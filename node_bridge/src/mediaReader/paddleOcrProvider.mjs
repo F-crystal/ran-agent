@@ -105,9 +105,15 @@ export async function analyzeImageOcrWithPaddle(asset, options = {}) {
   const env = options.env || process.env;
   const command = String(env.PERSONAL_AGENT_PADDLEOCR_COMMAND || 'paddleocr').trim();
   const execFileImpl = options.execFileImpl || execFile;
+  const childEnv = {
+    ...process.env,
+    ...env,
+    FLAGS_use_mkldnn: String(env.FLAGS_use_mkldnn || 'false'),
+  };
   let result;
   try {
     result = await execFileImpl(command, paddleArgs(asset, env), {
+      env: childEnv,
       timeout: Number(env.PERSONAL_AGENT_PADDLEOCR_TIMEOUT_MS || 120000),
       maxBuffer: 10 * 1024 * 1024,
     });

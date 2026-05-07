@@ -188,6 +188,7 @@ test('analyze_image uses DashScope OCR and vision adapters when an API key is co
 test('analyze_image uses PaddleOCR as the default OCR provider before DashScope vision', async () => {
   const requests = [];
   const paddleCalls = [];
+  const paddleExecOptions = [];
   const result = await handleMediaReaderMcpRequest(
     {
       method: 'tools/call',
@@ -220,8 +221,9 @@ test('analyze_image uses PaddleOCR as the default OCR provider before DashScope 
         });
       },
       resolveHostnameImpl: async () => ['93.184.216.34'],
-      execFileImpl: async (command, args) => {
+      execFileImpl: async (command, args, options) => {
         paddleCalls.push([command, ...args]);
+        paddleExecOptions.push(options);
         return {
           stdout: JSON.stringify({
             text: '本地识别文字',
@@ -239,6 +241,7 @@ test('analyze_image uses PaddleOCR as the default OCR provider before DashScope 
   assert.equal(result.structuredContent.scene_summary, '本地 OCR 后的图片摘要');
   assert.equal(paddleCalls.length, 1);
   assert.equal(paddleCalls[0][0], 'paddleocr');
+  assert.equal(paddleExecOptions[0].env.FLAGS_use_mkldnn, 'false');
   assert.deepEqual(requests.map((request) => request.model), ['qwen3-vl-flash']);
 });
 
