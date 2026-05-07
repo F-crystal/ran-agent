@@ -22,6 +22,7 @@ fi
 
 export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 export FLAGS_use_mkldnn="${FLAGS_use_mkldnn:-false}"
+export FLAGS_use_onednn="${FLAGS_use_onednn:-false}"
 export PERSONAL_AGENT_OCR_PROVIDER="${PERSONAL_AGENT_OCR_PROVIDER:-paddleocr}"
 export PERSONAL_AGENT_VISION_PROVIDER="${PERSONAL_AGENT_VISION_PROVIDER:-dashscope-qwen-vl}"
 export PERSONAL_AGENT_VISION_MODEL="${PERSONAL_AGENT_VISION_MODEL:-qwen3-vl-flash}"

@@ -241,6 +241,21 @@ test('analyze_image uses PaddleOCR as the default OCR provider before DashScope 
   assert.equal(result.structuredContent.scene_summary, '本地 OCR 后的图片摘要');
   assert.equal(paddleCalls.length, 1);
   assert.equal(paddleCalls[0][0], 'paddleocr');
+  assert.deepEqual(paddleCalls[0].slice(1), [
+    'ocr',
+    '-i',
+    paddleCalls[0][3],
+    '--use_doc_orientation_classify',
+    'False',
+    '--use_doc_unwarping',
+    'False',
+    '--use_textline_orientation',
+    'False',
+    '--device',
+    'cpu',
+    '--enable_mkldnn',
+    'False',
+  ]);
   assert.equal(paddleExecOptions[0].env.FLAGS_use_mkldnn, 'false');
   assert.deepEqual(requests.map((request) => request.model), ['qwen3-vl-flash']);
 });

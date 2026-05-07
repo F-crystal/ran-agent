@@ -98,6 +98,10 @@ function paddleArgs(asset, env = process.env) {
     'False',
     '--use_textline_orientation',
     'False',
+    '--device',
+    'cpu',
+    '--enable_mkldnn',
+    'False',
   ];
 }
 
@@ -109,6 +113,7 @@ export async function analyzeImageOcrWithPaddle(asset, options = {}) {
     ...process.env,
     ...env,
     FLAGS_use_mkldnn: String(env.FLAGS_use_mkldnn || 'false'),
+    FLAGS_use_onednn: String(env.FLAGS_use_onednn || 'false'),
   };
   let result;
   try {

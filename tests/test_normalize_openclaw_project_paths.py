@@ -74,6 +74,64 @@ class NormalizeOpenClawProjectPathsTest(unittest.TestCase):
             ["/opt/ran_agent/.openclaw/extensions"],
         )
 
+    def test_malformed_absolute_model_refs_are_restored_in_config_and_state(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root_dir = Path(temp_dir)
+            config_path = root_dir / "openclaw.personal-system.json"
+            state_dir = root_dir / ".openclaw_state"
+            state_dir.mkdir()
+            state_path = state_dir / "openclaw.json"
+            payload = {
+                "agents": {
+                    "defaults": {
+                        "model": {
+                            "primary": "/usr/bin/claude_code/qwen3.5-plus",
+                            "fallbacks": ["/usr/bin/claude_code/qwen3.6-plus"],
+                        },
+                    },
+                    "list": [
+                        {
+                            "id": "personal-system",
+                            "model": {
+                                "primary": "/usr/bin/claude_code/qwen3.5-plus",
+                                "fallbacks": [],
+                            },
+                        }
+                    ],
+                },
+                "models": {
+                    "providers": {
+                        "claude_code": {
+                            "models": [{"id": "qwen3.5-plus"}],
+                        }
+                    }
+                },
+            }
+            config_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+            state_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+
+            changed = normalize_config_paths(config_path, str(root_dir), None)
+            config_payload = json.loads(config_path.read_text(encoding="utf-8"))
+            state_payload = json.loads(state_path.read_text(encoding="utf-8"))
+
+        self.assertTrue(changed)
+        self.assertEqual(
+            config_payload["agents"]["defaults"]["model"]["primary"],
+            "claude_code/qwen3.5-plus",
+        )
+        self.assertEqual(
+            config_payload["agents"]["defaults"]["model"]["fallbacks"],
+            ["claude_code/qwen3.6-plus"],
+        )
+        self.assertEqual(
+            config_payload["agents"]["list"][0]["model"]["primary"],
+            "claude_code/qwen3.5-plus",
+        )
+        self.assertEqual(
+            state_payload["agents"]["defaults"]["model"]["primary"],
+            "claude_code/qwen3.5-plus",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
