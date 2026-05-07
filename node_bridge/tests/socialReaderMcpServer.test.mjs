@@ -1,0 +1,760 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {
+  buildSocialReaderTools,
+  detectSocialPlatform,
+  extractFirstUrl,
+  handleSocialReaderMcpRequest,
+  parseXhsUrlInfo,
+  resolveFetchImpl,
+  resolveXhsShareUrl,
+} from '../src/socialReaderMcpServer.mjs';
+
+test('social reader exposes only read-only tools with object schemas', () => {
+  const tools = buildSocialReaderTools();
+
+  assert.deepEqual(
+    tools.map((tool) => tool.name),
+    ['resolve_social_url', 'read_social_post', 'read_music_share', 'check_social_login']
+  );
+  for (const tool of tools) {
+    assert.equal(tool.inputSchema.type, 'object');
+    assert.equal(tool.inputSchema.additionalProperties, false);
+  }
+  assert.equal(tools.some((tool) => /publish|post_comment|comment_on|like/i.test(tool.name)), false);
+  assert.equal(
+    tools[0].inputSchema.properties.url.description,
+    'URL or share text containing URL.'
+  );
+  assert.equal(
+    tools[1].inputSchema.properties.url.description,
+    'URL or share text containing URL.'
+  );
+  assert.equal(
+    tools[2].inputSchema.properties.url.description,
+    'URL or share text containing URL.'
+  );
+});
+
+test('detectSocialPlatform recognizes common Chinese social share hosts', () => {
+  assert.equal(detectSocialPlatform('https://www.xiaohongshu.com/explore/abc'), 'xhs');
+  assert.equal(detectSocialPlatform('https://xhslink.com/a/abc'), 'xhs');
+  assert.equal(detectSocialPlatform('https://v.douyin.com/abc'), 'douyin');
+  assert.equal(detectSocialPlatform('https://b23.tv/abc'), 'bilibili');
+  assert.equal(detectSocialPlatform('https://www.bilibili.com/video/BV1xx411c7mD'), 'bilibili');
+  assert.equal(detectSocialPlatform('https://m.weibo.cn/status/abc'), 'weibo');
+  assert.equal(detectSocialPlatform('https://music.163.com/song?id=12345'), 'netease_music');
+  assert.equal(detectSocialPlatform('https://y.music.163.com/m/song?id=12345'), 'netease_music');
+  assert.equal(detectSocialPlatform('https://163cn.tv/6CuPb7V'), 'netease_music');
+});
+
+test('read_social_post routes xhs content and comments through the configured xhs MCP', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/abc?xsec_token=tok',
+          include_comments: true,
+          max_comments: 5,
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo; web_session=demo' },
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        if (toolName === 'get_note_content') {
+          return { content: [{ type: 'text', text: '标题: 测试笔记\n内容:\n正文' }] };
+        }
+        if (toolName === 'get_note_comments') {
+          return { content: [{ type: 'text', text: '0. 用户A: 评论A\n\n1. 用户B: 评论B' }] };
+        }
+        throw new Error(`unexpected tool: ${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'xhs');
+  assert.match(result.structuredContent.post_text, /测试笔记/);
+  assert.match(result.structuredContent.comments_text, /评论A/);
+  assert.deepEqual(
+    calls.map((call) => [call.server, call.toolName, call.arguments.url]),
+    [
+      ['xhs', 'get_note_content', 'https://www.xiaohongshu.com/explore/abc?xsec_token=tok'],
+      ['xhs', 'get_note_comments', 'https://www.xiaohongshu.com/explore/abc?xsec_token=tok'],
+    ]
+  );
+});
+
+test('check_social_login reports missing xhs cookie without spawning child MCP', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'check_social_login',
+        arguments: { platform: 'xhs' },
+      },
+    },
+    {
+      env: {},
+      mcpCallImpl: async () => {
+        throw new Error('child MCP should not be called');
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.platform, 'xhs');
+  assert.match(result.structuredContent.error, /XHS_COOKIE/);
+});
+
+test('read_social_post routes non-xhs links to generic parser with share_link argument', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://v.douyin.com/share-demo',
+        },
+      },
+    },
+    {
+      fetchImpl: async (url) => ({ url }),
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        return { content: [{ type: 'text', text: '{"status":"success","caption":"测试视频"}' }] };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'douyin');
+  assert.equal(result.structuredContent.parser_tool, 'parse_douyin_link');
+  assert.deepEqual(calls, [
+    {
+      server: 'generic',
+      toolName: 'parse_douyin_link',
+      arguments: { share_link: 'https://v.douyin.com/share-demo' },
+    },
+  ]);
+});
+
+test('read_social_post routes clean bilibili bvid URLs through bilibili MCP', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.bilibili.com/video/BV1xx411c7mD/?spm_id_from=333.999',
+        },
+      },
+    },
+    {
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        return { content: [{ type: 'text', text: 'B站视频详情' }] };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'bilibili');
+  assert.equal(result.structuredContent.bvid, 'BV1xx411c7mD');
+  assert.deepEqual(calls, [
+    {
+      server: 'bilibili',
+      toolName: 'get_video_info',
+      arguments: { bvid: 'BV1xx411c7mD' },
+    },
+  ]);
+});
+
+test('read_social_post resolves b23 short links before calling bilibili MCP', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: '【难道0昔不是区？0命白刻花昔满星骑士一-哔哩哔哩】 https://b23.tv/IxODijt',
+        },
+      },
+    },
+    {
+      fetchImpl: async () => ({ url: 'https://www.bilibili.com/video/BV1ZQRyBoEUs/?share_source=COPY&unique_k=IxODijt' }),
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        return { content: [{ type: 'text', text: '短链视频详情' }] };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.url, 'https://www.bilibili.com/video/BV1ZQRyBoEUs/?share_source=COPY&unique_k=IxODijt');
+  assert.deepEqual(calls, [
+    {
+      server: 'bilibili',
+      toolName: 'get_video_info',
+      arguments: { bvid: 'BV1ZQRyBoEUs' },
+    },
+  ]);
+});
+
+test('read_music_share reads netease song share text through configured API base', async () => {
+  const requests = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_music_share',
+        arguments: {
+          url: '分享单曲 https://music.163.com/song?id=12345&userid=1 复制打开',
+        },
+      },
+    },
+    {
+      env: { NETEASE_MUSIC_API_BASE_URL: 'https://music-api.example.com' },
+      fetchImpl: async (url, init) => {
+        requests.push({ url, init });
+        assert.match(init.headers['user-agent'], /Mozilla/);
+        return {
+          ok: true,
+          json: async () => ({
+            songs: [{
+              id: 12345,
+              name: '测试歌曲',
+              ar: [{ name: '歌手A' }],
+              al: { name: '测试专辑', picUrl: 'https://img.example.com/cover.jpg' },
+            }],
+          }),
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'netease_music');
+  assert.equal(result.structuredContent.music_type, 'song');
+  assert.equal(result.structuredContent.song_id, '12345');
+  assert.equal(result.structuredContent.title, '测试歌曲');
+  assert.deepEqual(result.structuredContent.artists, ['歌手A']);
+  assert.equal(
+    requests[0].url,
+    'https://music-api.example.com/song/detail?ids=%5B12345%5D'
+  );
+});
+
+test('read_music_share resolves 163cn.tv netease short share text before reading song detail', async () => {
+  const requests = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_music_share',
+        arguments: {
+          url: '分享泽典的单曲《月下逢》https://163cn.tv/6CuPb7V (@网易云音乐)',
+        },
+      },
+    },
+    {
+      env: { NETEASE_MUSIC_API_BASE_URL: 'https://music-api.example.com' },
+      fetchImpl: async (url, init) => {
+        requests.push({ url, init });
+        assert.match(init.headers['user-agent'], /Mozilla/);
+        if (url === 'https://163cn.tv/6CuPb7V') {
+          return {
+            ok: true,
+            url: 'https://music.163.com/song?id=2607556920&uct2=demo',
+          };
+        }
+        return {
+          ok: true,
+          json: async () => ({
+            songs: [{
+              id: 2607556920,
+              name: '月下逢',
+              ar: [{ name: '泽典' }],
+              al: { name: '月下逢', picUrl: 'https://img.example.com/yuexiafeng.jpg' },
+            }],
+          }),
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'netease_music');
+  assert.equal(result.structuredContent.url, 'https://music.163.com/song?id=2607556920&uct2=demo');
+  assert.equal(result.structuredContent.song_id, '2607556920');
+  assert.equal(result.structuredContent.title, '月下逢');
+  assert.deepEqual(result.structuredContent.artists, ['泽典']);
+  assert.deepEqual(
+    requests.map((request) => request.url),
+    [
+      'https://163cn.tv/6CuPb7V',
+      'https://music-api.example.com/song/detail?ids=%5B2607556920%5D',
+    ]
+  );
+});
+
+test('resolveFetchImpl falls back when global fetch is unavailable', () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = undefined;
+    assert.equal(typeof resolveFetchImpl(), 'function');
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test('read_social_post routes netease music links to the music reader', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://music.163.com/#/song?id=67890',
+        },
+      },
+    },
+    {
+      env: { NETEASE_MUSIC_API_BASE_URL: 'https://music-api.example.com/' },
+      fetchImpl: async () => ({
+        ok: true,
+        json: async () => ({
+          songs: [{
+            id: 67890,
+            name: '另一首歌',
+            artists: [{ name: '歌手B' }],
+            album: { name: '专辑B', picUrl: '' },
+          }],
+        }),
+      }),
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'netease_music');
+  assert.equal(result.structuredContent.song_id, '67890');
+});
+
+test('extractFirstUrl trims Chinese punctuation and share text tails', () => {
+  assert.equal(
+    extractFirstUrl('FIFA回应 http://xhslink.com/o/r5Ot5yz9ty \n先复制再打开【小红书】').url,
+    'http://xhslink.com/o/r5Ot5yz9ty'
+  );
+  assert.equal(
+    extractFirstUrl('看这个：https://xhslink.com/a/abc123，复制打开小红书').url,
+    'https://xhslink.com/a/abc123'
+  );
+  assert.equal(
+    extractFirstUrl('没有链接').error_code,
+    'NO_URL_FOUND'
+  );
+});
+
+test('parseXhsUrlInfo supports common final Xiaohongshu URL shapes', () => {
+  assert.deepEqual(
+    parseXhsUrlInfo('https://www.xiaohongshu.com/explore/note123?xsec_token=tok&xsec_source=app_share'),
+    {
+      note_id: 'note123',
+      xsec_token: 'tok',
+      xsec_source: 'app_share',
+      canonical_url: 'https://www.xiaohongshu.com/explore/note123?xsec_token=tok&xsec_source=app_share',
+    }
+  );
+  assert.deepEqual(
+    parseXhsUrlInfo('https://www.xiaohongshu.com/discovery/item/note456?xsec_token=tok2'),
+    {
+      note_id: 'note456',
+      xsec_token: 'tok2',
+      xsec_source: '',
+      canonical_url: 'https://www.xiaohongshu.com/explore/note456?xsec_token=tok2',
+    }
+  );
+});
+
+test('resolveXhsShareUrl follows xhslink /o/ redirect with browser UA and no cookie', async () => {
+  const requests = [];
+  const result = await resolveXhsShareUrl(
+    'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/r5Ot5yz9ty 先复制再打开【小红书】',
+    {
+      env: { XHS_COOKIE: 'a1=secret; id_token=secret' },
+      fetchImpl: async (url, init) => {
+        requests.push({ url, init });
+        assert.match(init.headers['user-agent'], /Mozilla/);
+        assert.equal(init.headers.cookie, undefined);
+        return {
+          status: 302,
+          headers: {
+            get(name) {
+              return name.toLowerCase() === 'location'
+                ? 'https://www.xiaohongshu.com/explore/note789?xsec_token=fresh&xsec_source=app_share'
+                : null;
+            },
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(requests.length, 1);
+  assert.equal(result.ok, true);
+  assert.equal(result.note_id, 'note789');
+  assert.equal(result.xsec_token, 'fresh');
+  assert.equal(result.canonical_url, 'https://www.xiaohongshu.com/explore/note789?xsec_token=fresh&xsec_source=app_share');
+});
+
+test('resolveXhsShareUrl follows xhslink /a/ redirect', async () => {
+  const result = await resolveXhsShareUrl('复制 https://xhslink.com/a/abc123，打开小红书', {
+    fetchImpl: async () => ({
+      status: 302,
+      headers: {
+        get(name) {
+          return name.toLowerCase() === 'location'
+            ? '/explore/note-a?xsec_token=tok-a'
+            : null;
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.resolved_url, 'https://www.xiaohongshu.com/explore/note-a?xsec_token=tok-a');
+  assert.equal(result.note_id, 'note-a');
+  assert.equal(result.xsec_token, 'tok-a');
+});
+
+test('resolveXhsShareUrl rejects non-whitelisted xhs-looking domains', async () => {
+  const result = await resolveXhsShareUrl('https://evil-xhslink.com/a/abc', {
+    fetchImpl: async () => {
+      throw new Error('fetch should not run');
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, 'UNSUPPORTED_PLATFORM');
+});
+
+test('read_social_post accepts share text and sends cleaned final XHS URL to backend', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/r5Ot5yz9ty 先复制再打开【小红书】',
+          include_comments: true,
+          max_comments: 2,
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      fetchImpl: async () => ({
+        status: 302,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === 'location'
+              ? 'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share'
+              : null;
+          },
+        },
+      }),
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        if (toolName === 'get_note_content') {
+          return { content: [{ type: 'text', text: '正文' }] };
+        }
+        if (toolName === 'get_note_comments') {
+          return { content: [{ type: 'text', text: '0. A\n\n1. B\n\n2. C' }] };
+        }
+        throw new Error(`unexpected tool: ${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.url, 'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share');
+  assert.equal(result.structuredContent.comments_text, '0. A\n\n1. B');
+  assert.deepEqual(
+    calls.map((call) => call.arguments.url),
+    [
+      'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share',
+      'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share',
+    ]
+  );
+});
+
+test('resolve_social_url accepts share text and returns structured XHS metadata', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'resolve_social_url',
+        arguments: {
+          url: 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/r5Ot5yz9ty 先复制再打开【小红书】',
+        },
+      },
+    },
+    {
+      fetchImpl: async () => ({
+        status: 302,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === 'location'
+              ? 'https://www.xiaohongshu.com/explore/note-resolve?xsec_token=resolve-token&xsec_source=app_share'
+              : null;
+          },
+        },
+      }),
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'xhs');
+  assert.equal(result.structuredContent.note_id, 'note-resolve');
+  assert.equal(result.structuredContent.has_xsec_token, true);
+
+  const noUrl = await handleSocialReaderMcpRequest({
+    method: 'tools/call',
+    params: {
+      name: 'resolve_social_url',
+      arguments: { url: '没有链接' },
+    },
+  });
+  assert.equal(noUrl.structuredContent.ok, false);
+  assert.equal(noUrl.structuredContent.error_code, 'NO_URL_FOUND');
+});
+
+test('read_social_post uses search fallback when shortlink resolves without token', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/no-token 复制打开',
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      fetchImpl: async () => ({
+        status: 302,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === 'location'
+              ? 'https://www.xiaohongshu.com/explore/note-search'
+              : null;
+          },
+        },
+      }),
+      mcpCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        calls.push({ toolName, arguments: toolArgs });
+        if (toolName === 'search_notes') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify([
+                { title: 'FIFA回应中国区天价世界杯版权', url: 'https://www.xiaohongshu.com/explore/note-search?xsec_token=fresh-search' },
+              ]),
+            }],
+          };
+        }
+        if (toolName === 'get_note_content') {
+          return { content: [{ type: 'text', text: '搜索兜底正文' }] };
+        }
+        throw new Error(`unexpected tool: ${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.url, 'https://www.xiaohongshu.com/explore/note-search?xsec_token=fresh-search');
+  assert.deepEqual(
+    calls.map((call) => [call.toolName, call.arguments]),
+    [
+      ['search_notes', { keywords: 'FIFA回应中国区天价世界杯版权' }],
+      ['get_note_content', { url: 'https://www.xiaohongshu.com/explore/note-search?xsec_token=fresh-search' }],
+    ]
+  );
+});
+
+test('read_social_post treats xhs 获取失败 text as backend failure and uses generic fallback', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: '外企十年，最狠的一封邮件，正文只有三个字 http://xhslink.com/o/4eNKGvbXwmZ 先复制一下，然后去【小红书】搜索查看笔记。',
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      fetchImpl: async () => ({
+        status: 302,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === 'location'
+              ? 'https://www.xiaohongshu.com/explore/note-fail?xsec_token=token-fail&xsec_source=app_share'
+              : null;
+          },
+        },
+      }),
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        if (server === 'xhs' && toolName === 'get_note_content') {
+          return { content: [{ type: 'text', text: '获取失败' }] };
+        }
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
+          return { content: [{ type: 'text', text: '通用解析正文' }] };
+        }
+        throw new Error(`unexpected tool: ${server}.${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.source, 'wanyi-watermark-mcp');
+  assert.equal(result.structuredContent.fallback, true);
+  assert.match(result.structuredContent.xhs_error, /获取失败/);
+  assert.equal(result.structuredContent.post_text, '通用解析正文');
+  assert.deepEqual(
+    calls.map((call) => [call.server, call.toolName]),
+    [
+      ['xhs', 'get_note_content'],
+      ['generic', 'parse_xhs_link'],
+    ]
+  );
+});
+
+test('read_social_post does not blindly choose ambiguous search results', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/no-token',
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      fetchImpl: async () => ({
+        status: 302,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === 'location'
+              ? 'https://www.xiaohongshu.com/explore/note-search'
+              : null;
+          },
+        },
+      }),
+      mcpCallImpl: async ({ toolName }) => {
+        if (toolName === 'search_notes') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify([
+                { title: 'FIFA回应中国区天价世界杯版权', url: 'https://www.xiaohongshu.com/explore/one?xsec_token=one' },
+                { title: 'FIFA回应中国区天价世界杯版权', url: 'https://www.xiaohongshu.com/explore/two?xsec_token=two' },
+              ]),
+            }],
+          };
+        }
+        throw new Error(`unexpected tool: ${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.error_code, 'AMBIGUOUS_SEARCH_RESULT');
+});
+
+test('read_social_post returns structured errors for no URL and unsupported platform', async () => {
+  const noUrl = await handleSocialReaderMcpRequest({
+    method: 'tools/call',
+    params: {
+      name: 'read_social_post',
+      arguments: { url: '没有链接的分享文案' },
+    },
+  });
+  assert.equal(noUrl.structuredContent.ok, false);
+  assert.equal(noUrl.structuredContent.error_code, 'NO_URL_FOUND');
+
+  const unsupported = await handleSocialReaderMcpRequest({
+    method: 'tools/call',
+    params: {
+      name: 'read_social_post',
+      arguments: { url: 'https://example.com/post/1' },
+    },
+  });
+  assert.equal(unsupported.structuredContent.ok, false);
+  assert.equal(unsupported.structuredContent.error_code, 'UNSUPPORTED_PLATFORM');
+});
+
+test('read_social_post caps max_comments to 1-100', async () => {
+  const seen = [];
+  const low = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/low?xsec_token=tok',
+          include_comments: true,
+          max_comments: 0,
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      mcpCallImpl: async ({ toolName }) => {
+        if (toolName === 'get_note_content') return { content: [{ type: 'text', text: '正文' }] };
+        if (toolName === 'get_note_comments') return { content: [{ type: 'text', text: '0. A\n\n1. B' }] };
+        throw new Error(`unexpected ${toolName}`);
+      },
+    }
+  );
+  seen.push(low.structuredContent.max_comments, low.structuredContent.comments_text);
+
+  const high = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/high?xsec_token=tok',
+          max_comments: 101,
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      mcpCallImpl: async ({ toolName }) => {
+        if (toolName === 'get_note_content') return { content: [{ type: 'text', text: '正文' }] };
+        throw new Error(`unexpected ${toolName}`);
+      },
+    }
+  );
+  seen.push(high.structuredContent.max_comments);
+
+  assert.deepEqual(seen, [1, '0. A', 100]);
+});

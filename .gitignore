@@ -1,0 +1,66 @@
+# Secrets
+.env.local
+.env
+.env.*
+!.env.example
+
+# Runtime state and local data
+.openclaw_state/
+data/
+logs/
+debug/
+state/
+
+# Vault runtime/user content (do not publish personal data)
+vault/inbox/
+vault/raw/
+vault/wiki/
+vault/.obsidian/workspace.json
+vault/.qwen/settings.json
+vault/.qwen/settings.json.orig
+
+# Python artifacts
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+*.db-shm
+*.db-wal
+*.sqlite-shm
+*.sqlite-wal
+
+# Node artifacts
+node_modules/
+.npm/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# OS/editor temp files
+.DS_Store
+*.swp
+*.swo
+tmp/
+
+# Local OpenClaw snapshots
+openclaw/openclaw.personal-system.json.bak
+openclaw/openclaw.personal-system.json.bak.*
+
+# Local-only historical notes and deployment journals
+local_archive/
+docs/deployment/
+docs/governance/archive/
+
+# Agents
+.codex/

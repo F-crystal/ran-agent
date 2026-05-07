@@ -1,0 +1,505 @@
+"""Runtime configuration for filesystem paths and scheduler settings."""
+
+from __future__ import annotations
+
+import json
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+
+def _load_prompt_json(filename: str) -> dict[str, object]:
+    """Load one bundled prompt JSON file into a dictionary."""
+
+    prompt_path = Path(__file__).resolve().parent / "prompts" / filename
+    with prompt_path.open("r", encoding="utf-8") as prompt_file:
+        return json.load(prompt_file)
+
+
+def _load_default_system_prompt() -> str:
+    """Load the default system prompt from the bundled JSON file."""
+
+    prompt_data = _load_prompt_json("system_prompt.json")
+    prompt = str(prompt_data["agent_system_prompt"]).strip()
+    if not prompt:
+        raise ValueError("agent_system_prompt must not be empty")
+    return prompt
+
+
+def _load_default_memory_policy_prompt() -> str:
+    """Render the bundled memory policy JSON into one instruction prompt string."""
+
+    policy_data = _load_prompt_json("memory_policy.json")
+    sections: list[str] = []
+
+    policy_name = str(policy_data.get("policy_name", "")).strip()
+    role = str(policy_data.get("role", "")).strip()
+    goal = str(policy_data.get("goal", "")).strip()
+
+    if policy_name:
+        sections.append(f"[Policy Name]\n{policy_name}")
+    if role:
+        sections.append(f"[Role]\n{role}")
+    if goal:
+        sections.append(f"[Goal]\n{goal}")
+
+    for section_name in ("decision_rules", "output_schema", "output_rules", "forbidden"):
+        items = policy_data.get(section_name, [])
+        if not isinstance(items, list):
+            continue
+        normalized_items = [str(item).strip() for item in items if str(item).strip()]
+        if not normalized_items:
+            continue
+        title = section_name.replace("_", " ").title()
+        body = "\n".join(f"- {item}" for item in normalized_items)
+        sections.append(f"[{title}]\n{body}")
+
+    layers = policy_data.get("layers", {})
+    if isinstance(layers, dict) and layers:
+        layer_lines = [
+            f"- {str(key).strip()}: {str(value).strip()}"
+            for key, value in layers.items()
+            if str(key).strip() and str(value).strip()
+        ]
+        if layer_lines:
+            sections.append("[Layers]\n" + "\n".join(layer_lines))
+
+    prompt = "\n\n".join(section for section in sections if section.strip()).strip()
+    if not prompt:
+        raise ValueError("memory policy prompt must not be empty")
+    return prompt
+
+
+def _load_default_tool_use_prompt() -> str:
+    """Load the system prompt used for tool and multimodal requests."""
+
+    prompt_data = _load_prompt_json("tool_use_system_prompt.json")
+    prompt = str(prompt_data["tool_use_system_prompt"]).strip()
+    if not prompt:
+        raise ValueError("tool_use_system_prompt must not be empty")
+    return prompt
+
+
+DEFAULT_SYSTEM_PROMPT = _load_default_system_prompt()
+DEFAULT_MEMORY_POLICY_PROMPT = _load_default_memory_policy_prompt()
+DEFAULT_TOOL_USE_PROMPT = _load_default_tool_use_prompt()
+
+
+def _extract_env_placeholder_name(value: str) -> str:
+    cleaned = str(value).strip()
+    if cleaned.startswith("${") and cleaned.endswith("}"):
+        return cleaned[2:-1].strip()
+    return ""
+
+
+def _load_openclaw_runtime_contract(base_dir: Path) -> dict[str, object]:
+    config_path = base_dir / "openclaw" / "openclaw.personal-system.json"
+    default_contract: dict[str, object] = {
+        "config_path": config_path,
+        "gateway_base_url": "http://127.0.0.1:19123",
+        "gateway_token_env_var": "OPENCLAW_GATEWAY_TOKEN",
+        "gateway_model_target": "openclaw/default",
+        "gateway_timeout_seconds": 120,
+        "backend_model_ref": "",
+        "backend_model_provider": "",
+        "backend_model_name": "",
+        "backend_model_api": "",
+        "backend_model_base_url": "",
+        "backend_model_api_key_env_var": "",
+        "backend_model_max_tokens": 0,
+    }
+    if not config_path.exists():
+        return default_contract
+
+    try:
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return default_contract
+
+    gateway = payload.get("gateway", {})
+    auth = gateway.get("auth", {}) if isinstance(gateway, dict) else {}
+    custom_host = str(gateway.get("customBindHost", "")).strip() if isinstance(gateway, dict) else ""
+    port = int(gateway.get("port", 19123)) if isinstance(gateway, dict) else 19123
+    bind_host = custom_host or "127.0.0.1"
+    gateway_base_url = f"http://{bind_host}:{port}"
+    gateway_token_env_var = _extract_env_placeholder_name(str(auth.get("token", ""))) or "OPENCLAW_GATEWAY_TOKEN"
+
+    agents = payload.get("agents", {})
+    defaults = agents.get("defaults", {}) if isinstance(agents, dict) else {}
+    model_block = defaults.get("model", {}) if isinstance(defaults, dict) else {}
+    backend_model_ref = str(model_block.get("primary", "")).strip()
+    provider_name, _, model_name = backend_model_ref.partition("/")
+
+    providers = payload.get("models", {}).get("providers", {})
+    provider_block = providers.get(provider_name, {}) if isinstance(providers, dict) else {}
+    provider_models = provider_block.get("models", []) if isinstance(provider_block, dict) else []
+    model_block_details = next(
+        (
+            item
+            for item in provider_models
+            if isinstance(item, dict) and str(item.get("id", "")).strip() == model_name
+        ),
+        {},
+    )
+
+    default_contract.update(
+        {
+            "gateway_base_url": gateway_base_url,
+            "gateway_token_env_var": gateway_token_env_var,
+            "backend_model_ref": backend_model_ref,
+            "backend_model_provider": provider_name,
+            "backend_model_name": model_name,
+            "backend_model_api": str(provider_block.get("api", "")).strip(),
+            "backend_model_base_url": str(provider_block.get("baseUrl", "")).strip(),
+            "backend_model_api_key_env_var": _extract_env_placeholder_name(
+                str(provider_block.get("apiKey", ""))
+            ),
+            "backend_model_max_tokens": int(model_block_details.get("maxTokens", 0) or 0),
+        }
+    )
+    return default_contract
+
+
+@dataclass(frozen=True)
+class AppConfig:
+    """Holds file paths and runtime values for the local agent."""
+
+    base_dir: Path
+    data_dir: Path
+    logs_dir: Path
+    vault_dir: Path
+    database_path: Path
+    log_file_path: Path
+    debug_dir: Path = Path("debug")
+    reflections_dir: Path = Path("debug/reflections")
+    night_cycles_dir: Path = Path("debug/night_cycles")
+    scheduler_timezone: str = "Asia/Shanghai"
+    brain_loop_interval_minutes: int = 120
+    proactive_check_interval_minutes: int = 90
+    knowledge_check_interval_minutes: int = 360
+    reminder_check_interval_minutes: int = 5
+    proactive_enabled: bool = False
+    reminder_delivery_enabled: bool = False
+    proactive_idle_minutes: int = 60
+    proactive_daily_limit: int = 5
+    proactive_silent_start_hour: int = 0
+    proactive_silent_end_hour: int = 9
+    node_bridge_outbound_base_url: str = "http://127.0.0.1:8791"
+    profile_memory_limit: int = 3
+    working_memory_limit: int = 2
+    session_recent_user_messages_limit: int = 3
+    memory_context_max_chars: int = 600
+    daily_context_max_chars: int = 600
+    reflection_context_max_chars: int = 600
+    continuity_context_max_chars: int = 1200
+    knowledge_recall_limit: int = 1
+    knowledge_snippet_max_chars: int = 240
+    proactive_memory_context_max_chars: int = 300
+    hermes_bounded_context_enabled: bool = True
+    hermes_bounded_context_interval_minutes: int = 720
+    working_memory_retention_limit: int = 20
+    profile_memory_history_limit: int = 30
+    profile_memory_repeat_threshold: int = 2
+    memory_llm_enabled: bool = True
+    memory_llm_history_limit: int = 6
+    vector_memory_enabled: bool = True
+    vector_memory_candidate_limit: int = 200
+    vector_memory_embedding_provider: str = "dashscope"
+    vector_memory_embedding_model: str = "text-embedding-v4"
+    vector_memory_embedding_dimension: int = 256
+    vector_memory_embedding_api_key_env_var: str = "DASHSCOPE_API_KEY"
+    vector_memory_embedding_base_url: str = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
+    vector_memory_index_path: Path = Path("data/memory_vector_index.bin")
+    vector_memory_metadata_path: Path = Path("data/memory_vector_index.json")
+    memory_policy_prompt: str = DEFAULT_MEMORY_POLICY_PROMPT
+    agent_system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    tool_use_system_prompt: str = DEFAULT_TOOL_USE_PROMPT
+    reviewer_enabled: bool = True
+    reviewer_debug_log_enabled: bool = False
+    reviewer_blacklist_enabled: bool = True
+    off_topic_check_enabled: bool = True
+    self_reflection_enabled: bool = True
+    self_reflection_interval_minutes: int = 720
+    self_reflection_sample_limit: int = 200
+    knowledge_agent_enabled: bool = True
+    night_cycle_enabled: bool = True
+    night_cycle_hour: int = 0
+    night_cycle_minute: int = 0
+    openclaw_config_path: Path = Path("openclaw/openclaw.personal-system.json")
+    openclaw_gateway_base_url: str = "http://127.0.0.1:19123"
+    openclaw_gateway_token_env_var: str = "OPENCLAW_GATEWAY_TOKEN"
+    openclaw_gateway_model_target: str = "openclaw/default"
+    openclaw_gateway_timeout_seconds: int = 120
+    backend_model_ref: str = ""
+    backend_model_provider: str = ""
+    backend_model_name: str = ""
+    backend_model_api: str = ""
+    backend_model_base_url: str = ""
+    backend_model_api_key_env_var: str = ""
+    backend_model_max_tokens: int = 0
+    backend_qwen_enabled: bool = False
+    qwen_api_key_env_var: str = "DASHSCOPE_API_KEY"
+    qwen_chat_model: str = "qwen3.5-plus"
+    qwen_tools_model: str = "qwen3.5-plus"
+    qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/responses"
+    qwen_timeout_seconds: int = 60
+    persona_evolution_enabled: bool = True
+    persona_proposals_dir: Path = Path("debug/persona_proposals")
+    identity_path: Path = Path("IDENTITY.md")
+    soul_path: Path = Path("SOUL.md")
+    ombre_mcp_command: str = ""
+    ombre_mcp_timeout_seconds: int = 10
+    wechat_account_id: str = "personal_agent"
+    wechat_login_mode: str = "terminal"
+    http_host: str = "127.0.0.1"
+    http_port: int = 8787
+
+
+def load_config(base_dir: Path | None = None) -> AppConfig:
+    """Build configuration from the repository layout."""
+
+    resolved_base_dir = base_dir or Path(__file__).resolve().parents[2]
+    data_dir = resolved_base_dir / "data"
+    logs_dir = resolved_base_dir / "logs"
+    vault_dir = resolved_base_dir / "vault"
+    debug_dir = resolved_base_dir / "debug"
+    reflections_dir = debug_dir / "reflections"
+    night_cycles_dir = debug_dir / "night_cycles"
+    openclaw_contract = _load_openclaw_runtime_contract(resolved_base_dir)
+
+    return AppConfig(
+        base_dir=resolved_base_dir,
+        data_dir=data_dir,
+        logs_dir=logs_dir,
+        vault_dir=vault_dir,
+        debug_dir=debug_dir,
+        reflections_dir=reflections_dir,
+        night_cycles_dir=night_cycles_dir,
+        openclaw_config_path=Path(openclaw_contract["config_path"]),
+        openclaw_gateway_base_url=os.getenv(
+            "OPENCLAW_GATEWAY_BASE_URL",
+            str(openclaw_contract["gateway_base_url"]),
+        ).strip().rstrip("/"),
+        openclaw_gateway_token_env_var=os.getenv(
+            "PERSONAL_AGENT_OPENCLAW_GATEWAY_TOKEN_ENV",
+            str(openclaw_contract["gateway_token_env_var"]),
+        ).strip(),
+        openclaw_gateway_model_target=os.getenv(
+            "PERSONAL_AGENT_OPENCLAW_GATEWAY_MODEL_TARGET",
+            str(openclaw_contract["gateway_model_target"]),
+        ).strip(),
+        openclaw_gateway_timeout_seconds=int(
+            os.getenv(
+                "PERSONAL_AGENT_OPENCLAW_GATEWAY_TIMEOUT_SECONDS",
+                str(openclaw_contract["gateway_timeout_seconds"]),
+            ).strip()
+        ),
+        backend_model_ref=str(openclaw_contract["backend_model_ref"]).strip(),
+        backend_model_provider=str(openclaw_contract["backend_model_provider"]).strip(),
+        backend_model_name=str(openclaw_contract["backend_model_name"]).strip(),
+        backend_model_api=str(openclaw_contract["backend_model_api"]).strip(),
+        backend_model_base_url=str(openclaw_contract["backend_model_base_url"]).strip(),
+        backend_model_api_key_env_var=str(openclaw_contract["backend_model_api_key_env_var"]).strip(),
+        backend_model_max_tokens=int(openclaw_contract["backend_model_max_tokens"]),
+        database_path=data_dir / "personal_agent.db",
+        log_file_path=logs_dir / "personal_agent.log",
+        brain_loop_interval_minutes=int(
+            os.getenv("PERSONAL_AGENT_BRAIN_LOOP_INTERVAL_MINUTES", "120").strip()
+        ),
+        proactive_check_interval_minutes=int(
+            os.getenv("PERSONAL_AGENT_PROACTIVE_CHECK_INTERVAL_MINUTES", "90").strip()
+        ),
+        knowledge_check_interval_minutes=int(
+            os.getenv("PERSONAL_AGENT_KNOWLEDGE_CHECK_INTERVAL_MINUTES", "360").strip()
+        ),
+        reminder_check_interval_minutes=int(
+            os.getenv("PERSONAL_AGENT_REMINDER_CHECK_INTERVAL_MINUTES", "5").strip()
+        ),
+        proactive_enabled=os.getenv(
+            "PERSONAL_AGENT_PROACTIVE_ENABLED",
+            "false",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        reminder_delivery_enabled=os.getenv(
+            "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED",
+            "false",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        proactive_idle_minutes=int(
+            os.getenv("PERSONAL_AGENT_PROACTIVE_IDLE_MINUTES", "60").strip()
+        ),
+        proactive_daily_limit=int(
+            os.getenv("PERSONAL_AGENT_PROACTIVE_DAILY_LIMIT", "5").strip()
+        ),
+        proactive_silent_start_hour=int(
+            os.getenv("PERSONAL_AGENT_PROACTIVE_SILENT_START_HOUR", "0").strip()
+        ),
+        proactive_silent_end_hour=int(
+            os.getenv("PERSONAL_AGENT_PROACTIVE_SILENT_END_HOUR", "9").strip()
+        ),
+        node_bridge_outbound_base_url=os.getenv(
+            "PERSONAL_AGENT_NODE_BRIDGE_OUTBOUND_BASE_URL",
+            "http://127.0.0.1:8791",
+        ).strip().rstrip("/"),
+        profile_memory_limit=int(os.getenv("PERSONAL_AGENT_PROFILE_MEMORY_LIMIT", "3").strip()),
+        working_memory_limit=int(os.getenv("PERSONAL_AGENT_WORKING_MEMORY_LIMIT", "2").strip()),
+        session_recent_user_messages_limit=int(
+            os.getenv("PERSONAL_AGENT_SESSION_RECENT_USER_MESSAGES_LIMIT", "3").strip()
+        ),
+        memory_context_max_chars=int(
+            os.getenv("PERSONAL_AGENT_MEMORY_CONTEXT_MAX_CHARS", "600").strip()
+        ),
+        daily_context_max_chars=int(
+            os.getenv("PERSONAL_AGENT_DAILY_CONTEXT_MAX_CHARS", "600").strip()
+        ),
+        reflection_context_max_chars=int(
+            os.getenv("PERSONAL_AGENT_REFLECTION_CONTEXT_MAX_CHARS", "600").strip()
+        ),
+        continuity_context_max_chars=int(
+            os.getenv("PERSONAL_AGENT_CONTINUITY_CONTEXT_MAX_CHARS", "1200").strip()
+        ),
+        knowledge_recall_limit=int(os.getenv("PERSONAL_AGENT_KNOWLEDGE_RECALL_LIMIT", "1").strip()),
+        knowledge_snippet_max_chars=int(
+            os.getenv("PERSONAL_AGENT_KNOWLEDGE_SNIPPET_MAX_CHARS", "240").strip()
+        ),
+        proactive_memory_context_max_chars=int(
+            os.getenv("PERSONAL_AGENT_PROACTIVE_MEMORY_CONTEXT_MAX_CHARS", "300").strip()
+        ),
+        hermes_bounded_context_enabled=os.getenv(
+            "PERSONAL_AGENT_HERMES_BOUNDED_CONTEXT_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        hermes_bounded_context_interval_minutes=int(
+            os.getenv("PERSONAL_AGENT_HERMES_BOUNDED_CONTEXT_INTERVAL_MINUTES", "720").strip()
+        ),
+        working_memory_retention_limit=int(
+            os.getenv("PERSONAL_AGENT_WORKING_MEMORY_RETENTION_LIMIT", "20").strip()
+        ),
+        profile_memory_history_limit=int(
+            os.getenv("PERSONAL_AGENT_PROFILE_MEMORY_HISTORY_LIMIT", "30").strip()
+        ),
+        profile_memory_repeat_threshold=int(
+            os.getenv("PERSONAL_AGENT_PROFILE_MEMORY_REPEAT_THRESHOLD", "2").strip()
+        ),
+        memory_llm_enabled=os.getenv("PERSONAL_AGENT_MEMORY_LLM_ENABLED", "true").strip().lower()
+        not in {"0", "false", "no", "off"},
+        memory_llm_history_limit=int(
+            os.getenv("PERSONAL_AGENT_MEMORY_LLM_HISTORY_LIMIT", "6").strip()
+        ),
+        vector_memory_enabled=os.getenv(
+            "PERSONAL_AGENT_VECTOR_MEMORY_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        vector_memory_candidate_limit=int(
+            os.getenv("PERSONAL_AGENT_VECTOR_MEMORY_CANDIDATE_LIMIT", "200").strip()
+        ),
+        vector_memory_embedding_provider=os.getenv(
+            "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_PROVIDER",
+            "dashscope",
+        ).strip().lower(),
+        vector_memory_embedding_model=os.getenv(
+            "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_MODEL",
+            "text-embedding-v4",
+        ).strip(),
+        vector_memory_embedding_dimension=int(
+            os.getenv("PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_DIMENSION", "256").strip()
+        ),
+        vector_memory_embedding_api_key_env_var=os.getenv(
+            "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_API_KEY_ENV",
+            "DASHSCOPE_API_KEY",
+        ).strip(),
+        vector_memory_embedding_base_url=os.getenv(
+            "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_BASE_URL",
+            "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding",
+        ).strip(),
+        vector_memory_index_path=Path(
+            os.getenv(
+                "PERSONAL_AGENT_VECTOR_MEMORY_INDEX_PATH",
+                str(data_dir / "memory_vector_index.bin"),
+            ).strip()
+        ),
+        vector_memory_metadata_path=Path(
+            os.getenv(
+                "PERSONAL_AGENT_VECTOR_MEMORY_METADATA_PATH",
+                str(data_dir / "memory_vector_index.json"),
+            ).strip()
+        ),
+        memory_policy_prompt=os.getenv(
+            "PERSONAL_AGENT_MEMORY_POLICY_PROMPT",
+            DEFAULT_MEMORY_POLICY_PROMPT,
+        ).strip(),
+        agent_system_prompt=os.getenv("PERSONAL_AGENT_SYSTEM_PROMPT", DEFAULT_SYSTEM_PROMPT).strip(),
+        tool_use_system_prompt=os.getenv(
+            "PERSONAL_AGENT_TOOL_USE_SYSTEM_PROMPT",
+            DEFAULT_TOOL_USE_PROMPT,
+        ).strip(),
+        reviewer_enabled=os.getenv(
+            "PERSONAL_AGENT_REVIEWER_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        reviewer_debug_log_enabled=os.getenv(
+            "PERSONAL_AGENT_REVIEWER_DEBUG_LOG_ENABLED",
+            "false",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        reviewer_blacklist_enabled=os.getenv(
+            "PERSONAL_AGENT_REVIEWER_BLACKLIST_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        off_topic_check_enabled=os.getenv(
+            "PERSONAL_AGENT_OFF_TOPIC_CHECK_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        self_reflection_enabled=os.getenv(
+            "PERSONAL_AGENT_SELF_REFLECTION_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        self_reflection_interval_minutes=int(
+            os.getenv("PERSONAL_AGENT_SELF_REFLECTION_INTERVAL_MINUTES", "720").strip()
+        ),
+        self_reflection_sample_limit=int(
+            os.getenv("PERSONAL_AGENT_SELF_REFLECTION_SAMPLE_LIMIT", "200").strip()
+        ),
+        knowledge_agent_enabled=os.getenv(
+            "PERSONAL_AGENT_KNOWLEDGE_AGENT_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        night_cycle_enabled=os.getenv(
+            "PERSONAL_AGENT_NIGHT_CYCLE_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        night_cycle_hour=int(os.getenv("PERSONAL_AGENT_NIGHT_CYCLE_HOUR", "0").strip()),
+        night_cycle_minute=int(os.getenv("PERSONAL_AGENT_NIGHT_CYCLE_MINUTE", "0").strip()),
+        backend_qwen_enabled=os.getenv(
+            "PERSONAL_AGENT_BACKEND_QWEN_ENABLED",
+            "false",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        qwen_api_key_env_var=os.getenv(
+            "PERSONAL_AGENT_QWEN_API_KEY_ENV",
+            "DASHSCOPE_API_KEY",
+        ).strip(),
+        qwen_chat_model=os.getenv("PERSONAL_AGENT_QWEN_CHAT_MODEL", "qwen3.5-plus").strip(),
+        qwen_tools_model=os.getenv("PERSONAL_AGENT_QWEN_TOOLS_MODEL", "qwen3.5-plus").strip(),
+        qwen_base_url=os.getenv(
+            "PERSONAL_AGENT_QWEN_BASE_URL",
+            "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
+        ).strip(),
+        qwen_timeout_seconds=int(
+            os.getenv("PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS", "45").strip()
+        ),
+        persona_evolution_enabled=os.getenv(
+            "PERSONAL_AGENT_PERSONA_EVOLUTION_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        persona_proposals_dir=debug_dir / "persona_proposals",
+        identity_path=resolved_base_dir / "IDENTITY.md",
+        soul_path=resolved_base_dir / "SOUL.md",
+        ombre_mcp_command=os.getenv(
+            "PERSONAL_AGENT_OMBRE_MCP_COMMAND",
+            str(resolved_base_dir / "src" / "personal_agent" / "ombre_brain_mcp.py"),
+        ).strip(),
+        ombre_mcp_timeout_seconds=int(
+            os.getenv("PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS", "10").strip()
+        ),
+        wechat_account_id=os.getenv("PERSONAL_AGENT_WECHAT_ACCOUNT_ID", "personal_agent").strip(),
+        wechat_login_mode=os.getenv("PERSONAL_AGENT_WECHAT_LOGIN_MODE", "terminal").strip().lower(),
+        http_host=os.getenv("PERSONAL_AGENT_HTTP_HOST", "127.0.0.1").strip(),
+        http_port=int(os.getenv("PERSONAL_AGENT_HTTP_PORT", "8787").strip()),
+    )

@@ -1,0 +1,34 @@
+{
+  "mcpServers": {
+    "playwright": {
+      "command": "bash",
+      "args": [
+        "scripts/start_playwright_mcp.sh"
+      ]
+    },
+    "time": {
+      "command": "bash",
+      "args": [
+        "scripts/start_time_mcp.sh"
+      ],
+      "env": {
+        "LOCAL_TIMEZONE": "Asia/Shanghai"
+      }
+    },
+    "media_generation": {
+      "command": "bash",
+      "args": [
+        "scripts/start_media_generation_mcp.sh"
+      ]
+    },
+    "social_reader": {
+      "command": "bash",
+      "args": [
+        "scripts/start_social_reader_mcp.sh"
+      ]
+    },
+    "tavily": {
+      "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=${TAVILY_API_KEY}"
+    }
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "personal-agent-node-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node ../scripts/apply_openclaw_runtime_patches.mjs && node --test"
+  }
+}

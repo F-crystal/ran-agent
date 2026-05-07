@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "defaultMode": "default",
+    "confirmShellCommands": true,
+    "confirmFileEdits": true,
+    "allow": []
+  },
+  "$version": 3
+}

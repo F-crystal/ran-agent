@@ -1,0 +1,15 @@
+{
+  "id": "todo-tools",
+  "name": "todo-tools",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "index.ts",
+  "description": "Todo tools plugin for OpenClaw - create_todo and list_todos",
+  "author": "",
+  "license": "MIT",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {}
+  }
+}

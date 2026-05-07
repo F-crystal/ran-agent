@@ -1,0 +1,21 @@
+{
+  "main": {
+    "id": "example-main",
+    "type": "split",
+    "children": [],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "example-left",
+    "type": "split",
+    "children": [],
+    "direction": "horizontal"
+  },
+  "right": {
+    "id": "example-right",
+    "type": "split",
+    "children": [],
+    "direction": "horizontal"
+  },
+  "active": null
+}

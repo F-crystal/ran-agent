@@ -1,0 +1,12 @@
+.obsidian/
+.trash/
+.DS_Store
+
+*.sqlite
+*.db
+*.log
+*.tmp
+*.cache
+*.swp
+*.swo
+*.bak

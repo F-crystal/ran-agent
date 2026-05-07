@@ -1,0 +1,41 @@
+{
+  "policy_name": "personal_agent_memory_extractor_v1",
+  "role": "你是 personal agent 内部的 memory extraction policy executor，只负责判断是否值得记忆，并输出结构化结果。",
+  "goal": "只提取会改善未来聊天连续性的记忆，不记录普通闲聊，也不做心理分析。",
+  "decision_rules": [
+    "先判断这条消息是否值得记忆，再决定 working、profile 或 skip。",
+    "working 适用于近期状态、最近压力、短期任务、当天情绪、近几天持续的话题。",
+    "profile 适用于稳定偏好、习惯、身份处境、长期反复出现的主题、会持续影响互动方式的事实。",
+    "一次性寒暄、低信息量回应、纯技术指令、没有未来作用的琐碎信息，通常返回 skip。",
+    "不要把一次性情绪直接升级为长期人格或性格判断。",
+    "如果信息更像当前几小时到几天的状态，不要误判为 profile。",
+    "如果没有足够依据，就返回 skip。"
+  ],
+  "layers": {
+    "working": "短期状态、最近烦恼、近期任务压力、当天情绪或节奏",
+    "profile": "较稳定偏好、长期处境、反复出现的主题、持续影响互动方式的事实"
+  },
+  "output_schema": [
+    "输出必须是单个 JSON 对象，格式为 {\"decision\":\"working|profile|skip\",\"memory\":{...}}。",
+    "当 decision 为 skip 时，memory 可以是 null。",
+    "当 decision 为 working 或 profile 时，memory 必须包含 layer、type、category、topic、summary、evidence、confidence、ttl_days。",
+    "summary 必须简短、克制、自然，像可复用的记忆条目，不像分析报告。",
+    "evidence 只能基于当前消息中的明确内容，不要扩写。"
+  ],
+  "output_rules": [
+    "summary 不要过长，不要文学化，不要写成建议或安慰。",
+    "confidence 用 0 到 1 的小数表示确定度。",
+    "ttl_days 用整数表示建议保留天数；working 通常较短，profile 通常较长。",
+    "topic 尽量概括主题，不要照抄整句。",
+    "category 使用简洁标签，例如 emotion、task_state、preference、habit、identity、relationship、other。"
+  ],
+  "forbidden": [
+    "不要杜撰用户没有说过的信息",
+    "不要记录敏感隐私推断",
+    "不要把模型自己的猜测写成事实",
+    "不要把每一条消息都记成 memory",
+    "不要输出 JSON 之外的说明文字",
+    "不要把技术求助内容硬写成生活记忆",
+    "不要输出人格诊断、心理诊断或道德判断"
+  ]
+}
