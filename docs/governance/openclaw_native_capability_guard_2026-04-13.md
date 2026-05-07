@@ -1,11 +1,13 @@
 # OpenClaw Native Capability Guard
 
+Status: HISTORICAL SNAPSHOT. Superseded by `docs/governance/current_runtime_status.md` and `openclaw/AGENTS.md`; retained for the April 2026 capability review only.
+
 Date: 2026-04-13  
 Scope: compatibility + governance convergence check for "OpenClaw native capability unchanged"
 
 ## Retained Capabilities
 
-- Frontline remains OpenClaw single speaker; default model chain is `Claude primary -> Codex fallback`.
+- Frontline remains OpenClaw single speaker. This historical review used the then-current Claude primary and fallback wording; current model/provider truth lives in `docs/governance/current_runtime_status.md`.
 - Knowledge maintenance remains on `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`.
 - Startup entry remains `./start_openclaw.sh`; `HEARTBEAT.md` is present in repo root.
 - Specialist skills remain on-demand and match governance list:

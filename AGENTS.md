@@ -26,7 +26,7 @@ Status: CURRENT (2026-05-06)
 
 ## Model And Memory Direction
 
-- OpenClaw frontend and Python backend live chat/runtime traffic must stay on `claude_code/*` provider paths pinned by `openclaw/openclaw.personal-system.json`.
+- OpenClaw frontend and Python backend live chat/runtime traffic must stay on the `claude_code` provider pinned by `openclaw/openclaw.personal-system.json`; agent `model.primary` fields store bare model ids such as `qwen3.5-plus`.
 - Do not enable direct `qwen/*` as OpenClaw frontend or Python backend primary/fallback.
 - Qwen is allowed only behind the local Claude-compatible path and in the knowledge executor path (`knowledge_agent.py + Qwen Code + vault_runner.sh + vault/`).
 - Memory path keeps Ombre integration first; do not replace it without an explicit migration request.

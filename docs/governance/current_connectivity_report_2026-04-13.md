@@ -1,5 +1,7 @@
 # 现状联通性报告（主链）
 
+Status: HISTORICAL SNAPSHOT. Superseded by `docs/governance/current_runtime_status.md` and `openclaw/openclaw.personal-system.json`; do not use model/provider values in this file as current runtime truth.
+
 日期：2026-04-14
 范围：按 `docs/governance` 当前真相验证关键链路契约
 
@@ -14,8 +16,8 @@
 
 ### 1) OpenClaw 配置契约
 
-目标契约：
-- 前台单一说话者 OpenClaw，主模型链 `Claude primary -> Codex fallback -> reply`
+历史目标契约：
+- 前台单一说话者 OpenClaw，当时主模型链仍按 Claude CLI primary 与 fallback 链路描述；当前合同已改为 `docs/governance/current_runtime_status.md` 中的 `provider=claude_code` + bare model。
 - 启动入口 `./start_openclaw.sh`
 - Claude 主链通过本机 Claude Code CLI 与 `~/.claude/settings.json` 运行；Qwen 只保留给后台知识维护路径使用。
 
@@ -24,16 +26,16 @@
 - 启动脚本检查：`start_openclaw.sh`
 - 环境注入检查：`source .env.local` 后查看 key 变量（脱敏）
 
-结果：`已通（配置层）`
-- `agents.defaults.model.primary = claude-cli/claude-opus-4-6`
-- `agents.list[0].model.primary = claude-cli/claude-opus-4-6`
+结果：`已通（配置层，历史快照）`
+- 当时 `agents.defaults.model.primary` 使用 Claude CLI primary。
+- 当时 `agents.list[0].model.primary` 使用 Claude CLI primary。
 - `agents.defaults.model.fallbacks = []`
 - `agents.defaults.cliBackends.claude-cli.command` 指向本机 `claude`
 - `start_openclaw.sh` 为标准入口，并允许通过本机 `claude` / `codex` CLI 可用性启动主链与第一层 fallback；Qwen env 仅用于后台知识维护。
 
 备注：
 - 已做本地 gateway chat completion smoke：
-  - 网关启动日志显示 `agent model: claude-cli/claude-opus-4-6`
+  - 网关启动日志显示当时的 Claude CLI primary model。
   - 本地 `POST /v1/chat/completions` 成功返回 `OK`
   - 当 `claude-cli` 缺少第三方 provider env 时，运行时会自动降级到 `codex/gpt-5.4-mini`
 - 这仍不等同于完整线上稳定性证明，但已覆盖本地真实主链与 fallback 行为。

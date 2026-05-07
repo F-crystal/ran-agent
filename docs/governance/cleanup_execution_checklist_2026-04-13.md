@@ -2,6 +2,8 @@
 
 Status: COMPLETED (frontend compatibility shell removal)
 
+Historical snapshot: retained as the April 2026 cleanup record. Current runtime and OpenClaw model/provider truth lives in `docs/governance/current_runtime_status.md`, `docs/governance/constraints.md`, and `openclaw/AGENTS.md`.
+
 ## Immediate Classification (Now)
 
 ### Now Safe To Delete

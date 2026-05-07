@@ -1,5 +1,7 @@
 # Initial Goals Status (2026-04-13)
 
+Status: HISTORICAL SNAPSHOT. Superseded by `docs/governance/current_runtime_status.md`, `docs/governance/constraints.md`, and `docs/governance/doc_status.md`; retained as the April 2026 goal convergence record.
+
 ## Scope And Method
 
 - Basis: `AGENTS.md` + active docs under `docs/governance/` listed by `docs/governance/doc_status.md`.
