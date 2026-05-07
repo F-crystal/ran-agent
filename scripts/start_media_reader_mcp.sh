@@ -21,8 +21,7 @@ if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
 fi
 
 export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-export PERSONAL_AGENT_OCR_PROVIDER="${PERSONAL_AGENT_OCR_PROVIDER:-dashscope-qwen-vl-ocr}"
-export PERSONAL_AGENT_OCR_MODEL="${PERSONAL_AGENT_OCR_MODEL:-qwen-vl-ocr-2025-11-20}"
+export PERSONAL_AGENT_OCR_PROVIDER="${PERSONAL_AGENT_OCR_PROVIDER:-paddleocr}"
 export PERSONAL_AGENT_VISION_PROVIDER="${PERSONAL_AGENT_VISION_PROVIDER:-dashscope-qwen-vl}"
 export PERSONAL_AGENT_VISION_MODEL="${PERSONAL_AGENT_VISION_MODEL:-qwen3-vl-flash}"
 export PERSONAL_AGENT_ASR_PROVIDER="${PERSONAL_AGENT_ASR_PROVIDER:-dashscope-asr}"

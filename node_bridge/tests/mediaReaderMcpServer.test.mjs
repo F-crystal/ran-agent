@@ -67,7 +67,7 @@ test('media reader exposes stable facade tool names with object schemas', () => 
   }
 });
 
-test('analyze_image returns structured provider-not-configured error without credentials or provider', async () => {
+test('analyze_image returns structured dependency error when default PaddleOCR is missing', async () => {
   const result = await handleMediaReaderMcpRequest(
     {
       method: 'tools/call',
@@ -89,7 +89,7 @@ test('analyze_image returns structured provider-not-configured error without cre
 
   assert.equal(result.isError, true);
   assert.equal(result.structuredContent.ok, false);
-  assert.equal(result.structuredContent.error_code, 'PROVIDER_NOT_CONFIGURED');
+  assert.equal(result.structuredContent.error_code, 'DEPENDENCY_MISSING');
 });
 
 test('analyze_image uses content-hash based analysis cache', async () => {
@@ -150,6 +150,7 @@ test('analyze_image uses DashScope OCR and vision adapters when an API key is co
       env: {
         ...tempCacheEnv(),
         DASHSCOPE_API_KEY: 'test-key',
+        PERSONAL_AGENT_OCR_PROVIDER: 'dashscope-qwen-vl-ocr',
         PERSONAL_AGENT_OCR_MODEL: 'qwen-vl-ocr-2025-11-20',
         PERSONAL_AGENT_VISION_MODEL: 'qwen3-vl-flash',
       },
@@ -182,6 +183,63 @@ test('analyze_image uses DashScope OCR and vision adapters when an API key is co
   assert.deepEqual(result.structuredContent.objects, ['文字', '图片']);
   assert.deepEqual(requests.map((request) => request.model), ['qwen-vl-ocr-2025-11-20', 'qwen3-vl-flash']);
   assert.match(requests[0].messages[0].content[0].image_url.url, /^data:image\/png;base64,/);
+});
+
+test('analyze_image uses PaddleOCR as the default OCR provider before DashScope vision', async () => {
+  const requests = [];
+  const paddleCalls = [];
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { url: 'https://cdn.example.com/pic.png', ocr: true, vlm: true },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        DASHSCOPE_API_KEY: 'test-key',
+        PERSONAL_AGENT_OCR_PROVIDER: 'paddleocr',
+        PERSONAL_AGENT_PADDLEOCR_COMMAND: 'paddleocr',
+      },
+      fetchImpl: async (url, init = {}) => {
+        if (String(url).includes('/compatible-mode/v1/chat/completions')) {
+          const body = JSON.parse(String(init.body || '{}'));
+          requests.push(body);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ choices: [{ message: { content: '{"summary":"本地 OCR 后的图片摘要","objects":["截图"]}' } }] }),
+          };
+        }
+        return responseFromBytes({
+          url,
+          headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+          bytes: pngBytes(),
+        });
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async (command, args) => {
+        paddleCalls.push([command, ...args]);
+        return {
+          stdout: JSON.stringify({
+            text: '本地识别文字',
+            blocks: [{ text: '本地识别文字' }],
+          }),
+          stderr: '',
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.ocr_text, '本地识别文字');
+  assert.equal(result.structuredContent.model.ocr, 'paddleocr');
+  assert.equal(result.structuredContent.scene_summary, '本地 OCR 后的图片摘要');
+  assert.equal(paddleCalls.length, 1);
+  assert.equal(paddleCalls[0][0], 'paddleocr');
+  assert.deepEqual(requests.map((request) => request.model), ['qwen3-vl-flash']);
 });
 
 test('transcribe_audio uses DashScope ASR adapter when an API key is configured', async () => {
@@ -250,6 +308,9 @@ test('analyze_video runs ffprobe ffmpeg frame extraction and DashScope analysis'
       fs.writeFileSync(args.at(-1), wavBytes());
       return { stdout: '', stderr: '' };
     }
+    if (command === 'paddleocr') {
+      return { stdout: JSON.stringify({ text: '视频帧文字', blocks: [] }), stderr: '' };
+    }
     throw new Error(`unexpected command ${command} ${args.join(' ')}`);
   }
 
@@ -272,8 +333,10 @@ test('analyze_video runs ffprobe ffmpeg frame extraction and DashScope analysis'
         ...tempCacheEnv(),
         PERSONAL_AGENT_MEDIA_CACHE_DIR: tempDir,
         DASHSCOPE_API_KEY: 'test-key',
+        PERSONAL_AGENT_OCR_PROVIDER: 'paddleocr',
         PERSONAL_AGENT_FFPROBE_PATH: '/fake/ffprobe',
         PERSONAL_AGENT_FFMPEG_PATH: '/fake/ffmpeg',
+        PERSONAL_AGENT_PADDLEOCR_COMMAND: 'paddleocr',
       },
       fetchImpl: async (url, init = {}) => {
         if (String(url).includes('/compatible-mode/v1/chat/completions')) {
