@@ -43,6 +43,8 @@ The normal WeChat text path uses OpenClaw's agent runtime. The OpenAI-compatible
 - `vault/`: Template structure for local knowledge work. Real `vault/inbox`, `vault/raw`, and `vault/wiki` content must stay private.
 - `docs/governance/`: Current constraints and runtime status.
 
+The MCP facade servers keep OpenClaw's tool surface small: `social_reader` reads public social links, `media_reader` turns images/audio/video into structured text, and `media_generation` creates sendable image/audio outputs.
+
 ## Quick Start
 
 Install Node dependencies:

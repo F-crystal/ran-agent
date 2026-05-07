@@ -3,6 +3,7 @@ import http from 'node:http';
 import https from 'node:https';
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
+import { buildMediaAssets } from './mediaReader/assetResolver.mjs';
 
 const SERVER_INFO = {
   name: 'ran-agent-social-reader',
@@ -71,6 +72,52 @@ export function buildSocialReaderTools() {
             minimum: 1,
             maximum: MAX_COMMENTS_CAP,
             default: DEFAULT_MAX_COMMENTS,
+          },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'read_social_post_deep',
+      title: 'Read Social Post Deep',
+      description: 'Read a social post and optionally analyze referenced media through the media_reader facade.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url: {
+            type: 'string',
+            description: 'URL or share text containing URL.',
+          },
+          include_comments: {
+            type: 'boolean',
+            description: 'Whether to fetch comments when the platform backend supports comments.',
+            default: false,
+          },
+          max_comments: {
+            type: 'integer',
+            description: `Maximum number of comments to request or return. Capped at ${MAX_COMMENTS_CAP}.`,
+            minimum: 1,
+            maximum: MAX_COMMENTS_CAP,
+            default: DEFAULT_MAX_COMMENTS,
+          },
+          include_media: {
+            type: 'boolean',
+            description: 'Whether to analyze media assets through media_reader.',
+            default: true,
+          },
+          media_detail: {
+            type: 'string',
+            description: 'Media analysis depth. standard is the default to avoid full-cost analysis by default.',
+            enum: ['none', 'basic', 'standard', 'full'],
+            default: 'standard',
+          },
+          max_media_assets: {
+            type: 'integer',
+            description: 'Maximum media assets to analyze.',
+            minimum: 1,
+            maximum: 100,
+            default: 20,
           },
         },
         required: ['url'],
@@ -1039,6 +1086,131 @@ async function readSocialPost(args = {}, options = {}) {
   }, options);
 }
 
+function normalizeMediaDetail(value) {
+  const text = String(value || 'standard').trim().toLowerCase();
+  return ['none', 'basic', 'standard', 'full'].includes(text) ? text : 'standard';
+}
+
+function collectMediaUrlsFromValue(value, output = []) {
+  if (!value) {
+    return output;
+  }
+  if (typeof value === 'string') {
+    const urls = value.match(/https?:\/\/[^\s"'<>【】「」《》，。！？、；：]+/ig) || [];
+    for (const url of urls) {
+      output.push(url.replace(/[，。！？、；：）)\]}】》」'".]+$/u, ''));
+    }
+    return output;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      collectMediaUrlsFromValue(item, output);
+    }
+    return output;
+  }
+  if (typeof value === 'object') {
+    for (const key of ['url', 'media_url', 'image_url', 'video_url', 'audio_url', 'src', 'cover_url']) {
+      if (typeof value[key] === 'string') {
+        collectMediaUrlsFromValue(value[key], output);
+      }
+    }
+    for (const key of ['media', 'medias', 'images', 'videos', 'audios', 'attachments', 'data']) {
+      if (value[key]) {
+        collectMediaUrlsFromValue(value[key], output);
+      }
+    }
+  }
+  return output;
+}
+
+function extractMediaUrlsFromPostText(postText) {
+  const text = String(postText || '');
+  const output = [];
+  try {
+    collectMediaUrlsFromValue(JSON.parse(text), output);
+  } catch {
+    collectMediaUrlsFromValue(text, output);
+  }
+  return [...new Set(output)];
+}
+
+async function callMediaReaderTool(toolName, toolArguments = {}, options = {}) {
+  if (typeof options.mediaReaderCallImpl === 'function') {
+    return await options.mediaReaderCallImpl({ toolName, arguments: toolArguments });
+  }
+  const env = options.env || process.env;
+  return await callMcpToolViaStdio({
+    command: env.MEDIA_READER_MCP_COMMAND || 'bash',
+    args: parseJsonArrayEnv(env.MEDIA_READER_MCP_ARGS_JSON, ['scripts/start_media_reader_mcp.sh']),
+    env: process.env,
+    toolName,
+    arguments: toolArguments,
+    timeoutMs: resolveTimeoutMs(env),
+  });
+}
+
+async function readSocialPostDeep(args = {}, options = {}) {
+  const socialResult = await readSocialPost(args, options);
+  if (socialResult.structuredContent?.ok === false) {
+    return socialResult;
+  }
+  const social = socialResult.structuredContent || {};
+  const mediaDetail = normalizeMediaDetail(args.media_detail);
+  const includeMedia = args.include_media !== false && mediaDetail !== 'none';
+  let mediaAnalysis = {
+    ok: true,
+    partial: false,
+    items: [],
+    merged_summary: '',
+    timeline: [],
+    partial_failures: [],
+    warnings: [],
+  };
+  const mediaUrls = includeMedia ? extractMediaUrlsFromPostText(social.post_text) : [];
+  const assets = includeMedia
+    ? buildMediaAssets({
+      mediaUrls,
+      platform: social.platform || '',
+      maxAssets: Number(args.max_media_assets || 20),
+    })
+    : [];
+
+  if (includeMedia && assets.length > 0) {
+    const mediaResult = await callMediaReaderTool('analyze_media_batch', {
+      assets,
+      media_detail: mediaDetail,
+      max_assets: Number(args.max_media_assets || 20),
+      task: 'summarize_social_post_media',
+    }, options);
+    mediaAnalysis = mediaResult.structuredContent || mediaResult;
+  }
+
+  const deepSummary = [
+    social.post_text ? `正文: ${social.post_text}` : '',
+    social.comments_text ? `评论: ${social.comments_text}` : '',
+    mediaAnalysis?.merged_summary ? `媒体: ${mediaAnalysis.merged_summary}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  return buildTextResult({
+    ok: true,
+    platform: social.platform || detectSocialPlatform(args.url || ''),
+    url: social.url || args.url || '',
+    source: social.source || '',
+    include_comments: args.include_comments === true,
+    max_comments: normalizeMaxComments(args.max_comments),
+    media_detail: mediaDetail,
+    post_text: social.post_text || '',
+    comments_text: social.comments_text || '',
+    media_assets: assets,
+    media_analysis: mediaAnalysis,
+    deep_summary: deepSummary,
+    warnings: [
+      ...(Array.isArray(mediaAnalysis?.warnings) ? mediaAnalysis.warnings : []),
+      ...(mediaAnalysis?.partial ? ['MEDIA_ANALYSIS_PARTIAL'] : []),
+    ],
+  });
+}
+
 async function readXhsPost({ rawText, resolved, includeComments, maxComments }, options = {}) {
   const env = options.env || process.env;
   const hasCookie = String(env.XHS_COOKIE || '').trim();
@@ -1260,6 +1432,9 @@ async function callTool(name, args = {}, options = {}) {
   }
   if (name === 'read_social_post') {
     return await readSocialPost(args, options);
+  }
+  if (name === 'read_social_post_deep') {
+    return await readSocialPostDeep(args, options);
   }
   if (name === 'read_music_share') {
     return await readMusicShare(args, options);

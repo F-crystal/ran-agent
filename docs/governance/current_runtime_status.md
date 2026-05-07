@@ -41,14 +41,16 @@ Status Date: 2026-05-06
 - Repo MCP config now also registers:
   - `time` via `scripts/start_time_mcp.sh`, using `mcp-server-time` with `LOCAL_TIMEZONE=Asia/Shanghai`
   - `media_generation` via `scripts/start_media_generation_mcp.sh`, exposing `generate_image` and `generate_speech`
-  - `social_reader` via `scripts/start_social_reader_mcp.sh`, exposing a read-only social share facade.
-- OpenClaw main config now registers `playwright`, `time`, `media_generation`, and `social_reader` MCP:
+  - `media_reader` via `scripts/start_media_reader_mcp.sh`, exposing a unified media-understanding facade for images, audio, video, OCR, ASR, and batch partial results.
+  - `social_reader` via `scripts/start_social_reader_mcp.sh`, exposing a read-only social share facade and `read_social_post_deep` aggregation path.
+- OpenClaw main config now registers `playwright`, `time`, `media_generation`, `media_reader`, and `social_reader` MCP:
   - `playwright` gives the OpenClaw agent runtime model-visible browser automation for dynamic, visual, or interactive pages.
   - ordinary text pages should still prefer `web_fetch`; browser MCP is reserved for cases where HTML extraction is insufficient.
   - the bundled OpenClaw `browser` plugin is explicitly disabled, so normal startup should not log `[browser] control listening ...`; browser automation should come from `playwright__browser_*` MCP tools.
   - `time` uses a launcher that prefers a preinstalled `mcp_server_time` Python module before falling back to `uvx`, reducing cold-start dependency downloads inside OpenClaw's MCP startup window.
   - `media_generation` remains OpenClaw-owned; Node bridge only converts trusted `WECHAT_MEDIA` markers from the media MCP result into WeChat `media` envelopes.
-  - `social_reader` is the preferred path for social media and music share links. It exposes only `resolve_social_url`, `read_social_post`, `read_music_share`, and `check_social_login`; internally it calls mature platform backends such as `jobson-xhs-mcp` for Xiaohongshu, `@wangshunnn/bilibili-mcp-server` for Bilibili public video metadata, `wanyi-watermark` for generic share parsing, and a NetEaseCloudMusicApi-compatible song detail endpoint for NetEase Music shares including `163cn.tv` short links.
+  - `media_reader` is the only OpenClaw-visible media understanding facade. It exposes `extract_media_assets`, `analyze_image`, `transcribe_audio`, `analyze_video`, and `analyze_media_batch`; lower-level OCR/ASR/VLM/ffmpeg providers stay behind adapters and return structured `PROVIDER_NOT_CONFIGURED` / `DEPENDENCY_MISSING` style errors when unavailable.
+  - `social_reader` is the preferred path for social media and music share links. It exposes `resolve_social_url`, `read_social_post`, `read_social_post_deep`, `read_music_share`, and `check_social_login`; internally it calls mature platform backends such as `jobson-xhs-mcp` for Xiaohongshu, `@wangshunnn/bilibili-mcp-server` for Bilibili public video metadata, `wanyi-watermark` for generic share parsing, and a NetEaseCloudMusicApi-compatible song detail endpoint for NetEase Music shares including `163cn.tv` short links.
 - Normal WeChat text replies now enter OpenClaw through `openclaw agent --json`, not the OpenAI-compatible chat-completions shim, so the agent runtime sees its MCP tools. The chat-completions path remains a compatibility fallback and is still used when the inbound WeChat payload contains images or other structured media.
 - `openclaw/openclaw.personal-system.json` web path hardening:
   - `tools.profile` set to `coding`
