@@ -30,6 +30,14 @@ function pngBytes() {
   ]);
 }
 
+function wavBytes() {
+  return Buffer.from('RIFF0000WAVEfmt ', 'ascii');
+}
+
+function mp4Bytes() {
+  return Buffer.concat([Buffer.from([0x00, 0x00, 0x00, 0x18]), Buffer.from('ftypmp42', 'ascii')]);
+}
+
 function tempCacheEnv() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-reader-cache-'));
   return {
@@ -126,6 +134,180 @@ test('analyze_image uses content-hash based analysis cache', async () => {
   assert.equal(second.structuredContent.cache_hit, true);
   assert.equal(visionCalls, 1);
   assert.equal(second.structuredContent.content_sha256, first.structuredContent.content_sha256);
+});
+
+test('analyze_image uses DashScope OCR and vision adapters when an API key is configured', async () => {
+  const requests = [];
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { url: 'https://cdn.example.com/pic.png', ocr: true, vlm: true },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        DASHSCOPE_API_KEY: 'test-key',
+        PERSONAL_AGENT_OCR_MODEL: 'qwen-vl-ocr-2025-11-20',
+        PERSONAL_AGENT_VISION_MODEL: 'qwen3-vl-plus',
+      },
+      fetchImpl: async (url, init = {}) => {
+        if (String(url).includes('/compatible-mode/v1/chat/completions')) {
+          const body = JSON.parse(String(init.body || '{}'));
+          requests.push(body);
+          const content = body.model.includes('ocr')
+            ? '{"text":"图中文字","blocks":[{"text":"图中文字"}]}'
+            : '{"summary":"一张带中文文字的图片","objects":["文字","图片"]}';
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ choices: [{ message: { content } }] }),
+          };
+        }
+        return responseFromBytes({
+          url,
+          headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+          bytes: pngBytes(),
+        });
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.ocr_text, '图中文字');
+  assert.equal(result.structuredContent.scene_summary, '一张带中文文字的图片');
+  assert.deepEqual(result.structuredContent.objects, ['文字', '图片']);
+  assert.deepEqual(requests.map((request) => request.model), ['qwen-vl-ocr-2025-11-20', 'qwen3-vl-plus']);
+  assert.match(requests[0].messages[0].content[0].image_url.url, /^data:image\/png;base64,/);
+});
+
+test('transcribe_audio uses DashScope ASR adapter when an API key is configured', async () => {
+  const requests = [];
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'transcribe_audio',
+        arguments: { url: 'https://media.example.com/voice.wav', language_hint: 'zh' },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        DASHSCOPE_API_KEY: 'test-key',
+        PERSONAL_AGENT_ASR_MODEL: 'qwen3-asr-flash',
+      },
+      fetchImpl: async (url, init = {}) => {
+        if (String(url).includes('/compatible-mode/v1/chat/completions')) {
+          const body = JSON.parse(String(init.body || '{}'));
+          requests.push(body);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ choices: [{ message: { content: '这是一段语音转写' } }] }),
+          };
+        }
+        return responseFromBytes({
+          url,
+          headers: { 'content-type': 'audio/wav', 'content-length': String(wavBytes().length) },
+          bytes: wavBytes(),
+        });
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.transcript, '这是一段语音转写');
+  assert.equal(result.structuredContent.model, 'qwen3-asr-flash');
+  assert.equal(requests[0].messages[0].content[0].type, 'input_audio');
+  assert.match(requests[0].messages[0].content[0].input_audio.data, /^data:audio\/wav;base64,/);
+});
+
+test('analyze_video runs ffprobe ffmpeg frame extraction and DashScope analysis', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-reader-ffmpeg-'));
+  const calls = [];
+  async function execFileImpl(command, args) {
+    calls.push([command, ...args]);
+    if (command === '/fake/ffprobe') {
+      return {
+        stdout: JSON.stringify({
+          format: { duration: '6.0', format_name: 'mov,mp4,m4a,3gp,3g2,mj2' },
+          streams: [{ codec_type: 'video', width: 640, height: 360 }],
+        }),
+        stderr: '',
+      };
+    }
+    if (command === '/fake/ffmpeg' && args.includes('-frames:v')) {
+      const pattern = args.at(-1);
+      fs.writeFileSync(pattern.replace('%03d', '001'), pngBytes());
+      return { stdout: '', stderr: '' };
+    }
+    if (command === '/fake/ffmpeg' && args.includes('-vn')) {
+      fs.writeFileSync(args.at(-1), wavBytes());
+      return { stdout: '', stderr: '' };
+    }
+    throw new Error(`unexpected command ${command} ${args.join(' ')}`);
+  }
+
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_video',
+        arguments: {
+          url: 'https://media.example.com/video.mp4',
+          max_frames: 1,
+          include_audio: true,
+          include_ocr: true,
+          include_vlm: true,
+        },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_MEDIA_CACHE_DIR: tempDir,
+        DASHSCOPE_API_KEY: 'test-key',
+        PERSONAL_AGENT_FFPROBE_PATH: '/fake/ffprobe',
+        PERSONAL_AGENT_FFMPEG_PATH: '/fake/ffmpeg',
+      },
+      fetchImpl: async (url, init = {}) => {
+        if (String(url).includes('/compatible-mode/v1/chat/completions')) {
+          const body = JSON.parse(String(init.body || '{}'));
+          const content = body.model.includes('ocr')
+            ? '{"text":"视频帧文字","blocks":[]}'
+            : body.model.includes('asr')
+              ? '视频音频转写'
+              : '{"summary":"视频画面摘要","objects":["画面"]}';
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({ choices: [{ message: { content } }] }),
+          };
+        }
+        return responseFromBytes({
+          url,
+          headers: { 'content-type': 'video/mp4', 'content-length': String(mp4Bytes().length) },
+          bytes: mp4Bytes(),
+        });
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl,
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.metadata.duration_seconds, 6);
+  assert.equal(result.structuredContent.frames.length, 1);
+  assert.equal(result.structuredContent.frames[0].scene_summary, '视频画面摘要');
+  assert.equal(result.structuredContent.asr.transcript, '视频音频转写');
+  assert.match(result.structuredContent.overall_summary, /视频画面摘要/);
+  assert.ok(calls.some((call) => call[0] === '/fake/ffprobe'));
+  assert.ok(calls.some((call) => call[0] === '/fake/ffmpeg'));
 });
 
 test('analyze_media_batch returns partial results when one item fails', async () => {

@@ -1,10 +1,14 @@
 import { MediaReaderError } from './assetResolver.mjs';
+import { analyzeImageVisionWithDashScope, isDashScopeProvider } from './dashscopeProvider.mjs';
 
 export async function analyzeImageVision(asset, options = {}) {
   if (options.visionProvider?.analyzeImage) {
     return await options.visionProvider.analyzeImage(asset, options);
   }
   const provider = String(options.env?.PERSONAL_AGENT_VISION_PROVIDER || '').trim();
+  if (isDashScopeProvider(provider, options.env)) {
+    return await analyzeImageVisionWithDashScope(asset, options);
+  }
   if (!provider) {
     throw new MediaReaderError('PROVIDER_NOT_CONFIGURED', 'PROVIDER_NOT_CONFIGURED: vision provider is not configured');
   }

@@ -152,8 +152,9 @@ async function analyzeImage(args = {}, options = {}) {
   if (cached) {
     return { ...cached, cache_hit: true };
   }
-  const ocr = ocrEnabled ? await analyzeImageOcr(asset, options) : { text: '', blocks: [], model: '' };
-  const vision = vlmEnabled ? await analyzeImageVision(asset, options) : { summary: '', objects: [], model: '' };
+  const providerOptions = { ...options, args };
+  const ocr = ocrEnabled ? await analyzeImageOcr(asset, providerOptions) : { text: '', blocks: [], model: '' };
+  const vision = vlmEnabled ? await analyzeImageVision(asset, providerOptions) : { summary: '', objects: [], model: '' };
   const payload = {
     ok: true,
     type: 'image',
@@ -175,7 +176,7 @@ async function transcribeAudio(args = {}, options = {}) {
   if (asset.type !== 'audio') {
     throw new MediaReaderError('UNSUPPORTED_MEDIA_TYPE', 'UNSUPPORTED_MEDIA_TYPE: expected audio media', { media_type: asset.type });
   }
-  const transcript = await transcribeAudioProvider(asset, options);
+  const transcript = await transcribeAudioProvider(asset, { ...options, args });
   return {
     ok: true,
     type: 'audio',
@@ -194,7 +195,7 @@ async function analyzeVideo(args = {}, options = {}) {
   if (asset.type !== 'video') {
     throw new MediaReaderError('UNSUPPORTED_MEDIA_TYPE', 'UNSUPPORTED_MEDIA_TYPE: expected video media', { media_type: asset.type });
   }
-  const result = await analyzeVideoWithFfmpeg(asset, options);
+  const result = await analyzeVideoWithFfmpeg(asset, { ...options, args });
   return {
     ok: true,
     type: 'video',

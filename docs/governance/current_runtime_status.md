@@ -49,7 +49,7 @@ Status Date: 2026-05-06
   - the bundled OpenClaw `browser` plugin is explicitly disabled, so normal startup should not log `[browser] control listening ...`; browser automation should come from `playwright__browser_*` MCP tools.
   - `time` uses a launcher that prefers a preinstalled `mcp_server_time` Python module before falling back to `uvx`, reducing cold-start dependency downloads inside OpenClaw's MCP startup window.
   - `media_generation` remains OpenClaw-owned; Node bridge only converts trusted `WECHAT_MEDIA` markers from the media MCP result into WeChat `media` envelopes.
-  - `media_reader` is the only OpenClaw-visible media understanding facade. It exposes `extract_media_assets`, `analyze_image`, `transcribe_audio`, `analyze_video`, and `analyze_media_batch`; lower-level OCR/ASR/VLM/ffmpeg providers stay behind adapters and return structured `PROVIDER_NOT_CONFIGURED` / `DEPENDENCY_MISSING` style errors when unavailable.
+  - `media_reader` is the only OpenClaw-visible media understanding facade. It exposes `extract_media_assets`, `analyze_image`, `transcribe_audio`, `analyze_video`, and `analyze_media_batch`; lower-level OCR/ASR/VLM/ffmpeg providers stay behind adapters. The default adapters use DashScope `qwen-vl-ocr-2025-11-20`, `qwen3-vl-plus`, `qwen3-asr-flash`, and server `ffmpeg`/`ffprobe`; missing `DASHSCOPE_API_KEY` / `QWEN_API_KEY` or missing ffmpeg binaries return structured errors.
   - `social_reader` is the preferred path for social media and music share links. It exposes `resolve_social_url`, `read_social_post`, `read_social_post_deep`, `read_music_share`, and `check_social_login`; internally it calls mature platform backends such as `jobson-xhs-mcp` for Xiaohongshu, `@wangshunnn/bilibili-mcp-server` for Bilibili public video metadata, `wanyi-watermark` for generic share parsing, and a NetEaseCloudMusicApi-compatible song detail endpoint for NetEase Music shares including `163cn.tv` short links.
 - Normal WeChat text replies now enter OpenClaw through `openclaw agent --json`, not the OpenAI-compatible chat-completions shim, so the agent runtime sees its MCP tools. The chat-completions path remains a compatibility fallback and is still used when the inbound WeChat payload contains images or other structured media.
 - `openclaw/openclaw.personal-system.json` web path hardening:
@@ -87,7 +87,7 @@ Status Date: 2026-05-06
 
 401 troubleshooting order:
 
-1. `.env.local`: confirm the Claude provider env is present for frontend runs; confirm `QWEN_API_KEY` or `DASHSCOPE_API_KEY` only if you plan to run backend knowledge maintenance.
+1. `.env.local`: confirm the Claude provider env is present for frontend runs; confirm `QWEN_API_KEY` or `DASHSCOPE_API_KEY` for media generation, media understanding, and backend knowledge maintenance.
 2. Startup command: run `./start_openclaw.sh` instead of raw `npx openclaw ...`.
 3. Gateway logs: look for `401`, `Unauthorized`, `InvalidApiKey`.
 
@@ -119,7 +119,7 @@ Status Date: 2026-05-06
 ### Backend Knowledge Executor (Qwen Code)
 
 - `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault` remains the only supported Qwen path in this repo.
-- `QWEN_API_KEY` / `DASHSCOPE_API_KEY` matter for knowledge maintenance runs, not for the OpenClaw frontend provider chain.
+- `QWEN_API_KEY` / `DASHSCOPE_API_KEY` matter for media generation, media understanding, and knowledge maintenance runs, not for the OpenClaw frontend chat model provider chain.
 - Frontline OpenClaw config should not reintroduce `qwen/*`, `modelstudio/qwen*`, or `qwen` auth profiles/providers.
 
 ## Backend Layer (Python)

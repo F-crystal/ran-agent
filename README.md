@@ -70,7 +70,7 @@ OPENCLAW_GATEWAY_TOKEN=...
 TAVILY_API_KEY=...
 ```
 
-Knowledge maintenance and media generation may also need `DASHSCOPE_API_KEY` or `QWEN_API_KEY`, depending on which paths you enable.
+Knowledge maintenance, media generation, and media understanding use `DASHSCOPE_API_KEY` or `QWEN_API_KEY` when those paths are enabled. The default `media_reader` adapters use DashScope Qwen OCR/VL/ASR models and server `ffmpeg`/`ffprobe` for video processing.
 
 ## Run Locally
 
