@@ -124,13 +124,17 @@ def _load_openclaw_runtime_contract(base_dir: Path) -> dict[str, object]:
     gateway_base_url = f"http://{bind_host}:{port}"
     gateway_token_env_var = _extract_env_placeholder_name(str(auth.get("token", ""))) or "OPENCLAW_GATEWAY_TOKEN"
 
+    providers = payload.get("models", {}).get("providers", {})
     agents = payload.get("agents", {})
     defaults = agents.get("defaults", {}) if isinstance(agents, dict) else {}
     model_block = defaults.get("model", {}) if isinstance(defaults, dict) else {}
     backend_model_ref = str(model_block.get("primary", "")).strip()
-    provider_name, _, model_name = backend_model_ref.partition("/")
+    if "/" in backend_model_ref:
+        provider_name, _, model_name = backend_model_ref.partition("/")
+    else:
+        model_name = backend_model_ref
+        provider_name = _find_openclaw_provider_for_model(providers, model_name)
 
-    providers = payload.get("models", {}).get("providers", {})
     provider_block = providers.get(provider_name, {}) if isinstance(providers, dict) else {}
     provider_models = provider_block.get("models", []) if isinstance(provider_block, dict) else []
     model_block_details = next(
@@ -158,6 +162,24 @@ def _load_openclaw_runtime_contract(base_dir: Path) -> dict[str, object]:
         }
     )
     return default_contract
+
+
+def _find_openclaw_provider_for_model(providers: object, model_name: str) -> str:
+    if not isinstance(providers, dict) or not model_name:
+        return ""
+
+    matches: list[str] = []
+    for provider_name, provider_block in providers.items():
+        provider_models = provider_block.get("models", []) if isinstance(provider_block, dict) else []
+        if any(
+            isinstance(item, dict) and str(item.get("id", "")).strip() == model_name
+            for item in provider_models
+        ):
+            matches.append(str(provider_name))
+
+    if "claude_code" in matches:
+        return "claude_code"
+    return matches[0] if matches else ""
 
 
 @dataclass(frozen=True)

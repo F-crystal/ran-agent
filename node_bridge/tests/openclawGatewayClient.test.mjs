@@ -162,11 +162,11 @@ test('openclaw config keeps the personal-system agent on the tool-capable Claude
   const bootstrapHook = config.hooks?.internal?.entries?.['bootstrap-extra-files'] || {};
   const providerModelIds = (claudeProvider.models || []).map((item) => item.id);
 
-  assert.equal(defaultsModel.primary, 'claude_code/qwen3.5-plus');
+  assert.equal(defaultsModel.primary, 'qwen3.5-plus');
   assert.deepEqual(defaultsModel.fallbacks, []);
   assert.equal(listedAgent.id, 'personal-system');
   assert.equal(listedAgent.default, true);
-  assert.equal(listedAgentModel.primary, 'claude_code/qwen3.5-plus');
+  assert.equal(listedAgentModel.primary, 'qwen3.5-plus');
   assert.deepEqual(listedAgentModel.fallbacks, []);
   assert.equal(defaults.heartbeat?.every, '90m');
   assert.equal(listedAgent.heartbeat?.every, '90m');

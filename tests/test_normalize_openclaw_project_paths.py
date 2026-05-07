@@ -16,9 +16,33 @@ assert SPEC is not None and SPEC.loader is not None
 SPEC.loader.exec_module(MODULE)
 
 normalize_config_paths = MODULE.normalize_config_paths
+normalize_absolute_model_ref = MODULE.normalize_absolute_model_ref
 
 
 class NormalizeOpenClawProjectPathsTest(unittest.TestCase):
+    def test_absolute_claude_code_model_path_normalizes_to_bare_model(self) -> None:
+        normalized = normalize_absolute_model_ref(
+            "/usr/bin/claude_code/qwen3.5-plus",
+            {"claude_code"},
+        )
+
+        self.assertEqual(normalized, "qwen3.5-plus")
+        self.assertNotEqual(normalized, "claude_code/qwen3.5-plus")
+
+    def test_bare_model_name_is_unchanged(self) -> None:
+        self.assertEqual(
+            normalize_absolute_model_ref("qwen3.5-plus", {"claude_code"}),
+            "qwen3.5-plus",
+        )
+
+    def test_provider_prefixed_model_ref_normalizes_to_bare_model(self) -> None:
+        normalized = normalize_absolute_model_ref(
+            "claude_code/qwen3.5-plus",
+            {"claude_code"},
+        )
+
+        self.assertEqual(normalized, "qwen3.5-plus")
+
     def test_server_paths_use_repo_root_and_claude_executable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             config_path = Path(temp_dir) / "openclaw.personal-system.json"
@@ -117,19 +141,23 @@ class NormalizeOpenClawProjectPathsTest(unittest.TestCase):
         self.assertTrue(changed)
         self.assertEqual(
             config_payload["agents"]["defaults"]["model"]["primary"],
+            "qwen3.5-plus",
+        )
+        self.assertNotEqual(
+            config_payload["agents"]["defaults"]["model"]["primary"],
             "claude_code/qwen3.5-plus",
         )
         self.assertEqual(
             config_payload["agents"]["defaults"]["model"]["fallbacks"],
-            ["claude_code/qwen3.6-plus"],
+            ["qwen3.6-plus"],
         )
         self.assertEqual(
             config_payload["agents"]["list"][0]["model"]["primary"],
-            "claude_code/qwen3.5-plus",
+            "qwen3.5-plus",
         )
         self.assertEqual(
             state_payload["agents"]["defaults"]["model"]["primary"],
-            "claude_code/qwen3.5-plus",
+            "qwen3.5-plus",
         )
 
 

@@ -32,6 +32,21 @@ function summarizeItems(items) {
     .join('\n');
 }
 
+function partialFailureFromResult(asset, result) {
+  if (!result?.partial) {
+    return null;
+  }
+  const warning = Array.isArray(result.warnings)
+    ? result.warnings.find((item) => item?.code)
+    : null;
+  const errorCode = String(result.error_code || warning?.code || 'PARTIAL_ANALYSIS');
+  return {
+    asset_id: asset?.asset_id || '',
+    error_code: errorCode,
+    error: `${errorCode}: partial media analysis`,
+  };
+}
+
 export async function analyzeMediaBatch({ assets = [], mediaDetail = 'standard', analyzeOne, env = process.env }) {
   const maxConcurrency = positiveInt(env.PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY, DEFAULT_MAX_CONCURRENCY);
   const batchTimeoutMs = positiveInt(env.PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS, DEFAULT_BATCH_TIMEOUT_MS);
@@ -51,6 +66,10 @@ export async function analyzeMediaBatch({ assets = [], mediaDetail = 'standard',
           'DOWNLOAD_TIMEOUT'
         );
         items.push(result);
+        const partialFailure = partialFailureFromResult(asset, result);
+        if (partialFailure) {
+          partialFailures.push(partialFailure);
+        }
       } catch (error) {
         const payload = buildErrorPayload(error, { asset_id: asset?.asset_id || '' });
         partialFailures.push({
@@ -73,7 +92,7 @@ export async function analyzeMediaBatch({ assets = [], mediaDetail = 'standard',
 
   return {
     ok: true,
-    partial: partialFailures.length > 0,
+    partial: partialFailures.length > 0 || items.some((item) => item?.partial),
     items,
     merged_summary: summarizeItems(items),
     timeline: items.flatMap((item) => Array.isArray(item.timeline) ? item.timeline : []),

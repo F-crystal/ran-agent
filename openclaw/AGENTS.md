@@ -19,7 +19,7 @@ Status: CURRENT (2026-05-06)
 
 - Single front speaker: OpenClaw, positioned as personal assistant + chat companion.
 - Live chat/runtime traffic must use tool-capable `claude_code/*` provider paths only; no `claude-cli/*` or direct `qwen/*` primary/fallback.
-- Active primary is `claude_code/qwen3.5-plus`; fallbacks stay empty. Keep the Qwen alias bare unless intentionally changing runtime model contract.
+- Active route/provider is `claude_code`; active model is bare `qwen3.5-plus`; fallbacks stay empty. Do not write provider-qualified refs such as `claude_code/qwen3.5-plus` into `agents.*.model.primary`.
 - Kimi and GLM are retired as OpenClaw frontend primary/fallback candidates and should not be present in active automatic routing config.
 - Persona comes from workspace bootstrap files (`AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `TOOLS.md`, `HEARTBEAT.md`); do not replace with ad-hoc inline prompt prose.
 - Keep `tools.allow` non-empty and `tools.profile=coding`; `OPENCLAW_BACKEND_MODEL` is ignored unless explicit override gate is enabled.

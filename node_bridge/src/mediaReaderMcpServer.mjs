@@ -121,7 +121,84 @@ function normalizeBoolean(value, fallback) {
   return typeof value === 'boolean' ? value : fallback;
 }
 
+function normalizeEnvBoolean(env, key, fallback) {
+  const value = env?.[key];
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+  return !['0', 'false', 'no', 'off'].includes(String(value).trim().toLowerCase());
+}
+
+function normalizePositiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function hasOwnEnv(env, key) {
+  return Object.prototype.hasOwnProperty.call(env || {}, key);
+}
+
+function ocrTimeoutMsFor({ env, mediaDetail }) {
+  if (hasOwnEnv(env, 'PERSONAL_AGENT_OCR_TIMEOUT_MS')) {
+    return normalizePositiveInt(env.PERSONAL_AGENT_OCR_TIMEOUT_MS, 15000);
+  }
+  if (String(mediaDetail || '').toLowerCase() === 'full') {
+    return 90000;
+  }
+  return 15000;
+}
+
+function errorCodeFor(error, fallback) {
+  if (error instanceof MediaReaderError) {
+    return error.error_code || fallback;
+  }
+  return String(error?.error_code || '').trim() || fallback;
+}
+
+function ocrErrorCodeFor(error) {
+  const code = errorCodeFor(error, 'OCR_FAILED');
+  return code === 'OCR_TIMEOUT' ? 'OCR_TIMEOUT' : 'OCR_FAILED';
+}
+
+function errorForSettledResult(result) {
+  if (result.error instanceof MediaReaderError && result.error.error_code === result.code) {
+    return result.error;
+  }
+  return new MediaReaderError(
+    result.code,
+    `${result.code}: ${result.error?.message || result.error || 'analysis failed'}`
+  );
+}
+
+function warningFor(code) {
+  return { code };
+}
+
+async function withTimeout(promise, timeoutMs, errorCode) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new MediaReaderError(errorCode, `${errorCode}: operation timed out`));
+    }, timeoutMs);
+  });
+  try {
+    return await Promise.race([promise, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function settleAnalyzer(fn, fallbackCode, codeForError = null) {
+  try {
+    return { ok: true, value: await fn() };
+  } catch (error) {
+    const code = codeForError ? codeForError(error) : errorCodeFor(error, fallbackCode);
+    return { ok: false, error, code };
+  }
+}
+
 async function analyzeImage(args = {}, options = {}) {
+  const env = options.env || process.env;
   const cache = createCacheStore(options.env);
   const asset = await downloadMediaAsset({ url: args.url, expectedKind: 'image' }, { ...options, cacheStore: cache });
   if (asset.type !== 'image') {
@@ -130,8 +207,11 @@ async function analyzeImage(args = {}, options = {}) {
       url_host: asset.url_host,
     });
   }
-  const ocrEnabled = normalizeBoolean(args.ocr, true);
+  const ocrEnabled = normalizeBoolean(args.ocr, true) && normalizeEnvBoolean(env, 'PERSONAL_AGENT_OCR_ENABLED', true);
   const vlmEnabled = normalizeBoolean(args.vlm, true);
+  const ocrRequired = normalizeEnvBoolean(env, 'PERSONAL_AGENT_OCR_REQUIRED', false);
+  const imageVlmFirst = normalizeEnvBoolean(env, 'PERSONAL_AGENT_IMAGE_VLM_FIRST', true);
+  const mediaDetail = args.media_detail || options.mediaDetail || 'standard';
   if (!ocrEnabled && !vlmEnabled) {
     throw new MediaReaderError('PROVIDER_NOT_CONFIGURED', 'PROVIDER_NOT_CONFIGURED: at least one image analyzer must be enabled');
   }
@@ -152,9 +232,55 @@ async function analyzeImage(args = {}, options = {}) {
   if (cached) {
     return { ...cached, cache_hit: true };
   }
-  const providerOptions = { ...options, args };
-  const ocr = ocrEnabled ? await analyzeImageOcr(asset, providerOptions) : { text: '', blocks: [], model: '' };
-  const vision = vlmEnabled ? await analyzeImageVision(asset, providerOptions) : { summary: '', objects: [], model: '' };
+  const ocrTimeoutMs = ocrTimeoutMsFor({ env, mediaDetail });
+  const providerOptions = {
+    ...options,
+    args,
+    env: {
+      ...env,
+      PERSONAL_AGENT_OCR_TIMEOUT_MS: String(ocrTimeoutMs),
+    },
+  };
+  const runOcr = () => settleAnalyzer(
+    () => withTimeout(analyzeImageOcr(asset, providerOptions), ocrTimeoutMs, 'OCR_TIMEOUT'),
+    'OCR_FAILED',
+    ocrErrorCodeFor
+  );
+  const runVision = () => settleAnalyzer(
+    () => analyzeImageVision(asset, providerOptions),
+    'VLM_FAILED'
+  );
+  let ocrPromise;
+  let visionPromise;
+  if (imageVlmFirst) {
+    visionPromise = vlmEnabled ? runVision() : Promise.resolve({ ok: true, value: { summary: '', objects: [], model: '' } });
+    ocrPromise = ocrEnabled ? runOcr() : Promise.resolve({ ok: true, value: { text: '', blocks: [], model: '' } });
+  } else {
+    ocrPromise = ocrEnabled ? runOcr() : Promise.resolve({ ok: true, value: { text: '', blocks: [], model: '' } });
+    visionPromise = vlmEnabled ? runVision() : Promise.resolve({ ok: true, value: { summary: '', objects: [], model: '' } });
+  }
+  let ocrResult;
+  let visionResult;
+  if (imageVlmFirst) {
+    [visionResult, ocrResult] = await Promise.all([visionPromise, ocrPromise]);
+  } else {
+    [ocrResult, visionResult] = await Promise.all([ocrPromise, visionPromise]);
+  }
+  if (!ocrResult.ok && ocrRequired) {
+    throw errorForSettledResult(ocrResult);
+  }
+  if (!ocrResult.ok && (!visionResult.ok || !vlmEnabled)) {
+    throw errorForSettledResult(ocrResult);
+  }
+  if (!visionResult.ok && (!ocrResult.ok || !ocrEnabled)) {
+    throw errorForSettledResult(visionResult);
+  }
+  const ocr = ocrResult.ok ? ocrResult.value : { text: '', blocks: [], model: ocrResult.code === 'OCR_TIMEOUT' ? 'paddleocr_timeout' : 'paddleocr_failed' };
+  const vision = visionResult.ok ? visionResult.value : { summary: '', objects: [], model: 'vlm_failed' };
+  const warnings = [];
+  if (!ocrResult.ok) warnings.push(warningFor(ocrResult.code));
+  if (!visionResult.ok) warnings.push(warningFor(visionResult.code));
+  const partial = warnings.length > 0;
   const payload = {
     ok: true,
     type: 'image',
@@ -165,9 +291,14 @@ async function analyzeImage(args = {}, options = {}) {
     objects: Array.isArray(vision.objects) ? vision.objects : [],
     model: { ocr: ocr.model || '', vlm: vision.model || '' },
     cache_hit: false,
-    warnings: [],
+    warnings,
   };
-  cache.writeAnalysis('vlm', provider, model, analysisKey, payload);
+  if (partial) {
+    payload.partial = true;
+    payload.error_code = warnings[0]?.code || 'PARTIAL_IMAGE_ANALYSIS';
+  } else {
+    cache.writeAnalysis('vlm', provider, model, analysisKey, payload);
+  }
   return payload;
 }
 
@@ -239,7 +370,10 @@ async function callTool(name, args = {}, options = {}) {
       env: options.env,
       analyzeOne: async (asset) => {
         if (asset.type === 'image') {
-          return await analyzeImage({ url: asset.url, ocr: true, vlm: args.media_detail !== 'basic' }, options);
+          return await analyzeImage({ url: asset.url, ocr: true, vlm: args.media_detail !== 'basic', media_detail: args.media_detail || 'standard' }, {
+            ...options,
+            mediaDetail: args.media_detail || 'standard',
+          });
         }
         if (asset.type === 'audio') {
           return await transcribeAudio({ url: asset.url, timestamps: true }, options);

@@ -6,7 +6,7 @@ Status Date: 2026-05-06
 
 - Active target path is:
   - `WeChat -> Node bridge -> OpenClaw Gateway -> Claude Code primary -> reply`
-- OpenClaw frontend primary is `claude_code/qwen3.5-plus` through the local Claude-compatible provider path, with no configured automatic fallbacks.
+- OpenClaw frontend route/provider is `claude_code` through the local Claude-compatible provider path; the active model field is bare `qwen3.5-plus`, with no configured automatic fallbacks.
 - Kimi and GLM are retired as OpenClaw frontend primary/fallback candidates and stay out of active automatic routing config.
 - Frontend positioning is personal assistant + chat companion (single front speaker: OpenClaw).
 - Python frontend `/chat` path is retired (returns 410).
@@ -58,8 +58,8 @@ Status Date: 2026-05-06
   - listed agent `agents.list[0].tools.allow` adds `read` on top of the root allowlist
   - native `todo-tools` plugin is disabled so live chat todo handling stays bridge-managed
   - bundled `bootstrap-extra-files` hook injects `openclaw/AGENTS.md` during bootstrap
-  - shared defaults use `claude_code/qwen3.5-plus`
-  - the listed frontline agent also uses `claude_code/qwen3.5-plus`
+  - shared defaults use provider `claude_code` with model `qwen3.5-plus`
+  - the listed frontline agent also uses provider `claude_code` with model `qwen3.5-plus`
   - fallbacks are empty for both shared defaults and the listed frontline agent
   - Kimi and GLM are retired as automatic frontend candidates and are not part of the active routing registry
   - the same Claude-provider registry also carries `claude_code/qwen-image` and `claude_code/qwen3-omni-flash` for generation-side routing
@@ -77,8 +77,8 @@ Status Date: 2026-05-06
   - native `contextPruning` enabled in `cache-ttl` mode with `ttl = 10m`, `softTrimRatio = 0.25`, `hardClearRatio = 0.45`
   - native `compaction.mode = safeguard`, `reserveTokensFloor = 12000`, `notifyUser = false`
   - `blockStreamingDefault = on` to reduce noisy partial streaming overhead during bridge-mediated chat
-  - active `claude_code/qwen3.5-plus` has a `120000` registry context window, matching the live `contextTokens` bound
-  - manual heavy `claude_code/qwen3.6-plus` registry entry remains available
+  - active model `qwen3.5-plus` under provider `claude_code` has a `120000` registry context window, matching the live `contextTokens` bound
+  - manual heavy model `qwen3.6-plus` under provider `claude_code` remains available
   - listed frontend heartbeat is reduced to `90m` to lower idle token spend while proactive outbound messaging remains frozen
   - `qwen3.5-plus` and `qwen3.6-plus` registry cost metadata is populated with China-mainland DashScope RMB pricing converted to USD estimates for OpenClaw usage display
   - `start_openclaw.sh` sets `OPENCLAW_DISABLE_MODEL_PRICING_REFRESH=true` and runtime patches skip optional OpenRouter pricing refresh, avoiding startup warnings on servers without direct OpenRouter access
@@ -95,12 +95,14 @@ Status Date: 2026-05-06
 
 - OpenClaw remains the single front speaker.
 - The shared `agents.defaults.model` resolution is:
-  - primary: `claude_code/qwen3.5-plus`
+  - provider: `claude_code`
+  - primary model: `qwen3.5-plus`
   - fallbacks: none
 - The active listed agent (`agents.list[0]`) uses:
-  - primary: `claude_code/qwen3.5-plus`
+  - provider: `claude_code`
+  - primary model: `qwen3.5-plus`
   - fallbacks: none
-- `claude_code/qwen3.6-plus` remains registered as a manual heavy model, not as the default frontline path.
+- `qwen3.6-plus` remains registered under provider `claude_code` as a manual heavy model, not as the default frontline path.
 - Kimi and GLM are retired as frontend primary/fallback candidates.
 - This path is intentionally tool-capable. It uses Claude settings as the credential source for an anthropic-compatible provider, instead of relying on the OpenClaw `claude-cli` text-only fallback backend.
 - Claude settings remain the source of truth for `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`; OpenClaw consumes those env values at startup.

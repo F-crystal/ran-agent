@@ -8,14 +8,20 @@ from pathlib import Path
 def normalize_absolute_model_ref(value: object, provider_ids: set[str]) -> object:
     if not isinstance(value, str):
         return value
+    sorted_provider_ids = sorted(provider_ids, key=len, reverse=True)
+    for provider_id in sorted_provider_ids:
+        prefix = f"{provider_id}/"
+        if value.startswith(prefix):
+            return value[len(prefix) :]
+
     if not value.startswith("/"):
         return value
 
-    for provider_id in sorted(provider_ids, key=len, reverse=True):
+    for provider_id in sorted_provider_ids:
         marker = f"/{provider_id}/"
         index = value.find(marker)
         if index >= 0:
-            return value[index + 1 :]
+            return value[index + len(marker) :]
     return value
 
 

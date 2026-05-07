@@ -2,8 +2,8 @@
 
 Status: CURRENT (2026-05-01)
 
-OpenClaw remains the single frontline speaker on `claude_code/qwen3.5-plus`.
-Keep `qwen3.5-plus` as the bare Qwen alias, with no automatic fallbacks. Kimi and GLM are retired as frontend primary/fallback candidates and stay out of active automatic routing config.
+OpenClaw remains the single frontline speaker through provider `claude_code` with model `qwen3.5-plus`.
+Keep `qwen3.5-plus` as the bare Qwen alias in agent model fields, with no automatic fallbacks. Kimi and GLM are retired as frontend primary/fallback candidates and stay out of active automatic routing config.
 Hermes is a budget discipline, not the runtime/provider.
 
 Budgets:

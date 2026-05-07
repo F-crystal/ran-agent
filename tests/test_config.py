@@ -160,7 +160,7 @@ class ConfigLoadingTest(unittest.TestCase):
     def test_backend_model_contract_defaults_to_openclaw_frontline_config(self) -> None:
         config = load_config()
 
-        self.assertEqual(config.backend_model_ref, "claude_code/qwen3.5-plus")
+        self.assertEqual(config.backend_model_ref, "qwen3.5-plus")
         self.assertEqual(config.backend_model_provider, "claude_code")
         self.assertEqual(config.backend_model_name, "qwen3.5-plus")
         self.assertIsNone(re.search(r"qwen3\.5-plus-\d{4}-\d{2}-\d{2}$", config.backend_model_ref))
@@ -181,9 +181,9 @@ class ConfigLoadingTest(unittest.TestCase):
             for item in config_data["models"]["providers"]["claude_code"]["models"]
         }
 
-        self.assertEqual(default_model["primary"], "claude_code/qwen3.5-plus")
+        self.assertEqual(default_model["primary"], "qwen3.5-plus")
         self.assertEqual(default_model["fallbacks"], [])
-        self.assertEqual(listed_model["primary"], "claude_code/qwen3.5-plus")
+        self.assertEqual(listed_model["primary"], "qwen3.5-plus")
         self.assertEqual(listed_model["fallbacks"], [])
         self.assertNotIn("kimi-for-coding", registered_model_ids)
         self.assertIn("qwen3.5-plus", registered_model_ids)

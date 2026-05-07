@@ -20,7 +20,7 @@ Status: CURRENT (2026-05-01)
   - `scheduler -> life-loop skill -> orchestrator judgment -> front speaker -> Node bridge`
 - Knowledge mainline:
   - `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
-- OpenClaw frontend must not use direct `qwen/*` provider paths. The active frontend primary is `claude_code/qwen3.5-plus` with empty fallbacks; Qwen Code belongs only to the knowledge mainline above.
+- OpenClaw frontend must not use direct `qwen/*` provider paths. The active frontend route/provider is `claude_code` with bare model `qwen3.5-plus` and empty fallbacks; Qwen Code belongs only to the knowledge mainline above.
 - Kimi and GLM are retired as OpenClaw frontend primary/fallback candidates and should not be present in active automatic routing config.
 
 ## Specialist Boundaries

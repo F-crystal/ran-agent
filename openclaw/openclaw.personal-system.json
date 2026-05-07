@@ -98,7 +98,7 @@
         "prompt": "Read HEARTBEAT.md if it exists (workspace context). Execute due tasks first. Be time-aware and continue tracking todos. If a user-given task or deadline is missing key detail, ask one concise follow-up question. When nothing needs attention, reply HEARTBEAT_OK."
       },
       "model": {
-        "primary": "claude_code/qwen3.5-plus",
+        "primary": "qwen3.5-plus",
         "fallbacks": []
       },
       "cliBackends": {
@@ -114,7 +114,7 @@
         "default": true,
         "workspace": ".",
         "model": {
-          "primary": "claude_code/qwen3.5-plus",
+          "primary": "qwen3.5-plus",
           "fallbacks": []
         },
         "reasoningDefault": "off",

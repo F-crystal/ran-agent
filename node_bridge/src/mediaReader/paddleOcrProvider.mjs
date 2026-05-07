@@ -4,6 +4,31 @@ import { MediaReaderError } from './assetResolver.mjs';
 
 const execFile = promisify(childProcess.execFile);
 
+function positiveInt(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function paddleTimeoutMs(env = process.env) {
+  return positiveInt(
+    env.PERSONAL_AGENT_PADDLEOCR_TIMEOUT_MS,
+    positiveInt(env.PERSONAL_AGENT_OCR_TIMEOUT_MS, 15000)
+  );
+}
+
+function logOcrPhase(options, phase, startedAt, extra = {}) {
+  const elapsedMs = Math.max(0, Date.now() - startedAt);
+  const payload = {
+    component: 'media_reader',
+    event: phase,
+    elapsed_ms: elapsedMs,
+  };
+  if (extra.exit_code !== undefined) payload.exit_code = extra.exit_code;
+  if (extra.error_code) payload.error_code = extra.error_code;
+  const logger = options.ocrLogImpl || console.error;
+  logger(JSON.stringify(payload));
+}
+
 function parseMaybeJson(text) {
   const raw = String(text || '').trim();
   if (!raw) {
@@ -109,6 +134,8 @@ export async function analyzeImageOcrWithPaddle(asset, options = {}) {
   const env = options.env || process.env;
   const command = String(env.PERSONAL_AGENT_PADDLEOCR_COMMAND || 'paddleocr').trim();
   const execFileImpl = options.execFileImpl || execFile;
+  const timeout = paddleTimeoutMs(env);
+  const startedAt = Date.now();
   const childEnv = {
     ...process.env,
     ...env,
@@ -117,17 +144,29 @@ export async function analyzeImageOcrWithPaddle(asset, options = {}) {
   };
   let result;
   try {
+    logOcrPhase(options, 'ocr_start', startedAt);
+    logOcrPhase(options, 'ocr_spawn', startedAt);
+    logOcrPhase(options, 'ocr_model_init_or_first_run', startedAt);
     result = await execFileImpl(command, paddleArgs(asset, env), {
       env: childEnv,
-      timeout: Number(env.PERSONAL_AGENT_PADDLEOCR_TIMEOUT_MS || 120000),
+      timeout,
+      killSignal: 'SIGKILL',
       maxBuffer: 10 * 1024 * 1024,
     });
   } catch (error) {
     if (error?.code === 'ENOENT') {
+      logOcrPhase(options, 'ocr_exit', startedAt, { exit_code: null, error_code: 'DEPENDENCY_MISSING' });
       throw new MediaReaderError('DEPENDENCY_MISSING', 'DEPENDENCY_MISSING: PaddleOCR command is not installed or not in PATH');
     }
+    if (error?.killed || error?.signal === 'SIGKILL' || /timed out|timeout/i.test(String(error?.message || ''))) {
+      logOcrPhase(options, 'ocr_timeout', startedAt, { error_code: 'OCR_TIMEOUT' });
+      logOcrPhase(options, 'ocr_exit', startedAt, { exit_code: error?.code ?? null, error_code: 'OCR_TIMEOUT' });
+      throw new MediaReaderError('OCR_TIMEOUT', `OCR_TIMEOUT: PaddleOCR exceeded ${timeout}ms`);
+    }
+    logOcrPhase(options, 'ocr_exit', startedAt, { exit_code: error?.code ?? null, error_code: 'OCR_FAILED' });
     throw new MediaReaderError('OCR_FAILED', `OCR_FAILED: ${error instanceof Error ? error.message : String(error)}`);
   }
+  logOcrPhase(options, 'ocr_exit', startedAt, { exit_code: 0 });
   const payload = parsePaddleOutput(result.stdout);
   return {
     text: payload.text,

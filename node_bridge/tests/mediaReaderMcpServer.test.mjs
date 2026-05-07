@@ -67,7 +67,7 @@ test('media reader exposes stable facade tool names with object schemas', () => 
   }
 });
 
-test('analyze_image returns structured dependency error when default PaddleOCR is missing', async () => {
+test('analyze_image returns structured OCR failure when default PaddleOCR is missing and VLM is unavailable', async () => {
   const result = await handleMediaReaderMcpRequest(
     {
       method: 'tools/call',
@@ -89,7 +89,7 @@ test('analyze_image returns structured dependency error when default PaddleOCR i
 
   assert.equal(result.isError, true);
   assert.equal(result.structuredContent.ok, false);
-  assert.equal(result.structuredContent.error_code, 'DEPENDENCY_MISSING');
+  assert.equal(result.structuredContent.error_code, 'OCR_FAILED');
 });
 
 test('analyze_image uses content-hash based analysis cache', async () => {
@@ -181,11 +181,11 @@ test('analyze_image uses DashScope OCR and vision adapters when an API key is co
   assert.equal(result.structuredContent.ocr_text, '图中文字');
   assert.equal(result.structuredContent.scene_summary, '一张带中文文字的图片');
   assert.deepEqual(result.structuredContent.objects, ['文字', '图片']);
-  assert.deepEqual(requests.map((request) => request.model), ['qwen-vl-ocr-2025-11-20', 'qwen3-vl-flash']);
-  assert.match(requests[0].messages[0].content[0].image_url.url, /^data:image\/png;base64,/);
+  assert.deepEqual(requests.map((request) => request.model), ['qwen3-vl-flash', 'qwen-vl-ocr-2025-11-20']);
+  assert.match(requests[1].messages[0].content[0].image_url.url, /^data:image\/png;base64,/);
 });
 
-test('analyze_image uses PaddleOCR as the default OCR provider before DashScope vision', async () => {
+test('analyze_image uses PaddleOCR as the default OCR provider alongside DashScope vision', async () => {
   const requests = [];
   const paddleCalls = [];
   const paddleExecOptions = [];
@@ -257,7 +257,181 @@ test('analyze_image uses PaddleOCR as the default OCR provider before DashScope 
     'False',
   ]);
   assert.equal(paddleExecOptions[0].env.FLAGS_use_mkldnn, 'false');
+  assert.equal(paddleExecOptions[0].timeout, 15000);
+  assert.equal(paddleExecOptions[0].killSignal, 'SIGKILL');
   assert.deepEqual(requests.map((request) => request.model), ['qwen3-vl-flash']);
+});
+
+test('analyze_image returns VLM result as partial success when OCR times out', async () => {
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { url: 'https://cdn.example.com/pic.png', ocr: true, vlm: true },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_VISION_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_TIMEOUT_MS: '20',
+      },
+      fetchImpl: async (url) => responseFromBytes({
+        url,
+        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+        bytes: pngBytes(),
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      ocrProvider: {
+        analyzeImage: async () => new Promise((resolve) => setTimeout(() => resolve({
+          text: 'late text',
+          blocks: [{ text: 'late text' }],
+          model: 'mock-ocr',
+        }), 200)),
+      },
+      visionProvider: {
+        analyzeImage: async () => ({ summary: 'VLM scene survives', objects: ['scene'], model: 'mock-vlm' }),
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.error_code, 'OCR_TIMEOUT');
+  assert.equal(result.structuredContent.ocr_text, '');
+  assert.equal(result.structuredContent.scene_summary, 'VLM scene survives');
+  assert.deepEqual(result.structuredContent.warnings, [{ code: 'OCR_TIMEOUT' }]);
+  assert.deepEqual(result.structuredContent.model, { ocr: 'paddleocr_timeout', vlm: 'mock-vlm' });
+});
+
+test('analyze_image maps unavailable OCR provider to OCR_FAILED partial warning', async () => {
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { url: 'https://cdn.example.com/pic.png', ocr: true, vlm: true },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_VISION_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_PROVIDER: 'mock',
+      },
+      fetchImpl: async (url) => responseFromBytes({
+        url,
+        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+        bytes: pngBytes(),
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      ocrProvider: {
+        analyzeImage: async () => {
+          const error = new Error('DEPENDENCY_MISSING: OCR provider unavailable');
+          error.error_code = 'DEPENDENCY_MISSING';
+          throw error;
+        },
+      },
+      visionProvider: {
+        analyzeImage: async () => ({ summary: 'VLM scene survives', objects: ['scene'], model: 'mock-vlm' }),
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.error_code, 'OCR_FAILED');
+  assert.equal(result.structuredContent.ocr_text, '');
+  assert.equal(result.structuredContent.scene_summary, 'VLM scene survives');
+  assert.deepEqual(result.structuredContent.warnings, [{ code: 'OCR_FAILED' }]);
+  assert.deepEqual(result.structuredContent.model, { ocr: 'paddleocr_failed', vlm: 'mock-vlm' });
+});
+
+test('analyze_image returns OCR result as partial success when VLM fails', async () => {
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { url: 'https://cdn.example.com/pic.png', ocr: true, vlm: true },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_VISION_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_PROVIDER: 'mock',
+      },
+      fetchImpl: async (url) => responseFromBytes({
+        url,
+        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+        bytes: pngBytes(),
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      ocrProvider: {
+        analyzeImage: async () => ({ text: 'OCR text survives', blocks: [{ text: 'OCR text survives' }], model: 'mock-ocr' }),
+      },
+      visionProvider: {
+        analyzeImage: async () => {
+          const error = new Error('VLM_FAILED: mock failure');
+          error.error_code = 'VLM_FAILED';
+          throw error;
+        },
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.error_code, 'VLM_FAILED');
+  assert.equal(result.structuredContent.ocr_text, 'OCR text survives');
+  assert.equal(result.structuredContent.scene_summary, '');
+  assert.deepEqual(result.structuredContent.warnings, [{ code: 'VLM_FAILED' }]);
+  assert.deepEqual(result.structuredContent.model, { ocr: 'mock-ocr', vlm: 'vlm_failed' });
+});
+
+test('analyze_image fails when both OCR and VLM fail', async () => {
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { url: 'https://cdn.example.com/pic.png', ocr: true, vlm: true },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_VISION_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_PROVIDER: 'mock',
+      },
+      fetchImpl: async (url) => responseFromBytes({
+        url,
+        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+        bytes: pngBytes(),
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      ocrProvider: {
+        analyzeImage: async () => {
+          const error = new Error('OCR_FAILED: mock failure');
+          error.error_code = 'OCR_FAILED';
+          throw error;
+        },
+      },
+      visionProvider: {
+        analyzeImage: async () => {
+          const error = new Error('VLM_FAILED: mock failure');
+          error.error_code = 'VLM_FAILED';
+          throw error;
+        },
+      },
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.ok, false);
 });
 
 test('transcribe_audio uses DashScope ASR adapter when an API key is configured', async () => {
@@ -429,4 +603,69 @@ test('analyze_media_batch returns partial results when one item fails', async ()
   assert.equal(result.structuredContent.partial_failures.length, 1);
   assert.equal(result.structuredContent.partial_failures[0].asset_id, 'img-bad');
   assert.equal(result.structuredContent.partial_failures[0].error_code, 'URL_BLOCKED');
+});
+
+test('analyze_media_batch keeps image item when OCR times out', async () => {
+  let ocrCalls = 0;
+  let visionCalls = 0;
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_media_batch',
+        arguments: {
+          media_detail: 'standard',
+          assets: [
+            { asset_id: 'img-timeout', type: 'image', url: 'https://cdn.example.com/a.png' },
+            { asset_id: 'img-ok', type: 'image', url: 'https://cdn.example.com/b.png' },
+          ],
+        },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_VISION_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_TIMEOUT_MS: '20',
+      },
+      fetchImpl: async (url) => responseFromBytes({
+        url,
+        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+        bytes: pngBytes(),
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      ocrProvider: {
+        analyzeImage: async () => {
+          ocrCalls += 1;
+          if (ocrCalls === 1) {
+            return new Promise((resolve) => setTimeout(() => resolve({
+              text: 'late text',
+              blocks: [],
+              model: 'mock-ocr',
+            }), 200));
+          }
+          return { text: 'ok text', blocks: [], model: 'mock-ocr' };
+        },
+      },
+      visionProvider: {
+        analyzeImage: async () => {
+          visionCalls += 1;
+          return {
+            summary: visionCalls === 1 ? 'timeout image VLM summary' : 'ok image VLM summary',
+            objects: [],
+            model: 'mock-vlm',
+          };
+        },
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.items.length, 2);
+  assert.match(result.structuredContent.merged_summary, /timeout image VLM summary/);
+  assert.equal(result.structuredContent.partial_failures.length, 1);
+  assert.equal(result.structuredContent.partial_failures[0].asset_id, 'img-timeout');
+  assert.equal(result.structuredContent.partial_failures[0].error_code, 'OCR_TIMEOUT');
 });
