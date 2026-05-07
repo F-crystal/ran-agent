@@ -151,7 +151,7 @@ test('analyze_image uses DashScope OCR and vision adapters when an API key is co
         ...tempCacheEnv(),
         DASHSCOPE_API_KEY: 'test-key',
         PERSONAL_AGENT_OCR_MODEL: 'qwen-vl-ocr-2025-11-20',
-        PERSONAL_AGENT_VISION_MODEL: 'qwen3-vl-plus',
+        PERSONAL_AGENT_VISION_MODEL: 'qwen3-vl-flash',
       },
       fetchImpl: async (url, init = {}) => {
         if (String(url).includes('/compatible-mode/v1/chat/completions')) {
@@ -180,7 +180,7 @@ test('analyze_image uses DashScope OCR and vision adapters when an API key is co
   assert.equal(result.structuredContent.ocr_text, '图中文字');
   assert.equal(result.structuredContent.scene_summary, '一张带中文文字的图片');
   assert.deepEqual(result.structuredContent.objects, ['文字', '图片']);
-  assert.deepEqual(requests.map((request) => request.model), ['qwen-vl-ocr-2025-11-20', 'qwen3-vl-plus']);
+  assert.deepEqual(requests.map((request) => request.model), ['qwen-vl-ocr-2025-11-20', 'qwen3-vl-flash']);
   assert.match(requests[0].messages[0].content[0].image_url.url, /^data:image\/png;base64,/);
 });
 

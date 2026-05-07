@@ -4,7 +4,7 @@ import { MediaReaderError } from './assetResolver.mjs';
 
 const DEFAULT_COMPAT_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
 const DEFAULT_OCR_MODEL = 'qwen-vl-ocr-2025-11-20';
-const DEFAULT_VISION_MODEL = 'qwen3-vl-plus';
+const DEFAULT_VISION_MODEL = 'qwen3-vl-flash';
 const DEFAULT_ASR_MODEL = 'qwen3-asr-flash';
 
 function normalizeCompatibleBaseUrl(raw) {
