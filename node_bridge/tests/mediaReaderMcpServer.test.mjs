@@ -56,6 +56,7 @@ test('media reader exposes stable facade tool names with object schemas', () => 
     [
       'extract_media_assets',
       'analyze_image',
+      'resolve_platform_media',
       'transcribe_audio',
       'analyze_video',
       'analyze_media_batch',

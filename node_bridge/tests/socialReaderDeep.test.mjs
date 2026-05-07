@@ -70,3 +70,54 @@ test('read_social_post_deep combines social text with media_reader partial batch
   assert.equal(result.structuredContent.media_analysis.partial_failures[0].error_code, 'EXPIRED_MEDIA_URL');
   assert.equal(calls.length, 1);
 });
+
+test('read_social_post_deep sends Bilibili platform assets through media_reader batch path', async () => {
+  const mediaCalls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: '【标题-哔哩哔哩】 https://www.bilibili.com/video/BV1xx411c7mD?p=2',
+          include_comments: false,
+          media_detail: 'standard',
+        },
+      },
+    },
+    {
+      fetchImpl: async (url) => ({ url }),
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        assert.equal(server, 'bilibili');
+        assert.equal(toolName, 'get_video_info');
+        assert.equal(toolArgs.bvid, 'BV1xx411c7mD');
+        return {
+          content: [{ type: 'text', text: 'B 站正文' }],
+        };
+      },
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        mediaCalls.push({ toolName, arguments: toolArgs });
+        assert.equal(toolName, 'analyze_media_batch');
+        assert.equal(toolArgs.assets[0].type, 'platform');
+        assert.equal(toolArgs.assets[0].platform, 'bilibili');
+        return {
+          structuredContent: {
+            ok: true,
+            partial: false,
+            items: [{ type: 'platform_media', overall_summary: 'B 站平台媒体总结' }],
+            merged_summary: 'B 站平台媒体总结',
+            timeline: [],
+            partial_failures: [],
+            warnings: [],
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'bilibili');
+  assert.equal(result.structuredContent.media_assets[0].type, 'platform');
+  assert.match(result.structuredContent.deep_summary, /B 站平台媒体总结/);
+  assert.equal(mediaCalls.length, 1);
+});

@@ -69,6 +69,7 @@ export async function analyzeMediaBatch({ assets = [], mediaDetail = 'standard',
         const partialFailure = partialFailureFromResult(asset, result);
         if (partialFailure) {
           partialFailures.push(partialFailure);
+          warnings.push(partialFailure.error_code);
         }
       } catch (error) {
         const payload = buildErrorPayload(error, { asset_id: asset?.asset_id || '' });
@@ -77,6 +78,7 @@ export async function analyzeMediaBatch({ assets = [], mediaDetail = 'standard',
           error_code: payload.error_code,
           error: payload.error,
         });
+        warnings.push(payload.error_code);
       }
     }
   }

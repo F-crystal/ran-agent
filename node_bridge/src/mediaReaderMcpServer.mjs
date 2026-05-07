@@ -7,6 +7,11 @@ import { analyzeImageVision } from './mediaReader/visionProvider.mjs';
 import { transcribeAudioProvider } from './mediaReader/asrProvider.mjs';
 import { analyzeVideoWithFfmpeg } from './mediaReader/ffmpegTools.mjs';
 import { analyzeMediaBatch } from './mediaReader/batchAnalyzer.mjs';
+import {
+  isPlatformMediaInput,
+  resolvePlatformMedia,
+  sanitizePlatformResult,
+} from './mediaReader/platformResolvers/index.mjs';
 
 const SERVER_INFO = {
   name: 'ran-agent-media-reader',
@@ -59,6 +64,23 @@ export function buildMediaReaderTools() {
           vlm: { type: 'boolean', default: true },
           prompt: { type: 'string' },
           language_hint: { type: 'string', default: 'zh' },
+        },
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'resolve_platform_media',
+      title: 'Resolve Platform Media',
+      description: 'Resolve Bilibili/XHS share text, shortlinks, and platform pages into normalized media assets.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          url_or_text: { type: 'string' },
+          platform: { type: 'string', enum: ['auto', 'bilibili', 'xhs'], default: 'auto' },
+          media_detail: { type: 'string', enum: ['basic', 'standard', 'full'], default: 'standard' },
+          include_comments: { type: 'boolean', default: false },
+          max_comments: { type: 'integer', minimum: 0, maximum: 200, default: 30 },
+          max_assets: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
         },
         additionalProperties: false,
       },
@@ -322,6 +344,37 @@ async function transcribeAudio(args = {}, options = {}) {
 }
 
 async function analyzeVideo(args = {}, options = {}) {
+  const videoInput = args.url || args.url_or_text || '';
+  if (isPlatformMediaInput(videoInput)) {
+    const resolved = await resolvePlatformMedia({
+      url_or_text: videoInput,
+      platform: args.platform || 'auto',
+      media_detail: args.media_detail || 'standard',
+      include_comments: args.include_comments === true,
+      max_comments: args.max_comments || 30,
+      max_assets: args.max_assets || 20,
+    }, options);
+    const sanitized = sanitizePlatformResult(resolved);
+    const subtitleText = sanitized.subtitle?.text || '';
+    return {
+      ok: true,
+      type: 'platform_video',
+      platform: sanitized.platform,
+      resolver: sanitized.resolver,
+      metadata: sanitized.metadata,
+      platform_media: sanitized,
+      asr: subtitleText ? { transcript: subtitleText, source: sanitized.transcript_source } : {},
+      frames: [],
+      timeline: [],
+      visual_summary: sanitized.post_text || sanitized.metadata?.title || '',
+      audio_summary: subtitleText,
+      overall_summary: [sanitized.post_text, subtitleText].filter(Boolean).join('\n'),
+      transcript_source: sanitized.transcript_source,
+      visual_source: sanitized.visual_source,
+      cache_hit: false,
+      warnings: sanitized.warnings,
+    };
+  }
   const asset = await downloadMediaAsset({ url: args.url, expectedKind: 'video' }, options);
   if (asset.type !== 'video') {
     throw new MediaReaderError('UNSUPPORTED_MEDIA_TYPE', 'UNSUPPORTED_MEDIA_TYPE: expected video media', { media_type: asset.type });
@@ -353,6 +406,17 @@ async function callTool(name, args = {}, options = {}) {
     });
     return buildTextResult({ ok: true, assets, warnings: assets.length ? [] : ['NO_MEDIA_FOUND'] });
   }
+  if (name === 'resolve_platform_media') {
+    const result = await resolvePlatformMedia({
+      url_or_text: args.url_or_text || '',
+      platform: args.platform || 'auto',
+      media_detail: args.media_detail || 'standard',
+      include_comments: args.include_comments === true,
+      max_comments: Number(args.max_comments || 30),
+      max_assets: Number(args.max_assets || 20),
+    }, options);
+    return buildTextResult(sanitizePlatformResult(result));
+  }
   if (name === 'analyze_image') {
     return buildTextResult(await analyzeImage(args, options));
   }
@@ -369,7 +433,61 @@ async function callTool(name, args = {}, options = {}) {
       mediaDetail: args.media_detail || 'standard',
       env: options.env,
       analyzeOne: async (asset) => {
-        if (asset.type === 'image') {
+        if (asset.type === 'platform' || isPlatformMediaInput(asset.url || asset.url_or_text || '')) {
+          const resolved = await resolvePlatformMedia({
+            url_or_text: asset.url_or_text || asset.url || '',
+            platform: asset.platform || 'auto',
+            media_detail: args.media_detail || 'standard',
+            include_comments: args.include_comments === true,
+            max_comments: args.max_comments || 30,
+            max_assets: args.max_assets || 20,
+          }, options);
+          const sanitized = sanitizePlatformResult(resolved);
+          const childItems = [];
+          const childWarnings = [...sanitized.warnings];
+          for (const media of (resolved.media || []).slice(0, Number(args.max_assets || 20))) {
+            try {
+              if ((media.type === 'image' || media.type === 'cover') && media.url) {
+                childItems.push(await analyzeImage({ url: media.url, ocr: true, vlm: args.media_detail !== 'basic', media_detail: args.media_detail || 'standard' }, {
+                  ...options,
+                  mediaDetail: args.media_detail || 'standard',
+                }));
+              } else if (media.type === 'audio' && media.url) {
+                childItems.push(await transcribeAudio({ url: media.url, timestamps: true }, options));
+              } else if (media.type === 'video' && media.url) {
+                childItems.push(await analyzeVideo({ url: media.url, max_frames: args.max_frames_per_video }, options));
+              } else if (media.type === 'subtitle') {
+                childItems.push({
+                  ok: true,
+                  type: 'subtitle',
+                  transcript: media.text || sanitized.subtitle?.text || '',
+                  warnings: [],
+                });
+              } else {
+                childWarnings.push({ code: 'UNSUPPORTED_MEDIA_TYPE', asset_id: media.asset_id || '' });
+              }
+            } catch (error) {
+              childWarnings.push({ code: errorCodeFor(error, 'MEDIA_ANALYSIS_FAILED'), asset_id: media.asset_id || '' });
+            }
+          }
+          const summaries = childItems
+            .map((item) => item.overall_summary || item.scene_summary || item.transcript || item.ocr_text || '')
+            .filter(Boolean);
+          return {
+            ok: true,
+            type: 'platform_media',
+            platform: sanitized.platform,
+            resolver: sanitized.resolver,
+            metadata: sanitized.metadata,
+            platform_media: sanitized,
+            items: childItems,
+            overall_summary: [sanitized.post_text, ...summaries].filter(Boolean).join('\n'),
+            partial: childWarnings.length > 0,
+            error_code: childWarnings[0]?.code || '',
+            warnings: childWarnings,
+          };
+        }
+        if (asset.type === 'image' || asset.type === 'cover') {
           return await analyzeImage({ url: asset.url, ocr: true, vlm: args.media_detail !== 'basic', media_detail: args.media_detail || 'standard' }, {
             ...options,
             mediaDetail: args.media_detail || 'standard',
@@ -380,6 +498,9 @@ async function callTool(name, args = {}, options = {}) {
         }
         if (asset.type === 'video') {
           return await analyzeVideo({ url: asset.url, max_frames: args.max_frames_per_video }, options);
+        }
+        if (asset.type === 'subtitle') {
+          return { ok: true, type: 'subtitle', transcript: String(asset.text || ''), warnings: [] };
         }
         throw new MediaReaderError('UNSUPPORTED_MEDIA_TYPE', 'UNSUPPORTED_MEDIA_TYPE: unsupported media asset type');
       },

@@ -1150,9 +1150,38 @@ async function callMediaReaderTool(toolName, toolArguments = {}, options = {}) {
 }
 
 async function readSocialPostDeep(args = {}, options = {}) {
-  const socialResult = await readSocialPost(args, options);
+  const extracted = extractFirstUrl(args.url || '');
+  const detectedPlatform = detectSocialPlatform(extracted.url || args.url || '');
+  let socialResult = await readSocialPost(args, options);
   if (socialResult.structuredContent?.ok === false) {
-    return socialResult;
+    if (['bilibili', 'xhs'].includes(detectedPlatform)) {
+      const platformResult = await callMediaReaderTool('resolve_platform_media', {
+        url_or_text: args.url || '',
+        platform: detectedPlatform,
+        media_detail: normalizeMediaDetail(args.media_detail),
+        include_comments: args.include_comments === true,
+        max_comments: normalizeMaxComments(args.max_comments),
+        max_assets: Number(args.max_media_assets || 20),
+      }, options);
+      if (platformResult.structuredContent?.ok === true) {
+        const platformMedia = platformResult.structuredContent;
+        socialResult = buildTextResult({
+          ok: true,
+          platform: platformMedia.platform,
+          url: extracted.url || args.url || '',
+          source: 'media_reader.resolve_platform_media',
+          include_comments: args.include_comments === true,
+          max_comments: normalizeMaxComments(args.max_comments),
+          post_text: platformMedia.post_text || '',
+          comments_text: Array.isArray(platformMedia.comments) ? platformMedia.comments.join('\n') : '',
+          platform_media: platformMedia,
+        });
+      } else {
+        return socialResult;
+      }
+    } else {
+      return socialResult;
+    }
   }
   const social = socialResult.structuredContent || {};
   const mediaDetail = normalizeMediaDetail(args.media_detail);
@@ -1167,12 +1196,24 @@ async function readSocialPostDeep(args = {}, options = {}) {
     warnings: [],
   };
   const mediaUrls = includeMedia ? extractMediaUrlsFromPostText(social.post_text) : [];
+  const platformAsset = includeMedia && ['bilibili', 'xhs'].includes(social.platform || detectedPlatform)
+    ? [{
+      asset_id: 'platform-1',
+      type: 'platform',
+      url: extracted.url || social.url || args.url || '',
+      platform: social.platform || detectedPlatform,
+      source: 'social_reader_deep',
+    }]
+    : [];
   const assets = includeMedia
-    ? buildMediaAssets({
+    ? [
+      ...platformAsset,
+      ...buildMediaAssets({
       mediaUrls,
       platform: social.platform || '',
       maxAssets: Number(args.max_media_assets || 20),
-    })
+    }),
+    ]
     : [];
 
   if (includeMedia && assets.length > 0) {
