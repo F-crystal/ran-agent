@@ -14,6 +14,7 @@ import {
 } from './mediaReader/platformResolvers/index.mjs';
 import {
   downloadBilibiliVideoForAnalysis,
+  downloadBilibiliAudioOnly,
   shouldDownloadBilibiliForAnalysis,
 } from './mediaReader/platformResolvers/bilibiliResolver.mjs';
 
@@ -416,45 +417,127 @@ async function analyzeVideo(args = {}, options = {}) {
       };
     }
 
-    // No transcript: fall back to video download for B站 (if explicitly enabled),
-    // or return metadata-only for other platforms.
-    if (isBilibili && shouldDownloadBilibiliForAnalysis(options.env || process.env)) {
-      const analysisArgs = { ...args, include_ocr: false };
-      const asset = await downloadBilibiliVideoForAnalysis({
-        url: resolved.resolved_url || videoInput,
-        bvid: sanitized.metadata?.bvid || '',
-        maxSeconds: args.max_seconds,
-      }, options);
-      const videoAnalysis = await analyzeVideoWithFfmpeg(asset, { ...options, args: analysisArgs });
-      const asr = subtitleText
-        ? { transcript: subtitleText, source: sanitized.transcript_source }
-        : (videoAnalysis.asr || {});
-      const visualSummary = String(videoAnalysis.visual_summary || sanitized.post_text || sanitized.metadata?.title || '');
-      const audioSummary = subtitleText || String(videoAnalysis.audio_summary || asr.transcript || '');
+    // Tier 2: No transcript. For B站, try audio-only download + ASR.
+    // Much faster than full video download: audio streams are tiny, ASR is cheap.
+    if (isBilibili) {
+      const warnings = [...sanitized.warnings];
+      let coverSummary = '';
+      const coverMedia = sanitized.media?.find((m) => m.type === 'cover' || m.type === 'image');
+      if (coverMedia?.url) {
+        try {
+          const coverAsset = await downloadMediaAsset({ url: coverMedia.url, expectedKind: 'image' }, options);
+          if (coverAsset.type === 'image') {
+            const vision = await analyzeImageVision(coverAsset, options);
+            coverSummary = String(vision.summary || '');
+          }
+        } catch {
+          warnings.push('COVER_ANALYSIS_FAILED');
+        }
+      }
+
+      try {
+        const audioAsset = await downloadBilibiliAudioOnly({
+          url: resolved.resolved_url || videoInput,
+          bvid: sanitized.metadata?.bvid || '',
+          maxSeconds: args.max_seconds,
+        }, options);
+        const asrResult = await transcribeAudioProvider(audioAsset, options);
+        const transcript = String(asrResult.transcript || '');
+        if (transcript) {
+          const visualSummary = [sanitized.post_text, coverSummary].filter(Boolean).join('\n');
+          const overallSummary = [
+            `Title: ${sanitized.metadata?.title || ''}`,
+            `Uploader: ${sanitized.metadata?.uploader || ''}`,
+            `Duration: ${Math.round(sanitized.metadata?.duration_seconds || 0)}s`,
+            visualSummary ? `\nVisual: ${visualSummary}` : '',
+            `\nASR Transcript:\n${transcript}`,
+          ].filter(Boolean).join('\n');
+          return {
+            ok: true,
+            type: 'platform_video',
+            platform: sanitized.platform,
+            resolver: sanitized.resolver,
+            analysis_mode: 'audio_asr',
+            metadata: sanitized.metadata,
+            platform_media: sanitized,
+            asr: { transcript, source: 'asr', model: asrResult.model || 'qwen3-asr-flash' },
+            frames: [],
+            timeline: [],
+            visual_summary: visualSummary,
+            audio_summary: transcript,
+            overall_summary: overallSummary,
+            transcript_source: 'asr',
+            visual_source: coverSummary ? 'thumbnail_vlm' : sanitized.visual_source,
+            cache_hit: false,
+            warnings,
+          };
+        }
+        warnings.push('ASR_EMPTY_TRANSCRIPT');
+      } catch (asrError) {
+        const code = asrError instanceof MediaReaderError ? asrError.error_code : 'AUDIO_ASR_FAILED';
+        warnings.push(code);
+      }
+
+      // Tier 3: Audio+ASR didn't produce results. Fall back to frame extraction
+      // (if explicitly enabled) or metadata-only.
+      if (shouldDownloadBilibiliForAnalysis(options.env || process.env)) {
+        const analysisArgs = { ...args, include_ocr: false };
+        try {
+          const asset = await downloadBilibiliVideoForAnalysis({
+            url: resolved.resolved_url || videoInput,
+            bvid: sanitized.metadata?.bvid || '',
+            maxSeconds: args.max_seconds,
+          }, options);
+          const videoAnalysis = await analyzeVideoWithFfmpeg(asset, { ...options, args: analysisArgs });
+          const visualSummary = String(videoAnalysis.visual_summary || sanitized.post_text || sanitized.metadata?.title || '');
+          return {
+            ok: true,
+            type: 'platform_video',
+            platform: sanitized.platform,
+            resolver: sanitized.resolver,
+            analysis_mode: 'frame_extraction',
+            metadata: { ...sanitized.metadata, ...(videoAnalysis.metadata || {}) },
+            platform_media: sanitized,
+            content_sha256: asset.content_sha256,
+            asr: videoAnalysis.asr || {},
+            frames: Array.isArray(videoAnalysis.frames) ? videoAnalysis.frames : [],
+            timeline: Array.isArray(videoAnalysis.timeline) ? videoAnalysis.timeline : [],
+            visual_summary: visualSummary,
+            audio_summary: String(videoAnalysis.audio_summary || ''),
+            overall_summary: [sanitized.post_text, visualSummary, String(videoAnalysis.audio_summary || '')].filter(Boolean).join('\n'),
+            transcript_source: videoAnalysis.asr?.transcript ? 'asr' : 'none',
+            visual_source: videoAnalysis.frames?.length ? 'video_frames' : sanitized.visual_source,
+            cache_hit: false,
+            warnings: [...warnings, ...(Array.isArray(videoAnalysis.warnings) ? videoAnalysis.warnings : [])],
+          };
+        } catch (frameError) {
+          const code = frameError instanceof MediaReaderError ? frameError.error_code : 'FRAME_EXTRACTION_FAILED';
+          warnings.push(code);
+        }
+      }
+
+      // Tier 4: Everything failed. Return metadata-only with cover context.
       return {
         ok: true,
         type: 'platform_video',
         platform: sanitized.platform,
         resolver: sanitized.resolver,
-        analysis_mode: 'frame_extraction',
-        metadata: {
-          ...sanitized.metadata,
-          ...(videoAnalysis.metadata || {}),
-        },
+        analysis_mode: 'metadata_only',
+        metadata: sanitized.metadata,
         platform_media: sanitized,
-        content_sha256: asset.content_sha256,
-        asr,
-        frames: Array.isArray(videoAnalysis.frames) ? videoAnalysis.frames : [],
-        timeline: Array.isArray(videoAnalysis.timeline) ? videoAnalysis.timeline : [],
-        visual_summary: visualSummary,
-        audio_summary: audioSummary,
-        overall_summary: [sanitized.post_text, visualSummary, audioSummary].filter(Boolean).join('\n'),
-        transcript_source: subtitleText ? sanitized.transcript_source : (asr.transcript ? 'asr' : sanitized.transcript_source),
-        visual_source: videoAnalysis.frames?.length ? 'video_frames' : sanitized.visual_source,
+        asr: {},
+        frames: [],
+        timeline: [],
+        visual_summary: [sanitized.post_text, coverSummary].filter(Boolean).join('\n'),
+        audio_summary: '',
+        overall_summary: [sanitized.post_text, sanitized.metadata?.title || '', coverSummary].filter(Boolean).join('\n'),
+        transcript_source: 'none',
+        visual_source: sanitized.visual_source,
         cache_hit: false,
-        warnings: [...sanitized.warnings, ...(Array.isArray(videoAnalysis.warnings) ? videoAnalysis.warnings : [])],
+        warnings,
       };
     }
+
     return {
       ok: true,
       type: 'platform_video',

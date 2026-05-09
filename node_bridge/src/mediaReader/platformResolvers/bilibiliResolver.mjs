@@ -123,6 +123,97 @@ export function shouldDownloadBilibiliForAnalysis(env = process.env) {
   return boolFromEnv(env, 'PERSONAL_AGENT_BILIBILI_DOWNLOAD_FOR_ANALYSIS', false);
 }
 
+export async function downloadBilibiliAudioOnly({ url, bvid = '', maxSeconds }, options = {}) {
+  const env = options.env || process.env;
+  const ytdlpPath = String(env.PERSONAL_AGENT_YTDLP_PATH || '').trim();
+  if (!ytdlpPath) {
+    throw new MediaReaderError('PLATFORM_RESOLVER_NOT_CONFIGURED', 'PLATFORM_RESOLVER_NOT_CONFIGURED: yt-dlp path is not configured for Bilibili audio analysis', bilibiliErrorExtra({
+      code: 'PLATFORM_RESOLVER_NOT_CONFIGURED',
+      env,
+    }));
+  }
+  await assertSafePlatformUrl(url, { platform: 'bilibili', options });
+  const cache = options.cacheStore || createCacheStore(env);
+  const parentDir = path.join(cache.rootDir, 'platform-downloads');
+  fs.mkdirSync(parentDir, { recursive: true });
+  const workDir = fs.mkdtempSync(path.join(parentDir, 'bilibili-audio-'));
+  const runtime = ytdlpRuntimeContext(env);
+  const secondsCap = Number(env.PERSONAL_AGENT_BILIBILI_AUDIO_ANALYSIS_MAX_SECONDS || 300);
+  const seconds = Math.min(normalizeAnalysisSeconds(maxSeconds, env), secondsCap);
+  const ytdlpArgs = [
+    '--no-playlist',
+    '--no-warnings',
+    '-f',
+    'ba',
+    '--download-sections',
+    `*0-${seconds}`,
+    '--paths',
+    workDir,
+    '-o',
+    '%(id)s.%(ext)s',
+    '--print',
+    'after_move:filepath',
+    '--no-simulate',
+  ];
+  const ffmpegPath = String(env.PERSONAL_AGENT_FFMPEG_PATH || '').trim();
+  if (ffmpegPath) {
+    ytdlpArgs.push('--ffmpeg-location', ffmpegPath);
+  }
+  if (runtime.proxy) {
+    ytdlpArgs.push('--proxy', runtime.proxy);
+  }
+  if (runtime.sessdata) {
+    ytdlpArgs.push('--add-header', `Cookie: SESSDATA=${runtime.sessdata}`);
+  }
+  ytdlpArgs.push(url);
+
+  try {
+    const execFileImpl = options.execFileImpl || execFileAsync;
+    const { stdout } = await execFileImpl(ytdlpPath, ytdlpArgs, {
+      timeout: Number(env.PERSONAL_AGENT_BILIBILI_ANALYSIS_DOWNLOAD_TIMEOUT_MS || env.PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS || 120000),
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const printedPath = String(stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .find((line) => path.isAbsolute(line) && fs.existsSync(line));
+    const downloadedPath = printedPath || fs.readdirSync(workDir)
+      .map((name) => path.join(workDir, name))
+      .filter((filePath) => fs.existsSync(filePath) && fs.statSync(filePath).isFile())
+      .sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0];
+    if (!downloadedPath) {
+      throw new MediaReaderError('AUDIO_STREAM_NOT_FOUND', 'AUDIO_STREAM_NOT_FOUND: yt-dlp did not produce a Bilibili audio file', bilibiliErrorExtra({
+        code: 'AUDIO_STREAM_NOT_FOUND',
+        env,
+      }));
+    }
+    const bytes = fs.readFileSync(downloadedPath);
+    const ext = path.extname(downloadedPath).toLowerCase();
+    const mimeMap = { '.m4a': 'audio/mp4', '.aac': 'audio/aac', '.mp3': 'audio/mpeg', '.opus': 'audio/ogg', '.wav': 'audio/wav' };
+    return {
+      type: 'audio',
+      file_path: downloadedPath,
+      mime: mimeMap[ext] || 'audio/mp4',
+      content_sha256: sha256Bytes(bytes),
+      content_length: bytes.length,
+      url_host: hostFromUrl(url),
+      url_redacted: redactUrl(url),
+      bvid: bvid || extractBvid(url),
+      source: 'bilibili_ytdlp_audio_download',
+    };
+  } catch (error) {
+    if (error instanceof MediaReaderError) throw error;
+    if (error?.code === 'ENOENT') {
+      throw new MediaReaderError('DEPENDENCY_MISSING', 'DEPENDENCY_MISSING: yt-dlp command is missing', bilibiliErrorExtra({
+        code: 'DEPENDENCY_MISSING', error, env,
+      }));
+    }
+    const code = mapBilibiliError(error);
+    throw new MediaReaderError(code, `${code}: Bilibili audio download failed`, bilibiliErrorExtra({ code, error, env }));
+  }
+}
+
 function recoverySuggestionFor(code) {
   if (code === 'BILIBILI_AUTH_REQUIRED' || code === 'MEDIA_DOWNLOAD_FORBIDDEN' || code === 'BILIBILI_VIP_REQUIRED') {
     return BILIBILI_AUTH_RECOVERY_SUGGESTION;
