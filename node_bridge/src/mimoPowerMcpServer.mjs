@@ -4,10 +4,13 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import readline from 'node:readline';
-import { fileURLToPath } from 'node:url';
+import {
+  isPathInsideRoot,
+  isTrustedLocalMediaPath,
+  resolveProjectRoot,
+  trustedMediaDirsDescription,
+} from './trustedMediaPaths.mjs';
 
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_PROJECT_ROOT = path.resolve(MODULE_DIR, '..', '..');
 const SERVER_INFO = {
   name: 'ran-agent-mimo-power',
   version: '0.1.0',
@@ -105,18 +108,13 @@ export function buildMimoPowerTools() {
   ];
 }
 
-function projectRoot(env = process.env) {
-  return path.resolve(String(env.RAN_AGENT_ROOT || env.PROJECT_ROOT || DEFAULT_PROJECT_ROOT));
-}
-
 function assertInsideProject(filePath, env = process.env) {
-  const root = projectRoot(env);
+  const root = resolveProjectRoot(env);
   const resolved = path.resolve(filePath);
-  const prefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
-  if (resolved !== root && !resolved.startsWith(prefix)) {
+  if (!isTrustedLocalMediaPath(resolved, env)) {
     throw new MimoPowerError(
       'LOCAL_FILE_BLOCKED',
-      `LOCAL_FILE_BLOCKED: local asset must stay inside project workspace: ${root}`,
+      `LOCAL_FILE_BLOCKED: local asset must stay inside trusted media directories: ${trustedMediaDirsDescription(env) || root}`,
       { project_root: root }
     );
   }
@@ -406,11 +404,10 @@ function resultTextFromResponse(payload = {}, env = process.env) {
 }
 
 function taskDir(env = process.env) {
-  const root = projectRoot(env);
+  const root = resolveProjectRoot(env);
   const raw = String(env.MIMO_POWER_TASK_DIR || path.join(root, 'debug/mimo_tasks')).trim();
   const resolved = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root, raw);
-  const prefix = root.endsWith(path.sep) ? root : `${root}${path.sep}`;
-  if (resolved !== root && !resolved.startsWith(prefix)) {
+  if (!isPathInsideRoot(resolved, root)) {
     throw new MimoPowerError('TASK_DIR_BLOCKED', `TASK_DIR_BLOCKED: MIMO_POWER_TASK_DIR must stay inside project workspace: ${root}`);
   }
   fs.mkdirSync(resolved, { recursive: true });

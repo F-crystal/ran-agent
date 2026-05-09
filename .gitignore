@@ -64,3 +64,4 @@ docs/governance/archive/
 
 # Agents
 .codex/
+.playwright-mcp/

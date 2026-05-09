@@ -5,9 +5,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { execFile as execFileCallback, spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { resolveStateDir } from './runtimeState.mjs';
+import { ensureConversationMediaContext } from './mediaContextStore.mjs';
+import { isTrustedLocalMediaPath, resolveProjectRoot } from './trustedMediaPaths.mjs';
 import {
   buildStructuredUrlContext,
   collectExtractedImageUrls,
@@ -23,8 +24,6 @@ const IMAGE_TASK_POLL_DELAY_MS = 1500;
 const WECHAT_REPLY_SEGMENT_MARKER = /\n{2,}/;
 const GENERATED_AUDIO_SAMPLE_RATE = 24000;
 const OPENCLAW_EMPTY_RESPONSE_SENTINEL = 'No response from OpenClaw.';
-const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_PROJECT_ROOT = path.resolve(MODULE_DIR, '..', '..');
 const execFile = promisify(execFileCallback);
 
 export function getOpenClawGatewayConfig(env = process.env) {
@@ -59,14 +58,6 @@ export function getOpenClawGatewayConfig(env = process.env) {
     projectRoot,
     fallbackText: env.NODE_BRIDGE_FALLBACK_TEXT || '暂时无法连接到 personal agent，请稍后再试。',
   };
-}
-
-function resolveProjectRoot(env = process.env) {
-  const explicit = String(env.RAN_AGENT_ROOT || env.PROJECT_ROOT || '').trim();
-  if (explicit) {
-    return explicit;
-  }
-  return DEFAULT_PROJECT_ROOT;
 }
 
 function buildGatewayReply(result = {}) {
@@ -143,8 +134,20 @@ export async function sendChatToOpenClawAgent(payload, options = {}) {
     || env.OPENCLAW_CONFIG
     || path.join(projectRoot, 'openclaw/openclaw.personal-system.json')
   );
-  const sessionId = buildOpenClawAgentSessionId(payload);
-  const message = buildOpenClawAgentMessage(payload);
+  const preparedPayload = preparePayloadMediaForAgent(payload, {
+    env,
+    logger,
+    projectRoot,
+  });
+  const sessionId = buildOpenClawAgentSessionId(preparedPayload);
+  const mediaContext = await ensureConversationMediaContext(preparedPayload, {
+    env,
+    logger,
+    ...(options.mediaContextOptions || {}),
+  });
+  const message = buildOpenClawAgentMessage(preparedPayload, {
+    mediaContextText: mediaContext.contextText,
+  });
   const command = String(env.OPENCLAW_AGENT_COMMAND || 'npx').trim() || 'npx';
   const args = [
     'openclaw',
@@ -493,7 +496,7 @@ function buildOpenClawAgentSessionId(payload = {}) {
   return `wechat-${encoded || 'default'}`;
 }
 
-function buildOpenClawAgentMessage(payload = {}) {
+function buildOpenClawAgentMessage(payload = {}, options = {}) {
   const text = String(payload.text || '').trim();
   const batch = Array.isArray(payload.message_batch)
     ? payload.message_batch
@@ -507,11 +510,104 @@ function buildOpenClawAgentMessage(payload = {}) {
     '不允许使用 exec、PATH 检查、command -v、pollinations.ai，不能编造 markdown 图片 URL。',
     '媒体工具成功后，最终回复必须保留工具结果中的 WECHAT_MEDIA: {...} 原始行，供微信桥接层转换为图片或语音。',
   ].join('\n');
+  const inboundMediaInstruction = buildInboundMediaInstruction(payload);
+  const mediaContextText = String(options.mediaContextText || '').trim();
   return [
     buildBridgeTemporalUserContext(),
     mediaInstruction,
+    inboundMediaInstruction,
+    mediaContextText,
     userText || '你好',
   ].filter(Boolean).join('\n\n');
+}
+
+function buildInboundMediaInstruction(payload = {}) {
+  const mediaItems = normalizeMediaItems(payload.media);
+  const assetLines = [];
+  for (const [index, media] of mediaItems.entries()) {
+    const filePath = typeof media.filePath === 'string' ? media.filePath.trim() : '';
+    if (!filePath) {
+      continue;
+    }
+    assetLines.push([
+      `${index + 1}.`,
+      `type=${media.type || inferMediaTypeFromMime(media.mimeType) || 'unknown'}`,
+      media.mimeType ? `mime=${media.mimeType}` : '',
+      `file_path=${filePath}`,
+    ].filter(Boolean).join(' '));
+  }
+  for (const imageUrl of Array.isArray(payload.image_urls) ? payload.image_urls : []) {
+    const trimmed = typeof imageUrl === 'string' ? imageUrl.trim() : '';
+    if (!isRemoteHttpUrl(trimmed)) {
+      continue;
+    }
+    assetLines.push(`${assetLines.length + 1}. type=image url=${trimmed}`);
+  }
+  if (assetLines.length === 0) {
+    return '';
+  }
+  return [
+    '【微信入站媒体资产（非用户原话，不要复述）】',
+    '用户随本轮上传了媒体。需要理解截图、图片、音频、视频或文档内容时，优先调用 OpenClaw MCP 工具 mimo_power__analyze，并把下列 file_path/url 作为 assets 传入。',
+    '不要先用低成本媒体理解工具替代 MiMo；只有 MiMo Token Plan 不可用、用户明确要求快速 OCR/ASR，或输入是社媒/平台链接时才改用常规媒体/社媒读取工具。',
+    ...assetLines,
+  ].join('\n');
+}
+
+function preparePayloadMediaForAgent(payload = {}, options = {}) {
+  const mediaItems = normalizeMediaItems(payload.media);
+  if (mediaItems.length === 0) {
+    return payload;
+  }
+
+  const projectRoot = path.resolve(String(options.projectRoot || resolveProjectRoot(options.env)));
+  let changed = false;
+  const preparedMedia = mediaItems.map((item) => {
+    const preparedPath = prepareLocalMediaPathForAgent(item.filePath, {
+      ...options,
+      projectRoot,
+    });
+    if (preparedPath !== item.filePath) {
+      changed = true;
+      return preparedPath ? { ...item, filePath: preparedPath } : null;
+    }
+    return item;
+  }).filter(Boolean);
+
+  if (!changed) {
+    return payload;
+  }
+  return {
+    ...payload,
+    media: preparedMedia,
+  };
+}
+
+function prepareLocalMediaPathForAgent(filePath, options = {}) {
+  const raw = typeof filePath === 'string' ? filePath.trim() : '';
+  if (!raw || isRemoteOrDataImageUrl(raw)) {
+    return raw;
+  }
+  const resolved = path.resolve(raw);
+  const projectRoot = path.resolve(String(options.projectRoot || resolveProjectRoot(options.env)));
+  const env = {
+    ...(options.env || process.env),
+    RAN_AGENT_ROOT: projectRoot,
+  };
+  if (isTrustedLocalMediaPath(resolved, env)) {
+    return resolved;
+  }
+  options.logger?.warn?.('dropping inbound media outside trusted media directories');
+  return '';
+}
+
+function inferMediaTypeFromMime(mimeType) {
+  const normalized = String(mimeType || '').trim().toLowerCase();
+  if (normalized.startsWith('image/')) return 'image';
+  if (normalized.startsWith('audio/')) return 'audio';
+  if (normalized.startsWith('video/')) return 'video';
+  if (normalized) return 'file';
+  return '';
 }
 
 function parseOpenClawAgentJson(stdout) {
@@ -2611,6 +2707,10 @@ function isVideoMedia(media) {
 
 function isRemoteOrDataImageUrl(value) {
   return /^https?:\/\//i.test(value) || /^data:image\//i.test(value);
+}
+
+function isRemoteHttpUrl(value) {
+  return /^https?:\/\//i.test(String(value || '').trim());
 }
 
 function hasFallbackableMedia(payload) {

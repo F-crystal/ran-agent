@@ -280,6 +280,192 @@ test('sendChatToOpenClawAgent invokes OpenClaw agent runtime and returns MCP mar
   assert.equal(response.model, 'claude_code/qwen3.5-plus');
 });
 
+test('sendChatToOpenClawAgent describes inbound media as MiMo MCP assets', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-agent-mimo-media-'));
+  const mediaPath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'screenshot.png');
+  fs.mkdirSync(path.dirname(mediaPath), { recursive: true });
+  fs.writeFileSync(mediaPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  let capturedArgs = [];
+  let response;
+  try {
+    response = await sendChatToOpenClawAgent(
+      {
+        text: '帮我看这张截图',
+        sender_id: 'user-agent-mimo-media',
+        channel: 'wechat',
+        media: [
+          {
+            filePath: mediaPath,
+            mimeType: 'image/png',
+            type: 'image',
+          },
+        ],
+      },
+      {
+        env: {
+          RAN_AGENT_ROOT: projectRoot,
+          OPENCLAW_CONFIG: path.join(projectRoot, 'openclaw/openclaw.personal-system.json'),
+        },
+        execFileImpl: async (command, args) => {
+          capturedArgs = args;
+          return {
+            stdout: JSON.stringify({
+              status: 'ok',
+              result: {
+                payloads: [{ text: 'MiMo 已分析截图' }],
+                meta: {
+                  agentMeta: {
+                    provider: 'claude_code',
+                    model: 'qwen3.5-plus',
+                  },
+                },
+              },
+            }),
+            stderr: '',
+          };
+        },
+        mediaContextOptions: {
+          analyzeMediaAssetImpl: async () => ({
+            ok: true,
+            analyzer: 'mimo_power',
+            summary: 'MiMo 看到一张截图。',
+          }),
+        },
+        logger: { log() {}, warn() {} },
+      }
+    );
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+
+  const message = capturedArgs[capturedArgs.indexOf('--message') + 1];
+  assert.match(message, /mimo_power__analyze/);
+  assert.match(message, /debug\/wechat\/inbound\/screenshot\.png/);
+  assert.match(message, /image\/png/);
+  assert.doesNotMatch(message, /media_reader__analyze_image/);
+  assert.equal(response.reply_text, 'MiMo 已分析截图');
+});
+
+test('sendChatToOpenClawAgent drops project files outside trusted media directories', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-agent-untrusted-media-'));
+  const privatePath = path.join(projectRoot, 'node_bridge', '.env.local');
+  fs.mkdirSync(path.dirname(privatePath), { recursive: true });
+  fs.writeFileSync(privatePath, 'SECRET=value\n');
+  let capturedArgs = [];
+  try {
+    await sendChatToOpenClawAgent(
+      {
+        text: '帮我看这个文件',
+        sender_id: 'user-agent-untrusted-media',
+        channel: 'wechat',
+        media: [{ filePath: privatePath, mimeType: 'text/plain', type: 'file' }],
+        image_urls: [privatePath],
+      },
+      {
+        env: {
+          RAN_AGENT_ROOT: projectRoot,
+          OPENCLAW_CONFIG: path.join(projectRoot, 'openclaw/openclaw.personal-system.json'),
+        },
+        execFileImpl: async (command, args) => {
+          capturedArgs = args;
+          return {
+            stdout: JSON.stringify({
+              status: 'ok',
+              result: {
+                payloads: [{ text: '没有可分析的可信媒体' }],
+                meta: {
+                  agentMeta: {
+                    provider: 'claude_code',
+                    model: 'qwen3.5-plus',
+                  },
+                },
+              },
+            }),
+            stderr: '',
+          };
+        },
+        logger: { log() {}, warn() {} },
+      }
+    );
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+
+  const message = capturedArgs[capturedArgs.indexOf('--message') + 1];
+  assert.doesNotMatch(message, /SECRET=value/);
+  assert.doesNotMatch(message, /\.env\.local/);
+  assert.doesNotMatch(message, /node_bridge/);
+  assert.doesNotMatch(message, /微信入站媒体资产/);
+});
+
+test('sendChatToOpenClawAgent injects generated media artifact context before OpenClaw reply', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-agent-media-context-'));
+  const mediaPath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'screenshot.png');
+  fs.mkdirSync(path.dirname(mediaPath), { recursive: true });
+  fs.writeFileSync(mediaPath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+  let capturedArgs = [];
+  let response;
+  try {
+    response = await sendChatToOpenClawAgent(
+      {
+        text: '刚才这张截图是什么意思',
+        sender_id: 'user-agent-media-context',
+        channel: 'wechat',
+        media: [
+          {
+            filePath: mediaPath,
+            mimeType: 'image/png',
+            type: 'image',
+          },
+        ],
+      },
+      {
+        env: {
+          RAN_AGENT_ROOT: projectRoot,
+          OPENCLAW_CONFIG: path.join(projectRoot, 'openclaw/openclaw.personal-system.json'),
+        },
+        execFileImpl: async (command, args) => {
+          capturedArgs = args;
+          return {
+            stdout: JSON.stringify({
+              status: 'ok',
+              result: {
+                payloads: [{ text: '这是登录失败截图' }],
+                meta: {
+                  agentMeta: {
+                    provider: 'claude_code',
+                    model: 'qwen3.5-plus',
+                  },
+                },
+              },
+            }),
+            stderr: '',
+          };
+        },
+        mediaContextOptions: {
+          analyzeMediaAssetImpl: async () => ({
+            ok: true,
+            analyzer: 'mimo_power',
+            summary: '截图显示登录失败，提示验证码过期。',
+            ocr_text: '验证码过期',
+            artifact_path: path.join(projectRoot, 'debug/mimo_tasks/fake.md'),
+          }),
+        },
+        logger: { log() {}, warn() {} },
+      }
+    );
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+  }
+
+  const message = capturedArgs[capturedArgs.indexOf('--message') + 1];
+  assert.match(message, /【最近媒体上下文/);
+  assert.match(message, /截图显示登录失败/);
+  assert.match(message, /验证码过期/);
+  assert.match(message, /artifact_id=/);
+  assert.equal(response.reply_text, '这是登录失败截图');
+});
+
 test('sendChatToOpenClawAgent loads project env and Claude settings for child process', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-agent-env-'));
   const homeDir = path.join(tempDir, 'home');

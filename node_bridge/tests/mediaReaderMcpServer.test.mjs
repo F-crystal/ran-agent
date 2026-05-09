@@ -68,6 +68,17 @@ test('media reader exposes stable facade tool names with object schemas', () => 
   }
 });
 
+test('media reader schemas expose trusted local media file_path inputs', () => {
+  const toolsByName = Object.fromEntries(buildMediaReaderTools().map((tool) => [tool.name, tool]));
+
+  for (const toolName of ['analyze_image', 'transcribe_audio', 'analyze_video']) {
+    const properties = toolsByName[toolName].inputSchema.properties;
+    assert.equal(properties.file_path.type, 'string');
+    assert.equal(properties.mime.type, 'string');
+    assert.equal(properties.type.type, 'string');
+  }
+});
+
 test('analyze_image returns structured OCR failure when default PaddleOCR is missing and VLM is unavailable', async () => {
   const result = await handleMediaReaderMcpRequest(
     {
@@ -135,6 +146,90 @@ test('analyze_image uses content-hash based analysis cache', async () => {
   assert.equal(second.structuredContent.cache_hit, true);
   assert.equal(visionCalls, 1);
   assert.equal(second.structuredContent.content_sha256, first.structuredContent.content_sha256);
+});
+
+test('analyze_image accepts local file_path through the media_reader facade', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-reader-local-project-'));
+  const imagePath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'pic.png');
+  fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+  fs.writeFileSync(imagePath, pngBytes());
+
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { file_path: imagePath, mime: 'image/png', ocr: true, vlm: true },
+      },
+    },
+    {
+      env: {
+        RAN_AGENT_ROOT: projectRoot,
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_VISION_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_PROVIDER: 'mock',
+      },
+      ocrProvider: {
+        analyzeImage: async (asset) => ({ text: `OCR ${path.basename(asset.file_path)}`, blocks: [], model: 'mock-ocr' }),
+      },
+      visionProvider: {
+        analyzeImage: async () => ({ summary: 'local image summary', objects: [], model: 'mock-vlm' }),
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.scene_summary, 'local image summary');
+  assert.equal(result.structuredContent.ocr_text, 'OCR pic.png');
+  assert.match(result.structuredContent.content_sha256, /^[a-f0-9]{64}$/);
+});
+
+test('analyze_image blocks local file_path outside trusted media directories', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-reader-local-project-'));
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { file_path: '/etc/passwd', mime: 'text/plain' },
+      },
+    },
+    {
+      env: {
+        RAN_AGENT_ROOT: projectRoot,
+        ...tempCacheEnv(),
+      },
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error_code, 'LOCAL_FILE_BLOCKED');
+});
+
+test('analyze_image blocks project-local file_path outside trusted media directories', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'media-reader-local-project-'));
+  const privatePath = path.join(projectRoot, 'node_bridge', '.env.local');
+  fs.mkdirSync(path.dirname(privatePath), { recursive: true });
+  fs.writeFileSync(privatePath, 'SECRET=value\n');
+
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { file_path: privatePath, mime: 'text/plain' },
+      },
+    },
+    {
+      env: {
+        RAN_AGENT_ROOT: projectRoot,
+        ...tempCacheEnv(),
+      },
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error_code, 'LOCAL_FILE_BLOCKED');
 });
 
 test('analyze_image uses DashScope OCR and vision adapters when an API key is configured', async () => {

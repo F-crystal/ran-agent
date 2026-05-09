@@ -108,6 +108,46 @@ test('createReplyBackend defaults to OpenClaw agent runtime for WeChat replies',
   });
 });
 
+test('createReplyBackend keeps inbound media on OpenClaw agent runtime for MCP tool access', async () => {
+  let agentPayload = null;
+  const backend = createReplyBackend({
+    agentImpl: async (payload) => {
+      agentPayload = payload;
+      return {
+        reply_text: 'MiMo 已分析截图',
+        follow_up_messages: [],
+        media: null,
+        model: 'openclaw/agent',
+      };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '帮我用 MiMo 看下这张截图',
+    sender_id: 'conv-agent-media',
+    channel: 'wechat',
+    media: [
+      {
+        filePath: '/opt/ran_agent/debug/wechat/inbound/screenshot.png',
+        mimeType: 'image/png',
+        type: 'image',
+      },
+    ],
+  });
+
+  assert.equal(agentPayload?.sender_id, 'conv-agent-media');
+  assert.deepEqual(agentPayload?.media, [
+    {
+      filePath: '/opt/ran_agent/debug/wechat/inbound/screenshot.png',
+      mimeType: 'image/png',
+      type: 'image',
+    },
+  ]);
+  assert.equal(response.replyText, 'MiMo 已分析截图');
+});
+
 test('createReplyBackend turns trusted MCP media markers into WeChat image media', async () => {
   const backend = createReplyBackend({
     chatImpl: async () => ({

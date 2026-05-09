@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import readline from 'node:readline';
 import { downloadMediaAsset, buildErrorPayload, buildMediaAssets, MediaReaderError } from './mediaReader/assetResolver.mjs';
 import { createCacheStore, sha256Hex } from './mediaReader/cacheStore.mjs';
@@ -17,6 +20,11 @@ import {
   downloadBilibiliAudioOnly,
   shouldDownloadBilibiliForAnalysis,
 } from './mediaReader/platformResolvers/bilibiliResolver.mjs';
+import {
+  isTrustedLocalMediaPath,
+  resolveProjectRoot,
+  trustedMediaDirsDescription,
+} from './trustedMediaPaths.mjs';
 
 const SERVER_INFO = {
   name: 'ran-agent-media-reader',
@@ -64,7 +72,10 @@ export function buildMediaReaderTools() {
         type: 'object',
         properties: {
           url: { type: 'string' },
+          file_path: { type: 'string', description: 'Trusted local media file path from the WeChat bridge.' },
           asset_id: { type: 'string' },
+          mime: { type: 'string' },
+          type: { type: 'string', enum: ['image'] },
           ocr: { type: 'boolean', default: true },
           vlm: { type: 'boolean', default: true },
           prompt: { type: 'string' },
@@ -98,7 +109,10 @@ export function buildMediaReaderTools() {
         type: 'object',
         properties: {
           url: { type: 'string' },
+          file_path: { type: 'string', description: 'Trusted local audio file path from the WeChat bridge.' },
           asset_id: { type: 'string' },
+          mime: { type: 'string' },
+          type: { type: 'string', enum: ['audio'] },
           language_hint: { type: 'string', default: 'zh' },
           timestamps: { type: 'boolean', default: true },
         },
@@ -113,7 +127,10 @@ export function buildMediaReaderTools() {
         type: 'object',
         properties: {
           url: { type: 'string' },
+          file_path: { type: 'string', description: 'Trusted local video file path from the WeChat bridge.' },
           asset_id: { type: 'string' },
+          mime: { type: 'string' },
+          type: { type: 'string', enum: ['video'] },
           include_audio: { type: 'boolean', default: true },
           include_ocr: { type: 'boolean', default: true },
           include_vlm: { type: 'boolean', default: true },
@@ -201,6 +218,59 @@ function warningFor(code) {
   return { code };
 }
 
+function assertTrustedLocalMediaFile(filePath, env = process.env) {
+  const root = resolveProjectRoot(env);
+  const resolved = path.resolve(String(filePath || ''));
+  if (!isTrustedLocalMediaPath(resolved, env)) {
+    throw new MediaReaderError(
+      'LOCAL_FILE_BLOCKED',
+      `LOCAL_FILE_BLOCKED: local media file must stay inside trusted media directories: ${trustedMediaDirsDescription(env) || root}`
+    );
+  }
+  const stat = fs.statSync(resolved);
+  if (!stat.isFile()) {
+    throw new MediaReaderError('LOCAL_FILE_BLOCKED', 'LOCAL_FILE_BLOCKED: local media path is not a file');
+  }
+  return { resolved, stat };
+}
+
+function mimeFromPathOrArg(filePath, mime = '') {
+  const explicit = String(mime || '').split(';')[0].trim().toLowerCase();
+  if (explicit) return explicit;
+  const ext = path.extname(String(filePath || '')).toLowerCase();
+  if (ext === '.png') return 'image/png';
+  if (ext === '.jpg' || ext === '.jpeg') return 'image/jpeg';
+  if (ext === '.webp') return 'image/webp';
+  if (ext === '.gif') return 'image/gif';
+  if (ext === '.wav') return 'audio/wav';
+  if (ext === '.mp3') return 'audio/mpeg';
+  if (ext === '.m4a') return 'audio/mp4';
+  if (ext === '.mp4') return 'video/mp4';
+  if (ext === '.webm') return 'video/webm';
+  return 'application/octet-stream';
+}
+
+async function resolveMediaAssetInput(args = {}, expectedKind = '', options = {}) {
+  const filePath = String(args.file_path || args.filePath || '').trim();
+  if (!filePath) {
+    return await downloadMediaAsset({ url: args.url, expectedKind }, options);
+  }
+  const { resolved, stat } = assertTrustedLocalMediaFile(filePath, options.env || process.env);
+  const mime = mimeFromPathOrArg(resolved, args.mime || args.mimeType);
+  const type = args.type || expectedKind || (mime.startsWith('image/') ? 'image' : mime.startsWith('audio/') ? 'audio' : mime.startsWith('video/') ? 'video' : 'unknown');
+  return {
+    temporary_url_key: '',
+    content_sha256: crypto.createHash('sha256').update(fs.readFileSync(resolved)).digest('hex'),
+    file_path: resolved,
+    mime,
+    type,
+    content_length: stat.size,
+    url_host: 'local',
+    url_redacted: '',
+    cache_key: '',
+  };
+}
+
 async function withTimeout(promise, timeoutMs, errorCode) {
   let timer;
   const timeout = new Promise((_, reject) => {
@@ -227,7 +297,7 @@ async function settleAnalyzer(fn, fallbackCode, codeForError = null) {
 async function analyzeImage(args = {}, options = {}) {
   const env = options.env || process.env;
   const cache = createCacheStore(options.env);
-  const asset = await downloadMediaAsset({ url: args.url, expectedKind: 'image' }, { ...options, cacheStore: cache });
+  const asset = await resolveMediaAssetInput(args, 'image', { ...options, cacheStore: cache });
   if (asset.type !== 'image') {
     throw new MediaReaderError('UNSUPPORTED_MEDIA_TYPE', 'UNSUPPORTED_MEDIA_TYPE: expected image media', {
       media_type: asset.type,
@@ -330,7 +400,7 @@ async function analyzeImage(args = {}, options = {}) {
 }
 
 async function transcribeAudio(args = {}, options = {}) {
-  const asset = await downloadMediaAsset({ url: args.url, expectedKind: 'audio' }, options);
+  const asset = await resolveMediaAssetInput(args, 'audio', options);
   if (asset.type !== 'audio') {
     throw new MediaReaderError('UNSUPPORTED_MEDIA_TYPE', 'UNSUPPORTED_MEDIA_TYPE: expected audio media', { media_type: asset.type });
   }
@@ -558,7 +628,7 @@ async function analyzeVideo(args = {}, options = {}) {
       warnings: isBilibili ? [...sanitized.warnings, 'SUBTITLE_NOT_FOUND'] : sanitized.warnings,
     };
   }
-  const asset = await downloadMediaAsset({ url: args.url, expectedKind: 'video' }, options);
+  const asset = await resolveMediaAssetInput(args, 'video', options);
   if (asset.type !== 'video') {
     throw new MediaReaderError('UNSUPPORTED_MEDIA_TYPE', 'UNSUPPORTED_MEDIA_TYPE: expected video media', { media_type: asset.type });
   }

@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status Date: 2026-05-06
+Status Date: 2026-05-10
 
 ## Frontend Path
 
@@ -54,7 +54,7 @@ Status Date: 2026-05-06
   - `media_reader__resolve_platform_media` is the platform media resolver entry for Bilibili and Xiaohongshu share text, short links, and page links. It extracts the first URL, safely resolves `b23.tv` / `xhslink.com`, rechecks host/DNS after redirects, refuses private-network targets, and returns redacted media assets plus metadata, comments, subtitles, transcript/visual source, and warnings.
   - `social_reader` is the preferred path for social media and music share links. It exposes `resolve_social_url`, `read_social_post`, `read_social_post_deep`, `read_music_share`, and `check_social_login`; internally it calls mature platform backends such as `jobson-xhs-mcp` for Xiaohongshu, `@wangshunnn/bilibili-mcp-server` for Bilibili public video metadata, `wanyi-watermark` for generic share parsing, and a NetEaseCloudMusicApi-compatible song detail endpoint for NetEase Music shares including `163cn.tv` short links. `read_social_post_deep` now sends Bilibili/XHS platform assets through `media_reader` instead of relying on direct media URLs in post text.
   - `mimo_power` is a Token Plan-only power tool, not a frontend model route. It calls `MIMO_TOKEN_PLAN_OPENAI_BASE_URL` with `MIMO_TOKEN_PLAN_API_KEY` using the official `api-key` header, defaults to `mimo-v2.5-pro`, stores large results under `debug/mimo_tasks/`, and returns unavailable after `MIMO_TOKEN_PLAN_EXPIRES_AT` (default `2026-06-09T23:59:00Z`). It must not change `agents.*.model`, `fallbacks`, `models.providers.claude_code`, or Claude settings.
-- Normal WeChat text replies now enter OpenClaw through `openclaw agent --json`, not the OpenAI-compatible chat-completions shim, so the agent runtime sees its MCP tools. The chat-completions path remains a compatibility fallback and is still used when the inbound WeChat payload contains images or other structured media.
+- Normal WeChat replies, including inbound images or other structured media, now enter OpenClaw through `openclaw agent --json` by default so the agent runtime sees its MCP tools. The bridge prepares trusted inbound uploaded media as `file_path` / remote `http(s)` `url` assets, rejects project-external paths and project-local paths outside trusted media directories, generates reusable media artifacts under `debug/media_context/`, and injects a compact recent-media context before the OpenClaw reply. The OpenAI-compatible chat-completions shim remains a compatibility fallback only when `NODE_BRIDGE_OPENCLAW_REPLY_MODE=http` or `NODE_BRIDGE_INBOUND_MEDIA_REPLY_MODE=http|gateway` is set.
 - `openclaw/openclaw.personal-system.json` web path hardening:
   - `tools.profile` set to `coding`
   - root `tools.allow` is an explicit non-empty list: `web_search`, `web_fetch`, `session_status`, `exec`, `process`
@@ -156,12 +156,14 @@ WeChat inbound
   -> handleWeChatTextMessage()
   -> mapWeChatMessageToBridgeRequest()
   -> createReplyBackend().getReply(payload)
-  -> normal text with no inbound media:
+  -> normal text or inbound media default path:
      -> sendChatToOpenClawAgent(payload)
      -> npx openclaw agent --session-id <wechat-session> --message <bridge-context + user text> --json
-     -> OpenClaw agent runtime sees configured MCP servers, including media_generation
+     -> media asset -> media artifact -> conversation media context
+     -> OpenClaw agent runtime sees configured MCP servers, including media_generation and mimo_power
      -> media_generation.generate_image / generate_speech returns WECHAT_MEDIA when used
-  -> inbound image/media compatibility path:
+     -> inbound screenshots/media are described as assets for mimo_power__analyze only when their file_path is under a trusted inbound media directory; non-explicit media analysis can fall back to media_reader when MiMo is unavailable, while explicit MiMo requests report MiMo unavailability rather than silently substituting another analyzer
+  -> explicit HTTP compatibility path:
      -> sendChatToOpenClawGateway(payload)
      -> build Shanghai time system prompt + multimodal user content
      -> POST OpenClaw Gateway /v1/chat/completions

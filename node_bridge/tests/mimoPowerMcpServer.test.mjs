@@ -142,9 +142,9 @@ test('analyze reports unavailable after configured plan expiry', async () => {
   assert.equal(result.structuredContent.error_code, 'MIMO_TOKEN_PLAN_EXPIRED');
 });
 
-test('local file assets are read only from inside the project workspace', () => {
+test('local file assets are read only from trusted media directories', () => {
   const projectRoot = tempProjectRoot();
-  const imagePath = path.join(projectRoot, 'debug', 'sample.png');
+  const imagePath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'sample.png');
   fs.mkdirSync(path.dirname(imagePath), { recursive: true });
   fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
 
@@ -164,6 +164,17 @@ test('local file assets are read only from inside the project workspace', () => 
       task: '越界文件',
       assets: [{ type: 'image', file_path: '/etc/passwd', mime: 'text/plain' }],
     }, { env: { RAN_AGENT_ROOT: projectRoot } }),
-    /must stay inside project workspace/
+    /must stay inside trusted media directories/
+  );
+
+  const privatePath = path.join(projectRoot, 'node_bridge', '.env.local');
+  fs.mkdirSync(path.dirname(privatePath), { recursive: true });
+  fs.writeFileSync(privatePath, 'SECRET=value\n');
+  assert.throws(
+    () => buildMimoRequestBody({
+      task: '项目内非媒体文件',
+      assets: [{ type: 'image', file_path: privatePath, mime: 'text/plain' }],
+    }, { env: { RAN_AGENT_ROOT: projectRoot } }),
+    /must stay inside trusted media directories/
   );
 });

@@ -9,6 +9,7 @@ export function getReplyBackendConfig(env = process.env) {
   return {
     fallbackText: env.NODE_BRIDGE_FALLBACK_TEXT || '暂时无法连接到 personal agent，请稍后再试。',
     openclawReplyMode: String(env.NODE_BRIDGE_OPENCLAW_REPLY_MODE || 'agent').trim().toLowerCase(),
+    inboundMediaReplyMode: String(env.NODE_BRIDGE_INBOUND_MEDIA_REPLY_MODE || 'agent').trim().toLowerCase(),
   };
 }
 
@@ -91,7 +92,7 @@ function resolveDefaultOpenClawReplyImpl(message, config, options = {}) {
   if (config.openclawReplyMode === 'http') {
     return sendChatToOpenClawGateway;
   }
-  if (hasInboundMediaForGateway(message)) {
+  if (hasInboundMediaForGateway(message) && ['http', 'gateway'].includes(config.inboundMediaReplyMode)) {
     return sendChatToOpenClawGateway;
   }
   return options.agentImpl || sendChatToOpenClawAgent;
