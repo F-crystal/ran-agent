@@ -8,7 +8,7 @@ import { execFile as execFileCallback, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveStateDir } from './runtimeState.mjs';
 import { ensureConversationMediaContext } from './mediaContextStore.mjs';
-import { isTrustedLocalMediaPath, resolveProjectRoot } from './trustedMediaPaths.mjs';
+import { isPathInsideRoot, isTrustedLocalMediaPath, resolveProjectRoot } from './trustedMediaPaths.mjs';
 import {
   buildStructuredUrlContext,
   collectExtractedImageUrls,
@@ -548,8 +548,8 @@ function buildInboundMediaInstruction(payload = {}) {
   }
   return [
     '【微信入站媒体资产（非用户原话，不要复述）】',
-    '用户随本轮上传了媒体。需要理解截图、图片、音频、视频或文档内容时，优先调用 OpenClaw MCP 工具 mimo_power__analyze，并把下列 file_path/url 作为 assets 传入。',
-    '不要先用低成本媒体理解工具替代 MiMo；只有 MiMo Token Plan 不可用、用户明确要求快速 OCR/ASR，或输入是社媒/平台链接时才改用常规媒体/社媒读取工具。',
+    '用户随本轮上传了媒体。必须调用 MCP 工具 mimo_power__analyze 来分析这些媒体，把下列 file_path/url 作为 assets 传入。',
+    '不要用 exec/process 读取图片文件，不要用自身视觉能力直接分析图片。只有 MiMo Token Plan 不可用（返回 MIMO_TOKEN_PLAN_KEY_MISSING/EXPIRED）时才 fallback 到 media_reader。',
     ...assetLines,
   ].join('\n');
 }
@@ -597,8 +597,30 @@ function prepareLocalMediaPathForAgent(filePath, options = {}) {
   if (isTrustedLocalMediaPath(resolved, env)) {
     return resolved;
   }
-  options.logger?.warn?.('dropping inbound media outside trusted media directories');
-  return '';
+  // Only copy external files (outside the project workspace) into the trusted
+  // inbound directory. Project-internal files (e.g. .env, vault, data) are
+  // never promoted to trusted media — they stay dropped.
+  if (isPathInsideRoot(resolved, projectRoot)) {
+    options.logger?.warn?.('dropping project-internal file outside trusted media directories');
+    return '';
+  }
+  try {
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+      options.logger?.warn?.(`inbound media file not found or not a file: ${resolved}`);
+      return '';
+    }
+    const inboundDir = path.join(projectRoot, 'debug', 'wechat', 'inbound');
+    fs.mkdirSync(inboundDir, { recursive: true });
+    const ext = path.extname(resolved) || '.bin';
+    const base = path.basename(resolved, path.extname(resolved)) || 'media';
+    const dest = path.join(inboundDir, `${base}-${Date.now()}${ext}`);
+    fs.copyFileSync(resolved, dest);
+    options.logger?.log?.(`copied inbound media to trusted dir: ${dest}`);
+    return dest;
+  } catch (error) {
+    options.logger?.warn?.(`failed to copy inbound media to trusted dir: ${error instanceof Error ? error.message : String(error)}`);
+    return '';
+  }
 }
 
 function inferMediaTypeFromMime(mimeType) {

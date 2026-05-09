@@ -398,6 +398,55 @@ test('sendChatToOpenClawAgent drops project files outside trusted media director
   assert.doesNotMatch(message, /微信入站媒体资产/);
 });
 
+test('sendChatToOpenClawAgent copies external media files to trusted inbound directory', async () => {
+  const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-agent-external-media-'));
+  const externalDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wechat-sdk-media-'));
+  const imageFile = path.join(externalDir, '1778345688721-95b3b62d.bin');
+  fs.writeFileSync(imageFile, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  let capturedArgs = [];
+  try {
+    await sendChatToOpenClawAgent(
+      {
+        text: '',
+        sender_id: 'user-agent-external-media',
+        channel: 'wechat',
+        media: [{ filePath: imageFile, mimeType: 'image/png', type: 'image' }],
+      },
+      {
+        env: {
+          RAN_AGENT_ROOT: projectRoot,
+          OPENCLAW_CONFIG: path.join(projectRoot, 'openclaw/openclaw.personal-system.json'),
+        },
+        execFileImpl: async (command, args) => {
+          capturedArgs = args;
+          return {
+            stdout: JSON.stringify({
+              status: 'ok',
+              result: {
+                payloads: [{ text: '已分析图片' }],
+                meta: { agentMeta: { provider: 'claude_code', model: 'qwen3.5-plus' } },
+              },
+            }),
+            stderr: '',
+          };
+        },
+        logger: { log() {}, warn() {} },
+      }
+    );
+  } finally {
+    fs.rmSync(projectRoot, { recursive: true, force: true });
+    fs.rmSync(externalDir, { recursive: true, force: true });
+  }
+
+  const message = capturedArgs[capturedArgs.indexOf('--message') + 1];
+  assert.match(message, /微信入站媒体资产/);
+  assert.match(message, /mimo_power__analyze/);
+  // The file should have been copied to the trusted inbound directory
+  assert.match(message, /debug\/wechat\/inbound/);
+  // The original /tmp path should NOT appear
+  assert.doesNotMatch(message, new RegExp(externalDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+});
+
 test('sendChatToOpenClawAgent injects generated media artifact context before OpenClaw reply', async () => {
   const projectRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openclaw-agent-media-context-'));
   const mediaPath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'screenshot.png');
