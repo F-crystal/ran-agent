@@ -156,7 +156,6 @@ Then start each service in its own terminal:
 cd node_bridge && ./start_node.sh  # WeChat bridge
 ```
 
-For production deployment on a server, see `local_archive/docs/deployment/` for systemd unit files and server configuration guides.
 
 ---
 

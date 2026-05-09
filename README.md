@@ -155,8 +155,7 @@ cp .env.example .env.local
 ./start_python.sh          # 后端服务（记忆、调度、知识库）
 cd node_bridge && ./start_node.sh  # 微信 Bridge
 ```
-
-服务器部署参考 `local_archive/docs/deployment/` 目录下的 systemd unit 文件和部署指南。
+三个终端分别启动。停止用 `Ctrl+C`。
 
 ---
 
