@@ -9,6 +9,24 @@ import {
 import { callMcpToolViaStdio, parseJsonArrayEnv, textFromMcpResult } from './mcpClient.mjs';
 
 const execFileAsync = promisify(execFile);
+const BILIBILI_RECOVERY_SUGGESTION = '当前服务器访问 B站解析接口被 412 拦截。可以尝试配置 SESSDATA、配置 yt-dlp 代理/更换出口，或提供字幕文本、音频文件、视频文件、本地解析结果。';
+const BILIBILI_AUTH_RECOVERY_SUGGESTION = '当前 B站内容需要登录态或权限。可以配置有效 SESSDATA 后重试，或提供字幕文本、音频文件、视频文件、本地解析结果。';
+
+const BILIBILI_ERROR_CODES = new Set([
+  'BILIBILI_PRECONDITION_FAILED',
+  'BILIBILI_SHORTLINK_BLOCKED',
+  'BILIBILI_EXTRACT_FAILED',
+  'BILIBILI_AUTH_REQUIRED',
+  'BILIBILI_VIP_REQUIRED',
+  'BILIBILI_REGION_BLOCKED',
+  'STREAM_URL_EXPIRED',
+  'SUBTITLE_NOT_FOUND',
+  'AUDIO_STREAM_NOT_FOUND',
+  'VIDEO_STREAM_NOT_FOUND',
+  'DEPENDENCY_MISSING',
+  'PLATFORM_RESOLVER_NOT_CONFIGURED',
+  'MEDIA_DOWNLOAD_FORBIDDEN',
+]);
 
 function boolFromEnv(env, key, fallback) {
   const value = env?.[key];
@@ -42,14 +60,63 @@ function warning(code, extra = {}) {
 
 function mapBilibiliError(error) {
   const code = String(error?.error_code || '').trim();
-  if (code) return code;
-  const text = `${error?.message || error || ''}`.toLowerCase();
+  if (BILIBILI_ERROR_CODES.has(code)) return code;
+  const text = `${error?.message || ''}\n${error?.stderr || ''}\n${error?.stdout || ''}\n${error || ''}`.toLowerCase();
+  if (text.includes('412') || text.includes('precondition failed') || text.includes('request is blocked by server')) return 'BILIBILI_PRECONDITION_FAILED';
+  if (text.includes('login') || text.includes('auth') || text.includes('cookie') || text.includes('sessdata')) return 'BILIBILI_AUTH_REQUIRED';
+  if (text.includes('403') || text.includes('forbidden')) return 'MEDIA_DOWNLOAD_FORBIDDEN';
   if (text.includes('login') || text.includes('auth') || text.includes('sessdata')) return 'BILIBILI_AUTH_REQUIRED';
   if (text.includes('vip')) return 'BILIBILI_VIP_REQUIRED';
   if (text.includes('region')) return 'BILIBILI_REGION_BLOCKED';
   if (text.includes('expire')) return 'STREAM_URL_EXPIRED';
+  if (text.includes('subtitle')) return 'SUBTITLE_NOT_FOUND';
+  if (text.includes('audio')) return 'AUDIO_STREAM_NOT_FOUND';
+  if (text.includes('video')) return 'VIDEO_STREAM_NOT_FOUND';
   if (text.includes('not found')) return 'BILIBILI_EXTRACT_FAILED';
   return 'BILIBILI_EXTRACT_FAILED';
+}
+
+function httpStatusFromError(error) {
+  const explicit = Number(error?.http_status || error?.status || error?.statusCode || error?.extra?.http_status);
+  if (Number.isInteger(explicit) && explicit > 0) {
+    return explicit;
+  }
+  const text = `${error?.message || ''}\n${error?.stderr || ''}\n${error?.stdout || ''}`;
+  const match = text.match(/(?:HTTP(?:\s+Error)?|status)\s*[: ]\s*(\d{3})/i) || text.match(/\b(4\d{2}|5\d{2})\b/);
+  return match ? Number(match[1]) : undefined;
+}
+
+function ytdlpRuntimeContext(env = process.env) {
+  const proxy = String(env.PERSONAL_AGENT_YTDLP_PROXY || '').trim();
+  const allowCookies = boolFromEnv(env, 'PERSONAL_AGENT_BILIBILI_ALLOW_AUTH_COOKIES', false);
+  const sessdataEnv = String(env.PERSONAL_AGENT_BILIBILI_SESSDATA_ENV || 'SESSDATA').trim() || 'SESSDATA';
+  const sessdata = allowCookies ? String(env[sessdataEnv] || '').trim() : '';
+  return {
+    proxy,
+    used_proxy: Boolean(proxy),
+    sessdata,
+    has_sessdata: Boolean(sessdata),
+  };
+}
+
+function recoverySuggestionFor(code) {
+  if (code === 'BILIBILI_AUTH_REQUIRED' || code === 'MEDIA_DOWNLOAD_FORBIDDEN' || code === 'BILIBILI_VIP_REQUIRED') {
+    return BILIBILI_AUTH_RECOVERY_SUGGESTION;
+  }
+  return BILIBILI_RECOVERY_SUGGESTION;
+}
+
+function bilibiliErrorExtra({ code, error, env, extra = {} }) {
+  const runtime = ytdlpRuntimeContext(env);
+  const httpStatus = httpStatusFromError(error);
+  return {
+    platform: 'bilibili',
+    ...(httpStatus ? { http_status: httpStatus } : {}),
+    used_proxy: runtime.used_proxy,
+    has_sessdata: runtime.has_sessdata,
+    recovery_suggestion: recoverySuggestionFor(code),
+    ...extra,
+  };
 }
 
 function normalizeMedia(media = [], maxAssets = 20) {
@@ -107,20 +174,31 @@ async function resolveWithYtdlp({ resolvedUrl, bvid, page, maxAssets }, options 
   const env = options.env || process.env;
   const ytdlpPath = String(env.PERSONAL_AGENT_YTDLP_PATH || '').trim();
   if (!ytdlpPath) {
-    throw new MediaReaderError('PLATFORM_RESOLVER_NOT_CONFIGURED', 'PLATFORM_RESOLVER_NOT_CONFIGURED: Bilibili provider or yt-dlp path is not configured');
+    throw new MediaReaderError('PLATFORM_RESOLVER_NOT_CONFIGURED', 'PLATFORM_RESOLVER_NOT_CONFIGURED: Bilibili provider or yt-dlp path is not configured', bilibiliErrorExtra({
+      code: 'PLATFORM_RESOLVER_NOT_CONFIGURED',
+      env,
+    }));
   }
   const execFileImpl = options.execFileImpl || execFileAsync;
+  const runtime = ytdlpRuntimeContext(env);
+  const ytdlpArgs = [
+    '--dump-json',
+    '--skip-download',
+    '--no-warnings',
+    '--write-subs',
+    '--write-auto-subs',
+    '--sub-langs',
+    'zh-Hans,zh-CN,zh,en',
+  ];
+  if (runtime.proxy) {
+    ytdlpArgs.push('--proxy', runtime.proxy);
+  }
+  if (runtime.sessdata) {
+    ytdlpArgs.push('--add-header', `Cookie: SESSDATA=${runtime.sessdata}`);
+  }
+  ytdlpArgs.push(resolvedUrl);
   try {
-    const { stdout } = await execFileImpl(ytdlpPath, [
-      '--dump-json',
-      '--skip-download',
-      '--no-warnings',
-      '--write-subs',
-      '--write-auto-subs',
-      '--sub-langs',
-      'zh-Hans,zh-CN,zh,en',
-      resolvedUrl,
-    ], {
+    const { stdout } = await execFileImpl(ytdlpPath, ytdlpArgs, {
       timeout: Number(env.PERSONAL_AGENT_PLATFORM_RESOLVE_TIMEOUT_MS || 15000),
       maxBuffer: 10 * 1024 * 1024,
     });
@@ -144,9 +222,14 @@ async function resolveWithYtdlp({ resolvedUrl, bvid, page, maxAssets }, options 
     };
   } catch (error) {
     if (error?.code === 'ENOENT') {
-      throw new MediaReaderError('DEPENDENCY_MISSING', 'DEPENDENCY_MISSING: yt-dlp command is missing');
+      throw new MediaReaderError('DEPENDENCY_MISSING', 'DEPENDENCY_MISSING: yt-dlp command is missing', bilibiliErrorExtra({
+        code: 'DEPENDENCY_MISSING',
+        error,
+        env,
+      }));
     }
-    throw new MediaReaderError(mapBilibiliError(error), `${mapBilibiliError(error)}: Bilibili extraction failed`);
+    const code = mapBilibiliError(error);
+    throw new MediaReaderError(code, `${code}: Bilibili extraction failed`, bilibiliErrorExtra({ code, error, env }));
   }
 }
 
@@ -159,11 +242,29 @@ export async function resolveBilibiliMedia(args = {}, options = {}) {
   await assertSafePlatformUrl(originalUrl, { platform: 'bilibili', options });
   let resolvedUrl = originalUrl;
   if (hostFromUrl(originalUrl) === 'b23.tv') {
-    resolvedUrl = await resolveShortlink(originalUrl, {
-      platform: 'bilibili',
-      options,
-      errorCode: 'SHORTLINK_RESOLVE_FAILED',
-    });
+    try {
+      resolvedUrl = await resolveShortlink(originalUrl, {
+        platform: 'bilibili',
+        options,
+        errorCode: 'SHORTLINK_RESOLVE_FAILED',
+      });
+    } catch (error) {
+      if (error instanceof MediaReaderError) {
+        const code = error.error_code === 'SHORTLINK_RESOLVE_FAILED' && Number(error.extra?.http_status) === 412
+          ? 'BILIBILI_SHORTLINK_BLOCKED'
+          : error.error_code;
+        throw new MediaReaderError(code, `${code}: Bilibili shortlink resolve failed`, bilibiliErrorExtra({
+          code,
+          error,
+          env,
+          extra: {
+            ...error.extra,
+            http_status: error.extra?.http_status,
+          },
+        }));
+      }
+      throw error;
+    }
   }
   if (detectPlatformFromUrl(resolvedUrl) !== 'bilibili') {
     throw new MediaReaderError('BILIBILI_EXTRACT_FAILED', 'BILIBILI_EXTRACT_FAILED: resolved URL is not Bilibili');
@@ -198,7 +299,7 @@ export async function resolveBilibiliMedia(args = {}, options = {}) {
       throw error;
     }
     const code = mapBilibiliError(error);
-    throw new MediaReaderError(code, `${code}: Bilibili extraction failed`);
+    throw new MediaReaderError(code, `${code}: Bilibili extraction failed`, bilibiliErrorExtra({ code, error, env }));
   }
 
   const metadata = {

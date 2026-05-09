@@ -27,6 +27,18 @@ function okResponse({ url }) {
   };
 }
 
+function statusResponse({ url, status, body = '' }) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    url,
+    headers: {
+      get: () => '',
+    },
+    text: async () => body,
+  };
+}
+
 async function callResolve(arguments_, options = {}) {
   return await handleMediaReaderMcpRequest(
     {
@@ -45,7 +57,7 @@ test('media reader exposes resolve_platform_media facade tool', () => {
   assert.ok(tools.some((tool) => tool.name === 'resolve_platform_media'));
   const tool = tools.find((item) => item.name === 'resolve_platform_media');
   assert.equal(tool.inputSchema.additionalProperties, false);
-  assert.deepEqual(tool.inputSchema.properties.platform.enum, ['auto', 'bilibili', 'xhs']);
+  assert.deepEqual(tool.inputSchema.properties.platform.enum, ['auto', 'bilibili', 'xhs', 'wechat_article']);
 });
 
 test('resolve_platform_media resolves Bilibili share text through safe shortlink and provider', async () => {
@@ -99,11 +111,15 @@ test('resolve_platform_media resolves Bilibili share text through safe shortlink
 
 test('resolve_platform_media accepts clean Bilibili shortlink and clean long URL', async () => {
   let calls = 0;
+  let fetchCalls = 0;
   const options = {
-    fetchImpl: async (url) => redirectResponse({
-      url,
-      location: 'https://www.bilibili.com/video/BV1yy411c7mE',
-    }),
+    fetchImpl: async (url) => {
+      fetchCalls += 1;
+      return redirectResponse({
+        url,
+        location: 'https://www.bilibili.com/video/BV1yy411c7mE',
+      });
+    },
     resolveHostnameImpl: async () => ['93.184.216.34'],
     platformProviders: {
       bilibili: {
@@ -122,6 +138,134 @@ test('resolve_platform_media accepts clean Bilibili shortlink and clean long URL
   assert.equal(longResult.structuredContent.ok, true);
   assert.equal(longResult.structuredContent.metadata.page, 2);
   assert.equal(calls, 2);
+  assert.equal(fetchCalls, 1);
+});
+
+test('resolve_platform_media returns Bilibili shortlink 412 without calling yt-dlp', async () => {
+  let execCalled = false;
+  const result = await callResolve(
+    { url_or_text: '【标题-哔哩哔哩】 https://b23.tv/xMvq8vT', platform: 'bilibili' },
+    {
+      env: { PERSONAL_AGENT_YTDLP_PATH: 'yt-dlp' },
+      fetchImpl: async (url) => statusResponse({ url, status: 412 }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async () => {
+        execCalled = true;
+        throw new Error('yt-dlp should not be called');
+      },
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.platform, 'bilibili');
+  assert.equal(result.structuredContent.http_status, 412);
+  assert.match(result.structuredContent.error_code, /BILIBILI_SHORTLINK_BLOCKED|BILIBILI_PRECONDITION_FAILED/);
+  assert.match(result.structuredContent.recovery_suggestion, /SESSDATA|代理|字幕文本/);
+  assert.equal(execCalled, false);
+});
+
+test('resolve_platform_media maps yt-dlp HTTP 412 and passes redaction-sensitive config only to argv', async () => {
+  const calls = [];
+  const result = await callResolve(
+    { url_or_text: 'https://www.bilibili.com/video/BV1xx411c7mD', platform: 'bilibili' },
+    {
+      env: {
+        PERSONAL_AGENT_YTDLP_PATH: 'yt-dlp',
+        PERSONAL_AGENT_YTDLP_PROXY: 'http://user:secret@proxy.example:8080',
+        PERSONAL_AGENT_BILIBILI_ALLOW_AUTH_COOKIES: 'true',
+        PERSONAL_AGENT_BILIBILI_SESSDATA_ENV: 'BILI_TEST_SESSDATA',
+        BILI_TEST_SESSDATA: 'secret-sessdata',
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async (command, args) => {
+        calls.push({ command, args });
+        const error = new Error('ERROR: Unable to download JSON metadata: HTTP Error 412: Precondition Failed');
+        error.stderr = 'HTTP Error 412: Precondition Failed';
+        throw error;
+      },
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error_code, 'BILIBILI_PRECONDITION_FAILED');
+  assert.equal(result.structuredContent.http_status, 412);
+  assert.equal(result.structuredContent.used_proxy, true);
+  assert.equal(result.structuredContent.has_sessdata, true);
+  assert.ok(calls[0].args.includes('--proxy'));
+  assert.ok(calls[0].args.includes('http://user:secret@proxy.example:8080'));
+  assert.ok(calls[0].args.includes('--add-header'));
+  assert.ok(calls[0].args.includes('Cookie: SESSDATA=secret-sessdata'));
+});
+
+test('resolve_platform_media maps Bilibili forbidden and auth stderr to explicit errors', async () => {
+  const forbidden = await callResolve(
+    { url_or_text: 'https://www.bilibili.com/video/BV1xx411c7mD', platform: 'bilibili' },
+    {
+      env: { PERSONAL_AGENT_YTDLP_PATH: 'yt-dlp' },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async () => {
+        const error = new Error('HTTP Error 403: Forbidden');
+        error.stderr = 'HTTP Error 403: Forbidden';
+        throw error;
+      },
+    }
+  );
+  assert.equal(forbidden.isError, true);
+  assert.match(forbidden.structuredContent.error_code, /MEDIA_DOWNLOAD_FORBIDDEN|BILIBILI_AUTH_REQUIRED/);
+
+  const auth = await callResolve(
+    { url_or_text: 'https://www.bilibili.com/video/BV1xx411c7mD', platform: 'bilibili' },
+    {
+      env: { PERSONAL_AGENT_YTDLP_PATH: 'yt-dlp' },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async () => {
+        const error = new Error('Login required. Use cookies for auth');
+        error.stderr = 'Login required. Use cookies for auth';
+        throw error;
+      },
+    }
+  );
+  assert.equal(auth.isError, true);
+  assert.equal(auth.structuredContent.error_code, 'BILIBILI_AUTH_REQUIRED');
+});
+
+test('resolve_platform_media recognizes WeChat articles and captcha pages', async () => {
+  const result = await callResolve(
+    { url_or_text: '看看这篇 https://mp.weixin.qq.com/s/demo ，复制打开', platform: 'auto' },
+    {
+      fetchImpl: async (url) => statusResponse({
+        url: 'https://mp.weixin.qq.com/s/demo',
+        status: 200,
+        body: '<html><head><title>验证码</title></head><body>wappoc_appmsgcaptcha 环境异常</body></html>',
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.platform, 'wechat_article');
+  assert.equal(result.structuredContent.captcha_detected, true);
+  assert.equal(result.structuredContent.error_code, 'WECHAT_CAPTCHA_REQUIRED');
+  assert.match(result.structuredContent.recovery_suggestion, /复制正文|PDF|wechat-reader/);
+});
+
+test('resolve_platform_media returns WeChat dynamic content unavailable for shell-only HTML', async () => {
+  const result = await callResolve(
+    { url_or_text: 'https://mp.weixin.qq.com/s/demo', platform: 'wechat_article' },
+    {
+      fetchImpl: async (url) => statusResponse({
+        url,
+        status: 200,
+        body: '<html><head><title>文章标题</title></head><body><div id="js_article"></div><script>render()</script></body></html>',
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.platform, 'wechat_article');
+  assert.equal(result.structuredContent.error_code, 'WECHAT_DYNAMIC_CONTENT_UNAVAILABLE');
+  assert.equal(result.structuredContent.captcha_detected, false);
 });
 
 test('resolve_platform_media rejects non-Bilibili links and unsafe Bilibili redirects', async () => {
@@ -146,6 +290,23 @@ test('resolve_platform_media rejects non-Bilibili links and unsafe Bilibili redi
 
   assert.equal(unsafeRedirect.isError, true);
   assert.equal(unsafeRedirect.structuredContent.error_code, 'SHORTLINK_RESOLVE_FAILED');
+});
+
+test('resolve_platform_media rejects platform redirects whose final host resolves privately', async () => {
+  let dnsCalls = 0;
+  const result = await callResolve(
+    { url_or_text: 'https://mp.weixin.qq.com/s/demo', platform: 'wechat_article' },
+    {
+      fetchImpl: async (url) => redirectResponse({ url, location: 'https://mp.weixin.qq.com/s/private' }),
+      resolveHostnameImpl: async () => {
+        dnsCalls += 1;
+        return dnsCalls === 1 ? ['93.184.216.34'] : ['127.0.0.1'];
+      },
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error_code, 'PRIVATE_NETWORK_BLOCKED');
 });
 
 test('resolve_platform_media returns structured Bilibili dependency errors when provider is missing', async () => {
@@ -268,6 +429,32 @@ test('analyze_video routes platform pages through platform resolver instead of d
   assert.equal(providerCalled, true);
 });
 
+test('analyze_video returns explicit Bilibili 412 instead of retrying as direct media', async () => {
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_video',
+        arguments: { url: 'https://www.bilibili.com/video/BV1xx411c7mD' },
+      },
+    },
+    {
+      env: { PERSONAL_AGENT_YTDLP_PATH: 'yt-dlp' },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async () => {
+        const error = new Error('HTTP Error 412: Precondition Failed');
+        error.stderr = 'HTTP Error 412: Precondition Failed';
+        throw error;
+      },
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error_code, 'BILIBILI_PRECONDITION_FAILED');
+  assert.equal(result.structuredContent.http_status, 412);
+  assert.match(result.structuredContent.recovery_suggestion, /SESSDATA|代理|字幕文本/);
+});
+
 test('analyze_media_batch keeps platform resolver and single media failures partial', async () => {
   const result = await handleMediaReaderMcpRequest(
     {
@@ -293,4 +480,37 @@ test('analyze_media_batch keeps platform resolver and single media failures part
   assert.ok(Array.isArray(result.structuredContent.partial_failures));
   assert.ok(result.structuredContent.partial_failures.length >= 1);
   assert.ok(result.structuredContent.warnings.length >= 1);
+});
+
+test('analyze_media_batch keeps Bilibili 412 as a partial failure', async () => {
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_media_batch',
+        arguments: {
+          assets: [
+            { asset_id: 'platform-1', type: 'platform', url: 'https://www.bilibili.com/video/BV1xx411c7mD', platform: 'bilibili' },
+          ],
+          media_detail: 'standard',
+        },
+      },
+    },
+    {
+      env: { PERSONAL_AGENT_YTDLP_PATH: 'yt-dlp' },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async () => {
+        const error = new Error('HTTP Error 412: Precondition Failed');
+        error.stderr = 'HTTP Error 412: Precondition Failed';
+        throw error;
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.items.length, 0);
+  assert.equal(result.structuredContent.partial_failures[0].asset_id, 'platform-1');
+  assert.equal(result.structuredContent.partial_failures[0].error_code, 'BILIBILI_PRECONDITION_FAILED');
+  assert.ok(result.structuredContent.warnings.includes('BILIBILI_PRECONDITION_FAILED'));
 });

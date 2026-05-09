@@ -121,3 +121,45 @@ test('read_social_post_deep sends Bilibili platform assets through media_reader 
   assert.match(result.structuredContent.deep_summary, /B 站平台媒体总结/);
   assert.equal(mediaCalls.length, 1);
 });
+
+test('read_social_post_deep returns WeChat captcha as partial without crashing', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: 'https://mp.weixin.qq.com/s/demo',
+          media_detail: 'standard',
+        },
+      },
+    },
+    {
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        calls.push({ toolName, arguments: toolArgs });
+        if (toolName === 'resolve_platform_media') {
+          return {
+            isError: true,
+            structuredContent: {
+              ok: false,
+              platform: 'wechat_article',
+              captcha_detected: true,
+              error_code: 'WECHAT_CAPTCHA_REQUIRED',
+              recovery_suggestion: '当前微信公众号文章触发微信验证码或动态加载限制。请在浏览器中打开文章后复制正文，或导出 PDF/截图上传；也可以配置已验证的 wechat-reader 浏览器会话后重试。',
+            },
+          };
+        }
+        throw new Error(`unexpected tool ${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.platform, 'wechat_article');
+  assert.equal(result.structuredContent.media_analysis.partial, true);
+  assert.equal(result.structuredContent.media_analysis.partial_failures[0].error_code, 'WECHAT_CAPTCHA_REQUIRED');
+  assert.ok(result.structuredContent.warnings.includes('WECHAT_CAPTCHA_REQUIRED'));
+  assert.equal(calls.length, 1);
+});

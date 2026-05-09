@@ -71,12 +71,12 @@ export function buildMediaReaderTools() {
     {
       name: 'resolve_platform_media',
       title: 'Resolve Platform Media',
-      description: 'Resolve Bilibili/XHS share text, shortlinks, and platform pages into normalized media assets.',
+      description: 'Resolve Bilibili/XHS/WeChat share text, shortlinks, and platform pages into normalized media assets.',
       inputSchema: {
         type: 'object',
         properties: {
           url_or_text: { type: 'string' },
-          platform: { type: 'string', enum: ['auto', 'bilibili', 'xhs'], default: 'auto' },
+          platform: { type: 'string', enum: ['auto', 'bilibili', 'xhs', 'wechat_article'], default: 'auto' },
           media_detail: { type: 'string', enum: ['basic', 'standard', 'full'], default: 'standard' },
           include_comments: { type: 'boolean', default: false },
           max_comments: { type: 'integer', minimum: 0, maximum: 200, default: 30 },

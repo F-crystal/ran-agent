@@ -2,6 +2,7 @@ import dns from 'node:dns/promises';
 import net from 'node:net';
 import { MediaReaderError, redactUrl, hostFromUrl } from '../assetResolver.mjs';
 import { resolveBilibiliMedia } from './bilibiliResolver.mjs';
+import { resolveWechatArticle } from './wechatArticleResolver.mjs';
 import { resolveXhsMedia } from './xhsResolver.mjs';
 
 export const BROWSER_USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
@@ -11,6 +12,7 @@ const TRAILING_RE = /(?:复制打开.*)?[，。！？、；：）)\]}】》」'"
 
 const PLATFORM_HOSTS = {
   bilibili: ['b23.tv', 'www.bilibili.com', 'bilibili.com', 'm.bilibili.com'],
+  wechat_article: ['mp.weixin.qq.com'],
   xhs: ['xhslink.com', 'www.xiaohongshu.com', 'xiaohongshu.com', 'm.xiaohongshu.com'],
 };
 
@@ -38,6 +40,9 @@ export function detectPlatformFromUrl(url) {
   const hostname = hostFromUrl(url);
   if (hostMatches(hostname, PLATFORM_HOSTS.bilibili)) {
     return 'bilibili';
+  }
+  if (hostMatches(hostname, PLATFORM_HOSTS.wechat_article)) {
+    return 'wechat_article';
   }
   if (hostMatches(hostname, PLATFORM_HOSTS.xhs)) {
     return 'xhs';
@@ -101,7 +106,7 @@ export async function assertSafePlatformUrl(url, { platform = 'auto', options = 
   }
   const detected = detectPlatformFromUrl(parsed.toString());
   const expected = platform === 'auto' ? detected : platform;
-  if (!['bilibili', 'xhs'].includes(detected) || detected !== expected) {
+  if (!['bilibili', 'xhs', 'wechat_article'].includes(detected) || detected !== expected) {
     throw new MediaReaderError('UNSUPPORTED_PLATFORM', 'UNSUPPORTED_PLATFORM: URL host is not allowed for platform resolver', {
       platform: expected,
       url_host: parsed.hostname.toLowerCase(),
@@ -169,6 +174,13 @@ export async function resolveShortlink(url, { platform = 'auto', options = {}, e
       }
       continue;
     }
+    if (status >= 400) {
+      throw new MediaReaderError(errorCode, `${errorCode}: shortlink returned HTTP ${status}`, {
+        platform,
+        url_host: hostFromUrl(current),
+        http_status: status,
+      });
+    }
     if (response?.url && response.url !== current) {
       current = response.url;
       await assertSafePlatformUrl(current, { platform, options, errorCode });
@@ -222,10 +234,10 @@ export async function resolvePlatformMedia(args = {}, options = {}) {
   if (!originalUrl) {
     throw new MediaReaderError('NO_URL_FOUND', 'NO_URL_FOUND: no URL found in share text');
   }
-  const requestedPlatform = ['bilibili', 'xhs'].includes(args.platform) ? args.platform : 'auto';
+  const requestedPlatform = ['bilibili', 'xhs', 'wechat_article'].includes(args.platform) ? args.platform : 'auto';
   const detected = detectPlatformFromUrl(originalUrl);
   const platform = requestedPlatform === 'auto' ? detected : requestedPlatform;
-  if (!['bilibili', 'xhs'].includes(platform) || (detected !== 'unknown' && requestedPlatform !== 'auto' && detected !== platform)) {
+  if (!['bilibili', 'xhs', 'wechat_article'].includes(platform) || (detected !== 'unknown' && requestedPlatform !== 'auto' && detected !== platform)) {
     throw new MediaReaderError('UNSUPPORTED_PLATFORM', 'UNSUPPORTED_PLATFORM: unsupported social URL host', {
       platform,
       url_host: hostFromUrl(originalUrl),
@@ -237,6 +249,9 @@ export async function resolvePlatformMedia(args = {}, options = {}) {
   }
   if (platform === 'xhs') {
     return await resolveXhsMedia({ ...args, originalUrl }, options);
+  }
+  if (platform === 'wechat_article') {
+    return await resolveWechatArticle({ ...args, originalUrl }, options);
   }
   throw new MediaReaderError('UNSUPPORTED_PLATFORM', 'UNSUPPORTED_PLATFORM: unsupported social URL host', {
     url_host: hostFromUrl(originalUrl),

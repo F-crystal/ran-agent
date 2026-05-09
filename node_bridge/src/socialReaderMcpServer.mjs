@@ -27,6 +27,7 @@ const PLATFORM_HOSTS = [
   ['douyin', ['douyin.com', 'iesdouyin.com']],
   ['kuaishou', ['kuaishou.com', 'gifshow.com']],
   ['bilibili', ['bilibili.com', 'b23.tv']],
+  ['wechat_article', ['mp.weixin.qq.com']],
   ['netease_music', ['music.163.com', 'y.music.163.com', '163cn.tv']],
   ['weibo', ['weibo.com', 'weibo.cn']],
   ['zhihu', ['zhihu.com']],
@@ -1035,6 +1036,76 @@ async function readMusicShare(args = {}, options = {}) {
   }
 }
 
+async function readWechatArticlePost(args = {}, options = {}) {
+  const mediaResult = await callMediaReaderTool('resolve_platform_media', {
+    url_or_text: args.url || '',
+    platform: 'wechat_article',
+    media_detail: 'standard',
+    include_comments: false,
+    max_comments: 0,
+    max_assets: 20,
+  }, options);
+  const structured = mediaResult.structuredContent || {};
+  if (structured.ok === false || mediaResult.isError) {
+    return buildErrorResult(structured.error || structured.error_code || 'WECHAT_ARTICLE_EXTRACT_FAILED', {
+      platform: 'wechat_article',
+      captcha_detected: structured.captcha_detected === true,
+      error_code: structured.error_code || 'WECHAT_ARTICLE_EXTRACT_FAILED',
+      recovery_suggestion: structured.recovery_suggestion || '',
+      http_status: structured.http_status,
+    });
+  }
+  return buildTextResult({
+    ok: true,
+    platform: 'wechat_article',
+    url: structured.resolved_url_redacted || structured.original_url_redacted || args.url || '',
+    source: 'media_reader.resolve_platform_media',
+    include_comments: false,
+    max_comments: 0,
+    comments_supported: false,
+    post_text: structured.post_text || '',
+    comments_text: '',
+    platform_media: structured,
+  });
+}
+
+function partialSocialFailureResult({ platform, url, failure }) {
+  const errorCode = String(failure?.error_code || 'SOCIAL_READER_PARTIAL_FAILURE');
+  const partialFailure = {
+    asset_id: 'platform-1',
+    error_code: errorCode,
+    error: failure?.error || `${errorCode}: platform read failed`,
+    platform,
+    captcha_detected: failure?.captcha_detected === true,
+    recovery_suggestion: failure?.recovery_suggestion || '',
+  };
+  return buildTextResult({
+    ok: true,
+    partial: true,
+    platform,
+    url,
+    source: 'social_reader_partial_failure',
+    include_comments: false,
+    max_comments: 0,
+    media_detail: 'standard',
+    post_text: '',
+    comments_text: '',
+    media_assets: [],
+    media_analysis: {
+      ok: true,
+      partial: true,
+      items: [],
+      merged_summary: '',
+      timeline: [],
+      partial_failures: [partialFailure],
+      warnings: [errorCode],
+    },
+    deep_summary: '',
+    partial_failures: [partialFailure],
+    warnings: [errorCode, 'MEDIA_ANALYSIS_PARTIAL'],
+  });
+}
+
 async function readSocialPost(args = {}, options = {}) {
   const extracted = extractFirstUrl(args.url || '');
   if (!extracted.url) {
@@ -1067,6 +1138,10 @@ async function readSocialPost(args = {}, options = {}) {
 
   if (platform === 'netease_music') {
     return await readMusicShare(args, options);
+  }
+
+  if (platform === 'wechat_article') {
+    return await readWechatArticlePost(args, options);
   }
 
   if (platform === 'unknown') {
@@ -1154,7 +1229,14 @@ async function readSocialPostDeep(args = {}, options = {}) {
   const detectedPlatform = detectSocialPlatform(extracted.url || args.url || '');
   let socialResult = await readSocialPost(args, options);
   if (socialResult.structuredContent?.ok === false) {
-    if (['bilibili', 'xhs'].includes(detectedPlatform)) {
+    if (detectedPlatform === 'wechat_article') {
+      return partialSocialFailureResult({
+        platform: 'wechat_article',
+        url: extracted.url || args.url || '',
+        failure: socialResult.structuredContent || {},
+      });
+    }
+    if (['bilibili', 'xhs', 'wechat_article'].includes(detectedPlatform)) {
       const platformResult = await callMediaReaderTool('resolve_platform_media', {
         url_or_text: args.url || '',
         platform: detectedPlatform,
@@ -1177,7 +1259,11 @@ async function readSocialPostDeep(args = {}, options = {}) {
           platform_media: platformMedia,
         });
       } else {
-        return socialResult;
+        return partialSocialFailureResult({
+          platform: detectedPlatform,
+          url: extracted.url || args.url || '',
+          failure: platformResult.structuredContent || socialResult.structuredContent || {},
+        });
       }
     } else {
       return socialResult;

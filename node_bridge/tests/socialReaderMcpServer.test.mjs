@@ -46,6 +46,7 @@ test('detectSocialPlatform recognizes common Chinese social share hosts', () => 
   assert.equal(detectSocialPlatform('https://music.163.com/song?id=12345'), 'netease_music');
   assert.equal(detectSocialPlatform('https://y.music.163.com/m/song?id=12345'), 'netease_music');
   assert.equal(detectSocialPlatform('https://163cn.tv/6CuPb7V'), 'netease_music');
+  assert.equal(detectSocialPlatform('https://mp.weixin.qq.com/s/demo'), 'wechat_article');
 });
 
 test('read_social_post routes xhs content and comments through the configured xhs MCP', async () => {
@@ -207,6 +208,42 @@ test('read_social_post resolves b23 short links before calling bilibili MCP', as
       arguments: { bvid: 'BV1ZQRyBoEUs' },
     },
   ]);
+});
+
+test('read_social_post extracts WeChat article links from share text and reports captcha', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: '分享一篇文章\nhttps://mp.weixin.qq.com/s/demo，复制打开',
+        },
+      },
+    },
+    {
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        assert.equal(toolName, 'resolve_platform_media');
+        assert.equal(toolArgs.platform, 'wechat_article');
+        assert.equal(toolArgs.url_or_text, '分享一篇文章\nhttps://mp.weixin.qq.com/s/demo，复制打开');
+        return {
+          isError: true,
+          structuredContent: {
+            ok: false,
+            platform: 'wechat_article',
+            captcha_detected: true,
+            error_code: 'WECHAT_CAPTCHA_REQUIRED',
+            recovery_suggestion: '当前微信公众号文章触发微信验证码或动态加载限制。请在浏览器中打开文章后复制正文，或导出 PDF/截图上传；也可以配置已验证的 wechat-reader 浏览器会话后重试。',
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.platform, 'wechat_article');
+  assert.equal(result.structuredContent.error_code, 'WECHAT_CAPTCHA_REQUIRED');
+  assert.equal(result.structuredContent.captcha_detected, true);
 });
 
 test('read_music_share reads netease song share text through configured API base', async () => {
