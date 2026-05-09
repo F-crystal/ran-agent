@@ -419,12 +419,13 @@ async function analyzeVideo(args = {}, options = {}) {
     // No transcript: fall back to video download for B站 (if explicitly enabled),
     // or return metadata-only for other platforms.
     if (isBilibili && shouldDownloadBilibiliForAnalysis(options.env || process.env)) {
+      const analysisArgs = { ...args, include_ocr: false };
       const asset = await downloadBilibiliVideoForAnalysis({
         url: resolved.resolved_url || videoInput,
         bvid: sanitized.metadata?.bvid || '',
         maxSeconds: args.max_seconds,
       }, options);
-      const videoAnalysis = await analyzeVideoWithFfmpeg(asset, { ...options, args });
+      const videoAnalysis = await analyzeVideoWithFfmpeg(asset, { ...options, args: analysisArgs });
       const asr = subtitleText
         ? { transcript: subtitleText, source: sanitized.transcript_source }
         : (videoAnalysis.asr || {});
