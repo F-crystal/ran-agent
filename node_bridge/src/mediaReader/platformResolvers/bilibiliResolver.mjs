@@ -138,6 +138,13 @@ function providerFromOptions(options = {}) {
   return options.platformProviders?.bilibili;
 }
 
+function providerModeFromEnv(env = process.env) {
+  const value = String(env.PERSONAL_AGENT_BILIBILI_PROVIDER || '').trim().toLowerCase();
+  if (['ytdlp', 'yt-dlp', 'yt_dlp'].includes(value)) return 'ytdlp';
+  if (['mcp', 'bilibili-mcp', 'backend_mcp'].includes(value)) return 'mcp';
+  return 'auto';
+}
+
 async function resolveWithMcp({ originalUrl, resolvedUrl, bvid, page, args, maxAssets }, options = {}) {
   const env = options.env || process.env;
   let result;
@@ -291,8 +298,21 @@ export async function resolveBilibiliMedia(args = {}, options = {}) {
         max_assets: maxAssets,
       });
     } else {
-      providerResult = await resolveWithMcp({ originalUrl, resolvedUrl, bvid, page, args, maxAssets }, options)
-        || await resolveWithYtdlp({ resolvedUrl, bvid, page, maxAssets }, options);
+      const providerMode = providerModeFromEnv(env);
+      if (providerMode === 'ytdlp') {
+        providerResult = await resolveWithYtdlp({ resolvedUrl, bvid, page, maxAssets }, options);
+      } else if (providerMode === 'mcp') {
+        providerResult = await resolveWithMcp({ originalUrl, resolvedUrl, bvid, page, args, maxAssets }, options);
+        if (!providerResult) {
+          throw new MediaReaderError('PLATFORM_RESOLVER_NOT_CONFIGURED', 'PLATFORM_RESOLVER_NOT_CONFIGURED: Bilibili MCP provider is not configured', bilibiliErrorExtra({
+            code: 'PLATFORM_RESOLVER_NOT_CONFIGURED',
+            env,
+          }));
+        }
+      } else {
+        providerResult = await resolveWithMcp({ originalUrl, resolvedUrl, bvid, page, args, maxAssets }, options)
+          || await resolveWithYtdlp({ resolvedUrl, bvid, page, maxAssets }, options);
+      }
     }
   } catch (error) {
     if (error instanceof MediaReaderError) {

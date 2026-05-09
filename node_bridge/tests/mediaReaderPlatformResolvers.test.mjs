@@ -197,6 +197,42 @@ test('resolve_platform_media maps yt-dlp HTTP 412 and passes redaction-sensitive
   assert.ok(calls[0].args.includes('Cookie: SESSDATA=secret-sessdata'));
 });
 
+test('resolve_platform_media honors PERSONAL_AGENT_BILIBILI_PROVIDER=ytdlp over MCP config', async () => {
+  let mcpCalled = false;
+  let execCalled = false;
+  const result = await callResolve(
+    { url_or_text: 'https://www.bilibili.com/video/BV1xx411c7mD', platform: 'bilibili' },
+    {
+      env: {
+        PERSONAL_AGENT_BILIBILI_PROVIDER: 'ytdlp',
+        PERSONAL_AGENT_BILIBILI_MCP_COMMAND: 'npx',
+        PERSONAL_AGENT_BILIBILI_MCP_ARGS_JSON: '["-y","@wangshunnn/bilibili-mcp-server"]',
+        PERSONAL_AGENT_YTDLP_PATH: 'yt-dlp',
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      mcpCallImpl: async () => {
+        mcpCalled = true;
+        throw new Error('MCP should not be called when provider=ytdlp');
+      },
+      execFileImpl: async () => {
+        execCalled = true;
+        return {
+          stdout: JSON.stringify({
+            title: 'yt-dlp title',
+            description: 'yt-dlp description',
+            thumbnail: 'https://i0.hdslb.com/bfs/archive/cover.jpg',
+          }),
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.metadata.title, 'yt-dlp title');
+  assert.equal(mcpCalled, false);
+  assert.equal(execCalled, true);
+});
+
 test('resolve_platform_media maps Bilibili forbidden and auth stderr to explicit errors', async () => {
   const forbidden = await callResolve(
     { url_or_text: 'https://www.bilibili.com/video/BV1xx411c7mD', platform: 'bilibili' },
