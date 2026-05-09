@@ -33,6 +33,12 @@
         "scripts/start_social_reader_mcp.sh"
       ]
     },
+    "mimo_power": {
+      "command": "bash",
+      "args": [
+        "scripts/start_mimo_power_mcp.sh"
+      ]
+    },
     "tavily": {
       "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=${TAVILY_API_KEY}"
     }

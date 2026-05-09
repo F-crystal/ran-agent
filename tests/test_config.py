@@ -262,6 +262,16 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(social_reader["args"], ["scripts/start_social_reader_mcp.sh"])
         self.assertNotIn("~", json.dumps(social_reader, ensure_ascii=False))
 
+    def test_repo_mcp_config_registers_mimo_power_wrapper_without_home_shortcuts(self) -> None:
+        mcp_path = Path(__file__).resolve().parents[1] / ".mcp.json"
+        mcp_data = json.loads(mcp_path.read_text(encoding="utf-8"))
+
+        mimo_power = mcp_data["mcpServers"]["mimo_power"]
+
+        self.assertEqual(mimo_power["command"], "bash")
+        self.assertEqual(mimo_power["args"], ["scripts/start_mimo_power_mcp.sh"])
+        self.assertNotIn("~", json.dumps(mimo_power, ensure_ascii=False))
+
     def test_openclaw_personal_system_registers_playwright_mcp_wrapper(self) -> None:
         config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
         config_data = json.loads(config_path.read_text(encoding="utf-8"))
@@ -281,6 +291,21 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(social_reader["command"], "bash")
         self.assertEqual(social_reader["args"], ["scripts/start_social_reader_mcp.sh"])
         self.assertNotIn("~", json.dumps(social_reader, ensure_ascii=False))
+
+    def test_openclaw_personal_system_registers_mimo_power_mcp_without_changing_frontline_model(self) -> None:
+        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
+        config_data = json.loads(config_path.read_text(encoding="utf-8"))
+
+        mimo_power = config_data["mcp"]["servers"]["mimo_power"]
+
+        self.assertEqual(mimo_power["command"], "bash")
+        self.assertEqual(mimo_power["args"], ["scripts/start_mimo_power_mcp.sh"])
+        self.assertNotIn("~", json.dumps(mimo_power, ensure_ascii=False))
+        self.assertEqual(config_data["agents"]["defaults"]["model"]["primary"], "qwen3.5-plus")
+        self.assertEqual(config_data["agents"]["defaults"]["model"]["fallbacks"], [])
+        self.assertEqual(config_data["agents"]["list"][0]["model"]["primary"], "qwen3.5-plus")
+        self.assertEqual(config_data["agents"]["list"][0]["model"]["fallbacks"], [])
+        self.assertEqual(list(config_data["models"]["providers"].keys()), ["claude_code"])
 
     def test_openclaw_disables_bundled_browser_plugin_when_playwright_mcp_is_registered(self) -> None:
         config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"

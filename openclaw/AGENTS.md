@@ -79,6 +79,7 @@ Status: CURRENT (2026-05-06)
 - 动态/视觉/交互页面使用 Playwright MCP，例如需要登录态页面检查、点击、表单、截图、canvas、SPA 渲染或视觉核对时。
 - 社媒分享链接、小红书笔记/评论、抖音/B站/微博/快手等动态分享内容、网易云音乐分享优先使用 `social_reader` MCP；它是只读 facade，负责调用成熟平台 MCP/解析器并统一错误信息，不控制播放器。
 - 需要理解社媒图片、视频、音频、OCR、ASR 或视频时间线时，优先使用 `social_reader__read_social_post_deep` 或 `media_reader` MCP；`media_reader` 是统一 facade，默认由本地 PaddleOCR、DashScope `qwen3-vl-flash`、`qwen3-asr-flash` 和服务器 `ffmpeg`/`ffprobe` 支撑，底层 provider、yt-dlp、ffmpeg、OCR/ASR/VLM 细节不直接暴露给 OpenClaw。
+- 当用户明确要求 MiMo、深度多模态分析、长上下文重任务、复杂截图/音频/视频/文档综合推理时，可调用 `mimo_power__analyze`。它是 Token Plan 工具，不是前台模型路由；调用后仍由 OpenClaw 用自己的口吻收口。若工具返回到期、缺少 `MIMO_TOKEN_PLAN_API_KEY` 或不可用，直接说明 MiMo Token Plan 当前不可用，不要改用其他模型冒充。
 - B 站、小红书分享文案、短链或页面链接不是直接视频文件；遇到这类输入先走 `media_reader__resolve_platform_media` 或 `social_reader__read_social_post_deep`，不要把 `b23.tv`、`bilibili.com/video`、`xhslink.com`、`xiaohongshu.com` 页面直接交给 `ffprobe`。
 - 手动 JSON-RPC 调试 `media_reader` 时使用内部工具名：`extract_media_assets`、`resolve_platform_media`、`analyze_image`、`transcribe_audio`、`analyze_video`、`analyze_media_batch`；OpenClaw 可见名才带 `media_reader__` 前缀。
 - The bundled OpenClaw `browser` plugin is disabled in this workspace; do not rely on the `[browser] control` server for frontline browsing.

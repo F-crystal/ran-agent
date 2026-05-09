@@ -320,5 +320,68 @@ class StartSocialReaderMcpScriptTest(unittest.TestCase):
         self.assertIn("xhs_cookie=a1=demo", logged_argv)
 
 
+class StartMimoPowerMcpScriptTest(unittest.TestCase):
+    def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        clean_env = {
+            "PATH": f"{env['PATH']}:/usr/bin:/bin",
+            "HOME": env.get("HOME", tempfile.gettempdir()),
+        }
+        for key in (
+            "MIMO_POWER_NODE_BIN",
+            "MIMO_TOKEN_PLAN_API_KEY",
+            "MIMO_TOKEN_PLAN_OPENAI_BASE_URL",
+            "MIMO_TOKEN_PLAN_EXPIRES_AT",
+            "MIMO_POWER_MODEL",
+            "MIMO_POWER_TASK_DIR",
+        ):
+            if key in env:
+                clean_env[key] = env[key]
+
+        return subprocess.run(
+            ["/bin/bash", str(ROOT_DIR / "scripts" / "start_mimo_power_mcp.sh")],
+            cwd=ROOT_DIR,
+            env=clean_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def test_mimo_power_wrapper_runs_node_facade_with_independent_env(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            log_path = temp_path / "argv.log"
+            fake_node = temp_path / "node"
+            fake_node.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    printf '%s\\n' "$*" > "{log_path}"
+                    printf 'model=%s\\n' "${{MIMO_POWER_MODEL:-}}" >> "{log_path}"
+                    printf 'key_present=%s\\n' "$(test -n "${{MIMO_TOKEN_PLAN_API_KEY:-}}" && printf yes || printf no)" >> "{log_path}"
+                    exit 0
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_node.chmod(0o755)
+
+            result = self.run_script(
+                {
+                    "PATH": temp_dir,
+                    "MIMO_POWER_NODE_BIN": str(fake_node),
+                    "MIMO_TOKEN_PLAN_API_KEY": "tp-secret",
+                    "MIMO_POWER_MODEL": "mimo-v2.5-pro",
+                }
+            )
+            logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("node_bridge/src/mimoPowerMcpServer.mjs", logged_argv)
+        self.assertIn("model=mimo-v2.5-pro", logged_argv)
+        self.assertIn("key_present=yes", logged_argv)
+        self.assertNotIn("tp-secret", logged_argv)
+
+
 if __name__ == "__main__":
     unittest.main()
