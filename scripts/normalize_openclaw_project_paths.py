@@ -96,13 +96,14 @@ def normalize_payload_paths(
             cli_backends = defaults.get("cliBackends")
             if isinstance(cli_backends, dict):
                 claude_cli = cli_backends.get("claude-cli")
-                if (
-                    isinstance(claude_cli, dict)
-                    and claude_command
-                    and claude_cli.get("command") != claude_command
-                ):
-                    claude_cli["command"] = claude_command
-                    changed = True
+                if isinstance(claude_cli, dict):
+                    existing = claude_cli.get("command")
+                    # Only set command when missing/empty; never overwrite an
+                    # existing settings provider name (e.g. 'claude') with a
+                    # resolved system absolute path (e.g. '/usr/bin/claude').
+                    if not existing and claude_command:
+                        claude_cli["command"] = claude_command
+                        changed = True
 
         agent_list = agents.get("list")
         if isinstance(agent_list, list):

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  createInboundMessageBuffer,
   handleWeChatTextMessage,
   mapWeChatMessageToBridgeRequest,
   sanitizeReplyText,
@@ -202,8 +203,9 @@ test('handleWeChatTextMessage can return structured reply metadata', async () =>
   });
 });
 
-test('handleWeChatTextMessage forwards image-only message to backend', async () => {
-  let receivedPayload;
+test('handleWeChatTextMessage holds image-only message in buffer', async () => {
+  const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
+  let backendCalled = false;
   const reply = await handleWeChatTextMessage(
     {
       text: '',
@@ -216,39 +218,87 @@ test('handleWeChatTextMessage forwards image-only message to backend', async () 
     },
     {
       fallbackText: 'fallback text',
+      buffer,
       logger: {
         info() {},
         warn() {},
         error() {},
+        log() {},
       },
       backend: {
-        async getReply(payload) {
-          receivedPayload = payload;
+        async getReply() {
+          backendCalled = true;
           return { replyText: '这是图片内容。' };
         },
       },
     }
   );
 
-  assert.equal(reply, '这是图片内容。');
-  assert.deepEqual(receivedPayload, {
-    text: '',
-    sender_id: 'wx-user-image-only',
-    channel: 'wechat',
-    image_urls: [],
-    media: [
-      {
+  // Media-only message should be held, not forwarded
+  assert.equal(reply, '');
+  assert.equal(backendCalled, false);
+  const stats = buffer.getStats();
+  assert.equal(stats.entries.length, 1);
+  assert.equal(stats.entries[0].pendingCount, 1);
+  buffer.clear();
+});
+
+test('handleWeChatTextMessage merges held image with subsequent text-ref', async () => {
+  const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
+  let receivedPayload;
+
+  // First: image-only (held)
+  const holdReply = await handleWeChatTextMessage(
+    {
+      text: '',
+      media: {
         filePath: '/tmp/from-media.png',
         mimeType: 'image/png',
         type: 'image',
       },
-    ],
-    route_hint: 'vision_understand',
-  });
+      conversationId: 'wx-user-merge',
+    },
+    {
+      buffer,
+      logger: { info() {}, warn() {}, error() {}, log() {} },
+      backend: {
+        async getReply(payload) {
+          receivedPayload = payload;
+          return { replyText: '已分析。' };
+        },
+      },
+    }
+  );
+  assert.equal(holdReply, '');
+
+  // Then: text-ref (merges with held media)
+  const mergeReply = await handleWeChatTextMessage(
+    {
+      text: '用 mimo 读一下',
+      conversationId: 'wx-user-merge',
+    },
+    {
+      buffer,
+      logger: { info() {}, warn() {}, error() {}, log() {} },
+      backend: {
+        async getReply(payload) {
+          receivedPayload = payload;
+          return { replyText: '图片内容是...' };
+        },
+      },
+    }
+  );
+
+  assert.equal(mergeReply, '图片内容是...');
+  assert.ok(receivedPayload.media);
+  assert.equal(receivedPayload.media.length, 1);
+  assert.equal(receivedPayload.media[0].filePath, '/tmp/from-media.png');
+  buffer.clear();
 });
 
-test('handleWeChatTextMessage forwards audio-only message to backend', async () => {
-  let receivedPayload;
+test('handleWeChatTextMessage holds audio-only message in buffer', async () => {
+  const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
+  let backendCalled = false;
   const reply = await handleWeChatTextMessage(
     {
       text: '',
@@ -261,35 +311,25 @@ test('handleWeChatTextMessage forwards audio-only message to backend', async () 
     },
     {
       fallbackText: 'fallback text',
+      buffer,
       logger: {
         info() {},
         warn() {},
         error() {},
+        log() {},
       },
       backend: {
-        async getReply(payload) {
-          receivedPayload = payload;
+        async getReply() {
+          backendCalled = true;
           return { replyText: '收到音频。' };
         },
       },
     }
   );
 
-  assert.equal(reply, '收到音频。');
-  assert.deepEqual(receivedPayload, {
-    text: '',
-    sender_id: 'wx-user-audio-only',
-    channel: 'wechat',
-    image_urls: [],
-    media: [
-      {
-        filePath: '/tmp/from-media.m4a',
-        mimeType: 'audio/mp4',
-        type: 'audio',
-      },
-    ],
-    route_hint: '',
-  });
+  assert.equal(reply, '');
+  assert.equal(backendCalled, false);
+  buffer.clear();
 });
 
 test('handleWeChatTextMessage returns fallback when python call fails', async () => {

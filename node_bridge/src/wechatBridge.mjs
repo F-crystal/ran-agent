@@ -3,6 +3,24 @@
  */
 
 import { createReplyBackend } from './replyBackend.mjs';
+import { createInboundMessageBuffer } from './inboundMessageBuffer.mjs';
+
+export { createInboundMessageBuffer } from './inboundMessageBuffer.mjs';
+
+let _defaultBuffer = null;
+
+function getDefaultBuffer(env, logger) {
+  if (!_defaultBuffer) {
+    _defaultBuffer = createInboundMessageBuffer({
+      logger,
+      mediaReplyGraceMs: Number(env?.WECHAT_MEDIA_REPLY_GRACE_MS || 12000),
+      textRefWaitMs: Number(env?.WECHAT_TEXT_REF_WAIT_MS || 8000),
+      pendingMediaTtlMs: Number(env?.WECHAT_PENDING_MEDIA_TTL_MS || 600000),
+      mediaOnlyIdleReply: String(env?.WECHAT_MEDIA_ONLY_IDLE_REPLY || 'false').toLowerCase() === 'true',
+    });
+  }
+  return _defaultBuffer;
+}
 
 export function mapWeChatMessageToBridgeRequest(message) {
   const imageUrls = extractImageUrlsFromWeChatRequest(message);
@@ -51,9 +69,19 @@ export async function handleWeChatTextMessage(message, options = {}) {
     return options.fallbackText || '暂时无法连接到 personal agent，请稍后再试。';
   }
 
+  // Turn aggregation: buffer media-only messages, merge with text-ref
+  const buffer = options.buffer || getDefaultBuffer(options.env, logger);
+  const buffered = await buffer.processInbound(payload);
+  if (buffered.action === 'hold') {
+    logger.log?.(`[buffer] media held sender=${payload.sender_id} pending=${buffered.pendingMediaCount || 0}`);
+    return '';
+  }
+  const mergedPayload = buffered.payload;
+
   try {
-    logger.info?.(`handling wechat message sender_id=${payload.sender_id} channel=${payload.channel}`);
-    const response = await backend.getReply(payload, {
+    const mediaMerged = Array.isArray(mergedPayload.media) ? mergedPayload.media.length : 0;
+    logger.info?.(`handling wechat message sender_id=${mergedPayload.sender_id} channel=${mergedPayload.channel} media_merged=${mediaMerged}`);
+    const response = await backend.getReply(mergedPayload, {
       fetchImpl: options.fetchImpl,
     });
     const replyText = sanitizeReplyText(response.replyText, {
