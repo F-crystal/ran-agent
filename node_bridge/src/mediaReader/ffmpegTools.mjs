@@ -116,10 +116,29 @@ export async function analyzeVideoWithFfmpeg(asset, options = {}) {
     .map((name) => path.join(workDir, name));
 
   const frames = [];
+  const warnings = [];
   for (let index = 0; index < framePaths.length; index += 1) {
     const frameAsset = frameAssetFromPath(framePaths[index], asset);
-    const ocr = includeOcr ? await analyzeImageOcr(frameAsset, options) : { text: '', blocks: [], model: '' };
-    const vision = includeVlm ? await analyzeImageVision(frameAsset, options) : { summary: '', objects: [], model: '' };
+    let ocr = { text: '', blocks: [], model: '' };
+    if (includeOcr) {
+      try {
+        ocr = await analyzeImageOcr(frameAsset, options);
+      } catch (error) {
+        const code = error instanceof MediaReaderError ? error.error_code : 'OCR_FAILED';
+        warnings.push(code);
+        ocr.model = code === 'OCR_TIMEOUT' ? 'paddleocr_timeout' : code;
+      }
+    }
+    let vision = { summary: '', objects: [], model: '' };
+    if (includeVlm) {
+      try {
+        vision = await analyzeImageVision(frameAsset, options);
+      } catch (error) {
+        const code = error instanceof MediaReaderError ? error.error_code : 'VLM_FAILED';
+        warnings.push(code);
+        vision.model = code;
+      }
+    }
     frames.push({
       frame_index: index,
       content_sha256: frameAsset.content_sha256,
@@ -132,7 +151,6 @@ export async function analyzeVideoWithFfmpeg(asset, options = {}) {
   }
 
   let asr = {};
-  const warnings = [];
   if (includeAudio) {
     const audioPath = path.join(workDir, 'audio.wav');
     try {
