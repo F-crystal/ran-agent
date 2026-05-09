@@ -67,7 +67,7 @@ WeChat ──┬── inbound ──► Node Bridge ──► OpenClaw Agent Ru
 
 - **MCP Facade Pattern.** OpenClaw sees clean, stable tools (`media_reader__analyze_video`, `social_reader__read_social_post_deep`, etc.). Behind each facade are platform resolvers, provider adapters, and format converters. Tools don't leak internals to the agent.
 
-- **Subtitle-First Video Understanding.** Videos are analyzed through three tiers: downloadable subtitles (~2s), VLM frame analysis when subtitles aren't available (~15s), and metadata-only as a last resort (~1s). No blind frame dumping on long videos.
+- **Subtitle-First Video Understanding.** Four-tier progressive fallback: downloadable subtitles (~2s) → audio-only ASR transcription (~10s) → keyframe VLM analysis without OCR (~30s) → metadata as last resort (~1s). Long videos never blindly download full files.
 
 - **Local-First Everything.** State in SQLite. Knowledge in Obsidian vault. Conversations on your machine. No cloud database, no hosted service, no telemetry. Single-user by design — there is no user management, no RBAC, no API rate limiting, because there's only you.
 
