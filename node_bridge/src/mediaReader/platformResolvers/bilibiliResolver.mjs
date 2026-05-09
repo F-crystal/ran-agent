@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { MediaReaderError, hostFromUrl, redactUrl } from '../assetResolver.mjs';
@@ -296,6 +297,100 @@ async function resolveWithMcp({ originalUrl, resolvedUrl, bvid, page, args, maxA
   };
 }
 
+function vttToPlainText(vtt) {
+  return String(vtt || '')
+    .split(/\r?\n\r?\n/)
+    .filter((cue) => /\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[.,]\d{3}/.test(cue))
+    .map((cue) => {
+      const lines = cue.split(/\r?\n/);
+      return lines
+        .slice(1)
+        .map((line) => line.replace(/<[^>]+>/g, '').trim())
+        .filter(Boolean)
+        .join(' ');
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+function srtToPlainText(srt) {
+  return String(srt || '')
+    .split(/\r?\n\r?\n/)
+    .filter((cue) => /^\d+$/m.test(cue.split(/\r?\n/)[0]))
+    .map((cue) => {
+      const lines = cue.split(/\r?\n/);
+      return lines
+        .slice(2)
+        .map((line) => line.replace(/<[^>]+>/g, '').trim())
+        .filter(Boolean)
+        .join(' ');
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+async function extractSubtitlesFromYtdlp({ resolvedUrl, bvid }, options = {}) {
+  const env = options.env || process.env;
+  const ytdlpPath = String(env.PERSONAL_AGENT_YTDLP_PATH || '').trim();
+  if (!ytdlpPath) return null;
+  const execFileImpl = options.execFileImpl || execFileAsync;
+  const runtime = ytdlpRuntimeContext(env);
+  const workDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ran-bili-subs-'));
+  try {
+    const args = [
+      '--skip-download',
+      '--no-warnings',
+      '--write-subs',
+      '--write-auto-subs',
+      '--sub-langs',
+      'zh-Hans,zh-CN,zh,ai-zh',
+      '--sub-format',
+      'vtt/srt',
+      '--paths',
+      workDir,
+      '-o',
+      '%(id)s.%(ext)s',
+    ];
+    if (runtime.proxy) args.push('--proxy', runtime.proxy);
+    if (runtime.sessdata) args.push('--add-header', `Cookie: SESSDATA=${runtime.sessdata}`);
+    args.push(resolvedUrl);
+    await execFileImpl(ytdlpPath, args, {
+      timeout: Number(env.PERSONAL_AGENT_PLATFORM_RESOLVE_TIMEOUT_MS || 15000),
+      maxBuffer: 10 * 1024 * 1024,
+    });
+  } catch {
+    return null;
+  }
+  const subtitleFiles = fs.readdirSync(workDir)
+    .filter((name) => /\.(vtt|srt)$/i.test(name))
+    .sort()
+    .map((name) => path.join(workDir, name));
+  const texts = [];
+  for (const filePath of subtitleFiles) {
+    try {
+      const raw = fs.readFileSync(filePath, 'utf-8');
+      const isVtt = /\.vtt$/i.test(filePath);
+      const text = isVtt ? vttToPlainText(raw) : srtToPlainText(raw);
+      if (text) {
+        const lang = path.basename(filePath).match(/\.([a-z]{2}(?:-[A-Za-z]+)?)\.(?:vtt|srt)$/i)?.[1] || '';
+        texts.push({ text, lang, source: isVtt ? 'vtt' : 'srt' });
+      }
+    } catch {
+      // ignore unreadable subtitle files
+    }
+  }
+  try { fs.rmSync(workDir, { recursive: true, force: true }); } catch { /* ignore */ }
+  if (!texts.length) return null;
+  const primary = texts.find((t) => ['zh-Hans', 'zh-CN', 'zh', 'ai-zh'].includes(t.lang)) || texts[0];
+  return {
+    text: primary.text,
+    source: `yt-dlp/${primary.source}`,
+    available: texts.map((t) => ({ lang: t.lang, source: t.source })),
+  };
+}
+
 async function resolveWithYtdlp({ resolvedUrl, bvid, page, maxAssets }, options = {}) {
   const env = options.env || process.env;
   const ytdlpPath = String(env.PERSONAL_AGENT_YTDLP_PATH || '').trim();
@@ -334,6 +429,12 @@ async function resolveWithYtdlp({ resolvedUrl, bvid, page, maxAssets }, options 
     if (thumbnail) {
       media.push({ type: 'cover', url: thumbnail, mime: 'image/jpeg' });
     }
+    const hasAnyCaptions = (payload.subtitles && Object.keys(payload.subtitles).length > 0)
+      || (payload.automatic_captions && Object.keys(payload.automatic_captions).length > 0);
+    let subtitle = null;
+    if (hasAnyCaptions) {
+      subtitle = await extractSubtitlesFromYtdlp({ resolvedUrl, bvid }, options);
+    }
     return {
       metadata: {
         title: payload.title || '',
@@ -344,7 +445,7 @@ async function resolveWithYtdlp({ resolvedUrl, bvid, page, maxAssets }, options 
       },
       post_text: payload.description || payload.title || '',
       media: normalizeMedia(media, maxAssets),
-      subtitle: null,
+      subtitle,
     };
   } catch (error) {
     if (error?.code === 'ENOENT') {

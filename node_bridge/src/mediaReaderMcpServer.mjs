@@ -359,8 +359,66 @@ async function analyzeVideo(args = {}, options = {}) {
       max_assets: args.max_assets || 20,
     }, options);
     const sanitized = sanitizePlatformResult(resolved);
-    const subtitleText = sanitized.subtitle?.text || '';
-    if (sanitized.platform === 'bilibili' && shouldDownloadBilibiliForAnalysis(options.env || process.env)) {
+    const subtitle = sanitized.subtitle;
+    const subtitleText = subtitle?.text || '';
+    const isBilibili = sanitized.platform === 'bilibili';
+
+    // Subtitle-first path: when real transcript/subtitle text exists, skip video download.
+    // For B站: requires yt-dlp subtitle extraction. For XHS/others: post_text IS the note content.
+    const hasTranscript = Boolean(subtitleText);
+    const hasXhsTextContent = sanitized.platform === 'xhs' && sanitized.post_text && sanitized.post_text.length > 60;
+    const hasTextContent = hasTranscript || hasXhsTextContent;
+    const effectiveTranscript = subtitleText || (hasXhsTextContent ? sanitized.post_text : '');
+
+    if (hasTextContent) {
+      const warnings = [...sanitized.warnings];
+      let coverSummary = '';
+      const coverMedia = sanitized.media?.find((m) => m.type === 'cover' || m.type === 'image');
+      if (coverMedia?.url) {
+        try {
+          const coverAsset = await downloadMediaAsset({ url: coverMedia.url, expectedKind: 'image' }, options);
+          if (coverAsset.type === 'image') {
+            const vision = await analyzeImageVision(coverAsset, options);
+            coverSummary = String(vision.summary || '');
+          }
+        } catch {
+          warnings.push('COVER_ANALYSIS_FAILED');
+        }
+      }
+      const visualSummary = [sanitized.post_text !== effectiveTranscript ? sanitized.post_text : '', coverSummary].filter(Boolean).join('\n');
+      const overallSummary = [
+        `Title: ${sanitized.metadata?.title || sanitized.metadata?.note_id || ''}`,
+        sanitized.metadata?.uploader ? `Uploader: ${sanitized.metadata.uploader}` : '',
+        sanitized.metadata?.duration_seconds ? `Duration: ${Math.round(sanitized.metadata.duration_seconds)}s` : '',
+        visualSummary ? `\nDescription: ${visualSummary}` : '',
+        coverSummary ? `\nVisual: ${coverSummary}` : '',
+        effectiveTranscript ? `\nTranscript:\n${effectiveTranscript}` : '',
+      ].filter(Boolean).join('\n');
+      const transcriptSource = subtitleText ? sanitized.transcript_source : (sanitized.post_text ? 'post_text' : 'none');
+      return {
+        ok: true,
+        type: 'platform_video',
+        platform: sanitized.platform,
+        resolver: sanitized.resolver,
+        analysis_mode: 'transcript_first',
+        metadata: sanitized.metadata,
+        platform_media: sanitized,
+        asr: { transcript: subtitleText, source: transcriptSource },
+        frames: [],
+        timeline: [],
+        visual_summary: visualSummary,
+        audio_summary: subtitleText || sanitized.post_text,
+        overall_summary: overallSummary,
+        transcript_source: transcriptSource,
+        visual_source: coverSummary ? 'thumbnail_vlm' : sanitized.visual_source,
+        cache_hit: false,
+        warnings,
+      };
+    }
+
+    // No transcript: fall back to video download for B站 (if explicitly enabled),
+    // or return metadata-only for other platforms.
+    if (isBilibili && shouldDownloadBilibiliForAnalysis(options.env || process.env)) {
       const asset = await downloadBilibiliVideoForAnalysis({
         url: resolved.resolved_url || videoInput,
         bvid: sanitized.metadata?.bvid || '',
@@ -377,6 +435,7 @@ async function analyzeVideo(args = {}, options = {}) {
         type: 'platform_video',
         platform: sanitized.platform,
         resolver: sanitized.resolver,
+        analysis_mode: 'frame_extraction',
         metadata: {
           ...sanitized.metadata,
           ...(videoAnalysis.metadata || {}),
@@ -400,6 +459,7 @@ async function analyzeVideo(args = {}, options = {}) {
       type: 'platform_video',
       platform: sanitized.platform,
       resolver: sanitized.resolver,
+      analysis_mode: 'metadata_only',
       metadata: sanitized.metadata,
       platform_media: sanitized,
       asr: subtitleText ? { transcript: subtitleText, source: sanitized.transcript_source } : {},
@@ -411,7 +471,7 @@ async function analyzeVideo(args = {}, options = {}) {
       transcript_source: sanitized.transcript_source,
       visual_source: sanitized.visual_source,
       cache_hit: false,
-      warnings: sanitized.warnings,
+      warnings: isBilibili ? [...sanitized.warnings, 'SUBTITLE_NOT_FOUND'] : sanitized.warnings,
     };
   }
   const asset = await downloadMediaAsset({ url: args.url, expectedKind: 'video' }, options);
