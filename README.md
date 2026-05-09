@@ -1,242 +1,246 @@
-<p align="right"><a href="README_zh.md">中文</a> | <b>English</b></p>
+<p align="right"><b>中文</b> | <a href="README_en.md">English</a></p>
 
 # Ran Agent
 
-**A local-first personal AI agent that lives in WeChat, understands social media content, and manages knowledge — all on infrastructure you control.**
+**一个运行在微信里的本地优先个人 AI 助手，能理解社交媒体内容、管理知识——所有数据都在你自己的服务器上。**
 
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent connects WeChat to an LLM-powered conversation runtime with memory, reflection, and multi-modal understanding. Share a Bilibili link or a Xiaohongshu post, and the agent actually reads it — extracting subtitles from videos, running vision-language models on frames, and transcribing audio. Everything runs on a single server you own.
+Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入 LLM 对话引擎，加上记忆和反思能力，再通过多模态理解管线让 Agent"看见"内容——发给它一个 B站链接或小红书帖子，它真的会去看、去读、去总结。一切在你自己的服务器上运行。
 
 ---
 
-## Table of Contents
+## 目录
 
-- [What It Does](#what-it-does)
-- [Architecture](#architecture)
-- [MCP Services](#mcp-services)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Project Structure](#project-structure)
-- [Testing](#testing)
-- [Platform Support](#platform-support)
-- [License](#license)
-- [Privacy](#privacy)
-
----
-
-## What It Does
-
-**WeChat Agent.** Messages flow `WeChat → Node bridge → OpenClaw agent runtime → Claude/Qwen → reply`. Natural conversation, not prompt-and-response. The agent remembers past conversations and evolves its persona over time.
-
-**Social Media Understanding.** Drop a Bilibili video, a Xiaohongshu note, or a WeChat article link into chat. The agent resolves the platform, extracts content, and summarizes it for you:
-
-- Bilibili: subtitle extraction (manual + AI-generated), cover image VLM, video frame analysis, ASR fallback
-- Xiaohongshu: note text extraction, image understanding, video metadata, comment reading
-- WeChat Articles: content parsing, captcha detection, structured degradation
-
-**Knowledge Management.** An Obsidian vault stores structured knowledge. The Python backend runs periodic maintenance jobs — organizing notes, updating the knowledge index, and keeping the vault current. No dumping everything into a prompt window.
-
-**Memory and Reflection.** The agent builds a working memory across conversations. A nightly reflection cycle reviews the day's interactions and suggests persona refinements. You stay in control of what sticks and what fades.
+- [能做什么](#能做什么)
+- [架构](#架构)
+- [MCP 服务](#mcp-服务)
+- [快速开始](#快速开始)
+- [配置说明](#配置说明)
+- [项目结构](#项目结构)
+- [测试](#测试)
+- [平台支持](#平台支持)
+- [许可证](#许可证)
+- [隐私](#隐私)
 
 ---
 
-## Architecture
+## 能做什么
+
+**微信 Agent。** 消息路径：`微信 → Node Bridge → OpenClaw Agent → Claude/Qwen → 回复`。像跟朋友聊天，不像在提示词框里打字。Agent 会记住你们的对话，并在长期交互中演化自己的性格。
+
+**社交媒体理解。** 把 B站视频、小红书笔记、微信公众号文章链接发到对话框里，Agent 会解析内容并总结给你：
+
+- B站：字幕提取（人工字幕 + AI 生成字幕）、封面图视觉理解、视频帧分析、语音转写兜底
+- 小红书：笔记正文提取、图片内容理解、视频元数据、评论读取
+- 微信公众号：正文解析、验证码识别、结构化降级
+
+**知识管理。** Obsidian 知识库存储结构化知识，Python 后端定期运行维护任务——整理笔记、更新知识索引、保持知识库更新。不需要把全部内容塞进 prompt。
+
+**记忆与反思。** Agent 在对话中构建工作记忆。每晚运行反思周期，回顾当天互动，提出性格微调建议。你始终控制哪些内容被记住、哪些被遗忘。
+
+---
+
+## 架构
 
 ```
-WeChat ──┬── inbound ──► Node Bridge ──► OpenClaw Agent Runtime ──► Claude/Qwen
-         │                    ▲                │    │    │
-         │                    │                │    │    └──► media_generation
-         │                    │                │    └───────► social_reader
-         │                    │                └────────────► media_reader
-         │                    │
-         └── outbound ◄── Node Bridge ◄── reply ◄────────────┘
-                              ▲
-                              │
-                    Python Backend
-                    ┌─────────┼─────────┐
-                    │ memory  │ scheduler│
-                    │ knowledge│ todo    │
-                    │ reflection         │
-                    └────────────────────┘
+微信 ──┬── 消息接入 ──► Node Bridge ──► OpenClaw Agent ──► Claude/Qwen
+       │                    ▲               │    │    │
+       │                    │               │    │    └──► media_generation
+       │                    │               │    └───────► social_reader
+       │                    │               └────────────► media_reader
+       │                    │
+       └── 消息发出 ◄── Node Bridge ◄── 回复 ◄───────────┘
+                            ▲
+                            │
+                  Python 后端服务
+                  ┌─────────┼─────────┐
+                  │ 记忆    │ 调度器   │
+                  │ 知识库  │ 待办     │
+                  │ 反思              │
+                  └────────────────────┘
 ```
 
-**Key Design Decisions:**
+**关键设计决策：**
 
-- **MCP Facade Pattern.** OpenClaw sees clean, stable tools (`media_reader__analyze_video`, `social_reader__read_social_post_deep`, etc.). Behind each facade are platform resolvers, provider adapters, and format converters. Tools don't leak internals to the agent.
+- **MCP 门面模式。** OpenClaw 只看到 6 个干净稳定的工具（`media_reader__analyze_video` 等），背后是平台解析器、Provider 适配器、格式转换器。内部细节不泄露给 Agent。
 
-- **Subtitle-First Video Understanding.** Videos are analyzed through three tiers: downloadable subtitles (~2s), VLM frame analysis when subtitles aren't available (~15s), and metadata-only as a last resort (~1s). No blind frame dumping on long videos.
+- **字幕优先的视频理解。** 三级策略：优先提取可下载字幕（~2秒），无字幕时 VLM 逐帧分析（~15秒），最后降级为纯元数据返回（~1秒）。长视频不盲目抽帧。
 
-- **Local-First Everything.** State in SQLite. Knowledge in Obsidian vault. Conversations on your machine. No cloud database, no hosted service, no telemetry. Single-user by design — there is no user management, no RBAC, no API rate limiting, because there's only you.
-
----
-
-## MCP Services
-
-The agent's capabilities are organized as MCP (Model Context Protocol) services. Each service exposes a focused set of tools to OpenClaw.
-
-### Built-in Services
-
-**`media_reader`** — The agent's eyes and ears for media content.
-
-| Tool | Description |
-|------|-------------|
-| `extract_media_assets` | Extract media URLs from social text or message content |
-| `analyze_image` | OCR + vision-language model analysis of images |
-| `resolve_platform_media` | Resolve Bilibili/XHS/WeChat links into normalized media |
-| `transcribe_audio` | Speech-to-text transcription with language detection |
-| `analyze_video` | Video analysis: metadata, subtitle extraction, frame VLM, ASR |
-| `analyze_media_batch` | Batch analysis with partial-failure tolerance |
-
-**`social_reader`** — Platform-aware social content reading.
-
-| Tool | Description |
-|------|-------------|
-| `resolve_social_url` | Identify platform and extract canonical URL from share text |
-| `read_social_post` | Read a social media post with platform-specific extraction |
-| `read_social_post_deep` | Deep read: resolve platform media + analyze all assets |
-| `read_music_share` | Parse shared music links (NetEase, etc.) |
-| `check_social_login` | Check platform authentication status |
-
-**`media_generation`** — Create sendable media for WeChat responses.
-
-| Tool | Description |
-|------|-------------|
-| `generate_image` | Generate images via Qwen image generation |
-| `generate_speech` | Text-to-speech audio generation |
-
-**`ombre_brain`** — Emotional memory system for long-term memory management.
-
-| Tool | Description |
-|------|-------------|
-| `breath` | Recall memories by emotional relevance |
-| `trace` | Trace memory associations and connections |
-| `pulse` | Surface active/emotionally charged memories |
-| `hold` | Store a long-term memory entry |
-| `grow` | Store a core (identity-forming) memory |
-
-Implements Russell's valence/arousal model, Ebbinghaus forgetting curve, and Obsidian-compatible Markdown storage.
-
-### External Services
-
-| Service | Description |
-|---------|-------------|
-| `playwright` | Browser automation for web interaction |
-| `time` | Timezone-aware time and date queries |
-| `tavily` | Web search via Tavily API |
+- **数据完全本地。** 状态存 SQLite，知识存 Obsidian Vault，聊天记录在你的机器上。没有云数据库、没有托管服务、没有遥测。单用户设计——没有用户管理、权限控制、API 限流，因为只有你一个人用。
 
 ---
 
-## Quick Start
+## MCP 服务
 
-**Prerequisites:** Node.js ≥22, Python ≥3.10, ffmpeg, ffprobe
+Agent 的能力以 MCP（模型上下文协议）服务的形式组织，每个服务向 OpenClaw 暴露一组聚焦的工具。
+
+### 自建服务
+
+**`media_reader`** — Agent 的"眼睛和耳朵"。
+
+| 工具 | 描述 |
+|------|------|
+| `extract_media_assets` | 从社交文本或消息中提取媒体 URL |
+| `analyze_image` | 图片 OCR + 视觉语言模型分析 |
+| `resolve_platform_media` | 解析 B站/小红书/微信链接为标准化媒体 |
+| `transcribe_audio` | 语音转文字，支持语言检测 |
+| `analyze_video` | 视频分析：元数据、字幕提取、帧 VLM、语音转写 |
+| `analyze_media_batch` | 批量分析，支持部分失败容错 |
+
+**`social_reader`** — 平台感知的社交内容阅读。
+
+| 工具 | 描述 |
+|------|------|
+| `resolve_social_url` | 识别平台，从分享文案中提取规范 URL |
+| `read_social_post` | 读取社交帖子，平台特定的内容提取 |
+| `read_social_post_deep` | 深度读取：解析平台媒体 + 分析所有资源 |
+| `read_music_share` | 解析音乐分享链接（网易云等） |
+| `check_social_login` | 检查平台认证状态 |
+
+**`media_generation`** — 为微信回复生成可发送的媒体。
+
+| 工具 | 描述 |
+|------|------|
+| `generate_image` | 通过 Qwen 生成图片 |
+| `generate_speech` | 文字转语音 |
+
+**`ombre_brain`** — 情感记忆系统，用于长期记忆管理。
+
+| 工具 | 描述 |
+|------|------|
+| `breath` | 按情感相关性召回记忆 |
+| `trace` | 追踪记忆关联和连接 |
+| `pulse` | 浮现活跃/高情感记忆 |
+| `hold` | 存储长期记忆条目 |
+| `grow` | 存储核心（身份形成性）记忆 |
+
+实现 Russell 效价/唤醒度模型、Ebbinghaus 遗忘曲线、Obsidian 兼容 Markdown 存储。
+
+<sub>集成自 [P0luz/Ombre-Brain](https://github.com/P0luz/Ombre-Brain)，直接作为记忆管理 MCP 使用。</sub>
+
+### 外部服务
+
+| 服务 | 描述 |
+|------|------|
+| `playwright` | 浏览器自动化，用于网页交互 |
+| `time` | 时区感知的时间和日期查询 |
+| `tavily` | 通过 Tavily API 进行网页搜索 |
+
+---
+
+## 快速开始
+
+**前提：** Node.js ≥22，Python ≥3.10，ffmpeg，ffprobe
 
 ```bash
 git clone https://github.com/F-crystal/ran-agent.git
 cd ran-agent
 
-# Install dependencies
+# 安装依赖
 npm install
 python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
 
-# Configure credentials
+# 配置凭据
 cp .env.example .env.local
-# Edit .env.local — at minimum you need ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN
+# 编辑 .env.local — 最少需要 ANTHROPIC_BASE_URL 和 ANTHROPIC_AUTH_TOKEN
 ```
 
-Then start each service in its own terminal:
+三个终端分别启动：
 
 ```bash
-./start_openclaw.sh       # Agent runtime
-./start_python.sh          # Backend services (memory, scheduler, knowledge)
-cd node_bridge && ./start_node.sh  # WeChat bridge
+./start_openclaw.sh       # Agent 运行时
+./start_python.sh          # 后端服务（记忆、调度、知识库）
+cd node_bridge && ./start_node.sh  # 微信 Bridge
 ```
 
-For production deployment on a server, see `local_archive/docs/deployment/` for systemd unit files and server configuration guides.
+服务器部署参考 `local_archive/docs/deployment/` 目录下的 systemd unit 文件和部署指南。
 
 ---
 
-## Configuration
+## 配置说明
 
-All configuration lives in `.env.local` (never committed). Key variables:
+所有配置在 `.env.local` 中（不提交到 Git）。复制模板并根据需要填写：
 
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_BASE_URL` | Claude-compatible API endpoint |
-| `ANTHROPIC_AUTH_TOKEN` | API authentication token |
-| `OPENCLAW_GATEWAY_TOKEN` | OpenClaw gateway auth |
-| `DASHSCOPE_API_KEY` | DashScope provider key (VLM, ASR, image generation) |
-| `TAVILY_API_KEY` | Web search API key |
-| `PERSONAL_AGENT_VISION_PROVIDER` | Vision model provider (default: `dashscope-qwen-vl`) |
-| `PERSONAL_AGENT_VISION_MODEL` | Vision model (default: `qwen3-vl-flash`) |
-| `PERSONAL_AGENT_ASR_PROVIDER` | ASR provider (default: `dashscope-asr`) |
-| `PERSONAL_AGENT_BILIBILI_ENABLED` | Enable Bilibili platform resolver |
-| `PERSONAL_AGENT_XHS_ENABLED` | Enable Xiaohongshu platform resolver |
-| `PERSONAL_AGENT_YTDLP_PATH` | Path to yt-dlp binary (for Bilibili extraction) |
-| `PERSONAL_AGENT_FFMPEG_PATH` | Path to ffmpeg (for video processing) |
+```bash
+cp .env.example .env.local
+```
 
-For the full configuration reference, see `local_archive/docs/deployment/`.
+配置按模块分组：
+
+| 模块 | 关键变量 | 说明 |
+|------|----------|------|
+| 模型 Provider | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` | Claude 兼容 API（必填） |
+| 视觉理解 | `PERSONAL_AGENT_VISION_PROVIDER`, `PERSONAL_AGENT_VISION_MODEL` | 默认 `dashscope-qwen-vl` / `qwen3-vl-flash` |
+| 语音识别 | `PERSONAL_AGENT_ASR_PROVIDER`, `PERSONAL_AGENT_ASR_MODEL` | 默认 `dashscope-asr` / `qwen3-asr-flash` |
+| 网页搜索 | `TAVILY_API_KEY` | Tavily 搜索 API |
+| B站 | `PERSONAL_AGENT_BILIBILI_ENABLED`, `PERSONAL_AGENT_YTDLP_PATH` | yt-dlp 路径 + 代理/认证 |
+| 小红书 | `PERSONAL_AGENT_XHS_ENABLED`, `PERSONAL_AGENT_XHS_PROVIDER` | 后端 MCP 或 social reader |
+| 视频处理 | `PERSONAL_AGENT_FFMPEG_PATH`, `PERSONAL_AGENT_FFPROBE_PATH` | ffmpeg/ffprobe 路径 |
+| 缓存/并发 | `PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY`, `PERSONAL_AGENT_MEDIA_CACHE_DIR` | 批次并发数、缓存目录 |
+
+完整变量列表见 `.env.example`。
 
 ---
 
-## Project Structure
+## 项目结构
 
 ```
 ran_agent/
-├── openclaw/                    # OpenClaw agent config and runtime
-├── node_bridge/                 # WeChat bridge + MCP facade servers
+├── openclaw/                    # OpenClaw Agent 配置和运行时
+├── node_bridge/                 # 微信 Bridge + MCP 门面服务
 │   └── src/
-│       ├── mediaReader/         # OCR, VLM, ASR, ffmpeg, platform resolvers
-│       │   └── platformResolvers/  # Bilibili, XHS, WeChat resolvers
+│       ├── mediaReader/         # OCR、VLM、ASR、ffmpeg、平台解析器
+│       │   └── platformResolvers/  # B站、小红书、微信公众号解析器
 │       ├── socialReaderMcpServer.mjs
 │       ├── mediaReaderMcpServer.mjs
 │       ├── mediaGenerationMcpServer.mjs
-│       └── wechatBridge.mjs     # WeChat inbound/outbound message handling
-├── src/personal_agent/          # Python backend
-│   ├── memory.py                # Conversation memory
-│   ├── knowledge_agent.py       # Knowledge extraction and vault management
-│   ├── scheduler.py             # Cron job scheduler
-│   └── night_cycle.py           # Nightly reflection and persona evolution
-├── skills/                      # On-demand operational skills
-├── scripts/                     # Startup scripts, deploy tooling
-├── vault/                       # Obsidian knowledge vault (templates only)
-├── docs/governance/             # Runtime constraints and status
-└── local_archive/               # Deployment guides (private, not in git)
+│       └── wechatBridge.mjs     # 微信消息收发处理
+├── src/personal_agent/          # Python 后端
+│   ├── memory.py                # 对话记忆
+│   ├── knowledge_agent.py       # 知识提取和 Vault 管理
+│   ├── scheduler.py             # 定时任务调度
+│   └── night_cycle.py           # 夜间反思和性格演化
+├── skills/                      # 按需加载的专业技能
+├── scripts/                     # 启动脚本、部署工具
+├── vault/                       # Obsidian 知识库（仅模板）
+├── docs/governance/             # 运行时约束和状态
+└── local_archive/               # 部署指南（私有，不入 Git）
 ```
 
 ---
 
-## Testing
+## 测试
 
 ```bash
-# Python tests
+# Python 测试
 PYTHONPATH=src pytest -q tests/
 
-# Node.js tests
+# Node.js 测试
 npm --prefix node_bridge test
 ```
 
 ---
 
-## Platform Support
+## 平台支持
 
-| Platform | Resolver | Subtitles | Video Frames | Auth Support |
-|----------|----------|-----------|--------------|--------------|
-| Bilibili | yt-dlp + MCP | manual + AI-generated | VLM frame analysis | SESSDATA cookie |
-| Xiaohongshu | Backend MCP | note text as content | cover image VLM | Cookie auth |
-| WeChat Articles | HTML fetch + parser | article body | — | Login-free |
-| Direct media URLs | ffmpeg + DashScope | ASR transcription | VLM frame analysis | — |
-
----
-
-## License
-
-PolyForm Noncommercial License 1.0.0 — free for personal use, research, and learning. Commercial use requires permission. See [LICENSE.md](LICENSE.md).
+| 平台 | 解析方式 | 字幕 | 视频帧 | 认证支持 |
+|------|----------|------|--------|----------|
+| B站 | yt-dlp + MCP | 人工 + AI | VLM 逐帧分析 | SESSDATA Cookie |
+| 小红书 | 后端 MCP | 笔记正文 | 封面图 VLM | Cookie 认证 |
+| 微信公众号 | HTML 抓取 + 解析 | 文章正文 | — | 无需登录 |
+| 直接媒体链接 | ffmpeg + DashScope | ASR 转写 | VLM 逐帧分析 | — |
 
 ---
 
-## Privacy
+## 许可证
 
-This is a personal agent. None of these should ever enter version control: `.env.local`, `.openclaw_state/`, chat logs, cookies, API keys, vault content, state databases. The `.gitignore` is configured to block these by default — always verify before making your fork public.
+PolyForm Noncommercial License 1.0.0 — 个人使用、研究和学习免费。商业使用需授权。详见 [LICENSE.md](LICENSE.md)。
+
+---
+
+## 隐私
+
+这是一个个人 Agent。以下内容永远不应进入版本控制：`.env.local`、`.openclaw_state/`、聊天记录、Cookie、API 密钥、Vault 内容、状态数据库。`.gitignore` 已默认阻止这些文件——在公开你的 Fork 前务必再次确认。

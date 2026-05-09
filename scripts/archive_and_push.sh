@@ -203,7 +203,7 @@ ensure_no_sensitive_tracked() {
     [ -n "$path" ] || continue
     [ -e "$ROOT_DIR/$path" ] || continue
     case "$path" in
-      .env|.env.*|.env.local|.openclaw_state/*|.openclaw_state|data/*|data|logs/*|logs|debug/*|debug|state/*|state|local_archive/*|local_archive|docs/deployment/*|docs/deployment|docs/governance/archive/*|docs/governance/archive|vault/inbox/*|vault/inbox|vault/raw/*|vault/raw|vault/wiki/*|vault/wiki|vault/.obsidian/workspace.json|vault/.qwen/settings.json|vault/.qwen/settings.json.orig|.npm/*|.npm|.pytest_cache/*|.pytest_cache|.venv/*|.venv|node_modules/*|node_modules|__pycache__/*|__pycache__|*.pyc)
+      .env|.env.local|.openclaw_state/*|.openclaw_state|data/*|data|logs/*|logs|debug/*|debug|state/*|state|local_archive/*|local_archive|docs/deployment/*|docs/deployment|docs/governance/archive/*|docs/governance/archive|vault/inbox/*|vault/inbox|vault/raw/*|vault/raw|vault/wiki/*|vault/wiki|vault/.obsidian/workspace.json|vault/.qwen/settings.json|vault/.qwen/settings.json.orig|.npm/*|.npm|.pytest_cache/*|.pytest_cache|.venv/*|.venv|node_modules/*|node_modules|__pycache__/*|__pycache__|*.pyc)
         bad+=("$path")
         ;;
     esac
@@ -248,7 +248,7 @@ ensure_no_forbidden_staged() {
       continue
     fi
     case "$path" in
-      .env|.env.*|.env.local|.openclaw_state/*|.openclaw_state|data/*|data|logs/*|logs|debug/*|debug|state/*|state|local_archive/*|local_archive|docs/deployment/*|docs/deployment|docs/governance/archive/*|docs/governance/archive|vault/inbox/*|vault/inbox|vault/raw/*|vault/raw|vault/wiki/*|vault/wiki|vault/.obsidian/workspace.json|vault/.qwen/settings.json|vault/.qwen/settings.json.orig|.npm/*|.npm|.pytest_cache/*|.pytest_cache|.venv/*|.venv|node_modules/*|node_modules|__pycache__/*|__pycache__|*.pyc)
+      .env|.env.local|.openclaw_state/*|.openclaw_state|data/*|data|logs/*|logs|debug/*|debug|state/*|state|local_archive/*|local_archive|docs/deployment/*|docs/deployment|docs/governance/archive/*|docs/governance/archive|vault/inbox/*|vault/inbox|vault/raw/*|vault/raw|vault/wiki/*|vault/wiki|vault/.obsidian/workspace.json|vault/.qwen/settings.json|vault/.qwen/settings.json.orig|.npm/*|.npm|.pytest_cache/*|.pytest_cache|.venv/*|.venv|node_modules/*|node_modules|__pycache__/*|__pycache__|*.pyc)
         bad+=("$path")
         ;;
     esac
