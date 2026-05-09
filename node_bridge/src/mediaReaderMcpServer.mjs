@@ -12,6 +12,10 @@ import {
   resolvePlatformMedia,
   sanitizePlatformResult,
 } from './mediaReader/platformResolvers/index.mjs';
+import {
+  downloadBilibiliVideoForAnalysis,
+  shouldDownloadBilibiliForAnalysis,
+} from './mediaReader/platformResolvers/bilibiliResolver.mjs';
 
 const SERVER_INFO = {
   name: 'ran-agent-media-reader',
@@ -356,6 +360,41 @@ async function analyzeVideo(args = {}, options = {}) {
     }, options);
     const sanitized = sanitizePlatformResult(resolved);
     const subtitleText = sanitized.subtitle?.text || '';
+    if (sanitized.platform === 'bilibili' && shouldDownloadBilibiliForAnalysis(options.env || process.env)) {
+      const asset = await downloadBilibiliVideoForAnalysis({
+        url: resolved.resolved_url || videoInput,
+        bvid: sanitized.metadata?.bvid || '',
+        maxSeconds: args.max_seconds,
+      }, options);
+      const videoAnalysis = await analyzeVideoWithFfmpeg(asset, { ...options, args });
+      const asr = subtitleText
+        ? { transcript: subtitleText, source: sanitized.transcript_source }
+        : (videoAnalysis.asr || {});
+      const visualSummary = String(videoAnalysis.visual_summary || sanitized.post_text || sanitized.metadata?.title || '');
+      const audioSummary = subtitleText || String(videoAnalysis.audio_summary || asr.transcript || '');
+      return {
+        ok: true,
+        type: 'platform_video',
+        platform: sanitized.platform,
+        resolver: sanitized.resolver,
+        metadata: {
+          ...sanitized.metadata,
+          ...(videoAnalysis.metadata || {}),
+        },
+        platform_media: sanitized,
+        content_sha256: asset.content_sha256,
+        asr,
+        frames: Array.isArray(videoAnalysis.frames) ? videoAnalysis.frames : [],
+        timeline: Array.isArray(videoAnalysis.timeline) ? videoAnalysis.timeline : [],
+        visual_summary: visualSummary,
+        audio_summary: audioSummary,
+        overall_summary: [sanitized.post_text, visualSummary, audioSummary].filter(Boolean).join('\n'),
+        transcript_source: subtitleText ? sanitized.transcript_source : (asr.transcript ? 'asr' : sanitized.transcript_source),
+        visual_source: videoAnalysis.frames?.length ? 'video_frames' : sanitized.visual_source,
+        cache_hit: false,
+        warnings: [...sanitized.warnings, ...(Array.isArray(videoAnalysis.warnings) ? videoAnalysis.warnings : [])],
+      };
+    }
     return {
       ok: true,
       type: 'platform_video',
@@ -445,29 +484,45 @@ async function callTool(name, args = {}, options = {}) {
           const sanitized = sanitizePlatformResult(resolved);
           const childItems = [];
           const childWarnings = [...sanitized.warnings];
-          for (const media of (resolved.media || []).slice(0, Number(args.max_assets || 20))) {
+          if (sanitized.platform === 'bilibili' && shouldDownloadBilibiliForAnalysis(options.env || process.env)) {
             try {
-              if ((media.type === 'image' || media.type === 'cover') && media.url) {
-                childItems.push(await analyzeImage({ url: media.url, ocr: true, vlm: args.media_detail !== 'basic', media_detail: args.media_detail || 'standard' }, {
-                  ...options,
-                  mediaDetail: args.media_detail || 'standard',
-                }));
-              } else if (media.type === 'audio' && media.url) {
-                childItems.push(await transcribeAudio({ url: media.url, timestamps: true }, options));
-              } else if (media.type === 'video' && media.url) {
-                childItems.push(await analyzeVideo({ url: media.url, max_frames: args.max_frames_per_video }, options));
-              } else if (media.type === 'subtitle') {
-                childItems.push({
-                  ok: true,
-                  type: 'subtitle',
-                  transcript: media.text || sanitized.subtitle?.text || '',
-                  warnings: [],
-                });
-              } else {
-                childWarnings.push({ code: 'UNSUPPORTED_MEDIA_TYPE', asset_id: media.asset_id || '' });
-              }
+              childItems.push(await analyzeVideo({
+                url: asset.url_or_text || asset.url || '',
+                platform: asset.platform || 'bilibili',
+                media_detail: args.media_detail || 'standard',
+                include_audio: true,
+                include_ocr: true,
+                include_vlm: args.media_detail !== 'basic',
+                max_frames: args.max_frames_per_video,
+              }, options));
             } catch (error) {
-              childWarnings.push({ code: errorCodeFor(error, 'MEDIA_ANALYSIS_FAILED'), asset_id: media.asset_id || '' });
+              childWarnings.push({ code: errorCodeFor(error, 'MEDIA_ANALYSIS_FAILED'), asset_id: asset.asset_id || '' });
+            }
+          } else {
+            for (const media of (resolved.media || []).slice(0, Number(args.max_assets || 20))) {
+              try {
+                if ((media.type === 'image' || media.type === 'cover') && media.url) {
+                  childItems.push(await analyzeImage({ url: media.url, ocr: true, vlm: args.media_detail !== 'basic', media_detail: args.media_detail || 'standard' }, {
+                    ...options,
+                    mediaDetail: args.media_detail || 'standard',
+                  }));
+                } else if (media.type === 'audio' && media.url) {
+                  childItems.push(await transcribeAudio({ url: media.url, timestamps: true }, options));
+                } else if (media.type === 'video' && media.url) {
+                  childItems.push(await analyzeVideo({ url: media.url, max_frames: args.max_frames_per_video }, options));
+                } else if (media.type === 'subtitle') {
+                  childItems.push({
+                    ok: true,
+                    type: 'subtitle',
+                    transcript: media.text || sanitized.subtitle?.text || '',
+                    warnings: [],
+                  });
+                } else {
+                  childWarnings.push({ code: 'UNSUPPORTED_MEDIA_TYPE', asset_id: media.asset_id || '' });
+                }
+              } catch (error) {
+                childWarnings.push({ code: errorCodeFor(error, 'MEDIA_ANALYSIS_FAILED'), asset_id: media.asset_id || '' });
+              }
             }
           }
           const summaries = childItems

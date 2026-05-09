@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   buildMediaReaderTools,
@@ -491,6 +494,89 @@ test('analyze_video returns explicit Bilibili 412 instead of retrying as direct 
   assert.match(result.structuredContent.recovery_suggestion, /SESSDATA|代理|字幕文本/);
 });
 
+test('analyze_video downloads a bounded Bilibili segment for ffmpeg analysis when enabled', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bilibili-analysis-'));
+  const calls = [];
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_video',
+        arguments: {
+          url: 'https://www.bilibili.com/video/BV1xx411c7mD',
+          max_frames: 1,
+          max_seconds: 180,
+        },
+      },
+    },
+    {
+      env: {
+        PERSONAL_AGENT_MEDIA_CACHE_DIR: tempDir,
+        PERSONAL_AGENT_BILIBILI_PROVIDER: 'ytdlp',
+        PERSONAL_AGENT_YTDLP_PATH: '/fake/yt-dlp',
+        PERSONAL_AGENT_YTDLP_PROXY: 'socks5h://127.0.0.1:10808',
+        PERSONAL_AGENT_BILIBILI_DOWNLOAD_FOR_ANALYSIS: 'true',
+        PERSONAL_AGENT_BILIBILI_ANALYSIS_MAX_SECONDS: '12',
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async (command, args) => {
+        calls.push([command, ...args]);
+        assert.equal(command, '/fake/yt-dlp');
+        if (args.includes('--dump-json')) {
+          return {
+            stdout: JSON.stringify({
+              title: 'B站标题',
+              thumbnail: 'https://i0.hdslb.com/bfs/archive/cover.jpg',
+              description: 'B站简介',
+              duration: 102,
+              uploader: 'UP主',
+            }),
+            stderr: '',
+          };
+        }
+        if (args.includes('--download-sections')) {
+          assert.ok(args.includes('--proxy'));
+          assert.ok(args.includes('socks5h://127.0.0.1:10808'));
+          assert.equal(args[args.indexOf('--download-sections') + 1], '*0-12');
+          const outputDir = args[args.indexOf('--paths') + 1];
+          const filePath = path.join(outputDir, 'BV1xx411c7mD.mp4');
+          fs.mkdirSync(outputDir, { recursive: true });
+          fs.writeFileSync(filePath, Buffer.from('fake mp4'));
+          return { stdout: `${filePath}\n`, stderr: '' };
+        }
+        throw new Error(`unexpected yt-dlp args ${args.join(' ')}`);
+      },
+      ffmpegProvider: {
+        analyzeVideo: async (asset) => {
+          assert.equal(asset.type, 'video');
+          assert.equal(asset.mime, 'video/mp4');
+          assert.ok(asset.file_path.endsWith('.mp4'));
+          return {
+            metadata: { duration_seconds: 12, width: 640, height: 360 },
+            frames: [{ frame_index: 0, scene_summary: '视频画面摘要', ocr_text: '', objects: [] }],
+            asr: { transcript: '视频音频转写' },
+            timeline: [{ frame_index: 0, summary: '视频画面摘要' }],
+            visual_summary: '视频画面摘要',
+            audio_summary: '视频音频转写',
+            overall_summary: '视频画面摘要\n视频音频转写',
+            warnings: [],
+          };
+        },
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.type, 'platform_video');
+  assert.equal(result.structuredContent.platform, 'bilibili');
+  assert.equal(result.structuredContent.frames.length, 1);
+  assert.equal(result.structuredContent.frames[0].scene_summary, '视频画面摘要');
+  assert.equal(result.structuredContent.asr.transcript, '视频音频转写');
+  assert.equal(result.structuredContent.platform_media.metadata.title, 'B站标题');
+  assert.ok(calls.some((call) => call.includes('--dump-json')));
+  assert.ok(calls.some((call) => call.includes('--download-sections')));
+});
+
 test('analyze_media_batch keeps platform resolver and single media failures partial', async () => {
   const result = await handleMediaReaderMcpRequest(
     {
@@ -516,6 +602,77 @@ test('analyze_media_batch keeps platform resolver and single media failures part
   assert.ok(Array.isArray(result.structuredContent.partial_failures));
   assert.ok(result.structuredContent.partial_failures.length >= 1);
   assert.ok(result.structuredContent.warnings.length >= 1);
+});
+
+test('analyze_media_batch analyzes a Bilibili platform video when download analysis is enabled', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'bilibili-batch-analysis-'));
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_media_batch',
+        arguments: {
+          assets: [
+            { asset_id: 'platform-1', type: 'platform', url: 'https://www.bilibili.com/video/BV1xx411c7mD', platform: 'bilibili' },
+          ],
+          max_frames_per_video: 1,
+          media_detail: 'standard',
+        },
+      },
+    },
+    {
+      env: {
+        PERSONAL_AGENT_MEDIA_CACHE_DIR: tempDir,
+        PERSONAL_AGENT_BILIBILI_PROVIDER: 'ytdlp',
+        PERSONAL_AGENT_YTDLP_PATH: '/fake/yt-dlp',
+        PERSONAL_AGENT_YTDLP_PROXY: 'socks5h://127.0.0.1:10808',
+        PERSONAL_AGENT_BILIBILI_DOWNLOAD_FOR_ANALYSIS: 'true',
+        PERSONAL_AGENT_BILIBILI_ANALYSIS_MAX_SECONDS: '12',
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async (command, args) => {
+        assert.equal(command, '/fake/yt-dlp');
+        if (args.includes('--dump-json')) {
+          return {
+            stdout: JSON.stringify({
+              title: 'B站标题',
+              thumbnail: 'https://i0.hdslb.com/bfs/archive/cover.jpg',
+              description: 'B站简介',
+              duration: 102,
+              uploader: 'UP主',
+            }),
+            stderr: '',
+          };
+        }
+        if (args.includes('--download-sections')) {
+          const outputDir = args[args.indexOf('--paths') + 1];
+          const filePath = path.join(outputDir, 'BV1xx411c7mD.mp4');
+          fs.mkdirSync(outputDir, { recursive: true });
+          fs.writeFileSync(filePath, Buffer.from('fake mp4'));
+          return { stdout: `${filePath}\n`, stderr: '' };
+        }
+        throw new Error(`unexpected yt-dlp args ${args.join(' ')}`);
+      },
+      ffmpegProvider: {
+        analyzeVideo: async () => ({
+          metadata: { duration_seconds: 12 },
+          frames: [{ frame_index: 0, scene_summary: '批量视频画面摘要', ocr_text: '', objects: [] }],
+          asr: { transcript: '批量视频音频转写' },
+          timeline: [{ frame_index: 0, summary: '批量视频画面摘要' }],
+          visual_summary: '批量视频画面摘要',
+          audio_summary: '批量视频音频转写',
+          overall_summary: '批量视频画面摘要\n批量视频音频转写',
+          warnings: [],
+        }),
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.items.length, 1);
+  assert.equal(result.structuredContent.items[0].items[0].frames[0].scene_summary, '批量视频画面摘要');
+  assert.match(result.structuredContent.items[0].overall_summary, /批量视频音频转写/);
 });
 
 test('analyze_media_batch keeps Bilibili 412 as a partial failure', async () => {

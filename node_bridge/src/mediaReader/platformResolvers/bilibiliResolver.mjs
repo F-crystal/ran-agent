@@ -1,6 +1,9 @@
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import { promisify } from 'node:util';
-import { MediaReaderError, hostFromUrl } from '../assetResolver.mjs';
+import { MediaReaderError, hostFromUrl, redactUrl } from '../assetResolver.mjs';
+import { createCacheStore, sha256Bytes } from '../cacheStore.mjs';
 import {
   assertSafePlatformUrl,
   detectPlatformFromUrl,
@@ -37,6 +40,22 @@ function boolFromEnv(env, key, fallback) {
 function normalizeMaxAssets(value) {
   const parsed = Number(value);
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), 100) : 20;
+}
+
+function normalizeAnalysisSeconds(value, env = process.env) {
+  const configured = Number(env.PERSONAL_AGENT_BILIBILI_ANALYSIS_MAX_SECONDS || 60);
+  const cap = Number.isFinite(configured) && configured > 0 ? configured : 60;
+  const requested = Number(value || cap);
+  const seconds = Number.isFinite(requested) && requested > 0 ? requested : cap;
+  return Math.min(Math.floor(seconds), Math.floor(cap), 600);
+}
+
+function mimeForVideoFile(filePath) {
+  const extension = path.extname(String(filePath || '')).toLowerCase();
+  if (extension === '.webm') return 'video/webm';
+  if (extension === '.mkv') return 'video/x-matroska';
+  if (extension === '.mov') return 'video/quicktime';
+  return 'video/mp4';
 }
 
 function extractBvid(url) {
@@ -99,11 +118,111 @@ function ytdlpRuntimeContext(env = process.env) {
   };
 }
 
+export function shouldDownloadBilibiliForAnalysis(env = process.env) {
+  return boolFromEnv(env, 'PERSONAL_AGENT_BILIBILI_DOWNLOAD_FOR_ANALYSIS', false);
+}
+
 function recoverySuggestionFor(code) {
   if (code === 'BILIBILI_AUTH_REQUIRED' || code === 'MEDIA_DOWNLOAD_FORBIDDEN' || code === 'BILIBILI_VIP_REQUIRED') {
     return BILIBILI_AUTH_RECOVERY_SUGGESTION;
   }
   return BILIBILI_RECOVERY_SUGGESTION;
+}
+
+export async function downloadBilibiliVideoForAnalysis({ url, bvid = '', maxSeconds }, options = {}) {
+  const env = options.env || process.env;
+  const ytdlpPath = String(env.PERSONAL_AGENT_YTDLP_PATH || '').trim();
+  if (!ytdlpPath) {
+    throw new MediaReaderError('PLATFORM_RESOLVER_NOT_CONFIGURED', 'PLATFORM_RESOLVER_NOT_CONFIGURED: yt-dlp path is not configured for Bilibili analysis', bilibiliErrorExtra({
+      code: 'PLATFORM_RESOLVER_NOT_CONFIGURED',
+      env,
+    }));
+  }
+  await assertSafePlatformUrl(url, { platform: 'bilibili', options });
+  const cache = options.cacheStore || createCacheStore(env);
+  const parentDir = path.join(cache.rootDir, 'platform-downloads');
+  fs.mkdirSync(parentDir, { recursive: true });
+  const workDir = fs.mkdtempSync(path.join(parentDir, 'bilibili-'));
+  const runtime = ytdlpRuntimeContext(env);
+  const seconds = normalizeAnalysisSeconds(maxSeconds, env);
+  const format = String(env.PERSONAL_AGENT_BILIBILI_ANALYSIS_FORMAT || 'bv*+ba/b').trim() || 'bv*+ba/b';
+  const ytdlpArgs = [
+    '--no-playlist',
+    '--no-warnings',
+    '-f',
+    format,
+    '--download-sections',
+    `*0-${seconds}`,
+    '--force-keyframes-at-cuts',
+    '--remux-video',
+    'mp4',
+    '--paths',
+    workDir,
+    '-o',
+    '%(id)s.%(ext)s',
+    '--print',
+    'after_move:filepath',
+    '--no-simulate',
+  ];
+  const ffmpegPath = String(env.PERSONAL_AGENT_FFMPEG_PATH || '').trim();
+  if (ffmpegPath) {
+    ytdlpArgs.push('--ffmpeg-location', ffmpegPath);
+  }
+  if (runtime.proxy) {
+    ytdlpArgs.push('--proxy', runtime.proxy);
+  }
+  if (runtime.sessdata) {
+    ytdlpArgs.push('--add-header', `Cookie: SESSDATA=${runtime.sessdata}`);
+  }
+  ytdlpArgs.push(url);
+
+  try {
+    const execFileImpl = options.execFileImpl || execFileAsync;
+    const { stdout } = await execFileImpl(ytdlpPath, ytdlpArgs, {
+      timeout: Number(env.PERSONAL_AGENT_BILIBILI_ANALYSIS_DOWNLOAD_TIMEOUT_MS || env.PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS || 120000),
+      maxBuffer: 10 * 1024 * 1024,
+    });
+    const printedPath = String(stdout || '')
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .find((line) => path.isAbsolute(line) && fs.existsSync(line));
+    const downloadedPath = printedPath || fs.readdirSync(workDir)
+      .map((name) => path.join(workDir, name))
+      .filter((filePath) => fs.existsSync(filePath) && fs.statSync(filePath).isFile())
+      .sort((a, b) => fs.statSync(b).size - fs.statSync(a).size)[0];
+    if (!downloadedPath) {
+      throw new MediaReaderError('VIDEO_STREAM_NOT_FOUND', 'VIDEO_STREAM_NOT_FOUND: yt-dlp did not produce a Bilibili analysis video file', bilibiliErrorExtra({
+        code: 'VIDEO_STREAM_NOT_FOUND',
+        env,
+      }));
+    }
+    const bytes = fs.readFileSync(downloadedPath);
+    return {
+      type: 'video',
+      file_path: downloadedPath,
+      mime: mimeForVideoFile(downloadedPath),
+      content_sha256: sha256Bytes(bytes),
+      content_length: bytes.length,
+      url_host: hostFromUrl(url),
+      url_redacted: redactUrl(url),
+      bvid: bvid || extractBvid(url),
+      source: 'bilibili_ytdlp_analysis_download',
+    };
+  } catch (error) {
+    if (error instanceof MediaReaderError) {
+      throw error;
+    }
+    if (error?.code === 'ENOENT') {
+      throw new MediaReaderError('DEPENDENCY_MISSING', 'DEPENDENCY_MISSING: yt-dlp command is missing', bilibiliErrorExtra({
+        code: 'DEPENDENCY_MISSING',
+        error,
+        env,
+      }));
+    }
+    const code = mapBilibiliError(error);
+    throw new MediaReaderError(code, `${code}: Bilibili analysis video download failed`, bilibiliErrorExtra({ code, error, env }));
+  }
 }
 
 function bilibiliErrorExtra({ code, error, env, extra = {} }) {
