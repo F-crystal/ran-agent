@@ -1,130 +1,135 @@
 # Ran Agent
 
-Ran Agent is a local-first personal agent runtime for a single-user WeChat setup.
-It is shared as an implementation reference: OpenClaw is the visible chat agent, Node connects WeChat to OpenClaw, and the Python backend provides memory, knowledge, reflection, todo, and scheduler capabilities.
+**A local-first personal AI agent that lives in your WeChat, understands social media, and manages your knowledge — all on your own machine.**
 
-This is not a hosted SaaS product or a production-ready multi-user bot. Treat it as a template and a set of ideas you can adapt for your own private agent.
+Ran Agent is an end-to-end personal agent runtime. It connects WeChat messages to an LLM-powered conversation frontend, adds memory and reflection, and gives the agent eyes through a multi-provider media understanding pipeline that can watch Bilibili videos, read Xiaohongshu posts, and parse WeChat articles. Everything runs on a single server you control.
 
-## Who This Is For
+---
 
-- You want to study how a personal agent can combine chat, memory, knowledge maintenance, reminders, and MCP tools.
-- You are comfortable configuring Node, Python, OpenClaw, local env files, and model provider credentials.
-- You want a private, owner-only system that runs on your own machine or server.
+## What It Actually Does
 
-## Who This Is Not For
+- **WeChat Agent**: Messages flow WeChat → Node bridge → OpenClaw agent runtime → Claude/Qwen → reply back. Feels like texting a friend, not prompting a bot.
 
-- People looking for a one-click chatbot.
-- Teams looking for multi-tenant SaaS, customer service automation, or enterprise permission isolation.
-- Anyone planning to commit runtime state, chat logs, cookies, tokens, or personal vault content into Git.
+- **Social Media Understanding**: Share a Bilibili link, a Xiaohongshu post, or a WeChat article, and the agent actually reads it. It extracts subtitles from videos, runs vision-language models on frames, and transcribes audio — then tells you what the content is about in natural language.
+
+- **Memory That Persists**: Remembers past conversations, evolves its persona over time, and maintains a knowledge vault without dumping everything into a giant prompt.
+
+- **Proactive Check-ins**: A scheduler wakes the agent for morning briefings, evening reflections, and periodic knowledge maintenance. It learns when to reach out and when to stay quiet.
+
+- **Media Generation**: Can create and send images and audio responses through WeChat when text isn't enough.
+
+---
 
 ## Architecture
 
-```text
-WeChat
-  -> node_bridge/
-  -> OpenClaw agent runtime
-  -> Claude-compatible model provider
-  -> reply back through node_bridge/
-
-Python backend
-  -> /health, /ingest, /tools/*
-  -> SQLite state
-  -> memory, knowledge, reflection, todo, night-cycle jobs
+```
+┌─────────────────────────────────────────────────────────┐
+│                      WeChat                             │
+└──────────┬──────────────────────────────────┬───────────┘
+           │ incoming                         │ outgoing
+           ▼                                  ▲
+┌──────────────────────┐          ┌───────────────────────┐
+│   Node Bridge         │          │   Node Bridge          │
+│   wechatBridge.mjs    │          │   outboundServer.mjs   │
+└──────────┬───────────┘          └───────────────────────┘
+           │                                  ▲
+           ▼                                  │
+┌──────────────────────────────────────────────────────────┐
+│                 OpenClaw Agent Runtime                    │
+│  ┌─────────────┐  ┌──────────────┐  ┌─────────────────┐  │
+│  │ social_reader│  │ media_reader │  │ media_generation│  │
+│  │ (platforms) │  │ (OCR/VLM/ASR)│  │ (image/audio)   │  │
+│  └─────────────┘  └──────────────┘  └─────────────────┘  │
+└──────────────────────────────────────────────────────────┘
+           │
+           ▼
+┌──────────────────────────────────────────────────────────┐
+│                  Python Backend                           │
+│  memory │ knowledge │ reflection │ todo │ scheduler       │
+│  ┌──────┐ ┌────────┐ ┌──────────┐ ┌────┐ ┌───────────┐  │
+│  │SQLite│ │Obsidian│ │ persona  │ │CRUD│ │ cron jobs │  │
+│  └──────┘ │ vault  │ │ evolution│ └────┘ └───────────┘  │
+│           └────────┘ └──────────┘                        │
+└──────────────────────────────────────────────────────────┘
 ```
 
-The normal WeChat text path uses OpenClaw's agent runtime. The OpenAI-compatible chat-completions path is kept only as a compatibility surface for structured media cases and backend capability calls.
+**Key design choices:**
 
-## Main Pieces
+- **MCP Facade Pattern**: OpenClaw sees 6 clean tools (`social_reader__read_social_post_deep`, `media_reader__analyze_video`, etc.). Behind those facades are platform resolvers for Bilibili, Xiaohongshu, and WeChat; subtitle extraction via yt-dlp; vision-language analysis via DashScope Qwen-VL; and audio transcription via Qwen-ASR.
 
-- `openclaw/`: OpenClaw local configuration and runtime boundary.
-- `node_bridge/`: WeChat bridge, message merging, outbound delivery, media handling, and MCP facade servers.
-- `src/personal_agent/`: Python backend services, state layer, scheduler jobs, memory, knowledge, and reflection code.
-- `skills/`: On-demand operational skills used by the runtime and agents.
-- `vault/`: Template structure for local knowledge work. Real `vault/inbox`, `vault/raw`, and `vault/wiki` content must stay private.
-- `docs/governance/`: Current constraints and runtime status.
+- **Subtitle-First Video Understanding**: Videos are analyzed through a three-tier strategy — prefer downloadable subtitles (2-5s), fall back to VLM frame analysis when subtitles aren't available, and degrade gracefully to metadata-only when needed. No blind frame dumping.
 
-The MCP facade servers keep OpenClaw's tool surface small: `social_reader` reads public social links, `media_reader` turns images/audio/video into structured text, and `media_generation` creates sendable image/audio outputs.
+- **Local-First Everything**: State lives in SQLite. Knowledge lives in an Obsidian vault. Conversations stay on your machine. No cloud database, no hosted service, no telemetry.
+
+- **Single-User, Owner-Only**: Designed from the ground up as a personal agent, not a multi-tenant platform. There's no user management, no RBAC, no API rate limiting — because there's only you.
+
+---
+
+## Media Understanding Pipeline
+
+The `media_reader` MCP server is the agent's eyes and ears. It currently supports:
+
+| Platform | Capability |
+|----------|------------|
+| **Bilibili** | Subtitle extraction (manual + AI-generated), cover image analysis, video frame VLM, audio ASR fallback |
+| **Xiaohongshu** | Note content extraction, image VLM, video metadata, comment reading |
+| **WeChat Articles** | Content extraction, captcha detection, structured error reporting |
+| **Direct media** | Image OCR/VLM, audio transcription, video metadata + frame analysis |
+
+Provider stack: yt-dlp (platform extraction), DashScope Qwen3-VL-Flash (vision), DashScope Qwen3-ASR-Flash (audio), PaddleOCR (local OCR fallback), ffmpeg (video processing).
+
+---
 
 ## Quick Start
 
-Install Node dependencies:
+**Prerequisites**: Node.js ≥22, Python ≥3.10, ffmpeg/ffprobe, yt-dlp (optional, for Bilibili).
 
 ```bash
+# Clone and install
+git clone https://github.com/F-crystal/ran-agent.git
+cd ran-agent
 npm install
+python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+
+# Configure your model provider
+cp .env.example .env.local
+# Edit .env.local with your credentials (ANTHROPIC_BASE_URL, ANTHROPIC_AUTH_TOKEN, etc.)
+
+# Start services (3 terminals)
+./start_openclaw.sh       # Agent runtime
+./start_python.sh          # Backend services
+cd node_bridge && ./start_node.sh  # WeChat bridge
 ```
 
-Create a Python environment:
+## Testing
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-Create `.env.local` in the repo root. At minimum, OpenClaw needs a Claude-compatible provider:
-
-```bash
-ANTHROPIC_BASE_URL=...
-ANTHROPIC_AUTH_TOKEN=...
-OPENCLAW_GATEWAY_TOKEN=...
-TAVILY_API_KEY=...
-```
-
-Knowledge maintenance, media generation, and media understanding use `DASHSCOPE_API_KEY` or `QWEN_API_KEY` when those paths are enabled. The default `media_reader` adapters use local PaddleOCR for OCR, cost-focused DashScope Qwen VL Flash for image understanding, DashScope Qwen ASR for audio, and server `ffmpeg`/`ffprobe` for video processing.
-
-## Run Locally
-
-Start each service in a separate terminal:
-
-```bash
-./start_openclaw.sh
-```
-
-```bash
-./start_python.sh
-```
-
-```bash
-cd node_bridge
-./start_node.sh
-```
-
-Stop each process with `Ctrl+C`. Runtime logs and state are local-only.
-
-## Test
-
-```bash
-PYTHONPATH=src python -m unittest discover -s tests -p 'test_*.py'
-```
-
-```bash
+PYTHONPATH=src pytest -q tests/
 npm --prefix node_bridge test
 ```
 
-```bash
-./scripts/connectivity_smoke.sh
+## Project Structure
+
 ```
-
-## Privacy Rules
-
-Never publish these paths:
-
-- `.env.local`, `node_bridge/.env.local`, or any `.env.*` file
-- `.openclaw_state/`
-- `data/`
-- `logs/`
-- `debug/`
-- `state/`
-- `local_archive/`
-- `vault/inbox/`, `vault/raw/`, `vault/wiki/`
-- `node_modules/`
-- `.venv/`
-- `*.db`, `*.sqlite`, `*.sqlite3`
-
-Before making a repo public, run `git status --short --ignored` and a secret scan. Public commits should include source code, templates, and docs only, not private runtime data.
+ran_agent/
+├── openclaw/              # OpenClaw agent config and runtime
+├── node_bridge/           # WeChat bridge + MCP facade servers
+│   └── src/
+│       ├── mediaReader/   # OCR, VLM, ASR, ffmpeg, platform resolvers
+│       └── ...            # WeChat bridge, social reader, outbound
+├── src/personal_agent/    # Python backend (memory, knowledge, scheduler)
+├── skills/                # On-demand operational skills
+├── scripts/               # Startup scripts, archive tooling
+├── vault/                 # Obsidian knowledge vault (templates only)
+└── docs/governance/       # Runtime constraints and status
+```
 
 ## License
 
-This project uses the PolyForm Noncommercial License 1.0.0. Personal learning, research, and noncommercial use are allowed. Commercial use is not granted.
+PolyForm Noncommercial License 1.0.0 — free for personal use, research, and learning. Commercial use requires permission.
 
-See `LICENSE.md`.
+See [LICENSE.md](LICENSE.md).
+
+## Privacy
+
+This is a personal agent. None of the following should ever enter version control: `.env.local`, chat logs, cookies, API keys, vault content, state databases. The repo is structured to keep these out by default via `.gitignore`, but always verify before making a repo public.

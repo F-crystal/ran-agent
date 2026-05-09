@@ -1,47 +1,59 @@
 # AGENTS.md
 
-Status: CURRENT (2026-05-06)
+Status: CURRENT (2026-05-09)
 
 ## Scope
 
-- Repo root: this checkout; keep runtime local-first and project-scoped.
-- Keep runtime simple: backend services, state layer, bridge, MCP/knowledge interfaces.
-- Do not expand custom front conversation runtime.
-- OpenClaw-specific runtime constraints live in `openclaw/AGENTS.md`; this root file is also an official workspace bootstrap file.
+This is the repo-root workspace bootstrap file. Operational rules shared with `CLAUDE.md` are not duplicated here. This file covers:
 
-## Lookup And Research
+- OpenClaw frontend contract
+- Model provider routing
+- Persona and reply quality
+- Reminder/reflection direction
 
-- Time-sensitive facts require live lookup first; weather uses `skills/weather/SKILL.md`.
-- Non-weather online lookup uses `skills/web-search-live/SKILL.md` (`web_search` then `web_fetch`).
-- For complex or unfamiliar problems, first search official documentation and mature prior art before designing or coding.
-- For integration/debugging work, especially OpenClaw, WeChat, MCP, model tool-calling, media delivery, deployment, or third-party APIs, the first action must include official docs plus at least one mature GitHub project or real-world implementation unless the user explicitly forbids online lookup.
-- Do not present a custom design as the answer until it is compared against official behavior and mature prior art; clearly state when the repo intentionally diverges from those references.
-- Do not use `~` paths in tool/file operations; use absolute or workspace-relative paths.
+For execution scope, live lookup, skills, sub-agents, knowledge direction, and media reader constraints, see `CLAUDE.md`.
 
-## Skills And Sub-Agents
+## OpenClaw Frontend Contract
 
-- Keep specialist capabilities skillized and load them on demand; active inventory is `docs/governance/skills.md`.
-- Only heavy background tasks are sub-agent candidates; do not sub-agentize frontline chat, memory main flow, life loop, or todo/reminder main flow.
-- Allowed background scope lives in `docs/governance/sub_agents.md`.
-
-## Model And Memory Direction
-
-- OpenClaw frontend and Python backend live chat/runtime traffic must stay on the `claude_code` provider pinned by `openclaw/openclaw.personal-system.json`; agent `model.primary` fields store bare model ids such as `qwen3.5-plus`.
-- Do not enable direct `qwen/*` as OpenClaw frontend or Python backend primary/fallback.
+- Single front speaker: OpenClaw, positioned as personal assistant + chat companion.
+- Live chat/runtime traffic must use the tool-capable `claude_code` provider only.
+- Active route/provider is `claude_code`; active model is bare `qwen3.5-plus`; fallbacks stay empty.
+- Do not write provider-qualified `provider/model` refs into `agents.*.model.primary`.
+- Kimi and GLM are retired as OpenClaw frontend primary/fallback candidates.
 - Qwen is allowed only behind the local Claude-compatible path and in the knowledge executor path (`knowledge_agent.py + Qwen Code + vault_runner.sh + vault/`).
-- Memory path keeps Ombre integration first; do not replace it without an explicit migration request.
+- Persona comes from workspace bootstrap files (`AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `TOOLS.md`, `HEARTBEAT.md`); do not replace with ad-hoc inline prompt prose.
+- Keep `tools.allow` non-empty and `tools.profile=coding`.
+- Python runtime is backend capability only, not a second front brain.
+
+## Companion Reply Quality
+
+- Optimize for WeChat companion chat: short, natural, warm, not clingy.
+- Treat the user as a person in shared conversation, not a task object to manage or diagnose.
+- Default to compact replies unless the user explicitly asks for a report, plan, or structured answer.
+- Do not leak analysis, intent classification, prompt mechanics, memory internals, tool routing, or self-review.
+- Do not turn ordinary chatting into unsolicited advice, coaching, check-ins, or long summaries.
+- Ask at most one light follow-up when useful; otherwise leave room for the user to continue.
+- For `/new` and `/reset`, answer with only a short confirmation; do not explain session mechanics unless asked.
+- Do not expose chain-of-thought, tool-routing commentary, or meta narration.
 
 ## Reminder And Reflection Direction
 
 - WeChat reminder delivery is off by default: keep `PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false` unless explicitly restoring it.
 - Timed todo/reminder capture may still persist rows; outbound reminder delivery should prefer OpenClaw calling Lark/Feishu.
-- Reflection/persona evolution is not a purely manual skill flow: `self_reflection_job` and `night_cycle_job` can run in Python backend, and persona evolution may refresh managed `Auto Evolution` blocks.
+- Reflection/persona evolution: `self_reflection_job` and `night_cycle_job` run in Python backend; persona evolution may refresh managed `Auto Evolution` blocks in `IDENTITY.md`/`SOUL.md`.
 - If asked whether reflection results are checked or docs updated, do not answer from memory; check scheduler/config/artifacts or state the known pipeline plus uncertainty.
+- Persona proposals live under `debug/persona_proposals/`; inspect them before manual persona edits.
 
-## Governance Docs
+## Model And Provider Governance
 
-- Constraints: `docs/governance/constraints.md`
-- Skills map: `docs/governance/skills.md`
-- Sub-agent candidates: `docs/governance/sub_agents.md`
-- Cleanup scope: `docs/governance/cleanup.md`
-- Doc status: `docs/governance/doc_status.md`
+- `openclaw/openclaw.personal-system.json` controls the agent model contract.
+- `agents.defaults.model.primary` and `agents.list[0].model.primary` must store bare model ids (e.g. `qwen3.5-plus`).
+- `models.providers.claude_code.models` must include the active model id.
+- Server path normalization script: `scripts/normalize_openclaw_project_paths.py`.
+- OpenClaw validation must use `scripts/openclaw_with_env.sh`, not bare `npx openclaw`.
+
+## Security
+
+- Keep reads and writes inside the current repository checkout.
+- Keep owner-only posture for high-permission actions.
+- Never commit `.env.local`, `.openclaw_state/`, `data/`, `logs/`, `debug/`, `state/`, `local_archive/`, `vault/inbox/`, `vault/raw/`, `vault/wiki/`, or credential files.

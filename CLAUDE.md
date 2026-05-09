@@ -1,11 +1,11 @@
 # CLAUDE.md
 
-Status: CURRENT (2026-04-15)
+Status: CURRENT (2026-05-09)
 
 ## Execution Scope
 
-- This repo is local-first and project-scoped only.
-- Keep runtime simple: backend services, state layer, bridge, and MCP/knowledge interfaces.
+- This repo is local-first and project-scoped.
+- Keep runtime simple: backend services, state layer, WeChat bridge, MCP/knowledge interfaces.
 - Do not expand custom front conversation runtime.
 
 ## OpenClaw Local Contract
@@ -17,8 +17,9 @@ Status: CURRENT (2026-04-15)
 ## Live Lookup Rule
 
 - For time-sensitive facts (news, prices, schedules, policy updates, product changes), perform web lookup first, then answer.
-- Weather queries should use workspace skill override: `skills/weather/SKILL.md`.
-- For non-weather online lookup, use `skills/web-search-live/SKILL.md` flow (`web_search` then `web_fetch`).
+- Weather queries use `skills/weather/SKILL.md`.
+- Non-weather online lookup uses `skills/web-search-live/SKILL.md` (`web_search` then `web_fetch`).
+- For integration/debugging work (OpenClaw, WeChat, MCP, media delivery, deployment, third-party APIs), first check official docs plus at least one mature GitHub reference or real-world implementation before designing a solution.
 - Do not use `~`-prefixed filesystem paths in tool/file operations; use absolute paths or workspace-relative paths only.
 
 ## Skills-First Rule
@@ -35,6 +36,7 @@ Specialist capabilities must stay skillized and loaded on demand:
 - `skills/web-search-live/SKILL.md`
 - `skills/context-compact/SKILL.md`
 - `skills/reminder/SKILL.md`
+- `skills/archive-and-push/SKILL.md`
 
 Do not keep all specialist context always loaded in every turn.
 
@@ -58,6 +60,14 @@ Do not sub-agentize:
 
 - Knowledge management stays on product path: `knowledge_agent.py + Qwen Code + vault_runner.sh + vault/`.
 - Memory path keeps current Ombre integration first; do not replace with new memory stack without explicit migration request.
+
+## Media Reader Constraints
+
+- `media_reader` MCP servers (`mediaReaderMcpServer.mjs`, `socialReaderMcpServer.mjs`) are the stable facade; do not expose internal provider/ffmpeg/platform-resolver tools to OpenClaw directly.
+- Video analysis uses subtitle-first strategy: prefer yt-dlp extracted subtitles, fall back to VLM frame analysis, degrade to metadata-only.
+- Frame extraction mode skips OCR by default (VLM reads burned-in subtitles from frames).
+- Platform resolver credentials (SESSDATA, XHS_COOKIE, proxy URLs) must never appear in tool output, logs, docs, or git.
+- PaddleOCR is best-effort on servers; timeouts are expected on low-CPU instances.
 
 ## Governance Docs
 
