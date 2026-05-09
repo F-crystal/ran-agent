@@ -4,6 +4,15 @@
  * Collects media-only messages and merges them with subsequent text that
  * refers to the media, producing a single logical user turn before handing
  * off to the reply backend.
+ *
+ * Supports two merge paths:
+ *   1. Immediate: text-ref arrives while pending media exists → merge now
+ *   2. Deferred:  text-ref arrives first, media arrives later
+ *      - Wait WECHAT_TEXT_REF_WAIT_MS for media
+ *      - If media arrives → merge immediately
+ *      - If wait expires → send text alone, but keep text-ref intent alive
+ *        until WECHAT_PENDING_TEXT_REF_TTL_MS
+ *      - If media arrives within intent TTL → return deferred merge
  */
 
 const MEDIA_REF_PATTERNS = [
@@ -18,8 +27,6 @@ const MEDIA_REF_PATTERNS = [
   /这个(?:文件|图片|图|截图|视频|语音|音频|文档)/,
   /(?:ocr|识别|转写|提取文字|文字提取)/i,
 ];
-
-const MEDIA_ONLY_TYPES = new Set(['image', 'video', 'audio', 'file']);
 
 export function isMediaRefText(text) {
   const trimmed = String(text || '').trim();
@@ -41,33 +48,48 @@ export function createInboundMessageBuffer(options = {}) {
   const now = options.nowImpl || (() => Date.now());
 
   const graceMs = Math.max(1000, Number(options.mediaReplyGraceMs || 12000));
-  const textRefWaitMs = Math.max(1000, Number(options.textRefWaitMs || 8000));
+  const textRefWaitMs = Math.max(1000, Number(options.textRefWaitMs || 30000));
   const pendingTtlMs = Math.max(10000, Number(options.pendingMediaTtlMs || 600000));
+  const pendingTextRefTtlMs = Math.max(10000, Number(options.pendingTextRefTtlMs || 120000));
   const idleReplyEnabled = options.mediaOnlyIdleReply === true;
 
   // sender_id -> { items: [...], createdAt }
-  const pending = new Map();
+  const pendingMedia = new Map();
 
   // sender_id -> { payload, resolve, timer }
   const waitingTextRef = new Map();
 
+  // sender_id -> { payload, createdAt, consumed }
+  // Kept after initial wait expires so media arriving within intent TTL
+  // can still trigger a deferred merge.
+  const pendingTextRefIntents = new Map();
+
+  // Callback set by the bridge to trigger deferred replies when media
+  // arrives after the text-ref wait has expired.
+  let onDeferredMerge = null;
+
   function cleanupExpired() {
     const ts = now();
-    for (const [senderId, entry] of pending) {
+    for (const [senderId, entry] of pendingMedia) {
       if (ts - entry.createdAt > pendingTtlMs) {
         logger.log?.(`[buffer] pending media expired sender=${senderId} age=${ts - entry.createdAt}ms`);
-        pending.delete(senderId);
+        pendingMedia.delete(senderId);
+      }
+    }
+    for (const [senderId, intent] of pendingTextRefIntents) {
+      if (ts - intent.createdAt > pendingTextRefTtlMs || intent.consumed) {
+        pendingTextRefIntents.delete(senderId);
       }
     }
   }
 
   function getPending(senderId) {
     cleanupExpired();
-    return pending.get(senderId) || null;
+    return pendingMedia.get(senderId) || null;
   }
 
   function drainPendingMedia(senderId) {
-    const entry = pending.get(senderId);
+    const entry = pendingMedia.get(senderId);
     if (!entry) {
       return [];
     }
@@ -75,9 +97,8 @@ export function createInboundMessageBuffer(options = {}) {
     for (const item of items) {
       item.consumed = true;
     }
-    // Remove the entry if all items consumed
     if (entry.items.every((item) => item.consumed)) {
-      pending.delete(senderId);
+      pendingMedia.delete(senderId);
     }
     return items;
   }
@@ -89,10 +110,10 @@ export function createInboundMessageBuffer(options = {}) {
     }
     cleanupExpired();
     const ts = now();
-    let entry = pending.get(senderId);
+    let entry = pendingMedia.get(senderId);
     if (!entry) {
       entry = { items: [], createdAt: ts };
-      pending.set(senderId, entry);
+      pendingMedia.set(senderId, entry);
     }
     entry.items.push({
       media: Array.isArray(payload.media) ? payload.media : [],
@@ -103,12 +124,22 @@ export function createInboundMessageBuffer(options = {}) {
     logger.log?.(`[buffer] pending media added sender=${senderId} total=${entry.items.length}`);
   }
 
-  function mergeMediaFromPending(payload) {
-    const senderId = String(payload.sender_id || '').trim();
-    const items = drainPendingMedia(senderId);
+  function mergeMediaIntoPayload(payload, senderId) {
+    const entry = pendingMedia.get(senderId);
+    if (!entry) {
+      return payload;
+    }
+    const items = entry.items.filter((item) => !item.consumed);
     if (items.length === 0) {
       return payload;
     }
+    for (const item of items) {
+      item.consumed = true;
+    }
+    if (entry.items.every((item) => item.consumed)) {
+      pendingMedia.delete(senderId);
+    }
+
     const mergedMedia = [];
     const mergedImageUrls = [];
     for (const item of items) {
@@ -123,7 +154,7 @@ export function createInboundMessageBuffer(options = {}) {
         }
       }
     }
-    // Also include media from the text payload itself (shouldn't normally have, but be safe)
+    // Also include media from the text payload itself
     for (const m of Array.isArray(payload.media) ? payload.media : []) {
       if (!mergedMedia.some((existing) => existing.filePath === m.filePath)) {
         mergedMedia.push(m);
@@ -143,7 +174,7 @@ export function createInboundMessageBuffer(options = {}) {
     if (mergedMedia.length > 0) {
       result.route_hint = 'vision_understand';
     }
-    logger.log?.(`[buffer] merged ${items.length} pending media batch(es) into text turn sender=${senderId}`);
+    logger.log?.(`[buffer] merged ${items.length} pending media batch(es) into turn sender=${senderId}`);
     return result;
   }
 
@@ -151,7 +182,7 @@ export function createInboundMessageBuffer(options = {}) {
     return new Promise((resolve) => {
       const timer = setTimeout(() => {
         waitingTextRef.delete(senderId);
-        logger.log?.(`[buffer] text-ref wait expired sender=${senderId}`);
+        logger.log?.(`[buffer] text-ref wait expired sender=${senderId} (intent kept until TTL)`);
         resolve({ timedOut: true });
       }, textRefWaitMs);
       waitingTextRef.set(senderId, { resolve, timer, createdAt: now() });
@@ -165,20 +196,55 @@ export function createInboundMessageBuffer(options = {}) {
     }
     clearTimeout(wait.timer);
     waitingTextRef.delete(senderId);
-    // Add the arriving media to the pending queue so mergeMediaFromPending
-    // can pick it up when the waiting text-ref processes the result.
     addPendingMedia(payload);
     wait.resolve({ timedOut: false, payload });
     return true;
   }
 
+  function saveTextRefIntent(senderId, payload) {
+    pendingTextRefIntents.set(senderId, {
+      payload,
+      createdAt: now(),
+      consumed: false,
+    });
+    logger.log?.(`[buffer] text-ref intent saved sender=${senderId} ttl=${pendingTextRefTtlMs}ms`);
+  }
+
+  function checkDeferredTextRefIntent(senderId) {
+    cleanupExpired();
+    const intent = pendingTextRefIntents.get(senderId);
+    if (!intent || intent.consumed) {
+      return null;
+    }
+    // Check if there's unconsumed pending media
+    const entry = pendingMedia.get(senderId);
+    if (!entry || !entry.items.some((item) => !item.consumed)) {
+      return null;
+    }
+    intent.consumed = true;
+    const merged = mergeMediaIntoPayload(intent.payload, senderId);
+    logger.log?.(`[buffer] deferred merge: text-ref intent + media sender=${senderId}`);
+    return merged;
+  }
+
+  /**
+   * Set callback for deferred merges. When media arrives and a text-ref
+   * intent is pending, the buffer calls this with the merged payload so
+   * the bridge can trigger a reply.
+   */
+  function setDeferredMergeCallback(fn) {
+    onDeferredMerge = fn;
+  }
+
   /**
    * Main entry point. Classifies an inbound payload and decides what to do:
    *
-   * Returns { action, payload, pendingMediaCount? }:
+   * Returns { action, payload, pendingMediaCount?, deferredMerge? }:
    *   - { action: 'reply', payload } — send to reply backend immediately
    *   - { action: 'hold', pendingMediaCount } — media held, no reply
    *   - { action: 'wait', promise } — waiting for media, caller should await
+   *   - { action: 'deferred-merge', payload } — media arrived after text-ref
+   *     wait expired; merged with saved text-ref intent
    */
   async function processInbound(payload) {
     const senderId = String(payload.sender_id || '').trim();
@@ -188,15 +254,17 @@ export function createInboundMessageBuffer(options = {}) {
 
     // Case 1: Media-only message
     if (isMediaOnly) {
-      // Check if a text message is already waiting for media
+      // Check if a text message is actively waiting
       const resolved = resolveTextRefWait(senderId, payload);
       if (resolved) {
-        // The waiting text already resolved — but we need to add media to it.
-        // Actually the resolve sends the media payload back to the waiting caller.
-        // The waiting caller will merge and return.
         return { action: 'hold', pendingMediaCount: 0, resolvedViaWait: true };
       }
       addPendingMedia(payload);
+      // Check if there's a saved text-ref intent within its TTL
+      const deferred = checkDeferredTextRefIntent(senderId);
+      if (deferred) {
+        return { action: 'deferred-merge', payload: deferred };
+      }
       if (idleReplyEnabled) {
         return {
           action: 'reply',
@@ -206,7 +274,7 @@ export function createInboundMessageBuffer(options = {}) {
           },
         };
       }
-      return { action: 'hold', pendingMediaCount: pending.get(senderId)?.items.length || 0 };
+      return { action: 'hold', pendingMediaCount: pendingMedia.get(senderId)?.items.length || 0 };
     }
 
     // Case 2: Text that looks like a media reference
@@ -214,17 +282,18 @@ export function createInboundMessageBuffer(options = {}) {
       const pendingEntry = getPending(senderId);
       if (pendingEntry && pendingEntry.items.some((item) => !item.consumed)) {
         // Merge immediately
-        return { action: 'reply', payload: mergeMediaFromPending(payload) };
+        return { action: 'reply', payload: mergeMediaIntoPayload(payload, senderId) };
       }
       // No pending media — wait for one to arrive
-      logger.log?.(`[buffer] text-ref without pending media, waiting sender=${senderId}`);
+      logger.log?.(`[buffer] text-ref without pending media, waiting ${textRefWaitMs}ms sender=${senderId}`);
       const result = await waitForTextRef(senderId);
       if (result.timedOut) {
-        // No media arrived within wait window — send text alone
+        // Save intent so media arriving within pendingTextRefTtlMs can still merge
+        saveTextRefIntent(senderId, payload);
         return { action: 'reply', payload };
       }
-      // Media arrived — merge
-      return { action: 'reply', payload: mergeMediaFromPending(payload) };
+      // Media arrived during wait — merge
+      return { action: 'reply', payload: mergeMediaIntoPayload(payload, senderId) };
     }
 
     // Case 3: Plain text — no waiting, no binding
@@ -233,8 +302,7 @@ export function createInboundMessageBuffer(options = {}) {
 
   /**
    * Synchronous version for callers that can't await.
-   * Handles cases 1 and 3 synchronously; for case 2 with pending media, merges
-   * immediately; for case 2 without pending media, sends text alone (no wait).
+   * For case 2 without pending media, sends text alone and saves intent.
    */
   function processInboundSync(payload) {
     const senderId = String(payload.sender_id || '').trim();
@@ -243,9 +311,12 @@ export function createInboundMessageBuffer(options = {}) {
     const isTextRef = text && isMediaRefText(text);
 
     if (isMediaOnly) {
-      // Resolve any waiting text-ref
       resolveTextRefWait(senderId, payload);
       addPendingMedia(payload);
+      const deferred = checkDeferredTextRefIntent(senderId);
+      if (deferred) {
+        return { action: 'deferred-merge', payload: deferred };
+      }
       if (idleReplyEnabled) {
         return {
           action: 'reply',
@@ -255,14 +326,16 @@ export function createInboundMessageBuffer(options = {}) {
           },
         };
       }
-      return { action: 'hold', pendingMediaCount: pending.get(senderId)?.items.length || 0 };
+      return { action: 'hold', pendingMediaCount: pendingMedia.get(senderId)?.items.length || 0 };
     }
 
     if (isTextRef) {
       const pendingEntry = getPending(senderId);
       if (pendingEntry && pendingEntry.items.some((item) => !item.consumed)) {
-        return { action: 'reply', payload: mergeMediaFromPending(payload) };
+        return { action: 'reply', payload: mergeMediaIntoPayload(payload, senderId) };
       }
+      // No pending media in sync mode — save intent, send text alone
+      saveTextRefIntent(senderId, payload);
       return { action: 'reply', payload };
     }
 
@@ -272,14 +345,24 @@ export function createInboundMessageBuffer(options = {}) {
   function getStats() {
     cleanupExpired();
     const entries = [];
-    for (const [senderId, entry] of pending) {
+    for (const [senderId, entry] of pendingMedia) {
       entries.push({
         senderId,
         pendingCount: entry.items.filter((i) => !i.consumed).length,
         ageMs: now() - entry.createdAt,
       });
     }
-    return { entries, waitingTextRefCount: waitingTextRef.size };
+    const intentEntries = [];
+    for (const [senderId, intent] of pendingTextRefIntents) {
+      if (!intent.consumed) {
+        intentEntries.push({ senderId, ageMs: now() - intent.createdAt });
+      }
+    }
+    return {
+      entries,
+      waitingTextRefCount: waitingTextRef.size,
+      pendingTextRefIntents: intentEntries,
+    };
   }
 
   function clear() {
@@ -287,7 +370,8 @@ export function createInboundMessageBuffer(options = {}) {
       clearTimeout(wait.timer);
     }
     waitingTextRef.clear();
-    pending.clear();
+    pendingMedia.clear();
+    pendingTextRefIntents.clear();
   }
 
   return {
@@ -296,12 +380,14 @@ export function createInboundMessageBuffer(options = {}) {
     isMediaRefText,
     isMediaOnlyPayload,
     addPendingMedia,
-    drainPendingMedia,
-    mergeMediaFromPending,
+    mergeMediaIntoPayload,
     waitForTextRef,
     resolveTextRefWait,
+    saveTextRefIntent,
+    checkDeferredTextRefIntent,
+    setDeferredMergeCallback,
     getStats,
     clear,
-    _config: { graceMs, textRefWaitMs, pendingTtlMs, idleReplyEnabled },
+    _config: { graceMs, textRefWaitMs, pendingTtlMs, pendingTextRefTtlMs, idleReplyEnabled },
   };
 }

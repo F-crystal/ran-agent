@@ -17,10 +17,10 @@ function makePayload(overrides = {}) {
   };
 }
 
-function makeMediaPayload(senderId = 'user-1') {
+function makeMediaPayload(senderId = 'user-1', filePath = '/tmp/img.png') {
   return makePayload({
     sender_id: senderId,
-    media: [{ filePath: '/tmp/img.png', mimeType: 'image/png', type: 'image' }],
+    media: [{ filePath, mimeType: 'image/png', type: 'image' }],
   });
 }
 
@@ -52,7 +52,10 @@ describe('isMediaOnlyPayload', () => {
   });
 
   it('returns false for payload with text', () => {
-    assert.equal(isMediaOnlyPayload(makePayload({ text: 'hello', media: [{ filePath: '/tmp/a.png', mimeType: 'image/png', type: 'image' }] })), false);
+    assert.equal(isMediaOnlyPayload(makePayload({
+      text: 'hello',
+      media: [{ filePath: '/tmp/a.png', mimeType: 'image/png', type: 'image' }],
+    })), false);
   });
 
   it('returns false for empty payload', () => {
@@ -75,7 +78,7 @@ describe('inbound message buffer', () => {
     let now = 1000;
     const buffer = createInboundMessageBuffer({
       pendingMediaTtlMs: 600000,
-      textRefWaitMs: 8000,
+      textRefWaitMs: 30000,
       nowImpl: () => now,
     });
 
@@ -100,7 +103,8 @@ describe('inbound message buffer', () => {
     let now = 1000;
     const buffer = createInboundMessageBuffer({
       pendingMediaTtlMs: 600000,
-      textRefWaitMs: 100, // short wait so test is fast
+      textRefWaitMs: 100,
+      pendingTextRefTtlMs: 100,
       nowImpl: () => now,
     });
 
@@ -141,7 +145,7 @@ describe('inbound message buffer', () => {
 
   it('waits for media when text-ref arrives first, merges when media comes within window', async () => {
     const buffer = createInboundMessageBuffer({
-      textRefWaitMs: 8000,
+      textRefWaitMs: 500,
       pendingMediaTtlMs: 600000,
     });
 
@@ -255,6 +259,139 @@ describe('inbound message buffer', () => {
     }));
     assert.equal(result.action, 'reply');
     assert.ok(!result.payload.media || result.payload.media.length === 0);
+    buffer.clear();
+  });
+});
+
+describe('deferred text-ref intent', () => {
+  it('text-ref first, image arrives within wait window → immediate merge', async () => {
+    const buffer = createInboundMessageBuffer({
+      textRefWaitMs: 200,
+      pendingMediaTtlMs: 600000,
+      pendingTextRefTtlMs: 120000,
+    });
+
+    // Text-ref arrives first — wait starts (200ms)
+    const textPromise = buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '用 mimo 读一下',
+    }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Media arrives within the wait window
+    buffer.resolveTextRefWait('user-1', makeMediaPayload('user-1'));
+
+    const result = await textPromise;
+    assert.equal(result.action, 'reply');
+    assert.ok(result.payload.media);
+    assert.equal(result.payload.media.length, 1);
+    buffer.clear();
+  });
+
+  it('text-ref first, image 60s later → deferred merge via saved intent', async () => {
+    let now = 1000;
+    const buffer = createInboundMessageBuffer({
+      textRefWaitMs: 100,
+      pendingMediaTtlMs: 600000,
+      pendingTextRefTtlMs: 120000,
+      nowImpl: () => now,
+    });
+
+    // Text-ref arrives first — wait starts (100ms)
+    const textPromise = buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '用 mimo 读一下',
+    }));
+    await new Promise((r) => setTimeout(r, 10));
+
+    // 150ms later — wait expires, text sent alone, intent saved
+    now += 150;
+    const textResult = await textPromise;
+    assert.equal(textResult.action, 'reply');
+    assert.ok(!textResult.payload.media || textResult.payload.media.length === 0);
+
+    // Intent should be saved
+    const stats1 = buffer.getStats();
+    assert.equal(stats1.pendingTextRefIntents.length, 1);
+
+    // 60s total — media arrives, within 120s intent TTL
+    now += 60000;
+    const mediaResult = await buffer.processInbound(makeMediaPayload('user-1'));
+    assert.equal(mediaResult.action, 'deferred-merge');
+    assert.ok(mediaResult.payload.media);
+    assert.equal(mediaResult.payload.media.length, 1);
+    assert.equal(mediaResult.payload.text, '用 mimo 读一下');
+
+    // Intent consumed
+    const stats2 = buffer.getStats();
+    assert.equal(stats2.pendingTextRefIntents.length, 0);
+    buffer.clear();
+  });
+
+  it('text-ref intent expires after TTL, late media does not bind', async () => {
+    let now = 1000;
+    const buffer = createInboundMessageBuffer({
+      textRefWaitMs: 100,
+      pendingMediaTtlMs: 600000,
+      pendingTextRefTtlMs: 120000,
+      nowImpl: () => now,
+    });
+
+    // Text-ref arrives — wait expires quickly (100ms), intent saved
+    const textPromise = buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '用 mimo 读一下',
+    }));
+    await new Promise((r) => setTimeout(r, 10));
+    now += 150;
+    const textResult = await textPromise;
+    assert.equal(textResult.action, 'reply');
+
+    // 121s later — intent TTL expired
+    now += 121000;
+    const mediaResult = await buffer.processInbound(makeMediaPayload('user-1'));
+    // Should be hold (media saved as pending, but no intent to merge with)
+    assert.equal(mediaResult.action, 'hold');
+    buffer.clear();
+  });
+
+  it('plain text is never delayed or bound by pending media', async () => {
+    let now = 1000;
+    const buffer = createInboundMessageBuffer({
+      pendingMediaTtlMs: 600000,
+      textRefWaitMs: 30000,
+      pendingTextRefTtlMs: 120000,
+      nowImpl: () => now,
+    });
+
+    // Media arrives
+    await buffer.processInbound(makeMediaPayload());
+
+    // Plain text arrives immediately — should NOT bind
+    const result = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '你好',
+    }));
+    assert.equal(result.action, 'reply');
+    assert.ok(!result.payload.media || result.payload.media.length === 0);
+
+    // Media still pending
+    const stats = buffer.getStats();
+    assert.equal(stats.entries.length, 1);
+    assert.equal(stats.entries[0].pendingCount, 1);
+
+    // Another plain text — still no binding
+    now += 5000;
+    const result2 = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '今天天气怎么样',
+    }));
+    assert.equal(result2.action, 'reply');
+    assert.ok(!result2.payload.media || result2.payload.media.length === 0);
+
+    // No text-ref intent created for plain text
+    const stats2 = buffer.getStats();
+    assert.equal(stats2.pendingTextRefIntents.length, 0);
     buffer.clear();
   });
 });
