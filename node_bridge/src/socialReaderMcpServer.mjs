@@ -158,6 +158,75 @@ export function buildSocialReaderTools() {
         additionalProperties: false,
       },
     },
+    {
+      name: 'xhs_browse_probe',
+      title: 'XHS Browse Probe',
+      description: 'Probe XHS browse backend availability and discover available tools. Always available.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        required: [],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'xhs_browse_search',
+      title: 'XHS Browse Search',
+      description: 'Search Xiaohongshu notes by keyword. Requires XHS_BROWSE_ENABLED=true and XHS_BROWSE_SEARCH_ENABLED=true.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search query keyword.' },
+          max_results: { type: 'integer', description: 'Maximum results. Default 5, hard limit 10.', minimum: 1, maximum: 10, default: 5 },
+          sort: { type: 'string', description: 'Sort order.', enum: ['relevance', 'latest', 'popular'], default: 'relevance' },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'xhs_browse_note',
+      title: 'XHS Browse Note',
+      description: 'Get Xiaohongshu note details by note_id. Requires XHS_BROWSE_ENABLED=true and XHS_BROWSE_NOTE_ENABLED=true.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          note_id: { type: 'string', description: 'Note ID to fetch.' },
+          include_images: { type: 'boolean', description: 'Include images.', default: true },
+        },
+        required: ['note_id'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'xhs_browse_user',
+      title: 'XHS Browse User',
+      description: 'Get Xiaohongshu user profile. Requires XHS_BROWSE_USER_ENABLED=true (disabled by default).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          user_id: { type: 'string', description: 'User ID.' },
+          max_items: { type: 'integer', description: 'Max notes. Default 5, hard limit 10.', minimum: 1, maximum: 10, default: 5 },
+        },
+        required: ['user_id'],
+        additionalProperties: false,
+      },
+    },
+    {
+      name: 'xhs_browse_feed',
+      title: 'XHS Browse Feed',
+      description: 'Get Xiaohongshu recommendation feed. Requires XHS_BROWSE_FEED_ENABLED=true (disabled by default).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', description: 'Feed category.', enum: ['default', 'food', 'travel', 'fashion'], default: 'default' },
+          max_items: { type: 'integer', description: 'Max items. Default 5, hard limit 10.', minimum: 1, maximum: 10, default: 5 },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+    },
+
   ];
 }
 
@@ -1569,6 +1638,22 @@ async function callTool(name, args = {}, options = {}) {
   if (name === 'check_social_login') {
     return await checkSocialLogin(String(args.platform || ''), options);
   }
+  if (name === 'xhs_browse_probe') {
+    return await xhsBrowseProbe(args, options);
+  }
+  if (name === 'xhs_browse_search') {
+    return await xhsBrowseSearch(args, options);
+  }
+  if (name === 'xhs_browse_note') {
+    return await xhsBrowseNote(args, options);
+  }
+  if (name === 'xhs_browse_user') {
+    return await xhsBrowseUser(args, options);
+  }
+  if (name === 'xhs_browse_feed') {
+    return await xhsBrowseFeed(args, options);
+  }
+
   return buildErrorResult(`unknown tool: ${name}`);
 }
 
@@ -1637,4 +1722,758 @@ export function runSocialReaderMcpServer(options = {}) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runSocialReaderMcpServer();
+}
+// ============================================================================
+// XHS Browse 常量和配置
+// ============================================================================
+
+const XHS_BROWSE_DEFAULTS = {
+  enabled: false,
+  maxResults: 5,
+  maxResultsHardLimit: 10,
+  maxItems: 5,
+  maxItemsHardLimit: 10,
+  minIntervalMs: 30000,
+  maxCallsPerSession: 10,
+  timeoutMs: 60000,
+  searchEnabled: true,
+  noteEnabled: true,
+  userEnabled: false,
+  feedEnabled: false,
+};
+
+const XHS_BROWSE_TOOL_CANDIDATES = {
+  search: ['search_notes', 'search', 'query_notes', 'search_note'],
+  note: ['get_note_info', 'get_note', 'note_detail', 'get_note_content'],
+  user: ['get_user_notes', 'user_profile', 'user_homepage'],
+  feed: ['get_feed', 'explore', 'recommendation_feed'],
+};
+
+const XHS_BROWSE_ERROR_CODES = {
+  DISABLED: 'XHS_BROWSE_DISABLED',
+  BACKEND_UNAVAILABLE: 'XHS_BROWSE_BACKEND_UNAVAILABLE',
+  TOOL_NOT_FOUND: 'XHS_BROWSE_TOOL_NOT_FOUND',
+  PROTOCOL_ERROR: 'XHS_BROWSE_PROTOCOL_ERROR',
+  SEARCH_FAILED: 'XHS_SEARCH_FAILED',
+  NOTE_READ_FAILED: 'XHS_NOTE_READ_FAILED',
+  PROFILE_DISABLED: 'XHS_PROFILE_DISABLED',
+  PROFILE_FAILED: 'XHS_PROFILE_FAILED',
+  FEED_DISABLED: 'XHS_FEED_DISABLED',
+  FEED_FAILED: 'XHS_FEED_FAILED',
+  AUTH_REQUIRED: 'XHS_AUTH_REQUIRED',
+  RISK_CONTROL: 'XHS_RISK_CONTROL',
+  RATE_LIMITED: 'XHS_RATE_LIMITED',
+  INVALID_ARGUMENT: 'XHS_INVALID_ARGUMENT',
+  TIMEOUT: 'XHS_TIMEOUT',
+  BACKEND_MCP_ERROR: 'XHS_BACKEND_MCP_ERROR',
+};
+
+// Session 调用计数（内存中，重启后重置）
+let xhsBrowseSessionCallCount = 0;
+let xhsBrowseLastCallTime = 0;
+
+// ============================================================================
+// XHS Browse 配置读取函数
+// ============================================================================
+
+function getXhsBrowseConfig(env = process.env) {
+  const enabled = String(env.XHS_BROWSE_ENABLED || 'false').toLowerCase() === 'true';
+  const command = String(env.XHS_BROWSE_MCP_COMMAND || '').trim();
+  const argsJson = String(env.XHS_BROWSE_MCP_ARGS_JSON || '');
+  const cookieEnv = String(env.XHS_BROWSE_MCP_COOKIE_ENV || 'XHS_COOKIE');
+  const timeoutMs = Number(env.XHS_BROWSE_MCP_TIMEOUT_MS || XHS_BROWSE_DEFAULTS.timeoutMs);
+  const maxResults = Math.min(
+    Number(env.XHS_BROWSE_MAX_RESULTS || XHS_BROWSE_DEFAULTS.maxResults),
+    XHS_BROWSE_DEFAULTS.maxResultsHardLimit
+  );
+  const maxItems = Math.min(
+    Number(env.XHS_BROWSE_MAX_ITEMS || XHS_BROWSE_DEFAULTS.maxItems),
+    XHS_BROWSE_DEFAULTS.maxItemsHardLimit
+  );
+  const minIntervalMs = Number(env.XHS_BROWSE_MIN_INTERVAL_MS || XHS_BROWSE_DEFAULTS.minIntervalMs);
+  const maxCallsPerSession = Number(env.XHS_BROWSE_MAX_CALLS_PER_SESSION || XHS_BROWSE_DEFAULTS.maxCallsPerSession);
+  const searchEnabled = String(env.XHS_BROWSE_SEARCH_ENABLED || 'true').toLowerCase() === 'true';
+  const noteEnabled = String(env.XHS_BROWSE_NOTE_ENABLED || 'true').toLowerCase() === 'true';
+  const userEnabled = String(env.XHS_BROWSE_USER_ENABLED || 'false').toLowerCase() === 'true';
+  const feedEnabled = String(env.XHS_BROWSE_FEED_ENABLED || 'false').toLowerCase() === 'true';
+
+  // 获取 Cookie（通过变量名间接引用，不直接存储）
+  const cookie = String(env[cookieEnv] || '');
+
+  return {
+    enabled,
+    command,
+    args: parseJsonArrayEnv(argsJson, []),
+    cookieEnv,
+    cookie,
+    timeoutMs,
+    maxResults,
+    maxItems,
+    minIntervalMs,
+    maxCallsPerSession,
+    searchEnabled,
+    noteEnabled,
+    userEnabled,
+    feedEnabled,
+    isConfigured: enabled && command && argsJson,
+  };
+}
+
+function xhsBrowseServerConfig(env = process.env) {
+  const config = getXhsBrowseConfig(env);
+  return {
+    command: config.command,
+    args: config.args,
+    env: config.cookieEnv ? { [config.cookieEnv]: config.cookie } : {},
+  };
+}
+
+// ============================================================================
+// XHS Browse Rate Limiting
+// ============================================================================
+
+function checkXhsBrowseRateLimit(config) {
+  const now = Date.now();
+  
+  // 检查调用间隔
+  if (xhsBrowseLastCallTime > 0) {
+    const interval = now - xhsBrowseLastCallTime;
+    if (interval < config.minIntervalMs) {
+      return {
+        ok: false,
+        error_code: XHS_BROWSE_ERROR_CODES.RATE_LIMITED,
+        message: `Rate limited: minimum interval is ${config.minIntervalMs}ms, please wait ${Math.ceil((config.minIntervalMs - interval) / 1000)}s`,
+      };
+    }
+  }
+
+  // 检查 session 调用次数
+  if (xhsBrowseSessionCallCount >= config.maxCallsPerSession) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.RATE_LIMITED,
+      message: `Rate limited: maximum ${config.maxCallsPerSession} calls per session exceeded`,
+    };
+  }
+
+  // 更新计数
+  xhsBrowseLastCallTime = now;
+  xhsBrowseSessionCallCount++;
+
+  return null; // 没有限流
+}
+
+// ============================================================================
+// XHS Browse Backend Adapter
+// ============================================================================
+
+async function callXhsBrowseBackend(toolName, args, config) {
+  return new Promise((resolve, reject) => {
+    if (!config.command || !config.args || config.args.length === 0) {
+      resolve({
+        ok: false,
+        error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+        message: 'XHS_BROWSE_MCP_COMMAND not configured',
+      });
+      return;
+    }
+
+    let stdout = '';
+    let stderr = '';
+    let child;
+
+    try {
+      const { spawn } = require('node:child_process');
+      child = spawn(config.command, config.args, {
+        env: { ...process.env, ...config.env },
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+    } catch (error) {
+      resolve({
+        ok: false,
+        error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+        message: `Failed to spawn backend: ${error.message}`,
+      });
+      return;
+    }
+
+    const timeoutHandle = setTimeout(() => {
+      if (child) {
+        child.kill('SIGTERM');
+      }
+      resolve({
+        ok: false,
+        error_code: XHS_BROWSE_ERROR_CODES.TIMEOUT,
+        message: `Backend call timeout after ${config.timeoutMs}ms`,
+      });
+    }, config.timeoutMs);
+
+    let settled = false;
+    const finishResolve = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      resolve(result);
+    };
+
+    const finishReject = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutHandle);
+      reject(error);
+    };
+
+    const rl = require('node:readline').createInterface({
+      input: child.stdout,
+      crlfDelay: Infinity,
+    });
+
+    rl.on('line', (line) => {
+      const trimmed = line.trim();
+      if (!trimmed) return;
+
+      let payload;
+      try {
+        payload = JSON.parse(trimmed);
+      } catch {
+        return;
+      }
+
+      // 处理 initialize 响应
+      if (payload.id === 1) {
+        if (payload.error) {
+          finishResolve({
+            ok: false,
+            error_code: XHS_BROWSE_ERROR_CODES.PROTOCOL_ERROR,
+            message: `Initialize failed: ${payload.error.message}`,
+          });
+        }
+        return;
+      }
+
+      // 处理 tools/list 响应
+      if (payload.id === 2) {
+        if (payload.error) {
+          finishResolve({
+            ok: false,
+            error_code: XHS_BROWSE_ERROR_CODES.PROTOCOL_ERROR,
+            message: `tools/list failed: ${payload.error.message}`,
+          });
+        } else {
+          finishResolve({
+            ok: true,
+            available_tools: (payload.result?.tools || []).map(t => t.name),
+          });
+        }
+        return;
+      }
+
+      // 处理工具调用响应
+      if (payload.id === 3) {
+        if (payload.error) {
+          finishResolve({
+            ok: false,
+            error_code: XHS_BROWSE_ERROR_CODES.BACKEND_MCP_ERROR,
+            message: payload.error.message,
+          });
+        } else {
+          finishResolve({
+            ok: true,
+            data: payload.result,
+          });
+        }
+        return;
+      }
+    });
+
+    child.stderr.on('data', (chunk) => {
+      stderr += String(chunk);
+    });
+
+    child.on('error', finishReject);
+    child.on('exit', (code, signal) => {
+      if (!settled && code !== 0) {
+        finishResolve({
+          ok: false,
+          error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+          message: `Backend exited with code ${code}: ${stderr.trim()}`,
+        });
+      }
+    });
+
+    // 发送 MCP 协议消息
+    child.stdin.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2024-11-05',
+        capabilities: {},
+        clientInfo: { name: 'ran-agent-social-reader', version: '0.1.0' },
+      },
+    }) + '\n');
+
+    child.stdin.write(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+      params: {},
+    }) + '\n');
+
+    // 请求 tools/list
+    if (toolName === 'probe') {
+      child.stdin.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 2,
+        method: 'tools/list',
+        params: {},
+      }) + '\n');
+    } else {
+      // 调用具体工具
+      child.stdin.write(JSON.stringify({
+        jsonrpc: '2.0',
+        id: 3,
+        method: 'tools/call',
+        params: {
+          name: toolName,
+          arguments: args,
+        },
+      }) + '\n');
+    }
+  });
+}
+
+async function probeXhsBrowseBackend(config) {
+  if (!config.isConfigured) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+      message: 'XHS_BROWSE not configured',
+    };
+  }
+
+  const result = await callXhsBrowseBackend('probe', {}, config);
+  
+  if (!result.ok) {
+    return result;
+  }
+
+  // 匹配工具名
+  const availableTools = result.available_tools || [];
+  const matchedTools = {};
+
+  for (const [category, candidates] of Object.entries(XHS_BROWSE_TOOL_CANDIDATES)) {
+    for (const candidate of candidates) {
+      if (availableTools.includes(candidate)) {
+        matchedTools[category] = candidate;
+        break;
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    backend: 'xhs_browse',
+    command: config.command,
+    args: config.args,
+    available_tools: availableTools,
+    matched_tools: matchedTools,
+  };
+}
+
+function mapXhsBrowseToolName(category, config, matchedTools) {
+  if (matchedTools && matchedTools[category]) {
+    return matchedTools[category];
+  }
+  
+  const candidates = XHS_BROWSE_TOOL_CANDIDATES[category];
+  return candidates ? candidates[0] : category;
+}
+
+function normalizeXhsBrowseResponse(category, rawData) {
+  // 根据类别归一化响应结构
+  if (category === 'search') {
+    return {
+      ok: true,
+      query: rawData.query || '',
+      results: (rawData.results || []).map(item => ({
+        note_id: item.note_id || item.id || '',
+        title: item.title || '',
+        user: item.user || { id: item.user_id || '', name: item.username || '' },
+        url: item.url || item.link || '',
+        cover_image: item.cover_image || item.cover || item.image || '',
+      })),
+      total_count: rawData.total_count || rawData.total || (rawData.results || []).length,
+    };
+  }
+
+  if (category === 'note') {
+    return {
+      ok: true,
+      note_id: rawData.note_id || rawData.id || '',
+      title: rawData.title || '',
+      content: rawData.content || rawData.desc || rawData.description || '',
+      images: rawData.images || rawData.image_list || [],
+      user: rawData.user || { id: rawData.user_id || '', name: rawData.username || '' },
+      create_time: rawData.create_time || rawData.created_at || '',
+    };
+  }
+
+  if (category === 'user') {
+    return {
+      ok: true,
+      user_id: rawData.user_id || rawData.id || '',
+      user_info: {
+        name: rawData.user_info?.name || rawData.username || rawData.name || '',
+        avatar: rawData.user_info?.avatar || rawData.avatar || '',
+        followers: rawData.user_info?.followers || rawData.followers || '',
+        following: rawData.user_info?.following || rawData.following || '',
+      },
+      notes: (rawData.notes || []).map(note => ({
+        note_id: note.note_id || note.id || '',
+        title: note.title || '',
+        cover_image: note.cover_image || note.cover || '',
+        create_time: note.create_time || note.created_at || '',
+      })),
+    };
+  }
+
+  if (category === 'feed') {
+    return {
+      ok: true,
+      category: rawData.category || 'default',
+      feed: (rawData.feed || rawData.items || []).map(item => ({
+        note_id: item.note_id || item.id || '',
+        title: item.title || '',
+        user: item.user || { id: item.user_id || '', name: item.username || '' },
+        url: item.url || item.link || '',
+      })),
+    };
+  }
+
+  return { ok: true, data: rawData };
+}
+
+// ============================================================================
+// XHS Browse 工具实现
+// ============================================================================
+
+async function xhsBrowseProbe(args, options = {}) {
+  const config = getXhsBrowseConfig();
+  
+  if (!config.isConfigured) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+      message: 'XHS_BROWSE_MCP_COMMAND not configured',
+    };
+  }
+
+  return await probeXhsBrowseBackend(config);
+}
+
+async function xhsBrowseSearch(args, options = {}) {
+  const config = getXhsBrowseConfig();
+
+  if (!config.enabled) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
+      message: 'XHS_BROWSE is disabled. Set XHS_BROWSE_ENABLED=true to enable.',
+    };
+  }
+
+  if (!config.searchEnabled) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
+      message: 'XHS_BROWSE_SEARCH is disabled. Set XHS_BROWSE_SEARCH_ENABLED=true to enable.',
+    };
+  }
+
+  if (!config.isConfigured) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+      message: 'XHS_BROWSE backend not configured',
+    };
+  }
+
+  // 限流检查
+  const rateLimitError = checkXhsBrowseRateLimit(config);
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
+  // 参数验证
+  const query = String(args.query || '').trim();
+  if (!query) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.INVALID_ARGUMENT,
+      message: 'query is required',
+    };
+  }
+
+  let maxResults = Number(args.max_results || config.maxResults);
+  maxResults = Math.min(maxResults, XHS_BROWSE_DEFAULTS.maxResultsHardLimit);
+
+  const sort = args.sort || 'relevance';
+
+  // 探测后端并获取工具映射
+  const probeResult = await probeXhsBrowseBackend(config);
+  if (!probeResult.ok) {
+    return probeResult;
+  }
+
+  if (!probeResult.matched_tools?.search) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.TOOL_NOT_FOUND,
+      message: 'Search tool not found in backend',
+      available_tools: probeResult.available_tools,
+    };
+  }
+
+  // 调用后端
+  const backendToolName = probeResult.matched_tools.search;
+  const result = await callXhsBrowseBackend(backendToolName, {
+    query,
+    max_results: maxResults,
+    sort,
+  }, config);
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.SEARCH_FAILED,
+      message: result.message || 'Search failed',
+    };
+  }
+
+  return normalizeXhsBrowseResponse('search', result.data || {});
+}
+
+async function xhsBrowseNote(args, options = {}) {
+  const config = getXhsBrowseConfig();
+
+  if (!config.enabled) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
+      message: 'XHS_BROWSE is disabled. Set XHS_BROWSE_ENABLED=true to enable.',
+    };
+  }
+
+  if (!config.noteEnabled) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
+      message: 'XHS_BROWSE_NOTE is disabled. Set XHS_BROWSE_NOTE_ENABLED=true to enable.',
+    };
+  }
+
+  if (!config.isConfigured) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+      message: 'XHS_BROWSE backend not configured',
+    };
+  }
+
+  // 限流检查
+  const rateLimitError = checkXhsBrowseRateLimit(config);
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
+  // 参数验证
+  const noteId = String(args.note_id || '').trim();
+  if (!noteId) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.INVALID_ARGUMENT,
+      message: 'note_id is required',
+    };
+  }
+
+  // 探测后端并获取工具映射
+  const probeResult = await probeXhsBrowseBackend(config);
+  if (!probeResult.ok) {
+    return probeResult;
+  }
+
+  if (!probeResult.matched_tools?.note) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.TOOL_NOT_FOUND,
+      message: 'Note tool not found in backend',
+      available_tools: probeResult.available_tools,
+    };
+  }
+
+  // 调用后端
+  const backendToolName = probeResult.matched_tools.note;
+  const result = await callXhsBrowseBackend(backendToolName, {
+    note_id: noteId,
+    include_images: args.include_images !== false,
+  }, config);
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
+      message: result.message || 'Failed to read note',
+    };
+  }
+
+  return normalizeXhsBrowseResponse('note', result.data || {});
+}
+
+async function xhsBrowseUser(args, options = {}) {
+  const config = getXhsBrowseConfig();
+
+  if (!config.enabled) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
+      message: 'XHS_BROWSE is disabled. Set XHS_BROWSE_ENABLED=true to enable.',
+    };
+  }
+
+  if (!config.userEnabled) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.PROFILE_DISABLED,
+      message: 'XHS_BROWSE_USER is disabled by default. Set XHS_BROWSE_USER_ENABLED=true to enable.',
+    };
+  }
+
+  if (!config.isConfigured) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+      message: 'XHS_BROWSE backend not configured',
+    };
+  }
+
+  // 限流检查
+  const rateLimitError = checkXhsBrowseRateLimit(config);
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
+  // 参数验证
+  const userId = String(args.user_id || '').trim();
+  if (!userId) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.INVALID_ARGUMENT,
+      message: 'user_id is required',
+    };
+  }
+
+  let maxItems = Number(args.max_items || config.maxItems);
+  maxItems = Math.min(maxItems, XHS_BROWSE_DEFAULTS.maxItemsHardLimit);
+
+  // 探测后端并获取工具映射
+  const probeResult = await probeXhsBrowseBackend(config);
+  if (!probeResult.ok) {
+    return probeResult;
+  }
+
+  if (!probeResult.matched_tools?.user) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.TOOL_NOT_FOUND,
+      message: 'User tool not found in backend',
+      available_tools: probeResult.available_tools,
+    };
+  }
+
+  // 调用后端
+  const backendToolName = probeResult.matched_tools.user;
+  const result = await callXhsBrowseBackend(backendToolName, {
+    user_id: userId,
+    max_items: maxItems,
+  }, config);
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.PROFILE_FAILED,
+      message: result.message || 'Failed to get user profile',
+    };
+  }
+
+  return normalizeXhsBrowseResponse('user', result.data || {});
+}
+
+async function xhsBrowseFeed(args, options = {}) {
+  const config = getXhsBrowseConfig();
+
+  if (!config.enabled) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
+      message: 'XHS_BROWSE is disabled. Set XHS_BROWSE_ENABLED=true to enable.',
+    };
+  }
+
+  if (!config.feedEnabled) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.FEED_DISABLED,
+      message: 'XHS_BROWSE_FEED is disabled by default due to risk control. Set XHS_BROWSE_FEED_ENABLED=true to enable.',
+    };
+  }
+
+  if (!config.isConfigured) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
+      message: 'XHS_BROWSE backend not configured',
+    };
+  }
+
+  // 限流检查
+  const rateLimitError = checkXhsBrowseRateLimit(config);
+  if (rateLimitError) {
+    return rateLimitError;
+  }
+
+  // 探测后端并获取工具映射
+  const probeResult = await probeXhsBrowseBackend(config);
+  if (!probeResult.ok) {
+    return probeResult;
+  }
+
+  if (!probeResult.matched_tools?.feed) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.TOOL_NOT_FOUND,
+      message: 'Feed tool not found in backend',
+      available_tools: probeResult.available_tools,
+    };
+  }
+
+  const category = args.category || 'default';
+  let maxItems = Number(args.max_items || config.maxItems);
+  maxItems = Math.min(maxItems, XHS_BROWSE_DEFAULTS.maxItemsHardLimit);
+
+  // 调用后端
+  const backendToolName = probeResult.matched_tools.feed;
+  const result = await callXhsBrowseBackend(backendToolName, {
+    category,
+    max_items: maxItems,
+  }, config);
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.FEED_FAILED,
+      message: result.message || 'Failed to get feed',
+    };
+  }
+
+  return normalizeXhsBrowseResponse('feed', result.data || {});
 }

@@ -65,3 +65,4 @@ docs/governance/archive/
 # Agents
 .codex/
 .playwright-mcp/
+vault/ombre/
