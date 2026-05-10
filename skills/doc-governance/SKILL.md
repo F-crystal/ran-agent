@@ -5,6 +5,8 @@ description: "文档治理：维护 AGENTS.md / CLAUDE.md / openclaw/AGENTS.md /
 
 # Doc Governance
 
+Status: CURRENT (2026-05-10)
+
 ## Use When
 
 - 用户说"更新文档""文档一致性""瘦身 AGENTS""文档治理"
