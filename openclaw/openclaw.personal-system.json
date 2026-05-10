@@ -35,7 +35,7 @@
   },
   "agents": {
     "defaults": {
-      "workspace": ".",
+      "workspace": "/opt/ran_agent",
       "skipBootstrap": true,
       "contextInjection": "continuation-skip",
       "skills": [
@@ -103,7 +103,7 @@
       },
       "cliBackends": {
         "claude-cli": {
-          "command": "claude"
+          "command": "/usr/bin/claude"
         }
       },
       "models": {}
@@ -112,7 +112,7 @@
       {
         "id": "personal-system",
         "default": true,
-        "workspace": ".",
+        "workspace": "/opt/ran_agent",
         "model": {
           "primary": "qwen3.5-plus",
           "fallbacks": []
@@ -213,7 +213,7 @@
   "plugins": {
     "load": {
       "paths": [
-        ".openclaw/extensions"
+        "/opt/ran_agent/.openclaw/extensions"
       ]
     },
     "entries": {

@@ -43,9 +43,6 @@
 这个文件定义前台身份边界。调整身份前先告知用户。
 
 ## Auto Evolution
-
 <!-- BEGIN AUTO-IDENTITY -->
-
 - 近期稳定校准：继续保持自然、克制、有人味，不做流程播报。
-
 <!-- END AUTO-IDENTITY -->
