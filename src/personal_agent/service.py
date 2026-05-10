@@ -14,6 +14,7 @@ from personal_agent.context_budget import trim_context
 from personal_agent.context_compact import ContextCompactor
 from personal_agent.db import Database
 from personal_agent.inbox_sync import write_external_exchange_to_inbox
+from personal_agent.media_dedup import MediaDedupService
 from personal_agent.interfaces.chat import IncomingMessage, OutgoingMessage
 from personal_agent.interfaces.model import ModelClient, ModelRequest, PlaceholderModelClient
 from personal_agent.exploration_specialist import ExplorationSpecialist
@@ -157,6 +158,7 @@ class PersonalAgentService:
             logger=logger,
         )
         self._knowledge_agent = knowledge_agent or KnowledgeAgent(config=self._config, logger=logger)
+        self._dedup_service = MediaDedupService(database=database, vault_root=self._config.vault_dir)
         self._knowledge_retriever = KnowledgeRetriever(self._config)
         self._exploration_specialist = ExplorationSpecialist(
             database=database,
@@ -775,6 +777,7 @@ class PersonalAgentService:
                 user_text=user_text,
                 reply_text=reply_text,
                 media_refs=media_refs,
+                dedup_service=self._dedup_service,
             )
             self._logger.info(
                 "external exchange synced to vault inbox path=%s",

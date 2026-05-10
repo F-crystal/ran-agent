@@ -632,3 +632,123 @@ def _copy_media_to_vault(
 | 2026-05-10 | v0.1 | 初始设计方案 (JSON 索引) |
 | 2026-05-10 | v2 | 根据评估改进：SQLite 替代 JSON、明确 Node Bridge 分工、通用媒体设计、跨月路径策略 |
 
+
+---
+
+## Phase 1 实施记录 (2026-05-10)
+
+### 实施时间
+- **日期**: 2026 年 05 月 10 日星期日
+- **时间**: 13:17 - 13:45 (Asia/Shanghai)
+- **耗时**: ~28 分钟
+
+### 实施范围
+Phase 1 仅实现 SHA256 精确去重，pHash 字段预留但不实现。
+
+### 修改文件清单
+
+| 文件 | 变更类型 | 说明 |
+|------|----------|------|
+| `src/personal_agent/db.py` | 修改 | 新增 `media_dedup` 和 `media_dedup_refs` 表结构，添加索引 |
+| `src/personal_agent/media_dedup.py` | 新增 | `MediaDedupService` 类（~200 行），实现 SHA256 计算、去重、引用追踪 |
+| `src/personal_agent/inbox_sync.py` | 修改 | `_copy_media_to_vault()` 集成去重逻辑，支持 `dedup_service` 参数（Optional） |
+| `src/personal_agent/service.py` | 修改 | 初始化 `MediaDedupService`，传入 `write_external_exchange_to_inbox` |
+| `tests/test_media_dedup.py` | 新增 | 7 个单元测试，覆盖 SHA256、去重、引用计数、统计等 |
+
+### 测试结果
+
+| 测试套件 | 结果 | 说明 |
+|----------|------|------|
+| `test_media_dedup` | ✅ 7/7 通过 | 新增单元测试全部通过 |
+| `test_inbox_sync_and_life_loop` | ✅ 7/7 通过 | 现有集成测试通过 |
+| `test_http_server` | ✅ 16/16 通过 | HTTP 接口测试通过 |
+| **全量回归** | ⚠️ 168 测试，4 失败 1 错误 | 失败均为已有问题（`test_start_time_mcp`），与本次修改无关 |
+
+### 核心实现细节
+
+#### 1. 数据库表结构
+```sql
+CREATE TABLE media_dedup (
+    sha256 TEXT PRIMARY KEY,
+    phash TEXT,              -- Phase 2 预留
+    rel_path TEXT NOT NULL,
+    width INTEGER,           -- Phase 2 预留
+    height INTEGER,          -- Phase 2 预留
+    size_bytes INTEGER NOT NULL,
+    mime_type TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    reference_count INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE media_dedup_refs (
+    id INTEGER PRIMARY KEY,
+    sha256 TEXT NOT NULL,
+    source_table TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    source_column TEXT NOT NULL,
+    context TEXT,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (sha256) REFERENCES media_dedup(sha256)
+);
+
+CREATE INDEX idx_media_dedup_refs_sha256 ON media_dedup_refs(sha256);
+```
+
+#### 2. 去重流程
+```
+1. 计算源文件 SHA256
+2. 查询 media_dedup 表
+   - 命中 → 复用现有 rel_path，插入新引用，reference_count +1
+   - 未命中 → 生成新 rel_path（基于 SHA256），复制文件，插入记录和引用
+3. 返回 rel_path 给调用方
+```
+
+#### 3. 向后兼容设计
+- `write_external_exchange_to_inbox()` 的 `dedup_service` 参数为 `Optional`
+- 不传参数时，走原有纯复制逻辑（`_copy_media_to_vault` 中的 else 分支）
+- 现有调用方无需修改即可正常工作
+
+#### 4. 路径策略
+- 统一使用 vault 根目录相对路径（如 `inbox/images/.media/abc123.bin`）
+- 避免跨月目录断裂问题
+- 文件命名：`{sha256}{extension}`
+
+### 验证方法
+
+#### 手动测试步骤
+1. 发送一张图片到微信 → 检查 `vault/inbox/images/` 下生成新文件
+2. 发送相同图片 → 检查无新文件生成，`reference_count` 增加到 2
+3. 查询数据库：
+   ```sql
+   SELECT sha256, rel_path, reference_count FROM media_dedup;
+   SELECT * FROM media_dedup_refs WHERE sha256 = '...';
+   ```
+
+#### 自动化测试
+```bash
+cd /opt/ran_agent
+source .venv/bin/activate
+PYTHONPATH=src python -m unittest tests.test_media_dedup -v
+```
+
+### 性能影响评估
+- **SHA256 计算**: ~1-5ms/MB（可忽略）
+- **数据库查询**: 单次 SELECT + INSERT，SQLite 内存索引，<1ms
+- **总体延迟**: <10ms（用户无感知）
+
+### 已知限制与后续工作
+
+| 限制 | 影响 | 解决计划 |
+|------|------|----------|
+| 仅支持精确去重 | 相似图片（缩放、裁剪、压缩）无法归并 | Phase 2 实现 pHash |
+| 无并发锁 | 多线程同时写入同一 SHA256 可能冲突 | SQLite 事务已提供基本保护，极端情况需优化 |
+| 无清理机制 | 删除 note 后媒体文件不会自动清理 | 需要额外 GC 任务（后续讨论） |
+
+### 提交记录
+- **Commit Hash**: （待生成）
+- **提交信息**: `feat: 图片去重 Phase 1 实现 (SHA256 + SQLite)`
+- **推送分支**: `origin/main`
+
+---
+

@@ -83,6 +83,37 @@ SCHEMA_STATEMENTS = (
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    # Media deduplication tables (Phase 1: SHA256 exact dedup)
+    """
+    CREATE TABLE IF NOT EXISTS media_dedup (
+        sha256 TEXT PRIMARY KEY,
+        phash TEXT,
+        rel_path TEXT NOT NULL,
+        width INTEGER,
+        height INTEGER,
+        size_bytes INTEGER NOT NULL,
+        mime_type TEXT,
+        first_seen_at TEXT NOT NULL,
+        last_seen_at TEXT NOT NULL,
+        reference_count INTEGER NOT NULL DEFAULT 1
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS media_dedup_refs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sha256 TEXT NOT NULL,
+        source_table TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        source_column TEXT NOT NULL,
+        context TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (sha256) REFERENCES media_dedup(sha256)
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_media_dedup_refs_sha256 
+    ON media_dedup_refs(sha256)
+    """,
 )
 
 
