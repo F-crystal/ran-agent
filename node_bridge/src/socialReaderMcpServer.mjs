@@ -1883,7 +1883,6 @@ async function callXhsBrowseBackend(toolName, args, config) {
     let child;
 
     try {
-      const { spawn } = require('node:child_process');
       child = spawn(config.command, config.args, {
         env: { ...process.env, ...config.env },
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -1923,7 +1922,7 @@ async function callXhsBrowseBackend(toolName, args, config) {
       reject(error);
     };
 
-    const rl = require('node:readline').createInterface({
+    const rl = readline.createInterface({
       input: child.stdout,
       crlfDelay: Infinity,
     });
