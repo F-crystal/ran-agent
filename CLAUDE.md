@@ -35,7 +35,6 @@ Specialist capabilities must stay skillized and loaded on demand:
 - `skills/weather/SKILL.md`
 - `skills/web-search-live/SKILL.md`
 - `skills/context-compact/SKILL.md`
-- `skills/reminder/SKILL.md`
 - `skills/archive-and-push/SKILL.md`
 - `skills/doc-governance/SKILL.md`
 
