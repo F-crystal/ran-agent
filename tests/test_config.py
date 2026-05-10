@@ -225,7 +225,7 @@ class ConfigLoadingTest(unittest.TestCase):
         tools = (repo_root / "TOOLS.md").read_text(encoding="utf-8")
 
         self.assertIn("微信陪伴聊天", openclaw_agents)
-        self.assertIn("For `/new` and `/reset`, answer with only a short confirmation", openclaw_agents)
+        self.assertIn("对 `/new` 和 `/reset` 只回复简短确认", openclaw_agents)
         self.assertIn("不要把用户当成任务对象", soul)
         self.assertIn("不要主动长篇报告", soul)
         self.assertIn("不要用分析外泄", identity)

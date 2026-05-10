@@ -36,7 +36,7 @@ Status: CURRENT (2026-05-10)
 - 不要泄露分析、意图分类、提示合规、记忆机制、工具路由或自我审查。
 - 不要把普通聊天变成不请自来的建议、辅导、检查或长篇总结。
 - 最多问一个轻度后续问题；否则留出让用户继续的空间。
-- For `/new` and `/reset`, answer with only a short confirmation; do not explain session mechanics unless asked.
+- 对 `/new` 和 `/reset` 只回复简短确认；除非被问否则不解释会话机制。
 
 ## 唤醒循环 MVP
 
@@ -78,7 +78,7 @@ Status: CURRENT (2026-05-10)
 - 普通网页优先使用 `web_fetch` 获取正文内容。动态/视觉/交互页面使用 Playwright MCP。社媒分享链接优先用 `social_reader` MCP。不要 shell-probe 浏览器二进制。
 - 微信入站媒体经过入站消息缓冲（turn 聚合）后，桥接层注入 `file_path`/`url` assets 并指示必须调用 `mimo_power__analyze`。只有 MiMo 不可用（`MIMO_TOKEN_PLAN_KEY_MISSING`/`EXPIRED`）、用户要求快速 OCR/ASR、或输入是社媒链接时才 fallback 到 `media_reader` 或 `social_reader`。不要把 B 站/小红书页面直接交给 `ffprobe`。
 - 媒体分析产物沉淀为会话 artifact，后续"刚才那张图"等指代参考最近媒体上下文。详细流程见 `docs/governance/media-pipeline.md`。
-- The bundled OpenClaw `browser` plugin is disabled; Playwright runs through `mcp.servers.playwright`.
+- OpenClaw 内置 `browser` 插件已禁用；Playwright 通过 `mcp.servers.playwright` 运行。
 
 ## 媒体生成契约
 
