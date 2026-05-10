@@ -1815,7 +1815,7 @@ function getXhsBrowseConfig(env = process.env) {
     noteEnabled,
     userEnabled,
     feedEnabled,
-    isConfigured: enabled && command && argsJson,
+    isConfigured: command && command.length > 0,
   };
 }
 
