@@ -1,6 +1,6 @@
 # Skills Map
 
-Status: CURRENT (2026-05-01)
+Status: CURRENT (2026-05-10)
 
 ## Active Skills (On-Demand)
 
@@ -14,6 +14,9 @@ Status: CURRENT (2026-05-01)
 - `web-search-live`
 - `archive-and-push`
 - `code-simplifier`
+- `context-compact`
+- `aihot`
+- `doc-governance`
 
 ## Loading Rule
 
@@ -32,8 +35,7 @@ Status: CURRENT (2026-05-01)
 - `skills/weather/SKILL.md`
 - `skills/web-search-live/SKILL.md`
 - `skills/archive-and-push/SKILL.md`
-- `skills/code-simplifier/SKILL.md` (adapted from Anthropic `claude-plugins-official/plugins/code-simplifier`; upstream prompt and license are preserved under `references/`)
-
-## Note
-
-- Retired chat-agent skill guidance was removed from the active repo; historical references remain only in archive notes.
+- `skills/code-simplifier/SKILL.md` (adapted from Anthropic `claude-plugins-official/plugins/code-simplifier`)
+- `skills/context-compact/SKILL.md`
+- `skills/aihot/SKILL.md`
+- `skills/doc-governance/SKILL.md`

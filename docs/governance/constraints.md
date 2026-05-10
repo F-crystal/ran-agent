@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-05-01)
+Status: CURRENT (2026-05-10)
 
 ## Split Of Responsibility
 
@@ -14,42 +14,18 @@ Status: CURRENT (2026-05-01)
 
 ## Real Mainlines
 
-- Chat mainline (target lock):
-  - `WeChat -> Node bridge -> OpenClaw frontend -> Claude Code primary -> reply -> WeChat`
-- Proactive mainline:
-  - `scheduler -> life-loop skill -> orchestrator judgment -> front speaker -> Node bridge`
-- Knowledge mainline:
-  - `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
-- OpenClaw frontend must not use direct `qwen/*` provider paths. The active frontend route/provider is `claude_code` with bare model `qwen3.5-plus` and empty fallbacks; Qwen Code belongs only to the knowledge mainline above.
-- Kimi and GLM are retired as OpenClaw frontend primary/fallback candidates and should not be present in active automatic routing config.
+- Chat mainline: `WeChat -> Node bridge -> OpenClaw frontend -> Claude Code primary -> reply`
+- Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> OpenClaw reply`
+- Proactive mainline: `scheduler -> life-loop skill -> orchestrator judgment -> front speaker -> Node bridge`
+- Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
+- OpenClaw frontend must not use direct `qwen/*` provider paths. Active route/provider is `claude_code` with bare model `qwen3.5-plus` and empty fallbacks.
+- Kimi and GLM are retired as OpenClaw frontend primary/fallback candidates.
 
 ## Specialist Boundaries
 
 - Specialists are skillized and on-demand only.
 - Do not keep all specialist blocks in default turn context.
 - Memory, reflection, knowledge-state, life-loop, night-cycle, ombre-memory remain support layers.
-
-## Companion Reply Quality
-
-- OpenClaw frontline replies should fit 微信陪伴聊天: short, natural, warm, and not clingy.
-- Persona/bootstrap text should prevent meta narration, analysis leakage, hidden tool routing, and unsolicited long reports.
-- Ordinary casual chat should stay conversational; do not automatically convert it into advice, task management, diagnosis, or a structured status report.
-- Command-like reset triggers such as `/new` and `/reset` should receive only a short confirmation unless the user asks for mechanics.
-
-## Sub-Agent Boundaries
-
-Allowed sub-agent candidates (heavy/background only):
-
-- reflection
-- knowledge maintenance
-- exploration
-- heavy inspect_more
-
-Not allowed as peer front sub-agents:
-
-- frontline chat
-- memory main flow
-- life loop
 
 ## Technical Limits
 
@@ -67,7 +43,6 @@ Unless explicitly requested, do not introduce:
 - For frontline lock, heartbeat cadence, and todo/reminder behavior, read `openclaw/AGENTS.md`.
 - Keep the local OpenClaw config project-scoped in `openclaw/openclaw.personal-system.json`.
 - `openclaw/openclaw.personal-system.json` enables the bundled `bootstrap-extra-files` hook so `openclaw/AGENTS.md` is loaded at bootstrap.
-- Keep runtime changes in the OpenClaw subtree aligned with the local AGENTS file rather than duplicating constraints here.
 
 ## Security Scope
 
