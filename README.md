@@ -39,6 +39,8 @@ Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入
 
 **知识管理。** Obsidian 知识库存储结构化知识，Python 后端定期运行维护任务——整理笔记、更新知识索引、保持知识库更新。不需要把全部内容塞进 prompt。
 
+**媒体理解管线。** 发图片后说"用 mimo 看一下"，系统自动将图片和文字合并为一个请求处理。媒体分析结果在会话中持久化，后续说"刚才那张图"能正确指代之前的分析结果。支持图片、音频、视频、文档的深度多模态分析。
+
 **记忆与反思。** Agent 在对话中构建工作记忆。每晚运行反思周期，回顾当天互动，提出性格微调建议。你始终控制哪些内容被记住、哪些被遗忘。
 
 ---
@@ -46,13 +48,13 @@ Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入
 ## 架构
 
 ```
-微信 ──┬── 消息接入 ──► Node Bridge ──► OpenClaw Agent ──► Claude/Qwen
-       │                    ▲               │    │    │
-       │                    │               │    │    └──► media_generation
-       │                    │               │    └───────► social_reader
-       │                    │               └────────────► media_reader
-       │                    │
-       └── 消息发出 ◄── Node Bridge ◄── 回复 ◄───────────┘
+微信 ──┬── 消息接入 ──► 入站消息聚合 ──► Node Bridge ──► OpenClaw Agent ──► Claude/Qwen
+       │                  (图片+文字合并)       ▲               │    │    │
+       │                                        │               │    │    └──► media_generation
+       │                                        │               │    └───────► social_reader
+       │                                        │               └────────────► media_reader + mimo_power
+       │                                        │
+       └── 消息发出 ◄── Node Bridge ◄── 回复 ◄──┘
                             ▲
                             │
                   Python 后端服务
@@ -68,6 +70,8 @@ Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入
 - **MCP 门面模式。** OpenClaw 只看到 6 个干净稳定的工具（`media_reader__analyze_video` 等），背后是平台解析器、Provider 适配器、格式转换器。内部细节不泄露给 Agent。
 
 - **字幕优先的视频理解。** 四层逐级降级：软字幕直接提取（~2s）→ 纯音频 ASR 转写（~10s，仅下载音频）→ 关键帧 VLM 分析（~30s，不含 OCR）→ 元数据兜底（~1s）。长视频不盲目下载全片。
+
+- **媒体制品管线。** 入站媒体经 MiMo 分析（media_reader 兜底）后存为会话级制品。后续引用如"刚才那张图"自动解析到先前的分析结果，无需重复处理。
 
 - **数据完全本地。** 状态存 SQLite，知识存 Obsidian Vault，聊天记录在你的机器上。没有云数据库、没有托管服务、没有遥测。单用户设计——没有用户管理、权限控制、API 限流，因为只有你一个人用。
 
@@ -106,6 +110,12 @@ Agent 的能力以 MCP（模型上下文协议）服务的形式组织，每个�
 |------|------|
 | `generate_image` | 通过 Qwen 生成图片 |
 | `generate_speech` | 文字转语音 |
+
+**`mimo_power`** — 深度多模态分析服务。
+
+| 工具 | 描述 |
+|------|------|
+| `analyze` | 深度多模态分析（图片/音频/视频/文档），使用 MiMo Token Plan |
 
 **`ombre_brain`** — 情感记忆系统，用于长期记忆管理。
 
@@ -193,6 +203,10 @@ ran_agent/
 │   └── src/
 │       ├── mediaReader/         # OCR、VLM、ASR、ffmpeg、平台解析器
 │       │   └── platformResolvers/  # B站、小红书、微信公众号解析器
+│       ├── inboundMessageBuffer.mjs  # 入站消息聚合（图片+文字合并）
+│       ├── mediaContextStore.mjs     # 媒体制品持久化
+│       ├── trustedMediaPaths.mjs     # 可信媒体路径校验
+│       ├── mimoPowerMcpServer.mjs    # MiMo Power MCP 服务
 │       ├── socialReaderMcpServer.mjs
 │       ├── mediaReaderMcpServer.mjs
 │       ├── mediaGenerationMcpServer.mjs

@@ -39,6 +39,8 @@ Ran Agent connects WeChat to an LLM-powered conversation runtime with memory, re
 
 **Knowledge Management.** An Obsidian vault stores structured knowledge. The Python backend runs periodic maintenance jobs — organizing notes, updating the knowledge index, and keeping the vault current. No dumping everything into a prompt window.
 
+**Media Understanding Pipeline.** Send an image and follow up with "use mimo to look at it" — the system automatically merges the image and text into a single request. Media analysis results are persisted as conversation-level artifacts, so saying "that image from earlier" correctly resolves to the prior analysis. Supports deep multimodal analysis of images, audio, video, and documents.
+
 **Memory and Reflection.** The agent builds a working memory across conversations. A nightly reflection cycle reviews the day's interactions and suggests persona refinements. You stay in control of what sticks and what fades.
 
 ---
@@ -46,13 +48,13 @@ Ran Agent connects WeChat to an LLM-powered conversation runtime with memory, re
 ## Architecture
 
 ```
-WeChat ──┬── inbound ──► Node Bridge ──► OpenClaw Agent Runtime ──► Claude/Qwen
-         │                    ▲                │    │    │
-         │                    │                │    │    └──► media_generation
-         │                    │                │    └───────► social_reader
-         │                    │                └────────────► media_reader
-         │                    │
-         └── outbound ◄── Node Bridge ◄── reply ◄────────────┘
+WeChat ──┬── inbound ──► Inbound Aggregation ──► Node Bridge ──► OpenClaw Agent Runtime ──► Claude/Qwen
+         │                (image+text merge)          ▲                │    │    │
+         │                                            │                │    │    └──► media_generation
+         │                                            │                │    └───────► social_reader
+         │                                            │                └────────────► media_reader + mimo_power
+         │                                            │
+         └── outbound ◄── Node Bridge ◄── reply ◄────┘
                               ▲
                               │
                     Python Backend
@@ -68,6 +70,8 @@ WeChat ──┬── inbound ──► Node Bridge ──► OpenClaw Agent Ru
 - **MCP Facade Pattern.** OpenClaw sees clean, stable tools (`media_reader__analyze_video`, `social_reader__read_social_post_deep`, etc.). Behind each facade are platform resolvers, provider adapters, and format converters. Tools don't leak internals to the agent.
 
 - **Subtitle-First Video Understanding.** Four-tier progressive fallback: downloadable subtitles (~2s) → audio-only ASR transcription (~10s) → keyframe VLM analysis without OCR (~30s) → metadata as last resort (~1s). Long videos never blindly download full files.
+
+- **Media Artifact Pipeline.** Inbound media is analyzed (MiMo first, media_reader fallback) and stored as conversation-scoped artifacts. Follow-up references like "that image from earlier" resolve to prior analysis results without reprocessing.
 
 - **Local-First Everything.** State in SQLite. Knowledge in Obsidian vault. Conversations on your machine. No cloud database, no hosted service, no telemetry. Single-user by design — there is no user management, no RBAC, no API rate limiting, because there's only you.
 
@@ -106,6 +110,12 @@ The agent's capabilities are organized as MCP (Model Context Protocol) services.
 |------|-------------|
 | `generate_image` | Generate images via Qwen image generation |
 | `generate_speech` | Text-to-speech audio generation |
+
+**`mimo_power`** — Deep multimodal analysis service.
+
+| Tool | Description |
+|------|-------------|
+| `analyze` | Deep multimodal analysis (image/audio/video/document) via MiMo Token Plan |
 
 **`ombre_brain`** — Emotional memory system for long-term memory management.
 
@@ -193,6 +203,10 @@ ran_agent/
 │   └── src/
 │       ├── mediaReader/         # OCR, VLM, ASR, ffmpeg, platform resolvers
 │       │   └── platformResolvers/  # Bilibili, XHS, WeChat resolvers
+│       ├── inboundMessageBuffer.mjs  # Turn aggregation (image+text merge)
+│       ├── mediaContextStore.mjs     # Media artifact persistence
+│       ├── trustedMediaPaths.mjs     # Trusted media path validation
+│       ├── mimoPowerMcpServer.mjs    # MiMo Power MCP service
 │       ├── socialReaderMcpServer.mjs
 │       ├── mediaReaderMcpServer.mjs
 │       ├── mediaGenerationMcpServer.mjs

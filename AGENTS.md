@@ -85,7 +85,9 @@ Do not sub-agentize:
 ## Media Reader Constraints
 
 - MCP servers (`media_reader`, `social_reader`, `media_generation`) are the stable facade; do not expose internal provider/ffmpeg/platform-resolver tools to OpenClaw directly.
-- WeChat inbound media uses the artifact mainline: media asset -> media artifact -> conversation media context -> OpenClaw reply.
+- WeChat inbound media uses the artifact mainline: raw messages -> logical turn (via `inboundMessageBuffer.mjs` turn aggregation) -> media asset -> media artifact -> conversation media context -> OpenClaw reply.
+- The inbound message buffer holds media-only messages in a pending queue (TTL 10 min) and merges them with subsequent text-ref messages (e.g. "用 mimo 分析") within configurable timeouts (`WECHAT_TEXT_REF_WAIT_MS`, `WECHAT_PENDING_MEDIA_TTL_MS`, `WECHAT_PENDING_TEXT_REF_TTL_MS`). Plain text passes through without delay.
+- External media files (e.g. WeChat SDK /tmp files) are auto-copied to trusted dirs before processing.
 - Local media `file_path` inputs are accepted only from trusted inbound media directories (`debug/wechat/inbound`, `debug/mimo_inbound`, `.openclaw_state/wechat/inbound`, `.openclaw_state/openclaw-weixin/media`, or `NODE_BRIDGE_TRUSTED_MEDIA_DIRS` / `PERSONAL_AGENT_TRUSTED_MEDIA_DIRS`). URL media assets must be remote `http(s)` URLs. Project-local secrets, state, vault, and env files are not valid media assets.
 - Video analysis uses subtitle-first strategy: prefer yt-dlp extracted subtitles, fall back to audio ASR, then VLM frame analysis if explicitly enabled, and finally degrade to metadata-only.
 - Frame extraction mode skips OCR by default (VLM reads burned-in subtitles from frames).
@@ -104,7 +106,7 @@ Do not sub-agentize:
 - `openclaw/openclaw.personal-system.json` controls the agent model contract.
 - `agents.defaults.model.primary` and `agents.list[0].model.primary` must store bare model ids (e.g. `qwen3.5-plus`).
 - `models.providers.claude_code.models` must include the active model id.
-- Server path normalization: `scripts/normalize_openclaw_project_paths.py`.
+- Server path normalization: `scripts/normalize_openclaw_project_paths.py` (preserves existing `claude-cli.command` values to prevent overwriting local paths with server defaults).
 - OpenClaw validation must use `scripts/openclaw_with_env.sh`, not bare `npx openclaw`.
 
 ## Security
