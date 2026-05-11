@@ -12,6 +12,14 @@ ARCHIVE_RECORD="${ARCHIVE_RECORD:-$ROOT_DIR/local_archive/docs/governance/archiv
 SENSITIVE_PRESENT=()
 STAGED_FILES=()
 
+# Detect Python binary: prefer .venv if available, fallback to python3
+PYTHON_BIN=""
+if [ -f "$ROOT_DIR/.venv/bin/python" ]; then
+  PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+else
+  PYTHON_BIN="python3"
+fi
+
 usage() {
   cat <<'EOF'
 Usage: scripts/archive_and_push.sh [--push] [--dry-run] [--skip-tests] [--remote-url URL] [--commit-message MSG] [--record PATH]
@@ -107,7 +115,8 @@ ensure_main_branch() {
 run_baseline_tests() {
   [ "$RUN_TESTS" -eq 1 ] || return 0
 
-  run_cmd env PYTHONPATH="$ROOT_DIR/src" pytest -q \
+  log "Using Python: $PYTHON_BIN"
+  run_cmd env PYTHONPATH="$ROOT_DIR/src" "$PYTHON_BIN" -m pytest -q \
     "$ROOT_DIR/tests/test_http_server.py" \
     "$ROOT_DIR/tests/test_knowledge_agent.py" \
     "$ROOT_DIR/tests/test_config.py"
@@ -333,7 +342,7 @@ Date: $(date '+%Y-%m-%d')
 
 ## Staged Files
 EOF
-    printf '%s\n' "$staged_list" | sed '/^$/d; s/^/- `/; s/$/`/'
+    printf '%s\n' "$staged_list" | sed '/^$/d; s/^/- `/; s/$/$/`/'
     cat <<'EOF'
 
 ## Notes
