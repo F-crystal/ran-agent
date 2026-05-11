@@ -32,6 +32,38 @@ const PLATFORM_HOSTS = [
   ['weibo', ['weibo.com', 'weibo.cn']],
   ['zhihu', ['zhihu.com']],
 ];
+// Internal cache for note_id -> xsecToken mapping (never exposed to users)
+const xhsNoteTokenCache = new Map();
+const XHS_NOTE_TOKEN_CACHE_MAX_SIZE = 1000;
+
+function cacheXhsNoteToken(noteId, xsecToken, metadata = {}) {
+  if (!noteId || !xsecToken) return;
+  if (xhsNoteTokenCache.size >= XHS_NOTE_TOKEN_CACHE_MAX_SIZE) {
+    const firstKey = xhsNoteTokenCache.keys().next().value;
+    if (firstKey) xhsNoteTokenCache.delete(firstKey);
+  }
+  xhsNoteTokenCache.set(noteId, {
+    xsecToken,
+    title: metadata.title || '',
+    user: metadata.user || '',
+    type: metadata.type || '',
+    createdAt: Date.now(),
+  });
+}
+
+function getCachedXhsNoteToken(noteId) {
+  if (!noteId) return null;
+  const entry = xhsNoteTokenCache.get(noteId);
+  if (!entry) return null;
+  const TTL_MS = 24 * 60 * 60 * 1000;
+  if (Date.now() - entry.createdAt > TTL_MS) {
+    xhsNoteTokenCache.delete(noteId);
+    return null;
+  }
+  return entry;
+}
+
+
 
 export function buildSocialReaderTools() {
   return [
@@ -521,7 +553,7 @@ export function parseXhsUrlInfo(url) {
   }
   return {
     note_id: noteId,
-    xsec_token: xsecToken,
+    xsecToken: xsecToken,
     xsec_source: xsecSource,
     canonical_url: canonicalUrl,
   };
@@ -1743,8 +1775,8 @@ const XHS_BROWSE_DEFAULTS = {
 };
 
 const XHS_BROWSE_TOOL_CANDIDATES = {
-  search: ['search_notes', 'search', 'query_notes', 'search_note'],
-  note: ['get_note_info', 'get_note', 'note_detail', 'get_note_content'],
+  search: ['search_notes', 'search', 'query_notes', 'search_note', 'xhs_search_note'],
+  note: ['get_note_info', 'get_note', 'note_detail', 'get_note_content', 'xhs_get_note_detail'],
   user: ['get_user_notes', 'user_profile', 'user_homepage'],
   feed: ['get_feed', 'explore', 'recommendation_feed'],
 };
@@ -2091,17 +2123,32 @@ function mapXhsBrowseToolName(category, config, matchedTools) {
 function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
   // 根据类别归一化响应结构
   if (category === 'search') {
+    const results = rawData.results || [];
+    // Extract and cache xsecToken for each note (internal only, never exposed)
+    results.forEach(item => {
+      const noteId = item.note_id || item.id || '';
+      const xsecToken = item.xsecToken || item.xsec_token || '';
+      if (noteId && xsecToken) {
+        cacheXhsNoteToken(noteId, xsecToken, {
+          title: item.title || '',
+          user: typeof item.user === 'string' ? item.user : (item.user?.name || item.user?.nickname || ''),
+          type: item.type || '',
+        });
+      }
+    });
+    
     return {
       ok: true,
       query: originalQuery || rawData.query || '',
-      results: (rawData.results || []).map(item => ({
+      results: results.map(item => ({
         note_id: item.note_id || item.id || '',
         title: item.title || '',
         user: item.user || { id: item.user_id || '', name: item.username || '' },
         url: item.url || item.link || '',
         cover_image: item.cover_image || item.cover || item.image || '',
+        type: item.type || '',
       })),
-      total_count: rawData.total_count || rawData.total || (rawData.results || []).length,
+      total_count: rawData.total_count || rawData.total || results.length,
     };
   }
 
@@ -2316,10 +2363,25 @@ async function xhsBrowseNote(args, options = {}) {
     };
   }
 
-  // 调用后端
+  // Get xsecToken from cache (populated by search results)
+  const cachedEntry = getCachedXhsNoteToken(noteId);
+  const xsecToken = cachedEntry?.xsecToken || '';
+  
+  // If no xsecToken in cache, return error requiring context
+  if (!xsecToken) {
+    return {
+      ok: false,
+      error_code: 'XHS_NOTE_CONTEXT_REQUIRED',
+      message: `No cached context for note_id: ${noteId}. Please search first using xhs_browse_search, then read the note.`,
+      hint: 'Run xhs_browse_search with a relevant query to populate the note cache.',
+    };
+  }
+  
+  // Call backend with feed_id and xsec_token (required by xhs_get_note_detail)
   const backendToolName = probeResult.matched_tools.note;
   const result = await callXhsBrowseBackend(backendToolName, {
-    note_id: noteId,
+    feedId: noteId,
+    xsecToken: xsecToken,
     include_images: args.include_images !== false,
   }, config);
 

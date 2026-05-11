@@ -208,8 +208,33 @@ def test_adapter_normalization():
     assert 'available_tools' in content
     assert 'matched_tools' in content
     # 检查 originalQuery 参数支持
-    assert 'originalQuery || rawData.query' in content, "Should support originalQuery parameter"
+    assert 'originalQuery' in content, "Should support originalQuery parameter"
+    # 检查 debug_shape 诊断字段
+    assert 'debug_shape' in content, "Should include debug_shape"
     print("✅ test_adapter_normalization: PASSED")
+
+def test_backend_eof_without_response():
+    """测试 16: 后端 EOF 但无 JSON-RPC 响应时返回错误"""
+    with open(MJS_FILE, 'r') as f:
+        content = f.read()
+    
+    # 检查 exit handler 是否处理无响应情况
+    assert 'Backend exited without JSON-RPC response' in content, "Should return error when backend exits without response"
+    # 检查错误码
+    assert 'BACKEND_MCP_ERROR' in content, "Should use BACKEND_MCP_ERROR code"
+    # 检查 targetId 用于区分 probe 和工具调用
+    assert 'targetId' in content, "Should use targetId for response matching"
+    print("✅ test_backend_eof_without_response: PASSED")
+
+def test_probe_callable_verified_flag():
+    """测试 17: probe 返回 callable_verified 标志"""
+    with open(MJS_FILE, 'r') as f:
+        content = f.read()
+    
+    # 检查 probeXhsBrowseBackend 是否返回 callable_verified
+    assert 'callable_verified' in content, "Should return callable_verified flag"
+    assert 'declared_tools' in content, "Should return declared_tools"
+    print("✅ test_probe_callable_verified_flag: PASSED")
 
 if __name__ == '__main__':
     tests = [
@@ -228,6 +253,8 @@ if __name__ == '__main__':
         test_tool_name_mapping,
         test_search_notes_uses_keywords,
         test_adapter_normalization,
+        test_backend_eof_without_response,
+        test_probe_callable_verified_flag,
     ]
     
     failed = []

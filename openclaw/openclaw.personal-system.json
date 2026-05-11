@@ -45,9 +45,9 @@
       "userTimezone": "Asia/Shanghai",
       "thinkingDefault": "off",
       "typingMode": "message",
-      "timeoutSeconds": 180,
+      "timeoutSeconds": 600,
       "llm": {
-        "idleTimeoutSeconds": 120
+        "idleTimeoutSeconds": 300
       },
       "contextTokens": 120000,
       "params": {
