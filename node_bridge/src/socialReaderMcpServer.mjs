@@ -5,6 +5,14 @@ import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { buildMediaAssets } from './mediaReader/assetResolver.mjs';
 
+// Default Puppeteer executable path for xhs-mcp backend (use system Chromium)
+if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
+  process.env.PUPPETEER_EXECUTABLE_PATH = '/snap/bin/chromium';
+}
+if (!process.env.PUPPETEER_SKIP_DOWNLOAD) {
+  process.env.PUPPETEER_SKIP_DOWNLOAD = 'true';
+}
+
 const SERVER_INFO = {
   name: 'ran-agent-social-reader',
   version: '0.1.0',
@@ -2123,32 +2131,53 @@ function mapXhsBrowseToolName(category, config, matchedTools) {
 function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
   // 根据类别归一化响应结构
   if (category === 'search') {
-    const results = rawData.results || [];
-    // Extract and cache xsecToken for each note (internal only, never exposed)
-    results.forEach(item => {
-      const noteId = item.note_id || item.id || '';
+    // xhs-mcp returns items[] or feeds[] with nested noteCard structure
+    const rawItems = rawData.items || rawData.feeds || rawData.results || [];
+    
+    // Parse and normalize each item
+    const normalizedItems = rawItems.map(item => {
+      // xhs-mcp structure: item.noteCard.* nested, item.id and item.xsecToken at top level
+      const noteCard = item.noteCard || item;
+      const user = noteCard.user || item.user || {};
+      const cover = noteCard.cover || item.cover || {};
+      const interactInfo = noteCard.interactInfo || item.interactInfo || {};
+      
+      const noteId = item.id || item.note_id || '';
       const xsecToken = item.xsecToken || item.xsec_token || '';
+      
+      // Cache xsecToken internally (never exposed)
       if (noteId && xsecToken) {
         cacheXhsNoteToken(noteId, xsecToken, {
-          title: item.title || '',
-          user: typeof item.user === 'string' ? item.user : (item.user?.name || item.user?.nickname || ''),
-          type: item.type || '',
+          title: noteCard.displayTitle || noteCard.display_title || '',
+          user: user.nickname || user.nickName || '',
+          type: noteCard.type || '',
         });
       }
+      
+      return {
+        note_id: noteId,
+        title: noteCard.displayTitle || noteCard.display_title || item.title || '',
+        user: user.nickname || user.nickName || user.name || user.username || '',
+        user_id: user.userId || user.id || '',
+        cover_image: cover.urlDefault || cover.urlPre || cover.coverUrl || item.cover_image || '',
+        type: noteCard.type || item.type || '',
+        liked_count: interactInfo.likedCount || interactInfo.liked_count || 0,
+        collected_count: interactInfo.collectedCount || interactInfo.collected_count || 0,
+        comment_count: interactInfo.commentCount || interactInfo.comment_count || 0,
+        shared_count: interactInfo.sharedCount || interactInfo.shared_count || 0,
+        url: noteId ? `https://www.xiaohongshu.com/explore/${noteId}` : (item.url || ''),
+        xsecToken: xsecToken, // Keep for internal use, will be filtered in output if needed
+      };
     });
+    
+    // Remove xsecToken from final output (internal only)
+    const results = normalizedItems.map(({ xsecToken, ...rest }) => rest);
     
     return {
       ok: true,
       query: originalQuery || rawData.query || '',
-      results: results.map(item => ({
-        note_id: item.note_id || item.id || '',
-        title: item.title || '',
-        user: item.user || { id: item.user_id || '', name: item.username || '' },
-        url: item.url || item.link || '',
-        cover_image: item.cover_image || item.cover || item.image || '',
-        type: item.type || '',
-      })),
-      total_count: rawData.total_count || rawData.total || results.length,
+      results: results,
+      total_count: rawData.total_count || rawData.total || rawItems.length,
     };
   }
 
@@ -2284,8 +2313,8 @@ async function xhsBrowseSearch(args, options = {}) {
   const backendToolName = probeResult.matched_tools.search;
   // 根据后端工具名称映射参数
   const backendArgs = {};
-  if (backendToolName === 'search_notes') {
-    backendArgs.keywords = query;
+  if (backendToolName === 'search_notes' || backendToolName === 'xhs_search_note' || backendToolName.includes('search')) {
+    backendArgs.keyword = query;
   } else {
     backendArgs.query = query;
   }
@@ -2302,7 +2331,46 @@ async function xhsBrowseSearch(args, options = {}) {
     };
   }
 
-  return normalizeXhsBrowseResponse('search', result.data || {}, query);
+  // Parse xhs-mcp response: result.data.content[0].text contains JSON string
+  let rawData = {};
+  try {
+    const mcpContent = result.data?.content?.[0]?.text;
+    if (mcpContent) {
+      const parsed = JSON.parse(mcpContent);
+      // xhs-mcp returns {success, items/feeds, count} or {success: false, error, message}
+      if (parsed.success === false) {
+        return {
+          ok: false,
+          error_code: XHS_BROWSE_ERROR_CODES.SEARCH_FAILED,
+          message: parsed.message || parsed.error || 'Search failed',
+          debug: { raw: mcpContent.substring(0, 500) },
+        };
+      }
+      // Map xhs-mcp fields to expected format
+      rawData = {
+        items: parsed.items || parsed.feeds || [],
+        total_count: parsed.count || parsed.total || 0,
+        query: parsed.keyword || parsed.query || query || '',
+      };
+    }
+  } catch (parseError) {
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.SEARCH_FAILED,
+      message: 'Failed to parse backend response: ' + parseError.message,
+      debug: { raw: result.data ? JSON.stringify(result.data).substring(0, 500) : 'empty' },
+    };
+  }
+
+  const normalized = normalizeXhsBrowseResponse('search', rawData, query);
+  
+  // Truncate results to maxResults
+  if (normalized.ok && normalized.results && normalized.results.length > maxResults) {
+    normalized.results = normalized.results.slice(0, maxResults);
+    normalized.total_count = normalized.results.length;
+  }
+  
+  return normalized;
 }
 
 async function xhsBrowseNote(args, options = {}) {
