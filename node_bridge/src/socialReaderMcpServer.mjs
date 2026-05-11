@@ -2088,12 +2088,12 @@ function mapXhsBrowseToolName(category, config, matchedTools) {
   return candidates ? candidates[0] : category;
 }
 
-function normalizeXhsBrowseResponse(category, rawData) {
+function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
   // 根据类别归一化响应结构
   if (category === 'search') {
     return {
       ok: true,
-      query: rawData.query || '',
+      query: originalQuery || rawData.query || '',
       results: (rawData.results || []).map(item => ({
         note_id: item.note_id || item.id || '',
         title: item.title || '',
@@ -2235,11 +2235,17 @@ async function xhsBrowseSearch(args, options = {}) {
 
   // 调用后端
   const backendToolName = probeResult.matched_tools.search;
-  const result = await callXhsBrowseBackend(backendToolName, {
-    query,
-    max_results: maxResults,
-    sort,
-  }, config);
+  // 根据后端工具名称映射参数
+  const backendArgs = {};
+  if (backendToolName === 'search_notes') {
+    backendArgs.keywords = query;
+  } else {
+    backendArgs.query = query;
+  }
+  backendArgs.max_results = maxResults;
+  backendArgs.sort = sort;
+
+  const result = await callXhsBrowseBackend(backendToolName, backendArgs, config);
 
   if (!result.ok) {
     return {
@@ -2249,7 +2255,7 @@ async function xhsBrowseSearch(args, options = {}) {
     };
   }
 
-  return normalizeXhsBrowseResponse('search', result.data || {});
+  return normalizeXhsBrowseResponse('search', result.data || {}, query);
 }
 
 async function xhsBrowseNote(args, options = {}) {

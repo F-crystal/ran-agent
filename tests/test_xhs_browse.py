@@ -189,14 +189,26 @@ def test_tool_name_mapping():
     assert 'get_feed' in content
     print("✅ test_tool_name_mapping: PASSED")
 
+def test_search_notes_uses_keywords():
+    """测试 14: search_notes 工具使用 keywords 参数"""
+    with open(MJS_FILE, 'r') as f:
+        content = f.read()
+    
+    # 检查 xhsBrowseSearch 中是否有 keywords 参数映射
+    assert "backendArgs.keywords = query" in content, "search_notes should use keywords parameter"
+    assert "if (backendToolName === 'search_notes')" in content, "Should check for search_notes tool name"
+    print("✅ test_search_notes_uses_keywords: PASSED")
+
 def test_adapter_normalization():
-    """测试 14: Adapter 归一化逻辑"""
+    """测试 15: Adapter 归一化逻辑"""
     with open(MJS_FILE, 'r') as f:
         content = f.read()
     
     assert 'normalizeXhsBrowseResponse' in content
     assert 'available_tools' in content
     assert 'matched_tools' in content
+    # 检查 originalQuery 参数支持
+    assert 'originalQuery || rawData.query' in content, "Should support originalQuery parameter"
     print("✅ test_adapter_normalization: PASSED")
 
 if __name__ == '__main__':
@@ -214,6 +226,7 @@ if __name__ == '__main__':
         test_no_sensitive_data_logging,
         test_env_example_updated,
         test_tool_name_mapping,
+        test_search_notes_uses_keywords,
         test_adapter_normalization,
     ]
     
