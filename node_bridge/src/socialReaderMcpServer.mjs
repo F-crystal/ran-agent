@@ -1460,6 +1460,9 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
 
   const prepared = await prepareXhsBackendUrl({ rawText, resolved }, options);
   if (!prepared.ok) {
+    if (genericFallbackEnabled) {
+      return await readGenericSocialPost({ url: resolved.resolved_url || resolved.original_url || String(rawText), platform: 'xhs', includeComments, maxComments }, options);
+    }
     return buildErrorResult(prepared.error || prepared.error_code, prepared);
   }
   const url = prepared.backend_url;
