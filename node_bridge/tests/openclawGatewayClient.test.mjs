@@ -305,6 +305,7 @@ test('sendChatToOpenClawAgent describes inbound media as MiMo MCP assets', async
         env: {
           RAN_AGENT_ROOT: projectRoot,
           OPENCLAW_CONFIG: path.join(projectRoot, 'openclaw/openclaw.personal-system.json'),
+          OPENCLAW_CONTEXT_POLICY: 'legacy',
         },
         execFileImpl: async (command, args) => {
           capturedArgs = args;
@@ -365,6 +366,7 @@ test('sendChatToOpenClawAgent drops project files outside trusted media director
         env: {
           RAN_AGENT_ROOT: projectRoot,
           OPENCLAW_CONFIG: path.join(projectRoot, 'openclaw/openclaw.personal-system.json'),
+          OPENCLAW_CONTEXT_POLICY: 'legacy',
         },
         execFileImpl: async (command, args) => {
           capturedArgs = args;
@@ -416,6 +418,7 @@ test('sendChatToOpenClawAgent copies external media files to trusted inbound dir
         env: {
           RAN_AGENT_ROOT: projectRoot,
           OPENCLAW_CONFIG: path.join(projectRoot, 'openclaw/openclaw.personal-system.json'),
+          OPENCLAW_CONTEXT_POLICY: 'legacy',
         },
         execFileImpl: async (command, args) => {
           capturedArgs = args;
@@ -472,6 +475,7 @@ test('sendChatToOpenClawAgent injects generated media artifact context before Op
         env: {
           RAN_AGENT_ROOT: projectRoot,
           OPENCLAW_CONFIG: path.join(projectRoot, 'openclaw/openclaw.personal-system.json'),
+          OPENCLAW_CONTEXT_POLICY: 'legacy',
         },
         execFileImpl: async (command, args) => {
           capturedArgs = args;

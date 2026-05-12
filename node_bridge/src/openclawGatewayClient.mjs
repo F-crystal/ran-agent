@@ -8,6 +8,12 @@ import { execFile as execFileCallback, spawnSync } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveStateDir } from './runtimeState.mjs';
 import { ensureConversationMediaContext } from './mediaContextStore.mjs';
+import {
+  buildCompactMediaContext,
+  selectMediaArtifactsForPrompt,
+  buildContextSizeLog,
+  buildPersonaContract,
+} from './openclawContextPolicy.mjs';
 import { isPathInsideRoot, isTrustedLocalMediaPath, resolveProjectRoot } from './trustedMediaPaths.mjs';
 import {
   buildStructuredUrlContext,
@@ -145,8 +151,47 @@ export async function sendChatToOpenClawAgent(payload, options = {}) {
     logger,
     ...(options.mediaContextOptions || {}),
   });
+  // Context Policy v1: compact media context
+  const contextPolicyMode = String(env.OPENCLAW_CONTEXT_POLICY || 'compact').trim().toLowerCase();
+  const maxMediaArtifacts = Math.max(1, Number(env.OPENCLAW_MAX_MEDIA_ARTIFACTS || 3));
+  const enableContextSizeLog = String(env.OPENCLAW_CONTEXT_SIZE_LOG || '1').trim().toLowerCase() === '1';
+
+  let mediaContextText;
+  if (contextPolicyMode === 'compact' && Array.isArray(mediaContext.artifacts)) {
+    const selected = selectMediaArtifactsForPrompt(mediaContext.artifacts, maxMediaArtifacts);
+    mediaContextText = buildCompactMediaContext(selected);
+  } else {
+    // legacy fallback
+    mediaContextText = mediaContext.contextText;
+  }
+
+  // Context size logging
+  if (enableContextSizeLog) {
+    const personaContract = buildPersonaContract();
+    const temporalContext = buildBridgeTemporalUserContext();
+    const mediaInstruction = String(options.mediaInstruction || "");
+    const userText = String(preparedPayload.text || "");
+    const finalMessage = buildOpenClawAgentMessage(preparedPayload, { mediaContextText });
+    const sizeLog = buildContextSizeLog([
+      { label: "system_prompt_chars", text: temporalContext },
+      { label: "persona_prompt_chars", text: personaContract },
+      { label: "history_chars", text: "" },
+      { label: "media_context_chars", text: mediaContextText },
+      { label: "tool_context_chars", text: mediaInstruction },
+      { label: "final_prompt_chars", text: finalMessage },
+    ]);
+    const enrichedLog = {
+      ...sizeLog,
+      media_artifact_count: Array.isArray(mediaContext.artifacts) ? mediaContext.artifacts.length : 0,
+      injected_media_count: Array.isArray(mediaContext.artifacts) && contextPolicyMode === "compact" ? selectMediaArtifactsForPrompt(mediaContext.artifacts, maxMediaArtifacts).length : 0,
+      compacted_history_count: 0,
+      request_id: String(Date.now()) + "-" + Math.random().toString(36).slice(2, 8),
+      context_policy_mode: contextPolicyMode,
+    };
+    logger.log?.("[context-size]", JSON.stringify(enrichedLog));
+  }
   const message = buildOpenClawAgentMessage(preparedPayload, {
-    mediaContextText: mediaContext.contextText,
+    mediaContextText,
   });
   const command = String(env.OPENCLAW_AGENT_COMMAND || 'npx').trim() || 'npx';
   const args = [

@@ -152,3 +152,81 @@ After success, preserve `WECHAT_MEDIA: {...}` line in reply for bridge consumpti
 - Platform resolver credentials (SESSDATA, XHS_COOKIE, proxy URLs) must never appear in tool output, logs, docs, or git.
 - PaddleOCR is best-effort on servers; timeouts expected on low-CPU instances.
 - Frame extraction skips OCR by default (VLM reads burned-in subtitles).
+
+## Context Policy v1
+
+Module: `node_bridge/src/openclawContextPolicy.mjs`
+
+Status: CURRENT (2026-05-12)
+
+Compact media context injection to reduce prompt size while preserving persona and media awareness.
+
+### Pipeline Integration
+
+```text
+ensureConversationMediaContext
+  -> Context Policy v1 (compact mode)
+     -> selectMediaArtifactsForPrompt (max 3 artifacts)
+     -> buildCompactMediaContext (≤180 chars per artifact)
+  -> buildOpenClawAgentMessage
+     -> inject compact media context OR legacy full context
+```
+
+### Dual Mode
+
+| Mode | Env Var | Behavior |
+|------|---------|----------|
+| **compact** | `OPENCLAW_CONTEXT_POLICY=compact` (default) | Use `selectMediaArtifactsForPrompt` + `buildCompactMediaContext` |
+| **legacy** | `OPENCLAW_CONTEXT_POLICY=legacy` | Use original `mediaContext.contextText` from `renderConversationMediaContext` |
+
+### Artifact Selection Rules
+
+- Max 3 media artifacts injected per turn
+- Priority: `explicit_ref` > `current_media` > `recent_candidate` > `history`
+- `consumed=true` and non-current-ref old media filtered out
+- `recent_candidate` not consumed (soft attachment)
+
+### Compact Format
+
+Example output (≤180 chars per artifact):
+```
+[当前媒体上下文]
+  1. img_xxx：饭局短视频截图；相亲饭局误会剧情；来源陈佰萬；694 赞/60 藏/25 评。
+  2. img_yyy：博物馆展览照片；尼罗河的赠礼主题；古埃及文明特展。
+[请基于以上媒体内容与用户对话]
+```
+
+### Context Size Logging
+
+When `OPENCLAW_CONTEXT_SIZE_LOG=1` (default), logs include:
+- `system_prompt_chars`, `persona_prompt_chars`, `history_chars`
+- `media_context_chars`, `tool_context_chars`, `final_prompt_chars`
+- `media_artifact_count`, `injected_media_count`, `compacted_history_count`
+- `request_id`, `context_policy_mode`
+
+### Exported Functions
+
+- `renderCompactArtifact(artifact)` - Render single artifact to ≤180 char text
+- `selectMediaArtifactsForPrompt(artifacts, max=3)` - Select artifacts by priority
+- `buildCompactMediaContext(artifacts)` - Build compact media context text
+- `buildContextSizeLog(parts)` - Generate context size log object
+- `buildPersonaContract()` - Generate lightweight persona prompt
+
+### Rollback
+
+Set `OPENCLAW_CONTEXT_POLICY=legacy` to revert to original full media context rendering without code changes.
+
+### Test Coverage
+
+- `node_bridge/tests/openclawContextPolicy.test.mjs` - Core policy functions
+- Compact mode: max 3 artifacts, priority order, consumed filtering
+- Legacy mode: fallback to `renderConversationMediaContext`
+
+### Env Vars
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OPENCLAW_CONTEXT_POLICY` | `compact` | `compact` or `legacy` mode |
+| `OPENCLAW_MAX_MEDIA_ARTIFACTS` | `3` | Max artifacts to inject |
+| `OPENCLAW_MEDIA_COMPACT_CHARS` | `180` | Max chars per compact artifact |
+| `OPENCLAW_CONTEXT_SIZE_LOG` | `1` | Enable context size logging |
