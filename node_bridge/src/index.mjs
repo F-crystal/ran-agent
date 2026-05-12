@@ -260,6 +260,11 @@ function normalizeFollowUpTexts(messages) {
   return normalized;
 }
 
+function isProactiveDeliveryEnabled(env = process.env) {
+  const value = String(env.PERSONAL_AGENT_PROACTIVE_ENABLED || 'false').trim().toLowerCase();
+  return ['1', 'true', 'yes', 'on'].includes(value);
+}
+
 function normalizeChatReplyResult(replyResult) {
   const explicitFollowUps = normalizeFollowUpTexts(replyResult?.followUpMessages);
   const mediaFromMarker = extractTrustedReplyMediaMarker(replyResult?.replyText);
@@ -357,6 +362,10 @@ export function buildAgent({ logger, env }) {
   }
 
   async function flushPendingOutboundQueue() {
+    if (!isProactiveDeliveryEnabled(env)) {
+      logger.info?.('[node-bridge] pending proactive outbound queue held because proactive delivery is disabled');
+      return;
+    }
     const drained = drainPendingOutboundMessages(8, env)
       .map((item) => String(item?.text || '').trim())
       .filter(Boolean);

@@ -43,7 +43,7 @@ test('buildMimoRequestBody maps mixed multimodal assets into MiMo OpenAI-compati
     mode: 'deep',
   }, {
     env: {
-      MIMO_POWER_MODEL: 'mimo-v2.5',
+      MIMO_POWER_MULTIMODAL_MODEL: 'mimo-v2.5',
       MIMO_POWER_MAX_COMPLETION_TOKENS: '4096',
     },
   });
@@ -89,6 +89,7 @@ test('analyze calls Token Plan endpoint with api-key header and stores a result 
         RAN_AGENT_ROOT: projectRoot,
         MIMO_TOKEN_PLAN_API_KEY: 'tp-test',
         MIMO_TOKEN_PLAN_OPENAI_BASE_URL: 'https://token-plan-cn.xiaomimimo.com/v1',
+        MIMO_POWER_VISION_MODEL: 'mimo-v2.5',
         MIMO_POWER_TASK_DIR: path.join(projectRoot, 'debug/mimo_tasks'),
       },
       resolveHostnameImpl: async () => ['93.184.216.34'],
@@ -154,7 +155,7 @@ test('local file assets are read only from trusted media directories', () => {
   }, {
     env: {
       RAN_AGENT_ROOT: projectRoot,
-      MIMO_POWER_MODEL: 'mimo-v2.5',
+      MIMO_POWER_VISION_MODEL: 'mimo-v2.5',
     },
   });
 

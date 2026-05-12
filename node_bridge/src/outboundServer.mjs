@@ -262,6 +262,13 @@ export async function handleOutboundRequest({ bot, logger = console, method, url
   }
   const forceSend = payload.force === true;
   const messageKind = typeof payload.kind === 'string' ? payload.kind.trim().toLowerCase() : 'checkin';
+  if (messageKind !== 'reminder' && !forceSend && !isProactiveDeliveryEnabled(process.env)) {
+    logger.warn?.('proactive outbound dropped because proactive delivery is disabled');
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: 'proactive_delivery_disabled' },
+    };
+  }
   if (messageKind === 'reminder' && !isReminderDeliveryEnabled(process.env)) {
     logger.warn?.('reminder outbound dropped because reminder delivery is disabled');
     return {
@@ -344,6 +351,12 @@ export async function handleOutboundRequest({ bot, logger = console, method, url
       payload: { ok: true, queued: true, reason: 'send_failed' },
     };
   }
+}
+
+function isProactiveDeliveryEnabled(env = process.env) {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(env.PERSONAL_AGENT_PROACTIVE_ENABLED || 'false').trim().toLowerCase()
+  );
 }
 
 function isReminderDeliveryEnabled(env = process.env) {

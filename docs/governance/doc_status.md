@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-05-12)
+Status: CURRENT (2026-05-13)
 
 ## Public Source Of Truth
 
@@ -20,7 +20,7 @@ Status: CURRENT (2026-05-12)
 
 ## Publication Notes
 
-- Historical archive notes and deployment journals are local-only under ignored `local_archive/docs/`.
+- Historical archive notes and deployment journals are local-only under ignored `local_archive/docs/`; do not force-add them to Git unless the owner explicitly asks for a specific safe file.
 - Future archive records go under `local_archive/docs/governance/archive/`.
 - Future deployment notes go under `local_archive/docs/deployment/`.
 - Runtime state, private vault content, logs, databases, debug outputs, env files, and local archive material must remain ignored.

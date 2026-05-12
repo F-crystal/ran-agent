@@ -341,6 +341,10 @@ export function buildMimoChatCompletionsRequestBody(args = {}, options = {}) {
   };
 }
 
+export function buildMimoRequestBody(args = {}, options = {}) {
+  return buildMimoChatCompletionsRequestBody(args, options);
+}
+
 export function buildMimoResponsesRequestBody(args = {}, options = {}) {
   const env = options.env || process.env;
   const task = String(args.task || '').trim();

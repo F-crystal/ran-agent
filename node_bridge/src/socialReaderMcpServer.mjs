@@ -561,7 +561,7 @@ export function parseXhsUrlInfo(url) {
   }
   return {
     note_id: noteId,
-    xsecToken: xsecToken,
+    xsec_token: xsecToken,
     xsec_source: xsecSource,
     canonical_url: canonicalUrl,
   };
@@ -1460,6 +1460,13 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
 
   const prepared = await prepareXhsBackendUrl({ rawText, resolved }, options);
   if (!prepared.ok) {
+    if (prepared.error_code === 'AMBIGUOUS_SEARCH_RESULT') {
+      return buildErrorResult(prepared.error || prepared.error_code, {
+        ...prepared,
+        platform: 'xhs',
+        url: resolved.resolved_url || resolved.original_url || String(rawText),
+      });
+    }
     if (genericFallbackEnabled) {
       return await readGenericSocialPost({ url: resolved.resolved_url || resolved.original_url || String(rawText), platform: 'xhs', includeComments, maxComments }, options);
     }
@@ -1574,6 +1581,7 @@ export async function callMcpToolViaStdio({
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }) {
   return await new Promise((resolve, reject) => {
+    const targetId = 2;
     const child = spawn(command, args, {
       env,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -1619,7 +1627,7 @@ export async function callMcpToolViaStdio({
       } catch {
         return;
       }
-      if (payload.id === 2) {
+      if (payload.id === targetId) {
         if (payload.error) {
           finishReject(new Error(payload.error.message || JSON.stringify(payload.error)));
         } else {
@@ -1635,6 +1643,8 @@ export async function callMcpToolViaStdio({
     child.on('exit', (code, signal) => {
       if (!settled && code !== 0) {
         finishReject(new Error(`MCP backend exited code=${code} signal=${signal || ''}: ${stderr.trim()}`));
+      } else if (!settled) {
+        finishReject(new Error(`Backend exited without JSON-RPC response: code=${code} signal=${signal || ''}: ${stderr.trim()}`));
       }
     });
 
@@ -1655,7 +1665,7 @@ export async function callMcpToolViaStdio({
     })}\n`);
     child.stdin.write(`${JSON.stringify({
       jsonrpc: '2.0',
-      id: 2,
+      id: targetId,
       method: 'tools/call',
       params: {
         name: toolName,
@@ -1924,6 +1934,7 @@ async function callXhsBrowseBackend(toolName, args, config) {
     let stdout = '';
     let stderr = '';
     let child;
+    const targetId = toolName === 'probe' ? 2 : 3;
 
     try {
       child = spawn(config.command, config.args, {
@@ -2011,7 +2022,7 @@ async function callXhsBrowseBackend(toolName, args, config) {
       }
 
       // 处理工具调用响应
-      if (payload.id === 3) {
+      if (payload.id === targetId && targetId === 3) {
         if (payload.error) {
           finishResolve({
             ok: false,
@@ -2040,6 +2051,12 @@ async function callXhsBrowseBackend(toolName, args, config) {
           error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
           message: `Backend exited with code ${code}: ${stderr.trim()}`,
         });
+      } else if (!settled) {
+        finishResolve({
+          ok: false,
+          error_code: XHS_BROWSE_ERROR_CODES.BACKEND_MCP_ERROR,
+          message: `Backend exited without JSON-RPC response: code=${code} signal=${signal || ''}: ${stderr.trim()}`,
+        });
       }
     });
 
@@ -2065,7 +2082,7 @@ async function callXhsBrowseBackend(toolName, args, config) {
     if (toolName === 'probe') {
       child.stdin.write(JSON.stringify({
         jsonrpc: '2.0',
-        id: 2,
+        id: targetId,
         method: 'tools/list',
         params: {},
       }) + '\n');
@@ -2073,7 +2090,7 @@ async function callXhsBrowseBackend(toolName, args, config) {
       // 调用具体工具
       child.stdin.write(JSON.stringify({
         jsonrpc: '2.0',
-        id: 3,
+        id: targetId,
         method: 'tools/call',
         params: {
           name: toolName,
@@ -2117,6 +2134,8 @@ async function probeXhsBrowseBackend(config) {
     backend: 'xhs_browse',
     command: config.command,
     args: config.args,
+    callable_verified: true,
+    declared_tools: availableTools,
     available_tools: availableTools,
     matched_tools: matchedTools,
   };
@@ -2132,6 +2151,11 @@ function mapXhsBrowseToolName(category, config, matchedTools) {
 }
 
 function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
+  const debugShape = {
+    category,
+    raw_keys: rawData && typeof rawData === 'object' ? Object.keys(rawData).sort() : [],
+  };
+
   // 根据类别归一化响应结构
   if (category === 'search') {
     // xhs-mcp returns items[] or feeds[] with nested noteCard structure
@@ -2181,6 +2205,10 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
       query: originalQuery || rawData.query || '',
       results: results,
       total_count: rawData.total_count || rawData.total || rawItems.length,
+      debug_shape: {
+        ...debugShape,
+        item_count: rawItems.length,
+      },
     };
   }
 
@@ -2193,6 +2221,7 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
       images: rawData.images || rawData.image_list || [],
       user: rawData.user || { id: rawData.user_id || '', name: rawData.username || '' },
       create_time: rawData.create_time || rawData.created_at || '',
+      debug_shape: debugShape,
     };
   }
 
@@ -2212,6 +2241,7 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
         cover_image: note.cover_image || note.cover || '',
         create_time: note.create_time || note.created_at || '',
       })),
+      debug_shape: debugShape,
     };
   }
 
@@ -2225,10 +2255,11 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
         user: item.user || { id: item.user_id || '', name: item.username || '' },
         url: item.url || item.link || '',
       })),
+      debug_shape: debugShape,
     };
   }
 
-  return { ok: true, data: rawData };
+  return { ok: true, data: rawData, debug_shape: debugShape };
 }
 
 // ============================================================================
@@ -2316,7 +2347,9 @@ async function xhsBrowseSearch(args, options = {}) {
   const backendToolName = probeResult.matched_tools.search;
   // 根据后端工具名称映射参数
   const backendArgs = {};
-  if (backendToolName === 'search_notes' || backendToolName === 'xhs_search_note' || backendToolName.includes('search')) {
+  if (backendToolName === 'search_notes') {
+    backendArgs.keywords = query;
+  } else if (backendToolName === 'xhs_search_note' || backendToolName.includes('search')) {
     backendArgs.keyword = query;
   } else {
     backendArgs.query = query;

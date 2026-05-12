@@ -61,6 +61,24 @@ const sampleArtifacts = [
   assert.ok(output.length > 0, "Non-empty output");
 }
 
+{
+  const mediaContextArtifact = {
+    id: "media_img_1234",
+    type: "image",
+    analyzer: "mimo_power",
+    summary: "截图显示登录失败，提示验证码过期。",
+    ocr_text: "验证码过期",
+    created_at: "2026-05-12T10:00:00.000Z",
+  };
+
+  const output = renderCompactArtifact(mediaContextArtifact);
+  assert.ok(output.length <= 180, "mediaContextStore artifact render ≤ 180 chars");
+  assert.match(output, /截图显示登录失败/, "Uses mediaContextStore summary");
+  assert.match(output, /验证码过期/, "Uses mediaContextStore OCR text");
+  assert.match(output, /mimo_power/, "Includes analyzer source when legacy source is absent");
+  assert.notEqual(output, "img_1234：。", "Does not render an empty shell");
+}
+
 // ──────────────── 2. selectMediaArtifactsForPrompt max 3 ────────────────
 
 {

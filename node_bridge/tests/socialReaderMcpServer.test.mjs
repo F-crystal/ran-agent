@@ -15,7 +15,18 @@ test('social reader exposes only read-only tools with object schemas', () => {
 
   assert.deepEqual(
     tools.map((tool) => tool.name),
-    ['resolve_social_url', 'read_social_post', 'read_social_post_deep', 'read_music_share', 'check_social_login']
+    [
+      'resolve_social_url',
+      'read_social_post',
+      'read_social_post_deep',
+      'read_music_share',
+      'check_social_login',
+      'xhs_browse_probe',
+      'xhs_browse_search',
+      'xhs_browse_note',
+      'xhs_browse_user',
+      'xhs_browse_feed',
+    ]
   );
   for (const tool of tools) {
     assert.equal(tool.inputSchema.type, 'object');

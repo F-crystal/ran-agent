@@ -64,9 +64,10 @@ if (decayedConfidence < globalThreshold) candidate removed
 **Example**:
 | Turn | User Input | Media Confidence | Action |
 |------|------------|------------------|--------|
-| 1 | [sends image] | 1.0 (new) | Attached |
-| 2 | "博主很有竞争意识" | 0.7 (decay) | Attached (relevant) |
-| 3 | "我们不说妒忌，要说忮忌" | 0.105 (decay × intent shift) | **Removed** (< 0.25) |
+| 1 | [sends image] | N/A | Held |
+| 2 | "博主很有竞争意识" | 0.5 (first soft attach) | Attached (relevant) |
+| 3 | "继续说" | 0.35 (decay) | Attached |
+| 4 | "忮忌是什么意思" | 0.0735 (decay × intent shift) | **Removed** (< 0.25) |
 
 ### Behavior Summary
 
@@ -88,7 +89,7 @@ if (decayedConfidence < globalThreshold) candidate removed
 
 ### Test Coverage
 
-21 test cases in `node_bridge/tests/inboundMessageBuffer.test.mjs`:
+22 test cases in `node_bridge/tests/inboundMessageBuffer.test.mjs`:
 - ✅ Explicit ref binding and consumption
 - ✅ Implicit ref soft attachment
 - ✅ Subsequent explicit ref after implicit ref (media not consumed)
@@ -192,9 +193,11 @@ Example output (≤180 chars per artifact):
 ```
 [当前媒体上下文]
   1. img_xxx：饭局短视频截图；相亲饭局误会剧情；来源陈佰萬；694 赞/60 藏/25 评。
-  2. img_yyy：博物馆展览照片；尼罗河的赠礼主题；古埃及文明特展。
+  2. img_yyy：博物馆展览照片；OCR 尼罗河的赠礼；来源mimo_power；时间2026-05-12。
 [请基于以上媒体内容与用户对话]
 ```
+
+Compact rendering accepts both legacy `title`/`description`/`source`/`stats` fields and mediaContextStore fields: `summary`, `ocr_text`, `transcript`, `keyframes`, `analyzer`, `created_at`.
 
 ### Context Size Logging
 

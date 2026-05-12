@@ -185,6 +185,7 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(default_model["fallbacks"], [])
         self.assertEqual(listed_model["primary"], "qwen3.5-plus")
         self.assertEqual(listed_model["fallbacks"], [])
+        self.assertEqual(config_data["agents"]["defaults"]["heartbeat"]["directPolicy"], "block")
         self.assertNotIn("kimi-for-coding", registered_model_ids)
         self.assertIn("qwen3.5-plus", registered_model_ids)
 

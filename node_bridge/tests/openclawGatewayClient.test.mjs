@@ -177,7 +177,7 @@ test('openclaw config keeps the personal-system agent on the tool-capable Claude
   assert.equal(defaults.compaction?.mode, 'safeguard');
   assert.equal(defaults.params?.cacheRetention, 'short');
   assert.equal(defaults.blockStreamingDefault, 'on');
-  assert.equal(claudeCliBackend.command, 'claude');
+  assert.equal(claudeCliBackend.command, '/usr/bin/claude');
   assert.equal(claudeProvider.api, 'anthropic-messages');
   assert.equal(claudeProvider.baseUrl, '${ANTHROPIC_BASE_URL}');
   assert.equal(claudeProvider.apiKey, '${ANTHROPIC_AUTH_TOKEN}');

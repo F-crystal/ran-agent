@@ -85,7 +85,7 @@
       "heartbeat": {
         "every": "90m",
         "target": "last",
-        "directPolicy": "allow",
+        "directPolicy": "block",
         "lightContext": true,
         "isolatedSession": true,
         "ackMaxChars": 220,

@@ -11,6 +11,19 @@ import {
 } from '../src/runtimeState.mjs';
 
 const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
+const ORIGINAL_PROACTIVE_ENABLED = process.env.PERSONAL_AGENT_PROACTIVE_ENABLED;
+
+test.beforeEach(() => {
+  process.env.PERSONAL_AGENT_PROACTIVE_ENABLED = 'true';
+});
+
+test.afterEach(() => {
+  if (ORIGINAL_PROACTIVE_ENABLED === undefined) {
+    delete process.env.PERSONAL_AGENT_PROACTIVE_ENABLED;
+  } else {
+    process.env.PERSONAL_AGENT_PROACTIVE_ENABLED = ORIGINAL_PROACTIVE_ENABLED;
+  }
+});
 
 test('getOutboundServerConfig reads host and port from environment', () => {
   const config = getOutboundServerConfig({
@@ -49,6 +62,32 @@ test('handleOutboundRequest sends proactive message through bot', async () => {
   } else {
     assert.equal(sentPayload, null);
   }
+});
+
+test('handleOutboundRequest drops checkin when proactive delivery is disabled', async () => {
+  process.env.PERSONAL_AGENT_PROACTIVE_ENABLED = 'false';
+  let sendCalled = false;
+  const result = await handleOutboundRequest({
+    bot: {
+      async sendMessage() {
+        sendCalled = true;
+      },
+    },
+    logger: {
+      info() {},
+      warn() {},
+      error() {},
+    },
+    method: 'POST',
+    url: '/outbound/send',
+    bodyText: JSON.stringify({ text: '你刚提到下午要改论文提纲，进展到哪一步了？' }),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.dropped, true);
+  assert.equal(result.payload.reason, 'proactive_delivery_disabled');
+  assert.equal(sendCalled, false);
 });
 
 test('handleOutboundRequest forwards structured media payloads through bot', async () => {

@@ -1,5 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   InboundMergeCoordinator,
@@ -10,6 +12,12 @@ import {
   buildAgent,
   shouldRetryWeixinStartAttempt,
 } from '../src/index.mjs';
+import {
+  appendPendingOutboundMessage,
+  drainPendingOutboundMessages,
+} from '../src/runtimeState.mjs';
+
+const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
 test('shouldRetryWeixinStartAttempt treats non-positive max retries as infinite', () => {
   assert.equal(shouldRetryWeixinStartAttempt(1, 0), true);
@@ -266,4 +274,48 @@ test('buildAgent keeps paragraph-separated replies in the synchronous response',
 
   assert.deepEqual(result, { text: '第一段\n\n第二段\n\n第三段' });
   assert.deepEqual(followUps, null);
+});
+
+test('buildAgent does not flush pending proactive messages when proactive delivery is disabled', async () => {
+  const stateBaseDir = path.join(PROJECT_ROOT, '.openclaw_state');
+  fs.mkdirSync(stateBaseDir, { recursive: true });
+  const stateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-pending-disabled-'));
+  const env = {
+    OPENCLAW_STATE_DIR: stateDir,
+    PERSONAL_AGENT_PROACTIVE_ENABLED: 'false',
+    NODE_BRIDGE_MERGE_WINDOW_MS: '10',
+    async handleWeChatTextMessage() {
+      return {
+        replyText: '正常回复',
+        followUpMessages: [],
+      };
+    },
+    async sendFollowUpMessages() {
+      throw new Error('should not send disabled proactive pending messages');
+    },
+  };
+  appendPendingOutboundMessage({
+    text: '你刚提到下午要改论文提纲，进展到哪一步了？',
+    reason: 'checkin_cooldown_not_reached',
+  }, env);
+  let followUpSendCalled = false;
+  env.sendFollowUpMessages = async () => {
+    followUpSendCalled = true;
+    throw new Error('should not send disabled proactive pending messages');
+  };
+
+  const agent = buildAgent({
+    logger: { log() {}, warn() {}, error() {} },
+    env,
+  });
+
+  const result = await agent.chat({
+    text: '你好',
+    conversationId: 'wx-pending-disabled',
+  });
+  await new Promise((resolve) => setTimeout(resolve, 25));
+
+  assert.deepEqual(result, { text: '正常回复' });
+  assert.equal(followUpSendCalled, false);
+  assert.equal(drainPendingOutboundMessages(10, env).length, 1);
 });

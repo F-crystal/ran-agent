@@ -205,6 +205,38 @@ describe('inbound message buffer - implicit reference (recent_candidate)', () =>
     assert.equal(result.payload.media_candidates[0].relation, 'recent_candidate');
   });
 
+  it('decays the same recent media candidate across ordinary follow-up turns', async () => {
+    const buffer = createInboundMessageBuffer({
+      pendingMediaTtlMs: 600000,
+      logger: { log() {} },
+    });
+
+    await buffer.processInbound(makeMediaPayload('user-1', '/tmp/img.png'));
+
+    const first = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '怎么样？',
+    }));
+    const second = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '继续说',
+    }));
+    const third = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '还有呢',
+    }));
+
+    assert.equal(first.payload.media_candidates[0].confidence, 0.5);
+    assert.ok(
+      second.payload.media_candidates[0].confidence < first.payload.media_candidates[0].confidence,
+      'confidence decays on the next ordinary turn'
+    );
+    assert.ok(
+      !third.payload.media_candidates,
+      'candidate drops once decayed below the global threshold'
+    );
+  });
+
   it('allows subsequent explicit ref after implicit ref (media not consumed)', async () => {
     const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
 

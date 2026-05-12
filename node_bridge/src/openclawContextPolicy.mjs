@@ -43,18 +43,42 @@ export function renderCompactArtifact(artifact) {
 
   const segments = [];
 
-  // 标题或描述摘要
-  const headline = artifact.title || artifact.description || '';
+  // 标题或内容摘要。兼容 mediaContextStore 的 summary/ocr/transcript/keyframes 字段。
+  const keyframes = summarizeKeyframes(artifact.keyframes);
+  const headline = firstNonEmpty(
+    artifact.title,
+    artifact.description,
+    artifact.summary,
+    artifact.transcript,
+    artifact.ocr_text,
+    keyframes,
+  );
   if (headline) segments.push(truncate(headline, 40));
 
   // 描述（如果和标题不同）
-  if (artifact.description && artifact.description !== artifact.title) {
-    segments.push(truncate(artifact.description, 60));
+  pushDistinctSegment(segments, artifact.description, headline, 60);
+
+  // mediaContextStore analysis fields
+  pushDistinctSegment(segments, artifact.summary, headline, 70);
+  if (artifact.ocr_text && !sameText(artifact.ocr_text, headline)) {
+    segments.push(`OCR ${truncate(normalizeText(artifact.ocr_text), 50)}`);
+  }
+  if (artifact.transcript && !sameText(artifact.transcript, headline)) {
+    segments.push(`转写${truncate(normalizeText(artifact.transcript), 55)}`);
+  }
+  if (keyframes && !sameText(keyframes, headline)) {
+    segments.push(`关键帧${truncate(keyframes, 55)}`);
   }
 
   // 来源
-  if (artifact.source) {
-    segments.push(`来源${truncate(artifact.source, 20)}`);
+  const source = firstNonEmpty(artifact.source, artifact.analyzer);
+  if (source) {
+    segments.push(`来源${truncate(source, 20)}`);
+  }
+
+  const createdAt = formatCreatedAt(artifact.created_at);
+  if (createdAt) {
+    segments.push(`时间${createdAt}`);
   }
 
   // 统计
@@ -200,8 +224,52 @@ function shortId(artifact) {
  * 截断到 maxLen 字符，超出加 "…"
  */
 function truncate(str, maxLen) {
+  str = normalizeText(str);
   if (str.length <= maxLen) return str;
   return str.slice(0, maxLen - 1) + '…';
+}
+
+function firstNonEmpty(...values) {
+  for (const value of values) {
+    const text = normalizeText(value);
+    if (text) return text;
+  }
+  return '';
+}
+
+function normalizeText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function sameText(a, b) {
+  return normalizeText(a) === normalizeText(b);
+}
+
+function pushDistinctSegment(segments, value, headline, maxLen) {
+  const text = normalizeText(value);
+  if (text && !sameText(text, headline) && !segments.some((segment) => sameText(segment, text))) {
+    segments.push(truncate(text, maxLen));
+  }
+}
+
+function summarizeKeyframes(keyframes) {
+  if (!Array.isArray(keyframes) || keyframes.length === 0) return '';
+  return keyframes
+    .map((frame, index) => {
+      if (!frame || typeof frame !== 'object') return '';
+      return firstNonEmpty(frame.summary, frame.scene_summary, frame.ocr_text, frame.text, `frame ${index + 1}`);
+    })
+    .filter(Boolean)
+    .slice(0, 3)
+    .join(' | ');
+}
+
+function formatCreatedAt(value) {
+  const text = normalizeText(value);
+  if (!text) return '';
+  const ms = Date.parse(text);
+  if (!Number.isFinite(ms)) return truncate(text, 20);
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 /**

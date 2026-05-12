@@ -59,7 +59,9 @@ function buildMediaCandidate(item, relation, confidence, source = 'pending_media
     if (m.type) { candidate.type = m.type; break; }
   }
   candidate.created_at = item.createdAt;
-  candidate.attachedAtTurn = turnCounter;
+  candidate.attachedAtTurn = relation === 'recent_candidate'
+    ? (item.attachedAtTurn ?? turnCounter)
+    : turnCounter;
   return candidate;
 }
 
@@ -216,6 +218,9 @@ export function createInboundMessageBuffer(options = {}) {
     const mergedImageUrls = [];
     
     for (const item of availableItems) {
+      if (item.attachedAtTurn == null) {
+        item.attachedAtTurn = turnCounter;
+      }
       const candidate = buildMediaCandidate(item, 'recent_candidate', 0.5, 'pending_media', turnCounter);
       mediaCandidates.push(candidate);
       for (const m of item.media) {
@@ -374,6 +379,7 @@ export function createInboundMessageBuffer(options = {}) {
       });
     }
     return {
+      entries,
       pendingMedia: entries,
       pendingMediaCount: entries.length,
       waitingTextRef: waitingTextRef.size,
@@ -383,11 +389,19 @@ export function createInboundMessageBuffer(options = {}) {
     };
   }
 
+  function clear() {
+    pendingMedia.clear();
+    waitingTextRef.clear();
+    pendingTextRefIntents.clear();
+    turnCounter = 0;
+  }
+
   return {
     processInbound,
     processInboundSync,
     setDeferredMergeCallback,
     getStats,
+    clear,
     resolveTextRefWait,
   };
 }

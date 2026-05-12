@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-12)
+Status: CURRENT (2026-05-13)
 
 ## Frontend Path
 
@@ -52,8 +52,9 @@ Status: CURRENT (2026-05-12)
 
 ## Heartbeat
 
-- `heartbeat.every = 90m`, `activeHours = 08:30-23:30 (Asia/Shanghai)`
+- `heartbeat.every = 90m`, `activeHours = 08:30-23:30 (Asia/Shanghai)`, `directPolicy = block`
 - `HEARTBEAT.md` in workspace root.
+- Heartbeat is internal maintenance only; proactive check-ins/reminders are blocked unless explicitly re-enabled.
 - Persona/bootstrap files: `AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `TOOLS.md`, `HEARTBEAT.md`.
 - Hermes budget files (`openclaw/HERMES_*.md`) are repo references only, not injected.
 
@@ -107,6 +108,8 @@ WeChat inbound
 - Inbound fragment merge: short-window message batching.
 - Meta leak sanitization: strips tool-call fragments from replies.
 - Outbound failure cache: failed sends queued for retry on next user message.
+- Proactive freeze: `PERSONAL_AGENT_PROACTIVE_ENABLED=false` blocks `/outbound/send` check-ins and holds chat-path pending outbound queue without draining.
+- Reminder freeze: `PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false` blocks reminder delivery.
 - `/checkin` command: update proactive outreach random range.
 
 ## Code Anchors
