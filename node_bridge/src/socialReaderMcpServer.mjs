@@ -2418,6 +2418,46 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = 
   return { ok: true, data: rawData, debug_shape: debugShape };
 }
 
+async function fallbackXhsBrowseNote({ noteId, lookup, cachedEntry, fallbackFrom }, options = {}) {
+  const fallbackUrl = lookup?.url || cachedEntry?.url || cachedEntry?.canonical_url || buildXhsCanonicalUrl(noteId);
+  const fallback = await readGenericSocialPost({
+    url: fallbackUrl,
+    platform: 'xhs',
+    includeComments: false,
+    maxComments: 0,
+  }, options);
+
+  if (fallback.structuredContent?.ok !== true) {
+    return null;
+  }
+
+  return {
+    ok: true,
+    partial: false,
+    note_id: noteId,
+    title: cachedEntry?.title || '',
+    content: fallback.structuredContent.post_text || '',
+    images: [],
+    user: { id: cachedEntry?.user_id || '', name: cachedEntry?.user || '' },
+    source: 'wanyi-watermark-mcp',
+    read_ref: `xhs:note:${noteId}`,
+    ...(fallbackFrom ? { fallback_from: fallbackFrom } : {}),
+  };
+}
+
+function getXhsBrowseFailurePayload(rawData) {
+  if (!rawData || typeof rawData !== 'object') {
+    return null;
+  }
+  if (rawData.success === false || rawData.ok === false) {
+    return {
+      message: String(rawData.message || rawData.error || 'Failed to read note'),
+      backend_error: rawData.error ? String(rawData.error) : '',
+    };
+  }
+  return null;
+}
+
 // ============================================================================
 // XHS Browse 工具实现
 // ============================================================================
@@ -2637,25 +2677,9 @@ async function xhsBrowseNote(args, options = {}) {
   
   // If no xsecToken in cache, try the generic parser against the cached or bare URL.
   if (!xsecToken) {
-    const fallbackUrl = lookup.url || cachedEntry?.url || buildXhsCanonicalUrl(noteId);
-    const fallback = await readGenericSocialPost({
-      url: fallbackUrl,
-      platform: 'xhs',
-      includeComments: false,
-      maxComments: 0,
-    }, options);
-    if (fallback.structuredContent?.ok === true) {
-      return {
-        ok: true,
-        partial: false,
-        note_id: noteId,
-        title: cachedEntry?.title || '',
-        content: fallback.structuredContent.post_text || '',
-        images: [],
-        user: { id: cachedEntry?.user_id || '', name: cachedEntry?.user || '' },
-        source: 'wanyi-watermark-mcp',
-        read_ref: `xhs:note:${noteId}`,
-      };
+    const fallbackResult = await fallbackXhsBrowseNote({ noteId, lookup, cachedEntry }, options);
+    if (fallbackResult) {
+      return fallbackResult;
     }
     return {
       ok: false,
@@ -2682,7 +2706,29 @@ async function xhsBrowseNote(args, options = {}) {
     };
   }
 
-  return normalizeXhsBrowseResponse('note', parseMcpStructuredData(result.data || {}), '', options);
+  const rawData = parseMcpStructuredData(result.data || {});
+  const backendFailure = getXhsBrowseFailurePayload(rawData);
+  if (backendFailure) {
+    const fallbackResult = await fallbackXhsBrowseNote({
+      noteId,
+      lookup,
+      cachedEntry,
+      fallbackFrom: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
+    }, options);
+    if (fallbackResult) {
+      return fallbackResult;
+    }
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
+      message: backendFailure.message,
+      backend_error: backendFailure.backend_error,
+      note_id: noteId,
+      read_ref: `xhs:note:${noteId}`,
+    };
+  }
+
+  return normalizeXhsBrowseResponse('note', rawData, '', options);
 }
 
 async function xhsBrowseUser(args, options = {}) {

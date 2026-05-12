@@ -342,7 +342,13 @@ Date: $(date '+%Y-%m-%d')
 
 ## Staged Files
 EOF
-    printf '%s\n' "$staged_list" | sed '/^$/d; s/^/- `/; s/$/$/`/'
+    local staged_path
+    while IFS= read -r staged_path; do
+      [ -n "$staged_path" ] || continue
+      printf -- '- `%s`\n' "$staged_path"
+    done <<EOF
+$staged_list
+EOF
     cat <<'EOF'
 
 ## Notes

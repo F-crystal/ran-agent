@@ -200,6 +200,105 @@ test('xhs_browse_search stores token context and xhs_browse_note reads by read_r
   );
 });
 
+test('xhs_browse_note falls back when browse backend returns a failure payload', async () => {
+  const calls = [];
+  const env = {
+    XHS_BROWSE_ENABLED: 'true',
+    XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
+    XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
+    XHS_BROWSE_MIN_INTERVAL_MS: '0',
+    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+  };
+  const options = {
+    env,
+    xhsBrowseCallImpl: async ({ toolName }) => {
+      calls.push({ source: 'browse', toolName });
+      if (toolName === 'probe') {
+        return { ok: true, available_tools: ['search_notes', 'get_note_content'] };
+      }
+      if (toolName === 'search_notes') {
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                items: [{
+                  id: 'server-note',
+                  xsecToken: 'server-token',
+                  noteCard: {
+                    displayTitle: '服务端笔记',
+                    user: { nickname: '作者B', userId: 'user456' },
+                  },
+                }],
+              }),
+            }],
+          },
+        };
+      }
+      if (toolName === 'get_note_content') {
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: false,
+                error: 'note failed',
+                message: 'backend failed',
+                stack: 'hidden stack',
+              }),
+            }],
+          },
+        };
+      }
+      throw new Error(`unexpected browse tool: ${toolName}`);
+    },
+    mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+      calls.push({ source: 'mcp', server, toolName, arguments: toolArgs });
+      if (server === 'generic' && toolName === 'parse_xhs_link') {
+        return { content: [{ type: 'text', text: '通用解析详情' }] };
+      }
+      throw new Error(`unexpected mcp tool: ${server}.${toolName}`);
+    },
+  };
+
+  await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_search',
+        arguments: { query: '服务端', max_results: 1 },
+      },
+    },
+    options
+  );
+
+  const note = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_note',
+        arguments: { read_ref: 'xhs:note:server-note' },
+      },
+    },
+    options
+  );
+
+  assert.equal(note.ok, true);
+  assert.equal(note.note_id, 'server-note');
+  assert.equal(note.title, '服务端笔记');
+  assert.equal(note.content, '通用解析详情');
+  assert.equal(note.source, 'wanyi-watermark-mcp');
+  assert.equal(note.fallback_from, 'XHS_NOTE_READ_FAILED');
+  assert.equal(JSON.stringify(note).includes('server-token'), false);
+  assert.deepEqual(
+    calls.map((call) => call.source === 'browse' ? call.toolName : `${call.server}.${call.toolName}`),
+    ['probe', 'search_notes', 'probe', 'get_note_content', 'generic.parse_xhs_link']
+  );
+});
+
 test('read_social_post can reuse token context cached by xhs_browse_search', async () => {
   const calls = [];
   const env = {
