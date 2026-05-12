@@ -25,6 +25,7 @@ export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 VAULT_DIR="${OBSIDIAN_MEMORY_VAULT_DIR:-$ROOT_DIR/vault}"
 INDEX_PATH="${OBSIDIAN_MEMORY_INDEX_PATH:-$ROOT_DIR/data/obsidian-memory-index.sqlite}"
 PROVIDER="${OBSIDIAN_MEMORY_MCP_PROVIDER:-obsidian-index}"
+OBSIDIAN_INDEX_PACKAGE="${OBSIDIAN_MEMORY_OBSIDIAN_INDEX_PACKAGE:-iflow-mcp-tcsavage-obsidian-index}"
 
 mkdir -p "$(dirname "$INDEX_PATH")"
 
@@ -41,9 +42,10 @@ fi
 
 case "$PROVIDER" in
   obsidian-index)
-    exec uvx obsidian-index \
+    exec uvx --from "$OBSIDIAN_INDEX_PACKAGE" obsidian-index mcp \
       --vault "$VAULT_DIR" \
       --database "$INDEX_PATH" \
+      --reindex \
       --watch
     ;;
   mcpvault)
