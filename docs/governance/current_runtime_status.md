@@ -30,6 +30,8 @@ Status: CURRENT (2026-05-13)
 
 - Bundled `browser` plugin disabled; Playwright via `mcp.servers.playwright`.
 - Media pipeline details: `docs/governance/media-pipeline.md`.
+- XHS content reading uses generic parser fallback (`wanyi-watermark`) as the primary read path. `jobson-xhs-mcp` is retained as a token-aware compatibility path when a fresh `xsec_token` is available.
+- XHS browse search stores `note_id -> xsec_token` context in `.openclaw_state/social_reader/xhs-note-token-cache.json` by default and returns `read_ref` handles without exposing token values.
 
 ## Tools Config
 

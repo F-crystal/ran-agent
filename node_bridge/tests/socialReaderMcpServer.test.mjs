@@ -60,7 +60,7 @@ test('detectSocialPlatform recognizes common Chinese social share hosts', () => 
   assert.equal(detectSocialPlatform('https://mp.weixin.qq.com/s/demo'), 'wechat_article');
 });
 
-test('read_social_post routes xhs content and comments through the configured xhs MCP', async () => {
+test('read_social_post uses generic XHS parser as primary content path', async () => {
   const calls = [];
   const result = await handleSocialReaderMcpRequest(
     {
@@ -78,28 +78,205 @@ test('read_social_post routes xhs content and comments through the configured xh
       env: { XHS_COOKIE: 'a1=demo; web_session=demo' },
       mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
         calls.push({ server, toolName, arguments: toolArgs });
-        if (toolName === 'get_note_content') {
-          return { content: [{ type: 'text', text: '标题: 测试笔记\n内容:\n正文' }] };
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
+          return { content: [{ type: 'text', text: '通用解析正文' }] };
         }
-        if (toolName === 'get_note_comments') {
-          return { content: [{ type: 'text', text: '0. 用户A: 评论A\n\n1. 用户B: 评论B' }] };
-        }
-        throw new Error(`unexpected tool: ${toolName}`);
+        throw new Error(`unexpected tool: ${server}.${toolName}`);
       },
     }
   );
 
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.platform, 'xhs');
-  assert.match(result.structuredContent.post_text, /测试笔记/);
-  assert.match(result.structuredContent.comments_text, /评论A/);
+  assert.equal(result.structuredContent.source, 'wanyi-watermark-mcp');
+  assert.equal(result.structuredContent.parser_tool, 'parse_xhs_link');
+  assert.equal(result.structuredContent.post_text, '通用解析正文');
+  assert.equal(result.structuredContent.comments_supported, false);
   assert.deepEqual(
-    calls.map((call) => [call.server, call.toolName, call.arguments.url]),
+    calls.map((call) => [call.server, call.toolName, call.arguments.share_link]),
     [
-      ['xhs', 'get_note_content', 'https://www.xiaohongshu.com/explore/abc?xsec_token=tok'],
-      ['xhs', 'get_note_comments', 'https://www.xiaohongshu.com/explore/abc?xsec_token=tok'],
+      ['generic', 'parse_xhs_link', 'https://www.xiaohongshu.com/explore/abc?xsec_token=tok'],
     ]
   );
+});
+
+test('xhs_browse_search stores token context and xhs_browse_note reads by read_ref without exposing token', async () => {
+  const calls = [];
+  const env = {
+    XHS_BROWSE_ENABLED: 'true',
+    XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
+    XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
+    XHS_BROWSE_MIN_INTERVAL_MS: '0',
+    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+  };
+  const options = {
+    env,
+    xhsBrowseCallImpl: async ({ toolName, arguments: toolArgs }) => {
+      calls.push({ toolName, arguments: toolArgs });
+      if (toolName === 'probe') {
+        return {
+          ok: true,
+          available_tools: ['search_notes', 'get_note_content'],
+        };
+      }
+      if (toolName === 'search_notes') {
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                items: [{
+                  id: 'note123',
+                  xsecToken: 'token123',
+                  noteCard: {
+                    displayTitle: '测试标题',
+                    type: 'normal',
+                    user: { nickname: '作者A', userId: 'user123' },
+                    cover: { urlDefault: 'https://example.com/cover.jpg' },
+                    interactInfo: { likedCount: 7, collectedCount: 3, commentCount: 2 },
+                  },
+                }],
+              }),
+            }],
+          },
+        };
+      }
+      if (toolName === 'get_note_content') {
+        assert.equal(
+          toolArgs.url,
+          'https://www.xiaohongshu.com/explore/note123?xsec_token=token123'
+        );
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ id: 'note123', title: '测试标题', desc: '详情正文' }),
+            }],
+          },
+        };
+      }
+      throw new Error(`unexpected tool: ${toolName}`);
+    },
+  };
+
+  const search = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_search',
+        arguments: { query: '测试', max_results: 1 },
+      },
+    },
+    options
+  );
+
+  assert.equal(search.ok, true);
+  assert.equal(search.results[0].note_id, 'note123');
+  assert.equal(search.results[0].read_ref, 'xhs:note:note123');
+  assert.equal(Object.hasOwn(search.results[0], 'xsecToken'), false);
+  assert.equal(JSON.stringify(search).includes('token123'), false);
+
+  const note = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_note',
+        arguments: { read_ref: 'xhs:note:note123' },
+      },
+    },
+    options
+  );
+
+  assert.equal(note.ok, true);
+  assert.equal(note.note_id, 'note123');
+  assert.equal(note.content, '详情正文');
+  assert.equal(JSON.stringify(note).includes('token123'), false);
+  assert.deepEqual(
+    calls.map((call) => call.toolName),
+    ['probe', 'search_notes', 'probe', 'get_note_content']
+  );
+});
+
+test('read_social_post can reuse token context cached by xhs_browse_search', async () => {
+  const calls = [];
+  const env = {
+    XHS_COOKIE: 'a1=demo',
+    XHS_BROWSE_ENABLED: 'true',
+    XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
+    XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
+    XHS_BROWSE_MIN_INTERVAL_MS: '0',
+    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+  };
+  const options = {
+    env,
+    xhsBrowseCallImpl: async ({ toolName }) => {
+      if (toolName === 'probe') {
+        return { ok: true, available_tools: ['search_notes', 'get_note_content'] };
+      }
+      if (toolName === 'search_notes') {
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                items: [{ id: 'cached-note', xsecToken: 'cached-token', noteCard: { displayTitle: '缓存笔记' } }],
+              }),
+            }],
+          },
+        };
+      }
+      throw new Error(`unexpected browse tool: ${toolName}`);
+    },
+    mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+      calls.push({ server, toolName, arguments: toolArgs });
+      if (server === 'generic' && toolName === 'parse_xhs_link') {
+        throw new Error('generic parser unavailable');
+      }
+      if (server === 'xhs' && toolName === 'get_note_content') {
+        return { content: [{ type: 'text', text: '缓存 token 读取正文' }] };
+      }
+      throw new Error(`unexpected tool: ${server}.${toolName}`);
+    },
+  };
+
+  await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_search',
+        arguments: { query: '缓存笔记', max_results: 1 },
+      },
+    },
+    options
+  );
+
+  const post = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: { url: 'https://www.xiaohongshu.com/explore/cached-note' },
+      },
+    },
+    options
+  );
+
+  assert.equal(post.structuredContent.ok, true);
+  assert.equal(post.structuredContent.post_text, '缓存 token 读取正文');
+  assert.equal(post.structuredContent.url, 'https://www.xiaohongshu.com/explore/cached-note?xsec_token=cached-token');
+  assert.deepEqual(
+    calls.map((call) => [call.server, call.toolName, call.arguments]),
+    [
+      ['generic', 'parse_xhs_link', { share_link: 'https://www.xiaohongshu.com/explore/cached-note' }],
+      ['xhs', 'get_note_content', { url: 'https://www.xiaohongshu.com/explore/cached-note?xsec_token=cached-token' }],
+    ]
+  );
+  assert.equal(JSON.stringify(post).includes('cached-token'), true);
 });
 
 test('check_social_login reports missing xhs cookie without spawning child MCP', async () => {
@@ -494,7 +671,7 @@ test('resolveXhsShareUrl rejects non-whitelisted xhs-looking domains', async () 
   assert.equal(result.error_code, 'UNSUPPORTED_PLATFORM');
 });
 
-test('read_social_post accepts share text and sends cleaned final XHS URL to backend', async () => {
+test('read_social_post accepts share text and sends cleaned final XHS URL to generic parser', async () => {
   const calls = [];
   const result = await handleSocialReaderMcpRequest(
     {
@@ -522,25 +699,22 @@ test('read_social_post accepts share text and sends cleaned final XHS URL to bac
       }),
       mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
         calls.push({ server, toolName, arguments: toolArgs });
-        if (toolName === 'get_note_content') {
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
           return { content: [{ type: 'text', text: '正文' }] };
         }
-        if (toolName === 'get_note_comments') {
-          return { content: [{ type: 'text', text: '0. A\n\n1. B\n\n2. C' }] };
-        }
-        throw new Error(`unexpected tool: ${toolName}`);
+        throw new Error(`unexpected tool: ${server}.${toolName}`);
       },
     }
   );
 
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.url, 'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share');
-  assert.equal(result.structuredContent.comments_text, '0. A\n\n1. B');
+  assert.equal(result.structuredContent.comments_text, '');
+  assert.equal(result.structuredContent.comments_supported, false);
   assert.deepEqual(
-    calls.map((call) => call.arguments.url),
+    calls.map((call) => [call.server, call.toolName, call.arguments.share_link]),
     [
-      'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share',
-      'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share',
+      ['generic', 'parse_xhs_link', 'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share'],
     ]
   );
 });
@@ -635,13 +809,14 @@ test('read_social_post uses search fallback when shortlink resolves without toke
   assert.deepEqual(
     calls.map((call) => [call.toolName, call.arguments]),
     [
+      ['parse_xhs_link', { share_link: 'https://www.xiaohongshu.com/explore/note-search' }],
       ['search_notes', { keywords: 'FIFA回应中国区天价世界杯版权' }],
       ['get_note_content', { url: 'https://www.xiaohongshu.com/explore/note-search?xsec_token=fresh-search' }],
     ]
   );
 });
 
-test('read_social_post treats xhs 获取失败 text as backend failure and uses generic fallback', async () => {
+test('read_social_post uses generic parser before jobson for XHS share text', async () => {
   const calls = [];
   const result = await handleSocialReaderMcpRequest(
     {
@@ -680,13 +855,13 @@ test('read_social_post treats xhs 获取失败 text as backend failure and uses 
 
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.source, 'wanyi-watermark-mcp');
-  assert.equal(result.structuredContent.fallback, true);
-  assert.match(result.structuredContent.xhs_error, /获取失败/);
+  assert.equal(result.structuredContent.primary, true);
+  assert.equal(result.structuredContent.fallback, undefined);
+  assert.equal(result.structuredContent.xhs_error, undefined);
   assert.equal(result.structuredContent.post_text, '通用解析正文');
   assert.deepEqual(
     calls.map((call) => [call.server, call.toolName]),
     [
-      ['xhs', 'get_note_content'],
       ['generic', 'parse_xhs_link'],
     ]
   );

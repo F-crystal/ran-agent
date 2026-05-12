@@ -48,7 +48,7 @@ OpenClaw 可调用以下 MCP 工具：
 | MCP 服务器 | 用途 |
 |------------|------|
 | `media_reader` | 统一媒体读取 facade -- 图片 OCR、音频 ASR、视频分析。底层由 PaddleOCR、DashScope qwen3-vl-flash / qwen3-asr-flash、ffmpeg/ffprobe 支撑。 |
-| `social_reader` | 社媒内容只读 facade -- B 站、小红书、微信公众号文章等平台内容解析。不控制播放器。 |
+| `social_reader` | 社媒内容只读 facade -- B 站、小红书、微信公众号文章等平台内容解析。不控制播放器。小红书内容读取默认优先通用解析 fallback，搜索结果通过内部 `read_ref` / token cache 衔接详情读取。 |
 | `media_generation` | 媒体生成 -- 图片生成 (DashScope qwen-image) 和语音合成 (DashScope qwen3-omni-flash)。 |
 | `mimo_power` | 深度多模态分析 -- 长上下文重任务、复杂截图/音频/视频/文档综合推理。依赖 MiMo Token Plan。 |
 | `playwright` | 浏览器自动化 -- 动态页面、登录态检查、SPA 渲染、截图等交互场景。 |

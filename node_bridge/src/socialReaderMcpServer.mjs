@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import http from 'node:http';
 import https from 'node:https';
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { buildMediaAssets } from './mediaReader/assetResolver.mjs';
@@ -43,24 +45,86 @@ const PLATFORM_HOSTS = [
 // Internal cache for note_id -> xsecToken mapping (never exposed to users)
 const xhsNoteTokenCache = new Map();
 const XHS_NOTE_TOKEN_CACHE_MAX_SIZE = 1000;
+let xhsNoteTokenCacheLoaded = false;
 
-function cacheXhsNoteToken(noteId, xsecToken, metadata = {}) {
-  if (!noteId || !xsecToken) return;
+function resolveXhsNoteTokenCachePath(env = process.env) {
+  const configured = String(env.XHS_NOTE_TOKEN_CACHE_PATH || '').trim();
+  if (configured) {
+    return path.isAbsolute(configured) ? configured : path.resolve(process.cwd(), configured);
+  }
+  return path.resolve(process.cwd(), '.openclaw_state/social_reader/xhs-note-token-cache.json');
+}
+
+function loadXhsNoteTokenCache(env = process.env) {
+  if (xhsNoteTokenCacheLoaded) return;
+  xhsNoteTokenCacheLoaded = true;
+  const filePath = resolveXhsNoteTokenCachePath(env);
+  try {
+    const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const entries = payload && typeof payload === 'object' ? payload.entries || payload : {};
+    for (const [noteId, entry] of Object.entries(entries)) {
+      if (noteId && entry && typeof entry === 'object') {
+        xhsNoteTokenCache.set(noteId, entry);
+      }
+    }
+  } catch {
+    // Cache is best-effort state; missing or invalid files should not break reading.
+  }
+}
+
+function persistXhsNoteTokenCache(env = process.env) {
+  const filePath = resolveXhsNoteTokenCachePath(env);
+  try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    const entries = Object.fromEntries(xhsNoteTokenCache.entries());
+    fs.writeFileSync(filePath, `${JSON.stringify({ entries }, null, 2)}\n`, { mode: 0o600 });
+  } catch {
+    // Never fail a social read because the local cache could not be written.
+  }
+}
+
+function buildXhsCanonicalUrl(noteId, xsecToken = '', xsecSource = '') {
+  if (!noteId) return '';
+  const canonical = new URL(`https://www.xiaohongshu.com/explore/${noteId}`);
+  if (xsecToken) canonical.searchParams.set('xsec_token', xsecToken);
+  if (xsecSource) canonical.searchParams.set('xsec_source', xsecSource);
+  return canonical.toString();
+}
+
+function cacheXhsNoteToken(noteId, xsecToken = '', metadata = {}, options = {}) {
+  if (!noteId) return;
+  const env = options.env || process.env;
+  loadXhsNoteTokenCache(env);
   if (xhsNoteTokenCache.size >= XHS_NOTE_TOKEN_CACHE_MAX_SIZE) {
     const firstKey = xhsNoteTokenCache.keys().next().value;
     if (firstKey) xhsNoteTokenCache.delete(firstKey);
   }
+  const existing = xhsNoteTokenCache.get(noteId) || {};
+  const xsecSource = metadata.xsec_source || existing.xsec_source || '';
+  const canonicalUrl = metadata.canonical_url
+    || (xsecToken ? buildXhsCanonicalUrl(noteId, xsecToken, xsecSource) : '')
+    || existing.canonical_url
+    || buildXhsCanonicalUrl(noteId);
   xhsNoteTokenCache.set(noteId, {
-    xsecToken,
-    title: metadata.title || '',
-    user: metadata.user || '',
-    type: metadata.type || '',
+    ...existing,
+    xsecToken: xsecToken || existing.xsecToken || '',
+    xsec_source: xsecSource,
+    canonical_url: canonicalUrl,
+    url: metadata.url || canonicalUrl || existing.url || '',
+    title: metadata.title || existing.title || '',
+    user: metadata.user || existing.user || '',
+    user_id: metadata.user_id || existing.user_id || '',
+    cover_image: metadata.cover_image || existing.cover_image || '',
+    type: metadata.type || existing.type || '',
+    stats: metadata.stats || existing.stats || {},
     createdAt: Date.now(),
   });
+  persistXhsNoteTokenCache(env);
 }
 
-function getCachedXhsNoteToken(noteId) {
+function getCachedXhsNoteToken(noteId, options = {}) {
   if (!noteId) return null;
+  loadXhsNoteTokenCache(options.env || process.env);
   const entry = xhsNoteTokenCache.get(noteId);
   if (!entry) return null;
   const TTL_MS = 24 * 60 * 60 * 1000;
@@ -227,14 +291,16 @@ export function buildSocialReaderTools() {
     {
       name: 'xhs_browse_note',
       title: 'XHS Browse Note',
-      description: 'Get Xiaohongshu note details by note_id. Requires XHS_BROWSE_ENABLED=true and XHS_BROWSE_NOTE_ENABLED=true.',
+      description: 'Get Xiaohongshu note details by note_id, URL, or read_ref returned by xhs_browse_search. Requires XHS_BROWSE_ENABLED=true and XHS_BROWSE_NOTE_ENABLED=true.',
       inputSchema: {
         type: 'object',
         properties: {
           note_id: { type: 'string', description: 'Note ID to fetch.' },
+          read_ref: { type: 'string', description: 'Opaque read reference returned by xhs_browse_search, for example xhs:note:<note_id>.' },
+          url: { type: 'string', description: 'XHS note URL when available.' },
           include_images: { type: 'boolean', description: 'Include images.', default: true },
         },
-        required: ['note_id'],
+        required: [],
         additionalProperties: false,
       },
     },
@@ -695,6 +761,14 @@ async function prepareXhsBackendUrl({ rawText, resolved }, options = {}) {
       ok: true,
       backend_url: resolved.canonical_url,
       source: 'resolved_url',
+    };
+  }
+  const cachedEntry = getCachedXhsNoteToken(resolved.note_id, options);
+  if (cachedEntry?.xsecToken && cachedEntry?.canonical_url) {
+    return {
+      ok: true,
+      backend_url: cachedEntry.canonical_url,
+      source: 'xhs_browse_cache',
     };
   }
   return await resolveFreshXhsTokenFromSearch({ rawText, resolved }, options);
@@ -1451,10 +1525,20 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
   const env = options.env || process.env;
   const hasCookie = String(env.XHS_COOKIE || '').trim();
   const genericFallbackEnabled = String(env.SOCIAL_READER_GENERIC_FALLBACK_ENABLED || 'true') !== 'false';
-  if (!hasCookie) {
-    if (genericFallbackEnabled) {
-      return await readGenericSocialPost({ url: resolved.resolved_url, platform: 'xhs', includeComments, maxComments }, options);
+  if (genericFallbackEnabled) {
+    const generic = await readGenericSocialPost({
+      url: resolved.resolved_url || resolved.canonical_url || resolved.url || String(rawText),
+      platform: 'xhs',
+      includeComments,
+      maxComments,
+    }, options);
+    if (generic.structuredContent?.ok === true) {
+      generic.structuredContent.primary = true;
+      generic.content[0].text = JSON.stringify(generic.structuredContent, null, 2);
+      return generic;
     }
+  }
+  if (!hasCookie) {
     return buildErrorResult('LOGIN_REQUIRED: XHS_COOKIE is required for xhs content/comments', { error_code: 'LOGIN_REQUIRED', platform: 'xhs' });
   }
 
@@ -1920,7 +2004,14 @@ function checkXhsBrowseRateLimit(config) {
 // XHS Browse Backend Adapter
 // ============================================================================
 
-async function callXhsBrowseBackend(toolName, args, config) {
+async function callXhsBrowseBackend(toolName, args, config, options = {}) {
+  if (typeof options.xhsBrowseCallImpl === 'function') {
+    return await options.xhsBrowseCallImpl({
+      toolName,
+      arguments: args,
+      config,
+    });
+  }
   return new Promise((resolve, reject) => {
     if (!config.command || !config.args || config.args.length === 0) {
       resolve({
@@ -2101,7 +2192,7 @@ async function callXhsBrowseBackend(toolName, args, config) {
   });
 }
 
-async function probeXhsBrowseBackend(config) {
+async function probeXhsBrowseBackend(config, options = {}) {
   if (!config.isConfigured) {
     return {
       ok: false,
@@ -2110,7 +2201,7 @@ async function probeXhsBrowseBackend(config) {
     };
   }
 
-  const result = await callXhsBrowseBackend('probe', {}, config);
+  const result = await callXhsBrowseBackend('probe', {}, config, options);
   
   if (!result.ok) {
     return result;
@@ -2150,7 +2241,57 @@ function mapXhsBrowseToolName(category, config, matchedTools) {
   return candidates ? candidates[0] : category;
 }
 
-function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
+function parseMcpStructuredData(data) {
+  if (!data) return {};
+  if (data.structuredContent && typeof data.structuredContent === 'object') {
+    return data.structuredContent;
+  }
+  const text = textFromMcpResult(data);
+  if (!text) {
+    return data && typeof data === 'object' ? data : {};
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    return { content: text };
+  }
+}
+
+function parseXhsNoteLookup(args = {}) {
+  const readRef = String(args.read_ref || '').trim();
+  const fromRef = readRef.match(/^xhs:note:([^:\s]+)$/);
+  const rawUrl = String(args.url || '').trim();
+  const urlInfo = rawUrl ? parseXhsUrlInfo(rawUrl) : null;
+  return {
+    noteId: String(args.note_id || '').trim() || (fromRef ? fromRef[1] : '') || urlInfo?.note_id || '',
+    readRef,
+    url: rawUrl,
+    urlInfo,
+  };
+}
+
+function xhsBrowseBackendArgsForNote(toolName, noteId, entry = {}, includeImages = true) {
+  const xsecToken = entry.xsecToken || entry.xsec_token || '';
+  const xsecSource = entry.xsec_source || '';
+  const canonicalUrl = entry.canonical_url || buildXhsCanonicalUrl(noteId, xsecToken, xsecSource);
+  if (toolName === 'get_note_content') {
+    return { url: canonicalUrl };
+  }
+  if (toolName === 'xhs_get_note_detail') {
+    return { feedId: noteId, xsecToken, include_images: includeImages };
+  }
+  if (toolName === 'get_note_info' || toolName === 'get_note' || toolName === 'note_detail') {
+    return {
+      note_id: noteId,
+      xsec_token: xsecToken,
+      url: canonicalUrl,
+      include_images: includeImages,
+    };
+  }
+  return { feedId: noteId, xsecToken, include_images: includeImages };
+}
+
+function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = {}) {
   const debugShape = {
     category,
     raw_keys: rawData && typeof rawData === 'object' ? Object.keys(rawData).sort() : [],
@@ -2168,30 +2309,45 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
       const user = noteCard.user || item.user || {};
       const cover = noteCard.cover || item.cover || {};
       const interactInfo = noteCard.interactInfo || item.interactInfo || {};
+      const urlInfo = parseXhsUrlInfo(item.url || item.note_url || item.link || '');
       
-      const noteId = item.id || item.note_id || '';
-      const xsecToken = item.xsecToken || item.xsec_token || '';
+      const noteId = item.id || item.note_id || noteCard.id || noteCard.note_id || urlInfo.note_id || '';
+      const xsecToken = item.xsecToken || item.xsec_token || noteCard.xsecToken || noteCard.xsec_token || urlInfo.xsec_token || '';
+      const xsecSource = item.xsecSource || item.xsec_source || noteCard.xsecSource || noteCard.xsec_source || urlInfo.xsec_source || '';
+      const canonicalUrl = xsecToken
+        ? buildXhsCanonicalUrl(noteId, xsecToken, xsecSource)
+        : (urlInfo.canonical_url || buildXhsCanonicalUrl(noteId));
+      const stats = {
+        liked_count: interactInfo.likedCount || interactInfo.liked_count || 0,
+        collected_count: interactInfo.collectedCount || interactInfo.collected_count || 0,
+        comment_count: interactInfo.commentCount || interactInfo.comment_count || 0,
+        shared_count: interactInfo.sharedCount || interactInfo.shared_count || 0,
+      };
       
-      // Cache xsecToken internally (never exposed)
-      if (noteId && xsecToken) {
+      // Cache search context internally (tokens are never exposed to model/user output).
+      if (noteId) {
         cacheXhsNoteToken(noteId, xsecToken, {
           title: noteCard.displayTitle || noteCard.display_title || '',
           user: user.nickname || user.nickName || '',
+          user_id: user.userId || user.id || '',
+          cover_image: cover.urlDefault || cover.urlPre || cover.coverUrl || item.cover_image || '',
           type: noteCard.type || '',
-        });
+          xsec_source: xsecSource,
+          canonical_url: canonicalUrl,
+          url: canonicalUrl,
+          stats,
+        }, options);
       }
       
       return {
         note_id: noteId,
+        read_ref: noteId ? `xhs:note:${noteId}` : '',
         title: noteCard.displayTitle || noteCard.display_title || item.title || '',
         user: user.nickname || user.nickName || user.name || user.username || '',
         user_id: user.userId || user.id || '',
         cover_image: cover.urlDefault || cover.urlPre || cover.coverUrl || item.cover_image || '',
         type: noteCard.type || item.type || '',
-        liked_count: interactInfo.likedCount || interactInfo.liked_count || 0,
-        collected_count: interactInfo.collectedCount || interactInfo.collected_count || 0,
-        comment_count: interactInfo.commentCount || interactInfo.comment_count || 0,
-        shared_count: interactInfo.sharedCount || interactInfo.shared_count || 0,
+        ...stats,
         url: noteId ? `https://www.xiaohongshu.com/explore/${noteId}` : (item.url || ''),
         xsecToken: xsecToken, // Keep for internal use, will be filtered in output if needed
       };
@@ -2217,7 +2373,7 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
       ok: true,
       note_id: rawData.note_id || rawData.id || '',
       title: rawData.title || '',
-      content: rawData.content || rawData.desc || rawData.description || '',
+      content: rawData.content || rawData.desc || rawData.description || rawData.post_text || '',
       images: rawData.images || rawData.image_list || [],
       user: rawData.user || { id: rawData.user_id || '', name: rawData.username || '' },
       create_time: rawData.create_time || rawData.created_at || '',
@@ -2267,7 +2423,7 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery) {
 // ============================================================================
 
 async function xhsBrowseProbe(args, options = {}) {
-  const config = getXhsBrowseConfig();
+  const config = getXhsBrowseConfig(options.env || process.env);
   
   if (!config.isConfigured) {
     return {
@@ -2277,11 +2433,11 @@ async function xhsBrowseProbe(args, options = {}) {
     };
   }
 
-  return await probeXhsBrowseBackend(config);
+  return await probeXhsBrowseBackend(config, options);
 }
 
 async function xhsBrowseSearch(args, options = {}) {
-  const config = getXhsBrowseConfig();
+  const config = getXhsBrowseConfig(options.env || process.env);
 
   if (!config.enabled) {
     return {
@@ -2329,7 +2485,7 @@ async function xhsBrowseSearch(args, options = {}) {
   const sort = args.sort || 'relevance';
 
   // 探测后端并获取工具映射
-  const probeResult = await probeXhsBrowseBackend(config);
+  const probeResult = await probeXhsBrowseBackend(config, options);
   if (!probeResult.ok) {
     return probeResult;
   }
@@ -2357,7 +2513,7 @@ async function xhsBrowseSearch(args, options = {}) {
   backendArgs.max_results = maxResults;
   backendArgs.sort = sort;
 
-  const result = await callXhsBrowseBackend(backendToolName, backendArgs, config);
+  const result = await callXhsBrowseBackend(backendToolName, backendArgs, config, options);
 
   if (!result.ok) {
     return {
@@ -2398,7 +2554,7 @@ async function xhsBrowseSearch(args, options = {}) {
     };
   }
 
-  const normalized = normalizeXhsBrowseResponse('search', rawData, query);
+  const normalized = normalizeXhsBrowseResponse('search', rawData, query, options);
   
   // Truncate results to maxResults
   if (normalized.ok && normalized.results && normalized.results.length > maxResults) {
@@ -2410,7 +2566,7 @@ async function xhsBrowseSearch(args, options = {}) {
 }
 
 async function xhsBrowseNote(args, options = {}) {
-  const config = getXhsBrowseConfig();
+  const config = getXhsBrowseConfig(options.env || process.env);
 
   if (!config.enabled) {
     return {
@@ -2443,17 +2599,25 @@ async function xhsBrowseNote(args, options = {}) {
   }
 
   // 参数验证
-  const noteId = String(args.note_id || '').trim();
+  const lookup = parseXhsNoteLookup(args);
+  const noteId = lookup.noteId;
   if (!noteId) {
     return {
       ok: false,
       error_code: XHS_BROWSE_ERROR_CODES.INVALID_ARGUMENT,
-      message: 'note_id is required',
+      message: 'note_id, read_ref, or url is required',
     };
+  }
+  if (lookup.urlInfo?.xsec_token) {
+    cacheXhsNoteToken(noteId, lookup.urlInfo.xsec_token, {
+      xsec_source: lookup.urlInfo.xsec_source,
+      canonical_url: lookup.urlInfo.canonical_url,
+      url: lookup.urlInfo.canonical_url,
+    }, options);
   }
 
   // 探测后端并获取工具映射
-  const probeResult = await probeXhsBrowseBackend(config);
+  const probeResult = await probeXhsBrowseBackend(config, options);
   if (!probeResult.ok) {
     return probeResult;
   }
@@ -2468,26 +2632,47 @@ async function xhsBrowseNote(args, options = {}) {
   }
 
   // Get xsecToken from cache (populated by search results)
-  const cachedEntry = getCachedXhsNoteToken(noteId);
+  const cachedEntry = getCachedXhsNoteToken(noteId, options);
   const xsecToken = cachedEntry?.xsecToken || '';
   
-  // If no xsecToken in cache, return error requiring context
+  // If no xsecToken in cache, try the generic parser against the cached or bare URL.
   if (!xsecToken) {
+    const fallbackUrl = lookup.url || cachedEntry?.url || buildXhsCanonicalUrl(noteId);
+    const fallback = await readGenericSocialPost({
+      url: fallbackUrl,
+      platform: 'xhs',
+      includeComments: false,
+      maxComments: 0,
+    }, options);
+    if (fallback.structuredContent?.ok === true) {
+      return {
+        ok: true,
+        partial: false,
+        note_id: noteId,
+        title: cachedEntry?.title || '',
+        content: fallback.structuredContent.post_text || '',
+        images: [],
+        user: { id: cachedEntry?.user_id || '', name: cachedEntry?.user || '' },
+        source: 'wanyi-watermark-mcp',
+        read_ref: `xhs:note:${noteId}`,
+      };
+    }
     return {
       ok: false,
       error_code: 'XHS_NOTE_CONTEXT_REQUIRED',
-      message: `No cached context for note_id: ${noteId}. Please search first using xhs_browse_search, then read the note.`,
-      hint: 'Run xhs_browse_search with a relevant query to populate the note cache.',
+      message: `No cached token context for note_id: ${noteId}. Search first or provide an XHS URL that fallback can parse.`,
+      hint: 'Run xhs_browse_search with a relevant query, then read the returned read_ref.',
     };
   }
   
-  // Call backend with feed_id and xsec_token (required by xhs_get_note_detail)
+  // Call backend with the argument style expected by the matched backend tool.
   const backendToolName = probeResult.matched_tools.note;
-  const result = await callXhsBrowseBackend(backendToolName, {
-    feedId: noteId,
-    xsecToken: xsecToken,
-    include_images: args.include_images !== false,
-  }, config);
+  const result = await callXhsBrowseBackend(
+    backendToolName,
+    xhsBrowseBackendArgsForNote(backendToolName, noteId, cachedEntry, args.include_images !== false),
+    config,
+    options
+  );
 
   if (!result.ok) {
     return {
@@ -2497,11 +2682,11 @@ async function xhsBrowseNote(args, options = {}) {
     };
   }
 
-  return normalizeXhsBrowseResponse('note', result.data || {});
+  return normalizeXhsBrowseResponse('note', parseMcpStructuredData(result.data || {}), '', options);
 }
 
 async function xhsBrowseUser(args, options = {}) {
-  const config = getXhsBrowseConfig();
+  const config = getXhsBrowseConfig(options.env || process.env);
 
   if (!config.enabled) {
     return {
@@ -2547,7 +2732,7 @@ async function xhsBrowseUser(args, options = {}) {
   maxItems = Math.min(maxItems, XHS_BROWSE_DEFAULTS.maxItemsHardLimit);
 
   // 探测后端并获取工具映射
-  const probeResult = await probeXhsBrowseBackend(config);
+  const probeResult = await probeXhsBrowseBackend(config, options);
   if (!probeResult.ok) {
     return probeResult;
   }
@@ -2566,7 +2751,7 @@ async function xhsBrowseUser(args, options = {}) {
   const result = await callXhsBrowseBackend(backendToolName, {
     user_id: userId,
     max_items: maxItems,
-  }, config);
+  }, config, options);
 
   if (!result.ok) {
     return {
@@ -2576,11 +2761,11 @@ async function xhsBrowseUser(args, options = {}) {
     };
   }
 
-  return normalizeXhsBrowseResponse('user', result.data || {});
+  return normalizeXhsBrowseResponse('user', result.data || {}, '', options);
 }
 
 async function xhsBrowseFeed(args, options = {}) {
-  const config = getXhsBrowseConfig();
+  const config = getXhsBrowseConfig(options.env || process.env);
 
   if (!config.enabled) {
     return {
@@ -2613,7 +2798,7 @@ async function xhsBrowseFeed(args, options = {}) {
   }
 
   // 探测后端并获取工具映射
-  const probeResult = await probeXhsBrowseBackend(config);
+  const probeResult = await probeXhsBrowseBackend(config, options);
   if (!probeResult.ok) {
     return probeResult;
   }
@@ -2636,7 +2821,7 @@ async function xhsBrowseFeed(args, options = {}) {
   const result = await callXhsBrowseBackend(backendToolName, {
     category,
     max_items: maxItems,
-  }, config);
+  }, config, options);
 
   if (!result.ok) {
     return {
@@ -2646,5 +2831,5 @@ async function xhsBrowseFeed(args, options = {}) {
     };
   }
 
-  return normalizeXhsBrowseResponse('feed', result.data || {});
+  return normalizeXhsBrowseResponse('feed', result.data || {}, '', options);
 }

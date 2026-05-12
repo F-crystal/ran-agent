@@ -48,7 +48,7 @@ OpenClaw can invoke the following MCP tools:
 | MCP Server | Purpose |
 |------------|---------|
 | `media_reader` | Unified media reading facade -- image OCR, audio ASR, video analysis. Backed by PaddleOCR, DashScope qwen3-vl-flash / qwen3-asr-flash, and ffmpeg/ffprobe. |
-| `social_reader` | Social media read-only facade -- Bilibili, Xiaohongshu, WeChat article content parsing. Does not control playback. |
+| `social_reader` | Social media read-only facade -- Bilibili, Xiaohongshu, WeChat article content parsing. Does not control playback. Xiaohongshu reads prefer the generic parser fallback, while search results bridge to details through internal `read_ref` handles and token cache. |
 | `media_generation` | Media generation -- image generation (DashScope qwen-image) and speech synthesis (DashScope qwen3-omni-flash). |
 | `mimo_power` | Deep multimodal analysis -- heavy long-context tasks, complex screenshot/audio/video/document reasoning. Requires MiMo Token Plan. |
 | `playwright` | Browser automation -- dynamic pages, login-state checks, SPA rendering, screenshots, and other interactive scenarios. |
