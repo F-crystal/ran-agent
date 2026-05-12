@@ -1,6 +1,6 @@
 # Sub-Agent Candidates
 
-Status: CURRENT (2026-05-10)
+Status: CURRENT (2026-05-13)
 
 ## Candidates (Heavy / Background)
 

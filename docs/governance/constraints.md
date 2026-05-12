@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-05-10)
+Status: CURRENT (2026-05-13)
 
 ## Split Of Responsibility
 

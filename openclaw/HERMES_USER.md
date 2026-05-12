@@ -1,6 +1,6 @@
 # Hermes User Budget
 
-Status: CURRENT (2026-04-20)
+Status: CURRENT (2026-05-13)
 
 Keep durable user-profile facts compact and high-confidence.
 

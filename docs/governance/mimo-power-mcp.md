@@ -1,5 +1,7 @@
 # MiMo Power MCP 配置文档
 
+Status: CURRENT (2026-05-13)
+
 ## 概述
 
 MiMo Power MCP 是一个多模态分析工具，通过 MiMo Token Plan API 提供图像、音频、视频和文本的深度分析能力。

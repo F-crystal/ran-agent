@@ -1,6 +1,6 @@
 # Hermes Memory Budget
 
-Status: CURRENT (2026-04-20)
+Status: CURRENT (2026-05-13)
 
 Use Ombre/SQLite/vault as storage. Inject only recalled short context.
 
