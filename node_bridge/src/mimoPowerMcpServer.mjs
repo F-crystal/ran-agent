@@ -100,6 +100,10 @@ export function buildMimoPowerTools() {
             type: 'number',
             description: 'Optional output token cap for this request.',
           },
+          model: {
+            type: 'string',
+            description: 'Optional explicit model override.',
+          },
         },
         required: ['task'],
         additionalProperties: false,
@@ -221,7 +225,75 @@ function buildAssetContentPart(asset = {}, env = process.env) {
   return null;
 }
 
-export function buildMimoRequestBody(args = {}, options = {}) {
+/**
+ * Normalize endpoint style: 'chat' (default) or 'responses'
+ */
+function normalizeMimoEndpointStyle(env = process.env) {
+  const style = String(env.MIMO_POWER_ENDPOINT_STYLE || 'chat').trim().toLowerCase();
+  if (style === 'responses') return 'responses';
+  return 'chat';
+}
+
+/**
+ * Select model based on mode and assets.
+ * Returns { model, error } where error is set if no suitable model is found.
+ */
+function selectModel(args = {}, options = {}) {
+  const env = options.env || process.env;
+  const assets = Array.isArray(args.assets) ? args.assets : [];
+  const mode = String(args.mode || '').trim().toLowerCase();
+  
+  // 1. If args.model is explicitly provided, use it
+  if (args.model && String(args.model).trim()) {
+    return { model: String(args.model).trim(), error: null };
+  }
+  
+  // Detect asset types
+  const hasImage = assets.some(a => normalizeAssetType(a) === 'image');
+  const hasVideo = assets.some(a => normalizeAssetType(a) === 'video');
+  const hasAudio = assets.some(a => normalizeAssetType(a) === 'audio');
+  const hasVisionAsset = hasImage || hasVideo;
+  
+  // 2. Vision mode or vision assets
+  if (mode === 'vision' || hasVisionAsset) {
+    const visionModel = String(env.MIMO_POWER_VISION_MODEL || '').trim();
+    if (visionModel) {
+      return { model: visionModel, error: null };
+    }
+    const multiModel = String(env.MIMO_POWER_MULTIMODAL_MODEL || '').trim();
+    if (multiModel) {
+      return { model: multiModel, error: null };
+    }
+    return { model: null, error: new MimoPowerError('MIMO_VISION_MODEL_MISSING', 'MIMO_VISION_MODEL_MISSING: no vision/multimodal model configured for image/video assets') };
+  }
+  
+  // 3. Audio mode or audio assets
+  if (mode === 'audio' || hasAudio) {
+    const audioModel = String(env.MIMO_POWER_AUDIO_MODEL || '').trim();
+    if (audioModel) {
+      return { model: audioModel, error: null };
+    }
+    const multiModel = String(env.MIMO_POWER_MULTIMODAL_MODEL || '').trim();
+    if (multiModel) {
+      return { model: multiModel, error: null };
+    }
+    return { model: null, error: new MimoPowerError('MIMO_AUDIO_MODEL_MISSING', 'MIMO_AUDIO_MODEL_MISSING: no audio/multimodal model configured for audio assets') };
+  }
+  
+  // 4. Text-only task
+  const textModel = String(env.MIMO_POWER_TEXT_MODEL || '').trim();
+  if (textModel) {
+    return { model: textModel, error: null };
+  }
+  const legacyModel = String(env.MIMO_POWER_MODEL || '').trim();
+  if (legacyModel) {
+    return { model: legacyModel, error: null };
+  }
+  // Fallback to default
+  return { model: DEFAULT_MODEL, error: null };
+}
+
+export function buildMimoChatCompletionsRequestBody(args = {}, options = {}) {
   const env = options.env || process.env;
   const task = String(args.task || '').trim();
   if (!task) {
@@ -240,8 +312,14 @@ export function buildMimoRequestBody(args = {}, options = {}) {
       'Return a concise but evidence-rich result for OpenClaw to summarize. Include key findings, concrete evidence, risks, and next actions when relevant.',
     ].join('\n'),
   });
+  
+  const modelSelection = selectModel(args, options);
+  if (modelSelection.error) {
+    throw modelSelection.error;
+  }
+  
   return {
-    model: String(env.MIMO_POWER_MODEL || args.model || DEFAULT_MODEL).trim() || DEFAULT_MODEL,
+    model: modelSelection.model,
     messages: [
       {
         role: 'system',
@@ -260,6 +338,63 @@ export function buildMimoRequestBody(args = {}, options = {}) {
       args.max_completion_tokens || env.MIMO_POWER_MAX_COMPLETION_TOKENS,
       DEFAULT_MAX_COMPLETION_TOKENS
     ),
+  };
+}
+
+export function buildMimoResponsesRequestBody(args = {}, options = {}) {
+  const env = options.env || process.env;
+  const task = String(args.task || '').trim();
+  if (!task) {
+    throw new MimoPowerError('INVALID_ARGUMENTS', 'INVALID_ARGUMENTS: analyze requires task');
+  }
+  const mode = String(args.mode || 'deep').trim() || 'deep';
+  const assets = Array.isArray(args.assets) ? args.assets : [];
+  const input = assets
+    .map((asset) => buildAssetContentPart(asset, env))
+    .filter(Boolean);
+  input.push({
+    type: 'text',
+    text: [
+      `Task: ${task}`,
+      `mode: ${mode}`,
+      'Return a concise but evidence-rich result for OpenClaw to summarize. Include key findings, concrete evidence, risks, and next actions when relevant.',
+    ].join('\n'),
+  });
+  
+  const modelSelection = selectModel(args, options);
+  if (modelSelection.error) {
+    throw modelSelection.error;
+  }
+  
+  return {
+    model: modelSelection.model,
+    input,
+    max_output_tokens: normalizePositiveInteger(
+      args.max_completion_tokens || env.MIMO_POWER_MAX_COMPLETION_TOKENS,
+      DEFAULT_MAX_COMPLETION_TOKENS
+    ),
+  };
+}
+
+/**
+ * Unified request builder that selects endpoint style and builds body.
+ */
+export function buildMimoRequest(args = {}, options = {}) {
+  const env = options.env || process.env;
+  const endpointStyle = normalizeMimoEndpointStyle(env);
+  
+  if (endpointStyle === 'responses') {
+    return {
+      endpointPath: '/responses',
+      body: buildMimoResponsesRequestBody(args, options),
+      responseStyle: 'responses',
+    };
+  }
+  
+  return {
+    endpointPath: '/chat/completions',
+    body: buildMimoChatCompletionsRequestBody(args, options),
+    responseStyle: 'chat',
   };
 }
 
@@ -354,7 +489,7 @@ async function assertSafePublicAssetUrls(args = {}, options = {}) {
   }
 }
 
-async function postMimoRequest(body, options = {}) {
+async function postMimoRequest(body, endpointPath, options = {}) {
   const env = options.env || process.env;
   const { apiKey } = checkAvailability(env, options.now || new Date());
   const fetchImpl = options.fetchImpl || fetch;
@@ -363,7 +498,7 @@ async function postMimoRequest(body, options = {}) {
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   let response;
   try {
-    response = await fetchImpl(`${normalizeBaseUrl(env)}/chat/completions`, {
+    response = await fetchImpl(`${normalizeBaseUrl(env)}${endpointPath}`, {
       method: 'POST',
       headers: {
         'api-key': apiKey,
@@ -390,22 +525,50 @@ async function postMimoRequest(body, options = {}) {
   return await response.json();
 }
 
-function resultTextFromResponse(payload = {}, env = process.env) {
+function resultTextFromResponseChat(payload = {}) {
   const message = payload?.choices?.[0]?.message || {};
   const content = String(message.content || '').trim();
   if (content) {
     return content;
   }
-  const allowReasoning = String(env.MIMO_POWER_ALLOW_REASONING_CONTENT || '').trim().toLowerCase() === 'true';
-  if (allowReasoning) {
-    return String(message.reasoning_content || '').trim();
+  return '';
+}
+
+function resultTextFromResponseResponses(payload = {}) {
+  // Try output_text first
+  if (payload?.output_text) {
+    return String(payload.output_text).trim();
+  }
+  // Try output[].content[].text
+  const output = payload?.output;
+  if (Array.isArray(output) && output.length > 0) {
+    for (const item of output) {
+      const content = item?.content;
+      if (Array.isArray(content)) {
+        for (const part of content) {
+          if (part?.type === 'text' && part?.text) {
+            return String(part.text).trim();
+          }
+          if (part?.text) {
+            return String(part.text).trim();
+          }
+        }
+      }
+    }
   }
   return '';
 }
 
+function resultTextFromResponse(payload = {}, responseStyle = 'chat') {
+  if (responseStyle === 'responses') {
+    return resultTextFromResponseResponses(payload);
+  }
+  return resultTextFromResponseChat(payload);
+}
+
 function taskDir(env = process.env) {
   const root = resolveProjectRoot(env);
-  const raw = String(env.MIMO_POWER_TASK_DIR || path.join(root, 'debug/mimo_tasks')).trim();
+  const raw = String(env.MIMO_POWER_TASK_DIR || path.join(root, 'debug/mimo/tasks')).trim();
   const resolved = path.isAbsolute(raw) ? path.resolve(raw) : path.resolve(root, raw);
   if (!isPathInsideRoot(resolved, root)) {
     throw new MimoPowerError('TASK_DIR_BLOCKED', `TASK_DIR_BLOCKED: MIMO_POWER_TASK_DIR must stay inside project workspace: ${root}`);
@@ -414,16 +577,19 @@ function taskDir(env = process.env) {
   return resolved;
 }
 
-function writeTaskArtifact({ args, body, response, summary }, env = process.env) {
+function writeTaskArtifact({ args, body, response, summary, responseStyle }, env = process.env) {
   const id = `mimo-${new Date().toISOString().replace(/[:.]/g, '-')}-${Math.random().toString(16).slice(2, 10)}`;
   const filePath = path.join(taskDir(env), `${id}.md`);
-  const usage = response?.usage || {};
+  const usage = response?.usage || response?.token_usage || {};
+  const model = response?.model || body.model || '';
+  const endpointPath = responseStyle === 'responses' ? '/responses' : '/chat/completions';
   const content = [
     `# MiMo Power Result ${id}`,
     '',
-    `- model: ${response?.model || body.model || ''}`,
+    `- endpoint: ${endpointPath}`,
+    `- model: ${model}`,
     `- mode: ${args.mode || 'deep'}`,
-    `- total_tokens: ${usage.total_tokens ?? ''}`,
+    `- total_tokens: ${usage.total_tokens ?? usage.output_tokens ?? ''}`,
     '',
     '## Task',
     '',
@@ -438,14 +604,21 @@ function writeTaskArtifact({ args, body, response, summary }, env = process.env)
   return filePath;
 }
 
-function buildSuccessResult({ args, body, response, summary, artifactPath }) {
+function buildSuccessResult({ args, body, response, summary, artifactPath, responseStyle }) {
+  const endpointPath = responseStyle === 'responses' ? '/responses' : '/chat/completions';
+  const usage = response?.usage || response?.token_usage || {};
   const payload = {
     ok: true,
     task: String(args.task || '').trim(),
     mode: String(args.mode || 'deep'),
+    endpoint: endpointPath,
     summary,
     model: response?.model || body.model || '',
-    usage: response?.usage || {},
+    usage: {
+      total_tokens: usage.total_tokens ?? usage.output_tokens ?? '',
+      input_tokens: usage.input_tokens ?? usage.prompt_tokens ?? '',
+      output_tokens: usage.output_tokens ?? usage.completion_tokens ?? '',
+    },
     artifact_path: artifactPath,
     expires_at: DEFAULT_EXPIRES_AT,
   };
@@ -485,11 +658,12 @@ async function callAnalyze(args = {}, options = {}) {
     const env = options.env || process.env;
     checkAvailability(env, options.now || new Date());
     await assertSafePublicAssetUrls(args, options);
-    const body = buildMimoRequestBody(args, options);
-    const response = await postMimoRequest(body, options);
-    const summary = resultTextFromResponse(response, env);
-    const artifactPath = writeTaskArtifact({ args, body, response, summary }, env);
-    return buildSuccessResult({ args, body, response, summary, artifactPath });
+    
+    const { endpointPath, body, responseStyle } = buildMimoRequest(args, options);
+    const response = await postMimoRequest(body, endpointPath, options);
+    const summary = resultTextFromResponse(response, responseStyle);
+    const artifactPath = writeTaskArtifact({ args, body, response, summary, responseStyle }, env);
+    return buildSuccessResult({ args, body, response, summary, artifactPath, responseStyle });
   } catch (error) {
     return buildErrorResult(error);
   }
