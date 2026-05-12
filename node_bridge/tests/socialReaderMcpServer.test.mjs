@@ -258,7 +258,16 @@ test('xhs_browse_note falls back when browse backend returns a failure payload',
     mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
       calls.push({ source: 'mcp', server, toolName, arguments: toolArgs });
       if (server === 'generic' && toolName === 'parse_xhs_link') {
-        return { content: [{ type: 'text', text: '通用解析详情' }] };
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              status: 'success',
+              desc: '通用解析详情',
+              images: [{ url_png: 'https://example.com/detail.png' }],
+            }),
+          }],
+        };
       }
       throw new Error(`unexpected mcp tool: ${server}.${toolName}`);
     },
@@ -290,6 +299,7 @@ test('xhs_browse_note falls back when browse backend returns a failure payload',
   assert.equal(note.note_id, 'server-note');
   assert.equal(note.title, '服务端笔记');
   assert.equal(note.content, '通用解析详情');
+  assert.deepEqual(note.images, [{ url_png: 'https://example.com/detail.png' }]);
   assert.equal(note.source, 'wanyi-watermark-mcp');
   assert.equal(note.fallback_from, 'XHS_NOTE_READ_FAILED');
   assert.equal(JSON.stringify(note).includes('server-token'), false);
@@ -297,6 +307,84 @@ test('xhs_browse_note falls back when browse backend returns a failure payload',
     calls.map((call) => call.source === 'browse' ? call.toolName : `${call.server}.${call.toolName}`),
     ['probe', 'search_notes', 'probe', 'get_note_content', 'generic.parse_xhs_link']
   );
+});
+
+test('read_social_post normalizes successful XHS generic parser JSON', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/json-note',
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      mcpCallImpl: async ({ server, toolName }) => {
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                status: 'success',
+                platform: 'xiaohongshu',
+                note_id: 'json-note',
+                title: 'JSON 标题',
+                desc: 'JSON 正文',
+                images: [{ url_webp: 'https://example.com/json.webp' }],
+              }),
+            }],
+          };
+        }
+        throw new Error(`unexpected tool: ${server}.${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.post_text, 'JSON 正文');
+  assert.equal(result.structuredContent.title, 'JSON 标题');
+  assert.equal(result.structuredContent.note_id, 'json-note');
+  assert.deepEqual(result.structuredContent.images, [{ url_webp: 'https://example.com/json.webp' }]);
+  assert.equal(result.structuredContent.primary, true);
+});
+
+test('read_social_post treats XHS generic parser error JSON as failure', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/error-note',
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      mcpCallImpl: async ({ server, toolName }) => {
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                status: 'error',
+                error: '小红书图文解析失败: 无法从链接中提取笔记 ID',
+              }),
+            }],
+          };
+        }
+        throw new Error(`unexpected tool: ${server}.${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.platform, 'xhs');
+  assert.equal(result.structuredContent.error_code, 'GENERIC_PARSE_FAILED');
+  assert.match(result.structuredContent.error, /小红书图文解析失败/);
 });
 
 test('read_social_post can reuse token context cached by xhs_browse_search', async () => {

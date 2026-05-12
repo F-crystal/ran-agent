@@ -394,6 +394,70 @@ function textFromMcpResult(result) {
     .trim();
 }
 
+function normalizeGenericParserPayload(text) {
+  const rawText = String(text || '').trim();
+  if (!rawText) {
+    return {
+      ok: false,
+      error_code: 'GENERIC_PARSE_FAILED',
+      error: 'GENERIC_PARSE_FAILED: parser returned empty text',
+    };
+  }
+
+  let payload = null;
+  try {
+    const parsed = JSON.parse(rawText);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      payload = parsed;
+    }
+  } catch {
+    payload = null;
+  }
+
+  if (!payload) {
+    return {
+      ok: true,
+      post_text: rawText,
+    };
+  }
+
+  const status = String(payload.status || '').trim().toLowerCase();
+  if (status === 'error' || payload.ok === false || payload.success === false) {
+    const message = firstString(payload.error, payload.message) || 'generic parser returned failure';
+    return {
+      ok: false,
+      error_code: 'GENERIC_PARSE_FAILED',
+      error: `GENERIC_PARSE_FAILED: ${message}`,
+      parser_status: status || '',
+    };
+  }
+
+  const postText = firstString(
+    payload.desc,
+    payload.caption,
+    payload.content,
+    payload.text,
+    payload.description,
+    payload.title
+  ) || rawText;
+
+  return {
+    ok: true,
+    post_text: postText,
+    title: firstString(payload.title),
+    note_id: firstString(payload.note_id, payload.id),
+    parser_status: status || '',
+    media_type: firstString(payload.type),
+    images: Array.isArray(payload.images) ? payload.images : [],
+    media: payload.media,
+    medias: payload.medias,
+    videos: payload.videos,
+    audios: payload.audios,
+    attachments: payload.attachments,
+    image_count: payload.image_count,
+  };
+}
+
 function xhsBackendTextError(text, toolName) {
   const normalized = String(text || '').trim();
   if (!normalized) {
@@ -1392,6 +1456,17 @@ function extractMediaUrlsFromPostText(postText) {
   return [...new Set(output)];
 }
 
+function extractMediaUrlsFromSocialPayload(social) {
+  const output = extractMediaUrlsFromPostText(social?.post_text || '');
+  collectMediaUrlsFromValue(social?.images, output);
+  collectMediaUrlsFromValue(social?.media, output);
+  collectMediaUrlsFromValue(social?.medias, output);
+  collectMediaUrlsFromValue(social?.videos, output);
+  collectMediaUrlsFromValue(social?.audios, output);
+  collectMediaUrlsFromValue(social?.attachments, output);
+  return [...new Set(output)];
+}
+
 async function callMediaReaderTool(toolName, toolArguments = {}, options = {}) {
   if (typeof options.mediaReaderCallImpl === 'function') {
     return await options.mediaReaderCallImpl({ toolName, arguments: toolArguments });
@@ -1464,7 +1539,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
     partial_failures: [],
     warnings: [],
   };
-  const mediaUrls = includeMedia ? extractMediaUrlsFromPostText(social.post_text) : [];
+  const mediaUrls = includeMedia ? extractMediaUrlsFromSocialPayload(social) : [];
   const platformAsset = includeMedia && ['bilibili', 'xhs'].includes(social.platform || detectedPlatform)
     ? [{
       asset_id: 'platform-1',
@@ -1604,6 +1679,17 @@ async function readGenericSocialPost({ url, platform, includeComments, maxCommen
   const toolName = genericParserToolForPlatform(platform);
   try {
     const result = await callBackendMcpTool('generic', toolName, { share_link: url }, options);
+    const normalized = normalizeGenericParserPayload(textFromMcpResult(result));
+    if (!normalized.ok) {
+      return buildErrorResult(normalized.error, {
+        platform,
+        url,
+        source: 'wanyi-watermark-mcp',
+        parser_tool: toolName,
+        error_code: normalized.error_code,
+        parser_status: normalized.parser_status,
+      });
+    }
     return buildTextResult({
       ok: true,
       platform,
@@ -1612,9 +1698,20 @@ async function readGenericSocialPost({ url, platform, includeComments, maxCommen
       include_comments: includeComments,
       max_comments: maxComments,
       parser_tool: toolName,
-      post_text: textFromMcpResult(result),
+      post_text: normalized.post_text,
       comments_text: '',
       comments_supported: false,
+      ...(normalized.title ? { title: normalized.title } : {}),
+      ...(normalized.note_id ? { note_id: normalized.note_id } : {}),
+      ...(normalized.parser_status ? { parser_status: normalized.parser_status } : {}),
+      ...(normalized.media_type ? { media_type: normalized.media_type } : {}),
+      ...(Array.isArray(normalized.images) && normalized.images.length > 0 ? { images: normalized.images } : {}),
+      ...(normalized.media ? { media: normalized.media } : {}),
+      ...(normalized.medias ? { medias: normalized.medias } : {}),
+      ...(normalized.videos ? { videos: normalized.videos } : {}),
+      ...(normalized.audios ? { audios: normalized.audios } : {}),
+      ...(normalized.attachments ? { attachments: normalized.attachments } : {}),
+      ...(normalized.image_count !== undefined ? { image_count: normalized.image_count } : {}),
     });
   } catch (error) {
     return backendErrorResult(error, { platform, url });
@@ -2435,9 +2532,9 @@ async function fallbackXhsBrowseNote({ noteId, lookup, cachedEntry, fallbackFrom
     ok: true,
     partial: false,
     note_id: noteId,
-    title: cachedEntry?.title || '',
+    title: cachedEntry?.title || fallback.structuredContent.title || '',
     content: fallback.structuredContent.post_text || '',
-    images: [],
+    images: Array.isArray(fallback.structuredContent.images) ? fallback.structuredContent.images : [],
     user: { id: cachedEntry?.user_id || '', name: cachedEntry?.user || '' },
     source: 'wanyi-watermark-mcp',
     read_ref: `xhs:note:${noteId}`,
