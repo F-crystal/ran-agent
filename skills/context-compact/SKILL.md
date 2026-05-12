@@ -1,5 +1,10 @@
 # context-compact
 
+**注意**：此 skill 负责**对话历史压缩**（当 token 数接近上下文窗口上限时）。与 `Context Policy v1`（媒体上下文紧凑渲染）不同。
+
+- **Context Policy v1**：紧凑渲染媒体 artifact（每轮最多注入 3 个，每个≤180 字符），默认开启，无需手动触发。详见 `docs/governance/media-pipeline.md`。
+- **context-compact skill**：长会话历史压缩（保留最近 N 轮 + 历史摘要），当 token 数>80% 时自动触发或用户手动 `/compact`。
+
 ## 什么时候用
 
 - 对话历史 token 数接近上下文窗口上限（默认阈值：80%）。
@@ -18,19 +23,19 @@ if current_tokens > context_window * 0.8:
     compaction_result = context_compact.compact(
         conversation_history=history,
         strategy="auto",
-        preserve_recent_turns=2,  # 保留最近2轮
+        preserve_recent_turns=2,  # 保留最近 2 轮
     )
 ```
 
 ### 手动触发
 
-用户发送 `/compact` 或 `/compact 关注API设计决策`：
+用户发送 `/compact` 或 `/compact 关注 API 设计决策`：
 
 ```python
 compaction_result = context_compact.compact(
     conversation_history=history,
     strategy="handoff",  # 生成交接摘要
-    custom_focus=用户指令中的焦点描述,
+    custom_focus=用户指令中的焦点描述，
     preserve_tool_outputs=True,  # 保留关键工具输出
 )
 ```
@@ -40,7 +45,7 @@ compaction_result = context_compact.compact(
 | 策略 | 适用场景 | 输出 |
 |------|----------|------|
 | `micro` | 单轮工具结果过大 | 工具输出摘要，保留原始结果引用 |
-| `auto` | 常规长会话 | 最近N轮保留 + 历史摘要 |
+| `auto` | 常规长会话 | 最近 N 轮保留 + 历史摘要 |
 | `handoff` | 任务边界 | 结构化交接文档 |
 | `aggressive` | 紧急空间不足 | 仅保留关键决策和待办 |
 
@@ -76,7 +81,7 @@ compaction_result = context_compact.compact(
 
 ```
 你是一个对话历史压缩助手。请将以下对话历史总结为一份"交接文档"，
-让另一个AI助手能够继续当前工作而不丢失关键信息。
+让另一个 AI 助手能够继续当前工作而不丢失关键信息。
 
 必须包含：
 1. 当前进行中的任务/项目

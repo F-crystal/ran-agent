@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-10)
+Status: CURRENT (2026-05-12)
 
 ## Frontend Path
 
@@ -62,6 +62,7 @@ Status: CURRENT (2026-05-10)
 - Default: `openclaw agent --json` (agent runtime, MCP tools visible).
 - Inbound media: bridge validates paths, copies external files to trusted dirs, generates artifacts under `debug/media_context/`, injects recent-media context.
 - Turn aggregation: `inboundMessageBuffer.mjs` holds media-only messages, merges with text-ref.
+- Context Policy v1: compact media context injection (max 3 artifacts, ≤180 chars each), priority-based selection, legacy fallback via `OPENCLAW_CONTEXT_POLICY=legacy`.
 - Fallback: `NODE_BRIDGE_OPENCLAW_REPLY_MODE=http` uses OpenAI-compatible gateway (MCP tools not visible).
 
 ## Backend Layer (Python)

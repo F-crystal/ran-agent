@@ -41,6 +41,8 @@ Ran Agent connects WeChat to an LLM-powered conversation runtime with memory, re
 
 **Media Understanding Pipeline.** Send an image and follow up with "use mimo to look at it" — the system automatically merges the image and text into a single request. Media analysis results are persisted as conversation-level artifacts, so saying "that image from earlier" correctly resolves to the prior analysis. Supports deep multimodal analysis of images, audio, video, and documents.
 
+**Context Compression Policy.** Context Policy v1 enabled by default: max 3 media artifacts injected per turn, each compact-rendered (≤180 chars), prioritizing explicit refs and current media. Fallback to full media context via `OPENCLAW_CONTEXT_POLICY=legacy`. See `docs/governance/media-pipeline.md`.
+
 **Memory and Reflection.** The agent builds a working memory across conversations. A nightly reflection cycle reviews the day's interactions and suggests persona refinements. You stay in control of what sticks and what fades.
 
 ---

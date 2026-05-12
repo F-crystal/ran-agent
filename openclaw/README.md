@@ -58,6 +58,8 @@ OpenClaw 可调用以下 MCP 工具：
 
 微信入站媒体的处理遵循以下管线：
 
+**上下文压缩策略 (Context Policy v1)**：默认开启紧凑模式，每轮最多注入 3 个媒体 artifact，每个紧凑渲染（≤180 字符）。优先级：`explicit_ref` > `current_media` > `recent_candidate` > `history`。可通过 `OPENCLAW_CONTEXT_POLICY=legacy` 回退。详见 `docs/governance/media-pipeline.md`。
+
 ```
 入站媒体 (图片/音频/视频/文档)
       |
