@@ -136,7 +136,7 @@ test('openclaw config exposes live lookup and gateway exec tools while todo hand
   assert.equal(agentAllow.includes('list_todos'), false);
 });
 
-test('openclaw config registers media generation MCP so OpenClaw owns media tool calls', () => {
+test('openclaw config registers model-owned MCP tools without bridge memory injection', () => {
   const config = JSON.parse(fs.readFileSync(OPENCLAW_CONFIG_PATH, 'utf8'));
   const mcpServers = config.mcp?.servers || {};
 
@@ -148,6 +148,14 @@ test('openclaw config registers media generation MCP so OpenClaw owns media tool
   assert.deepEqual(mcpServers.social_reader, {
     command: 'bash',
     args: ['scripts/start_social_reader_mcp.sh'],
+  });
+  assert.deepEqual(mcpServers.obsidian_memory, {
+    command: 'bash',
+    args: ['scripts/start_obsidian_memory_mcp.sh'],
+  });
+  assert.deepEqual(mcpServers.personal_memory, {
+    command: 'bash',
+    args: ['scripts/start_personal_memory_mcp.sh'],
   });
 });
 

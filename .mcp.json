@@ -33,6 +33,18 @@
         "scripts/start_social_reader_mcp.sh"
       ]
     },
+    "obsidian_memory": {
+      "command": "bash",
+      "args": [
+        "scripts/start_obsidian_memory_mcp.sh"
+      ]
+    },
+    "personal_memory": {
+      "command": "bash",
+      "args": [
+        "scripts/start_personal_memory_mcp.sh"
+      ]
+    },
     "mimo_power": {
       "command": "bash",
       "args": [
