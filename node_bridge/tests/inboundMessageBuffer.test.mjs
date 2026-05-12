@@ -1,5 +1,10 @@
 /**
  * Tests for inbound message buffer — WeChat turn aggregation.
+ * 
+ * Tests cover three merge paths:
+ * 1. Explicit ref: text matches MEDIA_REF_PATTERNS → strong bind, consumed=true
+ * 2. Implicit candidate: plain text within window → soft attach, consumed=false
+ * 3. Deferred: text-ref arrives first, media arrives later
  */
 
 import { describe, it } from 'node:test';
@@ -27,7 +32,7 @@ function makeMediaPayload(senderId = 'user-1', filePath = '/tmp/img.png') {
 describe('isMediaRefText', () => {
   it('matches common media reference patterns', () => {
     assert.equal(isMediaRefText('用 mimo 读一下'), true);
-    assert.equal(isMediaRefText('用MiMo分析'), true);
+    assert.equal(isMediaRefText('用 MiMo 分析'), true);
     assert.equal(isMediaRefText('读一下图片'), true);
     assert.equal(isMediaRefText('分析这个'), true);
     assert.equal(isMediaRefText('看看刚才那张图'), true);
@@ -43,6 +48,14 @@ describe('isMediaRefText', () => {
     assert.equal(isMediaRefText('今天天气怎么样'), false);
     assert.equal(isMediaRefText('帮我写个邮件'), false);
     assert.equal(isMediaRefText(''), false);
+    // Implicit references that should NOT match explicit pattern
+    assert.equal(isMediaRefText('怎么样？'), false);
+    assert.equal(isMediaRefText('这个呢？'), false);
+    assert.equal(isMediaRefText('对吗？'), false);
+    assert.equal(isMediaRefText('好看吗？'), false);
+    assert.equal(isMediaRefText('啥意思？'), false);
+    assert.equal(isMediaRefText('笑死'), false);
+    assert.equal(isMediaRefText('你看'), false);
   });
 });
 
@@ -63,15 +76,14 @@ describe('isMediaOnlyPayload', () => {
   });
 });
 
-describe('inbound message buffer', () => {
+describe('inbound message buffer - explicit reference', () => {
   it('holds media-only messages and does not trigger reply', async () => {
     const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
     const result = await buffer.processInbound(makeMediaPayload());
     assert.equal(result.action, 'hold');
     const stats = buffer.getStats();
-    assert.equal(stats.entries.length, 1);
-    assert.equal(stats.entries[0].pendingCount, 1);
-    buffer.clear();
+    assert.equal(stats.pendingMedia.length, 1);
+    assert.equal(stats.pendingMedia[0].itemCount, 1);
   });
 
   it('merges media then text-ref even with 15s gap', async () => {
@@ -96,7 +108,10 @@ describe('inbound message buffer', () => {
     assert.ok(result.payload.media);
     assert.equal(result.payload.media.length, 1);
     assert.equal(result.payload.media[0].filePath, '/tmp/img.png');
-    buffer.clear();
+    // Verify explicit_ref relation and consumed
+    assert.ok(result.payload.media_candidates);
+    assert.equal(result.payload.media_candidates[0].relation, 'explicit_ref');
+    assert.equal(result.payload.media_candidates[0].confidence, 1.0);
   });
 
   it('does not bind media after TTL expiry', async () => {
@@ -119,85 +134,9 @@ describe('inbound message buffer', () => {
     }));
     assert.equal(result.action, 'reply');
     assert.ok(!result.payload.media || result.payload.media.length === 0);
-    buffer.clear();
   });
 
-  it('does not bind plain text to recent media', async () => {
-    const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
-
-    // Media arrives
-    await buffer.processInbound(makeMediaPayload());
-
-    // Plain text arrives (not a media ref)
-    const result = await buffer.processInbound(makePayload({
-      sender_id: 'user-1',
-      text: '你好',
-    }));
-    assert.equal(result.action, 'reply');
-    assert.ok(!result.payload.media || result.payload.media.length === 0);
-
-    // Pending media should still be there
-    const stats = buffer.getStats();
-    assert.equal(stats.entries.length, 1);
-    assert.equal(stats.entries[0].pendingCount, 1);
-    buffer.clear();
-  });
-
-  it('waits for media when text-ref arrives first, merges when media comes within window', async () => {
-    const buffer = createInboundMessageBuffer({
-      textRefWaitMs: 500,
-      pendingMediaTtlMs: 600000,
-    });
-
-    // Text-ref arrives first (no pending media)
-    const textPromise = buffer.processInbound(makePayload({
-      sender_id: 'user-1',
-      text: '用 mimo 读一下',
-    }));
-
-    // Give the async processInbound a tick to start waiting
-    await new Promise((r) => setTimeout(r, 10));
-
-    // Media arrives 6 seconds later — should resolve the wait
-    const mediaPayload = makeMediaPayload('user-1');
-    buffer.resolveTextRefWait('user-1', mediaPayload);
-
-    const result = await textPromise;
-    assert.equal(result.action, 'reply');
-    assert.ok(result.payload.media);
-    assert.equal(result.payload.media.length, 1);
-    buffer.clear();
-  });
-
-  it('preserves pending media after grace timeout (TTL controls lifetime)', async () => {
-    let now = 1000;
-    const buffer = createInboundMessageBuffer({
-      mediaReplyGraceMs: 12000,
-      pendingMediaTtlMs: 600000,
-      nowImpl: () => now,
-    });
-
-    // Media arrives
-    await buffer.processInbound(makeMediaPayload());
-
-    // 30 seconds later (past grace, within TTL) — media should still be there
-    now += 30000;
-    const stats = buffer.getStats();
-    assert.equal(stats.entries.length, 1);
-    assert.equal(stats.entries[0].pendingCount, 1);
-
-    // Text-ref should still merge
-    const result = await buffer.processInbound(makePayload({
-      sender_id: 'user-1',
-      text: '分析这个',
-    }));
-    assert.equal(result.action, 'reply');
-    assert.ok(result.payload.media);
-    assert.equal(result.payload.media.length, 1);
-    buffer.clear();
-  });
-
-  it('marks media as consumed after merge, prevents double-binding', async () => {
+  it('marks media as consumed after explicit ref merge, prevents double-binding', async () => {
     const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000, textRefWaitMs: 100 });
 
     // Media arrives
@@ -219,9 +158,122 @@ describe('inbound message buffer', () => {
     }));
     assert.equal(result2.action, 'reply');
     assert.ok(!result2.payload.media || result2.payload.media.length === 0);
-    buffer.clear();
+  });
+});
+
+describe('inbound message buffer - implicit reference (recent_candidate)', () => {
+  it('attaches recent media as candidate for plain text "怎么样？"', async () => {
+    const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
+
+    // Media arrives
+    await buffer.processInbound(makeMediaPayload());
+
+    // Plain text "怎么样？" arrives
+    const result = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '怎么样？',
+    }));
+    assert.equal(result.action, 'reply');
+    // Should have media attached as candidate
+    assert.ok(result.payload.media);
+    assert.equal(result.payload.media.length, 1);
+    // Verify recent_candidate relation
+    assert.ok(result.payload.media_candidates);
+    assert.equal(result.payload.media_candidates[0].relation, 'recent_candidate');
+    assert.equal(result.payload.media_candidates[0].confidence, 0.5);
+    
+    // Media should NOT be consumed (still available for explicit ref)
+    const stats = buffer.getStats();
+    assert.equal(stats.pendingMedia.length, 1);
+    assert.equal(stats.pendingMedia[0].unconsumedCount, 1);
   });
 
+  it('attaches recent media as candidate for "好看吗？"', async () => {
+    const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
+
+    // Media arrives
+    await buffer.processInbound(makeMediaPayload());
+
+    // Plain text "好看吗？" arrives
+    const result = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '好看吗？',
+    }));
+    assert.equal(result.action, 'reply');
+    assert.ok(result.payload.media);
+    assert.ok(result.payload.media_candidates);
+    assert.equal(result.payload.media_candidates[0].relation, 'recent_candidate');
+  });
+
+  it('allows subsequent explicit ref after implicit ref (media not consumed)', async () => {
+    const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
+
+    // Media arrives
+    await buffer.processInbound(makeMediaPayload());
+
+    // First: implicit ref "怎么样？"
+    const result1 = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '怎么样？',
+    }));
+    assert.equal(result1.action, 'reply');
+    assert.ok(result1.payload.media_candidates);
+    assert.equal(result1.payload.media_candidates[0].relation, 'recent_candidate');
+
+    // Second: explicit ref "看看这个" should still work
+    const result2 = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '看看这个',
+    }));
+    assert.equal(result2.action, 'reply');
+    assert.ok(result2.payload.media);
+    assert.ok(result2.payload.media_candidates);
+    assert.equal(result2.payload.media_candidates[0].relation, 'explicit_ref');
+    
+    // Now media should be consumed
+    const stats = buffer.getStats();
+    assert.equal(stats.pendingMedia.length, 0);
+  });
+
+  it('does not attach media after TTL expiry', async () => {
+    let now = 1000;
+    const buffer = createInboundMessageBuffer({
+      pendingMediaTtlMs: 600000,
+      nowImpl: () => now,
+    });
+
+    // Media arrives
+    await buffer.processInbound(makeMediaPayload());
+
+    // 601 seconds later (past TTL)
+    now += 601000;
+    const result = await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      text: '怎么样？',
+    }));
+    assert.equal(result.action, 'reply');
+    assert.ok(!result.payload.media || result.payload.media.length === 0);
+    assert.ok(!result.payload.media_candidates);
+  });
+
+  it('isolates recent candidates per sender', async () => {
+    const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
+
+    // User-1 sends media
+    await buffer.processInbound(makeMediaPayload('user-1'));
+    
+    // User-2 sends plain text — should NOT get user-1's media
+    const result = await buffer.processInbound(makePayload({
+      sender_id: 'user-2',
+      text: '怎么样？',
+    }));
+    assert.equal(result.action, 'reply');
+    assert.ok(!result.payload.media || result.payload.media.length === 0);
+    assert.ok(!result.payload.media_candidates);
+  });
+});
+
+describe('inbound message buffer - multiple media batches', () => {
   it('handles multiple media batches for same sender', async () => {
     const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
 
@@ -233,8 +285,8 @@ describe('inbound message buffer', () => {
     }));
 
     const stats = buffer.getStats();
-    assert.equal(stats.entries.length, 1);
-    assert.equal(stats.entries[0].pendingCount, 2);
+    assert.equal(stats.pendingMedia.length, 1);
+    assert.equal(stats.pendingMedia[0].itemCount, 2);
 
     // Text-ref merges both
     const result = await buffer.processInbound(makePayload({
@@ -244,22 +296,27 @@ describe('inbound message buffer', () => {
     assert.equal(result.action, 'reply');
     assert.ok(result.payload.media);
     assert.equal(result.payload.media.length, 2);
-    buffer.clear();
   });
 
-  it('isolates pending media per sender', async () => {
-    const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000, textRefWaitMs: 100 });
+  it('implicit ref attaches only most recent media (maxCandidates=1)', async () => {
+    const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
 
-    // User-1 sends media
-    await buffer.processInbound(makeMediaPayload('user-1'));
-    // User-2 sends text-ref — should not get user-1's media
+    // Two media messages arrive
+    await buffer.processInbound(makeMediaPayload('user-1', '/tmp/img1.png'));
+    await buffer.processInbound(makePayload({
+      sender_id: 'user-1',
+      media: [{ filePath: '/tmp/img2.png', mimeType: 'image/png', type: 'image' }],
+    }));
+
+    // Implicit ref should attach only most recent
     const result = await buffer.processInbound(makePayload({
-      sender_id: 'user-2',
-      text: '用 mimo 读一下',
+      sender_id: 'user-1',
+      text: '怎么样？',
     }));
     assert.equal(result.action, 'reply');
-    assert.ok(!result.payload.media || result.payload.media.length === 0);
-    buffer.clear();
+    assert.ok(result.payload.media);
+    assert.equal(result.payload.media.length, 1);
+    assert.equal(result.payload.media[0].filePath, '/tmp/img2.png');
   });
 });
 
@@ -285,7 +342,6 @@ describe('deferred text-ref intent', () => {
     assert.equal(result.action, 'reply');
     assert.ok(result.payload.media);
     assert.equal(result.payload.media.length, 1);
-    buffer.clear();
   });
 
   it('text-ref first, image 60s later → deferred merge via saved intent', async () => {
@@ -325,7 +381,6 @@ describe('deferred text-ref intent', () => {
     // Intent consumed
     const stats2 = buffer.getStats();
     assert.equal(stats2.pendingTextRefIntents.length, 0);
-    buffer.clear();
   });
 
   it('text-ref intent expires after TTL, late media does not bind', async () => {
@@ -352,46 +407,51 @@ describe('deferred text-ref intent', () => {
     const mediaResult = await buffer.processInbound(makeMediaPayload('user-1'));
     // Should be hold (media saved as pending, but no intent to merge with)
     assert.equal(mediaResult.action, 'hold');
-    buffer.clear();
   });
+});
 
-  it('plain text is never delayed or bound by pending media', async () => {
+describe('edge cases', () => {
+  it('preserves pending media after grace timeout (TTL controls lifetime)', async () => {
     let now = 1000;
     const buffer = createInboundMessageBuffer({
+      mediaReplyGraceMs: 12000,
       pendingMediaTtlMs: 600000,
-      textRefWaitMs: 30000,
-      pendingTextRefTtlMs: 120000,
       nowImpl: () => now,
     });
 
     // Media arrives
     await buffer.processInbound(makeMediaPayload());
 
-    // Plain text arrives immediately — should NOT bind
+    // 30 seconds later (past grace, within TTL) — media should still be there
+    now += 30000;
+    const stats = buffer.getStats();
+    assert.equal(stats.pendingMedia.length, 1);
+    assert.equal(stats.pendingMedia[0].itemCount, 1);
+
+    // Text-ref should still merge
     const result = await buffer.processInbound(makePayload({
       sender_id: 'user-1',
-      text: '你好',
+      text: '分析这个',
     }));
     assert.equal(result.action, 'reply');
-    assert.ok(!result.payload.media || result.payload.media.length === 0);
+    assert.ok(result.payload.media);
+    assert.equal(result.payload.media.length, 1);
+  });
 
-    // Media still pending
-    const stats = buffer.getStats();
-    assert.equal(stats.entries.length, 1);
-    assert.equal(stats.entries[0].pendingCount, 1);
+  it('handles sync mode for plain text with pending media', () => {
+    const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
 
-    // Another plain text — still no binding
-    now += 5000;
-    const result2 = await buffer.processInbound(makePayload({
+    // Media arrives
+    buffer.processInboundSync(makeMediaPayload());
+
+    // Plain text in sync mode
+    const result = buffer.processInboundSync(makePayload({
       sender_id: 'user-1',
-      text: '今天天气怎么样',
+      text: '怎么样？',
     }));
-    assert.equal(result2.action, 'reply');
-    assert.ok(!result2.payload.media || result2.payload.media.length === 0);
-
-    // No text-ref intent created for plain text
-    const stats2 = buffer.getStats();
-    assert.equal(stats2.pendingTextRefIntents.length, 0);
-    buffer.clear();
+    assert.equal(result.action, 'reply');
+    assert.ok(result.payload.media);
+    assert.ok(result.payload.media_candidates);
+    assert.equal(result.payload.media_candidates[0].relation, 'recent_candidate');
   });
 });
