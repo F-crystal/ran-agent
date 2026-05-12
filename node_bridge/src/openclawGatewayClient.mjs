@@ -549,7 +549,7 @@ function buildInboundMediaInstruction(payload = {}) {
   return [
     '【微信入站媒体资产（非用户原话，不要复述）】',
     '用户随本轮上传了媒体。必须调用 MCP 工具 mimo_power__analyze 来分析这些媒体，把下列 file_path/url 作为 assets 传入。',
-    '不要用 exec/process 读取图片文件，不要用自身视觉能力直接分析图片。只有 MiMo Token Plan 不可用（返回 MIMO_TOKEN_PLAN_KEY_MISSING/EXPIRED）时才 fallback 到 media_reader。',
+    '不要用 exec/process 读取图片文件，不要用自身视觉能力直接分析图片。优先调用 mimo_power__analyze；如果 MiMo 返回临时错误（如 MIMO_REQUEST_FAILED、MIMO_REQUEST_TIMEOUT 等），自动 fallback 到 media_reader；如果 MiMo 返回配置错误（MIMO_TOKEN_PLAN_KEY_MISSING、EXPIRED），直接报错提示用户检查 Token Plan 配置。',
     ...assetLines,
   ].join('\n');
 }
