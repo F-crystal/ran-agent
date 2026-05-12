@@ -1,5 +1,7 @@
 # OpenClaw -- Frontend Agent Runtime Configuration
 
+Status: CURRENT (2026-05-13)
+
 This directory contains the runtime contract, configuration baseline, and security boundary definitions for the OpenClaw frontend agent. OpenClaw is the "brain" of the personal assistant system -- it receives messages, invokes tools, generates replies, and manages conversation context and memory.
 
 ## OpenClaw in the Architecture
@@ -53,6 +55,8 @@ OpenClaw can invoke the following MCP tools:
 | `mimo_power` | Deep multimodal analysis -- heavy long-context tasks, complex screenshot/audio/video/document reasoning. Requires MiMo Token Plan. |
 | `playwright` | Browser automation -- dynamic pages, login-state checks, SPA rendering, screenshots, and other interactive scenarios. |
 | `time` | Timezone-aware time queries. Local timezone is `Asia/Shanghai`. |
+| `obsidian_memory` | Obsidian vault memory integration. |
+| `personal_memory` | Personal memory management. |
 
 ### Media Processing Pipeline
 

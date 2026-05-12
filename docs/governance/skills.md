@@ -1,6 +1,6 @@
 # Skills Map
 
-Status: CURRENT (2026-05-12)
+Status: CURRENT (2026-05-13)
 
 ## Active Skills (On-Demand)
 

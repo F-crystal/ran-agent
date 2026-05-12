@@ -1,5 +1,7 @@
 # OpenClaw -- 前端 Agent 运行时配置
 
+Status: CURRENT (2026-05-13)
+
 本目录包含 OpenClaw 前端 Agent 的运行时合约、配置基线和安全边界定义。OpenClaw 是整个个人助手系统的"大脑"，负责接收消息、调用工具、生成回复，并管理会话上下文与记忆。
 
 ## OpenClaw 在架构中的位置
@@ -53,6 +55,8 @@ OpenClaw 可调用以下 MCP 工具：
 | `mimo_power` | 深度多模态分析 -- 长上下文重任务、复杂截图/音频/视频/文档综合推理。依赖 MiMo Token Plan。 |
 | `playwright` | 浏览器自动化 -- 动态页面、登录态检查、SPA 渲染、截图等交互场景。 |
 | `time` | 时区感知时间查询，本地时区为 `Asia/Shanghai`。 |
+| `obsidian_memory` | Obsidian 知识库记忆集成。 |
+| `personal_memory` | 个人记忆管理。 |
 
 ### 媒体处理管线
 

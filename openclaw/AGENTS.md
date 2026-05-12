@@ -1,6 +1,6 @@
 # OpenClaw AGENTS
 
-Status: CURRENT (2026-05-12)
+Status: CURRENT (2026-05-13)
 
 ## 范围
 
