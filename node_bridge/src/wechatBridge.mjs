@@ -198,8 +198,13 @@ export function extractMediaAttachmentsFromWeChatRequest(request) {
   const candidates = [
     getValueByPath(request, ['media']),
     getValueByPath(request, ['message', 'media']),
+    getValueByPath(request, ['message', 'attachments']),
     getValueByPath(request, ['payload', 'media']),
+    getValueByPath(request, ['payload', 'attachments']),
     getValueByPath(request, ['content', 'media']),
+    getValueByPath(request, ['content', 'attachments']),
+    getValueByPath(request, ['message', 'content', 'media']),
+    getValueByPath(request, ['message', 'content', 'attachments']),
   ];
 
   const normalized = [];
@@ -225,13 +230,39 @@ function normalizeMediaCandidate(candidate) {
     return [];
   }
 
-  const filePath = typeof candidate.filePath === 'string' ? candidate.filePath.trim() : '';
+  // Try multiple field names for file path
+  let filePath = '';
+  for (const key of ['filePath', 'path', 'localPath', 'file_path', 'url', 'fileUrl']) {
+    const val = candidate[key];
+    if (typeof val === 'string' && val.trim()) {
+      filePath = val.trim();
+      break;
+    }
+  }
   if (!filePath) {
     return [];
   }
 
-  const mimeType = typeof candidate.mimeType === 'string' ? candidate.mimeType.trim().toLowerCase() : '';
-  const type = typeof candidate.type === 'string' ? candidate.type.trim().toLowerCase() : '';
+  // Try multiple field names for mime type
+  let mimeType = '';
+  for (const key of ['mimeType', 'mime_type', 'mime', 'contentType', 'content_type']) {
+    const val = candidate[key];
+    if (typeof val === 'string' && val.trim()) {
+      mimeType = val.trim().toLowerCase();
+      break;
+    }
+  }
+
+  // Try multiple field names for type
+  let type = '';
+  for (const key of ['type', 'mediaType', 'media_type', 'kind']) {
+    const val = candidate[key];
+    if (typeof val === 'string' && val.trim()) {
+      type = val.trim().toLowerCase();
+      break;
+    }
+  }
+
   return [
     {
       filePath,
