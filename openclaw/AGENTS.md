@@ -77,7 +77,7 @@ Status: CURRENT (2026-05-10)
 
 - 普通网页优先使用 `web_fetch` 获取正文内容。动态/视觉/交互页面使用 Playwright MCP。社媒分享链接优先用 `social_reader` MCP。不要 shell-probe 浏览器二进制。
 - 微信入站媒体经过入站消息缓冲（turn 聚合）后，桥接层注入 `file_path`/`url` assets 并指示必须调用 `mimo_power__analyze`。只有 MiMo 不可用（`MIMO_TOKEN_PLAN_KEY_MISSING`/`EXPIRED`）、用户要求快速 OCR/ASR、或输入是社媒链接时才 fallback 到 `media_reader` 或 `social_reader`。不要把 B 站/小红书页面直接交给 `ffprobe`。
-- 媒体分析产物沉淀为会话 artifact，后续"刚才那张图"等指代参考最近媒体上下文。详细流程见 `docs/governance/media-pipeline.md`。
+- 媒体分析产物沉淀为会话 artifact，后续"刚才那张图"等指代参考最近媒体上下文。MiMo Power MCP 配置和 model routing 详见 `docs/governance/mimo-power-mcp.md`；详细流程见 `docs/governance/media-pipeline.md`。
 - OpenClaw 内置 `browser` 插件已禁用；Playwright 通过 `mcp.servers.playwright` 运行。
 
 ## 媒体生成契约

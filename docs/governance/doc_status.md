@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-05-10)
+Status: CURRENT (2026-05-12)
 
 ## Public Source Of Truth
 
@@ -16,6 +16,7 @@ Status: CURRENT (2026-05-10)
 - `docs/governance/sub_agents.md`
 - `docs/governance/cleanup.md`
 - `docs/governance/media-pipeline.md`
+- `docs/governance/mimo-power-mcp.md`
 
 ## Publication Notes
 

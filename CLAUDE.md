@@ -47,6 +47,7 @@ Only heavy background tasks are sub-agent candidates: reflection, knowledge main
 ## Media Pipeline
 
 - MCP servers (`media_reader`, `social_reader`, `media_generation`, `mimo_power`) are the stable facade; do not expose internal tools to OpenClaw directly.
+- MiMo Power MCP configuration and model routing details in `docs/governance/mimo-power-mcp.md`.
 - Full pipeline: raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> OpenClaw reply. Details in `docs/governance/media-pipeline.md`.
 - External media files (e.g. WeChat SDK /tmp files) are auto-copied to trusted dirs before processing.
 - Platform resolver credentials must never appear in tool output, logs, docs, or git.
