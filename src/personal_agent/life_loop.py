@@ -327,6 +327,10 @@ class LifeLoop:
         Note: This is a lightweight check. The actual reminder sending is handled
         by the dedicated reminder_check_job that runs every minute.
         """
+        # Guard: respect reminder delivery configuration
+        if not self._config.reminder_delivery_enabled:
+            return None
+
         # Check for due reminders
         now_str = local_now.strftime("%Y-%m-%d %H:%M:%S")
         due_reminders = self._database.get_due_reminders(now_str)
