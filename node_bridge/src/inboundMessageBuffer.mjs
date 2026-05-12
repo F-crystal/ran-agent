@@ -1,10 +1,12 @@
 /**
- * Inbound message buffer for WeChat turn aggregation.
+ * Inbound message buffer for WeChat turn aggregation with media context decay.
  * 
  * Supports three merge paths:
  * 1. Explicit ref: text matches MEDIA_REF_PATTERNS -> strong bind, consumed=true
- * 2. Implicit candidate: plain text within window -> soft attach, consumed=false
+ * 2. Implicit candidate: plain text within window -> soft attach with decay
  * 3. Deferred: text-ref arrives first, media arrives later
+ * 
+ * Media decay: implicit candidates decay over turns to avoid irrelevant associations.
  */
 
 // Media reference patterns - spaces removed from alternation groups for correct matching
@@ -22,6 +24,20 @@ const MEDIA_REF_PATTERNS = [
   /识别.*/i,
 ].map(p => new RegExp(p.source.replace(/ /g, ""), p.flags));
 
+// Media decay configuration
+const MEDIA_DECAY_CONFIG = {
+  decayRate: 0.7,
+  maxRetentionRounds: 5,
+  globalThreshold: 0.25,
+  rapidDecayOnIntentShift: true,
+};
+
+// Generic intent phrases indicating topic shift (vocabulary/definition queries)
+const GENERIC_INTENT_PHRASES = [
+  "是什么", "意思", "解释", "定义", "区别",
+  "什么意思", "是什么意思", "何为"
+];
+
 export function isMediaRefText(text) {
   const trimmed = String(text || '').trim();
   if (!trimmed) return false;
@@ -35,7 +51,7 @@ export function isMediaOnlyPayload(payload) {
   return !hasText && (hasMedia || hasImageUrls);
 }
 
-function buildMediaCandidate(item, relation, confidence, source = 'pending_media') {
+function buildMediaCandidate(item, relation, confidence, source = 'pending_media', turnCounter) {
   const candidate = { relation, confidence, source };
   for (const m of item.media || []) {
     if (m.artifact_id) { candidate.artifact_id = m.artifact_id; break; }
@@ -43,7 +59,13 @@ function buildMediaCandidate(item, relation, confidence, source = 'pending_media
     if (m.type) { candidate.type = m.type; break; }
   }
   candidate.created_at = item.createdAt;
+  candidate.attachedAtTurn = turnCounter;
   return candidate;
+}
+
+function detectIntentShift(text) {
+  if (!text || typeof text !== 'string') return false;
+  return GENERIC_INTENT_PHRASES.some(phrase => text.includes(phrase));
 }
 
 export function createInboundMessageBuffer(options = {}) {
@@ -59,6 +81,9 @@ export function createInboundMessageBuffer(options = {}) {
   const waitingTextRef = new Map();
   const pendingTextRefIntents = new Map();
   let onDeferredMerge = null;
+  
+  // Turn counter for decay calculation
+  let turnCounter = 0;
 
   function cleanupExpired() {
     const ts = now();
@@ -67,7 +92,6 @@ export function createInboundMessageBuffer(options = {}) {
         logger.log?.(`[buffer] pending media expired sender=${senderId} age=${ts - entry.createdAt}ms`);
         pendingMedia.delete(senderId);
       } else if (entry.items.every((item) => item.consumed)) {
-        // Remove fully consumed entries
         pendingMedia.delete(senderId);
       }
     }
@@ -124,7 +148,7 @@ export function createInboundMessageBuffer(options = {}) {
       for (const url of item.image_urls) {
         if (typeof url === 'string' && url.trim() && !mergedImageUrls.includes(url.trim())) mergedImageUrls.push(url.trim());
       }
-      mediaCandidates.push(buildMediaCandidate(item, 'explicit_ref', 1.0, 'pending_media'));
+      mediaCandidates.push(buildMediaCandidate(item, 'explicit_ref', 1.0, 'pending_media', turnCounter));
     }
     
     for (const m of Array.isArray(payload.media) ? payload.media : []) {
@@ -145,6 +169,34 @@ export function createInboundMessageBuffer(options = {}) {
     return result;
   }
 
+  function applyDecay(candidates, currentTurn, intentShifted) {
+    const { decayRate, maxRetentionRounds, globalThreshold, rapidDecayOnIntentShift } = MEDIA_DECAY_CONFIG;
+    
+    return candidates.filter((candidate) => {
+      const roundsElapsed = currentTurn - (candidate.attachedAtTurn ?? currentTurn);
+      
+      if (roundsElapsed >= maxRetentionRounds) {
+        logger.log?.(`[decay] candidate ${candidate.artifact_id || 'unknown'} dropped: max retention (${maxRetentionRounds} rounds) exceeded`);
+        return false;
+      }
+      
+      let decayedConfidence = candidate.confidence * Math.pow(decayRate, roundsElapsed);
+      
+      if (intentShifted && rapidDecayOnIntentShift) {
+        decayedConfidence *= 0.3;
+        logger.log?.(`[decay] candidate ${candidate.artifact_id || 'unknown'} intent shift detected, extra 0.3x decay applied`);
+      }
+      
+      if (decayedConfidence < globalThreshold) {
+        logger.log?.(`[decay] candidate ${candidate.artifact_id || 'unknown'} dropped: confidence ${decayedConfidence.toFixed(3)} < threshold ${globalThreshold}`);
+        return false;
+      }
+      
+      candidate.confidence = decayedConfidence;
+      return true;
+    });
+  }
+
   function attachRecentMediaCandidates(payload, senderId, maxCandidates = 1) {
     const entry = pendingMedia.get(senderId);
     if (!entry || entry.items.length === 0) return payload;
@@ -152,18 +204,34 @@ export function createInboundMessageBuffer(options = {}) {
     const availableItems = entry.items.filter((item) => !item.consumed).slice(-maxCandidates);
     if (availableItems.length === 0) return payload;
     
-    const mediaCandidates = [];
+    // Increment turn counter
+    turnCounter += 1;
+    
+    // Detect intent shift from payload text
+    const intentShifted = detectIntentShift(payload.text);
+    
+    // Build candidates with current turn
+    let mediaCandidates = [];
     const mergedMedia = [];
     const mergedImageUrls = [];
     
     for (const item of availableItems) {
-      mediaCandidates.push(buildMediaCandidate(item, 'recent_candidate', 0.5, 'pending_media'));
+      const candidate = buildMediaCandidate(item, 'recent_candidate', 0.5, 'pending_media', turnCounter);
+      mediaCandidates.push(candidate);
       for (const m of item.media) {
         if (!mergedMedia.some((existing) => existing.filePath === m.filePath)) mergedMedia.push(m);
       }
       for (const url of item.image_urls) {
         if (typeof url === 'string' && url.trim() && !mergedImageUrls.includes(url.trim())) mergedImageUrls.push(url.trim());
       }
+    }
+    
+    // Apply decay
+    mediaCandidates = applyDecay(mediaCandidates, turnCounter, intentShifted);
+    
+    if (mediaCandidates.length === 0) {
+      logger.log?.(`[buffer] all recent media candidates decayed away sender=${senderId} intentShifted=${intentShifted}`);
+      return payload;
     }
     
     for (const item of availableItems) item.soft_used = true;
@@ -175,7 +243,7 @@ export function createInboundMessageBuffer(options = {}) {
     };
     if (mediaCandidates.length > 0) result.media_candidates = mediaCandidates;
     if (mergedMedia.length > 0) result.route_hint = 'vision_understand';
-    logger.log?.(`[buffer] attached ${mediaCandidates.length} recent media candidates sender=${senderId}`);
+    logger.log?.(`[buffer] attached ${mediaCandidates.length} recent media candidates sender=${senderId} intentShifted=${intentShifted}`);
     return result;
   }
 
@@ -185,7 +253,6 @@ export function createInboundMessageBuffer(options = {}) {
     clearTimeout(wait.timer);
     waitingTextRef.delete(senderId);
     addPendingMedia(payload);
-    // Merge media into the original text payload and resolve with merged result
     const merged = mergeMediaIntoPayload(wait.payload, senderId, true);
     wait.resolve({ timedOut: false, payload: merged });
     return true;
@@ -250,7 +317,6 @@ export function createInboundMessageBuffer(options = {}) {
         saveTextRefIntent(senderId, payload);
         return { action: 'reply', payload: result.payload };
       }
-      // Media arrived during wait - result.payload already merged
       return { action: 'reply', payload: result.payload };
     }
 
@@ -312,6 +378,8 @@ export function createInboundMessageBuffer(options = {}) {
       pendingMediaCount: entries.length,
       waitingTextRef: waitingTextRef.size,
       pendingTextRefIntents: Array.from(pendingTextRefIntents.values()),
+      turnCounter,
+      decayConfig: MEDIA_DECAY_CONFIG,
     };
   }
 
