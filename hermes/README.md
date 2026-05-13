@@ -4,9 +4,30 @@ This directory contains the repo-local Hermes profile distribution for `ran-agen
 It is intentionally safe to commit: no secrets, sessions, memories, logs, or
 machine-local state belong here.
 
-## Local Install
+## Local And Server Paths
 
-Hermes CLI is installed locally at:
+This distribution is portable. Do not hard-code the local checkout path into
+server runtime files. Set paths through environment variables instead.
+
+Recommended path conventions:
+
+| Scope | Repo root | Verification `HERMES_HOME` | Runtime `HERMES_HOME` |
+| --- | --- | --- | --- |
+| Local dev | `/Users/fengran/ran_agent` | `/private/tmp/ran-agent-hermes-home` | operator-owned, not required for Phase 5 |
+| Server | `/opt/ran_agent` or the deployed checkout path | `/tmp/ran-agent-hermes-home` | service-owned path such as `/home/ubuntu/.hermes-ran-agent` |
+
+Required path variables:
+
+```bash
+export RAN_AGENT_REPO_ROOT=/absolute/path/to/ran_agent
+export HERMES_HOME=/path/to/hermes-home
+```
+
+Secrets must live in machine-local env files, not in this repository.
+
+## Project-Local Verification
+
+On this local machine, Hermes CLI has been verified at:
 
 ```bash
 /Users/fengran/.local/bin/hermes
@@ -18,19 +39,46 @@ The verified local version is:
 Hermes Agent v0.13.0 (2026.5.7)
 ```
 
-Install or update the profile distribution:
+Phase 5 MCP verification should not modify the operator's default Hermes
+profile. Use a project-local or temporary `HERMES_HOME` when validating this
+distribution:
 
 ```bash
-hermes profile install /Users/fengran/ran_agent/hermes/profile --name ran-assistant --force -y
+export HERMES_HOME=/private/tmp/ran-agent-hermes-home
+export RAN_AGENT_REPO_ROOT=/Users/fengran/ran_agent
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
+hermes -p ran-assistant mcp list
 ```
 
-Then set the active profile if desired:
+On the server, use the same pattern with server paths:
 
 ```bash
-hermes profile use ran-assistant
+export HERMES_HOME=/tmp/ran-agent-hermes-home
+export RAN_AGENT_REPO_ROOT=/opt/ran_agent
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
+hermes -p ran-assistant mcp list
 ```
 
-Machine-local files live outside the repo:
+Do not run `hermes profile use ran-assistant` during project verification. Keep
+the repo-local config in this directory and use the temporary/project-local
+Hermes home for generated config, sessions, logs, memories, and MCP smoke
+state.
+
+For a real machine deployment, install the profile into that machine's
+dedicated Hermes home and keep secrets in the machine-local `.env`:
+
+```text
+$HERMES_HOME/profiles/ran-assistant/
+  config.yaml
+  .env
+  memories/
+  sessions/
+  logs/
+  cron/
+```
+
+The previous default personal Hermes home layout is shown only as an example
+of machine-local state, not as the Phase 5 verification target:
 
 ```text
 /Users/fengran/.hermes/profiles/ran-assistant/
@@ -45,6 +93,17 @@ Machine-local files live outside the repo:
 Do not copy secrets into this repository. Put `DEEPSEEK_API_KEY`,
 `HERMES_API_KEY`, platform cookies, and provider tokens in the machine-local
 Hermes `.env`, root `.env.local`, or `node_bridge/.env.local` as appropriate.
+
+## Server Deployment Boundary
+
+This README defines the portable profile distribution and verification pattern
+for both local and server environments. Full server deployment details
+including systemd units, restart order, log paths, health checks, and resource
+baseline belong in the Phase 9 deployment document.
+
+Until Phase 9, server validation should only prove that the profile can be
+installed under a service-owned `HERMES_HOME` and that the MCP servers can be
+listed/tested without relying on local absolute paths.
 
 ## Model Policy
 
