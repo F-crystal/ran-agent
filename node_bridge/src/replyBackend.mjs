@@ -1,12 +1,15 @@
 /**
- * Reply backend selector for OpenClaw-first chat mainline.
+ * Reply backend selector for Hermes-first chat mainline.
  */
 
 import { getBackendIngestConfig, ingestExchangeToBackend } from './backendIngestClient.mjs';
+import { getHermesGatewayConfig, sendChatToHermesGateway } from './hermesGatewayClient.mjs';
 import { getOpenClawGatewayConfig, sendChatToOpenClawAgent, sendChatToOpenClawGateway } from './openclawGatewayClient.mjs';
 
 export function getReplyBackendConfig(env = process.env) {
+  const replyBackend = normalizeReplyBackend(env.NODE_BRIDGE_REPLY_BACKEND || 'hermes');
   return {
+    replyBackend,
     fallbackText: env.NODE_BRIDGE_FALLBACK_TEXT || '暂时无法连接到 personal agent，请稍后再试。',
     openclawReplyMode: String(env.NODE_BRIDGE_OPENCLAW_REPLY_MODE || 'agent').trim().toLowerCase(),
     inboundMediaReplyMode: String(env.NODE_BRIDGE_INBOUND_MEDIA_REPLY_MODE || 'agent').trim().toLowerCase(),
@@ -19,8 +22,13 @@ export function createReplyBackend(options = {}) {
 
   return {
     async getReply(message, backendOptions = {}) {
-      const gatewayConfig = backendOptions.openclawConfig || getOpenClawGatewayConfig(env);
-      const chatImpl = options.chatImpl || resolveDefaultOpenClawReplyImpl(message, config, options);
+      const backend = normalizeReplyBackend(backendOptions.replyBackend || config.replyBackend);
+      const gatewayConfig = backend === 'openclaw'
+        ? backendOptions.openclawConfig || getOpenClawGatewayConfig(env)
+        : backendOptions.hermesConfig || getHermesGatewayConfig(env);
+      const chatImpl = backend === 'openclaw'
+        ? options.openclawImpl || options.chatImpl || resolveDefaultOpenClawReplyImpl(message, config, options)
+        : options.hermesImpl || options.chatImpl || sendChatToHermesGateway;
       const response = await chatImpl(
         {
           text: message.text,
@@ -35,7 +43,9 @@ export function createReplyBackend(options = {}) {
           config: gatewayConfig,
           fetchImpl: backendOptions.fetchImpl,
           execFileImpl: backendOptions.execFileImpl,
+          env,
           logger: options.logger || console,
+          mediaContextOptions: backendOptions.mediaContextOptions,
         }
       );
 
@@ -46,7 +56,7 @@ export function createReplyBackend(options = {}) {
         sender_id: message.sender_id,
         user_text: message.text,
         reply_text: response.reply_text,
-        source: 'openclaw_gateway',
+        source: backend === 'openclaw' ? 'openclaw_gateway' : 'hermes',
         image_urls: Array.isArray(message.image_urls)
           ? message.image_urls.filter((item) => typeof item === 'string' && item.trim())
           : [],
@@ -81,11 +91,16 @@ export function createReplyBackend(options = {}) {
         replyText: responseText,
         followUpMessages: Array.isArray(response.follow_up_messages) ? response.follow_up_messages : [],
         media: responseMedia,
-        source: 'openclaw',
+        source: backend,
       };
     },
     config,
   };
+}
+
+function normalizeReplyBackend(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return normalized === 'openclaw' ? 'openclaw' : 'hermes';
 }
 
 function resolveDefaultOpenClawReplyImpl(message, config, options = {}) {

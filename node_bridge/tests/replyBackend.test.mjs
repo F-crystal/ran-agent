@@ -5,19 +5,57 @@ import { createReplyBackend, getReplyBackendConfig } from '../src/replyBackend.m
 
 test('getReplyBackendConfig reads reply backend settings', () => {
   const config = getReplyBackendConfig({
+    NODE_BRIDGE_REPLY_BACKEND: 'openclaw',
     NODE_BRIDGE_FALLBACK_TEXT: 'fallback',
     NODE_BRIDGE_OPENCLAW_REPLY_MODE: 'http',
   });
 
+  assert.equal(config.replyBackend, 'openclaw');
   assert.equal(config.fallbackText, 'fallback');
   assert.equal(config.openclawReplyMode, 'http');
+  assert.equal(getReplyBackendConfig({}).replyBackend, 'hermes');
   assert.equal(getReplyBackendConfig({}).openclawReplyMode, 'agent');
 });
 
-test('createReplyBackend uses openclaw chat path', async () => {
+test('createReplyBackend defaults to Hermes reply backend', async () => {
+  let ingestPayload = null;
+  let hermesPayload = null;
+  const backend = createReplyBackend({
+    hermesImpl: async (payload) => {
+      hermesPayload = payload;
+      return {
+        reply_text: 'hermes reply',
+        follow_up_messages: [],
+        media: null,
+        model: 'deepseek-v4-flash',
+      };
+    },
+    ingestImpl: async (payload) => {
+      ingestPayload = payload;
+      return { ok: true };
+    },
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '你好',
+    sender_id: 'conv-hermes-default',
+    channel: 'wechat',
+  });
+
+  assert.equal(hermesPayload?.sender_id, 'conv-hermes-default');
+  assert.equal(ingestPayload?.source, 'hermes');
+  assert.equal(response.replyText, 'hermes reply');
+  assert.equal(response.source, 'hermes');
+});
+
+test('createReplyBackend uses OpenClaw chat path when fallback backend is selected', async () => {
   let ingestPayload = null;
   let chatPayload = null;
   const backend = createReplyBackend({
+    env: {
+      NODE_BRIDGE_REPLY_BACKEND: 'openclaw',
+    },
     chatImpl: async (payload) => {
       chatPayload = payload;
       return {
@@ -59,6 +97,7 @@ test('createReplyBackend uses openclaw chat path', async () => {
     url: 'https://example.com/out.png',
   });
   assert.equal(response.source, 'openclaw');
+  assert.equal(ingestPayload?.source, 'openclaw_gateway');
   assert.equal(chatPayload?.route_hint, 'web_search');
   assert.deepEqual(chatPayload?.message_batch, [{ index: 1, text: '你好' }, { index: 2, text: '再补一句' }]);
   assert.deepEqual(chatPayload?.media, [
@@ -78,9 +117,12 @@ test('createReplyBackend uses openclaw chat path', async () => {
   ]);
 });
 
-test('createReplyBackend defaults to OpenClaw agent runtime for WeChat replies', async () => {
+test('createReplyBackend uses OpenClaw agent runtime for WeChat replies when fallback backend is selected', async () => {
   let agentPayload = null;
   const backend = createReplyBackend({
+    env: {
+      NODE_BRIDGE_REPLY_BACKEND: 'openclaw',
+    },
     agentImpl: async (payload) => {
       agentPayload = payload;
       return {
@@ -108,9 +150,12 @@ test('createReplyBackend defaults to OpenClaw agent runtime for WeChat replies',
   });
 });
 
-test('createReplyBackend keeps inbound media on OpenClaw agent runtime for MCP tool access', async () => {
+test('createReplyBackend keeps inbound media on OpenClaw agent runtime when fallback backend is selected', async () => {
   let agentPayload = null;
   const backend = createReplyBackend({
+    env: {
+      NODE_BRIDGE_REPLY_BACKEND: 'openclaw',
+    },
     agentImpl: async (payload) => {
       agentPayload = payload;
       return {
