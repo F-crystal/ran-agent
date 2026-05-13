@@ -1,0 +1,46 @@
+name: ran-assistant
+version: 0.1.0
+description: "ran-agent Hermes front shell using DeepSeek V4 Flash by default"
+hermes_requires: ">=0.13.0"
+author: "fengran"
+license: "Private"
+
+env_requires:
+  - name: DEEPSEEK_API_KEY
+    description: "DeepSeek API key for Hermes model provider"
+    required: true
+  - name: RAN_AGENT_REPO_ROOT
+    description: "Absolute path to the ran-agent checkout"
+    required: true
+    default: "/Users/fengran/ran_agent"
+  - name: PYTHON_BACKEND_BASE_URL
+    description: "Python backend HTTP base URL"
+    required: false
+    default: "http://127.0.0.1:8787"
+  - name: DASHSCOPE_API_KEY
+    description: "DashScope key used by media_reader vision/ASR tools"
+    required: false
+    default: ""
+  - name: QWEN_API_KEY
+    description: "Qwen-compatible key used by media_reader/Python backend when enabled"
+    required: false
+    default: ""
+  - name: MIMO_TOKEN_PLAN_API_KEY
+    description: "MiMo Token Plan key for mimo_power multimodal understanding"
+    required: false
+    default: ""
+  - name: TAVILY_API_KEY
+    description: "Optional Tavily key for web search MCP"
+    required: false
+    default: ""
+
+distribution_owned:
+  - SOUL.md
+  - AGENTS.md
+  - config.yaml
+  - config.template.yaml
+  - config.pro.template.yaml
+  - mcp.json
+  - mcp.template.yaml
+  - skills/
+  - distribution.yaml
