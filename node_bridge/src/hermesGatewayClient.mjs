@@ -9,10 +9,11 @@ import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { ensureConversationMediaContext } from './mediaContextStore.mjs';
 import {
+  getContextPolicyConfig,
   buildCompactMediaContext,
   selectMediaArtifactsForPrompt,
   buildContextSizeLog,
-} from './openclawContextPolicy.mjs';
+} from './contextPolicy.mjs';
 import { resolveProjectRoot } from './trustedMediaPaths.mjs';
 
 const execFile = promisify(execFileCallback);
@@ -27,9 +28,11 @@ export function getHermesGatewayConfig(env = process.env) {
   const command = String(env.HERMES_COMMAND || 'hermes').trim() || 'hermes';
   const timeoutSeconds = Math.max(30, Number.parseInt(String(env.HERMES_REPLY_TIMEOUT_SECONDS || '180'), 10) || 180);
   const projectRoot = resolveProjectRoot(env);
-  const contextPolicyMode = String(env.RAN_AGENT_CONTEXT_POLICY || env.OPENCLAW_CONTEXT_POLICY || 'compact').trim().toLowerCase();
-  const maxMediaArtifacts = Math.max(1, Number.parseInt(String(env.RAN_AGENT_MAX_MEDIA_ARTIFACTS || env.OPENCLAW_MAX_MEDIA_ARTIFACTS || '3'), 10) || 3);
-  const enableContextSizeLog = String(env.RAN_AGENT_CONTEXT_SIZE_LOG || env.OPENCLAW_CONTEXT_SIZE_LOG || '1').trim().toLowerCase() === '1';
+  const {
+    contextPolicyMode,
+    maxMediaArtifacts,
+    enableContextSizeLog,
+  } = getContextPolicyConfig(env);
 
   return {
     baseUrl,

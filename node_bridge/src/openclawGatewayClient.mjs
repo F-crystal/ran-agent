@@ -9,11 +9,12 @@ import { promisify } from 'node:util';
 import { resolveStateDir } from './runtimeState.mjs';
 import { ensureConversationMediaContext } from './mediaContextStore.mjs';
 import {
+  getContextPolicyConfig,
   buildCompactMediaContext,
   selectMediaArtifactsForPrompt,
   buildContextSizeLog,
   buildPersonaContract,
-} from './openclawContextPolicy.mjs';
+} from './contextPolicy.mjs';
 import { isPathInsideRoot, isTrustedLocalMediaPath, resolveProjectRoot } from './trustedMediaPaths.mjs';
 import {
   buildStructuredUrlContext,
@@ -152,9 +153,11 @@ export async function sendChatToOpenClawAgent(payload, options = {}) {
     ...(options.mediaContextOptions || {}),
   });
   // Context Policy v1: compact media context
-  const contextPolicyMode = String(env.OPENCLAW_CONTEXT_POLICY || 'compact').trim().toLowerCase();
-  const maxMediaArtifacts = Math.max(1, Number(env.OPENCLAW_MAX_MEDIA_ARTIFACTS || 3));
-  const enableContextSizeLog = String(env.OPENCLAW_CONTEXT_SIZE_LOG || '1').trim().toLowerCase() === '1';
+  const {
+    contextPolicyMode,
+    maxMediaArtifacts,
+    enableContextSizeLog,
+  } = getContextPolicyConfig(env);
 
   let mediaContextText;
   if (contextPolicyMode === 'compact' && Array.isArray(mediaContext.artifacts)) {

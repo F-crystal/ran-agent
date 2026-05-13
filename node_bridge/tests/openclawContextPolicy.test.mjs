@@ -1,12 +1,17 @@
-// openclawContextPolicy.test.mjs
-// 测试文件：覆盖 openclawContextPolicy 模块的核心策略函数
+// contextPolicy.test.mjs
+// 测试文件：覆盖 contextPolicy 模块的核心策略函数，并验证 OpenClaw legacy wrapper
 import assert from "node:assert/strict";
 import {
+  getContextPolicyConfig,
   renderCompactArtifact,
   selectMediaArtifactsForPrompt,
   buildCompactMediaContext,
   buildContextSizeLog,
   buildPersonaContract,
+} from "../src/contextPolicy.mjs";
+import {
+  getContextPolicyConfig as getLegacyContextPolicyConfig,
+  buildCompactMediaContext as buildLegacyCompactMediaContext,
 } from "../src/openclawContextPolicy.mjs";
 
 // ──────────────────────────── Mock Artifacts ────────────────────────────
@@ -240,10 +245,65 @@ const sampleArtifacts = [
 
   assert.ok(typeof contract === "string", "buildPersonaContract returns string");
   assert.ok(contract.trim().length > 0, "Non-empty contract string");
-  assert.ok(contract.includes("OpenClaw"), "Contains OpenClaw reference");
+  assert.ok(contract.includes("ran-agent"), "Contains generic ran-agent reference");
+  assert.equal(contract.includes("OpenClaw"), false, "Does not hard-code OpenClaw persona in generic context policy");
 }
 
-// ────────────── 8. Legacy fallback ──────────────────────────────────────
+// ────────────── 8. getContextPolicyConfig env precedence ────────────────
+
+{
+  const config = getContextPolicyConfig({});
+  assert.equal(config.contextPolicyMode, "compact", "Default policy is compact");
+  assert.equal(config.maxMediaArtifacts, 3, "Default media artifact cap is 3");
+  assert.equal(config.enableContextSizeLog, true, "Default context-size log enabled");
+}
+
+{
+  const config = getContextPolicyConfig({
+    OPENCLAW_CONTEXT_POLICY: "legacy",
+    OPENCLAW_MAX_MEDIA_ARTIFACTS: "2",
+    OPENCLAW_CONTEXT_SIZE_LOG: "0",
+  });
+  assert.equal(config.contextPolicyMode, "legacy", "OPENCLAW_CONTEXT_POLICY remains legacy fallback");
+  assert.equal(config.maxMediaArtifacts, 2, "OPENCLAW_MAX_MEDIA_ARTIFACTS remains legacy fallback");
+  assert.equal(config.enableContextSizeLog, false, "OPENCLAW_CONTEXT_SIZE_LOG remains legacy fallback");
+}
+
+{
+  const config = getContextPolicyConfig({
+    RAN_AGENT_CONTEXT_POLICY: "compact",
+    RAN_AGENT_MAX_MEDIA_ARTIFACTS: "4",
+    RAN_AGENT_CONTEXT_SIZE_LOG: "yes",
+    OPENCLAW_CONTEXT_POLICY: "legacy",
+    OPENCLAW_MAX_MEDIA_ARTIFACTS: "2",
+    OPENCLAW_CONTEXT_SIZE_LOG: "0",
+  });
+  assert.equal(config.contextPolicyMode, "compact", "RAN_AGENT_CONTEXT_POLICY takes precedence");
+  assert.equal(config.maxMediaArtifacts, 4, "RAN_AGENT_MAX_MEDIA_ARTIFACTS takes precedence");
+  assert.equal(config.enableContextSizeLog, true, "RAN_AGENT_CONTEXT_SIZE_LOG takes precedence");
+}
+
+{
+  const config = getContextPolicyConfig({
+    RAN_AGENT_MAX_MEDIA_ARTIFACTS: "0",
+  });
+  assert.equal(config.maxMediaArtifacts, 3, "Invalid zero cap falls back to default");
+}
+
+{
+  assert.deepEqual(
+    getLegacyContextPolicyConfig({ OPENCLAW_MAX_MEDIA_ARTIFACTS: "2" }),
+    getContextPolicyConfig({ OPENCLAW_MAX_MEDIA_ARTIFACTS: "2" }),
+    "Legacy wrapper re-exports generic config helper"
+  );
+  assert.equal(
+    buildLegacyCompactMediaContext([]),
+    buildCompactMediaContext([]),
+    "Legacy wrapper re-exports compact media context builder"
+  );
+}
+
+// ────────────── 9. Legacy fallback ──────────────────────────────────────
 
 {
   // 当模块未提供新接口时，legacy fallback 应能回退
