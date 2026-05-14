@@ -995,3 +995,37 @@ an older revision.
 
 To disable courtly mode, set `RAN_AGENT_COURTLY_MODE=off` in `.env.local` and
 restart the Node bridge. To re-enable, set `RAN_AGENT_COURTLY_MODE=on`.
+
+## Quick Fix: Hermes model empty / gateway crash
+
+Use this one-shot paste when Hermes logs show `you passed .` or `model=`:
+
+```bash
+cd /opt/ran_agent
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+mkdir -p "$HERMES_HOME"
+
+cat > "$HERMES_HOME/config.yaml" <<'YAML'
+model:
+  provider: deepseek
+  default: deepseek-v4-flash
+  base_url: https://api.deepseek.com/v1
+  api_mode: chat_completions
+YAML
+chmod 600 "$HERMES_HOME/config.yaml"
+
+DS_KEY="$(grep -E '^DEEPSEEK_API_KEY=' /opt/ran_agent/.env.local | tail -1 | cut -d= -f2-)"
+[ -z "$DS_KEY" ] && DS_KEY="$(grep -E '^DEEPSEEK_API_KEY=' "$HERMES_HOME/profiles/ran-assistant/.env" | tail -1 | cut -d= -f2-)"
+if [ -n "$DS_KEY" ]; then
+  sed -i '/^DEEPSEEK_API_KEY=/d' "$HERMES_HOME/.env"
+  printf 'DEEPSEEK_API_KEY=%s\n' "$DS_KEY" >> "$HERMES_HOME/.env"
+  chmod 600 "$HERMES_HOME/.env"
+  echo "DEEPSEEK_API_KEY: SET len=${#DS_KEY}"
+else
+  echo "ERROR: DEEPSEEK_API_KEY not found"
+fi
+
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl status ran-agent-hermes.service --no-pager | head -10
+```
