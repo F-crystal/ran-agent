@@ -1133,13 +1133,28 @@ Run `bash scripts/diagnose-hermes-tools.sh` to verify:
 
 ## Lite/Full Capability Mode
 
-`RAN_AGENT_CAPABILITY_MODE` controls which Hermes profile is used per request:
+Two separate Hermes gateway instances run on different ports:
+
+| Instance | Port | Profile | Purpose |
+|----------|------|---------|---------|
+| `ran-agent-hermes.service` | 8642 | `ran-assistant-lite` | Daily chat, social links, memory |
+| `ran-agent-hermes-full.service` | 8643 | `ran-assistant` | Debug, commands, media generation |
+
+`RAN_AGENT_CAPABILITY_MODE` controls which gateway handles each request:
 
 | Mode | Behavior |
 |------|----------|
 | `auto` (default) | Lite by default; full for debug/generation intents |
-| `lite` | Always use `ran-assistant-lite` profile |
-| `full` | Always use `ran-assistant` profile |
+| `lite` | Always use port 8642 (lite) |
+| `full` | Always use port 8643 (full), fallback to 8643 if unavailable |
+
+### Env vars
+
+```
+HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+RAN_AGENT_CAPABILITY_MODE=auto
+```
 
 ### Auto detection rules
 
@@ -1148,15 +1163,20 @@ Run `bash scripts/diagnose-hermes-tools.sh` to verify:
 - **Generation intent** (画/生成/头像/壁纸/语音/朗读): full
 - **User override**: "开 full / 全能力 / 调试模式" → full; "轻量 / 省 token / 日常模式" → lite
 
-### Lite profile (`ran-assistant-lite`)
+### Lite profile (`ran-assistant-lite` on port 8642)
 
 Excludes: terminal, file, session_search, playwright, media_generation
 Keeps: web, skills, memory, safe, time, social_reader, media_reader, mimo_power, personal_memory, obsidian_memory, tavily
 
-### Full profile (`ran-assistant`)
+### Full profile (`ran-assistant` on port 8643)
 
 All tools including: terminal, file, session_search, playwright, media_generation
 Still excludes: vision_analyze, browser_vision, video_analyze, image_generate, text_to_speech
+
+### Fallback
+
+If full gateway (8643) is unavailable, full requests fall back to lite (8642)
+with `fallback_reason=full_gateway_unavailable` in the log.
 
 ### Logging
 

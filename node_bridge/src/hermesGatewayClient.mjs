@@ -20,6 +20,8 @@ const execFile = promisify(execFileCallback);
 
 export function getHermesGatewayConfig(env = process.env) {
   const baseUrl = String(env.HERMES_API_BASE_URL || 'http://127.0.0.1:8642/v1').trim().replace(/\/$/, '');
+  const liteBaseUrl = String(env.HERMES_LITE_API_BASE_URL || baseUrl).trim().replace(/\/$/, '');
+  const fullBaseUrl = String(env.HERMES_FULL_API_BASE_URL || 'http://127.0.0.1:8643/v1').trim().replace(/\/$/, '');
   const token = String(env.HERMES_API_KEY || env.API_SERVER_KEY || '').trim();
   const model = String(env.HERMES_DEFAULT_MODEL || env.HERMES_INFERENCE_MODEL || 'deepseek-v4-flash').trim();
   const provider = String(env.HERMES_PROVIDER || env.HERMES_INFERENCE_PROVIDER || 'deepseek').trim();
@@ -34,10 +36,11 @@ export function getHermesGatewayConfig(env = process.env) {
     enableContextSizeLog,
   } = getContextPolicyConfig(env);
   const capabilityMode = String(env.RAN_AGENT_CAPABILITY_MODE || 'auto').trim().toLowerCase();
-  const liteProfile = String(env.HERMES_LITE_PROFILE || 'ran-assistant-lite').trim();
 
   return {
     baseUrl,
+    liteBaseUrl,
+    fullBaseUrl,
     token,
     model,
     provider,
@@ -50,7 +53,6 @@ export function getHermesGatewayConfig(env = process.env) {
     maxMediaArtifacts,
     enableContextSizeLog,
     capabilityMode,
-    liteProfile,
     fallbackText: env.NODE_BRIDGE_FALLBACK_TEXT || '暂时无法连接到 Hermes，请稍后再试。',
   };
 }
@@ -87,9 +89,28 @@ export async function sendChatToHermesGateway(payload, options = {}) {
   const config = options.config || getHermesGatewayConfig(env);
   const logger = options.logger || console;
 
-  // Determine capability mode
+  // Determine capability mode and select base URL
   const capResult = resolveCapabilityMode(payload, config);
-  const effectiveProfile = capResult.mode === 'lite' ? config.liteProfile : config.profile;
+  let selectedBaseUrl = capResult.mode === 'lite' ? config.liteBaseUrl : config.fullBaseUrl;
+  let fallbackReason = '';
+
+  // If full mode, try full gateway first; fallback to lite if unavailable
+  if (capResult.mode === 'full' && selectedBaseUrl !== config.liteBaseUrl) {
+    try {
+      const testResp = await (options.fetchImpl || fetch)(`${selectedBaseUrl}/models`, {
+        method: 'GET',
+        headers: config.token ? { Authorization: `Bearer ${config.token}` } : {},
+        signal: AbortSignal.timeout(3000),
+      });
+      if (!testResp.ok) {
+        fallbackReason = 'full_gateway_unavailable';
+        selectedBaseUrl = config.liteBaseUrl;
+      }
+    } catch {
+      fallbackReason = 'full_gateway_unavailable';
+      selectedBaseUrl = config.liteBaseUrl;
+    }
+  }
 
   if (config.enableContextSizeLog) {
     logger.log?.('[hermes-capability-mode]', JSON.stringify({
@@ -99,27 +120,28 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       has_media: capResult.hasMedia,
       has_generation_intent: capResult.hasGenerationIntent,
       has_debug_intent: capResult.hasDebugIntent,
-      selected_profile: effectiveProfile,
+      selected_base_url: selectedBaseUrl,
+      fallback_reason: fallbackReason || undefined,
     }));
   }
 
   const preparedMessage = await buildHermesUserMessage(payload, {
     env,
-    config: { ...config, profile: effectiveProfile },
+    config: { ...config, baseUrl: selectedBaseUrl },
     logger,
     mediaContextOptions: options.mediaContextOptions,
   });
 
   if (config.mode === 'oneshot') {
     return sendChatToHermesOneShot(preparedMessage, {
-      config: { ...config, profile: effectiveProfile },
+      config: { ...config, baseUrl: selectedBaseUrl },
       execFileImpl: options.execFileImpl,
     });
   }
 
   try {
     return await sendChatToHermesApi(preparedMessage, {
-      config: { ...config, profile: effectiveProfile },
+      config: { ...config, baseUrl: selectedBaseUrl },
       fetchImpl: options.fetchImpl,
     });
   } catch (error) {
@@ -128,7 +150,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     }
     logger.warn?.(`hermes api request failed, retrying with one-shot: ${formatErrorMessage(error)}`);
     return sendChatToHermesOneShot(preparedMessage, {
-      config: { ...config, profile: effectiveProfile },
+      config: { ...config, baseUrl: selectedBaseUrl },
       execFileImpl: options.execFileImpl,
     });
   }
