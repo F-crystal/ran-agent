@@ -1,6 +1,6 @@
 # 微信桥接媒体缓冲逻辑升级
 
-Status: CURRENT (2026-05-13)
+Status: CURRENT (2026-05-14)
 
 ## 概述
 

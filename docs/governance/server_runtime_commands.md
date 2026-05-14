@@ -65,6 +65,86 @@ echo "Hermes runtime home is ready: $HERMES_HOME"
 hermes profile show "$HERMES_PROFILE"
 ```
 
+## Sync Hermes Profile Env From Local Env Files
+
+Run this when Hermes MCP tools are missing variables that already exist in
+`/opt/ran_agent/.env.local` or `/opt/ran_agent/node_bridge/.env.local`.
+
+This command copies env assignments into the Hermes profile env file and only
+prints key lengths/hashes, not secret values.
+
+Paste this on the server:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+
+export HERMES_PROFILE=ran-assistant
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+PROFILE_ENV="$HERMES_HOME/profiles/$HERMES_PROFILE/.env"
+
+mkdir -p "$(dirname "$PROFILE_ENV")"
+touch "$PROFILE_ENV"
+chmod 600 "$PROFILE_ENV"
+cp -p "$PROFILE_ENV" "$PROFILE_ENV.bak.$(date +%Y%m%d%H%M%S)"
+
+for SRC in /opt/ran_agent/.env.local /opt/ran_agent/node_bridge/.env.local; do
+  [ -f "$SRC" ] || continue
+  while IFS= read -r line; do
+    case "$line" in ''|\#*) continue ;; esac
+    key="${line%%=*}"
+    case "$key" in ''|*[!A-Za-z0-9_]* ) continue ;; esac
+    sed -i "/^${key}=/d" "$PROFILE_ENV"
+    printf '%s\n' "$line" >> "$PROFILE_ENV"
+  done < "$SRC"
+done
+
+set_profile_env() {
+  key="$1"
+  value="$2"
+  sed -i "/^${key}=/d" "$PROFILE_ENV"
+  printf '%s=%s\n' "$key" "$value" >> "$PROFILE_ENV"
+}
+
+set_profile_env RAN_AGENT_REPO_ROOT /opt/ran_agent
+set_profile_env HERMES_PROFILE "$HERMES_PROFILE"
+set_profile_env HERMES_HOME "$HERMES_HOME"
+set_profile_env HERMES_API_BASE_URL http://127.0.0.1:8642/v1
+set_profile_env PYTHON_BACKEND_BASE_URL http://127.0.0.1:8787
+set_profile_env OBSIDIAN_MEMORY_VAULT_DIR /opt/ran_agent/vault
+set_profile_env OBSIDIAN_MEMORY_INDEX_PATH /opt/ran_agent/data/obsidian-memory-index.duckdb
+set_profile_env OBSIDIAN_INDEX_DEVICE cpu
+set_profile_env OBSIDIAN_MEMORY_REINDEX 0
+set_profile_env OBSIDIAN_MEMORY_WATCH 0
+
+chmod 600 "$PROFILE_ENV"
+
+for key in \
+  API_SERVER_KEY HERMES_API_KEY DEEPSEEK_API_KEY RAN_AGENT_REPO_ROOT \
+  PYTHON_BACKEND_BASE_URL DASHSCOPE_API_KEY QWEN_API_KEY \
+  MIMO_TOKEN_PLAN_API_KEY OBSIDIAN_INDEX_DEVICE OBSIDIAN_MEMORY_INDEX_PATH \
+  OBSIDIAN_MEMORY_REINDEX OBSIDIAN_MEMORY_WATCH TAVILY_API_KEY
+do
+  value="$(grep -E "^${key}=" "$PROFILE_ENV" | tail -n 1 | cut -d= -f2- || true)"
+  if [ -n "$value" ]; then
+    hash="$(printf '%s' "$value" | sha256sum | awk '{print substr($1,1,12)}')"
+    echo "$key: SET len=${#value} sha256=$hash"
+  else
+    echo "$key: UNSET"
+  fi
+done
+
+sudo systemctl restart ran-agent-python.service
+sleep 3
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl restart ran-agent-node.service
+
+systemctl status ran-agent-python.service --no-pager
+systemctl status ran-agent-hermes.service --no-pager
+systemctl status ran-agent-node.service --no-pager
+```
+
 ## Systemd Cutover To Hermes Runtime
 
 Use this when `systemctl list-units 'ran-agent*' --type=service` shows the
