@@ -540,10 +540,23 @@ function sanitizeRawPreview(text, maxLen = 1000) {
 
 function extractRawFieldsSeen(data) {
   if (!data || typeof data !== 'object') return {};
+  const hasImages = Array.isArray(data.images) && data.images.length > 0;
+  const hasUrlPng = hasImages && data.images.some((i) => i && typeof i === 'object' && i.url_png);
+  const hasUrlWebp = hasImages && data.images.some((i) => i && typeof i === 'object' && i.url_webp);
   return {
+    status: Boolean(data.status),
+    type: Boolean(data.type),
+    platform: Boolean(data.platform),
     title: Boolean(data.title || data.note_title || data.display_title),
     desc: Boolean(data.desc || data.description || data.note_desc || data.content),
-    images: Boolean(data.images?.length || data.image_list?.length || data.note_image_list?.length),
+    caption: Boolean(data.caption),
+    url: Boolean(data.url),
+    source_url: Boolean(data.source_url),
+    image_count: Boolean(data.image_count),
+    images: hasImages,
+    images_url_png: hasUrlPng,
+    images_url_webp: hasUrlWebp,
+    format_info: Boolean(data.format_info),
     video: Boolean(data.video || data.video_url || data.note_video),
     media: Boolean(data.media?.length || data.media_list?.length),
     comments: Boolean(data.comments?.length || data.comment_list?.length),
@@ -1761,7 +1774,10 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     diagnostics.media_raw_preview = media ? sanitizeRawPreview(JSON.stringify(media)) : '';
   }
 
-  const normalizedMedia = normalizeXhsMedia(media);
+  // Media is already normalized by runXhsMediaPath
+  const images = mediaOk ? (media.images || []) : [];
+  const videos = mediaOk ? (media.videos || []) : [];
+  const mediaCount = images.length + videos.length;
 
   // Both failed
   if (!detailOk && !mediaOk) {
@@ -1780,10 +1796,34 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     });
   }
 
-  // Merge results
-  const title = detail?.title || detail?.note_title || media?.title || '';
-  const desc = detail?.desc || detail?.content || detail?.post_text || media?.desc || '';
-  const tags = detail?.tags || [];
+  // Detail ok but no media
+  if (detailOk && mediaCount === 0) {
+    const title = detail?.title || detail?.note_title || '';
+    const desc = detail?.desc || detail?.content || detail?.post_text || '';
+    return buildTextResult({
+      ok: true,
+      partial_success: false,
+      quality: 'low',
+      platform: 'xhs',
+      note_id: noteId,
+      url,
+      source: detail?.source || 'xhs_browse',
+      title,
+      desc,
+      tags: detail?.tags || [],
+      images: [],
+      videos: [],
+      media: [],
+      post_text: detail?.post_text || desc,
+      comments_text: detail?.comments_text || '',
+      diagnostics,
+    });
+  }
+
+  // Merge results (detail ok + media ok, or detail failed + media ok)
+  const title = detailOk ? (detail?.title || detail?.note_title || media?.title || '') : (media?.title || '');
+  const desc = detailOk ? (detail?.desc || detail?.content || detail?.post_text || media?.desc || '') : (media?.desc || '');
+  const tags = detailOk ? (detail?.tags || []) : [];
 
   return buildTextResult({
     ok: true,
@@ -1795,12 +1835,13 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     title,
     desc,
     tags,
-    images: normalizedMedia.images,
-    videos: normalizedMedia.videos,
-    media: normalizedMedia.media,
+    images,
+    videos,
+    media: [],
     post_text: detailOk ? (detail?.post_text || desc) : '',
     comments_text: detail?.comments_text || '',
     message: !detailOk && mediaOk ? '正文未完整获取，但媒体资源已获取' : undefined,
+    media_count: mediaCount,
     diagnostics,
   });
 }
@@ -1880,14 +1921,26 @@ async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
       }, options);
       if (result?.structuredContent?.ok === true) {
         const data = result.structuredContent;
+        const normalized = normalizeXhsMedia(data);
+        const mediaCount = normalized.images.length + normalized.videos.length;
+        if (mediaCount > 0) {
+          return {
+            ok: true,
+            source: 'wanyi-watermark',
+            title: data.title || '',
+            desc: data.post_text || data.desc || '',
+            images: normalized.images,
+            videos: normalized.videos,
+            media: normalized.media,
+            raw_fields_seen: extractRawFieldsSeen(data),
+          };
+        }
+        // wanyi returned success but no media
         return {
-          ok: true,
+          ok: false,
+          error_code: 'WANYI_NO_MEDIA',
+          message: 'wanyi returned success but no normalized media resources',
           source: 'wanyi-watermark',
-          title: data.title || '',
-          desc: data.post_text || '',
-          images: Array.isArray(data.images) ? data.images : [],
-          videos: Array.isArray(data.videos) ? data.videos : [],
-          media: Array.isArray(data.media) ? data.media : [],
           raw_fields_seen: extractRawFieldsSeen(data),
         };
       }
@@ -1905,38 +1958,52 @@ function normalizeXhsMedia(mediaResult) {
 
   const images = [];
   const videos = [];
-  const media = [];
 
-  // Collect from various field names
-  const rawImages = mediaResult.images || mediaResult.image_urls || [];
-  const rawVideos = mediaResult.videos || mediaResult.video_url ? [mediaResult.video_url] : (mediaResult.video ? [mediaResult.video] : []);
-  const rawMedia = mediaResult.media || mediaResult.medias || mediaResult.files || mediaResult.resources || [];
+  const resultType = String(mediaResult.type || '').trim().toLowerCase();
+  const resultPlatform = String(mediaResult.platform || '').trim().toLowerCase();
 
-  for (const img of rawImages) {
-    if (typeof img === 'string' && img.trim()) {
-      images.push({ type: 'image', url: img.trim(), source_backend: 'wanyi-watermark' });
-    } else if (img && typeof img === 'object' && img.url) {
-      images.push({ type: 'image', url: img.url, thumbnail: img.thumbnail || '', width: img.width || 0, height: img.height || 0, source_backend: 'wanyi-watermark' });
+  // 1. XHS image note: images[].url_png / images[].url_webp
+  if (Array.isArray(mediaResult.images)) {
+    for (const img of mediaResult.images) {
+      if (!img || typeof img !== 'object') continue;
+      const url = img.url_png || img.url_webp || img.url || '';
+      if (!url) continue;
+      images.push({
+        type: 'image',
+        url,
+        url_png: img.url_png || '',
+        url_webp: img.url_webp || '',
+        width: img.width || 0,
+        height: img.height || 0,
+        source_backend: 'wanyi-watermark',
+      });
     }
   }
 
-  for (const vid of rawVideos) {
-    if (typeof vid === 'string' && vid.trim()) {
-      videos.push({ type: 'video', url: vid.trim(), source_backend: 'wanyi-watermark' });
-    } else if (vid && typeof vid === 'object' && vid.url) {
-      videos.push({ type: 'video', url: vid.url, thumbnail: vid.thumbnail || '', source_backend: 'wanyi-watermark' });
-    }
+  // 2. XHS video note: type=video, url field
+  if (resultType === 'video' && mediaResult.url) {
+    videos.push({
+      type: 'video',
+      url: mediaResult.url,
+      title: mediaResult.title || '',
+      caption: mediaResult.caption || '',
+      source_backend: resultPlatform === 'generic' ? 'wanyi-watermark-generic' : 'wanyi-watermark',
+    });
   }
 
-  for (const item of rawMedia) {
-    if (typeof item === 'string' && item.trim()) {
-      media.push({ type: 'media', url: item.trim(), source_backend: 'wanyi-watermark' });
-    } else if (item && typeof item === 'object' && item.url) {
-      media.push({ type: item.type || 'media', url: item.url, thumbnail: item.thumbnail || '', source_backend: 'wanyi-watermark' });
-    }
+  // 3. Generic fallback video: platform=generic, url + source_url
+  if (resultPlatform === 'generic' && mediaResult.url && resultType !== 'video') {
+    videos.push({
+      type: 'video',
+      url: mediaResult.url,
+      title: mediaResult.title || '',
+      caption: mediaResult.caption || '',
+      source_url: mediaResult.source_url || '',
+      source_backend: 'wanyi-watermark-generic',
+    });
   }
 
-  return { images, videos, media };
+  return { images, videos, media: [] };
 }
 
 function xhsCookieDiagnostics(env) {
