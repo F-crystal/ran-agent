@@ -8,4 +8,4 @@ for noncommercial purposes, subject to the full license terms.
 Commercial use is not licensed.
 
 Full license text:
-https://polyformproject.org/licenses/noncommercial/1.0.0/
+https://polyformproject.org/licenses/noncommercial/1.0.0
