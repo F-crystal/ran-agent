@@ -476,14 +476,16 @@ function xhsBackendTextError(text, toolName) {
   }
   if (/cookie已失效|cookie失效|cookie expired|invalid cookie/i.test(normalized)) {
     return {
-      error_code: 'LOGIN_REQUIRED',
+      error_code: 'XHS_COOKIE_EXPIRED',
       message: `${toolName} returned login failure: ${normalized}`,
+      hint: 'XHS cookie has expired. Re-login to xiaohongshu.com and update XHS_COOKIE in .env.local.',
     };
   }
   if (/验证码|风控|risk|captcha/i.test(normalized)) {
     return {
-      error_code: 'CAPTCHA_OR_RISK_CONTROL',
+      error_code: 'XHS_IP_RISK',
       message: `${toolName} returned risk control: ${normalized}`,
+      hint: 'XHS detected IP risk or requires captcha. Try again later or use a different network.',
     };
   }
   if (/^获取失败[。.!！\s]*$/i.test(normalized) || /获取失败/.test(normalized)) {
@@ -1092,8 +1094,13 @@ async function checkSocialLogin(platform, options = {}) {
     return buildErrorResult(`UNSUPPORTED_PLATFORM: unsupported login check platform: ${platform}`, { error_code: 'UNSUPPORTED_PLATFORM', platform });
   }
   const env = options.env || process.env;
+  const cookieDiag = xhsCookieDiagnostics(env);
   if (!String(env.XHS_COOKIE || '').trim()) {
-    return buildErrorResult('LOGIN_REQUIRED: XHS_COOKIE is required for xhs login checks', { error_code: 'LOGIN_REQUIRED', platform: 'xhs' });
+    return buildErrorResult('LOGIN_REQUIRED: XHS_COOKIE is required for xhs login checks', {
+      error_code: 'XHS_COOKIE_MISSING',
+      platform: 'xhs',
+      cookie_diagnostics: cookieDiag,
+    });
   }
   try {
     const result = await callBackendMcpTool('xhs', 'check_cookie', {}, options);
@@ -1327,8 +1334,9 @@ async function readWechatArticlePost(args = {}, options = {}) {
   });
 }
 
-function partialSocialFailureResult({ platform, url, failure }) {
+function partialSocialFailureResult({ platform, url, failure, env }) {
   const errorCode = String(failure?.error_code || 'SOCIAL_READER_PARTIAL_FAILURE');
+  const cookieDiag = platform === 'xhs' ? xhsCookieDiagnostics(env || process.env) : undefined;
   const partialFailure = {
     asset_id: 'platform-1',
     error_code: errorCode,
@@ -1336,6 +1344,7 @@ function partialSocialFailureResult({ platform, url, failure }) {
     platform,
     captcha_detected: failure?.captcha_detected === true,
     recovery_suggestion: failure?.recovery_suggestion || '',
+    cookie_diagnostics: cookieDiag,
   };
   return buildTextResult({
     ok: true,
@@ -1503,6 +1512,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
         platform: 'wechat_article',
         url: extracted.url || args.url || '',
         failure: socialResult.structuredContent || {},
+        env: options.env,
       });
     }
     if (['bilibili', 'xhs', 'wechat_article'].includes(detectedPlatform)) {
@@ -1532,6 +1542,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
           platform: detectedPlatform,
           url: extracted.url || args.url || '',
           failure: platformResult.structuredContent || socialResult.structuredContent || {},
+          env: options.env,
         });
       }
     } else {
@@ -1607,9 +1618,23 @@ async function readSocialPostDeep(args = {}, options = {}) {
   });
 }
 
+function xhsCookieDiagnostics(env) {
+  const cookie = String(env.XHS_COOKIE || '').trim();
+  if (!cookie) return { status: 'MISSING', error_code: 'XHS_COOKIE_MISSING' };
+  const len = cookie.length;
+  // Simple sha256 prefix for diagnostic (no crypto import needed)
+  let hash = 0;
+  for (let i = 0; i < Math.min(cookie.length, 256); i++) {
+    hash = ((hash << 5) - hash + cookie.charCodeAt(i)) | 0;
+  }
+  const hashPrefix = Math.abs(hash).toString(16).slice(0, 12).padStart(12, '0');
+  return { status: 'SET', len, hash_prefix: hashPrefix };
+}
+
 async function readXhsPost({ rawText, resolved, includeComments, maxComments }, options = {}) {
   const env = options.env || process.env;
   const hasCookie = String(env.XHS_COOKIE || '').trim();
+  const cookieDiag = xhsCookieDiagnostics(env);
   const genericFallbackEnabled = String(env.SOCIAL_READER_GENERIC_FALLBACK_ENABLED || 'true') !== 'false';
   if (genericFallbackEnabled) {
     const generic = await readGenericSocialPost({
@@ -1625,7 +1650,12 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
     }
   }
   if (!hasCookie) {
-    return buildErrorResult('LOGIN_REQUIRED: XHS_COOKIE is required for xhs content/comments', { error_code: 'LOGIN_REQUIRED', platform: 'xhs' });
+    return buildErrorResult('LOGIN_REQUIRED: XHS_COOKIE is required for xhs content/comments', {
+      error_code: 'XHS_COOKIE_MISSING',
+      platform: 'xhs',
+      cookie_diagnostics: cookieDiag,
+      hint: 'Set XHS_COOKIE in .env.local. Cookie may expire periodically; re-login to xiaohongshu.com and copy fresh cookie.',
+    });
   }
 
   const prepared = await prepareXhsBackendUrl({ rawText, resolved }, options);

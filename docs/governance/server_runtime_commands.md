@@ -1067,3 +1067,49 @@ The Node bridge detects these URLs and injects a routing instruction into the us
 - DeepSeek V4 must never receive raw `image_url` payloads
 
 Run `bash scripts/diagnose-media-xhs.sh` to verify the routing configuration.
+
+## XHS Troubleshooting
+
+### resolve_social_url OK but read_social_post_deep fails
+
+Symptom: `resolve_social_url` returns `has_xsec_token: true` but deep read fails
+with `XHS_COOKIE_EXPIRED`, `XHS_IP_RISK`, or `XHS_MISSING_XSEC_TOKEN`.
+
+Causes:
+- **XHS_COOKIE_EXPIRED** — Cookie has expired. Re-login to xiaohongshu.com,
+  copy fresh cookie, update `XHS_COOKIE` in `.env.local`.
+- **XHS_IP_RISK** — XHS detected suspicious IP. May need captcha verification
+  or network change. Try again later.
+- **XHS_MISSING_XSEC_TOKEN** — Short link resolved but no `xsec_token` was
+  returned. The note may need a fresh search-based token resolution.
+- **XHS_CAPTCHA_REQUIRED** — XHS requires captcha. Manual browser verification
+  needed.
+
+### CallToolResult content Field required
+
+Symptom: Hermes MCP client reports `CallToolResult content Field required`.
+
+Cause: A social_reader handler returned a bare object `{ok: true, ...}` instead
+of a proper MCP CallToolResult `{content: [{type:"text", text:...}]}`.
+
+Fix: Already resolved — all handlers now go through `wrapMcpResult()` which
+wraps bare objects with `buildTextResult()` or `buildErrorResult()`.
+
+### require is not defined
+
+Symptom: `search_media_artifacts` reports `ReferenceError: require is not defined`.
+
+Cause: ESM module (`.mjs`) using `require()`. The file imports `fs` and `path`
+at the top level; the redundant `require()` calls crashed at runtime.
+
+Fix: Already resolved — removed `require('fs')` and `require('path')` from
+`searchMediaArtifacts`. Uses the existing ESM imports.
+
+### Don't misdiagnose
+
+- These are **code bugs**, not Hermes MCP loading failures. If Hermes logs show
+  `social_reader` process started and `resolve_social_url` works, the MCP is
+  loaded correctly.
+- Cookie/IP issues are **external platform problems**, not ran-agent bugs.
+- `web_extract` failing on XHS links is **expected** — XHS blocks non-browser
+  requests. Always use `social_reader` for XHS.
