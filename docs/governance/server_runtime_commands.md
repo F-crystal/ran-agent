@@ -1068,6 +1068,69 @@ The Node bridge detects these URLs and injects a routing instruction into the us
 
 Run `bash scripts/diagnose-media-xhs.sh` to verify the routing configuration.
 
+## Hermes Tool Visibility Configuration
+
+Two-layer defense to prevent Hermes built-in vision tools from interfering:
+
+### Layer 1: `disabled_tools` (single tool filter)
+
+Filters individual tools from the available tool list:
+
+```yaml
+disabled_tools:
+  - browser_vision
+  - image_generate
+  - text_to_speech
+  - video_analyze
+  - vision_analyze
+```
+
+Do NOT add `web_search` or `web_extract` — these are needed for normal web pages.
+
+### Layer 2: `platform_toolsets` (toolset filter)
+
+Controls which toolsets are available per platform. Excludes `vision`, `image_gen`,
+`tts`, and `browser_vision` toolsets entirely:
+
+```yaml
+platform_toolsets:
+  cli:
+    - web
+    - terminal
+    - file
+    - skills
+    - memory
+    - session_search
+    - safe
+    - mcp-time
+    - mcp-social_reader
+    - mcp-media_reader
+    - mcp-mimo_power
+    - mcp-media_generation
+    - mcp-personal_memory
+    - mcp-obsidian_memory
+    - mcp-playwright
+    - mcp-tavily
+  gateway:
+    # Same as cli
+```
+
+The `web` toolset includes `web_search` and `web_extract` — both kept for normal pages.
+
+### Why both layers
+
+- `disabled_tools` catches individual tools even if a toolset includes them.
+- `platform_toolsets` prevents entire toolset categories from loading.
+- Together they ensure `vision_analyze` cannot be invoked by the model.
+
+### Diagnostic
+
+Run `bash scripts/diagnose-hermes-tools.sh` to verify:
+- `disabled_tools` contains the 5 forbidden tools
+- `platform_toolsets` does NOT contain `vision`/`image_gen`/`tts`
+- `platform_toolsets` DOES contain `web` and all `mcp-*` tools
+- No recent `vision_analyze` / `image_url BadRequest` in logs
+
 ## XHS Troubleshooting
 
 ### resolve_social_url OK but read_social_post_deep fails
