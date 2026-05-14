@@ -2,8 +2,6 @@
 
 set -euo pipefail
 
-echo "🌉 Starting Node bridge (OpenClaw frontend mode)..."
-
 cd "$(dirname "$0")"
 
 # Load environment variables from .env.local if it exists
@@ -14,7 +12,14 @@ if [ -f ".env.local" ]; then
   set +a
 fi
 
-export NODE_BRIDGE_FALLBACK_TEXT="暂时无法连接到 OpenClaw，请稍后再试。"
+export NODE_BRIDGE_REPLY_BACKEND="${NODE_BRIDGE_REPLY_BACKEND:-openclaw}"
+if [ "$NODE_BRIDGE_REPLY_BACKEND" = "hermes" ]; then
+  echo "🌉 Starting Node bridge (Hermes frontend mode)..."
+  export NODE_BRIDGE_FALLBACK_TEXT="${NODE_BRIDGE_FALLBACK_TEXT:-暂时无法连接到 Hermes，请稍后再试。}"
+else
+  echo "🌉 Starting Node bridge (OpenClaw frontend mode)..."
+  export NODE_BRIDGE_FALLBACK_TEXT="${NODE_BRIDGE_FALLBACK_TEXT:-暂时无法连接到 OpenClaw，请稍后再试。}"
+fi
 export OPENCLAW_GATEWAY_BASE_URL="${OPENCLAW_GATEWAY_BASE_URL:-http://127.0.0.1:19123}"
 export OPENCLAW_GATEWAY_TOKEN="${OPENCLAW_GATEWAY_TOKEN:-}"
 export OPENCLAW_GATEWAY_MODEL="${OPENCLAW_GATEWAY_MODEL:-openclaw/personal-system}"
@@ -22,8 +27,8 @@ export OPENCLAW_BACKEND_MODEL="${OPENCLAW_BACKEND_MODEL:-}"
 export PERSONAL_AGENT_PROACTIVE_ENABLED="${PERSONAL_AGENT_PROACTIVE_ENABLED:-false}"
 export PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED="${PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED:-false}"
 
-# If token is still empty, try to read from config file
-if [ -z "${OPENCLAW_GATEWAY_TOKEN}" ]; then
+# If token is still empty, try to read from config file for OpenClaw mode.
+if [ "$NODE_BRIDGE_REPLY_BACKEND" != "hermes" ] && [ -z "${OPENCLAW_GATEWAY_TOKEN}" ]; then
   CONFIG_FILE="${OPENCLAW_CONFIG:-$(cd .. && pwd)/openclaw/openclaw.personal-system.json}"
   if [ -f "$CONFIG_FILE" ]; then
     echo "🔍 Reading token from config file: $CONFIG_FILE"
@@ -36,7 +41,7 @@ if [ -z "${OPENCLAW_GATEWAY_TOKEN}" ]; then
   fi
 fi
 
-if [ -z "${OPENCLAW_GATEWAY_TOKEN}" ]; then
+if [ "$NODE_BRIDGE_REPLY_BACKEND" != "hermes" ] && [ -z "${OPENCLAW_GATEWAY_TOKEN}" ]; then
   echo "❌ OPENCLAW_GATEWAY_TOKEN is required."
   echo "   Please either:"
   echo "   1. Set it in .env.local file"
@@ -69,7 +74,7 @@ gateway_target="${gateway_target%%/*}"
 gateway_host="${gateway_target%%:*}"
 gateway_port="${gateway_target##*:}"
 
-if [ -n "$gateway_host" ] && [ -n "$gateway_port" ]; then
+if [ "$NODE_BRIDGE_REPLY_BACKEND" != "hermes" ] && [ -n "$gateway_host" ] && [ -n "$gateway_port" ]; then
   echo "⏳ Waiting for OpenClaw gateway ${gateway_host}:${gateway_port}..."
   ready=false
   for (( attempt=1; attempt<=OPENCLAW_GATEWAY_STARTUP_WAIT_ATTEMPTS; attempt++ )); do
