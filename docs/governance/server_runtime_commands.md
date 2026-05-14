@@ -65,7 +65,111 @@ echo "Hermes runtime home is ready: $HERMES_HOME"
 hermes profile show "$HERMES_PROFILE"
 ```
 
-## Pull And Restart Runtime
+## Systemd Cutover To Hermes Runtime
+
+Use this when `systemctl list-units 'ran-agent*' --type=service` shows the
+server is already managed by systemd. This is the normal production path.
+
+Paste this on the server:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+git pull
+
+export RAN_AGENT_REPO_ROOT=/opt/ran_agent
+export HERMES_PROFILE=ran-assistant
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+export HERMES_HOST=127.0.0.1
+export HERMES_PORT=8642
+export HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+export PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
+
+mkdir -p "$HERMES_HOME" /opt/ran_agent/logs
+hermes profile install /opt/ran_agent/hermes/profile --name "$HERMES_PROFILE" --force -y
+
+sudo systemctl stop ran-agent-node.service ran-agent-openclaw.service ran-agent-python.service 2>/dev/null || true
+sudo systemctl disable ran-agent-openclaw.service 2>/dev/null || true
+
+pkill -f '/tmp/ran-agent-hermes-home-phase5' 2>/dev/null || true
+pkill -f 'obsidian-index mcp' 2>/dev/null || true
+pkill -f 'hermes .*gateway run' 2>/dev/null || true
+pkill -f 'personal_agent.http_runner' 2>/dev/null || true
+pkill -f 'node_bridge/src/wechatBridge.mjs' 2>/dev/null || true
+
+sudo tee /etc/systemd/system/ran-agent-hermes.service >/dev/null <<'EOF'
+[Unit]
+Description=Ran Agent Hermes Gateway
+After=network-online.target ran-agent-python.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/ran_agent
+EnvironmentFile=-/opt/ran_agent/.env.local
+EnvironmentFile=-/opt/ran_agent/node_bridge/.env.local
+Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
+Environment=HERMES_PROFILE=ran-assistant
+Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+Environment=API_SERVER_ENABLED=true
+Environment=API_SERVER_HOST=127.0.0.1
+Environment=API_SERVER_PORT=8642
+Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+Environment=HERMES_REPLY_MODE=api
+Environment=HERMES_REPLY_TIMEOUT_SECONDS=180
+Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
+Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
+Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
+Environment=HF_ENDPOINT=https://hf-mirror.com
+Environment=HF_HOME=/home/ubuntu/.hermes-ran-agent/hf-home
+Environment=TRANSFORMERS_CACHE=/home/ubuntu/.hermes-ran-agent/hf-home
+Environment=SENTENCE_TRANSFORMERS_HOME=/home/ubuntu/.hermes-ran-agent/sentence-transformers
+Environment=OBSIDIAN_MEMORY_VAULT_DIR=/opt/ran_agent/vault
+Environment=OBSIDIAN_MEMORY_INDEX_PATH=/opt/ran_agent/data/obsidian-memory-index.duckdb
+Environment=OBSIDIAN_INDEX_DEVICE=cpu
+Environment=OBSIDIAN_MEMORY_REINDEX=0
+Environment=OBSIDIAN_MEMORY_WATCH=0
+ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p ran-assistant gateway run --replace --accept-hooks'
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo mkdir -p /etc/systemd/system/ran-agent-node.service.d
+sudo tee /etc/systemd/system/ran-agent-node.service.d/10-hermes.conf >/dev/null <<'EOF'
+[Unit]
+After=ran-agent-hermes.service ran-agent-python.service
+Wants=ran-agent-hermes.service ran-agent-python.service
+
+[Service]
+Environment=NODE_BRIDGE_REPLY_BACKEND=hermes
+Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+Environment=HERMES_REPLY_MODE=api
+Environment=HERMES_REPLY_TIMEOUT_SECONDS=180
+Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
+Environment=PYTHON_BACKEND_INGEST_ENABLED=true
+Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
+Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl enable ran-agent-python.service ran-agent-hermes.service ran-agent-node.service
+sudo systemctl restart ran-agent-python.service
+sleep 3
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl restart ran-agent-node.service
+
+systemctl status ran-agent-python.service --no-pager
+systemctl status ran-agent-hermes.service --no-pager
+systemctl status ran-agent-node.service --no-pager
+ss -ltnp | grep -E ':(8787|8791|8642)\b' || true
+```
+
+## Pull And Restart Runtime Without Systemd
 
 Paste this on the server:
 
@@ -163,6 +267,11 @@ Paste this on the server:
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
 
+if systemctl list-units --type=service --all | grep -q 'ran-agent-'; then
+  sudo systemctl stop ran-agent-node.service ran-agent-hermes.service ran-agent-openclaw.service ran-agent-python.service 2>/dev/null || true
+  sleep 2
+fi
+
 echo "== ports before =="
 ss -ltnp | grep -E ':(8787|8791|8642)\b' || true
 
@@ -188,7 +297,9 @@ echo "== ports after kill =="
 ss -ltnp | grep -E ':(8787|8791|8642)\b' || true
 ```
 
-Then rerun `Pull And Restart Runtime`.
+Then rerun `Systemd Cutover To Hermes Runtime` if the server has systemd
+`ran-agent-*` services, otherwise rerun `Pull And Restart Runtime Without
+Systemd`.
 
 ## If Node Bridge Still Points At OpenClaw
 
