@@ -1,13 +1,20 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-14)
+Status: CURRENT (2026-05-15)
 
 ## Frontend Path
 
-- Active path: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
+- Active path: `WeChat -> Node bridge -> Hermes gateway (lite/full) -> DeepSeek V4 Flash -> reply`
 - Provider: `hermes`; model: `deepseek-v4-flash`; fallbacks: none.
 - Kimi, GLM, and OpenClaw retired. Python frontend `/chat` returns 410.
 - Single front speaker: Hermes (personal assistant + chat companion).
+
+## Lite/Full Runtime
+
+- **8642 (lite):** `ran-assistant-lite` profile, `~/.hermes-ran-agent/lite` home. Low-context daily entry (~22644 tokens). Used for normal chat, XHS, memory, image understanding.
+- **8643 (full):** `ran-assistant` profile, `~/.hermes-ran-agent` home. Full debug entry (~24331 tokens). Used for debug/commands/generation.
+- Node bridge auto-selects per request via `RAN_AGENT_CAPABILITY_MODE=auto`.
+- 8642 is lite-context, not a security sandbox. Full unavailable → fallback to lite with logged reason.
 
 ## Phase Status
 

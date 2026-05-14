@@ -1131,64 +1131,102 @@ Run `bash scripts/diagnose-hermes-tools.sh` to verify:
 - `platform_toolsets` DOES contain `web` and all `mcp-*` tools
 - No recent `vision_analyze` / `image_url BadRequest` in logs
 
-## Lite/Full Capability Mode
+## Hermes Lite/Full Runtime Split
 
-Two separate Hermes gateway instances run on different ports:
+Two Hermes gateway instances run on different ports for cost isolation:
 
-| Instance | Port | Profile | Purpose |
-|----------|------|---------|---------|
-| `ran-agent-hermes.service` | 8642 | `ran-assistant-lite` | Daily chat, social links, memory |
-| `ran-agent-hermes-full.service` | 8643 | `ran-assistant` | Debug, commands, media generation |
+| Instance | Port | Profile | HERMES_HOME | Purpose |
+|----------|------|---------|-------------|---------|
+| `ran-agent-hermes.service` | 8642 | `ran-assistant-lite` | `~/.hermes-ran-agent/lite` | Low-context daily entry |
+| `ran-agent-hermes-full.service` | 8643 | `ran-assistant` | `~/.hermes-ran-agent` | Full debug/tool entry |
 
-`RAN_AGENT_CAPABILITY_MODE` controls which gateway handles each request:
+**Design decision:** 8642 is a lite-context entry, not a security sandbox.
+8642's value is lower cost / lower context for daily chat.
+8643's value is heavy tools / debug / terminal / media generation.
+Hermes API Server may still retain full tool access on 8642;
+do not treat "8642 cannot execute terminal" as a hard guarantee.
 
-| Mode | Behavior |
-|------|----------|
-| `auto` (default) | Lite by default; full for debug/generation intents |
-| `lite` | Always use port 8642 (lite) |
-| `full` | Always use port 8643 (full), fallback to 8643 if unavailable |
+### Systemd services
 
-### Env vars
+**Lite (8642):**
+```
+/etc/systemd/system/ran-agent-hermes.service
+  drop-in: 90-lite-runtime.conf
+  HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite
+  HERMES_PROFILE=ran-assistant-lite
+  API_SERVER_PORT=8642
+```
+
+**Full (8643):**
+```
+/etc/systemd/system/ran-agent-hermes-full.service
+  HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+  HERMES_PROFILE=ran-assistant
+  API_SERVER_PORT=8643
+```
+
+### Node bridge env vars (in `.env.local`)
 
 ```
 HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
 HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
 RAN_AGENT_CAPABILITY_MODE=auto
+HERMES_LITE_PROFILE=ran-assistant-lite
+HERMES_FULL_PROFILE=ran-assistant
 ```
 
 ### Auto detection rules
 
-- **Default**: lite (covers normal chat, social links, image analysis, memory)
-- **Debug intent** (调试/debug/执行命令/看日志/deploy/systemd/git/npm): full
-- **Generation intent** (画/生成/头像/壁纸/语音/朗读): full
-- **User override**: "开 full / 全能力 / 调试模式" → full; "轻量 / 省 token / 日常模式" → lite
+Node bridge selects gateway per request:
 
-### Lite profile (`ran-assistant-lite` on port 8642)
+- **Default / chat / XHS / memory / image understanding**: lite (8642)
+- **Debug intent** (调试/执行命令/看日志/systemctl/journalctl/git/npm): full (8643)
+- **Generation intent** (画/生成/语音/朗读/媒体生成): full (8643)
+- **User override**: "开 full / 全能力 / 调试模式" → full; "轻量 / 省 token" → lite
+- **Full unavailable**: fallback to lite with `fallback_reason=full_gateway_unavailable`
 
-Excludes: terminal, file, session_search, playwright, media_generation
-Keeps: web, skills, memory, safe, time, social_reader, media_reader, mimo_power, personal_memory, obsidian_memory, tavily
+### Config files
 
-### Full profile (`ran-assistant` on port 8643)
+| File | Location | Purpose |
+|------|----------|---------|
+| Lite runtime config | `~/.hermes-ran-agent/lite/config.yaml` | Restricted toolsets, no terminal/file/playwright |
+| Lite profile config | `~/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml` | MCP servers for lite |
+| Full runtime config | `~/.hermes-ran-agent/config.yaml` | Full toolsets with terminal/file/playwright |
+| Full profile config | `~/.hermes-ran-agent/profiles/ran-assistant/config.yaml` | All MCP servers |
+| Lite env | `~/.hermes-ran-agent/lite/.env` | Secrets for lite gateway |
+| Full env | `~/.hermes-ran-agent/.env` | Secrets for full gateway |
 
-All tools including: terminal, file, session_search, playwright, media_generation
-Still excludes: vision_analyze, browser_vision, video_analyze, image_generate, text_to_speech
+### Verified token counts
 
-### Fallback
-
-If full gateway (8643) is unavailable, full requests fall back to lite (8642)
-with `fallback_reason=full_gateway_unavailable` in the log.
-
-### Logging
-
-Every request logs `[hermes-capability-mode]` with:
-- `mode`: lite/full
-- `reason`: explicit_lite/full, default, debug_intent, generation_intent, user_requested_*
-- `has_social_link`, `has_media`, `has_generation_intent`, `has_debug_intent`
-- `selected_profile`: ran-assistant-lite or ran-assistant
+- 8642 (lite): ~22644 prompt tokens for basic "只回复 OK"
+- 8643 (full): ~24331 prompt tokens (includes terminal/file/playwright tool descriptions)
 
 ### Diagnostic
 
-Run `bash scripts/diagnose-lite-full.sh` to check env, profiles, toolsets, and recent logs.
+```bash
+bash scripts/diagnose-lite-full.sh
+```
+
+Checks: both ports listening, both services active, token comparison,
+vision errors, lark-cli availability.
+
+### Recovery
+
+```bash
+# Restart lite
+sudo systemctl restart ran-agent-hermes.service
+
+# Restart full
+sudo systemctl restart ran-agent-hermes-full.service
+
+# Restart Node bridge (re-reads capability mode)
+sudo systemctl restart ran-agent-node.service
+
+# Force rebuild lite config
+cp hermes/profile/config.lite.yaml ~/.hermes-ran-agent/lite/config.yaml
+# (append model/web/compression/terminal sections as in setup script)
+sudo systemctl restart ran-agent-hermes.service
+```
 
 ## XHS Troubleshooting
 
