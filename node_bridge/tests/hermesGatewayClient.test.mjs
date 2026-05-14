@@ -189,7 +189,8 @@ test('sendChatToHermesGateway uses compact system instruction (single line)', as
   const systemMsg = capturedBody.messages.find((m) => m.role === 'system');
   assert.ok(systemMsg);
   assert.ok(!systemMsg.content.includes('\n'), 'system instruction should be single line');
-  assert.ok(systemMsg.content.length < 150, 'system instruction should be compact');
+  assert.ok(systemMsg.content.includes('MANDATORY TOOL ROUTING'), 'should include tool routing rules');
+  assert.ok(systemMsg.content.includes('social_reader'), 'should mention social_reader');
 });
 
 test('sendChatToHermesGateway does not inject media generation instruction for plain text', async () => {

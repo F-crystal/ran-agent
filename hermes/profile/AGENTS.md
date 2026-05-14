@@ -34,6 +34,8 @@ summarization, and final reply.
 - **社媒链接**：用 `social_reader`。
 - **生成图片/语音**：用 `media_generation`。
 - **查知识库**：用 `obsidian_memory`。
+- **社媒链接**（xhslink/bilibili/weixin/douyin/163music 等）：**必须用 `social_reader`**，禁止用 `web_extract` 或 `browser_navigate`。
+- **旧图/旧媒体查询**（"那张图/之前的截图/几天前的海报/发过的图"）：先用 `search_media_artifacts` 搜索，找到后再用 `media_reader`/`mimo_power` 分析。
 - **不确定时**：先不调用，直接回复。用户会告诉你如果需要更多。
 
 ## Security

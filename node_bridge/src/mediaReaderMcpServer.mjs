@@ -158,6 +158,24 @@ export function buildMediaReaderTools() {
         additionalProperties: false,
       },
     },
+    {
+      name: 'search_media_artifacts',
+      title: 'Search Media Artifacts',
+      description: 'Read-only search for old media artifacts by keywords. Searches summary, OCR text, captions, source URL, platform. Does NOT modify artifacts or memory. Use when user asks about "那张图""之前的截图""几天前的海报" etc.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: 'Search keywords to match against artifact fields' },
+          conversation_id: { type: 'string', description: 'Limit to specific conversation (default: current)' },
+          sender_id: { type: 'string', description: 'Limit to specific sender' },
+          media_type: { type: 'string', enum: ['image', 'video', 'audio', 'any'], default: 'any' },
+          days: { type: 'integer', minimum: 1, maximum: 365, default: 30 },
+          limit: { type: 'integer', minimum: 1, maximum: 10, default: 5 },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      },
+    },
   ];
 }
 
@@ -649,6 +667,121 @@ async function analyzeVideo(args = {}, options = {}) {
   };
 }
 
+function searchMediaArtifacts(args = {}, options = {}) {
+  const fs = require('fs');
+  const path = require('path');
+
+  const query = String(args.query || '').trim().toLowerCase();
+  if (!query) return { ok: false, error: 'query is required', results: [] };
+
+  const conversationId = String(args.conversation_id || args.sender_id || '').trim();
+  const mediaType = String(args.media_type || 'any').trim().toLowerCase();
+  const days = Math.max(1, Math.min(365, Number(args.days) || 30));
+  const limit = Math.max(1, Math.min(10, Number(args.limit) || 5));
+
+  const env = options.env || process.env;
+  const stateDir = String(env.RAN_AGENT_STATE_DIR || env.OPENCLAW_STATE_DIR || '').trim() || path.resolve(process.cwd(), '..', '.ran_agent_state');
+  const artifactDir = path.join(stateDir, '..', 'debug', 'media_context', 'artifacts');
+  const convDir = path.join(stateDir, '..', 'debug', 'media_context', 'conversations');
+
+  if (!fs.existsSync(artifactDir)) return { ok: true, results: [], message: 'No artifact directory found' };
+
+  const cutoffMs = Date.now() - days * 24 * 60 * 60 * 1000;
+  const queryTerms = query.split(/\s+/).filter(Boolean);
+  const results = [];
+
+  // Load conversation state to get refs and filter by conversation
+  let convArtifacts = new Set();
+  if (conversationId && fs.existsSync(convDir)) {
+    for (const f of fs.readdirSync(convDir)) {
+      if (f.includes(conversationId) || f.includes(String(args.sender_id || ''))) {
+        try {
+          const data = JSON.parse(fs.readFileSync(path.join(convDir, f), 'utf-8'));
+          for (const a of (data.artifacts || [])) convArtifacts.add(a.id);
+        } catch {}
+      }
+    }
+  }
+
+  for (const file of fs.readdirSync(artifactDir)) {
+    if (!file.endsWith('.json')) continue;
+    try {
+      const data = JSON.parse(fs.readFileSync(path.join(artifactDir, file), 'utf-8'));
+      if (data.ok === false) continue;
+
+      // Time filter
+      const createdMs = data.created_at ? Date.parse(data.created_at) : 0;
+      if (createdMs && createdMs < cutoffMs) continue;
+
+      // Conversation filter
+      if (conversationId && convArtifacts.size > 0 && !convArtifacts.has(data.id)) continue;
+
+      // Media type filter
+      if (mediaType !== 'any' && data.type !== mediaType) continue;
+
+      // Search across fields
+      const searchableFields = {
+        summary: String(data.summary || ''),
+        ocr_text: String(data.ocr_text || ''),
+        source_url: String(data.source_url || data.source_artifact_path || ''),
+        platform: String(data.platform || ''),
+        transcript: String(data.transcript || ''),
+      };
+
+      // Also search raw fields if present
+      if (data.raw) {
+        if (data.raw.scene_summary) searchableFields.scene_summary = String(data.raw.scene_summary);
+        if (data.raw.objects) searchableFields.objects = Array.isArray(data.raw.objects) ? data.raw.objects.join(' ') : String(data.raw.objects);
+      }
+
+      const matchedFields = [];
+      let score = 0;
+      for (const [field, value] of Object.entries(searchableFields)) {
+        if (!value) continue;
+        const lowerValue = value.toLowerCase();
+        for (const term of queryTerms) {
+          if (lowerValue.includes(term)) {
+            matchedFields.push(field);
+            score += 1;
+            break;
+          }
+        }
+      }
+
+      if (score === 0) continue;
+
+      const ageMs = createdMs ? Date.now() - createdMs : 0;
+      const ageHours = ageMs / (1000 * 60 * 60);
+      const age = ageHours < 24 ? `${Math.round(ageHours)}h` : `${Math.round(ageHours / 24)}d`;
+
+      results.push({
+        artifact_id: data.id || file.replace('.json', ''),
+        media_type: data.type || 'unknown',
+        created_at: data.created_at || '',
+        age,
+        score,
+        matched_fields: [...new Set(matchedFields)],
+        short_summary: String(data.summary || data.raw?.scene_summary || '').slice(0, 120),
+        source_url: data.source_url || '',
+        platform: data.platform || '',
+      });
+    } catch {}
+  }
+
+  results.sort((a, b) => b.score - a.score || (b.created_at || '').localeCompare(a.created_at || ''));
+  const topResults = results.slice(0, limit);
+
+  return {
+    ok: true,
+    query,
+    total_matches: results.length,
+    returned: topResults.length,
+    days_searched: days,
+    results: topResults,
+    message: topResults.length === 0 ? 'No matching artifacts found. Try broader keywords or increase days.' : undefined,
+  };
+}
+
 async function callTool(name, args = {}, options = {}) {
   if (name === 'extract_media_assets') {
     const assets = buildMediaAssets({
@@ -775,6 +908,9 @@ async function callTool(name, args = {}, options = {}) {
       },
     });
     return buildTextResult(result);
+  }
+  if (name === 'search_media_artifacts') {
+    return buildTextResult(searchMediaArtifacts(args, options));
   }
   throw new MediaReaderError('UNKNOWN_TOOL', `UNKNOWN_TOOL: ${name}`);
 }
