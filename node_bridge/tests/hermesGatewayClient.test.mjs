@@ -61,6 +61,7 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
         HERMES_PROFILE: 'ran-assistant',
         HERMES_DEFAULT_MODEL: 'deepseek-v4-flash',
         RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+        RAN_AGENT_CAPABILITY_MODE: 'full',
       }),
       fetchImpl: async (url, init) => {
         capturedUrl = url;
@@ -123,6 +124,7 @@ test('sendChatToHermesGateway supports hermes one-shot mode', async () => {
         HERMES_PROVIDER: 'deepseek',
         HERMES_DEFAULT_MODEL: 'deepseek-v4-flash',
         RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+        RAN_AGENT_CAPABILITY_MODE: 'full',
       }),
       execFileImpl: async (command, args) => {
         capturedCommand = command;

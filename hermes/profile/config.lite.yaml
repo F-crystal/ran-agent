@@ -1,0 +1,120 @@
+# ran-assistant-lite: 普通文字聊天专用，最小 MCP 集合
+# 用于日常对话、社交链接读取、记忆查询，不加载重型工具
+
+model:
+  provider: deepseek
+  default: deepseek-v4-flash
+  model: deepseek-v4-flash
+  base_url: https://api.deepseek.com/v1
+  api_mode: chat_completions
+
+web:
+  search_backend: tavily
+  extract_backend: tavily
+
+compression:
+  enabled: true
+  threshold: 0.35
+  target_ratio: 0.12
+  protect_last_n: 8
+  hygiene_hard_message_limit: 160
+
+terminal:
+  backend: local
+  cwd: /opt/ran_agent
+  timeout: 180
+  lifetime_seconds: 300
+
+disabled_tools:
+  - browser_vision
+  - image_generate
+  - text_to_speech
+  - video_analyze
+  - vision_analyze
+  - terminal
+  - file
+  - session_search
+  - mcp-playwright
+  - mcp-media_generation
+
+platform_toolsets:
+  cli:
+    - web
+    - skills
+    - memory
+    - safe
+    - mcp-time
+    - mcp-social_reader
+    - mcp-media_reader
+    - mcp-mimo_power
+    - mcp-personal_memory
+    - mcp-obsidian_memory
+    - mcp-tavily
+  gateway:
+    - web
+    - skills
+    - memory
+    - safe
+    - mcp-time
+    - mcp-social_reader
+    - mcp-media_reader
+    - mcp-mimo_power
+    - mcp-personal_memory
+    - mcp-obsidian_memory
+    - mcp-tavily
+
+mcp_servers:
+  time:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_time_mcp.sh
+    env:
+      LOCAL_TIMEZONE: Asia/Shanghai
+    timeout: 120
+    connect_timeout: 60
+
+  social_reader:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_social_reader_mcp.sh
+    timeout: 300
+    connect_timeout: 90
+
+  media_reader:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_reader_mcp.sh
+    timeout: 300
+    connect_timeout: 90
+
+  mimo_power:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_mimo_power_mcp.sh
+    timeout: 600
+    connect_timeout: 90
+
+  personal_memory:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh
+    timeout: 120
+    connect_timeout: 60
+
+  obsidian_memory:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_obsidian_memory_mcp.sh
+    timeout: 180
+    connect_timeout: 90
+
+  tavily:
+    url: "https://mcp.tavily.com/mcp/?tavilyApiKey=${TAVILY_API_KEY}"
+    timeout: 60
+    connect_timeout: 30

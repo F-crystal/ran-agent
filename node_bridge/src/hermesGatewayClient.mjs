@@ -33,6 +33,8 @@ export function getHermesGatewayConfig(env = process.env) {
     maxMediaArtifacts,
     enableContextSizeLog,
   } = getContextPolicyConfig(env);
+  const capabilityMode = String(env.RAN_AGENT_CAPABILITY_MODE || 'auto').trim().toLowerCase();
+  const liteProfile = String(env.HERMES_LITE_PROFILE || 'ran-assistant-lite').trim();
 
   return {
     baseUrl,
@@ -47,31 +49,77 @@ export function getHermesGatewayConfig(env = process.env) {
     contextPolicyMode,
     maxMediaArtifacts,
     enableContextSizeLog,
+    capabilityMode,
+    liteProfile,
     fallbackText: env.NODE_BRIDGE_FALLBACK_TEXT || '暂时无法连接到 Hermes，请稍后再试。',
   };
+}
+
+const GENERATION_INTENT_PATTERN = /画|生成|头像|壁纸|海报|语音|朗读|读出来|tts|画图|生图|配图/;
+const DEBUG_INTENT_PATTERN = /调试|debug|执行命令|运行命令|看文件|查看日志|看日志|服务端|systemd|重启服务|部署|git\s+(push|pull|commit|log|diff|status)|npm\s+(install|run|test)|pip\s+install|curl\s+/;
+const FULL_OVERRIDE_PATTERN = /开\s*full|全能力|调试模式|full\s*mode/;
+const LITE_OVERRIDE_PATTERN = /轻量|省\s*token|日常模式|lite\s*mode/;
+
+function resolveCapabilityMode(payload, config) {
+  const mode = config.capabilityMode || 'auto';
+  const text = String(payload.text || '');
+  const hasSocialLink = SOCIAL_PLATFORM_NAMES.some(({ pattern }) => pattern.test(text));
+  const hasMedia = normalizeMediaItems(payload.media).length > 0
+    || (Array.isArray(payload.image_urls) && payload.image_urls.some((u) => typeof u === 'string' && u.trim()));
+  const hasGenerationIntent = GENERATION_INTENT_PATTERN.test(text);
+  const hasDebugIntent = DEBUG_INTENT_PATTERN.test(text);
+
+  // Explicit override
+  if (mode === 'lite') return { mode: 'lite', reason: 'explicit_lite', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
+  if (mode === 'full') return { mode: 'full', reason: 'explicit_full', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
+
+  // Auto mode
+  if (FULL_OVERRIDE_PATTERN.test(text)) return { mode: 'full', reason: 'user_requested_full', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
+  if (LITE_OVERRIDE_PATTERN.test(text)) return { mode: 'lite', reason: 'user_requested_lite', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
+  if (hasDebugIntent) return { mode: 'full', reason: 'debug_intent', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
+  if (hasGenerationIntent) return { mode: 'full', reason: 'generation_intent', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
+  // Default: lite (covers normal chat, social links, image analysis, memory queries)
+  return { mode: 'lite', reason: 'default', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
 }
 
 export async function sendChatToHermesGateway(payload, options = {}) {
   const env = options.env || process.env;
   const config = options.config || getHermesGatewayConfig(env);
   const logger = options.logger || console;
+
+  // Determine capability mode
+  const capResult = resolveCapabilityMode(payload, config);
+  const effectiveProfile = capResult.mode === 'lite' ? config.liteProfile : config.profile;
+
+  if (config.enableContextSizeLog) {
+    logger.log?.('[hermes-capability-mode]', JSON.stringify({
+      mode: capResult.mode,
+      reason: capResult.reason,
+      has_social_link: capResult.hasSocialLink,
+      has_media: capResult.hasMedia,
+      has_generation_intent: capResult.hasGenerationIntent,
+      has_debug_intent: capResult.hasDebugIntent,
+      selected_profile: effectiveProfile,
+    }));
+  }
+
   const preparedMessage = await buildHermesUserMessage(payload, {
     env,
-    config,
+    config: { ...config, profile: effectiveProfile },
     logger,
     mediaContextOptions: options.mediaContextOptions,
   });
 
   if (config.mode === 'oneshot') {
     return sendChatToHermesOneShot(preparedMessage, {
-      config,
+      config: { ...config, profile: effectiveProfile },
       execFileImpl: options.execFileImpl,
     });
   }
 
   try {
     return await sendChatToHermesApi(preparedMessage, {
-      config,
+      config: { ...config, profile: effectiveProfile },
       fetchImpl: options.fetchImpl,
     });
   } catch (error) {
@@ -80,7 +128,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     }
     logger.warn?.(`hermes api request failed, retrying with one-shot: ${formatErrorMessage(error)}`);
     return sendChatToHermesOneShot(preparedMessage, {
-      config,
+      config: { ...config, profile: effectiveProfile },
       execFileImpl: options.execFileImpl,
     });
   }
