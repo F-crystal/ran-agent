@@ -192,6 +192,48 @@ test('syncWeixinAccountConfigForVendorSdk writes account state to vendor path', 
   assert.equal(vendorAccount.baseUrl, 'https://vendor.weixin.test');
 });
 
+test('syncWeixinAccountConfigForVendorSdk does not rewrite the source account file', () => {
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
+  fs.mkdirSync(stateBaseDir, { recursive: true });
+  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-weixin-source-'));
+  const vendorStateDir = path.join(tempStateDir, 'vendor-state');
+  const accountId = 'c253ec115e14-im-bot';
+  const sourcePath = path.join(tempStateDir, 'openclaw-weixin', 'accounts', `${accountId}.json`);
+  fs.mkdirSync(path.dirname(sourcePath), { recursive: true });
+  const sourcePayload = {
+    token: 'source-token',
+    userId: 'wechat-user',
+    baseUrl: 'https://source.weixin.test',
+    savedAt: '2026-05-14T12:00:00.000Z',
+  };
+  fs.writeFileSync(sourcePath, JSON.stringify(sourcePayload, null, 2), 'utf-8');
+
+  syncWeixinAccountConfigForVendorSdk(
+    {
+      accountId,
+      token: 'source-token',
+      userId: 'wechat-user',
+      baseUrl: 'https://source.weixin.test',
+      savedAt: '2026-05-14T12:00:00.000Z',
+      sourcePath,
+    },
+    {
+      RAN_AGENT_STATE_DIR: tempStateDir,
+      OPENCLAW_STATE_DIR: vendorStateDir,
+    }
+  );
+
+  const sourceAfterSync = JSON.parse(fs.readFileSync(sourcePath, 'utf-8'));
+  const vendorAccount = JSON.parse(
+    fs.readFileSync(path.join(vendorStateDir, 'openclaw-weixin', 'accounts', `${accountId}.json`), 'utf-8')
+  );
+
+  assert.deepEqual(sourceAfterSync, sourcePayload);
+  assert.equal(vendorAccount.token, 'source-token');
+  assert.equal(vendorAccount.savedAt, '2026-05-14T12:00:00.000Z');
+  assert.equal(vendorAccount.mirroredByNodeBridge, true);
+});
+
 test('handleOutboundRequest sends proactive message through bot', async () => {
   let sentPayload = null;
   const result = await handleOutboundRequest({

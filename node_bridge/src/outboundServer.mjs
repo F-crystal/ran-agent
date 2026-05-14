@@ -311,17 +311,26 @@ export function syncWeixinAccountConfigForVendorSdk(accountConfig, env = process
   if (!accountId || !token || !userId) {
     return;
   }
+  const sourcePath = String(accountConfig?.sourcePath || '').trim()
+    ? path.resolve(String(accountConfig.sourcePath).trim())
+    : '';
 
   const payload = {
     token,
-    savedAt: new Date().toISOString(),
     baseUrl: String(accountConfig.baseUrl || '').trim() || 'https://ilinkai.weixin.qq.com',
     userId,
+    mirroredByNodeBridge: true,
   };
+  if (typeof accountConfig.savedAt === 'string' && accountConfig.savedAt.trim()) {
+    payload.savedAt = accountConfig.savedAt.trim();
+  }
   for (const indexPath of resolveVendorAccountIndexPaths(env)) {
     writeJsonFile(indexPath, [accountId]);
   }
   for (const accountPath of resolveVendorAccountPaths(accountId, env)) {
+    if (sourcePath && path.resolve(accountPath) === sourcePath) {
+      continue;
+    }
     writeJsonFile(accountPath, payload);
   }
 }
