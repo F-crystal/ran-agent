@@ -507,7 +507,11 @@ async function ensureWeixinAccountReady() {
     try {
       const existing = resolveWeixinAccountConfig(process.env);
       syncWeixinAccountConfigForVendorSdk(existing, process.env);
-      console.log(`[node-bridge] reusing existing weixin account accountId=${existing.accountId}`);
+      console.log(
+        `[node-bridge] reusing existing weixin account accountId=${existing.accountId} `
+        + `source=${existing.sourcePath || '(unknown)'} savedAt=${existing.savedAt || '(none)'} `
+        + `tokenSha256=${existing.tokenFingerprint || '(none)'}`
+      );
       return existing;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -518,6 +522,11 @@ async function ensureWeixinAccountReady() {
   await loginWithRetry();
   const accountConfig = resolveWeixinAccountConfig(process.env);
   syncWeixinAccountConfigForVendorSdk(accountConfig, process.env);
+  console.log(
+    `[node-bridge] login produced weixin account accountId=${accountConfig.accountId} `
+    + `source=${accountConfig.sourcePath || '(unknown)'} savedAt=${accountConfig.savedAt || '(none)'} `
+    + `tokenSha256=${accountConfig.tokenFingerprint || '(none)'}`
+  );
   return accountConfig;
 }
 

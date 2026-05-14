@@ -69,6 +69,8 @@ test('resolveWeixinAccountConfig reads vendor login state from openclaw-weixin p
 
   assert.equal(config.accountId, accountId);
   assert.equal(config.token, 'token-from-vendor-login');
+  assert.equal(config.tokenFingerprint.length, 12);
+  assert.equal(config.sourcePath, path.join(accountsDir, `${accountId}.json`));
   assert.equal(config.userId, 'wechat-user');
   assert.equal(config.baseUrl, 'https://example.weixin.test');
 });
@@ -143,6 +145,8 @@ test('resolveWeixinAccountConfig prefers the newest saved token across migrated 
 
   assert.equal(config.token, 'fresh-token-from-manual-login');
   assert.equal(config.baseUrl, 'https://fresh.weixin.test');
+  assert.equal(config.sourcePath, path.join(vendorDir, `${accountId}.json`));
+  assert.equal(config.savedAt, '2026-05-14T13:00:00.000Z');
 });
 
 test('syncWeixinAccountConfigForVendorSdk writes account state to vendor path', () => {

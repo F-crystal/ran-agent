@@ -4,6 +4,7 @@
 
 import fs from 'node:fs';
 import http from 'node:http';
+import crypto from 'node:crypto';
 import path from 'node:path';
 
 import {
@@ -90,11 +91,25 @@ function getAccountSavedAtMs(accountData) {
   return Number.isFinite(savedAtMs) ? savedAtMs : 0;
 }
 
+function tokenFingerprint(token) {
+  const normalized = String(token || '').trim();
+  if (!normalized) {
+    return '';
+  }
+  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 12);
+}
+
 function readWeixinAccountData(accountId, env = process.env) {
-  const candidates = [
-    readJsonFile(resolveAccountPath(accountId, env)),
-    ...resolveVendorAccountPaths(accountId, env).map((filePath) => readJsonFile(filePath)),
-  ].filter(Boolean);
+  const candidatePaths = [
+    resolveAccountPath(accountId, env),
+    ...resolveVendorAccountPaths(accountId, env),
+  ];
+  const candidates = candidatePaths
+    .map((filePath) => {
+      const data = readJsonFile(filePath);
+      return data ? { ...data, sourcePath: filePath } : null;
+    })
+    .filter(Boolean);
   const tokenCandidates = candidates
     .filter((item) => typeof item.token === 'string' && item.token.trim())
     .sort((left, right) => getAccountSavedAtMs(right) - getAccountSavedAtMs(left));
@@ -282,6 +297,9 @@ export function resolveWeixinAccountConfig(env = process.env) {
       : 'https://ilinkai.weixin.qq.com',
     cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c',
     token: accountData.token.trim(),
+    tokenFingerprint: tokenFingerprint(accountData.token),
+    sourcePath: typeof accountData.sourcePath === 'string' ? accountData.sourcePath : '',
+    savedAt: typeof accountData.savedAt === 'string' ? accountData.savedAt : '',
     userId: accountData.userId.trim(),
   };
 }
