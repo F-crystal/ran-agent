@@ -320,6 +320,130 @@ class StartSocialReaderMcpScriptTest(unittest.TestCase):
         self.assertIn("xhs_cookie=a1=demo", logged_argv)
 
 
+class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
+    def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+        clean_env = {
+            "PATH": f"{env['PATH']}:/usr/bin:/bin",
+            "HOME": env.get("HOME", tempfile.gettempdir()),
+        }
+        for key in (
+            "OBSIDIAN_MEMORY_MCP_PROVIDER",
+            "OBSIDIAN_MEMORY_VAULT_DIR",
+            "OBSIDIAN_MEMORY_INDEX_PATH",
+            "OBSIDIAN_MEMORY_OBSIDIAN_INDEX_PACKAGE",
+            "OBSIDIAN_MEMORY_OBSIDIAN_INDEX_LAUNCHER",
+            "OBSIDIAN_MEMORY_REINDEX",
+            "OBSIDIAN_MEMORY_WATCH",
+            "OBSIDIAN_MEMORY_UV_BIN",
+            "OBSIDIAN_INDEX_DEVICE",
+        ):
+            if key in env:
+                clean_env[key] = env[key]
+
+        return subprocess.run(
+            ["/bin/bash", str(ROOT_DIR / "scripts" / "start_obsidian_memory_mcp.sh")],
+            cwd=ROOT_DIR,
+            env=clean_env,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+
+    def test_obsidian_index_defaults_to_cpu_without_reindex_or_watch(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            log_path = temp_path / "argv.log"
+            fake_uvx = temp_path / "uvx"
+            fake_uvx.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    printf '%s\\n' "$*" > "{log_path}"
+                    printf 'device=%s\\n' "${{OBSIDIAN_INDEX_DEVICE:-}}" >> "{log_path}"
+                    exit 0
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_uvx.chmod(0o755)
+
+            result = self.run_script(
+                {
+                    "PATH": temp_dir,
+                    "OBSIDIAN_MEMORY_VAULT_DIR": str(temp_path / "vault"),
+                    "OBSIDIAN_MEMORY_INDEX_PATH": str(temp_path / "data" / "obsidian-memory-index.duckdb"),
+                }
+            )
+            logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--from iflow-mcp-tcsavage-obsidian-index python", logged_argv)
+        self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", logged_argv)
+        self.assertIn(f"--vault {temp_path / 'vault'}", logged_argv)
+        self.assertIn(f"--database {temp_path / 'data' / 'obsidian-memory-index.duckdb'}", logged_argv)
+        self.assertIn("device=cpu", logged_argv)
+        self.assertNotIn("--reindex", logged_argv)
+        self.assertNotIn("--watch", logged_argv)
+
+    def test_obsidian_index_reindex_and_watch_are_opt_in(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            log_path = temp_path / "argv.log"
+            fake_uvx = temp_path / "uvx"
+            fake_uvx.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    printf '%s\\n' "$*" > "{log_path}"
+                    printf 'device=%s\\n' "${{OBSIDIAN_INDEX_DEVICE:-}}" >> "{log_path}"
+                    exit 0
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_uvx.chmod(0o755)
+
+            result = self.run_script(
+                {
+                    "PATH": temp_dir,
+                    "OBSIDIAN_MEMORY_REINDEX": "1",
+                    "OBSIDIAN_MEMORY_WATCH": "true",
+                    "OBSIDIAN_INDEX_DEVICE": "cuda",
+                }
+            )
+            logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("--reindex", logged_argv)
+        self.assertIn("--watch", logged_argv)
+        self.assertIn("device=cuda", logged_argv)
+
+    def test_obsidian_index_prefers_uv_run_when_uv_is_available(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            log_path = temp_path / "argv.log"
+            fake_uv = temp_path / "uv"
+            fake_uv.write_text(
+                textwrap.dedent(
+                    f"""\
+                    #!/bin/sh
+                    printf '%s\\n' "$*" > "{log_path}"
+                    exit 0
+                    """
+                ),
+                encoding="utf-8",
+            )
+            fake_uv.chmod(0o755)
+
+            result = self.run_script({"PATH": temp_dir})
+            logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("run --no-project --with iflow-mcp-tcsavage-obsidian-index python", logged_argv)
+        self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", logged_argv)
+
+
 class StartMimoPowerMcpScriptTest(unittest.TestCase):
     def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         clean_env = {

@@ -28,9 +28,14 @@ fi
 export PATH="$ROOT_DIR/.venv/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 VAULT_DIR="${OBSIDIAN_MEMORY_VAULT_DIR:-$ROOT_DIR/vault}"
-INDEX_PATH="${OBSIDIAN_MEMORY_INDEX_PATH:-$ROOT_DIR/data/obsidian-memory-index.sqlite}"
+INDEX_PATH="${OBSIDIAN_MEMORY_INDEX_PATH:-$ROOT_DIR/data/obsidian-memory-index.duckdb}"
 PROVIDER="${OBSIDIAN_MEMORY_MCP_PROVIDER:-obsidian-index}"
 OBSIDIAN_INDEX_PACKAGE="${OBSIDIAN_MEMORY_OBSIDIAN_INDEX_PACKAGE:-iflow-mcp-tcsavage-obsidian-index}"
+OBSIDIAN_INDEX_LAUNCHER="${OBSIDIAN_MEMORY_OBSIDIAN_INDEX_LAUNCHER:-$ROOT_DIR/scripts/obsidian_index_mcp_launcher.py}"
+OBSIDIAN_MEMORY_REINDEX="${OBSIDIAN_MEMORY_REINDEX:-0}"
+OBSIDIAN_MEMORY_WATCH="${OBSIDIAN_MEMORY_WATCH:-0}"
+OBSIDIAN_MEMORY_UV_BIN="${OBSIDIAN_MEMORY_UV_BIN:-uv}"
+export OBSIDIAN_INDEX_DEVICE="${OBSIDIAN_INDEX_DEVICE:-cpu}"
 
 mkdir -p "$(dirname "$INDEX_PATH")"
 
@@ -47,11 +52,33 @@ fi
 
 case "$PROVIDER" in
   obsidian-index)
-    exec uvx --from "$OBSIDIAN_INDEX_PACKAGE" obsidian-index mcp \
-      --vault "$VAULT_DIR" \
-      --database "$INDEX_PATH" \
-      --reindex \
-      --watch
+    if command -v "$OBSIDIAN_MEMORY_UV_BIN" >/dev/null 2>&1; then
+      ARGS=(
+        run --no-project
+        --with "$OBSIDIAN_INDEX_PACKAGE"
+        python "$OBSIDIAN_INDEX_LAUNCHER"
+        mcp
+        --vault "$VAULT_DIR"
+        --database "$INDEX_PATH"
+      )
+      RUNNER=("$OBSIDIAN_MEMORY_UV_BIN")
+    else
+      ARGS=(
+        --from "$OBSIDIAN_INDEX_PACKAGE"
+        python "$OBSIDIAN_INDEX_LAUNCHER"
+        mcp
+        --vault "$VAULT_DIR"
+        --database "$INDEX_PATH"
+      )
+      RUNNER=(uvx)
+    fi
+    if [ "$OBSIDIAN_MEMORY_REINDEX" = "1" ] || [ "$OBSIDIAN_MEMORY_REINDEX" = "true" ]; then
+      ARGS+=(--reindex)
+    fi
+    if [ "$OBSIDIAN_MEMORY_WATCH" = "1" ] || [ "$OBSIDIAN_MEMORY_WATCH" = "true" ]; then
+      ARGS+=(--watch)
+    fi
+    exec "${RUNNER[@]}" "${ARGS[@]}"
     ;;
   mcpvault)
     exec npx -y @bitbonsai/mcpvault@latest "$VAULT_DIR"

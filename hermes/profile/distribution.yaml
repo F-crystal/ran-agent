@@ -29,6 +29,22 @@ env_requires:
     description: "MiMo Token Plan key for mimo_power multimodal understanding"
     required: false
     default: ""
+  - name: OBSIDIAN_INDEX_DEVICE
+    description: "Device for obsidian-index sentence-transformers backend; use cpu on Linux servers"
+    required: false
+    default: "cpu"
+  - name: OBSIDIAN_MEMORY_INDEX_PATH
+    description: "DuckDB index path for obsidian_memory semantic search"
+    required: false
+    default: "/Users/fengran/ran_agent/data/obsidian-memory-index.duckdb"
+  - name: OBSIDIAN_MEMORY_REINDEX
+    description: "Set to 1 only during explicit obsidian_memory index maintenance"
+    required: false
+    default: "0"
+  - name: OBSIDIAN_MEMORY_WATCH
+    description: "Set to 1 only when an obsidian_memory long-running watcher is desired"
+    required: false
+    default: "0"
   - name: TAVILY_API_KEY
     description: "Optional Tavily key for web search MCP"
     required: false

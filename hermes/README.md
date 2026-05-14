@@ -105,6 +105,30 @@ Until Phase 9, server validation should only prove that the profile can be
 installed under a service-owned `HERMES_HOME` and that the MCP servers can be
 listed/tested without relying on local absolute paths.
 
+## Obsidian Memory MCP
+
+`obsidian_memory` uses `obsidian-index` semantic search. The repo launcher wraps
+the upstream package so Linux servers can run the embedding model on CPU and so
+index maintenance is explicit instead of happening on every production start.
+
+Recommended server defaults:
+
+```bash
+export HF_ENDPOINT=https://hf-mirror.com
+export HF_HOME=/tmp/ran-agent-hermes-home-phase5/hf-home
+export TRANSFORMERS_CACHE=/tmp/ran-agent-hermes-home-phase5/hf-home
+export SENTENCE_TRANSFORMERS_HOME=/tmp/ran-agent-hermes-home-phase5/sentence-transformers
+export OBSIDIAN_MEMORY_VAULT_DIR=/opt/ran_agent/vault
+export OBSIDIAN_MEMORY_INDEX_PATH=/opt/ran_agent/data/obsidian-memory-index.duckdb
+export OBSIDIAN_INDEX_DEVICE=cpu
+export OBSIDIAN_MEMORY_REINDEX=0
+export OBSIDIAN_MEMORY_WATCH=0
+```
+
+Use `OBSIDIAN_MEMORY_REINDEX=1` or `OBSIDIAN_MEMORY_WATCH=1` only during
+explicit maintenance/prewarm sessions. The DuckDB index path is single-writer;
+do not run multiple `obsidian_memory` MCP instances against the same database.
+
 ## Model Policy
 
 `ran-assistant` defaults to:
