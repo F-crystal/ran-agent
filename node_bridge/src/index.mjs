@@ -528,10 +528,30 @@ function resetSyncBufferIfNeeded(accountId) {
   }
   try {
     const stateDir = resolveStateDir(process.env);
-    const syncPath = path.join(stateDir, 'ran-agent-weixin', 'accounts', `${accountId}.sync.json`);
-    if (fs.existsSync(syncPath)) {
-      fs.rmSync(syncPath, { force: true });
-      console.log(`[node-bridge] reset stale weixin sync buffer file=${syncPath}`);
+    const rawVendorStateDir = String(process.env.OPENCLAW_STATE_DIR || process.env.CLAWDBOT_STATE_DIR || '').trim();
+    const vendorStateDir = rawVendorStateDir
+      ? path.isAbsolute(rawVendorStateDir)
+        ? path.resolve(rawVendorStateDir)
+        : path.resolve(process.cwd(), rawVendorStateDir)
+      : '';
+    const candidateStateDirs = [
+      stateDir,
+      path.join(stateDir, '.openclaw_state'),
+      vendorStateDir,
+    ].filter(Boolean);
+    const syncPaths = [];
+    for (const dir of [...new Set(candidateStateDirs)]) {
+      syncPaths.push(
+        path.join(dir, 'ran-agent-weixin', 'accounts', `${accountId}.sync.json`),
+        path.join(dir, 'openclaw-weixin', 'accounts', `${accountId}.sync.json`),
+        path.join(dir, 'agents', 'default', 'sessions', '.openclaw-weixin-sync', 'default.json')
+      );
+    }
+    for (const syncPath of [...new Set(syncPaths)]) {
+      if (fs.existsSync(syncPath)) {
+        fs.rmSync(syncPath, { force: true });
+        console.log(`[node-bridge] reset stale weixin sync buffer file=${syncPath}`);
+      }
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

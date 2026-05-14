@@ -47,6 +47,27 @@ function resolveNestedLegacyAccountPath(accountId, env = process.env) {
   return path.join(resolveStateDir(env), '.openclaw_state', 'openclaw-weixin', 'accounts', `${accountId}.json`);
 }
 
+function resolveVendorStateDirs(env = process.env) {
+  const stateDir = resolveStateDir(env);
+  const dirs = [
+    stateDir,
+    path.join(stateDir, '.openclaw_state'),
+  ];
+  const vendorStateDir = String(env.OPENCLAW_STATE_DIR || env.CLAWDBOT_STATE_DIR || '').trim();
+  if (vendorStateDir) {
+    dirs.push(path.isAbsolute(vendorStateDir) ? path.resolve(vendorStateDir) : path.resolve(process.cwd(), vendorStateDir));
+  }
+  return [...new Set(dirs)];
+}
+
+function resolveVendorAccountIndexPaths(env = process.env) {
+  return resolveVendorStateDirs(env).map((dir) => path.join(dir, 'openclaw-weixin', 'accounts.json'));
+}
+
+function resolveVendorAccountPaths(accountId, env = process.env) {
+  return resolveVendorStateDirs(env).map((dir) => path.join(dir, 'openclaw-weixin', 'accounts', `${accountId}.json`));
+}
+
 function readJsonFile(filePath) {
   if (!fs.existsSync(filePath)) {
     return null;
@@ -67,8 +88,7 @@ function readFirstJsonFile(filePaths) {
 function readWeixinAccountData(accountId, env = process.env) {
   const candidates = [
     readJsonFile(resolveAccountPath(accountId, env)),
-    readJsonFile(resolveCompatAccountPath(accountId, env)),
-    readJsonFile(resolveNestedLegacyAccountPath(accountId, env)),
+    ...resolveVendorAccountPaths(accountId, env).map((filePath) => readJsonFile(filePath)),
   ].filter(Boolean);
   return candidates.find((item) => typeof item.token === 'string' && item.token.trim()) || candidates[0] || null;
 }
@@ -230,8 +250,7 @@ export function resolveWeixinAccountConfig(env = process.env) {
   if (!accountId) {
     const indexedAccounts = readFirstJsonFile([
       resolveAccountIndexPath(env),
-      resolveCompatAccountIndexPath(env),
-      resolveNestedLegacyAccountIndexPath(env),
+      ...resolveVendorAccountIndexPaths(env),
     ]);
     if (!Array.isArray(indexedAccounts) || indexedAccounts.length === 0) {
       throw new Error('没有可用的微信账号索引，请先运行 login');
@@ -267,14 +286,18 @@ export function syncWeixinAccountConfigForVendorSdk(accountConfig, env = process
     return;
   }
 
-  const accountPath = resolveCompatAccountPath(accountId, env);
-  writeJsonFile(resolveCompatAccountIndexPath(env), [accountId]);
-  writeJsonFile(accountPath, {
+  const payload = {
     token,
     savedAt: new Date().toISOString(),
     baseUrl: String(accountConfig.baseUrl || '').trim() || 'https://ilinkai.weixin.qq.com',
     userId,
-  });
+  };
+  for (const indexPath of resolveVendorAccountIndexPaths(env)) {
+    writeJsonFile(indexPath, [accountId]);
+  }
+  for (const accountPath of resolveVendorAccountPaths(accountId, env)) {
+    writeJsonFile(accountPath, payload);
+  }
 }
 
 let weixinSdkPromise = null;
