@@ -150,6 +150,46 @@ bash -c ':</dev/tcp/127.0.0.1/8642' && echo hermes_gateway_port_ok
 tail -n 120 logs/node-bridge.log
 ```
 
+## Port Occupied Recovery
+
+Use this when startup logs show:
+
+- `OSError: [Errno 98] Address already in use`
+- `Error: listen EADDRINUSE: address already in use 127.0.0.1:8791`
+
+Paste this on the server:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+
+echo "== ports before =="
+ss -ltnp | grep -E ':(8787|8791|8642)\b' || true
+
+for port in 8787 8791 8642; do
+  pids="$(lsof -tiTCP:$port -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$pids" ]; then
+    echo "killing port $port: $pids"
+    kill $pids 2>/dev/null || true
+  fi
+done
+
+sleep 2
+
+for port in 8787 8791 8642; do
+  pids="$(lsof -tiTCP:$port -sTCP:LISTEN 2>/dev/null || true)"
+  if [ -n "$pids" ]; then
+    echo "force killing port $port: $pids"
+    kill -9 $pids 2>/dev/null || true
+  fi
+done
+
+echo "== ports after kill =="
+ss -ltnp | grep -E ':(8787|8791|8642)\b' || true
+```
+
+Then rerun `Pull And Restart Runtime`.
+
 ## If Node Bridge Still Points At OpenClaw
 
 Force Hermes mode in `node_bridge/.env.local`:
