@@ -61,6 +61,19 @@ Completed boundary changes:
   `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` with a 5000 ms default.
 - Obsidian memory remains outside Phase 5 closure and remains explicit
   runtime/maintenance scope.
+- Hermes profile now carries the migrated companion identity and reply-quality
+  contract from the OpenClaw-era foreground files.
 
 Phase 6 must not re-open Phase 5 acceptance or require rerunning Phase 5
 external MCP exercises unless the owner explicitly requests it.
+
+## Migration Checklist
+
+- [x] Close Hermes profile/gateway script naming under Phase 5.
+- [x] Close Python backend and personal memory bridge boundary under Phase 6.
+- [x] Move server runtime from temporary Hermes home to
+  `/home/ubuntu/.hermes-ran-agent`.
+- [x] Move Node bridge systemd routing from OpenClaw gateway to Hermes gateway.
+- [x] Migrate OpenClaw companion tone into Hermes profile identity and soul.
+- [ ] Continue migrating any remaining OpenClaw-only runtime assumptions out of
+  startup scripts, docs, and service names.

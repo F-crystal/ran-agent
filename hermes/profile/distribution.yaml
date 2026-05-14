@@ -51,6 +51,7 @@ env_requires:
     default: ""
 
 distribution_owned:
+  - IDENTITY.md
   - SOUL.md
   - AGENTS.md
   - config.yaml
