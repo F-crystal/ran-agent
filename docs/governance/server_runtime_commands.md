@@ -1131,6 +1131,45 @@ Run `bash scripts/diagnose-hermes-tools.sh` to verify:
 - `platform_toolsets` DOES contain `web` and all `mcp-*` tools
 - No recent `vision_analyze` / `image_url BadRequest` in logs
 
+## Lite/Full Capability Mode
+
+`RAN_AGENT_CAPABILITY_MODE` controls which Hermes profile is used per request:
+
+| Mode | Behavior |
+|------|----------|
+| `auto` (default) | Lite by default; full for debug/generation intents |
+| `lite` | Always use `ran-assistant-lite` profile |
+| `full` | Always use `ran-assistant` profile |
+
+### Auto detection rules
+
+- **Default**: lite (covers normal chat, social links, image analysis, memory)
+- **Debug intent** (调试/debug/执行命令/看日志/deploy/systemd/git/npm): full
+- **Generation intent** (画/生成/头像/壁纸/语音/朗读): full
+- **User override**: "开 full / 全能力 / 调试模式" → full; "轻量 / 省 token / 日常模式" → lite
+
+### Lite profile (`ran-assistant-lite`)
+
+Excludes: terminal, file, session_search, playwright, media_generation
+Keeps: web, skills, memory, safe, time, social_reader, media_reader, mimo_power, personal_memory, obsidian_memory, tavily
+
+### Full profile (`ran-assistant`)
+
+All tools including: terminal, file, session_search, playwright, media_generation
+Still excludes: vision_analyze, browser_vision, video_analyze, image_generate, text_to_speech
+
+### Logging
+
+Every request logs `[hermes-capability-mode]` with:
+- `mode`: lite/full
+- `reason`: explicit_lite/full, default, debug_intent, generation_intent, user_requested_*
+- `has_social_link`, `has_media`, `has_generation_intent`, `has_debug_intent`
+- `selected_profile`: ran-assistant-lite or ran-assistant
+
+### Diagnostic
+
+Run `bash scripts/diagnose-lite-full.sh` to check env, profiles, toolsets, and recent logs.
+
 ## XHS Troubleshooting
 
 ### resolve_social_url OK but read_social_post_deep fails
