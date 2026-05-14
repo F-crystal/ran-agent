@@ -99,23 +99,22 @@ for SRC in /opt/ran_agent/.env.local /opt/ran_agent/node_bridge/.env.local; do
   done < "$SRC"
 done
 
-set_profile_env() {
-  key="$1"
-  value="$2"
+for entry in \
+  "RAN_AGENT_REPO_ROOT=/opt/ran_agent" \
+  "HERMES_PROFILE=$HERMES_PROFILE" \
+  "HERMES_HOME=$HERMES_HOME" \
+  "HERMES_API_BASE_URL=http://127.0.0.1:8642/v1" \
+  "PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787" \
+  "OBSIDIAN_MEMORY_VAULT_DIR=/opt/ran_agent/vault" \
+  "OBSIDIAN_MEMORY_INDEX_PATH=/opt/ran_agent/data/obsidian-memory-index.duckdb" \
+  "OBSIDIAN_INDEX_DEVICE=cpu" \
+  "OBSIDIAN_MEMORY_REINDEX=0" \
+  "OBSIDIAN_MEMORY_WATCH=0"
+do
+  key="${entry%%=*}"
   sed -i "/^${key}=/d" "$PROFILE_ENV"
-  printf '%s=%s\n' "$key" "$value" >> "$PROFILE_ENV"
-}
-
-set_profile_env RAN_AGENT_REPO_ROOT /opt/ran_agent
-set_profile_env HERMES_PROFILE "$HERMES_PROFILE"
-set_profile_env HERMES_HOME "$HERMES_HOME"
-set_profile_env HERMES_API_BASE_URL http://127.0.0.1:8642/v1
-set_profile_env PYTHON_BACKEND_BASE_URL http://127.0.0.1:8787
-set_profile_env OBSIDIAN_MEMORY_VAULT_DIR /opt/ran_agent/vault
-set_profile_env OBSIDIAN_MEMORY_INDEX_PATH /opt/ran_agent/data/obsidian-memory-index.duckdb
-set_profile_env OBSIDIAN_INDEX_DEVICE cpu
-set_profile_env OBSIDIAN_MEMORY_REINDEX 0
-set_profile_env OBSIDIAN_MEMORY_WATCH 0
+  printf '%s\n' "$entry" >> "$PROFILE_ENV"
+done
 
 chmod 600 "$PROFILE_ENV"
 
