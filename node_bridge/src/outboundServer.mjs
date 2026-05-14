@@ -4,7 +4,6 @@
 
 import fs from 'node:fs';
 import http from 'node:http';
-import crypto from 'node:crypto';
 import path from 'node:path';
 
 import {
@@ -25,48 +24,11 @@ function normalizeAccountId(raw) {
 }
 
 function resolveAccountIndexPath(env = process.env) {
-  return path.join(resolveStateDir(env), 'ran-agent-weixin', 'accounts.json');
-}
-
-function resolveCompatAccountIndexPath(env = process.env) {
   return path.join(resolveStateDir(env), 'openclaw-weixin', 'accounts.json');
 }
 
-function resolveNestedLegacyAccountIndexPath(env = process.env) {
-  return path.join(resolveStateDir(env), '.openclaw_state', 'openclaw-weixin', 'accounts.json');
-}
-
 function resolveAccountPath(accountId, env = process.env) {
-  return path.join(resolveStateDir(env), 'ran-agent-weixin', 'accounts', `${accountId}.json`);
-}
-
-function resolveCompatAccountPath(accountId, env = process.env) {
   return path.join(resolveStateDir(env), 'openclaw-weixin', 'accounts', `${accountId}.json`);
-}
-
-function resolveNestedLegacyAccountPath(accountId, env = process.env) {
-  return path.join(resolveStateDir(env), '.openclaw_state', 'openclaw-weixin', 'accounts', `${accountId}.json`);
-}
-
-function resolveVendorStateDirs(env = process.env) {
-  const stateDir = resolveStateDir(env);
-  const dirs = [
-    stateDir,
-    path.join(stateDir, '.openclaw_state'),
-  ];
-  const vendorStateDir = String(env.OPENCLAW_STATE_DIR || env.CLAWDBOT_STATE_DIR || '').trim();
-  if (vendorStateDir) {
-    dirs.push(path.isAbsolute(vendorStateDir) ? path.resolve(vendorStateDir) : path.resolve(process.cwd(), vendorStateDir));
-  }
-  return [...new Set(dirs)];
-}
-
-function resolveVendorAccountIndexPaths(env = process.env) {
-  return resolveVendorStateDirs(env).map((dir) => path.join(dir, 'openclaw-weixin', 'accounts.json'));
-}
-
-function resolveVendorAccountPaths(accountId, env = process.env) {
-  return resolveVendorStateDirs(env).map((dir) => path.join(dir, 'openclaw-weixin', 'accounts', `${accountId}.json`));
 }
 
 function readJsonFile(filePath) {
@@ -74,54 +36,6 @@ function readJsonFile(filePath) {
     return null;
   }
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-}
-
-function readFirstJsonFile(filePaths) {
-  for (const filePath of filePaths) {
-    const payload = readJsonFile(filePath);
-    if (payload !== null) {
-      return payload;
-    }
-  }
-  return null;
-}
-
-function getAccountSavedAtMs(accountData) {
-  const savedAtMs = Date.parse(String(accountData?.savedAt || ''));
-  return Number.isFinite(savedAtMs) ? savedAtMs : 0;
-}
-
-function tokenFingerprint(token) {
-  const normalized = String(token || '').trim();
-  if (!normalized) {
-    return '';
-  }
-  return crypto.createHash('sha256').update(normalized).digest('hex').slice(0, 12);
-}
-
-function readWeixinAccountData(accountId, env = process.env) {
-  const candidatePaths = [
-    resolveAccountPath(accountId, env),
-    ...resolveVendorAccountPaths(accountId, env),
-  ];
-  const candidates = candidatePaths
-    .map((filePath) => {
-      const data = readJsonFile(filePath);
-      return data ? { ...data, sourcePath: filePath } : null;
-    })
-    .filter(Boolean);
-  const tokenCandidates = candidates
-    .filter((item) => typeof item.token === 'string' && item.token.trim())
-    .sort((left, right) => getAccountSavedAtMs(right) - getAccountSavedAtMs(left));
-  return tokenCandidates[0] || candidates[0] || null;
-}
-
-function writeJsonFile(filePath, payload, mode = 0o600) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
-  try {
-    fs.chmodSync(filePath, mode);
-  } catch {}
 }
 
 export function getOutboundServerConfig(env = process.env) {
@@ -271,10 +185,7 @@ export function resolveWeixinAccountConfig(env = process.env) {
   let accountId = outboundConfig.accountId.trim();
 
   if (!accountId) {
-    const indexedAccounts = readFirstJsonFile([
-      resolveAccountIndexPath(env),
-      ...resolveVendorAccountIndexPaths(env),
-    ]);
+    const indexedAccounts = readJsonFile(resolveAccountIndexPath(env));
     if (!Array.isArray(indexedAccounts) || indexedAccounts.length === 0) {
       throw new Error('没有可用的微信账号索引，请先运行 login');
     }
@@ -282,7 +193,7 @@ export function resolveWeixinAccountConfig(env = process.env) {
   }
 
   const normalizedAccountId = normalizeAccountId(accountId);
-  const accountData = readWeixinAccountData(normalizedAccountId, env);
+  const accountData = readJsonFile(resolveAccountPath(normalizedAccountId, env));
   if (!accountData || typeof accountData.token !== 'string' || !accountData.token.trim()) {
     throw new Error(`账号 ${normalizedAccountId} 未配置 token，请先运行 login`);
   }
@@ -297,42 +208,8 @@ export function resolveWeixinAccountConfig(env = process.env) {
       : 'https://ilinkai.weixin.qq.com',
     cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c',
     token: accountData.token.trim(),
-    tokenFingerprint: tokenFingerprint(accountData.token),
-    sourcePath: typeof accountData.sourcePath === 'string' ? accountData.sourcePath : '',
-    savedAt: typeof accountData.savedAt === 'string' ? accountData.savedAt : '',
     userId: accountData.userId.trim(),
   };
-}
-
-export function syncWeixinAccountConfigForVendorSdk(accountConfig, env = process.env) {
-  const accountId = normalizeAccountId(accountConfig?.accountId || '');
-  const token = String(accountConfig?.token || '').trim();
-  const userId = String(accountConfig?.userId || '').trim();
-  if (!accountId || !token || !userId) {
-    return;
-  }
-  const sourcePath = String(accountConfig?.sourcePath || '').trim()
-    ? path.resolve(String(accountConfig.sourcePath).trim())
-    : '';
-
-  const payload = {
-    token,
-    baseUrl: String(accountConfig.baseUrl || '').trim() || 'https://ilinkai.weixin.qq.com',
-    userId,
-    mirroredByNodeBridge: true,
-  };
-  if (typeof accountConfig.savedAt === 'string' && accountConfig.savedAt.trim()) {
-    payload.savedAt = accountConfig.savedAt.trim();
-  }
-  for (const indexPath of resolveVendorAccountIndexPaths(env)) {
-    writeJsonFile(indexPath, [accountId]);
-  }
-  for (const accountPath of resolveVendorAccountPaths(accountId, env)) {
-    if (sourcePath && path.resolve(accountPath) === sourcePath) {
-      continue;
-    }
-    writeJsonFile(accountPath, payload);
-  }
 }
 
 let weixinSdkPromise = null;

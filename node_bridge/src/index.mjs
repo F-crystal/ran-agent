@@ -10,7 +10,6 @@ import {
   createProactiveBot,
   getOutboundServerConfig,
   resolveWeixinAccountConfig,
-  syncWeixinAccountConfigForVendorSdk,
 } from './outboundServer.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import {
@@ -506,12 +505,7 @@ async function ensureWeixinAccountReady() {
   if (!forceLogin) {
     try {
       const existing = resolveWeixinAccountConfig(process.env);
-      syncWeixinAccountConfigForVendorSdk(existing, process.env);
-      console.log(
-        `[node-bridge] reusing existing weixin account accountId=${existing.accountId} `
-        + `source=${existing.sourcePath || '(unknown)'} savedAt=${existing.savedAt || '(none)'} `
-        + `tokenSha256=${existing.tokenFingerprint || '(none)'}`
-      );
+      console.log(`[node-bridge] reusing existing weixin account accountId=${existing.accountId}`);
       return existing;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -520,14 +514,7 @@ async function ensureWeixinAccountReady() {
   }
 
   await loginWithRetry();
-  const accountConfig = resolveWeixinAccountConfig(process.env);
-  syncWeixinAccountConfigForVendorSdk(accountConfig, process.env);
-  console.log(
-    `[node-bridge] login produced weixin account accountId=${accountConfig.accountId} `
-    + `source=${accountConfig.sourcePath || '(unknown)'} savedAt=${accountConfig.savedAt || '(none)'} `
-    + `tokenSha256=${accountConfig.tokenFingerprint || '(none)'}`
-  );
-  return accountConfig;
+  return resolveWeixinAccountConfig(process.env);
 }
 
 function resetSyncBufferIfNeeded(accountId) {
@@ -537,30 +524,10 @@ function resetSyncBufferIfNeeded(accountId) {
   }
   try {
     const stateDir = resolveStateDir(process.env);
-    const rawVendorStateDir = String(process.env.OPENCLAW_STATE_DIR || process.env.CLAWDBOT_STATE_DIR || '').trim();
-    const vendorStateDir = rawVendorStateDir
-      ? path.isAbsolute(rawVendorStateDir)
-        ? path.resolve(rawVendorStateDir)
-        : path.resolve(process.cwd(), rawVendorStateDir)
-      : '';
-    const candidateStateDirs = [
-      stateDir,
-      path.join(stateDir, '.openclaw_state'),
-      vendorStateDir,
-    ].filter(Boolean);
-    const syncPaths = [];
-    for (const dir of [...new Set(candidateStateDirs)]) {
-      syncPaths.push(
-        path.join(dir, 'ran-agent-weixin', 'accounts', `${accountId}.sync.json`),
-        path.join(dir, 'openclaw-weixin', 'accounts', `${accountId}.sync.json`),
-        path.join(dir, 'agents', 'default', 'sessions', '.openclaw-weixin-sync', 'default.json')
-      );
-    }
-    for (const syncPath of [...new Set(syncPaths)]) {
-      if (fs.existsSync(syncPath)) {
-        fs.rmSync(syncPath, { force: true });
-        console.log(`[node-bridge] reset stale weixin sync buffer file=${syncPath}`);
-      }
+    const syncPath = path.join(stateDir, 'openclaw-weixin', 'accounts', `${accountId}.sync.json`);
+    if (fs.existsSync(syncPath)) {
+      fs.rmSync(syncPath, { force: true });
+      console.log(`[node-bridge] reset stale weixin sync buffer file=${syncPath}`);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
