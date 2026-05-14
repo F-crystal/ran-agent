@@ -382,6 +382,17 @@ function buildTextResult(payload) {
   };
 }
 
+function wrapMcpResult(result) {
+  // Already an MCP result (has content array)
+  if (result && Array.isArray(result.content)) return result;
+  // Bare error object (ok: false)
+  if (result && result.ok === false) {
+    return buildErrorResult(result.message || result.error || 'unknown error', result);
+  }
+  // Bare success object
+  return buildTextResult(result);
+}
+
 function textFromMcpResult(result) {
   if (typeof result === 'string') {
     return result;
@@ -1873,19 +1884,24 @@ async function callTool(name, args = {}, options = {}) {
     return await checkSocialLogin(String(args.platform || ''), options);
   }
   if (name === 'xhs_browse_probe') {
-    return await xhsBrowseProbe(args, options);
+    const result = await xhsBrowseProbe(args, options);
+    return wrapMcpResult(result);
   }
   if (name === 'xhs_browse_search') {
-    return await xhsBrowseSearch(args, options);
+    const result = await xhsBrowseSearch(args, options);
+    return wrapMcpResult(result);
   }
   if (name === 'xhs_browse_note') {
-    return await xhsBrowseNote(args, options);
+    const result = await xhsBrowseNote(args, options);
+    return wrapMcpResult(result);
   }
   if (name === 'xhs_browse_user') {
-    return await xhsBrowseUser(args, options);
+    const result = await xhsBrowseUser(args, options);
+    return wrapMcpResult(result);
   }
   if (name === 'xhs_browse_feed') {
-    return await xhsBrowseFeed(args, options);
+    const result = await xhsBrowseFeed(args, options);
+    return wrapMcpResult(result);
   }
 
   return buildErrorResult(`unknown tool: ${name}`);

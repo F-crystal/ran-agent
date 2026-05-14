@@ -668,9 +668,6 @@ async function analyzeVideo(args = {}, options = {}) {
 }
 
 function searchMediaArtifacts(args = {}, options = {}) {
-  const fs = require('fs');
-  const path = require('path');
-
   const query = String(args.query || '').trim().toLowerCase();
   if (!query) return { ok: false, error: 'query is required', results: [] };
 
