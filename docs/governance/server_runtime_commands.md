@@ -479,6 +479,40 @@ journalctl -u ran-agent-hermes -n 80 --no-pager
 journalctl -u ran-agent-node -n 80 --no-pager
 ```
 
+## Fix DeepSeek Provider Key 500
+
+Use this when Node bridge logs show:
+
+- `Provider 'deepseek' is set in config.yaml but no API key was found`
+- `Set the DEEPSEEK_API_KEY environment variable`
+
+Short paste version. It prompts for the key without echoing it:
+
+```bash
+cd /opt/ran_agent
+
+read -rsp "DEEPSEEK_API_KEY: " DEEPSEEK_API_KEY
+echo
+export DEEPSEEK_API_KEY
+
+for F in /opt/ran_agent/.env.local /home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env; do
+  [ -f "$F" ] || touch "$F"
+  cp "$F" "$F.bak.$(date +%Y%m%d-%H%M%S)"
+  sed -i '/^DEEPSEEK_API_KEY=/d' "$F"
+  printf 'DEEPSEEK_API_KEY=%s\n' "$DEEPSEEK_API_KEY" >> "$F"
+  chmod 600 "$F"
+done
+
+grep -E '^DEEPSEEK_API_KEY=' /opt/ran_agent/.env.local /home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env | awk -F= '{print $1, length($2)}'
+
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl restart ran-agent-node.service
+
+journalctl -u ran-agent-hermes -n 80 --no-pager
+journalctl -u ran-agent-node -n 80 --no-pager
+```
+
 ## Port Occupied Recovery
 
 Use this when startup logs show:
