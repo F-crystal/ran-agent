@@ -1,6 +1,6 @@
 # MiMo Power MCP 配置文档
 
-Status: CURRENT (2026-05-13)
+Status: CURRENT (2026-05-15)
 
 ## 概述
 

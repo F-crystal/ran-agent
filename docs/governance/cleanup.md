@@ -1,6 +1,6 @@
 # Cleanup Scope
 
-Status: CURRENT (2026-05-14)
+Status: CURRENT (2026-05-15)
 
 ## Deleted (2026-04-13)
 

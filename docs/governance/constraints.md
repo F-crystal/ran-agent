@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-05-14)
+Status: CURRENT (2026-05-15)
 
 ## Split Of Responsibility
 
@@ -18,7 +18,7 @@ Status: CURRENT (2026-05-14)
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Proactive mainline: `scheduler -> life-loop skill -> orchestrator judgment -> front speaker -> Node bridge`
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
-- Kimi, GLM, and OpenClaw are retired as frontend primary/fallback candidates.
+- Kimi, GLM, and OpenClaw are retired. Hermes (DeepSeek V4) is the sole frontend.
 
 ## Specialist Boundaries
 

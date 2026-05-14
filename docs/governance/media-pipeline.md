@@ -1,6 +1,6 @@
 # Media Pipeline
 
-Status: CURRENT (2026-05-13)
+Status: CURRENT (2026-05-15)
 
 ## Full Pipeline
 
@@ -158,7 +158,7 @@ After success, preserve `WECHAT_MEDIA: {...}` line in reply for bridge consumpti
 
 Module: `node_bridge/src/contextPolicy.mjs`
 
-Status: CURRENT (2026-05-13)
+Status: CURRENT (2026-05-15)
 
 Compact media context injection to reduce prompt size while preserving persona and media awareness.
 

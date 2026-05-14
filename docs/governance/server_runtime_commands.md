@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-05-14)
+Status: CURRENT (2026-05-15)
 
 This is the pasteable server runbook for the real `/opt/ran_agent` runtime.
 It does not run Phase 5 smoke tests.
@@ -1185,16 +1185,27 @@ Node bridge selects gateway per request:
 - **User override**: "开 full / 全能力 / 调试模式" → full; "轻量 / 省 token" → lite
 - **Full unavailable**: fallback to lite with `fallback_reason=full_gateway_unavailable`
 
-### Config files
+### Runtime config files
 
-| File | Location | Purpose |
-|------|----------|---------|
-| Lite runtime config | `~/.hermes-ran-agent/lite/config.yaml` | Restricted toolsets, no terminal/file/playwright |
-| Lite profile config | `~/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml` | MCP servers for lite |
-| Full runtime config | `~/.hermes-ran-agent/config.yaml` | Full toolsets with terminal/file/playwright |
-| Full profile config | `~/.hermes-ran-agent/profiles/ran-assistant/config.yaml` | All MCP servers |
-| Lite env | `~/.hermes-ran-agent/lite/.env` | Secrets for lite gateway |
-| Full env | `~/.hermes-ran-agent/.env` | Secrets for full gateway |
+| File | Purpose |
+|------|---------|
+| `/etc/systemd/system/ran-agent-hermes.service.d/90-lite-runtime.conf` | Lite gateway systemd drop-in (HERMES_HOME=lite, profile=ran-assistant-lite, port 8642) |
+| `/etc/systemd/system/ran-agent-hermes-full.service` | Full gateway systemd service (HERMES_HOME=default, profile=ran-assistant, port 8643) |
+| `/home/ubuntu/.hermes-ran-agent/lite/config.yaml` | Lite runtime config (restricted toolsets) |
+| `/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml` | Lite profile MCP servers |
+| `/home/ubuntu/.hermes-ran-agent/lite/.env` | Lite gateway secrets |
+| `/home/ubuntu/.hermes-ran-agent/config.yaml` | Full runtime config (full toolsets) |
+| `/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/config.yaml` | Full profile MCP servers |
+| `/home/ubuntu/.hermes-ran-agent/.env` | Full gateway secrets |
+| `/opt/ran_agent/.env.local` | Node bridge env (HERMES_LITE_API_BASE_URL, HERMES_FULL_API_BASE_URL, RAN_AGENT_CAPABILITY_MODE) |
+
+### Verified runtime state (2026-05-15)
+
+- 8642 (lite): `ran-assistant-lite` profile, ~22644 prompt tokens
+- 8643 (full): `ran-assistant` profile, ~24331 prompt tokens
+- 8643 can invoke `/usr/bin/lark-cli` via terminal
+- Both exclude `vision_analyze`, `browser_vision`, `video_analyze`, `image_generate`, `text_to_speech`
+- Node auto-routes: chat/XHS/media/memory → 8642; debug/commands/lark-cli/playwright/media_generation → 8643
 
 ### Verified token counts
 
