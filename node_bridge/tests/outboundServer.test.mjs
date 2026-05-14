@@ -104,6 +104,47 @@ test('resolveWeixinAccountConfig reads nested legacy openclaw state after state-
   assert.equal(config.baseUrl, 'https://nested.weixin.test');
 });
 
+test('resolveWeixinAccountConfig prefers the newest saved token across migrated account paths', () => {
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
+  fs.mkdirSync(stateBaseDir, { recursive: true });
+  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-weixin-freshest-'));
+  const accountId = 'c253ec115e14-im-bot';
+  const ranAgentDir = path.join(tempStateDir, 'ran-agent-weixin', 'accounts');
+  const vendorDir = path.join(tempStateDir, 'openclaw-weixin', 'accounts');
+  fs.mkdirSync(ranAgentDir, { recursive: true });
+  fs.mkdirSync(vendorDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(tempStateDir, 'ran-agent-weixin', 'accounts.json'),
+    JSON.stringify([accountId]),
+    'utf-8'
+  );
+  fs.writeFileSync(
+    path.join(ranAgentDir, `${accountId}.json`),
+    JSON.stringify({
+      token: 'old-token',
+      userId: 'wechat-user',
+      baseUrl: 'https://old.weixin.test',
+      savedAt: '2026-05-14T10:00:00.000Z',
+    }),
+    'utf-8'
+  );
+  fs.writeFileSync(
+    path.join(vendorDir, `${accountId}.json`),
+    JSON.stringify({
+      token: 'fresh-token-from-manual-login',
+      userId: 'wechat-user',
+      baseUrl: 'https://fresh.weixin.test',
+      savedAt: '2026-05-14T13:00:00.000Z',
+    }),
+    'utf-8'
+  );
+
+  const config = resolveWeixinAccountConfig({ RAN_AGENT_STATE_DIR: tempStateDir });
+
+  assert.equal(config.token, 'fresh-token-from-manual-login');
+  assert.equal(config.baseUrl, 'https://fresh.weixin.test');
+});
+
 test('syncWeixinAccountConfigForVendorSdk writes account state to vendor path', () => {
   const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(stateBaseDir, { recursive: true });

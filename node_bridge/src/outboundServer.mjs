@@ -85,12 +85,20 @@ function readFirstJsonFile(filePaths) {
   return null;
 }
 
+function getAccountSavedAtMs(accountData) {
+  const savedAtMs = Date.parse(String(accountData?.savedAt || ''));
+  return Number.isFinite(savedAtMs) ? savedAtMs : 0;
+}
+
 function readWeixinAccountData(accountId, env = process.env) {
   const candidates = [
     readJsonFile(resolveAccountPath(accountId, env)),
     ...resolveVendorAccountPaths(accountId, env).map((filePath) => readJsonFile(filePath)),
   ].filter(Boolean);
-  return candidates.find((item) => typeof item.token === 'string' && item.token.trim()) || candidates[0] || null;
+  const tokenCandidates = candidates
+    .filter((item) => typeof item.token === 'string' && item.token.trim())
+    .sort((left, right) => getAccountSavedAtMs(right) - getAccountSavedAtMs(left));
+  return tokenCandidates[0] || candidates[0] || null;
 }
 
 function writeJsonFile(filePath, payload, mode = 0o600) {
