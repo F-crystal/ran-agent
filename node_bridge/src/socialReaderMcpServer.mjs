@@ -1577,6 +1577,15 @@ async function callMediaReaderTool(toolName, toolArguments = {}, options = {}) {
 async function readSocialPostDeep(args = {}, options = {}) {
   const extracted = extractFirstUrl(args.url || '');
   const detectedPlatform = detectSocialPlatform(extracted.url || args.url || '');
+  const debug = args.debug === true;
+  const env = options.env || process.env;
+
+  // XHS: two-path approach (detail + media independently)
+  if (detectedPlatform === 'xhs') {
+    return await readXhsPostDeep({ extracted, args, debug, env }, options);
+  }
+
+  // Non-XHS: original flow
   let socialResult = await readSocialPost(args, options);
   if (socialResult.structuredContent?.ok === false) {
     if (detectedPlatform === 'wechat_article') {
@@ -1587,7 +1596,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
         env: options.env,
       });
     }
-    if (['bilibili', 'xhs', 'wechat_article'].includes(detectedPlatform)) {
+    if (['bilibili', 'wechat_article'].includes(detectedPlatform)) {
       const platformResult = await callMediaReaderTool('resolve_platform_media', {
         url_or_text: args.url || '',
         platform: detectedPlatform,
@@ -1634,7 +1643,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
     warnings: [],
   };
   const mediaUrls = includeMedia ? extractMediaUrlsFromSocialPayload(social) : [];
-  const platformAsset = includeMedia && ['bilibili', 'xhs'].includes(social.platform || detectedPlatform)
+  const platformAsset = includeMedia && ['bilibili'].includes(social.platform || detectedPlatform)
     ? [{
       asset_id: 'platform-1',
       type: 'platform',
@@ -1688,6 +1697,246 @@ async function readSocialPostDeep(args = {}, options = {}) {
       ...(mediaAnalysis?.partial ? ['MEDIA_ANALYSIS_PARTIAL'] : []),
     ],
   });
+}
+
+// XHS two-path deep read: detail (structured text) + media (wanyi-watermark) independently
+async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
+  const url = extracted.url || args.url || '';
+  const resolved = { ...extractFirstUrl(url), resolved_url: '', canonical_url: '' };
+
+  // Resolve the URL first
+  const resolvedXhs = await resolveXhsShareUrl(url, options);
+  if (resolvedXhs.ok) {
+    resolved.resolved_url = resolvedXhs.resolved_url || '';
+    resolved.canonical_url = resolvedXhs.resolved_url || '';
+    resolved.note_id = resolvedXhs.note_id || '';
+    resolved.xsec_token = resolvedXhs.xsec_token || '';
+    resolved.xsec_source = resolvedXhs.xsec_source || '';
+  }
+
+  const noteId = resolved.note_id || '';
+  const cachedEntry = noteId ? getCachedXhsNoteToken(noteId, options) : null;
+  const hasCookie = Boolean(String(env.XHS_COOKIE || '').trim());
+
+  // Determine media URLs for wanyi fallback (priority: original short link > canonical > resolved)
+  const wanyiUrl = url || resolved.resolved_url || '';
+
+  // Run both paths in parallel
+  const [detailResult, mediaResult] = await Promise.allSettled([
+    // Path 1: Detail (structured text)
+    runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, args }, options),
+    // Path 2: Media (wanyi-watermark)
+    runXhsMediaPath({ wanyiUrl, resolved, env }, options),
+  ]);
+
+  const detail = detailResult.status === 'fulfilled' ? detailResult.value : { ok: false, error_code: 'DETAIL_EXCEPTION', message: String(detailResult.reason) };
+  const media = mediaResult.status === 'fulfilled' ? mediaResult.value : { ok: false, error_code: 'MEDIA_EXCEPTION', message: String(mediaResult.reason) };
+
+  const detailOk = detail?.ok === true;
+  const mediaOk = media?.ok === true;
+
+  // Build diagnostics
+  const diagnostics = {
+    detail_backend: {
+      name: detail?.source || 'unknown',
+      ok: detailOk,
+      error_code: detail?.error_code || '',
+      message: detail?.message || '',
+      raw_fields_seen: detail?.raw_fields_seen || {},
+      used_cached_token: detail?.used_cached_token || false,
+      used_canonical_url: detail?.used_canonical_url || false,
+    },
+    media_backend: {
+      name: 'wanyi-watermark',
+      ok: mediaOk,
+      error_code: media?.error_code || '',
+      message: media?.message || '',
+      media_count: normalizeXhsMedia(media).images.length + normalizeXhsMedia(media).videos.length,
+      raw_fields_seen: media?.raw_fields_seen || {},
+    },
+  };
+
+  if (debug) {
+    diagnostics.detail_raw_preview = detail ? sanitizeRawPreview(JSON.stringify(detail)) : '';
+    diagnostics.media_raw_preview = media ? sanitizeRawPreview(JSON.stringify(media)) : '';
+  }
+
+  const normalizedMedia = normalizeXhsMedia(media);
+
+  // Both failed
+  if (!detailOk && !mediaOk) {
+    return buildTextResult({
+      ok: false,
+      partial_success: false,
+      platform: 'xhs',
+      note_id: noteId,
+      url,
+      error_code: detail?.error_code || media?.error_code || 'XHS_DEEP_READ_FAILED',
+      message: `Detail: ${detail?.message || 'failed'}. Media: ${media?.message || 'failed'}.`,
+      images: [],
+      videos: [],
+      media: [],
+      diagnostics,
+    });
+  }
+
+  // Merge results
+  const title = detail?.title || detail?.note_title || media?.title || '';
+  const desc = detail?.desc || detail?.content || detail?.post_text || media?.desc || '';
+  const tags = detail?.tags || [];
+
+  return buildTextResult({
+    ok: true,
+    partial_success: !detailOk && mediaOk,
+    platform: 'xhs',
+    note_id: noteId,
+    url,
+    source: detailOk ? (detail?.source || 'xhs_browse') : 'wanyi-watermark',
+    title,
+    desc,
+    tags,
+    images: normalizedMedia.images,
+    videos: normalizedMedia.videos,
+    media: normalizedMedia.media,
+    post_text: detailOk ? (detail?.post_text || desc) : '',
+    comments_text: detail?.comments_text || '',
+    message: !detailOk && mediaOk ? '正文未完整获取，但媒体资源已获取' : undefined,
+    diagnostics,
+  });
+}
+
+// Detail path: try xhs_browse_note or jobson get_note_content
+async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, args }, options = {}) {
+  const noteId = resolved.note_id || '';
+  const xsecToken = cachedEntry?.xsecToken || resolved.xsec_token || '';
+  const canonicalUrl = cachedEntry?.canonical_url || resolved.canonical_url || '';
+
+  // Try xhs_browse_note first (uses cache)
+  if (noteId && xsecToken) {
+    try {
+      const browseResult = await xhsBrowseNote({
+        note_id: noteId,
+        include_images: false,
+      }, options);
+      if (browseResult?.ok === true || browseResult?.structuredContent?.ok === true) {
+        const data = browseResult.structuredContent || browseResult;
+        return {
+          ok: true,
+          source: 'xhs_browse',
+          title: data.title || '',
+          desc: data.content || data.desc || '',
+          post_text: data.content || data.desc || '',
+          tags: data.tags || [],
+          comments_text: data.comments_text || '',
+          used_cached_token: Boolean(cachedEntry?.xsecToken),
+          used_canonical_url: Boolean(cachedEntry?.canonical_url),
+          raw_fields_seen: extractRawFieldsSeen(data),
+        };
+      }
+    } catch (e) {
+      // Fall through to jobson
+    }
+  }
+
+  // Try jobson get_note_content with canonical URL
+  if (canonicalUrl || url) {
+    try {
+      const postResult = await callBackendMcpTool('xhs', 'get_note_content', { url: canonicalUrl || url }, options);
+      const postText = textFromMcpResult(postResult);
+      const postTextError = xhsBackendTextError(postText, 'get_note_content');
+      if (!postTextError) {
+        return {
+          ok: true,
+          source: 'jobson-xhs-mcp',
+          post_text: postText,
+          desc: postText,
+          used_cached_token: Boolean(cachedEntry?.xsecToken),
+          used_canonical_url: Boolean(canonicalUrl),
+          raw_fields_seen: { desc: Boolean(postText) },
+        };
+      }
+      return { ok: false, error_code: postTextError.error_code, message: postTextError.message, source: 'jobson-xhs-mcp' };
+    } catch (e) {
+      return { ok: false, error_code: 'XHS_BACKEND_EXCEPTION', message: e instanceof Error ? e.message : String(e), source: 'jobson-xhs-mcp' };
+    }
+  }
+
+  return { ok: false, error_code: 'XHS_NO_DETAIL_SOURCE', message: 'No note_id or URL for detail path' };
+}
+
+// Media path: wanyi-watermark generic parser (independent of detail)
+async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
+  // Priority: original short link > canonical URL
+  const urls = [wanyiUrl, resolved?.canonical_url, resolved?.resolved_url].filter(Boolean);
+  const uniqueUrls = [...new Set(urls)];
+
+  for (const tryUrl of uniqueUrls) {
+    try {
+      const result = await readGenericSocialPost({
+        url: tryUrl,
+        platform: 'xhs',
+        includeComments: false,
+        maxComments: 0,
+      }, options);
+      if (result?.structuredContent?.ok === true) {
+        const data = result.structuredContent;
+        return {
+          ok: true,
+          source: 'wanyi-watermark',
+          title: data.title || '',
+          desc: data.post_text || '',
+          images: Array.isArray(data.images) ? data.images : [],
+          videos: Array.isArray(data.videos) ? data.videos : [],
+          media: Array.isArray(data.media) ? data.media : [],
+          raw_fields_seen: extractRawFieldsSeen(data),
+        };
+      }
+    } catch {
+      // Try next URL
+    }
+  }
+
+  return { ok: false, error_code: 'WANYI_MEDIA_FAILED', message: 'wanyi-watermark failed for all URL variants' };
+}
+
+// Normalize wanyi media output to standard format
+function normalizeXhsMedia(mediaResult) {
+  if (!mediaResult || mediaResult.ok === false) return { images: [], videos: [], media: [] };
+
+  const images = [];
+  const videos = [];
+  const media = [];
+
+  // Collect from various field names
+  const rawImages = mediaResult.images || mediaResult.image_urls || [];
+  const rawVideos = mediaResult.videos || mediaResult.video_url ? [mediaResult.video_url] : (mediaResult.video ? [mediaResult.video] : []);
+  const rawMedia = mediaResult.media || mediaResult.medias || mediaResult.files || mediaResult.resources || [];
+
+  for (const img of rawImages) {
+    if (typeof img === 'string' && img.trim()) {
+      images.push({ type: 'image', url: img.trim(), source_backend: 'wanyi-watermark' });
+    } else if (img && typeof img === 'object' && img.url) {
+      images.push({ type: 'image', url: img.url, thumbnail: img.thumbnail || '', width: img.width || 0, height: img.height || 0, source_backend: 'wanyi-watermark' });
+    }
+  }
+
+  for (const vid of rawVideos) {
+    if (typeof vid === 'string' && vid.trim()) {
+      videos.push({ type: 'video', url: vid.trim(), source_backend: 'wanyi-watermark' });
+    } else if (vid && typeof vid === 'object' && vid.url) {
+      videos.push({ type: 'video', url: vid.url, thumbnail: vid.thumbnail || '', source_backend: 'wanyi-watermark' });
+    }
+  }
+
+  for (const item of rawMedia) {
+    if (typeof item === 'string' && item.trim()) {
+      media.push({ type: 'media', url: item.trim(), source_backend: 'wanyi-watermark' });
+    } else if (item && typeof item === 'object' && item.url) {
+      media.push({ type: item.type || 'media', url: item.url, thumbnail: item.thumbnail || '', source_backend: 'wanyi-watermark' });
+    }
+  }
+
+  return { images, videos, media };
 }
 
 function xhsCookieDiagnostics(env) {
