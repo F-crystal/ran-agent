@@ -156,10 +156,55 @@ runtime is already replying, but it means Hermes has no explicit user allowlist.
 Only set `GATEWAY_ALLOW_ALL_USERS=true` when the gateway is bound to localhost
 and the bridge is the trusted ingress.
 
-Paste this on the server to fix the systemd timeout warning:
+Paste this on the server to fix the systemd timeout warning. This rewrites the
+Hermes unit so the effective systemd property is no longer `90s`.
 
 ```bash
 cd /opt/ran_agent
+
+sudo tee /etc/systemd/system/ran-agent-hermes.service >/dev/null <<'EOF'
+[Unit]
+Description=Ran Agent Hermes Gateway
+After=network-online.target ran-agent-python.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/ran_agent
+EnvironmentFile=-/opt/ran_agent/.env.local
+EnvironmentFile=-/opt/ran_agent/node_bridge/.env.local
+EnvironmentFile=-/home/ubuntu/.hermes/.env
+EnvironmentFile=-/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
+Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
+Environment=HERMES_PROFILE=ran-assistant
+Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+Environment=API_SERVER_ENABLED=true
+Environment=API_SERVER_HOST=127.0.0.1
+Environment=API_SERVER_PORT=8642
+Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+Environment=HERMES_REPLY_MODE=api
+Environment=HERMES_REPLY_TIMEOUT_SECONDS=180
+Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
+Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
+Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
+Environment=HF_ENDPOINT=https://hf-mirror.com
+Environment=HF_HOME=/home/ubuntu/.hermes-ran-agent/hf-home
+Environment=TRANSFORMERS_CACHE=/home/ubuntu/.hermes-ran-agent/hf-home
+Environment=SENTENCE_TRANSFORMERS_HOME=/home/ubuntu/.hermes-ran-agent/sentence-transformers
+Environment=OBSIDIAN_MEMORY_VAULT_DIR=/opt/ran_agent/vault
+Environment=OBSIDIAN_MEMORY_INDEX_PATH=/opt/ran_agent/data/obsidian-memory-index.duckdb
+Environment=OBSIDIAN_INDEX_DEVICE=cpu
+Environment=OBSIDIAN_MEMORY_REINDEX=0
+Environment=OBSIDIAN_MEMORY_WATCH=0
+ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p ran-assistant gateway run --replace --accept-hooks'
+Restart=always
+RestartSec=5
+TimeoutStopSec=240
+
+[Install]
+WantedBy=multi-user.target
+EOF
 
 sudo mkdir -p /etc/systemd/system/ran-agent-hermes.service.d
 sudo tee /etc/systemd/system/ran-agent-hermes.service.d/20-timeout.conf >/dev/null <<'EOF'
@@ -168,6 +213,7 @@ TimeoutStopSec=240
 EOF
 
 sudo systemctl daemon-reload
+sudo systemctl show ran-agent-hermes.service -p TimeoutStopUSec --no-pager
 sudo systemctl restart ran-agent-hermes.service
 sleep 5
 sudo systemctl restart ran-agent-node.service
@@ -177,7 +223,8 @@ sudo journalctl -u ran-agent-hermes -n 80 --no-pager
 ```
 
 Optional: paste this only if this server should trust the local bridge as the
-user gate and suppress the allowlist warning:
+user gate and suppress the allowlist warning. This writes both Hermes env
+locations because the gateway warning refers to `/home/ubuntu/.hermes/.env`.
 
 ```bash
 cd /opt/ran_agent
@@ -185,14 +232,21 @@ cd /opt/ran_agent
 export HERMES_PROFILE=ran-assistant
 export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
 PROFILE_ENV="$HERMES_HOME/profiles/$HERMES_PROFILE/.env"
+GLOBAL_ENV=/home/ubuntu/.hermes/.env
 
-mkdir -p "$(dirname "$PROFILE_ENV")"
+mkdir -p "$(dirname "$PROFILE_ENV")" "$(dirname "$GLOBAL_ENV")"
 touch "$PROFILE_ENV"
+touch "$GLOBAL_ENV"
 chmod 600 "$PROFILE_ENV"
+chmod 600 "$GLOBAL_ENV"
 sed -i '/^GATEWAY_ALLOW_ALL_USERS=/d' "$PROFILE_ENV"
+sed -i '/^GATEWAY_ALLOW_ALL_USERS=/d' "$GLOBAL_ENV"
 printf 'GATEWAY_ALLOW_ALL_USERS=true\n' >> "$PROFILE_ENV"
+printf 'GATEWAY_ALLOW_ALL_USERS=true\n' >> "$GLOBAL_ENV"
 chmod 600 "$PROFILE_ENV"
+chmod 600 "$GLOBAL_ENV"
 
+sudo systemctl daemon-reload
 sudo systemctl restart ran-agent-hermes.service
 sleep 5
 sudo systemctl restart ran-agent-node.service
@@ -244,6 +298,8 @@ User=ubuntu
 WorkingDirectory=/opt/ran_agent
 EnvironmentFile=-/opt/ran_agent/.env.local
 EnvironmentFile=-/opt/ran_agent/node_bridge/.env.local
+EnvironmentFile=-/home/ubuntu/.hermes/.env
+EnvironmentFile=-/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
 Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
 Environment=HERMES_PROFILE=ran-assistant
 Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent
