@@ -1113,3 +1113,24 @@ Fix: Already resolved — removed `require('fs')` and `require('path')` from
 - Cookie/IP issues are **external platform problems**, not ran-agent bugs.
 - `web_extract` failing on XHS links is **expected** — XHS blocks non-browser
   requests. Always use `social_reader` for XHS.
+
+### XHS deep read two-path fallback
+
+`read_social_post_deep` for XHS uses two independent paths:
+
+1. **Detail path** (`xhs_browse_note` / `get_note_content`): extracts structured
+   text — title, description, tags, comments. May require cookie + xsec_token.
+2. **Media path** (`wanyi-watermark`): extracts images, videos, media URLs.
+   Uses the original xhslink short link or canonical_url. May not require cookie.
+
+The two paths run in parallel. Results are merged:
+- Both fail → `ok: false` with diagnostics for both paths
+- Detail fails, media succeeds → `ok: true`, `partial_success: true`
+- Detail succeeds, media fails → `ok: true` with detail text only
+- Both succeed → full result with text + media
+
+"正文失败"不代表"媒体失败". If `diagnostics.detail_backend.ok` is false but
+`diagnostics.media_backend.ok` is true, the result still contains images/videos.
+
+Check `diagnostics.detail_backend.error_code` and
+`diagnostics.media_backend.error_code` separately to understand which path failed.
