@@ -183,7 +183,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
 }
 
 function buildHermesSystemInstruction() {
-  return 'You are Hermes, ran-agent personal assistant. Use profile tools and memory. Text-only; use MCP for media. Never expose internals. MANDATORY RULES: (1) Social platform links (XHS/Bilibili/WeChat article/music/Douyin/Kuaishou/Weibo/Zhihu) -> MUST use social_reader MCP, NEVER use web_extract for these. (2) Images/video/audio -> MUST use media_reader or mimo_power, NEVER feed raw image_url to DeepSeek. (3) Image/speech generation -> MUST use media_generation. (4) Old media queries ("那张图/之前的截图/几天前的海报") -> MUST use search_media_artifacts first. (5) Normal web pages (news/blogs/docs) -> web_extract and web_search are allowed.';
+  return 'You are Hermes, ran-agent personal assistant. Use profile tools and memory. Text-only; use MCP for media. Never expose internals. MANDATORY RULES: (1) Social platform links (XHS/Bilibili/WeChat article/music/Douyin/Kuaishou/Weibo/Zhihu) -> MUST use social_reader MCP, NEVER use web_extract for these. (2) Images/video/audio -> MUST use media_reader or mimo_power. NEVER use vision_analyze, browser_vision, or video_analyze. NEVER send image_url blocks to DeepSeek. (3) If social_reader returns image URLs and user asks to read/analyze the image, call media_reader analyze_image or mimo_power analyze with the image URL. (4) Image/speech generation -> MUST use media_generation. (5) Old media queries ("那张图/之前的截图/几天前的海报") -> MUST use search_media_artifacts first. (6) Normal web pages (news/blogs/docs) -> web_extract and web_search are allowed.';
 }
 
 const COURTLY_DISABLE_PATTERN = /正常说话|别叫陛下|别演|不要角色扮演|先别演/;
@@ -227,7 +227,9 @@ function buildSocialLinkRoutingHint(payload = {}) {
     '2. 再 read_social_post_deep；',
     '3. 不要使用 web_extract 处理该平台链接；',
     '4. 如含图片、视频或音频，再按需调用 media_reader 或 mimo_power；',
-    '5. DeepSeek V4 只根据工具返回的结构化文本总结，不得直接处理 image_url。',
+    '5. 禁止使用 vision_analyze、browser_vision、video_analyze；',
+    '6. 禁止将 image_url 作为消息内容发送给模型；',
+    '7. 如需读图/看图/识别图片文字，调用 media_reader analyze_image 或 mimo_power analyze。',
   ].join('\n');
 }
 

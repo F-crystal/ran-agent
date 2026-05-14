@@ -1842,6 +1842,7 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     comments_text: detail?.comments_text || '',
     message: !detailOk && mediaOk ? '正文未完整获取，但媒体资源已获取' : undefined,
     media_count: mediaCount,
+    vision_hint: mediaCount > 0 ? '如需分析图片/视频内容，使用 media_reader analyze_image 或 mimo_power analyze，不要使用 vision_analyze' : undefined,
     diagnostics,
   });
 }
