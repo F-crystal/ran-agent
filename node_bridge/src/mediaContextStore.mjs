@@ -188,6 +188,18 @@ function loadConversationState(conversationId, env) {
 }
 
 function saveConversationState(state, env) {
+  // Prune expired artifacts before saving
+  const now = Date.now();
+  if (Array.isArray(state.artifacts)) {
+    state.artifacts = state.artifacts.filter((artifact) => {
+      if (artifact.ok === false) return false;
+      if (artifact.created_at) {
+        const createdMs = Date.parse(artifact.created_at);
+        if (Number.isFinite(createdMs) && (now - createdMs) > ARTIFACT_TTL_MS) return false;
+      }
+      return true;
+    });
+  }
   writeJson(conversationStatePath(state.conversation_id, env), {
     ...state,
     updated_at: new Date().toISOString(),
@@ -423,9 +435,22 @@ function findReusableArtifact(state, asset) {
     .find((artifact) => artifact.media_id === asset.id && artifact.ok !== false);
 }
 
+const ARTIFACT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 function latestArtifacts(state, limit = MAX_RENDERED_ARTIFACTS) {
+  const now = Date.now();
   return [...state.artifacts]
-    .filter((artifact) => artifact.ok !== false)
+    .filter((artifact) => {
+      if (artifact.ok === false) return false;
+      // Time-based expiration: discard artifacts older than TTL
+      if (artifact.created_at) {
+        const createdMs = Date.parse(artifact.created_at);
+        if (Number.isFinite(createdMs) && (now - createdMs) > ARTIFACT_TTL_MS) {
+          return false;
+        }
+      }
+      return true;
+    })
     .slice(-limit)
     .reverse();
 }

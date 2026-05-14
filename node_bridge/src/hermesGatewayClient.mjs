@@ -154,9 +154,11 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     || (Array.isArray(payload.image_urls) && payload.image_urls.some((u) => typeof u === 'string' && u.trim()))
     || (Array.isArray(mediaContext.artifacts) && mediaContext.artifacts.length > 0);
   const courtlyAnchor = buildCourtlyStyleAnchor(payload);
+  const socialRoutingHint = buildSocialLinkRoutingHint(payload);
   const message = [
     buildBridgeTemporalUserContext(payload),
     courtlyAnchor,
+    socialRoutingHint,
     hasMedia ? buildHermesMediaGenerationInstruction() : '',
     buildHermesInboundMediaInstruction(payload),
     mediaContextText,
@@ -193,6 +195,14 @@ function shouldDisableCourtlyStyle(text) {
 
 function shouldForceCourtlyStyle(text) {
   return COURTLY_FORCE_PATTERN.test(String(text || ''));
+}
+
+const SOCIAL_LINK_PATTERN = /xhslink\.com|xiaohongshu\.com|xhs\.com|bilibili\.com|b23\.tv|mp\.weixin\.qq\.com|douyin\.com|163\.com\/music|music\.163\.com/i;
+
+function buildSocialLinkRoutingHint(payload = {}) {
+  const text = String(payload.text || '');
+  if (!SOCIAL_LINK_PATTERN.test(text)) return '';
+  return '【路由提示】消息含社媒链接，必须使用 social_reader MCP 工具读取，不要使用 web_extract 或 browser_navigate。';
 }
 
 export function buildCourtlyStyleAnchor(payload = {}) {
