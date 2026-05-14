@@ -750,3 +750,141 @@ Force Hermes mode in `node_bridge/.env.local`:
 cd /opt/ran_agent
 printf '\nNODE_BRIDGE_REPLY_BACKEND=hermes\nHERMES_API_BASE_URL=http://127.0.0.1:8642/v1\nHERMES_REPLY_MODE=api\nPYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787\nPYTHON_BACKEND_INGEST_TIMEOUT_MS=5000\nPERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000\n' >> node_bridge/.env.local
 ```
+
+## Fix Hermes DeepSeek model empty error
+
+Use this when Hermes gateway logs show:
+
+- `provider=deepseek ... model=`
+- `The supported API model names are deepseek-v4-pro or deepseek-v4-flash, but you passed .`
+
+Root cause:
+
+Hermes gateway does not only rely on the installable profile config at:
+
+```bash
+/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/config.yaml
+```
+
+For the real server runtime, the main Hermes config must also exist at:
+
+```bash
+/home/ubuntu/.hermes-ran-agent/config.yaml
+```
+
+Required runtime config:
+
+```yaml
+model:
+  provider: deepseek
+  default: deepseek-v4-flash
+  base_url: https://api.deepseek.com/v1
+  api_mode: chat_completions
+```
+
+Required env:
+
+```bash
+DEEPSEEK_API_KEY=...
+```
+
+Do not set:
+
+```bash
+OPENAI_BASE_URL=https://api.deepseek.com/v1
+```
+
+together with:
+
+```yaml
+model:
+  provider: deepseek
+```
+
+Otherwise Hermes may warn:
+
+```text
+OPENAI_BASE_URL is set (https://api.deepseek.com/v1) but model.provider is 'deepseek'. Auxiliary clients may route to the wrong endpoint.
+```
+
+Paste this on the server to repair the config:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+mkdir -p "$HERMES_HOME"
+
+[ -f "$HERMES_HOME/config.yaml" ] && cp -p "$HERMES_HOME/config.yaml" "$HERMES_HOME/config.yaml.bak.$(date +%Y%m%d-%H%M%S)"
+[ -f "$HERMES_HOME/.env" ] && cp -p "$HERMES_HOME/.env" "$HERMES_HOME/.env.bak.$(date +%Y%m%d-%H%M%S)"
+
+cat > "$HERMES_HOME/config.yaml" <<'YAML'
+model:
+  provider: deepseek
+  default: deepseek-v4-flash
+  base_url: https://api.deepseek.com/v1
+  api_mode: chat_completions
+YAML
+
+chmod 600 "$HERMES_HOME/config.yaml"
+
+touch "$HERMES_HOME/.env"
+chmod 600 "$HERMES_HOME/.env"
+
+DS_KEY="$(grep -E '^DEEPSEEK_API_KEY=' /opt/ran_agent/.env.local | tail -n 1 | cut -d= -f2-)"
+if [ -z "$DS_KEY" ]; then
+  DS_KEY="$(grep -E '^DEEPSEEK_API_KEY=' /home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env | tail -n 1 | cut -d= -f2-)"
+fi
+
+if [ -z "$DS_KEY" ]; then
+  read -rsp "DEEPSEEK_API_KEY: " DS_KEY
+  echo
+fi
+
+for K in DEEPSEEK_API_KEY OPENAI_API_KEY OPENAI_BASE_URL OPENAI_MODEL; do
+  sed -i "/^${K}=/d" "$HERMES_HOME/.env"
+done
+
+printf 'DEEPSEEK_API_KEY=%s\n' "$DS_KEY" >> "$HERMES_HOME/.env"
+chmod 600 "$HERMES_HOME/.env"
+
+sudo systemctl daemon-reload
+sudo systemctl restart ran-agent-hermes.service
+sleep 8
+sudo systemctl restart ran-agent-node.service
+sleep 3
+```
+
+Smoke test:
+
+```bash
+PROFILE_ENV=/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
+KEY="$(grep -E '^(HERMES_API_KEY|API_SERVER_KEY)=' "$PROFILE_ENV" | tail -n 1 | cut -d= -f2-)"
+
+curl -sS \
+  -o /tmp/hermes-smoke.json \
+  -w 'HTTP %{http_code}\n' \
+  -H "Authorization: Bearer $KEY" \
+  -H "Content-Type: application/json" \
+  http://127.0.0.1:8642/v1/chat/completions \
+  -d '{"model":"ran-assistant","messages":[{"role":"user","content":"只回复 OK"}],"max_tokens":32}'
+
+python3 - <<'PY'
+from pathlib import Path
+print(Path("/tmp/hermes-smoke.json").read_text(errors="ignore")[:1000])
+PY
+```
+
+Expected result:
+
+```text
+HTTP 200
+```
+
+A successful response may look like:
+
+```json
+{"choices":[{"message":{"role":"assistant","content":"OK"}}]}
+```
+
