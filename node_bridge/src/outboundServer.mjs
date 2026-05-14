@@ -27,8 +27,16 @@ function resolveAccountIndexPath(env = process.env) {
   return path.join(resolveStateDir(env), 'ran-agent-weixin', 'accounts.json');
 }
 
+function resolveCompatAccountIndexPath(env = process.env) {
+  return path.join(resolveStateDir(env), 'openclaw-weixin', 'accounts.json');
+}
+
 function resolveAccountPath(accountId, env = process.env) {
   return path.join(resolveStateDir(env), 'ran-agent-weixin', 'accounts', `${accountId}.json`);
+}
+
+function resolveCompatAccountPath(accountId, env = process.env) {
+  return path.join(resolveStateDir(env), 'openclaw-weixin', 'accounts', `${accountId}.json`);
 }
 
 function readJsonFile(filePath) {
@@ -36,6 +44,24 @@ function readJsonFile(filePath) {
     return null;
   }
   return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+}
+
+function readFirstJsonFile(filePaths) {
+  for (const filePath of filePaths) {
+    const payload = readJsonFile(filePath);
+    if (payload !== null) {
+      return payload;
+    }
+  }
+  return null;
+}
+
+function readWeixinAccountData(accountId, env = process.env) {
+  const candidates = [
+    readJsonFile(resolveAccountPath(accountId, env)),
+    readJsonFile(resolveCompatAccountPath(accountId, env)),
+  ].filter(Boolean);
+  return candidates.find((item) => typeof item.token === 'string' && item.token.trim()) || candidates[0] || null;
 }
 
 export function getOutboundServerConfig(env = process.env) {
@@ -185,7 +211,10 @@ export function resolveWeixinAccountConfig(env = process.env) {
   let accountId = outboundConfig.accountId.trim();
 
   if (!accountId) {
-    const indexedAccounts = readJsonFile(resolveAccountIndexPath(env));
+    const indexedAccounts = readFirstJsonFile([
+      resolveAccountIndexPath(env),
+      resolveCompatAccountIndexPath(env),
+    ]);
     if (!Array.isArray(indexedAccounts) || indexedAccounts.length === 0) {
       throw new Error('没有可用的微信账号索引，请先运行 login');
     }
@@ -193,7 +222,7 @@ export function resolveWeixinAccountConfig(env = process.env) {
   }
 
   const normalizedAccountId = normalizeAccountId(accountId);
-  const accountData = readJsonFile(resolveAccountPath(normalizedAccountId, env));
+  const accountData = readWeixinAccountData(normalizedAccountId, env);
   if (!accountData || typeof accountData.token !== 'string' || !accountData.token.trim()) {
     throw new Error(`账号 ${normalizedAccountId} 未配置 token，请先运行 login`);
   }

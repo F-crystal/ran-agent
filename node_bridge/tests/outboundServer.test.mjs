@@ -3,7 +3,12 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { getOutboundServerConfig, handleOutboundRequest, resolveStateDir } from '../src/outboundServer.mjs';
+import {
+  getOutboundServerConfig,
+  handleOutboundRequest,
+  resolveStateDir,
+  resolveWeixinAccountConfig,
+} from '../src/outboundServer.mjs';
 import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
@@ -35,6 +40,36 @@ test('getOutboundServerConfig reads host and port from environment', () => {
   assert.equal(config.host, '127.0.0.2');
   assert.equal(config.port, 9901);
   assert.equal(config.accountId, 'personal_agent');
+});
+
+test('resolveWeixinAccountConfig reads vendor login state from openclaw-weixin path', () => {
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
+  fs.mkdirSync(stateBaseDir, { recursive: true });
+  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-weixin-'));
+  const accountId = 'c253ec115e14-im-bot';
+  const accountsDir = path.join(tempStateDir, 'openclaw-weixin', 'accounts');
+  fs.mkdirSync(accountsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(tempStateDir, 'openclaw-weixin', 'accounts.json'),
+    JSON.stringify([accountId]),
+    'utf-8'
+  );
+  fs.writeFileSync(
+    path.join(accountsDir, `${accountId}.json`),
+    JSON.stringify({
+      token: 'token-from-vendor-login',
+      userId: 'wechat-user',
+      baseUrl: 'https://example.weixin.test',
+    }),
+    'utf-8'
+  );
+
+  const config = resolveWeixinAccountConfig({ RAN_AGENT_STATE_DIR: tempStateDir });
+
+  assert.equal(config.accountId, accountId);
+  assert.equal(config.token, 'token-from-vendor-login');
+  assert.equal(config.userId, 'wechat-user');
+  assert.equal(config.baseUrl, 'https://example.weixin.test');
 });
 
 test('handleOutboundRequest sends proactive message through bot', async () => {
