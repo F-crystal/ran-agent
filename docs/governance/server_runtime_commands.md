@@ -264,7 +264,46 @@ Use this when Node bridge logs show:
 This block does not print secret values. It only prints whether keys are set,
 their length, and a short hash prefix.
 
-Paste this on the server:
+Short paste version:
+
+```bash
+cd /opt/ran_agent
+
+P=/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
+R=/opt/ran_agent/.env.local
+
+AK="$(grep '^API_SERVER_KEY=' "$P" | tail -1 | cut -d= -f2-)"
+HK="$(grep '^HERMES_API_KEY=' "$P" | tail -1 | cut -d= -f2-)"
+
+cp "$R" "$R.bak.$(date +%Y%m%d-%H%M%S)"
+
+for K in NODE_BRIDGE_REPLY_BACKEND HERMES_HOME HERMES_PROFILE HERMES_API_BASE_URL API_SERVER_ENABLED API_SERVER_HOST API_SERVER_PORT API_SERVER_KEY HERMES_API_KEY HERMES_REPLY_MODE; do
+  sed -i "/^$K=/d" "$R"
+done
+
+cat >> "$R" <<EOF
+NODE_BRIDGE_REPLY_BACKEND=hermes
+HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+HERMES_PROFILE=ran-assistant
+HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+API_SERVER_ENABLED=true
+API_SERVER_HOST=127.0.0.1
+API_SERVER_PORT=8642
+API_SERVER_KEY=$AK
+HERMES_API_KEY=$HK
+HERMES_REPLY_MODE=api
+EOF
+
+chmod 600 "$R"
+
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl restart ran-agent-node.service
+
+grep -E '^(API_SERVER_KEY|HERMES_API_KEY)=' /opt/ran_agent/.env.local /home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env | awk -F= '{print $1, length($2)}'
+```
+
+Detailed inventory and repair version:
 
 ```bash
 cd /opt/ran_agent
