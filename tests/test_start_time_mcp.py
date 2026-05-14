@@ -334,7 +334,7 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
             "OBSIDIAN_MEMORY_OBSIDIAN_INDEX_LAUNCHER",
             "OBSIDIAN_MEMORY_REINDEX",
             "OBSIDIAN_MEMORY_WATCH",
-            "OBSIDIAN_MEMORY_UV_BIN",
+            "OBSIDIAN_MEMORY_UVX_BIN",
             "OBSIDIAN_INDEX_DEVICE",
         ):
             if key in env:
@@ -378,7 +378,7 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
             logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--from iflow-mcp-tcsavage-obsidian-index python", logged_argv)
+        self.assertIn("--with iflow-mcp-tcsavage-obsidian-index python", logged_argv)
         self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", logged_argv)
         self.assertIn(f"--vault {temp_path / 'vault'}", logged_argv)
         self.assertIn(f"--database {temp_path / 'data' / 'obsidian-memory-index.duckdb'}", logged_argv)
@@ -419,12 +419,12 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
         self.assertIn("--watch", logged_argv)
         self.assertIn("device=cuda", logged_argv)
 
-    def test_obsidian_index_prefers_uv_run_when_uv_is_available(self) -> None:
+    def test_obsidian_index_uses_configurable_uvx_binary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             log_path = temp_path / "argv.log"
-            fake_uv = temp_path / "uv"
-            fake_uv.write_text(
+            fake_uvx = temp_path / "custom-uvx"
+            fake_uvx.write_text(
                 textwrap.dedent(
                     f"""\
                     #!/bin/sh
@@ -434,13 +434,13 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            fake_uv.chmod(0o755)
+            fake_uvx.chmod(0o755)
 
-            result = self.run_script({"PATH": temp_dir})
+            result = self.run_script({"PATH": temp_dir, "OBSIDIAN_MEMORY_UVX_BIN": str(fake_uvx)})
             logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("run --no-project --with iflow-mcp-tcsavage-obsidian-index python", logged_argv)
+        self.assertIn("--with iflow-mcp-tcsavage-obsidian-index python", logged_argv)
         self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", logged_argv)
 
 

@@ -34,7 +34,7 @@ OBSIDIAN_INDEX_PACKAGE="${OBSIDIAN_MEMORY_OBSIDIAN_INDEX_PACKAGE:-iflow-mcp-tcsa
 OBSIDIAN_INDEX_LAUNCHER="${OBSIDIAN_MEMORY_OBSIDIAN_INDEX_LAUNCHER:-$ROOT_DIR/scripts/obsidian_index_mcp_launcher.py}"
 OBSIDIAN_MEMORY_REINDEX="${OBSIDIAN_MEMORY_REINDEX:-0}"
 OBSIDIAN_MEMORY_WATCH="${OBSIDIAN_MEMORY_WATCH:-0}"
-OBSIDIAN_MEMORY_UV_BIN="${OBSIDIAN_MEMORY_UV_BIN:-uv}"
+OBSIDIAN_MEMORY_UVX_BIN="${OBSIDIAN_MEMORY_UVX_BIN:-uvx}"
 export OBSIDIAN_INDEX_DEVICE="${OBSIDIAN_INDEX_DEVICE:-cpu}"
 
 mkdir -p "$(dirname "$INDEX_PATH")"
@@ -52,33 +52,20 @@ fi
 
 case "$PROVIDER" in
   obsidian-index)
-    if command -v "$OBSIDIAN_MEMORY_UV_BIN" >/dev/null 2>&1; then
-      ARGS=(
-        run --no-project
-        --with "$OBSIDIAN_INDEX_PACKAGE"
-        python "$OBSIDIAN_INDEX_LAUNCHER"
-        mcp
-        --vault "$VAULT_DIR"
-        --database "$INDEX_PATH"
-      )
-      RUNNER=("$OBSIDIAN_MEMORY_UV_BIN")
-    else
-      ARGS=(
-        --from "$OBSIDIAN_INDEX_PACKAGE"
-        python "$OBSIDIAN_INDEX_LAUNCHER"
-        mcp
-        --vault "$VAULT_DIR"
-        --database "$INDEX_PATH"
-      )
-      RUNNER=(uvx)
-    fi
+    ARGS=(
+      --with "$OBSIDIAN_INDEX_PACKAGE"
+      python "$OBSIDIAN_INDEX_LAUNCHER"
+      mcp
+      --vault "$VAULT_DIR"
+      --database "$INDEX_PATH"
+    )
     if [ "$OBSIDIAN_MEMORY_REINDEX" = "1" ] || [ "$OBSIDIAN_MEMORY_REINDEX" = "true" ]; then
       ARGS+=(--reindex)
     fi
     if [ "$OBSIDIAN_MEMORY_WATCH" = "1" ] || [ "$OBSIDIAN_MEMORY_WATCH" = "true" ]; then
       ARGS+=(--watch)
     fi
-    exec "${RUNNER[@]}" "${ARGS[@]}"
+    exec "$OBSIDIAN_MEMORY_UVX_BIN" "${ARGS[@]}"
     ;;
   mcpvault)
     exec npx -y @bitbonsai/mcpvault@latest "$VAULT_DIR"
