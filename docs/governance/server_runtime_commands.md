@@ -254,6 +254,192 @@ bash -c ':</dev/tcp/127.0.0.1/8642' && echo hermes_gateway_port_ok
 tail -n 120 logs/node-bridge.log
 ```
 
+## Fix Hermes API Key 401
+
+Use this when Node bridge logs show:
+
+- `reply backend failed: hermes api request failed: HTTP 401`
+- `Invalid API key`
+
+This block does not print secret values. It only prints whether keys are set,
+their length, and a short hash prefix.
+
+Paste this on the server:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+
+echo "== redacted key inventory before =="
+python3 - <<'PY'
+from pathlib import Path
+import hashlib
+
+files = [
+    Path("/opt/ran_agent/.env.local"),
+    Path("/opt/ran_agent/node_bridge/.env.local"),
+    Path("/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env"),
+]
+keys = ["API_SERVER_KEY", "HERMES_API_KEY", "DEEPSEEK_API_KEY"]
+
+for file_path in files:
+    print(f"\n== {file_path} ==")
+    if not file_path.exists():
+        print("missing")
+        continue
+    env = {}
+    for line in file_path.read_text(errors="ignore").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        env[key.strip()] = value.strip().strip('"').strip("'")
+    for key in keys:
+        value = env.get(key, "")
+        if value:
+            digest = hashlib.sha256(value.encode()).hexdigest()[:12]
+            print(f"{key}: SET len={len(value)} sha256={digest}")
+        else:
+            print(f"{key}: UNSET")
+PY
+
+PROFILE_ENV=/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
+ROOT_ENV=/opt/ran_agent/.env.local
+
+set -a
+[ -f "$PROFILE_ENV" ] && source "$PROFILE_ENV"
+set +a
+
+if [ -z "${API_SERVER_KEY:-}" ] && [ -n "${HERMES_API_KEY:-}" ]; then
+  API_SERVER_KEY="$HERMES_API_KEY"
+fi
+if [ -z "${HERMES_API_KEY:-}" ] && [ -n "${API_SERVER_KEY:-}" ]; then
+  HERMES_API_KEY="$API_SERVER_KEY"
+fi
+if [ -z "${API_SERVER_KEY:-}" ] || [ -z "${HERMES_API_KEY:-}" ]; then
+  API_SERVER_KEY="$(openssl rand -hex 24)"
+  HERMES_API_KEY="$API_SERVER_KEY"
+fi
+
+export API_SERVER_KEY
+export HERMES_API_KEY
+
+python3 - <<'PY'
+from pathlib import Path
+import os
+
+path = Path("/opt/ran_agent/.env.local")
+updates = {
+    "NODE_BRIDGE_REPLY_BACKEND": "hermes",
+    "HERMES_HOME": "/home/ubuntu/.hermes-ran-agent",
+    "HERMES_PROFILE": "ran-assistant",
+    "HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1",
+    "API_SERVER_ENABLED": "true",
+    "API_SERVER_HOST": "127.0.0.1",
+    "API_SERVER_PORT": "8642",
+    "API_SERVER_KEY": os.environ["API_SERVER_KEY"],
+    "HERMES_API_KEY": os.environ["HERMES_API_KEY"],
+    "HERMES_REPLY_MODE": "api",
+    "PYTHON_BACKEND_BASE_URL": "http://127.0.0.1:8787",
+    "PYTHON_BACKEND_INGEST_TIMEOUT_MS": "5000",
+    "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS": "5000",
+}
+
+lines = path.read_text(errors="ignore").splitlines() if path.exists() else []
+seen = set()
+out = []
+for line in lines:
+    stripped = line.strip()
+    if stripped and not stripped.startswith("#") and "=" in stripped:
+        key = stripped.split("=", 1)[0].strip()
+        if key in updates:
+            out.append(f"{key}={updates[key]}")
+            seen.add(key)
+            continue
+    out.append(line)
+
+if out and out[-1].strip():
+    out.append("")
+for key, value in updates.items():
+    if key not in seen:
+        out.append(f"{key}={value}")
+
+path.write_text("\n".join(out) + "\n")
+path.chmod(0o600)
+PY
+
+python3 - <<'PY'
+from pathlib import Path
+import os
+
+path = Path("/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env")
+updates = {
+    "RAN_AGENT_REPO_ROOT": "/opt/ran_agent",
+    "API_SERVER_KEY": os.environ["API_SERVER_KEY"],
+    "HERMES_API_KEY": os.environ["HERMES_API_KEY"],
+}
+
+lines = path.read_text(errors="ignore").splitlines() if path.exists() else []
+seen = set()
+out = []
+for line in lines:
+    stripped = line.strip()
+    if stripped and not stripped.startswith("#") and "=" in stripped:
+        key = stripped.split("=", 1)[0].strip()
+        if key in updates:
+            out.append(f"{key}={updates[key]}")
+            seen.add(key)
+            continue
+    out.append(line)
+
+if out and out[-1].strip():
+    out.append("")
+for key, value in updates.items():
+    if key not in seen:
+        out.append(f"{key}={value}")
+
+path.parent.mkdir(parents=True, exist_ok=True)
+path.write_text("\n".join(out) + "\n")
+path.chmod(0o600)
+PY
+
+echo "== redacted key inventory after =="
+python3 - <<'PY'
+from pathlib import Path
+import hashlib
+
+files = [
+    Path("/opt/ran_agent/.env.local"),
+    Path("/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env"),
+]
+keys = ["API_SERVER_KEY", "HERMES_API_KEY"]
+
+for file_path in files:
+    print(f"\n== {file_path} ==")
+    env = {}
+    for line in file_path.read_text(errors="ignore").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        env[key.strip()] = value.strip().strip('"').strip("'")
+    for key in keys:
+        value = env.get(key, "")
+        digest = hashlib.sha256(value.encode()).hexdigest()[:12] if value else "-"
+        print(f"{key}: {'SET' if value else 'UNSET'} len={len(value)} sha256={digest}")
+PY
+
+sudo systemctl daemon-reload
+sudo systemctl restart ran-agent-python.service
+sleep 3
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl restart ran-agent-node.service
+
+journalctl -u ran-agent-hermes -n 80 --no-pager
+journalctl -u ran-agent-node -n 80 --no-pager
+```
+
 ## Port Occupied Recovery
 
 Use this when startup logs show:
