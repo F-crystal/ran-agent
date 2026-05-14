@@ -150,9 +150,12 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     ...(options.mediaContextOptions || {}),
   });
   const mediaContextText = buildHermesMediaContextText(mediaContext, config);
+  const hasMedia = normalizeMediaItems(payload.media).length > 0
+    || (Array.isArray(payload.image_urls) && payload.image_urls.some((u) => typeof u === 'string' && u.trim()))
+    || (Array.isArray(mediaContext.artifacts) && mediaContext.artifacts.length > 0);
   const message = [
-    buildBridgeTemporalUserContext(),
-    buildHermesMediaGenerationInstruction(),
+    buildBridgeTemporalUserContext(payload),
+    hasMedia ? buildHermesMediaGenerationInstruction() : '',
     buildHermesInboundMediaInstruction(payload),
     mediaContextText,
     buildHermesUserText(payload),
@@ -176,12 +179,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
 }
 
 function buildHermesSystemInstruction() {
-  return [
-    'You are Hermes, the ran-agent foreground personal assistant shell.',
-    'Use the installed Hermes profile, MCP tools, skills, and memory policy.',
-    'DeepSeek V4 is treated as text-only in this deployment; do not infer raw media without tool results.',
-    'Do not expose internal tool traces, secrets, cookies, tokens, or implementation markers.',
-  ].join('\n');
+  return 'You are Hermes, ran-agent personal assistant. Use profile tools and memory. Text-only; use MCP for media. Never expose internals.';
 }
 
 function buildHermesMediaGenerationInstruction() {
@@ -235,7 +233,11 @@ function buildHermesUserText(payload = {}) {
   return batch.length > 0 ? batch.join('\n') : (text || '你好');
 }
 
-function buildBridgeTemporalUserContext(now = new Date()) {
+const RELATIVE_TIME_PATTERN = /今天|明天|昨天|后天|这周|上周|下周|刚才|最近|现在|今晚|明早|几点|什么时候|多久|何时/;
+
+function buildBridgeTemporalUserContext(payload = {}, now = new Date()) {
+  const text = String(payload?.text || '');
+  const hasRelativeTime = RELATIVE_TIME_PATTERN.test(text);
   const formatter = new Intl.DateTimeFormat('zh-CN', {
     timeZone: 'Asia/Shanghai',
     year: 'numeric',
@@ -246,7 +248,10 @@ function buildBridgeTemporalUserContext(now = new Date()) {
     second: '2-digit',
     hour12: false,
   });
-  return `【微信桥接实时上下文（非用户原话，不要复述）】当前本地时间：${formatter.format(now)}（Asia/Shanghai；ISO=${now.toISOString()}）。这是本轮最新时间上下文，涉及相对时间判断时优先参考。`;
+  if (hasRelativeTime) {
+    return `【微信桥接实时上下文（非用户原话，不要复述）】当前本地时间：${formatter.format(now)}（Asia/Shanghai；ISO=${now.toISOString()}）。这是本轮最新时间上下文，涉及相对时间判断时优先参考。`;
+  }
+  return `【时间：${formatter.format(now)}】`;
 }
 
 function buildHermesHeaders(config = {}) {

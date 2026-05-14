@@ -1,11 +1,11 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-05-13)
+Status: CURRENT (2026-05-14)
 
 ## Split Of Responsibility
 
 - Repo-global constraints live here and in `AGENTS.md`.
-- OpenClaw-specific runtime constraints live in `openclaw/AGENTS.md` and should not be duplicated here.
+- Hermes-specific runtime constraints live in `hermes/profile/AGENTS.md` and should not be duplicated here.
 
 ## Research Before Implementation
 
@@ -14,12 +14,11 @@ Status: CURRENT (2026-05-13)
 
 ## Real Mainlines
 
-- Chat mainline: `WeChat -> Node bridge -> OpenClaw frontend -> Claude Code primary -> reply`
-- Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> OpenClaw reply`
+- Chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
+- Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Proactive mainline: `scheduler -> life-loop skill -> orchestrator judgment -> front speaker -> Node bridge`
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
-- OpenClaw frontend must not use direct `qwen/*` provider paths. Active route/provider is `claude_code` with bare model `qwen3.5-plus` and empty fallbacks.
-- Kimi and GLM are retired as OpenClaw frontend primary/fallback candidates.
+- Kimi, GLM, and OpenClaw are retired as frontend primary/fallback candidates.
 
 ## Specialist Boundaries
 
@@ -38,11 +37,10 @@ Unless explicitly requested, do not introduce:
 - voice input/output
 - cloud database
 
-## OpenClaw Local Contract
+## Hermes Local Contract
 
-- For frontline lock, heartbeat cadence, and todo/reminder behavior, read `openclaw/AGENTS.md`.
-- Keep the local OpenClaw config project-scoped in `openclaw/openclaw.personal-system.json`.
-- `openclaw/openclaw.personal-system.json` enables the bundled `bootstrap-extra-files` hook so `openclaw/AGENTS.md` is loaded at bootstrap.
+- For frontline lock, heartbeat cadence, and todo/reminder behavior, read `hermes/profile/AGENTS.md`.
+- Keep the local Hermes config project-scoped in `hermes/profile/config.yaml`.
 
 ## Security Scope
 

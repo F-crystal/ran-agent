@@ -1,5 +1,5 @@
 /**
- * Minimal Node bridge runner for forwarding WeChat messages to OpenClaw Gateway.
+ * Minimal Node bridge runner for forwarding WeChat messages to Hermes Gateway.
  */
 
 import fs from 'node:fs';
@@ -524,7 +524,7 @@ function resetSyncBufferIfNeeded(accountId) {
   }
   try {
     const stateDir = resolveStateDir(process.env);
-    const syncPath = path.join(stateDir, 'openclaw-weixin', 'accounts', `${accountId}.sync.json`);
+    const syncPath = path.join(stateDir, 'ran-agent-weixin', 'accounts', `${accountId}.sync.json`);
     if (fs.existsSync(syncPath)) {
       fs.rmSync(syncPath, { force: true });
       console.log(`[node-bridge] reset stale weixin sync buffer file=${syncPath}`);

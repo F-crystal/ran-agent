@@ -101,7 +101,7 @@ class ReflectionSpecialist:
         
         This method performs reflection without generating user-facing output.
         It updates internal state and stores insights for future use.
-        Importantly, it updates preference_profile.json so OpenClaw can learn from it.
+        Importantly, it updates preference_profile.json so Hermes can learn from it.
         """
         limit = sample_limit or self._config.self_reflection_sample_limit
         

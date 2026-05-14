@@ -393,7 +393,7 @@ def main():
         if path.strip()
     ]
     if not fallback_paths:
-        legacy_path = Path(os.getenv("OMBRE_VAULT_LEGACY_PATH", ".openclaw_state/ombre_vault"))
+        legacy_path = Path(os.getenv("OMBRE_VAULT_LEGACY_PATH", ".ran_agent_state/ombre_vault"))
         if legacy_path != vault_path:
             fallback_paths.append(legacy_path)
     brain = OmbreBrain(vault_path, fallback_paths)

@@ -1,6 +1,6 @@
 ---
 name: doc-governance
-description: "文档治理：维护 AGENTS.md / CLAUDE.md / openclaw/AGENTS.md / README / docs/governance/ 等核心文档的口径一致、状态更新、瘦身原则。当用户说'更新文档''文档一致性''瘦身 AGENTS''治理文档清理'时使用。"
+description: "文档治理：维护 AGENTS.md / CLAUDE.md / hermes/profile/AGENTS.md / README / docs/governance/ 等核心文档的口径一致、状态更新、瘦身原则。当用户说'更新文档''文档一致性''瘦身 AGENTS''治理文档清理'时使用。"
 ---
 
 # Doc Governance
@@ -10,7 +10,7 @@ Status: CURRENT (2026-05-10)
 ## Use When
 
 - 用户说"更新文档""文档一致性""瘦身 AGENTS""文档治理""治理文档清理"
-- 需要检查 AGENTS.md / CLAUDE.md / openclaw/AGENTS.md / docs/governance/ 是否与代码实际状态一致
+- 需要检查 AGENTS.md / CLAUDE.md / hermes/profile/AGENTS.md / docs/governance/ 是否与代码实际状态一致
 - 需要把 AGENTS.md / CLAUDE.md 中的详细内容拆分到治理文档或 skill
 - 需要清理 docs/governance/ 下的历史快照或过期文档
 - 需要更新 `Status: CURRENT (YYYY-MM-DD)` 时间戳
@@ -40,9 +40,9 @@ AGENTS.md 和 CLAUDE.md 只保留：
 同一事实在以下文件中必须一致：
 - `AGENTS.md`（根目录）
 - `CLAUDE.md`
-- `openclaw/AGENTS.md`
+- `hermes/profile/AGENTS.md`
 - `README.md` / `README_en.md`
-- `openclaw/README.md` / `openclaw/README_en.md`
+- `hermes/README.md` / `hermes/README.md`
 - `docs/governance/` 下的治理文档
 
 如果一处更新，其他处必须同步。用 `grep` 检查关键词在各文件中的一致性。
@@ -58,14 +58,14 @@ AGENTS.md 和 CLAUDE.md 只保留：
 ### 4. 不重复
 
 - 根 AGENTS.md 和 CLAUDE.md 共享的内容：在两处都保持一致
-- openclaw/AGENTS.md 的内容不应复制到根 AGENTS.md
+- hermes/profile/AGENTS.md 的内容不应复制到根 AGENTS.md
 - 详细内容只写一处（治理文档或 skill），其他文件用引用
 - `docs/governance/` 内部也不重复：如果两个文档说同一件事，合并或删除较旧的那个
 
 ### 5. 中英文分离
 
-- `README.md` / `openclaw/README.md`：中文
-- `README_en.md` / `openclaw/README_en.md`：英文
+- `README.md` / `hermes/README.md`：中文
+- `README_en.md` / `hermes/README.md`：英文
 - `docs/governance/` 内部统一使用英文（与代码和 AGENTS.md 一致）
 - 两份 README 口径一致，不混用语言
 
@@ -86,9 +86,9 @@ AGENTS.md 和 CLAUDE.md 只保留：
 - [ ] 更新对应的 `docs/governance/` 文档（详细流程或状态）
 - [ ] 检查 `AGENTS.md` 中的引用是否准确
 - [ ] 检查 `CLAUDE.md` 中的引用是否准确
-- [ ] 检查 `openclaw/AGENTS.md` 中的描述是否准确
+- [ ] 检查 `hermes/profile/AGENTS.md` 中的描述是否准确
 - [ ] 更新 `README.md` 和 `README_en.md`（如果影响用户可见功能）
-- [ ] 更新 `openclaw/README.md` 和 `openclaw/README_en.md`（如果影响 MCP 工具清单）
+- [ ] 更新 `hermes/README.md` 和 `hermes/README.md`（如果影响 MCP 工具清单）
 - [ ] 更新所有受影响文档的 `Status: CURRENT (YYYY-MM-DD)` 时间戳
 - [ ] 检查 `docs/governance/doc_status.md` 的文件列表是否与实际一致
 - [ ] 检查 `docs/governance/skills.md` 的 skill 列表是否与 `skills/` 目录一致
@@ -99,16 +99,16 @@ AGENTS.md 和 CLAUDE.md 只保留：
 ```bash
 # 检查文档一致性（关键词在各文件中的出现）
 grep -rn 'KEYWORD' \
-  AGENTS.md CLAUDE.md openclaw/AGENTS.md \
-  README.md README_en.md openclaw/README.md openclaw/README_en.md \
+  AGENTS.md CLAUDE.md hermes/profile/AGENTS.md \
+  README.md README_en.md hermes/README.md hermes/README.md \
   docs/governance/
 
 # 检查状态标注
-grep -rn 'Status:' AGENTS.md CLAUDE.md openclaw/AGENTS.md \
+grep -rn 'Status:' AGENTS.md CLAUDE.md hermes/profile/AGENTS.md \
   docs/governance/*.md skills/*/SKILL.md
 
 # 统计核心文档行数（监控瘦身效果）
-wc -l AGENTS.md CLAUDE.md openclaw/AGENTS.md docs/governance/*.md
+wc -l AGENTS.md CLAUDE.md hermes/profile/AGENTS.md docs/governance/*.md
 
 # 检查 docs/governance/ 文件列表是否与 doc_status.md 一致
 ls docs/governance/*.md | sort

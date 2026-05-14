@@ -266,7 +266,7 @@ class BackendHttpControllerTest(unittest.TestCase):
             "/tools/todo/create",
             {
                 "text": "提醒我明天下午三点开会",
-                "source": "openclaw_live_chat",
+                "source": "hermes",
                 "extract_time": True,
             },
         )
@@ -281,7 +281,7 @@ class BackendHttpControllerTest(unittest.TestCase):
         assert todo is not None
         self.assertIn("开会", str(todo["content"]))
         self.assertTrue(str(todo["reminder_at"]).endswith("15:00:00"))
-        self.assertEqual(todo["source"], "openclaw_live_chat")
+        self.assertEqual(todo["source"], "hermes")
 
     def test_handle_tools_returns_not_found_for_unknown_route(self) -> None:
         status_code, response_payload = self.controller.handle_tools("/tools/unknown", {})
@@ -294,7 +294,7 @@ class BackendHttpControllerTest(unittest.TestCase):
             "/tools/todo/create",
             {
                 "text": "提醒我记得交房租",
-                "source": "openclaw_live_chat",
+                "source": "hermes",
                 "extract_time": True,
                 "require_time": True,
             },
@@ -310,7 +310,7 @@ class BackendHttpControllerTest(unittest.TestCase):
             "/tools/todo/create",
             {
                 "text": "提醒我周四下午去找老师",
-                "source": "openclaw_live_chat",
+                "source": "hermes",
                 "extract_time": True,
                 "require_time": True,
             },
@@ -325,14 +325,14 @@ class BackendHttpControllerTest(unittest.TestCase):
         todo_id = self.database.create_todo(
             content="去单位",
             reminder_at="2026-04-16 13:00:00",
-            source="openclaw_live_chat",
+            source="hermes",
         )
 
         status_code, response_payload = self.controller.handle_tools(
             "/tools/todo/complete",
             {
                 "text": "办完了",
-                "source": "openclaw_live_chat",
+                "source": "hermes",
             },
         )
 
@@ -348,14 +348,14 @@ class BackendHttpControllerTest(unittest.TestCase):
         todo_id = self.database.create_todo(
             content="取快递",
             reminder_at="2026-04-16 14:00:00",
-            source="openclaw_live_chat",
+            source="hermes",
         )
 
         status_code, response_payload = self.controller.handle_tools(
             "/tools/todo/cancel",
             {
                 "text": "这个提醒不用了",
-                "source": "openclaw_live_chat",
+                "source": "hermes",
             },
         )
 

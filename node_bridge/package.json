@@ -5,6 +5,6 @@
   "type": "module",
   "scripts": {
     "start": "node src/index.mjs",
-    "test": "node ../scripts/apply_openclaw_runtime_patches.mjs && node --test"
+    "test": "node --test"
   }
 }

@@ -92,14 +92,14 @@ def _extract_env_placeholder_name(value: str) -> str:
     return ""
 
 
-def _load_openclaw_runtime_contract(base_dir: Path) -> dict[str, object]:
-    config_path = base_dir / "openclaw" / "openclaw.personal-system.json"
-    default_contract: dict[str, object] = {
-        "config_path": config_path,
-        "gateway_base_url": "http://127.0.0.1:19123",
-        "gateway_token_env_var": "OPENCLAW_GATEWAY_TOKEN",
-        "gateway_model_target": "openclaw/default",
-        "gateway_timeout_seconds": 120,
+def _load_openclaw_runtime_contract(_base_dir: Path) -> dict[str, object]:
+    """Return default runtime contract (OpenClaw config removed)."""
+    return {
+        "config_path": "hermes/profile/config.yaml",
+        "gateway_base_url": "http://127.0.0.1:8642",
+        "gateway_token_env_var": "HERMES_API_KEY",
+        "gateway_model_target": "deepseek-v4-flash",
+        "gateway_timeout_seconds": 180,
         "backend_model_ref": "",
         "backend_model_provider": "",
         "backend_model_name": "",
@@ -108,78 +108,6 @@ def _load_openclaw_runtime_contract(base_dir: Path) -> dict[str, object]:
         "backend_model_api_key_env_var": "",
         "backend_model_max_tokens": 0,
     }
-    if not config_path.exists():
-        return default_contract
-
-    try:
-        payload = json.loads(config_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return default_contract
-
-    gateway = payload.get("gateway", {})
-    auth = gateway.get("auth", {}) if isinstance(gateway, dict) else {}
-    custom_host = str(gateway.get("customBindHost", "")).strip() if isinstance(gateway, dict) else ""
-    port = int(gateway.get("port", 19123)) if isinstance(gateway, dict) else 19123
-    bind_host = custom_host or "127.0.0.1"
-    gateway_base_url = f"http://{bind_host}:{port}"
-    gateway_token_env_var = _extract_env_placeholder_name(str(auth.get("token", ""))) or "OPENCLAW_GATEWAY_TOKEN"
-
-    providers = payload.get("models", {}).get("providers", {})
-    agents = payload.get("agents", {})
-    defaults = agents.get("defaults", {}) if isinstance(agents, dict) else {}
-    model_block = defaults.get("model", {}) if isinstance(defaults, dict) else {}
-    backend_model_ref = str(model_block.get("primary", "")).strip()
-    if "/" in backend_model_ref:
-        provider_name, _, model_name = backend_model_ref.partition("/")
-    else:
-        model_name = backend_model_ref
-        provider_name = _find_openclaw_provider_for_model(providers, model_name)
-
-    provider_block = providers.get(provider_name, {}) if isinstance(providers, dict) else {}
-    provider_models = provider_block.get("models", []) if isinstance(provider_block, dict) else []
-    model_block_details = next(
-        (
-            item
-            for item in provider_models
-            if isinstance(item, dict) and str(item.get("id", "")).strip() == model_name
-        ),
-        {},
-    )
-
-    default_contract.update(
-        {
-            "gateway_base_url": gateway_base_url,
-            "gateway_token_env_var": gateway_token_env_var,
-            "backend_model_ref": backend_model_ref,
-            "backend_model_provider": provider_name,
-            "backend_model_name": model_name,
-            "backend_model_api": str(provider_block.get("api", "")).strip(),
-            "backend_model_base_url": str(provider_block.get("baseUrl", "")).strip(),
-            "backend_model_api_key_env_var": _extract_env_placeholder_name(
-                str(provider_block.get("apiKey", ""))
-            ),
-            "backend_model_max_tokens": int(model_block_details.get("maxTokens", 0) or 0),
-        }
-    )
-    return default_contract
-
-
-def _find_openclaw_provider_for_model(providers: object, model_name: str) -> str:
-    if not isinstance(providers, dict) or not model_name:
-        return ""
-
-    matches: list[str] = []
-    for provider_name, provider_block in providers.items():
-        provider_models = provider_block.get("models", []) if isinstance(provider_block, dict) else []
-        if any(
-            isinstance(item, dict) and str(item.get("id", "")).strip() == model_name
-            for item in provider_models
-        ):
-            matches.append(str(provider_name))
-
-    if "claude_code" in matches:
-        return "claude_code"
-    return matches[0] if matches else ""
 
 
 @dataclass(frozen=True)
@@ -247,11 +175,10 @@ class AppConfig:
     night_cycle_enabled: bool = True
     night_cycle_hour: int = 0
     night_cycle_minute: int = 0
-    openclaw_config_path: Path = Path("openclaw/openclaw.personal-system.json")
-    openclaw_gateway_base_url: str = "http://127.0.0.1:19123"
-    openclaw_gateway_token_env_var: str = "OPENCLAW_GATEWAY_TOKEN"
-    openclaw_gateway_model_target: str = "openclaw/default"
-    openclaw_gateway_timeout_seconds: int = 120
+    hermes_base_url: str = "http://127.0.0.1:8642"
+    hermes_api_key_env_var: str = "HERMES_API_KEY"
+    hermes_model: str = "deepseek-v4-flash"
+    hermes_timeout_seconds: int = 180
     backend_model_ref: str = ""
     backend_model_provider: str = ""
     backend_model_name: str = ""
@@ -297,22 +224,21 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         debug_dir=debug_dir,
         reflections_dir=reflections_dir,
         night_cycles_dir=night_cycles_dir,
-        openclaw_config_path=Path(openclaw_contract["config_path"]),
-        openclaw_gateway_base_url=os.getenv(
-            "OPENCLAW_GATEWAY_BASE_URL",
+        hermes_base_url=os.getenv(
+            "HERMES_API_BASE_URL",
             str(openclaw_contract["gateway_base_url"]),
         ).strip().rstrip("/"),
-        openclaw_gateway_token_env_var=os.getenv(
-            "PERSONAL_AGENT_OPENCLAW_GATEWAY_TOKEN_ENV",
+        hermes_api_key_env_var=os.getenv(
+            "PERSONAL_AGENT_HERMES_API_KEY_ENV",
             str(openclaw_contract["gateway_token_env_var"]),
         ).strip(),
-        openclaw_gateway_model_target=os.getenv(
-            "PERSONAL_AGENT_OPENCLAW_GATEWAY_MODEL_TARGET",
+        hermes_model=os.getenv(
+            "PERSONAL_AGENT_HERMES_MODEL",
             str(openclaw_contract["gateway_model_target"]),
         ).strip(),
-        openclaw_gateway_timeout_seconds=int(
+        hermes_timeout_seconds=int(
             os.getenv(
-                "PERSONAL_AGENT_OPENCLAW_GATEWAY_TIMEOUT_SECONDS",
+                "PERSONAL_AGENT_HERMES_TIMEOUT_SECONDS",
                 str(openclaw_contract["gateway_timeout_seconds"]),
             ).strip()
         ),

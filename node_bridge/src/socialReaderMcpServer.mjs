@@ -52,7 +52,7 @@ function resolveXhsNoteTokenCachePath(env = process.env) {
   if (configured) {
     return path.isAbsolute(configured) ? configured : path.resolve(process.cwd(), configured);
   }
-  return path.resolve(process.cwd(), '.openclaw_state/social_reader/xhs-note-token-cache.json');
+  return path.resolve(process.cwd(), '.ran_agent_state/social_reader/xhs-note-token-cache.json');
 }
 
 function loadXhsNoteTokenCache(env = process.env) {

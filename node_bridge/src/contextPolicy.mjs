@@ -31,26 +31,21 @@ const PRIORITY_ORDER = {
 /**
  * 读取通用上下文策略配置。
  *
- * 新变量优先，旧 OPENCLAW_* 变量作为 legacy fallback：
- *   RAN_AGENT_CONTEXT_POLICY      > OPENCLAW_CONTEXT_POLICY
- *   RAN_AGENT_MAX_MEDIA_ARTIFACTS > OPENCLAW_MAX_MEDIA_ARTIFACTS
- *   RAN_AGENT_CONTEXT_SIZE_LOG    > OPENCLAW_CONTEXT_SIZE_LOG
- *
  * @param {object} env
  * @returns {{contextPolicyMode: string, maxMediaArtifacts: number, enableContextSizeLog: boolean}}
  */
 export function getContextPolicyConfig(env = process.env) {
   const contextPolicyMode = String(
-    firstDefined(env.RAN_AGENT_CONTEXT_POLICY, env.OPENCLAW_CONTEXT_POLICY, 'compact')
+    firstDefined(env.RAN_AGENT_CONTEXT_POLICY, 'compact')
   ).trim().toLowerCase() || 'compact';
   const maxMediaArtifacts = Math.max(
     1,
     Number.parseInt(String(
-      firstDefined(env.RAN_AGENT_MAX_MEDIA_ARTIFACTS, env.OPENCLAW_MAX_MEDIA_ARTIFACTS, '3')
+      firstDefined(env.RAN_AGENT_MAX_MEDIA_ARTIFACTS, '3')
     ), 10) || 3
   );
   const enableContextSizeLog = parseBooleanFlag(
-    firstDefined(env.RAN_AGENT_CONTEXT_SIZE_LOG, env.OPENCLAW_CONTEXT_SIZE_LOG, '1'),
+    firstDefined(env.RAN_AGENT_CONTEXT_SIZE_LOG, '1'),
     true
   );
 

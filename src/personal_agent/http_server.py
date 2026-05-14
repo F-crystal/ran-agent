@@ -1,4 +1,4 @@
-"""HTTP adapter exposing backend capabilities for OpenClaw tool calls."""
+"""HTTP adapter exposing backend capabilities for tool calls."""
 
 from __future__ import annotations
 
@@ -357,7 +357,7 @@ class PersonalAgentHttpServer:
                     self._write_json(
                         HTTPStatus.GONE,
                         {
-                            "error": "frontend /chat path retired; use OpenClaw Gateway /v1/chat/completions",
+                            "error": "frontend /chat path retired; use Hermes Gateway /v1/chat/completions",
                         },
                     )
                     return

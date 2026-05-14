@@ -161,13 +161,13 @@ test('handleOutboundRequest forwards audio media payloads through bot', async ()
 });
 
 test('handleOutboundRequest splits paragraph-delimited proactive text into sequential sends', async () => {
-  const stateBaseDir = path.join(PROJECT_ROOT, '.openclaw_state');
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(stateBaseDir, { recursive: true });
   const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-outbound-'));
   const previousDelay = process.env.NODE_BRIDGE_OUTBOUND_SEGMENT_DELAY_MS;
-  const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
   process.env.NODE_BRIDGE_OUTBOUND_SEGMENT_DELAY_MS = '0';
-  process.env.OPENCLAW_STATE_DIR = tempStateDir;
+  process.env.RAN_AGENT_STATE_DIR = tempStateDir;
 
   try {
     const sentPayloads = [];
@@ -199,9 +199,9 @@ test('handleOutboundRequest splits paragraph-delimited proactive text into seque
       process.env.NODE_BRIDGE_OUTBOUND_SEGMENT_DELAY_MS = previousDelay;
     }
     if (previousStateDir === undefined) {
-      delete process.env.OPENCLAW_STATE_DIR;
+      delete process.env.RAN_AGENT_STATE_DIR;
     } else {
-      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
     }
   }
 });
@@ -254,11 +254,11 @@ test('handleOutboundRequest drops low-value proactive text', async () => {
 
 test('handleOutboundRequest lets reminders bypass checkin cooldown', async () => {
   const env = {
-    OPENCLAW_STATE_DIR: path.join(PROJECT_ROOT, '.openclaw_state', 'test-outbound-server'),
+    RAN_AGENT_STATE_DIR: path.join(PROJECT_ROOT, '.ran_agent_state', 'test-outbound-server'),
   };
-  const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
   const previousReminderDelivery = process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED;
-  process.env.OPENCLAW_STATE_DIR = env.OPENCLAW_STATE_DIR;
+  process.env.RAN_AGENT_STATE_DIR = env.RAN_AGENT_STATE_DIR;
   process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED = 'true';
   setProactiveDispatchState({ nextAllowedAt: '2999-01-01T00:00:00.000Z' }, env);
 
@@ -285,9 +285,9 @@ test('handleOutboundRequest lets reminders bypass checkin cooldown', async () =>
     assert.equal(sentText, '提醒一下：去单位');
   } finally {
     if (previousStateDir === undefined) {
-      delete process.env.OPENCLAW_STATE_DIR;
+      delete process.env.RAN_AGENT_STATE_DIR;
     } else {
-      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
     }
     if (previousReminderDelivery === undefined) {
       delete process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED;
@@ -334,12 +334,12 @@ test('handleOutboundRequest drops reminder messages when reminder delivery is di
 });
 
 test('handleOutboundRequest drops pending reminder-like messages when reminder delivery is disabled', async () => {
-  const stateBaseDir = path.join(PROJECT_ROOT, '.openclaw_state');
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(stateBaseDir, { recursive: true });
   const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-outbound-'));
-  const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
   const previousReminderDelivery = process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED;
-  process.env.OPENCLAW_STATE_DIR = tempStateDir;
+  process.env.RAN_AGENT_STATE_DIR = tempStateDir;
   process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED = 'false';
   appendPendingOutboundMessage({ text: '提醒一下：交房租', reason: 'send_failed:context expired' }, process.env);
 
@@ -367,9 +367,9 @@ test('handleOutboundRequest drops pending reminder-like messages when reminder d
     assert.deepEqual(drainPendingOutboundMessages(10, process.env), []);
   } finally {
     if (previousStateDir === undefined) {
-      delete process.env.OPENCLAW_STATE_DIR;
+      delete process.env.RAN_AGENT_STATE_DIR;
     } else {
-      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
     }
     if (previousReminderDelivery === undefined) {
       delete process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED;
@@ -380,16 +380,16 @@ test('handleOutboundRequest drops pending reminder-like messages when reminder d
 });
 
 test('handleOutboundRequest requeues blocked proactive messages with a retry delay', async () => {
-  const stateBaseDir = path.join(PROJECT_ROOT, '.openclaw_state');
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(stateBaseDir, { recursive: true });
   const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-outbound-'));
   const env = {
-    OPENCLAW_STATE_DIR: tempStateDir,
+    RAN_AGENT_STATE_DIR: tempStateDir,
     NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS: '1000',
   };
-  const previousStateDir = process.env.OPENCLAW_STATE_DIR;
+  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
   const previousRetryDelay = process.env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS;
-  process.env.OPENCLAW_STATE_DIR = env.OPENCLAW_STATE_DIR;
+  process.env.RAN_AGENT_STATE_DIR = env.RAN_AGENT_STATE_DIR;
   process.env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS = env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS;
   setProactiveDispatchState({ nextAllowedAt: '2999-01-01T00:00:00.000Z' }, env);
 
@@ -422,9 +422,9 @@ test('handleOutboundRequest requeues blocked proactive messages with a retry del
     assert.match(lateDrain[0].nextAttemptAt, /T/);
   } finally {
     if (previousStateDir === undefined) {
-      delete process.env.OPENCLAW_STATE_DIR;
+      delete process.env.RAN_AGENT_STATE_DIR;
     } else {
-      process.env.OPENCLAW_STATE_DIR = previousStateDir;
+      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
     }
     if (previousRetryDelay === undefined) {
       delete process.env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS;
@@ -436,12 +436,12 @@ test('handleOutboundRequest requeues blocked proactive messages with a retry del
 
 test('resolveStateDir defaults to project-local state directory', () => {
   const resolved = resolveStateDir({});
-  assert.equal(resolved, path.join(PROJECT_ROOT, '.openclaw_state'));
+  assert.equal(resolved, path.join(PROJECT_ROOT, '.ran_agent_state'));
 });
 
 test('resolveStateDir rejects paths outside project workspace', () => {
   assert.throws(
-    () => resolveStateDir({ OPENCLAW_STATE_DIR: path.dirname(PROJECT_ROOT) }),
+    () => resolveStateDir({ RAN_AGENT_STATE_DIR: path.dirname(PROJECT_ROOT) }),
     /must stay inside project workspace/
   );
 });

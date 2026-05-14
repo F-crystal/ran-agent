@@ -3,7 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const DEFAULT_STATE_DIR = path.join(PROJECT_ROOT, '.openclaw_state');
+const DEFAULT_STATE_DIR = path.join(PROJECT_ROOT, '.ran_agent_state');
 const RUNTIME_DIR_NAME = 'node-bridge-runtime';
 const CHECKIN_RANGE_FILE = 'checkin-range.json';
 const PROACTIVE_DISPATCH_FILE = 'proactive-dispatch.json';
@@ -21,13 +21,13 @@ function assertWithinProject(absolutePath) {
     : `${normalizedProject}${path.sep}`;
   if (!normalizedTarget.startsWith(projectPrefix)) {
     throw new Error(
-      `OPENCLAW_STATE_DIR must stay inside project workspace: ${normalizedProject}`
+      `RAN_AGENT_STATE_DIR must stay inside project workspace: ${normalizedProject}`
     );
   }
 }
 
 export function resolveStateDir(env = process.env) {
-  const rawStateDir = (env.OPENCLAW_STATE_DIR || env.CLAWDBOT_STATE_DIR || DEFAULT_STATE_DIR).trim();
+  const rawStateDir = (env.RAN_AGENT_STATE_DIR || env.CLAWDBOT_STATE_DIR || DEFAULT_STATE_DIR).trim();
   const resolvedStateDir = path.isAbsolute(rawStateDir)
     ? path.resolve(rawStateDir)
     : path.resolve(PROJECT_ROOT, rawStateDir);

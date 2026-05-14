@@ -17,9 +17,9 @@ WeChat inbound
      -> mimo_power__analyze (primary)
      -> media_reader (fallback)
      -> write artifact to debug/media_context/
-  -> buildOpenClawAgentMessage
+  -> buildHermesAgentMessage
      -> inject media instruction + context
-  -> OpenClaw agent reply
+  -> Hermes reply
 ```
 
 ## Inbound Message Buffer
@@ -156,7 +156,7 @@ After success, preserve `WECHAT_MEDIA: {...}` line in reply for bridge consumpti
 
 ## Context Policy v1
 
-Module: `node_bridge/src/openclawContextPolicy.mjs`
+Module: `node_bridge/src/contextPolicy.mjs`
 
 Status: CURRENT (2026-05-13)
 
@@ -169,7 +169,7 @@ ensureConversationMediaContext
   -> Context Policy v1 (compact mode)
      -> selectMediaArtifactsForPrompt (max 3 artifacts)
      -> buildCompactMediaContext (≤180 chars per artifact)
-  -> buildOpenClawAgentMessage
+  -> buildHermesAgentMessage
      -> inject compact media context OR legacy full context
 ```
 
@@ -177,8 +177,8 @@ ensureConversationMediaContext
 
 | Mode | Env Var | Behavior |
 |------|---------|----------|
-| **compact** | `OPENCLAW_CONTEXT_POLICY=compact` (default) | Use `selectMediaArtifactsForPrompt` + `buildCompactMediaContext` |
-| **legacy** | `OPENCLAW_CONTEXT_POLICY=legacy` | Use original `mediaContext.contextText` from `renderConversationMediaContext` |
+| **compact** | `RAN_AGENT_CONTEXT_POLICY=compact` (default) | Use `selectMediaArtifactsForPrompt` + `buildCompactMediaContext` |
+| **legacy** | `RAN_AGENT_CONTEXT_POLICY=legacy` | Use original `mediaContext.contextText` from `renderConversationMediaContext` |
 
 ### Artifact Selection Rules
 
@@ -201,7 +201,7 @@ Compact rendering accepts both legacy `title`/`description`/`source`/`stats` fie
 
 ### Context Size Logging
 
-When `OPENCLAW_CONTEXT_SIZE_LOG=1` (default), logs include:
+When `RAN_AGENT_CONTEXT_SIZE_LOG=1` (default), logs include:
 - `system_prompt_chars`, `persona_prompt_chars`, `history_chars`
 - `media_context_chars`, `tool_context_chars`, `final_prompt_chars`
 - `media_artifact_count`, `injected_media_count`, `compacted_history_count`
@@ -217,11 +217,11 @@ When `OPENCLAW_CONTEXT_SIZE_LOG=1` (default), logs include:
 
 ### Rollback
 
-Set `OPENCLAW_CONTEXT_POLICY=legacy` to revert to original full media context rendering without code changes.
+Set `RAN_AGENT_CONTEXT_POLICY=legacy` to revert to original full media context rendering without code changes.
 
 ### Test Coverage
 
-- `node_bridge/tests/openclawContextPolicy.test.mjs` - Core policy functions
+- `node_bridge/tests/contextPolicy.test.mjs` - Core policy functions
 - Compact mode: max 3 artifacts, priority order, consumed filtering
 - Legacy mode: fallback to `renderConversationMediaContext`
 
@@ -229,7 +229,7 @@ Set `OPENCLAW_CONTEXT_POLICY=legacy` to revert to original full media context re
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OPENCLAW_CONTEXT_POLICY` | `compact` | `compact` or `legacy` mode |
-| `OPENCLAW_MAX_MEDIA_ARTIFACTS` | `3` | Max artifacts to inject |
-| `OPENCLAW_MEDIA_COMPACT_CHARS` | `180` | Max chars per compact artifact |
-| `OPENCLAW_CONTEXT_SIZE_LOG` | `1` | Enable context size logging |
+| `RAN_AGENT_CONTEXT_POLICY` | `compact` | `compact` or `legacy` mode |
+| `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | `3` | Max artifacts to inject |
+| `RAN_AGENT_MEDIA_COMPACT_CHARS` | `180` | Max chars per compact artifact |
+| `RAN_AGENT_CONTEXT_SIZE_LOG` | `1` | Enable context size logging |

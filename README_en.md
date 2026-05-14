@@ -29,7 +29,7 @@ Ran Agent connects WeChat to an LLM-powered conversation runtime with memory, re
 
 ## What It Does
 
-**WeChat Agent.** Messages flow `WeChat → Node bridge → OpenClaw agent runtime → Claude/Qwen → reply`. Natural conversation, not prompt-and-response. The agent remembers past conversations and evolves its persona over time.
+**WeChat Agent.** Messages flow `WeChat → Node bridge → Hermes Gateway → Claude/Qwen → reply`. Natural conversation, not prompt-and-response. The agent remembers past conversations and evolves its persona over time.
 
 **Social Media Understanding.** Drop a Bilibili video, a Xiaohongshu note, or a WeChat article link into chat. The agent resolves the platform, extracts content, and summarizes it for you:
 
@@ -41,7 +41,7 @@ Ran Agent connects WeChat to an LLM-powered conversation runtime with memory, re
 
 **Media Understanding Pipeline.** Send an image and follow up with "use mimo to look at it" — the system automatically merges the image and text into a single request. Media analysis results are persisted as conversation-level artifacts, so saying "that image from earlier" correctly resolves to the prior analysis. Supports deep multimodal analysis of images, audio, video, and documents.
 
-**Context Compression Policy.** Context Policy v1 enabled by default: max 3 media artifacts injected per turn, each compact-rendered (≤180 chars), prioritizing explicit refs and current media. Fallback to full media context via `OPENCLAW_CONTEXT_POLICY=legacy`. See `docs/governance/media-pipeline.md`.
+**Context Compression Policy.** Context Policy v1 enabled by default: max 3 media artifacts injected per turn, each compact-rendered (≤180 chars), prioritizing explicit refs and current media. Fallback to full media context via `RAN_AGENT_CONTEXT_POLICY=legacy`. See `docs/governance/media-pipeline.md`.
 
 **Memory and Reflection.** The agent builds a working memory across conversations. A nightly reflection cycle reviews the day's interactions and suggests persona refinements. You stay in control of what sticks and what fades.
 
@@ -50,7 +50,7 @@ Ran Agent connects WeChat to an LLM-powered conversation runtime with memory, re
 ## Architecture
 
 ```
-WeChat ──┬── inbound ──► Inbound Aggregation ──► Node Bridge ──► OpenClaw Agent Runtime ──► Claude/Qwen
+WeChat ──┬── inbound ──► Inbound Aggregation ──► Node Bridge ──► Hermes Gateway Runtime ──► Claude/Qwen
          │                (image+text merge)          ▲                │    │    │
          │                                            │                │    │    └──► media_generation
          │                                            │                │    └───────► social_reader
@@ -69,7 +69,7 @@ WeChat ──┬── inbound ──► Inbound Aggregation ──► Node Brid
 
 **Key Design Decisions:**
 
-- **MCP Facade Pattern.** OpenClaw sees clean, stable tools (`media_reader__analyze_video`, `social_reader__read_social_post_deep`, etc.). Behind each facade are platform resolvers, provider adapters, and format converters. Tools don't leak internals to the agent.
+- **MCP Facade Pattern.** Hermes sees clean, stable tools (`media_reader__analyze_video`, `social_reader__read_social_post_deep`, etc.). Behind each facade are platform resolvers, provider adapters, and format converters. Tools don't leak internals to the agent.
 
 - **Subtitle-First Video Understanding.** Four-tier progressive fallback: downloadable subtitles (~2s) → audio-only ASR transcription (~10s) → keyframe VLM analysis without OCR (~30s) → metadata as last resort (~1s). Long videos never blindly download full files.
 
@@ -81,7 +81,7 @@ WeChat ──┬── inbound ──► Inbound Aggregation ──► Node Brid
 
 ## MCP Services
 
-The agent's capabilities are organized as MCP (Model Context Protocol) services. Each service exposes a focused set of tools to OpenClaw.
+The agent's capabilities are organized as MCP (Model Context Protocol) services. Each service exposes a focused set of tools to Hermes.
 
 ### Built-in Services
 
@@ -163,7 +163,7 @@ cp .env.example .env.local
 Then start each service in its own terminal:
 
 ```bash
-./start_openclaw.sh       # Agent runtime
+hermes -p ran-assistant gateway run       # Agent runtime
 ./start_python.sh          # Backend services (memory, scheduler, knowledge)
 cd node_bridge && ./start_node.sh  # WeChat bridge
 ```
@@ -200,7 +200,7 @@ Full variable list: see `.env.example`.
 
 ```
 ran_agent/
-├── openclaw/                    # OpenClaw agent config and runtime
+├── hermes/                      # Hermes Gateway config and runtime
 ├── node_bridge/                 # WeChat bridge + MCP facade servers
 │   └── src/
 │       ├── mediaReader/         # OCR, VLM, ASR, ffmpeg, platform resolvers
@@ -258,4 +258,4 @@ PolyForm Noncommercial License 1.0.0 — free for personal use, research, and le
 
 ## Privacy
 
-This is a personal agent. None of these should ever enter version control: `.env.local`, `.openclaw_state/`, chat logs, cookies, API keys, vault content, state databases. The `.gitignore` is configured to block these by default — always verify before making your fork public.
+This is a personal agent. None of these should ever enter version control: `.env.local`, `.ran_agent_state/`, chat logs, cookies, API keys, vault content, state databases. The `.gitignore` is configured to block these by default — always verify before making your fork public.

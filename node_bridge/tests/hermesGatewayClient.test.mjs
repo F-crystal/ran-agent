@@ -85,7 +85,7 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.equal(capturedBody.model, 'ran-assistant');
   assert.equal(capturedBody.stream, false);
   assert.match(capturedBody.messages[0].content, /Hermes/);
-  assert.match(capturedBody.messages[1].content, /微信桥接实时上下文/);
+  assert.match(capturedBody.messages[1].content, /时间/);
   assert.match(capturedBody.messages[1].content, /你好\n补一句/);
   assert.equal(response.reply_text, 'Hermes reply');
   assert.equal(response.model, 'ran-assistant');
@@ -164,4 +164,128 @@ test('sendChatToHermesGateway can fall back from API to one-shot in auto mode', 
   );
 
   assert.equal(response.reply_text, 'fallback ok');
+});
+
+test('sendChatToHermesGateway uses compact system instruction (single line)', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '你好', sender_id: 'conv-compact-sys', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: 'hi' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const systemMsg = capturedBody.messages.find((m) => m.role === 'system');
+  assert.ok(systemMsg);
+  assert.ok(!systemMsg.content.includes('\n'), 'system instruction should be single line');
+  assert.ok(systemMsg.content.length < 150, 'system instruction should be compact');
+});
+
+test('sendChatToHermesGateway does not inject media generation instruction for plain text', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '今天天气怎么样', sender_id: 'conv-plain', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '晴天' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(!userMsg.content.includes('媒体工具指令'), 'plain text should not include media generation instruction');
+});
+
+test('sendChatToHermesGateway injects full temporal context for relative time words', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '今天有什么安排', sender_id: 'conv-time', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '没有安排' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('微信桥接实时上下文'), 'relative time should trigger full temporal context');
+  assert.ok(userMsg.content.includes('Asia/Shanghai'), 'full context should include timezone');
+});
+
+test('sendChatToHermesGateway uses compact temporal context for plain messages', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '你好呀', sender_id: 'conv-compact-time', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '你好' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('【时间：'), 'should have compact time prefix');
+  assert.ok(!userMsg.content.includes('微信桥接实时上下文'), 'should not have full temporal block');
+});
+
+test('sendChatToHermesGateway injects media generation instruction when media present', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    {
+      text: '帮我看看',
+      sender_id: 'conv-media',
+      channel: 'wechat',
+      media: [{ filePath: '/tmp/test.png', mimeType: 'image/png', type: 'image' }],
+    },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '好的' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('媒体工具指令'), 'media present should include media generation instruction');
 });

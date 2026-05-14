@@ -269,7 +269,7 @@ async function defaultAnalyzeMediaAsset({ asset, payload }, options = {}) {
   const task = [
     '分析这份微信入站媒体，提取对后续对话有用的事实。',
     payload?.text ? `用户当前问题：${payload.text}` : '',
-    '请输出简洁摘要、可见文字/OCR、音频转写或视频关键内容；不要代替 OpenClaw 回复用户。',
+    '请输出简洁摘要、可见文字/OCR、音频转写或视频关键内容；不要代替 Hermes 回复用户。',
   ].filter(Boolean).join('\n');
   const mimoAnalyze = options.mimoAnalyzeImpl || ((request, requestOptions) => handleMimoPowerMcpRequest(request, requestOptions));
   const mimoResult = await mimoAnalyze(

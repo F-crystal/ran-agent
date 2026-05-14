@@ -124,7 +124,7 @@ class _ConversationAgentFacade:
 
 
 class PersonalAgentService:
-    """Provides project-local backend capabilities for OpenClaw tool calls."""
+    """Provides project-local backend capabilities for tool calls."""
 
     _knowledge_actions = {"auto", "plan", "apply"}
 

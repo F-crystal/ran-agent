@@ -266,8 +266,8 @@ export PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
 mkdir -p "$HERMES_HOME" /opt/ran_agent/logs
 hermes profile install /opt/ran_agent/hermes/profile --name "$HERMES_PROFILE" --force -y
 
-sudo systemctl stop ran-agent-node.service ran-agent-openclaw.service ran-agent-python.service 2>/dev/null || true
-sudo systemctl disable ran-agent-openclaw.service 2>/dev/null || true
+sudo systemctl stop ran-agent-node.service ran-agent-python.service 2>/dev/null || true
+sudo systemctl disable 2>/dev/null || true
 
 pkill -f '/tmp/ran-agent-hermes-home-phase5' 2>/dev/null || true
 pkill -f 'obsidian-index mcp' 2>/dev/null || true
@@ -709,7 +709,7 @@ cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
 
 if systemctl list-units --type=service --all | grep -q 'ran-agent-'; then
-  sudo systemctl stop ran-agent-node.service ran-agent-hermes.service ran-agent-openclaw.service ran-agent-python.service 2>/dev/null || true
+  sudo systemctl stop ran-agent-node.service ran-agent-hermes.service ran-agent-python.service 2>/dev/null || true
   sleep 2
 fi
 
@@ -742,7 +742,7 @@ Then rerun `Systemd Cutover To Hermes Runtime` if the server has systemd
 `ran-agent-*` services, otherwise rerun `Pull And Restart Runtime Without
 Systemd`.
 
-## If Node Bridge Still Points At OpenClaw
+## Legacy Notes
 
 Force Hermes mode in `node_bridge/.env.local`:
 
@@ -750,6 +750,42 @@ Force Hermes mode in `node_bridge/.env.local`:
 cd /opt/ran_agent
 printf '\nNODE_BRIDGE_REPLY_BACKEND=hermes\nHERMES_API_BASE_URL=http://127.0.0.1:8642/v1\nHERMES_REPLY_MODE=api\nPYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787\nPYTHON_BACKEND_INGEST_TIMEOUT_MS=5000\nPERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000\n' >> node_bridge/.env.local
 ```
+
+## Hermes Compression Configuration
+
+Add this to the Hermes profile config on the server
+(`/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/config.yaml`) to reduce
+context cost for long conversations:
+
+```yaml
+compression:
+  enabled: true
+  threshold: 0.35
+  target_ratio: 0.12
+  protect_last_n: 8
+  hygiene_hard_message_limit: 160
+
+auxiliary:
+  compression:
+    provider: main
+    model: ""
+    base_url: null
+  web_extract:
+    provider: main
+    model: ""
+    base_url: null
+  session_search:
+    provider: main
+    model: ""
+    base_url: null
+```
+
+- `threshold: 0.35` — compress when context reaches 35% of model window.
+- `target_ratio: 0.12` — compress down to 12% of model window.
+- `protect_last_n: 8` — keep the last 8 messages uncompressed.
+- `hygiene_hard_message_limit: 160` — hard cap on messages before forced hygiene.
+- Auxiliary services use the main provider (no separate model). Set `model: ""`
+  and `base_url: null` to inherit from the profile's default provider.
 
 ## Fix Hermes DeepSeek model empty error
 

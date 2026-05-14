@@ -16,7 +16,7 @@ class OmbreBrainMCPTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             base_dir = Path(temp_dir)
             primary_vault = base_dir / "vault" / "ombre"
-            legacy_vault = base_dir / ".openclaw_state" / "ombre_vault"
+            legacy_vault = base_dir / ".ran_agent_state" / "ombre_vault"
             legacy_vault.mkdir(parents=True)
 
             memory = EmotionalMemory(

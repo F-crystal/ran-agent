@@ -4,10 +4,10 @@ Status: CURRENT (2026-05-14)
 
 ## Frontend Path
 
-- Active path: `WeChat -> Node bridge -> OpenClaw agent -> Claude Code primary -> reply`
-- Provider: `claude_code`; model: `qwen3.5-plus`; fallbacks: none.
-- Kimi and GLM retired. Python frontend `/chat` returns 410.
-- Single front speaker: OpenClaw (personal assistant + chat companion).
+- Active path: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
+- Provider: `hermes`; model: `deepseek-v4-flash`; fallbacks: none.
+- Kimi, GLM, and OpenClaw retired. Python frontend `/chat` returns 410.
+- Single front speaker: Hermes (personal assistant + chat companion).
 
 ## Phase Status
 
@@ -17,13 +17,12 @@ Status: CURRENT (2026-05-14)
 - Phase 6 is code-closed for backend/memory bridge boundaries: backend ingest timeout, personal memory backend health check, and personal memory recall timeout.
 - Detailed phase scope: `docs/governance/phase_status.md`.
 
-## OpenClaw Contract
+## Hermes Contract
 
-- Runtime constraints: `openclaw/AGENTS.md` (injected by `bootstrap-extra-files` hook).
-- Config: `openclaw/openclaw.personal-system.json`.
-- Startup: `./start_openclaw.sh` (not raw `npx openclaw`).
-- CLI checks: `scripts/openclaw_with_env.sh`.
-- Smoke: `./scripts/connectivity_smoke.sh`.
+- Runtime constraints: `hermes/profile/AGENTS.md`.
+- Config: `hermes/profile/config.yaml`.
+- Startup: `hermes -p ran-assistant gateway run --replace --accept-hooks`.
+- Smoke: `scripts/phase5_hermes_gateway_smoke.sh`.
 
 ## MCP Servers
 
@@ -70,15 +69,14 @@ Status: CURRENT (2026-05-14)
 - `HEARTBEAT.md` in workspace root.
 - Heartbeat is internal maintenance only; proactive check-ins/reminders are blocked unless explicitly re-enabled.
 - Persona/bootstrap files: `AGENTS.md`, `IDENTITY.md`, `SOUL.md`, `TOOLS.md`, `HEARTBEAT.md`.
-- Hermes budget files (`openclaw/HERMES_*.md`) are repo references only, not injected.
+- Hermes budget files (`hermes/profile/HERMES_*.md`) are repo references only, not injected.
 
 ## Media Reply Flow
 
-- Default: `openclaw agent --json` (agent runtime, MCP tools visible).
+- Default: `hermes gateway` (Hermes runtime, MCP tools visible).
 - Inbound media: bridge validates paths, copies external files to trusted dirs, generates artifacts under `debug/media_context/`, injects recent-media context.
 - Turn aggregation: `inboundMessageBuffer.mjs` holds media-only messages, merges with text-ref.
-- Context Policy v1: compact media context injection (max 3 artifacts, ≤180 chars each), priority-based selection, legacy fallback via `OPENCLAW_CONTEXT_POLICY=legacy`.
-- Fallback: `NODE_BRIDGE_OPENCLAW_REPLY_MODE=http` uses OpenAI-compatible gateway (MCP tools not visible).
+- Context Policy v1: compact media context injection (max 3 artifacts, ≤180 chars each), priority-based selection, legacy fallback via `RAN_AGENT_CONTEXT_POLICY=legacy`.
 
 ## Backend Layer (Python)
 
@@ -95,7 +93,7 @@ Status: CURRENT (2026-05-14)
 
 ## Troubleshooting
 
-- `401` / `Unauthorized`: confirm `.env.local` key values; use `./start_openclaw.sh`.
+- `401` / `Unauthorized`: confirm `.env.local` key values; use `hermes -p ran-assistant gateway run`.
 - `HEARTBEAT ENOENT`: check `HEARTBEAT.md` exists in workspace root.
 - `skills path warning`: verify `skills/*/SKILL.md` files exist; run from repo root.
 - `tools: [] is too short`: ensure `tools.allow` is non-empty; run `/new` after changes.
@@ -108,12 +106,11 @@ WeChat inbound
   -> node_bridge/src/wechatBridge.mjs
   -> inboundMessageBuffer (turn aggregation)
   -> createReplyBackend().getReply(payload)
-  -> sendChatToOpenClawAgent(payload)
+  -> sendChatToHermesGateway(payload)
   -> preparePayloadMediaForAgent (path validation, external file copy)
   -> ensureConversationMediaContext (MiMo/media_reader analysis, artifact persistence)
-  -> buildOpenClawAgentMessage (media instruction + context injection)
-  -> npx openclaw agent --json
-  -> OpenClaw agent runtime (MCP tools visible)
+  -> hermes gateway (port 8642)
+  -> DeepSeek V4 Flash
   -> ingestExchangeToBackend() -> POST /ingest
   -> sanitizeReplyText()
   -> reply to WeChat
@@ -133,7 +130,8 @@ WeChat inbound
 - `node_bridge/src/wechatBridge.mjs` — message normalization, buffer integration
 - `node_bridge/src/inboundMessageBuffer.mjs` — turn aggregation
 - `node_bridge/src/mediaContextStore.mjs` — media artifact persistence
-- `node_bridge/src/openclawGatewayClient.mjs` — OpenClaw agent/gateway client
+- `node_bridge/src/hermesGatewayClient.mjs` — Hermes gateway client
+- `node_bridge/src/dashscopeMediaClient.mjs` — DashScope media generation
 - `node_bridge/src/replyBackend.mjs` — reply dispatch
 - `src/personal_agent/http_server.py` — Python HTTP server
 - `src/personal_agent/service.py` — service layer

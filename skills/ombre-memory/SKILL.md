@@ -129,8 +129,8 @@ echo '{"candidate": {"content": "...", "weight": 0.8}, "layer": "long"}' | pytho
 | `PERSONAL_AGENT_OMBRE_MCP_COMMAND` | `src/personal_agent/ombre_brain_mcp.py` | MCP server path |
 | `PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS` | 10 | Request timeout |
 | `OMBRE_VAULT_PATH` | `vault/ombre` | Primary memory storage path |
-| `OMBRE_VAULT_LEGACY_PATH` | `.openclaw_state/ombre_vault` | Legacy vault path kept as read fallback during migration |
-| `OMBRE_VAULT_FALLBACK_PATHS` | `.openclaw_state/ombre_vault` | Extra fallback vault paths, separated by `:` |
+| `OMBRE_VAULT_LEGACY_PATH` | `.ran_agent_state/ombre_vault` | Legacy vault path kept as read fallback during migration |
+| `OMBRE_VAULT_FALLBACK_PATHS` | `.ran_agent_state/ombre_vault` | Extra fallback vault paths, separated by `:` |
 
 ### Memory Storage Format
 
@@ -194,7 +194,7 @@ When storing without explicit emotions:
 - `src/personal_agent/ombre_brain_mcp.py` - MCP server implementation
 - `src/personal_agent/ombre_mcp.py` - Python client backend
 - `vault/ombre/` - Primary memory storage directory
-- `.openclaw_state/ombre_vault/` - Legacy read-only fallback during migration
+- `.ran_agent_state/ombre_vault/` - Legacy read-only fallback during migration
 
 ## References
 

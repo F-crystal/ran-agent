@@ -67,6 +67,41 @@ Completed boundary changes:
 Phase 6 must not re-open Phase 5 acceptance or require rerunning Phase 5
 external MCP exercises unless the owner explicitly requests it.
 
+## Phase 7: Remove OpenClaw Reply Path
+
+Phase 7 is code-closed.
+
+Scope:
+- Remove `openclaw` branch from `replyBackend.mjs`.
+- Delete `openclawGatewayClient.mjs` (2868 lines).
+- Extract DashScope media functions to `dashscopeMediaClient.mjs`.
+- Clean up `start_node.sh` to Hermes-only mode.
+
+## Phase 8: Remove OpenClaw Infrastructure
+
+Phase 8 is code-closed.
+
+Scope:
+- Delete OpenClaw scripts, config, npm dependency.
+- Migrate `OPENCLAW_*` env vars to `RAN_AGENT_*`.
+- Move HERMES_*.md budget files to `hermes/profile/`.
+
+## Phase 9: State Directory Migration
+
+Phase 9 is code-closed.
+
+Scope:
+- Rename `.openclaw_state/` references to `.ran_agent_state/`.
+- Rename `openclaw-weixin` path segments to `ran-agent-weixin`.
+
+## Phase 10: Python Backend Model Client Replacement
+
+Phase 10 is code-closed.
+
+Scope:
+- Replace `OpenClawChatCompletionsModelClient` with `HermesChatCompletionsModelClient`.
+- Python backend now calls Hermes gateway (DeepSeek V4) instead of OpenClaw gateway.
+
 ## Migration Checklist
 
 - [x] Close Hermes profile/gateway script naming under Phase 5.
@@ -75,5 +110,8 @@ external MCP exercises unless the owner explicitly requests it.
   `/home/ubuntu/.hermes-ran-agent`.
 - [x] Move Node bridge systemd routing from OpenClaw gateway to Hermes gateway.
 - [x] Migrate OpenClaw companion tone into Hermes profile identity and soul.
-- [ ] Continue migrating any remaining OpenClaw-only runtime assumptions out of
-  startup scripts, docs, and service names.
+- [x] Remove OpenClaw reply path from Node bridge (Phase 7).
+- [x] Remove OpenClaw infrastructure and npm dependency (Phase 8).
+- [x] Migrate state directory from `.openclaw_state` to `.ran_agent_state` (Phase 9).
+- [x] Replace Python backend model client with Hermes (Phase 10).
+- [x] Update all documentation to reflect OpenClaw-free state.

@@ -39,7 +39,7 @@ export function buildMimoPowerTools() {
       description: [
         'Use MiMo Token Plan as a powerful multimodal, long-context, deep reasoning tool.',
         'Use when the user explicitly asks for MiMo, deep multimodal analysis, heavy archive/document review, image/audio/video understanding, or complex synthesis.',
-        'OpenClaw remains the speaker; this tool returns evidence and artifacts for OpenClaw to summarize.',
+        'Hermes remains the speaker; this tool returns evidence and artifacts for Hermes to summarize.',
       ].join(' '),
       inputSchema: {
         type: 'object',
@@ -309,7 +309,7 @@ export function buildMimoChatCompletionsRequestBody(args = {}, options = {}) {
     text: [
       `Task: ${task}`,
       `mode: ${mode}`,
-      'Return a concise but evidence-rich result for OpenClaw to summarize. Include key findings, concrete evidence, risks, and next actions when relevant.',
+      'Return a concise but evidence-rich result for Hermes to summarize. Include key findings, concrete evidence, risks, and next actions when relevant.',
     ].join('\n'),
   });
   
@@ -324,7 +324,7 @@ export function buildMimoChatCompletionsRequestBody(args = {}, options = {}) {
       {
         role: 'system',
         content: [
-          'You are MiMo, a powerful multimodal analysis worker called by OpenClaw.',
+          'You are MiMo, a powerful multimodal analysis worker called by Hermes.',
           'Do not roleplay as the user-facing assistant.',
           'Focus on accurate multimodal understanding, long-context synthesis, and actionable findings.',
         ].join(' '),
@@ -361,7 +361,7 @@ export function buildMimoResponsesRequestBody(args = {}, options = {}) {
     text: [
       `Task: ${task}`,
       `mode: ${mode}`,
-      'Return a concise but evidence-rich result for OpenClaw to summarize. Include key findings, concrete evidence, risks, and next actions when relevant.',
+      'Return a concise but evidence-rich result for Hermes to summarize. Include key findings, concrete evidence, risks, and next actions when relevant.',
     ].join('\n'),
   });
   

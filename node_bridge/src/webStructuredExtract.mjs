@@ -97,7 +97,7 @@ export async function extractStructuredContentFromUrlWithPlaywright(url, options
   let page = null;
   try {
     context = await browser.newContext({
-      userAgent: 'Mozilla/5.0 OpenClawBridge/1.0',
+      userAgent: 'Mozilla/5.0 RanAgentBridge/1.0',
     });
     page = await context.newPage();
     await page.goto(url, {

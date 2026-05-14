@@ -183,10 +183,10 @@ class OrchestratorAgent:
         *,
         now_local: datetime,
     ) -> OrchestratorTurnResult:
-        """Frontend turn handling is retired; OpenClaw gateway owns chat mainline."""
+        """Frontend turn handling is retired; Hermes gateway owns chat mainline."""
 
         del message, now_local
-        raise RuntimeError("/chat frontend path is retired; use OpenClaw Gateway /v1/chat/completions")
+        raise RuntimeError("/chat frontend path is retired; use Hermes Gateway")
 
     def evaluate_opportunities(
         self,

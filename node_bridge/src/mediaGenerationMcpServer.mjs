@@ -3,8 +3,8 @@ import readline from 'node:readline';
 import {
   generateImageWithQwen,
   generateSpeechWithQwenOmni,
-  getOpenClawGatewayConfig,
-} from './openclawGatewayClient.mjs';
+  getDashScopeMediaConfig,
+} from './dashscopeMediaClient.mjs';
 
 const SERVER_INFO = {
   name: 'ran-agent-media-generation',
@@ -104,7 +104,7 @@ function buildTools() {
 }
 
 async function callTool(name, args = {}, options = {}) {
-  const config = options.config || getOpenClawGatewayConfig(options.env);
+  const config = options.config || getDashScopeMediaConfig(options.env);
   const fetchImpl = options.fetchImpl || fetch;
   const logger = options.logger || console;
 

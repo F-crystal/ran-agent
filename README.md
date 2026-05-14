@@ -29,7 +29,7 @@ Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入
 
 ## 能做什么
 
-**微信 Agent。** 消息路径：`微信 → Node Bridge → OpenClaw Agent → Claude/Qwen → 回复`。像跟朋友聊天，不像在提示词框里打字。Agent 会记住你们的对话，并在长期交互中演化自己的性格。
+**微信 Agent。** 消息路径：`微信 → Node Bridge → Hermes Gateway → Claude/Qwen → 回复`。像跟朋友聊天，不像在提示词框里打字。Agent 会记住你们的对话，并在长期交互中演化自己的性格。
 
 **社交媒体理解。** 把 B站视频、小红书笔记、微信公众号文章链接发到对话框里，Agent 会解析内容并总结给你：
 
@@ -42,7 +42,7 @@ Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入
 **媒体理解管线。** 发图片后说"用 mimo 看一下"，系统自动将图片和文字合并为一个请求处理。媒体分析结果在会话中持久化，后续说"刚才那张图"能正确指代之前的分析结果。支持图片、音频、视频、文档的深度多模态分析。
 
 
-**上下文压缩策略。** 默认开启 Context Policy v1：每轮最多注入 3 个媒体 artifact，每个 artifact 紧凑渲染（≤180 字符），优先注入显式引用和当前媒体。可通过 `OPENCLAW_CONTEXT_POLICY=legacy` 回退到完整媒体上下文模式。详见 `docs/governance/media-pipeline.md`。
+**上下文压缩策略。** 默认开启 Context Policy v1：每轮最多注入 3 个媒体 artifact，每个 artifact 紧凑渲染（≤180 字符），优先注入显式引用和当前媒体。可通过 `RAN_AGENT_CONTEXT_POLICY=legacy` 回退到完整媒体上下文模式。详见 `docs/governance/media-pipeline.md`。
 **记忆与反思。** Agent 在对话中构建工作记忆。每晚运行反思周期，回顾当天互动，提出性格微调建议。你始终控制哪些内容被记住、哪些被遗忘。
 
 ---
@@ -50,7 +50,7 @@ Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入
 ## 架构
 
 ```
-微信 ──┬── 消息接入 ──► 入站消息聚合 ──► Node Bridge ──► OpenClaw Agent ──► Claude/Qwen
+微信 ──┬── 消息接入 ──► 入站消息聚合 ──► Node Bridge ──► Hermes Gateway ──► Claude/Qwen
        │                  (图片+文字合并)       ▲               │    │    │
        │                                        │               │    │    └──► media_generation
        │                                        │               │    └───────► social_reader
@@ -69,7 +69,7 @@ Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入
 
 **关键设计决策：**
 
-- **MCP 门面模式。** OpenClaw 只看到 6 个干净稳定的工具（`media_reader__analyze_video` 等），背后是平台解析器、Provider 适配器、格式转换器。内部细节不泄露给 Agent。
+- **MCP 门面模式。** Hermes 只看到 6 个干净稳定的工具（`media_reader__analyze_video` 等），背后是平台解析器、Provider 适配器、格式转换器。内部细节不泄露给 Agent。
 
 - **字幕优先的视频理解。** 四层逐级降级：软字幕直接提取（~2s）→ 纯音频 ASR 转写（~10s，仅下载音频）→ 关键帧 VLM 分析（~30s，不含 OCR）→ 元数据兜底（~1s）。长视频不盲目下载全片。
 
@@ -81,7 +81,7 @@ Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入
 
 ## MCP 服务
 
-Agent 的能力以 MCP（模型上下文协议）服务的形式组织，每个服务向 OpenClaw 暴露一组聚焦的工具。
+Agent 的能力以 MCP（模型上下文协议）服务的形式组织，每个服务向 Hermes 暴露一组聚焦的工具。
 
 ### 自建服务
 
@@ -163,7 +163,7 @@ cp .env.example .env.local
 三个终端分别启动：
 
 ```bash
-./start_openclaw.sh       # Agent 运行时
+hermes -p ran-assistant gateway run       # Agent 运行时
 ./start_python.sh          # 后端服务（记忆、调度、知识库）
 cd node_bridge && ./start_node.sh  # 微信 Bridge
 ```
@@ -200,7 +200,7 @@ cp .env.example .env.local
 
 ```
 ran_agent/
-├── openclaw/                    # OpenClaw Agent 配置和运行时
+├── hermes/                      # Hermes Gateway 配置和运行时
 ├── node_bridge/                 # 微信 Bridge + MCP 门面服务
 │   └── src/
 │       ├── mediaReader/         # OCR、VLM、ASR、ffmpeg、平台解析器
@@ -258,4 +258,4 @@ PolyForm Noncommercial License 1.0.0 — 个人使用、研究和学习免费。
 
 ## 隐私
 
-这是一个个人 Agent。以下内容永远不应进入版本控制：`.env.local`、`.openclaw_state/`、聊天记录、Cookie、API 密钥、Vault 内容、状态数据库。`.gitignore` 已默认阻止这些文件——在公开你的 Fork 前务必再次确认。
+这是一个个人 Agent。以下内容永远不应进入版本控制：`.env.local`、`.ran_agent_state/`、聊天记录、Cookie、API 密钥、Vault 内容、状态数据库。`.gitignore` 已默认阻止这些文件——在公开你的 Fork 前务必再次确认。

@@ -294,55 +294,53 @@ class QwenResponsesModelClient:
         return f"{normalized}/responses"
 
 
-class OpenClawChatCompletionsModelClient:
-    """Minimal OpenClaw Gateway chat-completions client for backend reuse."""
+class HermesChatCompletionsModelClient:
+    """Hermes Gateway chat-completions client for backend model calls."""
 
     def __init__(
         self,
         base_url: str,
-        token_env_var: str,
-        agent_target: str,
-        backend_model_override: str,
+        api_key_env_var: str,
+        model: str,
         timeout_seconds: int,
         logger: logging.Logger,
     ) -> None:
         self._base_url = base_url
-        self._token_env_var = token_env_var
-        self._agent_target = agent_target
-        self._backend_model_override = backend_model_override
+        self._api_key_env_var = api_key_env_var
+        self._model = model
         self._timeout_seconds = timeout_seconds
         self._logger = logger
 
     def generate_reply(self, request: ModelRequest) -> ModelResponse:
-        token = os.getenv(self._token_env_var, "").strip()
-        if not token:
-            self._logger.error("openclaw gateway token missing env_var=%s", self._token_env_var)
+        api_key = os.getenv(self._api_key_env_var, "").strip()
+        if not api_key:
+            # Fallback to API_SERVER_KEY
+            api_key = os.getenv("API_SERVER_KEY", "").strip()
+        if not api_key:
+            self._logger.error("hermes api key missing env_var=%s", self._api_key_env_var)
             return ModelResponse(
-                text=f"模型服务暂时不可用：未设置 OpenClaw Gateway token（{self._token_env_var}）。",
-                provider="openclaw",
+                text=f"模型服务暂时不可用：未设置 Hermes API key（{self._api_key_env_var}）。",
+                provider="hermes",
                 is_error=True,
             )
 
         payload = {
-            "model": self._agent_target,
+            "model": self._model,
             "messages": [
                 {"role": "system", "content": request.system_prompt},
                 {"role": "user", "content": request.build_user_prompt()},
             ],
         }
         headers = {
-            "Authorization": f"Bearer {token}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         }
-        if self._backend_model_override:
-            headers["x-openclaw-model"] = self._backend_model_override
 
         request_url = self._build_request_url()
         self._logger.info(
-            "openclaw gateway request url=%s agent_target=%s backend_model=%s",
+            "hermes gateway request url=%s model=%s",
             request_url,
-            self._agent_target,
-            self._backend_model_override or "default",
+            self._model,
         )
         request_obj = urllib.request.Request(
             url=request_url,
@@ -356,69 +354,69 @@ class OpenClawChatCompletionsModelClient:
                 response_data = json.loads(response.read().decode("utf-8"))
         except TimeoutError:
             self._logger.warning(
-                "openclaw gateway request timed out timeout_seconds=%s url=%s",
+                "hermes gateway request timed out timeout_seconds=%s url=%s",
                 self._timeout_seconds,
                 request_url,
             )
             return ModelResponse(
-                text=f"模型服务暂时不可用：OpenClaw Gateway 请求超时（{self._timeout_seconds}s），请稍后再试。",
-                provider="openclaw",
+                text=f"模型服务暂时不可用：Hermes Gateway 请求超时（{self._timeout_seconds}s），请稍后再试。",
+                provider="hermes",
                 is_error=True,
             )
         except urllib.error.HTTPError as exc:
             error_body = exc.read().decode("utf-8", errors="replace")
             self._logger.exception(
-                "openclaw gateway request failed http_status=%s body=%s",
+                "hermes gateway request failed http_status=%s body=%s",
                 exc.code,
                 error_body,
             )
             return ModelResponse(
-                text="模型服务暂时不可用：OpenClaw Gateway 返回错误，请稍后再试。",
-                provider="openclaw",
+                text="模型服务暂时不可用：Hermes Gateway 返回错误，请稍后再试。",
+                provider="hermes",
                 is_error=True,
             )
         except urllib.error.URLError as exc:
             reason = getattr(exc, "reason", None)
             if isinstance(reason, (TimeoutError, socket.timeout)):
                 self._logger.warning(
-                    "openclaw gateway request timed out via urlerror timeout_seconds=%s url=%s",
+                    "hermes gateway request timed out via urlerror timeout_seconds=%s url=%s",
                     self._timeout_seconds,
                     request_url,
                 )
                 return ModelResponse(
-                    text=f"模型服务暂时不可用：OpenClaw Gateway 请求超时（{self._timeout_seconds}s），请稍后再试。",
-                    provider="openclaw",
+                    text=f"模型服务暂时不可用：Hermes Gateway 请求超时（{self._timeout_seconds}s），请稍后再试。",
+                    provider="hermes",
                     is_error=True,
                 )
-            self._logger.exception("openclaw gateway request failed due to network error")
+            self._logger.exception("hermes gateway request failed due to network error")
             return ModelResponse(
-                text="模型服务暂时不可用：连接 OpenClaw Gateway 失败，请稍后再试。",
-                provider="openclaw",
+                text="模型服务暂时不可用：连接 Hermes Gateway 失败，请稍后再试。",
+                provider="hermes",
                 is_error=True,
             )
         except Exception:
-            self._logger.exception("openclaw gateway request failed unexpectedly")
+            self._logger.exception("hermes gateway request failed unexpectedly")
             return ModelResponse(
-                text="模型服务暂时不可用：OpenClaw Gateway 请求过程中出现异常，请稍后再试。",
-                provider="openclaw",
+                text="模型服务暂时不可用：Hermes Gateway 请求过程中出现异常，请稍后再试。",
+                provider="hermes",
                 is_error=True,
             )
 
         output_text = self._extract_output_text(response_data)
         if not output_text:
-            self._logger.error("openclaw gateway response did not contain text output")
+            self._logger.error("hermes gateway response did not contain text output")
             return ModelResponse(
-                text="模型服务暂时不可用：OpenClaw Gateway 未返回可读文本。",
-                provider="openclaw",
+                text="模型服务暂时不可用：Hermes Gateway 未返回可读文本。",
+                provider="hermes",
                 is_error=True,
             )
 
-        return ModelResponse(text=output_text, provider="openclaw", is_error=False)
+        return ModelResponse(text=output_text, provider="hermes", is_error=False)
 
     def _build_request_url(self) -> str:
         normalized = self._base_url.strip()
         if not normalized:
-            return "http://127.0.0.1:19123/v1/chat/completions"
+            return "http://127.0.0.1:8642/v1/chat/completions"
         normalized = normalized.rstrip("/")
         if normalized.endswith("/v1/chat/completions"):
             return normalized

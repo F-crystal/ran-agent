@@ -40,7 +40,7 @@ class ContextCompactor:
     """Manages context compression for conversation history."""
 
     # Token thresholds
-    DEFAULT_CONTEXT_WINDOW = 120000  # From openclaw config
+    DEFAULT_CONTEXT_WINDOW = 120000  # Default context window size
     AUTO_COMPACT_THRESHOLD = 0.8  # 80% of context window
     MICRO_COMPACT_THRESHOLD = 0.6  # 60% for single large tool outputs
 

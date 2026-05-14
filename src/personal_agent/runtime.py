@@ -7,7 +7,7 @@ from dataclasses import dataclass
 
 from personal_agent.config import AppConfig, load_config
 from personal_agent.db import Database
-from personal_agent.interfaces.model import OpenClawChatCompletionsModelClient, QwenResponsesModelClient
+from personal_agent.interfaces.model import HermesChatCompletionsModelClient, QwenResponsesModelClient
 from personal_agent.logging_setup import configure_logging
 from personal_agent.service import PersonalAgentService
 
@@ -65,17 +65,15 @@ def build_chat_model_client(config: AppConfig, logger: logging.Logger):
 
     if not config.backend_qwen_enabled:
         logger.info(
-            "using openclaw gateway chat model client agent_target=%s backend_model=%s timeout_seconds=%s",
-            config.openclaw_gateway_model_target,
-            config.backend_model_ref or "default",
-            config.openclaw_gateway_timeout_seconds,
+            "using hermes gateway chat model client model=%s timeout_seconds=%s",
+            config.hermes_model,
+            config.hermes_timeout_seconds,
         )
-        return OpenClawChatCompletionsModelClient(
-            base_url=config.openclaw_gateway_base_url,
-            token_env_var=config.openclaw_gateway_token_env_var,
-            agent_target=config.openclaw_gateway_model_target,
-            backend_model_override=config.backend_model_ref,
-            timeout_seconds=config.openclaw_gateway_timeout_seconds,
+        return HermesChatCompletionsModelClient(
+            base_url=config.hermes_base_url,
+            api_key_env_var=config.hermes_api_key_env_var,
+            model=config.hermes_model,
+            timeout_seconds=config.hermes_timeout_seconds,
             logger=logger,
         )
 
@@ -99,17 +97,15 @@ def build_tool_model_client(config: AppConfig, logger: logging.Logger):
 
     if not config.backend_qwen_enabled:
         logger.info(
-            "using openclaw gateway tool model client agent_target=%s backend_model=%s timeout_seconds=%s",
-            config.openclaw_gateway_model_target,
-            config.backend_model_ref or "default",
-            config.openclaw_gateway_timeout_seconds,
+            "using hermes gateway tool model client model=%s timeout_seconds=%s",
+            config.hermes_model,
+            config.hermes_timeout_seconds,
         )
-        return OpenClawChatCompletionsModelClient(
-            base_url=config.openclaw_gateway_base_url,
-            token_env_var=config.openclaw_gateway_token_env_var,
-            agent_target=config.openclaw_gateway_model_target,
-            backend_model_override=config.backend_model_ref,
-            timeout_seconds=config.openclaw_gateway_timeout_seconds,
+        return HermesChatCompletionsModelClient(
+            base_url=config.hermes_base_url,
+            api_key_env_var=config.hermes_api_key_env_var,
+            model=config.hermes_model,
+            timeout_seconds=config.hermes_timeout_seconds,
             logger=logger,
         )
 

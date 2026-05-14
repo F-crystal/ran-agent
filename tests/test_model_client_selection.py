@@ -13,7 +13,7 @@ from unittest.mock import patch
 from personal_agent.config import AppConfig
 from personal_agent.interfaces.model import (
     ModelRequest,
-    OpenClawChatCompletionsModelClient,
+    HermesChatCompletionsModelClient,
     QwenResponsesModelClient,
 )
 from personal_agent.runtime import build_chat_model_client, build_tool_model_client
@@ -36,7 +36,7 @@ class ModelClientSelectionTest(unittest.TestCase):
     def setUp(self) -> None:
         self.logger = build_test_logger()
 
-    def test_build_chat_model_client_returns_openclaw_gateway_client_by_default(self) -> None:
+    def test_build_chat_model_client_returns_hermes_client_by_default(self) -> None:
         config = AppConfig(
             base_dir=Path("."),
             data_dir=Path("./data"),
@@ -48,9 +48,9 @@ class ModelClientSelectionTest(unittest.TestCase):
 
         client = build_chat_model_client(config, self.logger)
 
-        self.assertIsInstance(client, OpenClawChatCompletionsModelClient)
+        self.assertIsInstance(client, HermesChatCompletionsModelClient)
 
-    def test_build_tool_model_client_returns_openclaw_gateway_client_by_default(self) -> None:
+    def test_build_tool_model_client_returns_hermes_client_by_default(self) -> None:
         config = AppConfig(
             base_dir=Path("."),
             data_dir=Path("./data"),
@@ -62,14 +62,13 @@ class ModelClientSelectionTest(unittest.TestCase):
 
         client = build_tool_model_client(config, self.logger)
 
-        self.assertIsInstance(client, OpenClawChatCompletionsModelClient)
+        self.assertIsInstance(client, HermesChatCompletionsModelClient)
 
-    def test_openclaw_gateway_client_returns_fallback_message_when_token_is_missing(self) -> None:
-        client = OpenClawChatCompletionsModelClient(
-            base_url="http://127.0.0.1:19123",
-            token_env_var="OPENCLAW_GATEWAY_TOKEN",
-            agent_target="openclaw/default",
-            backend_model_override="claude_code/qwen3.6-plus",
+    def test_hermes_client_returns_fallback_message_when_token_is_missing(self) -> None:
+        client = HermesChatCompletionsModelClient(
+            base_url="http://127.0.0.1:8642",
+            api_key_env_var="HERMES_API_KEY",
+            model="deepseek-v4-flash",
             timeout_seconds=5,
             logger=self.logger,
         )
@@ -80,8 +79,8 @@ class ModelClientSelectionTest(unittest.TestCase):
             )
 
         self.assertTrue(response.is_error)
-        self.assertEqual(response.provider, "openclaw")
-        self.assertIn("未设置 OpenClaw Gateway token", response.text)
+        self.assertEqual(response.provider, "hermes")
+        self.assertIn("未设置 Hermes API key", response.text)
 
     def test_build_chat_model_client_returns_qwen_client_when_enabled(self) -> None:
         config = AppConfig(

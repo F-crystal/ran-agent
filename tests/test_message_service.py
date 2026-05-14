@@ -288,14 +288,14 @@ class PersonalAgentServiceTest(unittest.TestCase):
             sender_id="compact-user",
             user_text="我们先定一下 API 设计。",
             reply_text="好，先看接口边界。",
-            source="openclaw_gateway",
+            source="hermes",
         )
         service.record_external_exchange(
             channel="wechat",
             sender_id="compact-user",
             user_text="后面再统一错误处理。",
             reply_text="可以，错误模型再收拢。",
-            source="openclaw_gateway",
+            source="hermes",
         )
 
         result = service.compact_conversation_context(
@@ -326,14 +326,14 @@ class PersonalAgentServiceTest(unittest.TestCase):
             sender_id="target-user",
             user_text="目标用户在聊 API 设计。",
             reply_text="先定接口。",
-            source="openclaw_gateway",
+            source="hermes",
         )
         service.record_external_exchange(
             channel="wechat",
             sender_id="other-user",
             user_text="另一个用户在问健身计划。",
             reply_text="先看训练频率。",
-            source="openclaw_gateway",
+            source="hermes",
         )
 
         result = service.compact_conversation_context(

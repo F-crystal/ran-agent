@@ -81,7 +81,7 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
             sender_id="user-42",
             user_text="今天我想把论文提纲写完",
             reply_text="好呀，我晚点提醒你回顾提纲。",
-            source="openclaw",
+            source="hermes",
         )
 
         inbox_items = sorted((self.config.vault_dir / "inbox" / "chat").glob("chat_sync_*.md"))
@@ -106,7 +106,7 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
             sender_id="user-42",
             user_text="这张图你看下",
             reply_text="看到了，是一张白色猫咪照片。",
-            source="openclaw",
+            source="hermes",
             media_refs=("https://example.com/cat.png",),
         )
 
@@ -129,7 +129,7 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
             sender_id="user-42",
             user_text="这段语音帮我留档",
             reply_text="已归档。",
-            source="openclaw",
+            source="hermes",
             media_refs=("filePath=/tmp/voice-note.m4a mimeType=audio/mp4 type=audio",),
         )
 

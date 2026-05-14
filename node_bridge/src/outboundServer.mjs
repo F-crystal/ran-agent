@@ -24,11 +24,11 @@ function normalizeAccountId(raw) {
 }
 
 function resolveAccountIndexPath(env = process.env) {
-  return path.join(resolveStateDir(env), 'openclaw-weixin', 'accounts.json');
+  return path.join(resolveStateDir(env), 'ran-agent-weixin', 'accounts.json');
 }
 
 function resolveAccountPath(accountId, env = process.env) {
-  return path.join(resolveStateDir(env), 'openclaw-weixin', 'accounts', `${accountId}.json`);
+  return path.join(resolveStateDir(env), 'ran-agent-weixin', 'accounts', `${accountId}.json`);
 }
 
 function readJsonFile(filePath) {

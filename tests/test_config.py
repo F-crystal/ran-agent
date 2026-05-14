@@ -157,91 +157,28 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertFalse(config.hermes_bounded_context_enabled)
         self.assertEqual(config.hermes_bounded_context_interval_minutes, 1440)
 
-    def test_backend_model_contract_defaults_to_openclaw_frontline_config(self) -> None:
+    def test_backend_model_contract_defaults_are_empty_after_openclaw_removal(self) -> None:
         config = load_config()
 
-        self.assertEqual(config.backend_model_ref, "qwen3.5-plus")
-        self.assertEqual(config.backend_model_provider, "claude_code")
-        self.assertEqual(config.backend_model_name, "qwen3.5-plus")
-        self.assertIsNone(re.search(r"qwen3\.5-plus-\d{4}-\d{2}-\d{2}$", config.backend_model_ref))
-        self.assertIsNone(re.search(r"qwen3\.5-plus-\d{4}-\d{2}-\d{2}$", config.backend_model_name))
-        self.assertEqual(config.backend_model_api, "anthropic-messages")
-        self.assertEqual(config.backend_model_base_url, "${ANTHROPIC_BASE_URL}")
-        self.assertEqual(config.backend_model_api_key_env_var, "ANTHROPIC_AUTH_TOKEN")
-        self.assertGreaterEqual(config.backend_model_max_tokens, 1)
-
-    def test_openclaw_personal_system_keeps_qwen35_as_frontline_without_fallbacks(self) -> None:
-        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-
-        default_model = config_data["agents"]["defaults"]["model"]
-        listed_model = config_data["agents"]["list"][0]["model"]
-        registered_model_ids = {
-            item["id"]
-            for item in config_data["models"]["providers"]["claude_code"]["models"]
-        }
-
-        self.assertEqual(default_model["primary"], "qwen3.5-plus")
-        self.assertEqual(default_model["fallbacks"], [])
-        self.assertEqual(listed_model["primary"], "qwen3.5-plus")
-        self.assertEqual(listed_model["fallbacks"], [])
-        self.assertEqual(config_data["agents"]["defaults"]["heartbeat"]["directPolicy"], "block")
-        self.assertNotIn("kimi-for-coding", registered_model_ids)
-        self.assertIn("qwen3.5-plus", registered_model_ids)
-
-    def test_openclaw_personal_system_pins_direct_sessions_to_daily_reset(self) -> None:
-        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-
-        self.assertEqual(config_data["session"]["dmScope"], "per-channel-peer")
-        self.assertEqual(
-            config_data["session"]["reset"],
-            {
-                "mode": "daily",
-                "atHour": 4,
-            },
-        )
-        self.assertEqual(
-            config_data["session"]["resetByType"]["direct"],
-            {
-                "mode": "daily",
-                "atHour": 4,
-            },
-        )
-        self.assertEqual(config_data["session"]["resetTriggers"], ["/new", "/reset"])
-
-    def test_openclaw_personal_system_frontline_defaults_disable_reasoning_output(self) -> None:
-        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-
-        self.assertEqual(config_data["agents"]["defaults"]["thinkingDefault"], "off")
-        self.assertEqual(config_data["agents"]["defaults"]["typingMode"], "message")
-        self.assertEqual(config_data["agents"]["list"][0]["reasoningDefault"], "off")
+        self.assertEqual(config.backend_model_ref, "")
+        self.assertEqual(config.backend_model_provider, "")
+        self.assertEqual(config.backend_model_name, "")
+        self.assertEqual(config.backend_model_api, "")
+        self.assertEqual(config.backend_model_base_url, "")
+        self.assertEqual(config.backend_model_api_key_env_var, "")
+        self.assertEqual(config.backend_model_max_tokens, 0)
 
     def test_frontline_bootstrap_contains_wechat_companion_quality_constraints(self) -> None:
         repo_root = Path(__file__).resolve().parents[1]
-        openclaw_agents = (repo_root / "openclaw" / "AGENTS.md").read_text(encoding="utf-8")
         soul = (repo_root / "SOUL.md").read_text(encoding="utf-8")
         identity = (repo_root / "IDENTITY.md").read_text(encoding="utf-8")
         tools = (repo_root / "TOOLS.md").read_text(encoding="utf-8")
 
-        self.assertIn("微信陪伴聊天", openclaw_agents)
-        self.assertIn("对 `/new` 和 `/reset` 只回复简短确认", openclaw_agents)
         self.assertIn("不要把用户当成任务对象", soul)
         self.assertIn("不要主动长篇报告", soul)
         self.assertIn("不要用分析外泄", identity)
         self.assertIn("不主动把普通陪伴聊天升级成任务", identity)
         self.assertIn("工具只是后台动作", tools)
-
-    def test_openclaw_personal_system_bootstraps_openclaw_agents_file_via_hook(self) -> None:
-        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-
-        bootstrap_hook = config_data["hooks"]["internal"]["entries"]["bootstrap-extra-files"]
-
-        self.assertTrue(config_data["hooks"]["internal"]["enabled"])
-        self.assertTrue(bootstrap_hook["enabled"])
-        self.assertEqual(bootstrap_hook["paths"], ["openclaw/AGENTS.md"])
 
     def test_repo_mcp_config_registers_playwright_wrapper_without_home_shortcuts(self) -> None:
         mcp_path = Path(__file__).resolve().parents[1] / ".mcp.json"
@@ -272,70 +209,6 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(mimo_power["command"], "bash")
         self.assertEqual(mimo_power["args"], ["scripts/start_mimo_power_mcp.sh"])
         self.assertNotIn("~", json.dumps(mimo_power, ensure_ascii=False))
-
-    def test_openclaw_personal_system_registers_playwright_mcp_wrapper(self) -> None:
-        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-
-        playwright = config_data["mcp"]["servers"]["playwright"]
-
-        self.assertEqual(playwright["command"], "bash")
-        self.assertEqual(playwright["args"], ["scripts/start_playwright_mcp.sh"])
-        self.assertNotIn("~", json.dumps(playwright, ensure_ascii=False))
-
-    def test_openclaw_personal_system_registers_social_reader_mcp_wrapper(self) -> None:
-        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-
-        social_reader = config_data["mcp"]["servers"]["social_reader"]
-
-        self.assertEqual(social_reader["command"], "bash")
-        self.assertEqual(social_reader["args"], ["scripts/start_social_reader_mcp.sh"])
-        self.assertNotIn("~", json.dumps(social_reader, ensure_ascii=False))
-
-    def test_openclaw_personal_system_registers_mimo_power_mcp_without_changing_frontline_model(self) -> None:
-        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-
-        mimo_power = config_data["mcp"]["servers"]["mimo_power"]
-
-        self.assertEqual(mimo_power["command"], "bash")
-        self.assertEqual(mimo_power["args"], ["scripts/start_mimo_power_mcp.sh"])
-        self.assertNotIn("~", json.dumps(mimo_power, ensure_ascii=False))
-        self.assertEqual(config_data["agents"]["defaults"]["model"]["primary"], "qwen3.5-plus")
-        self.assertEqual(config_data["agents"]["defaults"]["model"]["fallbacks"], [])
-        self.assertEqual(config_data["agents"]["list"][0]["model"]["primary"], "qwen3.5-plus")
-        self.assertEqual(config_data["agents"]["list"][0]["model"]["fallbacks"], [])
-        self.assertEqual(list(config_data["models"]["providers"].keys()), ["claude_code"])
-
-    def test_openclaw_disables_bundled_browser_plugin_when_playwright_mcp_is_registered(self) -> None:
-        config_path = Path(__file__).resolve().parents[1] / "openclaw" / "openclaw.personal-system.json"
-        config_data = json.loads(config_path.read_text(encoding="utf-8"))
-
-        browser_plugin = config_data["plugins"]["entries"]["browser"]
-
-        self.assertEqual(browser_plugin["enabled"], False)
-        self.assertIn("playwright", config_data["mcp"]["servers"])
-
-    def test_openclaw_runtime_docs_route_browser_work_to_fetch_or_playwright_mcp(self) -> None:
-        openclaw_agents_path = Path(__file__).resolve().parents[1] / "openclaw" / "AGENTS.md"
-        openclaw_agents = openclaw_agents_path.read_text(encoding="utf-8")
-
-        self.assertIn("普通网页优先使用 `web_fetch`", openclaw_agents)
-        self.assertIn("动态/视觉/交互页面使用 Playwright MCP", openclaw_agents)
-
-    def test_root_agents_is_thin_and_points_to_openclaw_local_contract(self) -> None:
-        root_agents_path = Path(__file__).resolve().parents[1] / "AGENTS.md"
-        root_agents = root_agents_path.read_text(encoding="utf-8")
-
-        self.assertIn("OpenClaw-specific runtime constraints live in `openclaw/AGENTS.md`", root_agents)
-        self.assertIn("this root file is also an official workspace bootstrap file", root_agents)
-        self.assertIn("Reflection/persona evolution is not a purely manual skill flow", root_agents)
-        self.assertIn("self_reflection_job", root_agents)
-        self.assertIn("night_cycle_job", root_agents)
-        self.assertIn("For complex or unfamiliar problems, first search official documentation", root_agents)
-        self.assertNotIn("Frontline single speaker: OpenClaw.", root_agents)
-        self.assertNotIn("Waking Loop MVP", root_agents)
 
     def test_scheduler_uses_configured_job_intervals(self) -> None:
         class FakeScheduler:

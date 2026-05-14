@@ -7,8 +7,8 @@ const DEFAULT_PROJECT_ROOT = path.resolve(MODULE_DIR, '..', '..');
 const DEFAULT_TRUSTED_MEDIA_DIRS = [
   'debug/wechat/inbound',
   'debug/mimo_inbound',
-  '.openclaw_state/wechat/inbound',
-  '.openclaw_state/openclaw-weixin/media',
+  '.ran_agent_state/wechat/inbound',
+  '.ran_agent_state/ran-agent-weixin/media',
 ];
 
 export function resolveProjectRoot(env = process.env) {

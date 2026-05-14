@@ -13,7 +13,7 @@ tasks:
 
 Behavior contract (MVP):
 
-- Fixed loop applies only in waking hours configured by OpenClaw heartbeat `activeHours`.
+- Fixed loop applies only in waking hours configured by Hermes heartbeat `activeHours`.
 - When user declares a task/plan/deadline, create or update a todo record via memory tools immediately.
 - When user gives an exact time/date, create a reminder (prefer cron/system-event wake) and keep tracking in todo until done.
 - Heartbeat runs are internal maintenance only. Do not initiate proactive check-ins, reminders, alerts, or follow-up questions from heartbeat.

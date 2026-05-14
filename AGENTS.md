@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Status: CURRENT (2026-05-13)
+Status: CURRENT (2026-05-14)
 
 ## Scope
 
-This is the repo-root workspace bootstrap file, loaded by both OpenClaw and Codex. It must be self-contained — do not reference `CLAUDE.md` or `openclaw/AGENTS.md` as required reading for rules defined here. OpenClaw-specific runtime constraints live in `openclaw/AGENTS.md`; this root file is also an official workspace bootstrap file.
+This is the repo-root workspace bootstrap file. It must be self-contained — do not reference `CLAUDE.md` or `hermes/profile/AGENTS.md` as required reading for rules defined here. Hermes-specific runtime constraints live in `hermes/profile/AGENTS.md`.
 
 ## Execution Scope
 
@@ -54,7 +54,7 @@ Only heavy background tasks are sub-agent candidates: reflection, knowledge main
 
 - Keep reads and writes inside the current repository checkout.
 - Keep owner-only posture for high-permission actions.
-- Never commit: `.env.local`, `.openclaw_state/`, `data/`, `logs/`, `debug/`, `state/`, `local_archive/`, `vault/inbox/`, `vault/raw/`, `vault/wiki/`, or credential files.
+- Never commit: `.env.local`, `.ran_agent_state/`, `data/`, `logs/`, `debug/`, `state/`, `local_archive/`, `vault/inbox/`, `vault/raw/`, `vault/wiki/`, or credential files.
 - Platform resolver credentials (SESSDATA, XHS_COOKIE, proxy URLs) must never appear in tool output, logs, docs, or git.
 
 ## Governance Docs

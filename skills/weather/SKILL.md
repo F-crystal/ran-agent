@@ -33,5 +33,4 @@ await web_fetch({ url: "https://example.com/weather-source" });
 
 ## Notes
 
-- 使用工作区技能副本，避免读取 `node_modules/openclaw/skills/weather/SKILL.md`。
 - 不使用 `~` 前缀路径；仅使用绝对路径或工作区相对路径。

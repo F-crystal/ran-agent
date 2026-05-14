@@ -2,13 +2,13 @@
 
 Status: CURRENT (2026-05-14)
 
+
 ## Public Source Of Truth
 
 - `README.md` / `README_en.md`
 - `AGENTS.md`
 - `CLAUDE.md`
-- `openclaw/AGENTS.md`
-- `openclaw/README.md` / `openclaw/README_en.md`
+- `hermes/profile/AGENTS.md`
 - `docs/governance/doc_status.md`
 - `docs/governance/current_runtime_status.md`
 - `docs/governance/phase_status.md`

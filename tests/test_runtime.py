@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from personal_agent.config import AppConfig
-from personal_agent.interfaces.model import OpenClawChatCompletionsModelClient, QwenResponsesModelClient
+from personal_agent.interfaces.model import HermesChatCompletionsModelClient, QwenResponsesModelClient
 from personal_agent.runtime import build_chat_model_client, build_tool_model_client
 
 
@@ -32,15 +32,15 @@ class RuntimeModelClientSelectionTest(unittest.TestCase):
             log_file_path=Path("./logs/personal_agent.log"),
         )
 
-    def test_build_chat_model_client_uses_openclaw_gateway_by_default(self) -> None:
+    def test_build_chat_model_client_uses_hermes_by_default(self) -> None:
         client = build_chat_model_client(self.base_config, self.logger)
 
-        self.assertIsInstance(client, OpenClawChatCompletionsModelClient)
+        self.assertIsInstance(client, HermesChatCompletionsModelClient)
 
-    def test_build_tool_model_client_uses_openclaw_gateway_by_default(self) -> None:
+    def test_build_tool_model_client_uses_hermes_by_default(self) -> None:
         client = build_tool_model_client(self.base_config, self.logger)
 
-        self.assertIsInstance(client, OpenClawChatCompletionsModelClient)
+        self.assertIsInstance(client, HermesChatCompletionsModelClient)
 
     def test_build_chat_model_client_uses_qwen_when_explicitly_enabled(self) -> None:
         config = AppConfig(**{**self.base_config.__dict__, "backend_qwen_enabled": True})

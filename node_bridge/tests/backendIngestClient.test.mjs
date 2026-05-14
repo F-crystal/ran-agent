@@ -24,7 +24,7 @@ test('ingestExchangeToBackend returns ok payload', async () => {
       sender_id: 'user-1',
       user_text: '你好',
       reply_text: '收到',
-      source: 'openclaw_gateway',
+      source: 'hermes',
     },
     {
       config: {

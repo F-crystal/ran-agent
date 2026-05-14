@@ -3,18 +3,14 @@ import assert from 'node:assert/strict';
 
 import { createReplyBackend, getReplyBackendConfig } from '../src/replyBackend.mjs';
 
-test('getReplyBackendConfig reads reply backend settings', () => {
+test('getReplyBackendConfig returns hermes config', () => {
   const config = getReplyBackendConfig({
-    NODE_BRIDGE_REPLY_BACKEND: 'openclaw',
     NODE_BRIDGE_FALLBACK_TEXT: 'fallback',
-    NODE_BRIDGE_OPENCLAW_REPLY_MODE: 'http',
   });
 
-  assert.equal(config.replyBackend, 'openclaw');
+  assert.equal(config.replyBackend, 'hermes');
   assert.equal(config.fallbackText, 'fallback');
-  assert.equal(config.openclawReplyMode, 'http');
   assert.equal(getReplyBackendConfig({}).replyBackend, 'hermes');
-  assert.equal(getReplyBackendConfig({}).openclawReplyMode, 'agent');
 });
 
 test('createReplyBackend defaults to Hermes reply backend', async () => {
@@ -49,29 +45,27 @@ test('createReplyBackend defaults to Hermes reply backend', async () => {
   assert.equal(response.source, 'hermes');
 });
 
-test('createReplyBackend uses OpenClaw chat path when fallback backend is selected', async () => {
+test('createReplyBackend passes route_hint and media to Hermes', async () => {
   let ingestPayload = null;
   let chatPayload = null;
   const backend = createReplyBackend({
-    env: {
-      NODE_BRIDGE_REPLY_BACKEND: 'openclaw',
-    },
-    chatImpl: async (payload) => {
+    hermesImpl: async (payload) => {
       chatPayload = payload;
       return {
-        reply_text: 'openclaw reply',
+        reply_text: 'hermes reply',
         follow_up_messages: ['第二条'],
         media: {
           type: 'image',
           url: 'https://example.com/out.png',
         },
-        model: 'openclaw/default',
+        model: 'deepseek-v4-flash',
       };
     },
     ingestImpl: async (payload) => {
       ingestPayload = payload;
       return { ok: true };
     },
+    logger: { log() {}, warn() {} },
   });
 
   const response = await backend.getReply({
@@ -90,14 +84,14 @@ test('createReplyBackend uses OpenClaw chat path when fallback backend is select
     ],
   });
 
-  assert.equal(response.replyText, 'openclaw reply');
+  assert.equal(response.replyText, 'hermes reply');
   assert.deepEqual(response.followUpMessages, ['第二条']);
   assert.deepEqual(response.media, {
     type: 'image',
     url: 'https://example.com/out.png',
   });
-  assert.equal(response.source, 'openclaw');
-  assert.equal(ingestPayload?.source, 'openclaw_gateway');
+  assert.equal(response.source, 'hermes');
+  assert.equal(ingestPayload?.source, 'hermes');
   assert.equal(chatPayload?.route_hint, 'web_search');
   assert.deepEqual(chatPayload?.message_batch, [{ index: 1, text: '你好' }, { index: 2, text: '再补一句' }]);
   assert.deepEqual(chatPayload?.media, [
@@ -117,52 +111,16 @@ test('createReplyBackend uses OpenClaw chat path when fallback backend is select
   ]);
 });
 
-test('createReplyBackend uses OpenClaw agent runtime for WeChat replies when fallback backend is selected', async () => {
-  let agentPayload = null;
+test('createReplyBackend passes inbound media to Hermes', async () => {
+  let hermesPayload = null;
   const backend = createReplyBackend({
-    env: {
-      NODE_BRIDGE_REPLY_BACKEND: 'openclaw',
-    },
-    agentImpl: async (payload) => {
-      agentPayload = payload;
-      return {
-        reply_text: '图好了。\n\nWECHAT_MEDIA: {"source":"media_generation_mcp","type":"image","url":"https://example.com/agent-image.png","model":"qwen-image"}',
-        follow_up_messages: [],
-        media: null,
-        model: 'openclaw/agent',
-      };
-    },
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '帮我画一只边牧',
-    sender_id: 'conv-agent-runtime',
-    channel: 'wechat',
-  });
-
-  assert.equal(agentPayload?.sender_id, 'conv-agent-runtime');
-  assert.equal(response.replyText, '图好了。');
-  assert.deepEqual(response.media, {
-    type: 'image',
-    url: 'https://example.com/agent-image.png',
-  });
-});
-
-test('createReplyBackend keeps inbound media on OpenClaw agent runtime when fallback backend is selected', async () => {
-  let agentPayload = null;
-  const backend = createReplyBackend({
-    env: {
-      NODE_BRIDGE_REPLY_BACKEND: 'openclaw',
-    },
-    agentImpl: async (payload) => {
-      agentPayload = payload;
+    hermesImpl: async (payload) => {
+      hermesPayload = payload;
       return {
         reply_text: 'MiMo 已分析截图',
         follow_up_messages: [],
         media: null,
-        model: 'openclaw/agent',
+        model: 'deepseek-v4-flash',
       };
     },
     ingestImpl: async () => ({ ok: true }),
@@ -182,8 +140,8 @@ test('createReplyBackend keeps inbound media on OpenClaw agent runtime when fall
     ],
   });
 
-  assert.equal(agentPayload?.sender_id, 'conv-agent-media');
-  assert.deepEqual(agentPayload?.media, [
+  assert.equal(hermesPayload?.sender_id, 'conv-agent-media');
+  assert.deepEqual(hermesPayload?.media, [
     {
       filePath: '/opt/ran_agent/debug/wechat/inbound/screenshot.png',
       mimeType: 'image/png',
@@ -195,11 +153,11 @@ test('createReplyBackend keeps inbound media on OpenClaw agent runtime when fall
 
 test('createReplyBackend turns trusted MCP media markers into WeChat image media', async () => {
   const backend = createReplyBackend({
-    chatImpl: async () => ({
+    hermesImpl: async () => ({
       reply_text: '图给你了。\n\nWECHAT_MEDIA: {"source":"media_generation_mcp","type":"image","url":"https://example.com/generated-cat.png","model":"qwen-image"}',
       follow_up_messages: [],
       media: null,
-      model: 'openclaw/default',
+      model: 'deepseek-v4-flash',
     }),
     ingestImpl: async () => ({ ok: true }),
     logger: { log() {}, warn() {} },
@@ -220,11 +178,11 @@ test('createReplyBackend turns trusted MCP media markers into WeChat image media
 
 test('createReplyBackend turns trusted MCP audio markers into WeChat audio media', async () => {
   const backend = createReplyBackend({
-    chatImpl: async () => ({
+    hermesImpl: async () => ({
       reply_text: '语音好了。\n\nWECHAT_MEDIA: {"source":"media_generation_mcp","type":"audio","url":"/tmp/wechat-audio.wav","fileName":"wechat-audio.wav","model":"qwen3-omni-flash"}',
       follow_up_messages: [],
       media: null,
-      model: 'openclaw/default',
+      model: 'deepseek-v4-flash',
     }),
     ingestImpl: async () => ({ ok: true }),
     logger: { log() {}, warn() {} },
@@ -246,11 +204,11 @@ test('createReplyBackend turns trusted MCP audio markers into WeChat audio media
 
 test('createReplyBackend does not treat arbitrary markdown images as generated WeChat media', async () => {
   const backend = createReplyBackend({
-    chatImpl: async () => ({
+    hermesImpl: async () => ({
       reply_text: '这是外部图片。\n\n![cat](https://image.pollinations.ai/prompt/cat)',
       follow_up_messages: [],
       media: null,
-      model: 'openclaw/default',
+      model: 'deepseek-v4-flash',
     }),
     ingestImpl: async () => ({ ok: true }),
     logger: { log() {}, warn() {} },

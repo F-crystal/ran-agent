@@ -223,7 +223,7 @@ test('buildAgent extracts trusted audio media marker at WeChat SDK boundary', as
       NODE_BRIDGE_MERGE_WINDOW_MS: '10',
       async handleWeChatTextMessage() {
         return {
-          replyText: '好的，已生成语音。\nWECHAT_MEDIA: {"source":"media_generation_mcp","kind":"speech","type":"audio","url":"/opt/ran_agent/.openclaw_state/generated/wechat-audio.wav","fileName":"wechat-audio.wav","model":"qwen3-omni-flash"}',
+          replyText: '好的，已生成语音。\nWECHAT_MEDIA: {"source":"media_generation_mcp","kind":"speech","type":"audio","url":"/opt/ran_agent/.ran_agent_state/generated/wechat-audio.wav","fileName":"wechat-audio.wav","model":"qwen3-omni-flash"}',
           followUpMessages: [],
           media: null,
         };
@@ -240,7 +240,7 @@ test('buildAgent extracts trusted audio media marker at WeChat SDK boundary', as
     text: '好的，已生成语音。',
     media: {
       type: 'file',
-      url: '/opt/ran_agent/.openclaw_state/generated/wechat-audio.wav',
+      url: '/opt/ran_agent/.ran_agent_state/generated/wechat-audio.wav',
       fileName: 'wechat-audio.wav',
     },
   });
@@ -277,11 +277,11 @@ test('buildAgent keeps paragraph-separated replies in the synchronous response',
 });
 
 test('buildAgent does not flush pending proactive messages when proactive delivery is disabled', async () => {
-  const stateBaseDir = path.join(PROJECT_ROOT, '.openclaw_state');
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(stateBaseDir, { recursive: true });
   const stateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-pending-disabled-'));
   const env = {
-    OPENCLAW_STATE_DIR: stateDir,
+    RAN_AGENT_STATE_DIR: stateDir,
     PERSONAL_AGENT_PROACTIVE_ENABLED: 'false',
     NODE_BRIDGE_MERGE_WINDOW_MS: '10',
     async handleWeChatTextMessage() {

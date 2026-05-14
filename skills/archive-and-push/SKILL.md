@@ -28,7 +28,7 @@ description: "当用户说“归档”时使用：运行基线测试、检查敏
 
 ## Rules
 
-- 不要把 `.env.local`、`.openclaw_state/`、`data/`、`logs/`、`debug/`、`state/`、`.npm/`、`.pytest_cache/`、`.venv/`、`node_modules/`、`__pycache__/`、`*.pyc` 纳入提交。
+- 不要把 `.env.local`、`.ran_agent_state/`、`data/`、`logs/`、`debug/`、`state/`、`.npm/`、`.pytest_cache/`、`.venv/`、`node_modules/`、`__pycache__/`、`*.pyc` 纳入提交。
 - 不要把 `vault/.obsidian/workspace.json`、`vault/.qwen/settings.json`、`vault/.qwen/settings.json.orig` 纳入提交；公开树只保留 `.example.json`。
 - 不要把 `local_archive/` 纳入提交。
 - 不要在 public tree 新增 `docs/deployment/` 或 `docs/governance/archive/`；部署文档写到 `local_archive/docs/deployment/`，归档记录写到 `local_archive/docs/governance/archive/`。

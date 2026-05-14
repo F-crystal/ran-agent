@@ -1,18 +1,14 @@
 /**
- * Reply backend selector for Hermes-first chat mainline.
+ * Reply backend selector for Hermes chat mainline.
  */
 
 import { getBackendIngestConfig, ingestExchangeToBackend } from './backendIngestClient.mjs';
 import { getHermesGatewayConfig, sendChatToHermesGateway } from './hermesGatewayClient.mjs';
-import { getOpenClawGatewayConfig, sendChatToOpenClawAgent, sendChatToOpenClawGateway } from './openclawGatewayClient.mjs';
 
 export function getReplyBackendConfig(env = process.env) {
-  const replyBackend = normalizeReplyBackend(env.NODE_BRIDGE_REPLY_BACKEND || 'hermes');
   return {
-    replyBackend,
+    replyBackend: 'hermes',
     fallbackText: env.NODE_BRIDGE_FALLBACK_TEXT || '暂时无法连接到 personal agent，请稍后再试。',
-    openclawReplyMode: String(env.NODE_BRIDGE_OPENCLAW_REPLY_MODE || 'agent').trim().toLowerCase(),
-    inboundMediaReplyMode: String(env.NODE_BRIDGE_INBOUND_MEDIA_REPLY_MODE || 'agent').trim().toLowerCase(),
   };
 }
 
@@ -22,13 +18,8 @@ export function createReplyBackend(options = {}) {
 
   return {
     async getReply(message, backendOptions = {}) {
-      const backend = normalizeReplyBackend(backendOptions.replyBackend || config.replyBackend);
-      const gatewayConfig = backend === 'openclaw'
-        ? backendOptions.openclawConfig || getOpenClawGatewayConfig(env)
-        : backendOptions.hermesConfig || getHermesGatewayConfig(env);
-      const chatImpl = backend === 'openclaw'
-        ? options.openclawImpl || options.chatImpl || resolveDefaultOpenClawReplyImpl(message, config, options)
-        : options.hermesImpl || options.chatImpl || sendChatToHermesGateway;
+      const gatewayConfig = backendOptions.hermesConfig || getHermesGatewayConfig(env);
+      const chatImpl = options.hermesImpl || options.chatImpl || sendChatToHermesGateway;
       const response = await chatImpl(
         {
           text: message.text,
@@ -56,7 +47,7 @@ export function createReplyBackend(options = {}) {
         sender_id: message.sender_id,
         user_text: message.text,
         reply_text: response.reply_text,
-        source: backend === 'openclaw' ? 'openclaw_gateway' : 'hermes',
+        source: 'hermes',
         image_urls: Array.isArray(message.image_urls)
           ? message.image_urls.filter((item) => typeof item === 'string' && item.trim())
           : [],
@@ -91,33 +82,11 @@ export function createReplyBackend(options = {}) {
         replyText: responseText,
         followUpMessages: Array.isArray(response.follow_up_messages) ? response.follow_up_messages : [],
         media: responseMedia,
-        source: backend,
+        source: 'hermes',
       };
     },
     config,
   };
-}
-
-function normalizeReplyBackend(value) {
-  const normalized = String(value || '').trim().toLowerCase();
-  return normalized === 'openclaw' ? 'openclaw' : 'hermes';
-}
-
-function resolveDefaultOpenClawReplyImpl(message, config, options = {}) {
-  if (config.openclawReplyMode === 'http') {
-    return sendChatToOpenClawGateway;
-  }
-  if (hasInboundMediaForGateway(message) && ['http', 'gateway'].includes(config.inboundMediaReplyMode)) {
-    return sendChatToOpenClawGateway;
-  }
-  return options.agentImpl || sendChatToOpenClawAgent;
-}
-
-function hasInboundMediaForGateway(message = {}) {
-  if (Array.isArray(message.image_urls) && message.image_urls.some((item) => typeof item === 'string' && item.trim())) {
-    return true;
-  }
-  return normalizeMediaItems(message.media).length > 0;
 }
 
 function extractTrustedMediaMarker(text) {

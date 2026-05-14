@@ -246,8 +246,8 @@ class StartPlaywrightMcpScriptTest(unittest.TestCase):
                 {
                     "PATH": temp_dir,
                     "PLAYWRIGHT_MCP_ISOLATED": "true",
-                    "PLAYWRIGHT_MCP_USER_DATA_DIR": "/opt/ran_agent/.openclaw_state/playwright-profile",
-                    "PLAYWRIGHT_MCP_STORAGE_STATE": "/opt/ran_agent/.openclaw_state/xhs-auth.json",
+                    "PLAYWRIGHT_MCP_USER_DATA_DIR": "/opt/ran_agent/.ran_agent_state/playwright-profile",
+                    "PLAYWRIGHT_MCP_STORAGE_STATE": "/opt/ran_agent/.ran_agent_state/xhs-auth.json",
                     "PLAYWRIGHT_MCP_CAPS": "network,storage",
                 }
             )
@@ -255,8 +255,8 @@ class StartPlaywrightMcpScriptTest(unittest.TestCase):
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("--isolated", logged_argv)
-        self.assertIn("--user-data-dir /opt/ran_agent/.openclaw_state/playwright-profile", logged_argv)
-        self.assertIn("--storage-state /opt/ran_agent/.openclaw_state/xhs-auth.json", logged_argv)
+        self.assertIn("--user-data-dir /opt/ran_agent/.ran_agent_state/playwright-profile", logged_argv)
+        self.assertIn("--storage-state /opt/ran_agent/.ran_agent_state/xhs-auth.json", logged_argv)
         self.assertIn("--caps network,storage", logged_argv)
 
 
