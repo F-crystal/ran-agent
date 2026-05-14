@@ -321,26 +321,26 @@ WantedBy=multi-user.target
 EOF
 
 sudo mkdir -p /etc/systemd/system/ran-agent-node.service.d
-sudo tee /etc/systemd/system/ran-agent-node.service.d/10-hermes.conf >/dev/null <<'EOF'
-[Unit]
-# Reset legacy dependencies from the base unit. Older installs had
-# Requires=ran-agent-openclaw.service, which makes systemd stop/restart the
-# Node bridge when the retired OpenClaw service stops.
-Requires=
-After=
-After=ran-agent-hermes.service ran-agent-python.service
-Wants=ran-agent-hermes.service ran-agent-python.service
-
-[Service]
-Environment=NODE_BRIDGE_REPLY_BACKEND=hermes
-Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
-Environment=HERMES_REPLY_MODE=api
-Environment=HERMES_REPLY_TIMEOUT_SECONDS=180
-Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
-Environment=PYTHON_BACKEND_INGEST_ENABLED=true
-Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
-Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
-EOF
+printf '%s\n' \
+  '[Unit]' \
+  '# Reset legacy dependencies from the base unit. Older installs had' \
+  '# Requires=ran-agent-openclaw.service, which makes systemd stop/restart the' \
+  '# Node bridge when the retired OpenClaw service stops.' \
+  'Requires=' \
+  'After=' \
+  'After=ran-agent-hermes.service ran-agent-python.service' \
+  'Wants=ran-agent-hermes.service ran-agent-python.service' \
+  '' \
+  '[Service]' \
+  'Environment=NODE_BRIDGE_REPLY_BACKEND=hermes' \
+  'Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1' \
+  'Environment=HERMES_REPLY_MODE=api' \
+  'Environment=HERMES_REPLY_TIMEOUT_SECONDS=180' \
+  'Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787' \
+  'Environment=PYTHON_BACKEND_INGEST_ENABLED=true' \
+  'Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000' \
+  'Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000' \
+  | sudo tee /etc/systemd/system/ran-agent-node.service.d/10-hermes.conf >/dev/null
 
 sudo systemctl daemon-reload
 sudo systemctl enable ran-agent-python.service ran-agent-hermes.service ran-agent-node.service
@@ -369,23 +369,23 @@ Paste this on the server:
 cd /opt/ran_agent
 
 sudo mkdir -p /etc/systemd/system/ran-agent-node.service.d
-sudo tee /etc/systemd/system/ran-agent-node.service.d/10-hermes.conf >/dev/null <<'EOF'
-[Unit]
-Requires=
-After=
-After=network.target ran-agent-python.service ran-agent-hermes.service
-Wants=ran-agent-python.service ran-agent-hermes.service
-
-[Service]
-Environment=NODE_BRIDGE_REPLY_BACKEND=hermes
-Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
-Environment=HERMES_REPLY_MODE=api
-Environment=HERMES_REPLY_TIMEOUT_SECONDS=180
-Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
-Environment=PYTHON_BACKEND_INGEST_ENABLED=true
-Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
-Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
-EOF
+printf '%s\n' \
+  '[Unit]' \
+  'Requires=' \
+  'After=' \
+  'After=network.target ran-agent-python.service ran-agent-hermes.service' \
+  'Wants=ran-agent-python.service ran-agent-hermes.service' \
+  '' \
+  '[Service]' \
+  'Environment=NODE_BRIDGE_REPLY_BACKEND=hermes' \
+  'Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1' \
+  'Environment=HERMES_REPLY_MODE=api' \
+  'Environment=HERMES_REPLY_TIMEOUT_SECONDS=180' \
+  'Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787' \
+  'Environment=PYTHON_BACKEND_INGEST_ENABLED=true' \
+  'Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000' \
+  'Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000' \
+  | sudo tee /etc/systemd/system/ran-agent-node.service.d/10-hermes.conf >/dev/null
 
 sudo systemctl daemon-reload
 sudo systemctl reset-failed ran-agent-node.service
