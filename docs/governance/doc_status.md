@@ -12,6 +12,7 @@ Status: CURRENT (2026-05-14)
 - `docs/governance/doc_status.md`
 - `docs/governance/current_runtime_status.md`
 - `docs/governance/phase_status.md`
+- `docs/governance/server_runtime_commands.md`
 - `docs/governance/constraints.md`
 - `docs/governance/skills.md`
 - `docs/governance/sub_agents.md`
