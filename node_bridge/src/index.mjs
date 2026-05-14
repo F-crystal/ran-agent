@@ -616,6 +616,19 @@ async function main() {
   const outboundConfig = getOutboundServerConfig(process.env);
   const outboundServer = createOutboundServer({ bot: proactiveBot, logger: console });
 
+  // Diagnostic: check port availability before listen
+  const { execSync: execSyncDiag } = await import('node:child_process');
+  try {
+    const ssOut = execSyncDiag(`ss -ltnp 2>/dev/null | grep ':${outboundConfig.port} ' || true`, { encoding: 'utf-8' });
+    if (ssOut.trim()) {
+      console.warn(`[node-bridge] WARNING: port ${outboundConfig.port} already in use before listen:\n${ssOut.trim()}`);
+    } else {
+      console.log(`[node-bridge] port ${outboundConfig.port} is free, proceeding with listen`);
+    }
+  } catch (e) {
+    console.warn(`[node-bridge] port check failed: ${e.message}`);
+  }
+
   await new Promise((resolve, reject) => {
     outboundServer.once('error', reject);
     outboundServer.listen(outboundConfig.port, outboundConfig.host, resolve);
@@ -637,6 +650,16 @@ if (entryScript && path.resolve(currentFile) === entryScript) {
   main().catch((error) => {
     const message = error instanceof Error ? error.stack || error.message : String(error);
     console.error(message);
+    // Diagnostic: check what's on port 8791 after error
+    try {
+      const { execSync } = require('node:child_process');
+      const ssOut = execSync('ss -ltnp 2>/dev/null | grep :8791 || echo "port 8791 free"', { encoding: 'utf-8' });
+      console.error(`[node-bridge] post-error port check: ${ssOut.trim()}`);
+      const lsofOut = execSync('lsof -iTCP:8791 -sTCP:LISTEN 2>/dev/null || echo "no listeners"', { encoding: 'utf-8' });
+      console.error(`[node-bridge] post-error lsof: ${lsofOut.trim()}`);
+    } catch (e) {
+      console.error(`[node-bridge] post-error port check failed: ${e.message}`);
+    }
     process.exitCode = 1;
   });
 }
