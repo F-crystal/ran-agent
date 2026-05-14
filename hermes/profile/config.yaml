@@ -1,4 +1,4 @@
-# Installable Hermes profile config for ran-assistant.
+# Installable Hermes profile config for ran-assistant (full gateway).
 # This file is safe to commit. Put secrets in the machine-local .env file.
 
 model:
@@ -8,6 +8,49 @@ model:
 # Keep daily chat on Flash. Use the Pro template or an explicit model override
 # for high-cost work:
 #   hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "..."
+
+disabled_tools:
+  - browser_vision
+  - image_generate
+  - text_to_speech
+  - video_analyze
+  - vision_analyze
+
+platform_toolsets:
+  cli:
+    - web
+    - terminal
+    - file
+    - skills
+    - memory
+    - session_search
+    - safe
+    - mcp-time
+    - mcp-social_reader
+    - mcp-media_reader
+    - mcp-mimo_power
+    - mcp-media_generation
+    - mcp-personal_memory
+    - mcp-obsidian_memory
+    - mcp-playwright
+    - mcp-tavily
+  gateway:
+    - web
+    - terminal
+    - file
+    - skills
+    - memory
+    - session_search
+    - safe
+    - mcp-time
+    - mcp-social_reader
+    - mcp-media_reader
+    - mcp-mimo_power
+    - mcp-media_generation
+    - mcp-personal_memory
+    - mcp-obsidian_memory
+    - mcp-playwright
+    - mcp-tavily
 
 mcp_servers:
   time:
