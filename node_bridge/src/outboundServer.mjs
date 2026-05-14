@@ -73,6 +73,14 @@ function readWeixinAccountData(accountId, env = process.env) {
   return candidates.find((item) => typeof item.token === 'string' && item.token.trim()) || candidates[0] || null;
 }
 
+function writeJsonFile(filePath, payload, mode = 0o600) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+  try {
+    fs.chmodSync(filePath, mode);
+  } catch {}
+}
+
 export function getOutboundServerConfig(env = process.env) {
   return {
     host: env.NODE_BRIDGE_OUTBOUND_HOST || '127.0.0.1',
@@ -249,6 +257,24 @@ export function resolveWeixinAccountConfig(env = process.env) {
     token: accountData.token.trim(),
     userId: accountData.userId.trim(),
   };
+}
+
+export function syncWeixinAccountConfigForVendorSdk(accountConfig, env = process.env) {
+  const accountId = normalizeAccountId(accountConfig?.accountId || '');
+  const token = String(accountConfig?.token || '').trim();
+  const userId = String(accountConfig?.userId || '').trim();
+  if (!accountId || !token || !userId) {
+    return;
+  }
+
+  const accountPath = resolveCompatAccountPath(accountId, env);
+  writeJsonFile(resolveCompatAccountIndexPath(env), [accountId]);
+  writeJsonFile(accountPath, {
+    token,
+    savedAt: new Date().toISOString(),
+    baseUrl: String(accountConfig.baseUrl || '').trim() || 'https://ilinkai.weixin.qq.com',
+    userId,
+  });
 }
 
 let weixinSdkPromise = null;

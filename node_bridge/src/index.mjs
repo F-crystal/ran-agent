@@ -10,6 +10,7 @@ import {
   createProactiveBot,
   getOutboundServerConfig,
   resolveWeixinAccountConfig,
+  syncWeixinAccountConfigForVendorSdk,
 } from './outboundServer.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import {
@@ -505,6 +506,7 @@ async function ensureWeixinAccountReady() {
   if (!forceLogin) {
     try {
       const existing = resolveWeixinAccountConfig(process.env);
+      syncWeixinAccountConfigForVendorSdk(existing, process.env);
       console.log(`[node-bridge] reusing existing weixin account accountId=${existing.accountId}`);
       return existing;
     } catch (error) {
@@ -514,7 +516,9 @@ async function ensureWeixinAccountReady() {
   }
 
   await loginWithRetry();
-  return resolveWeixinAccountConfig(process.env);
+  const accountConfig = resolveWeixinAccountConfig(process.env);
+  syncWeixinAccountConfigForVendorSdk(accountConfig, process.env);
+  return accountConfig;
 }
 
 function resetSyncBufferIfNeeded(accountId) {

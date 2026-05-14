@@ -8,6 +8,7 @@ import {
   handleOutboundRequest,
   resolveStateDir,
   resolveWeixinAccountConfig,
+  syncWeixinAccountConfigForVendorSdk,
 } from '../src/outboundServer.mjs';
 import {
   appendPendingOutboundMessage,
@@ -101,6 +102,35 @@ test('resolveWeixinAccountConfig reads nested legacy openclaw state after state-
   assert.equal(config.token, 'token-from-nested-legacy-state');
   assert.equal(config.userId, 'wechat-user');
   assert.equal(config.baseUrl, 'https://nested.weixin.test');
+});
+
+test('syncWeixinAccountConfigForVendorSdk writes account state to vendor path', () => {
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
+  fs.mkdirSync(stateBaseDir, { recursive: true });
+  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-weixin-sync-'));
+  const accountId = 'c253ec115e14-im-bot';
+
+  syncWeixinAccountConfigForVendorSdk(
+    {
+      accountId,
+      token: 'token-for-vendor-start',
+      userId: 'wechat-user',
+      baseUrl: 'https://vendor.weixin.test',
+    },
+    { RAN_AGENT_STATE_DIR: tempStateDir }
+  );
+
+  const index = JSON.parse(
+    fs.readFileSync(path.join(tempStateDir, 'openclaw-weixin', 'accounts.json'), 'utf-8')
+  );
+  const account = JSON.parse(
+    fs.readFileSync(path.join(tempStateDir, 'openclaw-weixin', 'accounts', `${accountId}.json`), 'utf-8')
+  );
+
+  assert.deepEqual(index, [accountId]);
+  assert.equal(account.token, 'token-for-vendor-start');
+  assert.equal(account.userId, 'wechat-user');
+  assert.equal(account.baseUrl, 'https://vendor.weixin.test');
 });
 
 test('handleOutboundRequest sends proactive message through bot', async () => {
