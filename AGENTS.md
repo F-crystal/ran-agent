@@ -11,6 +11,7 @@ This is the repo-root workspace bootstrap file. It must be self-contained — do
 - This repo is local-first and project-scoped.
 - Keep runtime simple: backend services, state layer, WeChat bridge, MCP/knowledge interfaces.
 - Do not expand custom front conversation runtime.
+- OpenClaw is retired and must not be used as a current runtime, deployment target, or debugging authority. Treat `openclaw-*` names and `.openclaw_state` references as legacy compatibility artifacts only.
 
 ## Live Lookup Rule
 
@@ -19,6 +20,8 @@ This is the repo-root workspace bootstrap file. It must be self-contained — do
 - Non-weather online lookup uses `skills/web-search-live/SKILL.md`.
 - For complex or unfamiliar problems, first search official documentation and mature prior art before designing or coding.
 - For integration/debugging work, first check official docs plus at least one mature GitHub reference before designing a solution.
+- Do not use retired OpenClaw documentation, old OpenClaw deployment notes, or OpenClaw-era repository code as current guidance. If external material still points through OpenClaw, extract only the dependency-specific fact and verify it against the current Hermes/Node bridge implementation before acting.
+- For WeChat bridge/login debugging, verify the exact CLI package, runtime SDK package, version, import path, and state directory contract before proposing token or state migration commands.
 - Do not use `~`-prefixed filesystem paths; use absolute paths or workspace-relative paths only.
 
 ## Skills-First Rule

@@ -323,6 +323,11 @@ EOF
 sudo mkdir -p /etc/systemd/system/ran-agent-node.service.d
 sudo tee /etc/systemd/system/ran-agent-node.service.d/10-hermes.conf >/dev/null <<'EOF'
 [Unit]
+# Reset legacy dependencies from the base unit. Older installs had
+# Requires=ran-agent-openclaw.service, which makes systemd stop/restart the
+# Node bridge when the retired OpenClaw service stops.
+Requires=
+After=
 After=ran-agent-hermes.service ran-agent-python.service
 Wants=ran-agent-hermes.service ran-agent-python.service
 
@@ -349,6 +354,50 @@ systemctl status ran-agent-python.service --no-pager
 systemctl status ran-agent-hermes.service --no-pager
 systemctl status ran-agent-node.service --no-pager
 ss -ltnp | grep -E ':(8787|8791|8642)\b' || true
+```
+
+## Fix Node Bridge Still Bound To Retired OpenClaw
+
+Use this if `systemctl cat ran-agent-node.service` shows
+`Requires=ran-agent-openclaw.service` or `After=... ran-agent-openclaw.service`.
+That stale dependency can interrupt WeChat QR login because systemd will stop the
+Node bridge whenever the retired OpenClaw service stops or restarts.
+
+Paste this on the server:
+
+```bash
+cd /opt/ran_agent
+
+sudo mkdir -p /etc/systemd/system/ran-agent-node.service.d
+sudo tee /etc/systemd/system/ran-agent-node.service.d/10-hermes.conf >/dev/null <<'EOF'
+[Unit]
+Requires=
+After=
+After=network.target ran-agent-python.service ran-agent-hermes.service
+Wants=ran-agent-python.service ran-agent-hermes.service
+
+[Service]
+Environment=NODE_BRIDGE_REPLY_BACKEND=hermes
+Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+Environment=HERMES_REPLY_MODE=api
+Environment=HERMES_REPLY_TIMEOUT_SECONDS=180
+Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
+Environment=PYTHON_BACKEND_INGEST_ENABLED=true
+Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
+Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl reset-failed ran-agent-node.service
+sudo systemctl restart ran-agent-python.service
+sudo systemctl restart ran-agent-hermes.service
+sudo systemctl stop ran-agent-node.service
+sudo systemctl start ran-agent-node.service
+
+sudo systemctl cat ran-agent-node.service
+sudo systemctl status ran-agent-node.service --no-pager -l
+sudo journalctl -u ran-agent-node.service -n 120 --no-pager -l
+sudo ss -ltnp | grep -E ':(8787|8791|8642)\b' || true
 ```
 
 ## Pull And Restart Runtime Without Systemd
@@ -946,4 +995,3 @@ an older revision.
 
 To disable courtly mode, set `RAN_AGENT_COURTLY_MODE=off` in `.env.local` and
 restart the Node bridge. To re-enable, set `RAN_AGENT_COURTLY_MODE=on`.
-
