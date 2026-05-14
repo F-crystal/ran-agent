@@ -156,11 +156,19 @@ runtime is already replying, but it means Hermes has no explicit user allowlist.
 Only set `GATEWAY_ALLOW_ALL_USERS=true` when the gateway is bound to localhost
 and the bridge is the trusted ingress.
 
-Paste this on the server to fix the systemd timeout warning. This rewrites the
-Hermes unit so the effective systemd property is no longer `90s`.
+Paste this on the server to inspect and fix the systemd timeout warning. This
+rewrites the Hermes unit and adds a high-priority drop-in so the effective
+systemd property is no longer `90s`.
 
 ```bash
 cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+
+sudo systemctl show ran-agent-hermes.service \
+  -p FragmentPath \
+  -p DropInPaths \
+  -p TimeoutStopUSec \
+  --no-pager
 
 sudo tee /etc/systemd/system/ran-agent-hermes.service >/dev/null <<'EOF'
 [Unit]
@@ -207,18 +215,54 @@ WantedBy=multi-user.target
 EOF
 
 sudo mkdir -p /etc/systemd/system/ran-agent-hermes.service.d
-sudo tee /etc/systemd/system/ran-agent-hermes.service.d/20-timeout.conf >/dev/null <<'EOF'
+sudo tee /etc/systemd/system/ran-agent-hermes.service.d/99-timeout.conf >/dev/null <<'EOF'
 [Service]
 TimeoutStopSec=240
 EOF
 
 sudo systemctl daemon-reload
-sudo systemctl show ran-agent-hermes.service -p TimeoutStopUSec --no-pager
+sudo systemctl show ran-agent-hermes.service \
+  -p FragmentPath \
+  -p DropInPaths \
+  -p TimeoutStopUSec \
+  --no-pager
 sudo systemctl restart ran-agent-hermes.service
 sleep 5
 sudo systemctl restart ran-agent-node.service
 
 sudo systemctl status ran-agent-hermes.service --no-pager
+sudo journalctl -u ran-agent-hermes -n 80 --no-pager
+```
+
+If `TimeoutStopUSec` is still `1min 30s`, regenerate the Hermes-managed unit
+and then reapply the high-priority timeout drop-in:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+
+sudo env \
+  RAN_AGENT_REPO_ROOT=/opt/ran_agent \
+  HERMES_PROFILE=ran-assistant \
+  HERMES_HOME=/home/ubuntu/.hermes-ran-agent \
+  /opt/ran_agent/.venv/bin/hermes -p ran-assistant gateway service install --replace
+
+sudo mkdir -p /etc/systemd/system/ran-agent-hermes.service.d
+sudo tee /etc/systemd/system/ran-agent-hermes.service.d/99-timeout.conf >/dev/null <<'EOF'
+[Service]
+TimeoutStopSec=240
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl show ran-agent-hermes.service \
+  -p FragmentPath \
+  -p DropInPaths \
+  -p TimeoutStopUSec \
+  --no-pager
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl restart ran-agent-node.service
+
 sudo journalctl -u ran-agent-hermes -n 80 --no-pager
 ```
 
