@@ -924,3 +924,26 @@ A successful response may look like:
 {"choices":[{"message":{"role":"assistant","content":"OK"}}]}
 ```
 
+## Sync Hermes SOUL.md for courtly attendant persona
+
+The Hermes runtime reads SOUL.md from `$HERMES_HOME/SOUL.md`. After updating
+`hermes/profile/SOUL.md` in the repo, sync it to the runtime location:
+
+```bash
+cd /opt/ran_agent
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+mkdir -p "$HERMES_HOME"
+cp -p /opt/ran_agent/hermes/profile/SOUL.md "$HERMES_HOME/SOUL.md"
+chmod 600 "$HERMES_HOME/SOUL.md"
+sudo systemctl restart ran-agent-hermes.service
+sleep 8
+sudo systemctl restart ran-agent-node.service
+```
+
+The `hermes profile install` command also copies profile files, but the explicit
+`cp` above guarantees SOUL.md is current even if the profile was installed from
+an older revision.
+
+To disable courtly mode, set `RAN_AGENT_COURTLY_MODE=off` in `.env.local` and
+restart the Node bridge. To re-enable, set `RAN_AGENT_COURTLY_MODE=on`.
+

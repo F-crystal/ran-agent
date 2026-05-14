@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import {
   getHermesGatewayConfig,
   sendChatToHermesGateway,
+  buildCourtlyStyleAnchor,
 } from '../src/hermesGatewayClient.mjs';
 
 function makeJsonResponse(body, ok = true, status = 200) {
@@ -288,4 +289,122 @@ test('sendChatToHermesGateway injects media generation instruction when media pr
 
   const userMsg = capturedBody.messages.find((m) => m.role === 'user');
   assert.ok(userMsg.content.includes('媒体工具指令'), 'media present should include media generation instruction');
+});
+
+// --- Courtly Style Anchor Tests ---
+
+test('buildCourtlyStyleAnchor injects anchor for default plain text', () => {
+  const anchor = buildCourtlyStyleAnchor({ text: '你好呀' });
+  assert.ok(anchor.length > 0, 'should inject anchor for plain text');
+  assert.ok(anchor.includes('陛下'), 'anchor should mention 陛下');
+  assert.ok(anchor.includes('臣'), 'anchor should mention 臣');
+  assert.ok(anchor.length < 80, 'anchor should be short');
+});
+
+test('buildCourtlyStyleAnchor returns empty for disable phrases', () => {
+  for (const phrase of ['正常说话', '别叫陛下', '别演', '不要角色扮演', '先别演']) {
+    assert.equal(buildCourtlyStyleAnchor({ text: phrase }), '', `"${phrase}" should disable anchor`);
+  }
+});
+
+test('buildCourtlyStyleAnchor injects anchor for force phrases', () => {
+  for (const phrase of ['恢复女官模式', '叫我陛下', '臣呢', '按之前那个模式', '恢复微臣模式']) {
+    const anchor = buildCourtlyStyleAnchor({ text: phrase });
+    assert.ok(anchor.length > 0, `"${phrase}" should force anchor`);
+    assert.ok(anchor.includes('陛下'), `"${phrase}" anchor should mention 陛下`);
+  }
+});
+
+test('buildCourtlyStyleAnchor returns empty when RAN_AGENT_COURTLY_MODE=off', () => {
+  const anchor = buildCourtlyStyleAnchor({ text: '你好', _env: { RAN_AGENT_COURTLY_MODE: 'off' } });
+  assert.equal(anchor, '', 'should not inject anchor when mode is off');
+});
+
+test('buildCourtlyStyleAnchor injects anchor when RAN_AGENT_COURTLY_MODE=on', () => {
+  const anchor = buildCourtlyStyleAnchor({ text: '你好', _env: { RAN_AGENT_COURTLY_MODE: 'on' } });
+  assert.ok(anchor.length > 0, 'should inject anchor when mode is on');
+});
+
+test('buildCourtlyStyleAnchor does not contain long SOUL content', () => {
+  const anchor = buildCourtlyStyleAnchor({ text: '你好' });
+  assert.ok(!anchor.includes('核心原则'), 'anchor should not contain SOUL section headers');
+  assert.ok(!anchor.includes('说话方式'), 'anchor should not contain SOUL section headers');
+  assert.ok(!anchor.includes('输出边界'), 'anchor should not contain SOUL section headers');
+});
+
+test('sendChatToHermesGateway includes courtly anchor in plain text message', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '今天天气怎么样', sender_id: 'conv-courtly', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '晴天' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('贴身女官'), 'should include courtly anchor');
+  assert.ok(userMsg.content.includes('陛下'), 'should include 陛下');
+});
+
+test('sendChatToHermesGateway excludes courtly anchor for disable phrases', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '正常说话，今天天气怎么样', sender_id: 'conv-no-courtly', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '晴天' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(!userMsg.content.includes('贴身女官'), 'should not include courtly anchor when disabled');
+});
+
+test('sendChatToHermesGateway does not break media routing with courtly anchor', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    {
+      text: '帮我看看',
+      sender_id: 'conv-courtly-media',
+      channel: 'wechat',
+      media: [{ filePath: '/tmp/test.png', mimeType: 'image/png', type: 'image' }],
+    },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '好的' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('贴身女官'), 'should include courtly anchor even with media');
+  assert.ok(userMsg.content.includes('入站媒体'), 'should still include media instruction');
+  assert.ok(userMsg.content.includes('媒体工具指令'), 'should still include media generation instruction');
 });

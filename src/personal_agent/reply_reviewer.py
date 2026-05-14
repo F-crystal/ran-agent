@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import dataclass
 
 from personal_agent.conversation_state import ConversationSessionState
@@ -15,6 +17,10 @@ BLACKLISTED_OPENINGS = (
     "被你发现了",
     "你刚才想聊什么来着",
 )
+
+COURTLY_MARKERS = ("陛下", "臣", "微臣")
+COURTLY_DISABLE_PATTERN = re.compile(r"正常说话|别叫陛下|别演|不要角色扮演|先别演")
+AI_PERSONA_LEAK_PATTERN = re.compile(r"作为一个AI语言模型|作为AI助手|作为一个人工智能|我是AI|作为语言模型")
 
 
 @dataclass(frozen=True)
@@ -164,3 +170,66 @@ def _looks_like_recent_state_over_inference(
         return False
     explicit_support = ("因为", "这几天", "最近一直", "连续", "总是")
     return not any(marker in user_text for marker in explicit_support)
+
+
+def detect_courtly_persona_drift(
+    reply_text: str,
+    user_text: str | None = None,
+) -> dict[str, object]:
+    """Check if a reply maintains the courtly attendant persona.
+
+    Returns a dict with:
+        ok: bool — True if reply passes the check
+        reason: str — explanation if not ok, empty otherwise
+        should_rewrite: bool — True if a rewrite is recommended
+        mode: str — always "courtly_attendant"
+    """
+    mode = os.getenv("RAN_AGENT_COURTLY_MODE", "on").strip().lower()
+    if mode == "off":
+        return {"ok": True, "reason": "", "should_rewrite": False, "mode": "courtly_attendant"}
+
+    # If user disabled courtly style this turn, skip check
+    if user_text and COURTLY_DISABLE_PATTERN.search(user_text):
+        return {"ok": True, "reason": "", "should_rewrite": False, "mode": "courtly_attendant"}
+
+    normalized = " ".join(reply_text.split()).strip()
+    if not normalized:
+        return {"ok": True, "reason": "empty_reply", "should_rewrite": False, "mode": "courtly_attendant"}
+
+    # Strip code blocks for analysis
+    text_without_code = re.sub(r"```[\s\S]*?```", "", normalized)
+    text_without_code = re.sub(r"`[^`]+`", "", text_without_code)
+    # Strip command-like lines
+    lines = text_without_code.split("\n")
+    conversational_lines = [
+        ln.strip() for ln in lines
+        if ln.strip() and not ln.strip().startswith(("$", "#", ">", "bash", "sh", "python", "node"))
+    ]
+    conversational_text = " ".join(conversational_lines)
+
+    # Check for AI persona leak (always bad)
+    if AI_PERSONA_LEAK_PATTERN.search(conversational_text):
+        return {
+            "ok": False,
+            "reason": "ai_persona_leak",
+            "should_rewrite": True,
+            "mode": "courtly_attendant",
+        }
+
+    # If reply is purely code/commands, no courtly check needed
+    if not conversational_text:
+        return {"ok": True, "reason": "", "should_rewrite": False, "mode": "courtly_attendant"}
+
+    # Check if courtly markers appear in first 2 conversational sentences
+    first_part = conversational_text[:200]
+    has_courtly_marker = any(marker in first_part for marker in COURTLY_MARKERS)
+
+    if not has_courtly_marker:
+        return {
+            "ok": False,
+            "reason": "courtly_marker_missing",
+            "should_rewrite": True,
+            "mode": "courtly_attendant",
+        }
+
+    return {"ok": True, "reason": "", "should_rewrite": False, "mode": "courtly_attendant"}

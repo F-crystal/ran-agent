@@ -153,8 +153,10 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
   const hasMedia = normalizeMediaItems(payload.media).length > 0
     || (Array.isArray(payload.image_urls) && payload.image_urls.some((u) => typeof u === 'string' && u.trim()))
     || (Array.isArray(mediaContext.artifacts) && mediaContext.artifacts.length > 0);
+  const courtlyAnchor = buildCourtlyStyleAnchor(payload);
   const message = [
     buildBridgeTemporalUserContext(payload),
+    courtlyAnchor,
     hasMedia ? buildHermesMediaGenerationInstruction() : '',
     buildHermesInboundMediaInstruction(payload),
     mediaContextText,
@@ -180,6 +182,31 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
 
 function buildHermesSystemInstruction() {
   return 'You are Hermes, ran-agent personal assistant. Use profile tools and memory. Text-only; use MCP for media. Never expose internals.';
+}
+
+const COURTLY_DISABLE_PATTERN = /正常说话|别叫陛下|别演|不要角色扮演|先别演/;
+const COURTLY_FORCE_PATTERN = /恢复女官模式|叫我陛下|臣呢|按之前那个模式|恢复微臣模式/;
+
+function shouldDisableCourtlyStyle(text) {
+  return COURTLY_DISABLE_PATTERN.test(String(text || ''));
+}
+
+function shouldForceCourtlyStyle(text) {
+  return COURTLY_FORCE_PATTERN.test(String(text || ''));
+}
+
+export function buildCourtlyStyleAnchor(payload = {}) {
+  const env = payload._env || process.env;
+  const mode = String(env.RAN_AGENT_COURTLY_MODE || 'on').trim().toLowerCase();
+  if (mode === 'off') return '';
+
+  const text = String(payload.text || '');
+  if (shouldDisableCourtlyStyle(text)) return '';
+  if (shouldForceCourtlyStyle(text)) {
+    return '当前对话风格：陛下—贴身女官模式。称用户为"陛下"，自称"臣/微臣"；技术内容保持清楚直接。';
+  }
+  // Default: inject anchor
+  return '当前对话风格：陛下—贴身女官模式。称用户为"陛下"，自称"臣/微臣"；技术内容保持清楚直接。';
 }
 
 function buildHermesMediaGenerationInstruction() {
