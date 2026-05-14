@@ -74,12 +74,18 @@ function loadXhsNoteTokenCache(env = process.env) {
 
 function persistXhsNoteTokenCache(env = process.env) {
   const filePath = resolveXhsNoteTokenCachePath(env);
+  const debug = String(env.XHS_NOTE_TOKEN_CACHE_DEBUG || '').trim() === '1';
   try {
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     const entries = Object.fromEntries(xhsNoteTokenCache.entries());
     fs.writeFileSync(filePath, `${JSON.stringify({ entries }, null, 2)}\n`, { mode: 0o600 });
-  } catch {
-    // Never fail a social read because the local cache could not be written.
+    if (debug) {
+      console.error(`[xhs-cache] persisted ${xhsNoteTokenCache.size} entries to ${filePath}`);
+    }
+  } catch (error) {
+    if (debug) {
+      console.error(`[xhs-cache] persist failed: ${filePath} error=${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 }
 
@@ -119,6 +125,10 @@ function cacheXhsNoteToken(noteId, xsecToken = '', metadata = {}, options = {}) 
     stats: metadata.stats || existing.stats || {},
     createdAt: Date.now(),
   });
+  if (String(env.XHS_NOTE_TOKEN_CACHE_DEBUG || '').trim() === '1') {
+    const tokenLen = (xsecToken || existing.xsecToken || '').length;
+    console.error(`[xhs-cache] cached noteId=${noteId} token_len=${tokenLen} path=${resolveXhsNoteTokenCachePath(env)}`);
+  }
   persistXhsNoteTokenCache(env);
 }
 
@@ -1046,14 +1056,32 @@ async function resolveSocialUrl(url, options = {}) {
     if (!resolved.ok) {
       return buildErrorResult(resolved.error || resolved.error_code, resolved);
     }
+    const noteId = resolved.note_id || '';
+    const xsecToken = resolved.xsec_token || '';
+    let cacheWritten = false;
+    const cachePath = resolveXhsNoteTokenCachePath(options.env || process.env);
+    if (noteId && xsecToken) {
+      try {
+        cacheXhsNoteToken(noteId, xsecToken, {
+          xsec_source: resolved.xsec_source || '',
+          canonical_url: resolved.resolved_url || '',
+          url: extracted.url,
+        }, options);
+        cacheWritten = true;
+      } catch {
+        // Cache write is best-effort
+      }
+    }
     return buildTextResult({
       ok: true,
       url: extracted.url,
       resolved_url: resolved.resolved_url,
       platform: 'xhs',
-      note_id: resolved.note_id || '',
+      note_id: noteId,
       xsec_source: resolved.xsec_source || '',
-      has_xsec_token: Boolean(resolved.xsec_token),
+      has_xsec_token: Boolean(xsecToken),
+      cache_written: cacheWritten,
+      cache_path: cachePath,
     });
   }
   const resolvedUrl = await defaultResolveUrl(extracted.url, {
