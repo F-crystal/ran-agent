@@ -189,8 +189,9 @@ test('sendChatToHermesGateway uses compact system instruction (single line)', as
   const systemMsg = capturedBody.messages.find((m) => m.role === 'system');
   assert.ok(systemMsg);
   assert.ok(!systemMsg.content.includes('\n'), 'system instruction should be single line');
-  assert.ok(systemMsg.content.includes('MANDATORY TOOL ROUTING'), 'should include tool routing rules');
+  assert.ok(systemMsg.content.includes('MANDATORY RULES'), 'should include mandatory rules');
   assert.ok(systemMsg.content.includes('social_reader'), 'should mention social_reader');
+  assert.ok(systemMsg.content.includes('web_extract and web_search are allowed'), 'should allow web tools for normal pages');
 });
 
 test('sendChatToHermesGateway does not inject media generation instruction for plain text', async () => {
@@ -408,4 +409,101 @@ test('sendChatToHermesGateway does not break media routing with courtly anchor',
   assert.ok(userMsg.content.includes('贴身女官'), 'should include courtly anchor even with media');
   assert.ok(userMsg.content.includes('入站媒体'), 'should still include media instruction');
   assert.ok(userMsg.content.includes('媒体工具指令'), 'should still include media generation instruction');
+});
+
+// --- Social Link Routing Tests ---
+
+test('xhslink.com injects social_reader routing instruction', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '帮我看看 http://xhslink.com/o/abc123', sender_id: 'conv-xhs', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({ HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1', HERMES_API_KEY: 'token', HERMES_REPLY_MODE: 'api', RAN_AGENT_CONTEXT_SIZE_LOG: '0' }),
+      fetchImpl: async (url, options) => { capturedBody = JSON.parse(options.body); return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }); },
+      logger: { warn() {} },
+    }
+  );
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('社交链接路由指令'), 'should inject social routing');
+  assert.ok(userMsg.content.includes('小红书'), 'should detect platform');
+  assert.ok(userMsg.content.includes('social_reader'), 'should mention social_reader');
+  assert.ok(userMsg.content.includes('resolve_social_url'), 'should include resolve step');
+  assert.ok(userMsg.content.includes('read_social_post_deep'), 'should include deep read step');
+  assert.ok(userMsg.content.includes('不要使用 web_extract'), 'should forbid web_extract');
+});
+
+test('bilibili.com injects social_reader routing instruction', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '看看这个 https://www.bilibili.com/video/BV1234567', sender_id: 'conv-bili', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({ HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1', HERMES_API_KEY: 'token', HERMES_REPLY_MODE: 'api', RAN_AGENT_CONTEXT_SIZE_LOG: '0' }),
+      fetchImpl: async (url, options) => { capturedBody = JSON.parse(options.body); return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }); },
+      logger: { warn() {} },
+    }
+  );
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('B站'), 'should detect bilibili');
+  assert.ok(userMsg.content.includes('social_reader'), 'should mention social_reader');
+});
+
+test('mp.weixin.qq.com injects social_reader routing instruction', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '读一下 https://mp.weixin.qq.com/s/abc123', sender_id: 'conv-wx', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({ HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1', HERMES_API_KEY: 'token', HERMES_REPLY_MODE: 'api', RAN_AGENT_CONTEXT_SIZE_LOG: '0' }),
+      fetchImpl: async (url, options) => { capturedBody = JSON.parse(options.body); return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }); },
+      logger: { warn() {} },
+    }
+  );
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('微信公众号'), 'should detect weixin');
+  assert.ok(userMsg.content.includes('social_reader'), 'should mention social_reader');
+});
+
+test('normal web link does NOT inject social_reader routing', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '看看这篇新闻 https://news.example.com/article/123', sender_id: 'conv-news', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({ HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1', HERMES_API_KEY: 'token', HERMES_REPLY_MODE: 'api', RAN_AGENT_CONTEXT_SIZE_LOG: '0' }),
+      fetchImpl: async (url, options) => { capturedBody = JSON.parse(options.body); return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }); },
+      logger: { warn() {} },
+    }
+  );
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(!userMsg.content.includes('社交链接路由指令'), 'should NOT inject social routing for normal web');
+  assert.ok(!userMsg.content.includes('social_reader'), 'should NOT mention social_reader');
+});
+
+test('social routing does not break courtly style anchor', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '帮我看看 http://xhslink.com/o/abc123', sender_id: 'conv-xhs-courtly', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({ HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1', HERMES_API_KEY: 'token', HERMES_REPLY_MODE: 'api', RAN_AGENT_CONTEXT_SIZE_LOG: '0' }),
+      fetchImpl: async (url, options) => { capturedBody = JSON.parse(options.body); return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }); },
+      logger: { warn() {} },
+    }
+  );
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('贴身女官'), 'should include courtly anchor');
+  assert.ok(userMsg.content.includes('社交链接路由指令'), 'should include social routing');
+});
+
+test('social routing does not break media context injection', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '看看 http://xhslink.com/o/abc123', sender_id: 'conv-xhs-media', channel: 'wechat', media: [{ filePath: '/tmp/test.png', mimeType: 'image/png', type: 'image' }] },
+    {
+      config: getHermesGatewayConfig({ HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1', HERMES_API_KEY: 'token', HERMES_REPLY_MODE: 'api', RAN_AGENT_CONTEXT_SIZE_LOG: '0' }),
+      fetchImpl: async (url, options) => { capturedBody = JSON.parse(options.body); return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }); },
+      logger: { warn() {} },
+    }
+  );
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('社交链接路由指令'), 'should include social routing');
+  assert.ok(userMsg.content.includes('入站媒体'), 'should include media instruction');
+  assert.ok(userMsg.content.includes('媒体工具指令'), 'should include media generation instruction');
 });

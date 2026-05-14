@@ -183,7 +183,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
 }
 
 function buildHermesSystemInstruction() {
-  return 'You are Hermes, ran-agent personal assistant. Use profile tools and memory. Text-only; use MCP for media. Never expose internals. MANDATORY TOOL ROUTING: For Xiaohongshu/Bilibili/WeChat article/music links -> MUST use social_reader. For images/video/audio -> MUST use media_reader or mimo_power. For image/speech generation -> MUST use media_generation. For old media queries like "那张图/之前的截图/几天前的海报" -> MUST use search_media_artifacts first. NEVER use web_extract, browser_navigate, vision_analyze, or image_generate for these tasks.';
+  return 'You are Hermes, ran-agent personal assistant. Use profile tools and memory. Text-only; use MCP for media. Never expose internals. MANDATORY RULES: (1) Social platform links (XHS/Bilibili/WeChat article/music/Douyin/Kuaishou/Weibo/Zhihu) -> MUST use social_reader MCP, NEVER use web_extract for these. (2) Images/video/audio -> MUST use media_reader or mimo_power, NEVER feed raw image_url to DeepSeek. (3) Image/speech generation -> MUST use media_generation. (4) Old media queries ("那张图/之前的截图/几天前的海报") -> MUST use search_media_artifacts first. (5) Normal web pages (news/blogs/docs) -> web_extract and web_search are allowed.';
 }
 
 const COURTLY_DISABLE_PATTERN = /正常说话|别叫陛下|别演|不要角色扮演|先别演/;
@@ -197,12 +197,38 @@ function shouldForceCourtlyStyle(text) {
   return COURTLY_FORCE_PATTERN.test(String(text || ''));
 }
 
-const SOCIAL_LINK_PATTERN = /xhslink\.com|xiaohongshu\.com|xhs\.com|bilibili\.com|b23\.tv|mp\.weixin\.qq\.com|douyin\.com|163\.com\/music|music\.163\.com/i;
+const SOCIAL_PLATFORM_NAMES = [
+  { pattern: /xhslink\.com|xiaohongshu\.com|xhs\.com/i, name: '小红书' },
+  { pattern: /bilibili\.com|b23\.tv/i, name: 'B站' },
+  { pattern: /mp\.weixin\.qq\.com/i, name: '微信公众号' },
+  { pattern: /douyin\.com/i, name: '抖音' },
+  { pattern: /kuaishou\.com/i, name: '快手' },
+  { pattern: /weibo\.com/i, name: '微博' },
+  { pattern: /zhihu\.com/i, name: '知乎' },
+  { pattern: /music\.163\.com|y\.music\.163\.com/i, name: '网易云音乐' },
+];
+
+function detectSocialPlatform(text) {
+  for (const { pattern, name } of SOCIAL_PLATFORM_NAMES) {
+    if (pattern.test(text)) return name;
+  }
+  return '';
+}
 
 function buildSocialLinkRoutingHint(payload = {}) {
   const text = String(payload.text || '');
-  if (!SOCIAL_LINK_PATTERN.test(text)) return '';
-  return '【路由提示】消息含社媒链接，必须使用 social_reader MCP 工具读取，不要使用 web_extract 或 browser_navigate。';
+  const platform = detectSocialPlatform(text);
+  if (!platform) return '';
+  return [
+    '【社交链接路由指令（非用户原话，不要复述）】',
+    `本轮包含社交平台链接：${platform}。`,
+    '必须优先使用 social_reader MCP：',
+    '1. 先 resolve_social_url；',
+    '2. 再 read_social_post_deep；',
+    '3. 不要使用 web_extract 处理该平台链接；',
+    '4. 如含图片、视频或音频，再按需调用 media_reader 或 mimo_power；',
+    '5. DeepSeek V4 只根据工具返回的结构化文本总结，不得直接处理 image_url。',
+  ].join('\n');
 }
 
 export function buildCourtlyStyleAnchor(payload = {}) {

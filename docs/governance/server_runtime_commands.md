@@ -1029,3 +1029,41 @@ sudo systemctl restart ran-agent-hermes.service
 sleep 5
 sudo systemctl status ran-agent-hermes.service --no-pager | head -10
 ```
+
+## Web vs Social Link Routing
+
+Hermes has two kinds of web tools:
+
+**Hermes native tools (keep enabled):**
+- `web_search` — Tavily-based web search. Used by weather skill, web-search-live skill, general queries.
+- `web_fetch` — fetch and extract web page content. Used for news, blogs, docs, official sites.
+
+**Disabled Hermes built-in tools (in `disabled_tools`):**
+- `browser_vision`, `image_generate`, `text_to_speech`, `video_analyze`, `vision_analyze`
+- These conflict with ran-agent MCP tools (`media_reader`, `mimo_power`, `media_generation`).
+
+**Social platform links MUST use `social_reader` MCP:**
+- xhslink.com, xiaohongshu.com (小红书)
+- bilibili.com, b23.tv (B站)
+- mp.weixin.qq.com (微信公众号)
+- douyin.com (抖音)
+- kuaishou.com (快手)
+- weibo.com (微博)
+- zhihu.com (知乎)
+- music.163.com (网易云音乐)
+
+The Node bridge detects these URLs and injects a routing instruction into the user message. The instruction tells Hermes to:
+1. Use `resolve_social_url` first
+2. Then `read_social_post_deep`
+3. Never use `web_extract` for these links
+4. Feed images/video/audio to `media_reader`/`mimo_power`
+
+**Normal web links (news, blogs, docs) do NOT get the routing instruction** and can use `web_extract`/`web_search` freely.
+
+**Media (images/video/audio) MUST use ran-agent MCP tools:**
+- `media_reader` for OCR, ASR, video analysis
+- `mimo_power` for deep multimodal analysis
+- `media_generation` for image/speech generation
+- DeepSeek V4 must never receive raw `image_url` payloads
+
+Run `bash scripts/diagnose-media-xhs.sh` to verify the routing configuration.
