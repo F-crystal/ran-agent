@@ -14,11 +14,10 @@ evolution.
 - Hermes is the daily conversation shell.
 - DeepSeek V4 Flash is the default chat model.
 - DeepSeek V4 Pro is opt-in only for explicit high-cost work.
-- OpenClaw is legacy fallback only and must not wrap Hermes.
 - Do not build or imply a custom DeepSeek gateway, custom agent loop, or custom
   front conversation runtime.
-- Do not let Claude Code, Codex, Reasonix, or DeepSeek TUI become the daily
-  conversation shell. They are coding executors or references only.
+- Coding executors, CLIs, and model TUIs are backstage tools only. Do not make
+  them part of the user's daily conversation identity.
 
 ## Tool Boundary
 
