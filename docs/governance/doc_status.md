@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-05-13)
+Status: CURRENT (2026-05-14)
 
 ## Public Source Of Truth
 
@@ -11,6 +11,7 @@ Status: CURRENT (2026-05-13)
 - `openclaw/README.md` / `openclaw/README_en.md`
 - `docs/governance/doc_status.md`
 - `docs/governance/current_runtime_status.md`
+- `docs/governance/phase_status.md`
 - `docs/governance/constraints.md`
 - `docs/governance/skills.md`
 - `docs/governance/sub_agents.md`

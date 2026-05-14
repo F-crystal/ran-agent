@@ -22,12 +22,12 @@ HERMES_PORT="${HERMES_PORT:-8642}"
 HERMES_HOST="${HERMES_HOST:-127.0.0.1}"
 HERMES_HOME="${HERMES_HOME:-/tmp/ran-agent-hermes-home-phase5}"
 PROFILE_ENV_FILE="$HERMES_HOME/profiles/$PROFILE_NAME/.env"
-PHASE6_LOG_DIR="${PHASE6_LOG_DIR:-$ROOT_DIR/logs}"
-PHASE6_RUN_ID="${PHASE6_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
-PHASE6_OUTPUT_DIR="${PHASE6_OUTPUT_DIR:-$PHASE6_LOG_DIR/phase6-hermes-$PHASE6_RUN_ID}"
-GATEWAY_LOG="$PHASE6_OUTPUT_DIR/hermes-gateway.log"
-SMOKE_LOG="$PHASE6_OUTPUT_DIR/node-bridge-hermes-smoke.log"
-PHASE6_REUSE_GATEWAY="${PHASE6_REUSE_GATEWAY:-0}"
+PHASE5_LOG_DIR="${PHASE5_LOG_DIR:-$ROOT_DIR/logs}"
+PHASE5_RUN_ID="${PHASE5_RUN_ID:-$(date +%Y%m%d-%H%M%S)}"
+PHASE5_OUTPUT_DIR="${PHASE5_OUTPUT_DIR:-$PHASE5_LOG_DIR/phase5-hermes-$PHASE5_RUN_ID}"
+GATEWAY_LOG="$PHASE5_OUTPUT_DIR/hermes-gateway.log"
+SMOKE_LOG="$PHASE5_OUTPUT_DIR/node-bridge-hermes-smoke.log"
+PHASE5_REUSE_GATEWAY="${PHASE5_REUSE_GATEWAY:-0}"
 
 tcp_ready() {
   local host="$1"
@@ -47,8 +47,8 @@ wait_for_tcp() {
     sleep 1
     attempt=$((attempt + 1))
   done
-  echo "phase6.fail: timed out waiting for Hermes gateway $host:$port" | tee "$PHASE6_OUTPUT_DIR/phase6-first-error.txt"
-  echo "gateway_log=$GATEWAY_LOG" | tee -a "$PHASE6_OUTPUT_DIR/phase6-first-error.txt"
+  echo "phase5.fail: timed out waiting for Hermes gateway $host:$port" | tee "$PHASE5_OUTPUT_DIR/phase5-first-error.txt"
+  echo "gateway_log=$GATEWAY_LOG" | tee -a "$PHASE5_OUTPUT_DIR/phase5-first-error.txt"
   exit 1
 }
 
@@ -65,11 +65,11 @@ stop_pid_file_process() {
   fi
 }
 
-stop_previous_phase6_processes() {
+stop_previous_phase5_processes() {
   local pid_file
   while IFS= read -r -d '' pid_file; do
     stop_pid_file_process "$pid_file"
-  done < <(find "$PHASE6_LOG_DIR" -path '*/hermes-gateway.pid' -type f -print0 2>/dev/null || true)
+  done < <(find "$PHASE5_LOG_DIR" -path '*/hermes-gateway.pid' -type f -print0 2>/dev/null || true)
 
   pkill -u "$(id -u)" -f 'scripts/start_obsidian_memory_mcp\.sh' >/dev/null 2>&1 || true
   pkill -u "$(id -u)" -f 'scripts/obsidian_index_mcp_launcher\.py' >/dev/null 2>&1 || true
@@ -107,18 +107,24 @@ if [ -z "${API_SERVER_KEY:-}" ] && [ -n "${HERMES_API_KEY:-}" ]; then
   export API_SERVER_KEY="$HERMES_API_KEY"
 fi
 if [ -z "${API_SERVER_KEY:-}" ] && [ -z "${HERMES_API_KEY:-}" ]; then
-  export API_SERVER_KEY="phase6-local-smoke"
+  export API_SERVER_KEY="phase5-local-smoke"
   export HERMES_API_KEY="$API_SERVER_KEY"
 fi
 export HERMES_API_BASE_URL="${HERMES_API_BASE_URL:-http://$HERMES_HOST:$HERMES_PORT/v1}"
 export HERMES_REPLY_MODE="${HERMES_REPLY_MODE:-api}"
 export NODE_BRIDGE_REPLY_BACKEND="${NODE_BRIDGE_REPLY_BACKEND:-hermes}"
 export HERMES_REPLY_TIMEOUT_SECONDS="${HERMES_REPLY_TIMEOUT_SECONDS:-300}"
-export PHASE6_SMOKE_TIMEOUT_MS="${PHASE6_SMOKE_TIMEOUT_MS:-90000}"
-export PHASE6_INCLUDE_OBSIDIAN="${PHASE6_INCLUDE_OBSIDIAN:-0}"
-export PHASE6_SMOKE_OUTPUT_DIR="$PHASE6_OUTPUT_DIR"
+export PHASE5_SMOKE_TIMEOUT_MS="${PHASE5_SMOKE_TIMEOUT_MS:-90000}"
+export PHASE5_INCLUDE_MEMORY="${PHASE5_INCLUDE_MEMORY:-0}"
+export PHASE5_INCLUDE_MCP_TOOLS="${PHASE5_INCLUDE_MCP_TOOLS:-0}"
+export PHASE5_INCLUDE_SOCIAL_READER="${PHASE5_INCLUDE_SOCIAL_READER:-0}"
+export PHASE5_INCLUDE_OBSIDIAN="${PHASE5_INCLUDE_OBSIDIAN:-0}"
+export PHASE5_SMOKE_OUTPUT_DIR="$PHASE5_OUTPUT_DIR"
 
-mkdir -p "$PHASE6_OUTPUT_DIR" "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$npm_config_cache" "$(dirname "$OBSIDIAN_MEMORY_INDEX_PATH")"
+mkdir -p "$PHASE5_OUTPUT_DIR" "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$npm_config_cache"
+if [ "$PHASE5_INCLUDE_OBSIDIAN" = "1" ]; then
+  mkdir -p "$(dirname "$OBSIDIAN_MEMORY_INDEX_PATH")"
+fi
 
 cd "$ROOT_DIR"
 
@@ -132,7 +138,7 @@ if [ -n "${HERMES_AGENT_DIR:-}" ]; then
 fi
 
 if ! command -v hermes >/dev/null 2>&1; then
-  echo "phase6.fail: hermes command not found. Set PATH or HERMES_AGENT_DIR before running." | tee "$PHASE6_OUTPUT_DIR/phase6-first-error.txt"
+  echo "phase5.fail: hermes command not found. Set PATH or HERMES_AGENT_DIR before running." | tee "$PHASE5_OUTPUT_DIR/phase5-first-error.txt"
   exit 1
 fi
 
@@ -141,48 +147,51 @@ if ! hermes profile show "$PROFILE_NAME" >/dev/null 2>&1; then
 fi
 
 gateway_started=0
-if [ "$PHASE6_REUSE_GATEWAY" != "1" ]; then
-  stop_previous_phase6_processes
+if [ "$PHASE5_REUSE_GATEWAY" != "1" ]; then
+  stop_previous_phase5_processes
 fi
 
-if [ "$PHASE6_REUSE_GATEWAY" = "1" ] && tcp_ready "$HERMES_HOST" "$HERMES_PORT"; then
-  echo "phase6.gateway.reuse $HERMES_API_BASE_URL"
+if [ "$PHASE5_REUSE_GATEWAY" = "1" ] && tcp_ready "$HERMES_HOST" "$HERMES_PORT"; then
+  echo "phase5.gateway.reuse $HERMES_API_BASE_URL"
 elif tcp_ready "$HERMES_HOST" "$HERMES_PORT"; then
-  echo "phase6.fail: $HERMES_HOST:$HERMES_PORT is already in use; set PHASE6_REUSE_GATEWAY=1 to reuse it, or stop the old Hermes gateway." | tee "$PHASE6_OUTPUT_DIR/phase6-first-error.txt"
+  echo "phase5.fail: $HERMES_HOST:$HERMES_PORT is already in use; set PHASE5_REUSE_GATEWAY=1 to reuse it, or stop the old Hermes gateway." | tee "$PHASE5_OUTPUT_DIR/phase5-first-error.txt"
   exit 1
 else
-  echo "phase6.gateway.start $HERMES_API_BASE_URL"
+  echo "phase5.gateway.start $HERMES_API_BASE_URL"
   nohup hermes -p "$PROFILE_NAME" gateway run --replace --accept-hooks >"$GATEWAY_LOG" 2>&1 &
-  echo "$!" >"$PHASE6_OUTPUT_DIR/hermes-gateway.pid"
+  echo "$!" >"$PHASE5_OUTPUT_DIR/hermes-gateway.pid"
   gateway_started=1
   wait_for_tcp "$HERMES_HOST" "$HERMES_PORT" 120
 fi
 
 {
-  echo "phase6.env.profile=$PROFILE_NAME"
-  echo "phase6.env.hermes_home=$HERMES_HOME"
-  echo "phase6.env.api_base=$HERMES_API_BASE_URL"
-  echo "phase6.env.obsidian_index=$OBSIDIAN_MEMORY_INDEX_PATH"
-  echo "phase6.env.include_obsidian=$PHASE6_INCLUDE_OBSIDIAN"
-  echo "phase6.env.gateway_started=$gateway_started"
-  echo "phase6.env.gateway_log=$GATEWAY_LOG"
-  echo "phase6.env.smoke_log=$SMOKE_LOG"
-} | tee "$PHASE6_OUTPUT_DIR/phase6-summary.txt"
+  echo "phase5.env.profile=$PROFILE_NAME"
+  echo "phase5.env.hermes_home=$HERMES_HOME"
+  echo "phase5.env.api_base=$HERMES_API_BASE_URL"
+  echo "phase5.env.obsidian_index=$OBSIDIAN_MEMORY_INDEX_PATH"
+  echo "phase5.env.include_memory=$PHASE5_INCLUDE_MEMORY"
+  echo "phase5.env.include_mcp_tools=$PHASE5_INCLUDE_MCP_TOOLS"
+  echo "phase5.env.include_social_reader=$PHASE5_INCLUDE_SOCIAL_READER"
+  echo "phase5.env.include_obsidian=$PHASE5_INCLUDE_OBSIDIAN"
+  echo "phase5.env.gateway_started=$gateway_started"
+  echo "phase5.env.gateway_log=$GATEWAY_LOG"
+  echo "phase5.env.smoke_log=$SMOKE_LOG"
+} | tee "$PHASE5_OUTPUT_DIR/phase5-summary.txt"
 
 set +e
-node "$ROOT_DIR/scripts/phase6_hermes_full_chain_smoke.mjs" 2>&1 | tee "$SMOKE_LOG"
+node "$ROOT_DIR/scripts/phase5_hermes_full_chain_smoke.mjs" 2>&1 | tee "$SMOKE_LOG"
 smoke_status="${PIPESTATUS[0]}"
 set -e
 
 if [ "$smoke_status" -ne 0 ]; then
   {
-    echo "phase6.fail: node bridge Hermes full-chain smoke failed"
-    echo "first_error=$PHASE6_OUTPUT_DIR/phase6-first-error.json"
+    echo "phase5.fail: node bridge Hermes full-chain smoke failed"
+    echo "first_error=$PHASE5_OUTPUT_DIR/phase5-first-error.json"
     echo "gateway_log=$GATEWAY_LOG"
     echo "smoke_log=$SMOKE_LOG"
-  } | tee "$PHASE6_OUTPUT_DIR/phase6-first-error.txt"
+  } | tee "$PHASE5_OUTPUT_DIR/phase5-first-error.txt"
   exit "$smoke_status"
 fi
 
-echo "phase6.ok: Hermes gateway/API server is running and Node bridge Hermes smoke passed"
-echo "phase6.logs: $PHASE6_OUTPUT_DIR"
+echo "phase5.ok: Hermes gateway/API server is running and Node bridge Hermes smoke passed"
+echo "phase5.logs: $PHASE5_OUTPUT_DIR"

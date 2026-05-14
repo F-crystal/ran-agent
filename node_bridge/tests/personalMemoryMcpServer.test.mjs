@@ -13,15 +13,20 @@ function jsonResponse(body, status = 200) {
   };
 }
 
-test('personal memory exposes one read-only recall tool', () => {
+test('personal memory exposes backend check and read-only recall tools', () => {
   const tools = buildPersonalMemoryTools();
 
-  assert.deepEqual(tools.map((tool) => tool.name), ['recall_personal_memory']);
-  assert.match(tools[0].description, /Ombre/);
-  assert.match(tools[0].description, /SQLite/);
+  assert.deepEqual(tools.map((tool) => tool.name), [
+    'check_personal_memory_backend',
+    'recall_personal_memory',
+  ]);
   assert.equal(tools[0].inputSchema.type, 'object');
   assert.equal(tools[0].inputSchema.additionalProperties, false);
-  assert.deepEqual(tools[0].inputSchema.required, ['query']);
+  assert.match(tools[1].description, /Ombre/);
+  assert.match(tools[1].description, /SQLite/);
+  assert.equal(tools[1].inputSchema.type, 'object');
+  assert.equal(tools[1].inputSchema.additionalProperties, false);
+  assert.deepEqual(tools[1].inputSchema.required, ['query']);
 });
 
 test('personal memory initialize and tools list follow MCP shape', async () => {
@@ -31,7 +36,33 @@ test('personal memory initialize and tools list follow MCP shape', async () => {
   assert.equal(initialized.protocolVersion, '2025-06-18');
   assert.deepEqual(initialized.capabilities, { tools: {} });
   assert.equal(initialized.serverInfo.name, 'ran-agent-personal-memory');
-  assert.equal(listed.tools.length, 1);
+  assert.equal(listed.tools.length, 2);
+});
+
+test('check_personal_memory_backend reports backend health', async () => {
+  const calls = [];
+  const result = await handlePersonalMemoryMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'check_personal_memory_backend',
+        arguments: {},
+      },
+    },
+    {
+      env: { PYTHON_BACKEND_BASE_URL: 'http://backend.test' },
+      fetchImpl: async (url, options) => {
+        calls.push({ url, options });
+        return jsonResponse({ status: 'ok' });
+      },
+    }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://backend.test/health');
+  assert.equal(calls[0].options.method, 'GET');
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.status, 'ok');
 });
 
 test('recall_personal_memory forwards to backend memory recall endpoint', async () => {

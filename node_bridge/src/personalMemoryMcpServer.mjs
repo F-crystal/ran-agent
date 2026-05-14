@@ -10,6 +10,11 @@ function backendBaseUrl(env = process.env) {
   return String(env.PYTHON_BACKEND_BASE_URL || 'http://127.0.0.1:8787').trim().replace(/\/$/, '');
 }
 
+function backendTimeoutMs(env = process.env) {
+  const parsed = Number.parseInt(String(env.PERSONAL_MEMORY_BACKEND_TIMEOUT_MS || ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5000;
+}
+
 function buildErrorResult(message) {
   return {
     isError: true,
@@ -53,6 +58,16 @@ function buildRecallResult(payload = {}) {
 export function buildPersonalMemoryTools() {
   return [
     {
+      name: 'check_personal_memory_backend',
+      title: 'Check Personal Memory Backend',
+      description: 'Check whether the local Python backend is reachable for personal memory operations. Does not read or write memory.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    },
+    {
       name: 'recall_personal_memory',
       title: 'Recall Personal Memory',
       description: [
@@ -86,6 +101,8 @@ async function recallPersonalMemory(args = {}, options = {}) {
   }
   const responseMode = String(args.response_mode || 'chat').trim() || 'chat';
   const fetchImpl = options.fetchImpl || fetch;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), backendTimeoutMs(options.env));
   let response;
   try {
     response = await fetchImpl(`${backendBaseUrl(options.env)}/tools/memory/recall`, {
@@ -93,6 +110,7 @@ async function recallPersonalMemory(args = {}, options = {}) {
       headers: {
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
       body: JSON.stringify({
         user_text: query,
         route: 'text_chat',
@@ -101,6 +119,8 @@ async function recallPersonalMemory(args = {}, options = {}) {
     });
   } catch (error) {
     return buildErrorResult(error instanceof Error ? error.message : String(error));
+  } finally {
+    clearTimeout(timeout);
   }
 
   const body = await response.json().catch(() => ({}));
@@ -109,6 +129,43 @@ async function recallPersonalMemory(args = {}, options = {}) {
     return buildErrorResult(`memory recall failed: ${errorText}`);
   }
   return buildRecallResult(body);
+}
+
+async function checkPersonalMemoryBackend(options = {}) {
+  const fetchImpl = options.fetchImpl || fetch;
+  const baseUrl = backendBaseUrl(options.env);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), backendTimeoutMs(options.env));
+  let response;
+  try {
+    response = await fetchImpl(`${baseUrl}/health`, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+  } catch (error) {
+    return buildErrorResult(error instanceof Error ? error.message : String(error));
+  } finally {
+    clearTimeout(timeout);
+  }
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const errorText = String(body?.error || '').trim() || `HTTP ${response.status}`;
+    return buildErrorResult(`memory backend health check failed: ${errorText}`);
+  }
+  const result = {
+    ok: true,
+    backend_base_url: baseUrl,
+    status: String(body?.status || 'ok'),
+  };
+  return {
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(result, null, 2),
+      },
+    ],
+    structuredContent: result,
+  };
 }
 
 export async function handlePersonalMemoryMcpRequest(request, options = {}) {
@@ -132,6 +189,9 @@ export async function handlePersonalMemoryMcpRequest(request, options = {}) {
   if (method === 'tools/call') {
     const params = request?.params || {};
     const name = String(params.name || '');
+    if (name === 'check_personal_memory_backend') {
+      return await checkPersonalMemoryBackend(options);
+    }
     if (name === 'recall_personal_memory') {
       return await recallPersonalMemory(params.arguments || {}, options);
     }

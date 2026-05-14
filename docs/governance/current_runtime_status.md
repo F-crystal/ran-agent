@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-13)
+Status: CURRENT (2026-05-14)
 
 ## Frontend Path
 
@@ -8,6 +8,14 @@ Status: CURRENT (2026-05-13)
 - Provider: `claude_code`; model: `qwen3.5-plus`; fallbacks: none.
 - Kimi and GLM retired. Python frontend `/chat` returns 410.
 - Single front speaker: OpenClaw (personal assistant + chat companion).
+
+## Phase Status
+
+- Phase 5 is code-closed for Hermes profile/gateway migration; current script names are `scripts/phase5_hermes_gateway_smoke.sh` and `scripts/phase5_hermes_full_chain_smoke.mjs`.
+- Default Phase 5 script behavior is minimal and does not exercise Python backend, memory bridge, Obsidian, social reader, media generation, MiMo, or other external MCP backends unless explicitly opted in.
+- The old `phase6_hermes_*` names were incorrect and are removed. Phase 6 is reserved for Python backend and memory bridge work.
+- Phase 6 is code-closed for backend/memory bridge boundaries: backend ingest timeout, personal memory backend health check, and personal memory recall timeout.
+- Detailed phase scope: `docs/governance/phase_status.md`.
 
 ## OpenClaw Contract
 
@@ -75,6 +83,8 @@ Status: CURRENT (2026-05-13)
 ## Backend Layer (Python)
 
 - Capabilities: `/ingest`, memory recall/update, knowledge state/run, reflection, life-loop, night-cycle.
+- Node bridge backend ingest uses `PYTHON_BACKEND_INGEST_TIMEOUT_MS` (default 5000 ms).
+- `personal_memory` MCP exposes `check_personal_memory_backend` and `recall_personal_memory`; recall uses `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` (default 5000 ms).
 - Scheduler: `brain_loop_job`, `life_loop_job`, `knowledge_agent_job`, `self_reflection_job`, `night_cycle_job`, `reminder_check_job` (5 min).
 - Knowledge path: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`.
 

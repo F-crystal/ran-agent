@@ -14,6 +14,7 @@ test('getBackendIngestConfig reads environment variables', () => {
 
   assert.equal(config.enabled, false);
   assert.equal(config.baseUrl, 'http://127.0.0.1:9999');
+  assert.equal(config.timeoutMs, 5000);
 });
 
 test('ingestExchangeToBackend returns ok payload', async () => {
@@ -29,6 +30,7 @@ test('ingestExchangeToBackend returns ok payload', async () => {
       config: {
         enabled: true,
         baseUrl: 'http://127.0.0.1:8787',
+        timeoutMs: 5000,
       },
       fetchImpl: async () => ({
         ok: true,
