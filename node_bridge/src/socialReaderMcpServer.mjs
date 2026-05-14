@@ -507,6 +507,50 @@ function xhsBackendTextError(text, toolName) {
   return null;
 }
 
+function buildXhsDiagnostic({ platform, url, noteId, whichBackend, backendToolName, errorCode, backendError, hasCookie, hasXsecToken, usedCachedToken, usedCanonicalUrl, rawFieldsSeen, rawPreview, env }) {
+  const cookieDiag = platform === 'xhs' ? xhsCookieDiagnostics(env || process.env) : undefined;
+  return {
+    platform: platform || 'xhs',
+    url: url || '',
+    note_id: noteId || '',
+    which_backend: whichBackend || '',
+    backend_tool_name: backendToolName || '',
+    error_code: errorCode || '',
+    backend_error: backendError || '',
+    has_cookie: hasCookie !== undefined ? hasCookie : Boolean(cookieDiag?.status === 'SET'),
+    has_xsec_token: hasXsecToken !== undefined ? hasXsecToken : false,
+    used_cached_token: usedCachedToken || false,
+    used_canonical_url: usedCanonicalUrl || false,
+    raw_fields_seen: rawFieldsSeen || {},
+    raw_preview: rawPreview ? rawPreview.slice(0, 1000) : '',
+    cookie_diagnostics: cookieDiag,
+  };
+}
+
+function sanitizeRawPreview(text, maxLen = 1000) {
+  let cleaned = String(text || '').slice(0, maxLen);
+  // Redact potential cookies and tokens
+  cleaned = cleaned.replace(/(?:cookie|token|key|secret|password|sessdata)[=:]\s*[^\s,;]{8,}/gi, (m) => {
+    const sep = m.includes('=') ? '=' : ':';
+    const key = m.split(sep)[0];
+    return `${key}${sep}***REDACTED***`;
+  });
+  return cleaned;
+}
+
+function extractRawFieldsSeen(data) {
+  if (!data || typeof data !== 'object') return {};
+  return {
+    title: Boolean(data.title || data.note_title || data.display_title),
+    desc: Boolean(data.desc || data.description || data.note_desc || data.content),
+    images: Boolean(data.images?.length || data.image_list?.length || data.note_image_list?.length),
+    video: Boolean(data.video || data.video_url || data.note_video),
+    media: Boolean(data.media?.length || data.media_list?.length),
+    comments: Boolean(data.comments?.length || data.comment_list?.length),
+    tags: Boolean(data.tags?.length || data.tag_list?.length),
+  };
+}
+
 function parseJsonArrayEnv(value, fallback) {
   if (!value) {
     return fallback;
@@ -1737,6 +1781,16 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
       const fallback = await readGenericSocialPost({ url, platform: 'xhs', includeComments, maxComments }, options);
       fallback.structuredContent.xhs_error = error instanceof Error ? error.message : String(error);
       fallback.structuredContent.fallback = true;
+      fallback.structuredContent.fallback_from = error?.error_code || 'XHS_BACKEND_EXCEPTION';
+      fallback.structuredContent.diagnostics = buildXhsDiagnostic({
+        platform: 'xhs', url, whichBackend: 'generic_parser', backendToolName: 'wanyi-watermark',
+        errorCode: error?.error_code || 'XHS_BACKEND_EXCEPTION',
+        backendError: error instanceof Error ? error.message : String(error),
+        hasCookie, hasXsecToken: Boolean(resolved.xsec_token),
+        usedCachedToken: Boolean(prepared.source === 'xhs_browse_cache'),
+        usedCanonicalUrl: Boolean(prepared.backend_url),
+        env,
+      });
       fallback.content[0].text = JSON.stringify(fallback.structuredContent, null, 2);
       return fallback;
     }
@@ -2777,7 +2831,10 @@ async function xhsBrowseSearch(args, options = {}) {
 }
 
 async function xhsBrowseNote(args, options = {}) {
-  const config = getXhsBrowseConfig(options.env || process.env);
+  const env = options.env || process.env;
+  const debug = args.debug === true;
+  const config = getXhsBrowseConfig(env);
+  const hasCookie = Boolean(String(env.XHS_COOKIE || '').trim());
 
   if (!config.enabled) {
     return {
@@ -2842,14 +2899,21 @@ async function xhsBrowseNote(args, options = {}) {
     };
   }
 
-  // Get xsecToken from cache (populated by search results)
+  // Get xsecToken from cache (populated by search results or resolve_social_url)
   const cachedEntry = getCachedXhsNoteToken(noteId, options);
   const xsecToken = cachedEntry?.xsecToken || '';
-  
+  const usedCachedToken = Boolean(xsecToken);
+  const usedCanonicalUrl = Boolean(cachedEntry?.canonical_url && xsecToken);
+
   // If no xsecToken in cache, try the generic parser against the cached or bare URL.
   if (!xsecToken) {
     const fallbackResult = await fallbackXhsBrowseNote({ noteId, lookup, cachedEntry }, options);
     if (fallbackResult) {
+      fallbackResult.fallback_from = 'XHS_NOTE_NO_TOKEN';
+      fallbackResult.diagnostics = buildXhsDiagnostic({
+        platform: 'xhs', noteId, whichBackend: 'generic_parser', backendToolName: 'wanyi-watermark',
+        errorCode: '', hasCookie, hasXsecToken: false, usedCachedToken: false, usedCanonicalUrl: false, env,
+      });
       return fallbackResult;
     }
     return {
@@ -2857,9 +2921,12 @@ async function xhsBrowseNote(args, options = {}) {
       error_code: 'XHS_NOTE_CONTEXT_REQUIRED',
       message: `No cached token context for note_id: ${noteId}. Search first or provide an XHS URL that fallback can parse.`,
       hint: 'Run xhs_browse_search with a relevant query, then read the returned read_ref.',
+      diagnostics: buildXhsDiagnostic({
+        platform: 'xhs', noteId, whichBackend: 'none', hasCookie, hasXsecToken: false, usedCachedToken: false, usedCanonicalUrl: false, env,
+      }),
     };
   }
-  
+
   // Call backend with the argument style expected by the matched backend tool.
   const backendToolName = probeResult.matched_tools.note;
   const result = await callXhsBrowseBackend(
@@ -2874,32 +2941,68 @@ async function xhsBrowseNote(args, options = {}) {
       ok: false,
       error_code: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
       message: result.message || 'Failed to read note',
+      diagnostics: buildXhsDiagnostic({
+        platform: 'xhs', noteId, whichBackend: 'xhs_browse', backendToolName,
+        errorCode: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED, backendError: result.message,
+        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl, env,
+      }),
     };
   }
 
   const rawData = parseMcpStructuredData(result.data || {});
   const backendFailure = getXhsBrowseFailurePayload(rawData);
   if (backendFailure) {
+    // Classify the error more precisely
+    const classifiedError = xhsBackendTextError(backendFailure.message || '', backendToolName);
+    const errorCode = classifiedError?.error_code || XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED;
+
     const fallbackResult = await fallbackXhsBrowseNote({
       noteId,
       lookup,
       cachedEntry,
-      fallbackFrom: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
+      fallbackFrom: errorCode,
     }, options);
     if (fallbackResult) {
+      fallbackResult.diagnostics = buildXhsDiagnostic({
+        platform: 'xhs', noteId, whichBackend: 'generic_parser', backendToolName,
+        errorCode, backendError: backendFailure.message,
+        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
+        rawFieldsSeen: extractRawFieldsSeen(rawData),
+        rawPreview: debug ? sanitizeRawPreview(JSON.stringify(rawData)) : '',
+        env,
+      });
       return fallbackResult;
     }
     return {
       ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
+      error_code: errorCode,
       message: backendFailure.message,
       backend_error: backendFailure.backend_error,
       note_id: noteId,
       read_ref: `xhs:note:${noteId}`,
+      diagnostics: buildXhsDiagnostic({
+        platform: 'xhs', noteId, whichBackend: 'xhs_browse', backendToolName,
+        errorCode, backendError: backendFailure.message,
+        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
+        rawFieldsSeen: extractRawFieldsSeen(rawData),
+        rawPreview: debug ? sanitizeRawPreview(JSON.stringify(rawData)) : '',
+        env,
+      }),
     };
   }
 
-  return normalizeXhsBrowseResponse('note', rawData, '', options);
+  const normalized = normalizeXhsBrowseResponse('note', rawData, '', options);
+  // Add diagnostics to successful response
+  normalized.raw_fields_seen = extractRawFieldsSeen(rawData);
+  if (debug) {
+    normalized.raw_preview = sanitizeRawPreview(JSON.stringify(rawData));
+  }
+  normalized.diagnostics = buildXhsDiagnostic({
+    platform: 'xhs', noteId, whichBackend: 'xhs_browse', backendToolName,
+    hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
+    rawFieldsSeen: extractRawFieldsSeen(rawData), env,
+  });
+  return normalized;
 }
 
 async function xhsBrowseUser(args, options = {}) {
