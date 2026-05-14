@@ -139,9 +139,65 @@ sudo systemctl restart ran-agent-hermes.service
 sleep 5
 sudo systemctl restart ran-agent-node.service
 
-systemctl status ran-agent-python.service --no-pager
-systemctl status ran-agent-hermes.service --no-pager
-systemctl status ran-agent-node.service --no-pager
+sudo systemctl status ran-agent-python.service --no-pager
+sudo systemctl status ran-agent-hermes.service --no-pager
+sudo systemctl status ran-agent-node.service --no-pager
+```
+
+## Fix Hermes Gateway Warnings
+
+Use this if the Hermes gateway log shows either of these warnings:
+
+- `Stale systemd unit detected ... TimeoutStopSec=90s`
+- `No user allowlists configured`
+
+The timeout warning should be fixed. The allowlist warning is not fatal if the
+runtime is already replying, but it means Hermes has no explicit user allowlist.
+Only set `GATEWAY_ALLOW_ALL_USERS=true` when the gateway is bound to localhost
+and the bridge is the trusted ingress.
+
+Paste this on the server to fix the systemd timeout warning:
+
+```bash
+cd /opt/ran_agent
+
+sudo mkdir -p /etc/systemd/system/ran-agent-hermes.service.d
+sudo tee /etc/systemd/system/ran-agent-hermes.service.d/20-timeout.conf >/dev/null <<'EOF'
+[Service]
+TimeoutStopSec=240
+EOF
+
+sudo systemctl daemon-reload
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl restart ran-agent-node.service
+
+sudo systemctl status ran-agent-hermes.service --no-pager
+sudo journalctl -u ran-agent-hermes -n 80 --no-pager
+```
+
+Optional: paste this only if this server should trust the local bridge as the
+user gate and suppress the allowlist warning:
+
+```bash
+cd /opt/ran_agent
+
+export HERMES_PROFILE=ran-assistant
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+PROFILE_ENV="$HERMES_HOME/profiles/$HERMES_PROFILE/.env"
+
+mkdir -p "$(dirname "$PROFILE_ENV")"
+touch "$PROFILE_ENV"
+chmod 600 "$PROFILE_ENV"
+sed -i '/^GATEWAY_ALLOW_ALL_USERS=/d' "$PROFILE_ENV"
+printf 'GATEWAY_ALLOW_ALL_USERS=true\n' >> "$PROFILE_ENV"
+chmod 600 "$PROFILE_ENV"
+
+sudo systemctl restart ran-agent-hermes.service
+sleep 5
+sudo systemctl restart ran-agent-node.service
+
+sudo journalctl -u ran-agent-hermes -n 80 --no-pager
 ```
 
 ## Systemd Cutover To Hermes Runtime
@@ -212,6 +268,7 @@ Environment=OBSIDIAN_MEMORY_WATCH=0
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p ran-assistant gateway run --replace --accept-hooks'
 Restart=always
 RestartSec=5
+TimeoutStopSec=240
 
 [Install]
 WantedBy=multi-user.target
