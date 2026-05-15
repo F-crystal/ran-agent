@@ -1244,6 +1244,20 @@ Desktop clients should use `base_url=http://127.0.0.1:8650/v1` and model
 `ran-agent`. Directly connecting Open WebUI/Chatbox/LobeChat to Hermes
 8642/8643 is a debug-only path and does not provide the unified timeline entry.
 
+Global timeline retention:
+
+```bash
+bash scripts/compact-global-timeline.sh
+bash scripts/diagnose-multi-frontend.sh
+```
+
+`apply-hermes-runtime-split.sh` upserts non-sensitive retention defaults into
+`/opt/ran_agent/.env.local`: max 50 MiB, max 5000 turns, 30-day retention,
+compaction enabled, and archive dir
+`/opt/ran_agent/.ran_agent_state/timeline_archive`. The live
+`global-timeline.jsonl` keeps recent turns for continuity; older content is
+summarized and the original file is gzipped into the archive directory.
+
 Rollback:
 
 ```bash

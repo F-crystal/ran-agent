@@ -9,6 +9,7 @@ NODE_ENV_FILE="${RAN_AGENT_NODE_ENV_FILE:-/opt/ran_agent/.env.local}"
 NODE_BRIDGE_ENV_FILE="${RAN_AGENT_NODE_BRIDGE_ENV_FILE:-/opt/ran_agent/node_bridge/.env.local}"
 IDENTITY_MAP_PATH="${RAN_AGENT_IDENTITY_MAP_PATH:-/opt/ran_agent/.ran_agent_state/identity-map.json}"
 GLOBAL_TIMELINE_PATH="${RAN_AGENT_GLOBAL_TIMELINE_PATH:-/opt/ran_agent/.ran_agent_state/global-timeline.jsonl}"
+TIMELINE_ARCHIVE_DIR="${RAN_AGENT_TIMELINE_ARCHIVE_DIR:-/opt/ran_agent/.ran_agent_state/timeline_archive}"
 DESKTOP_PROXY_PORT="${DESKTOP_PROXY_PORT:-8650}"
 
 env_value() {
@@ -49,6 +50,11 @@ for key in \
   RAN_AGENT_DEFAULT_GLOBAL_USER_ID \
   RAN_AGENT_IDENTITY_MAP_PATH \
   RAN_AGENT_GLOBAL_TIMELINE_PATH \
+  RAN_AGENT_TIMELINE_MAX_BYTES \
+  RAN_AGENT_TIMELINE_MAX_TURNS \
+  RAN_AGENT_TIMELINE_RETENTION_DAYS \
+  RAN_AGENT_TIMELINE_COMPACT_ENABLED \
+  RAN_AGENT_TIMELINE_ARCHIVE_DIR \
   HERMES_SESSION_CONTINUITY_ENABLED \
   HERMES_GLOBAL_RECENT_TURNS \
   HERMES_ACTIVE_TOPIC_CHAR_BUDGET
@@ -92,7 +98,42 @@ else
 fi
 
 echo ""
-echo "=== 6. Global timeline recent records ==="
+echo "=== 6. Global timeline retention ==="
+if [ -f "$GLOBAL_TIMELINE_PATH" ]; then
+  size_bytes="$(wc -c < "$GLOBAL_TIMELINE_PATH" | tr -d ' ')"
+  turn_count="$(wc -l < "$GLOBAL_TIMELINE_PATH" | tr -d ' ')"
+  echo "timeline path: $GLOBAL_TIMELINE_PATH"
+  echo "timeline size bytes: $size_bytes"
+  echo "timeline turn count: $turn_count"
+  if [ -d "$TIMELINE_ARCHIVE_DIR" ]; then
+    archive_count="$(find "$TIMELINE_ARCHIVE_DIR" -maxdepth 1 -name 'global-timeline-*.jsonl.gz' 2>/dev/null | wc -l | tr -d ' ')"
+    echo "archive dir: $TIMELINE_ARCHIVE_DIR"
+    echo "archive count: $archive_count"
+    if [ -f "$TIMELINE_ARCHIVE_DIR/last_compact.json" ]; then
+      python3 - "$TIMELINE_ARCHIVE_DIR/last_compact.json" <<'PY'
+import json, sys
+try:
+    data=json.load(open(sys.argv[1], encoding="utf-8"))
+except Exception:
+    data={}
+print("last compact time:", data.get("compacted_at", "UNKNOWN"))
+print("last compact retained turns:", data.get("retained_turns", "UNKNOWN"))
+print("last compact summary turns:", data.get("summary_turns", "UNKNOWN"))
+PY
+    else
+      echo "last compact time: NONE"
+    fi
+  else
+    echo "archive dir: NOT FOUND ($TIMELINE_ARCHIVE_DIR)"
+    echo "archive count: 0"
+    echo "last compact time: NONE"
+  fi
+else
+  echo "global timeline: NOT FOUND"
+fi
+
+echo ""
+echo "=== 7. Global timeline recent records ==="
 if [ -f "$GLOBAL_TIMELINE_PATH" ]; then
   python3 - "$GLOBAL_TIMELINE_PATH" <<'PY'
 import json, sys
@@ -113,6 +154,6 @@ else
 fi
 
 echo ""
-echo "=== 7. Hermes continuity / routing logs ==="
+echo "=== 8. Hermes continuity / routing logs ==="
 recent_journal '\[hermes-session-continuity\]' "No recent [hermes-session-continuity] logs"
 recent_journal '\[hermes-capability-mode\]' "No recent [hermes-capability-mode] logs"

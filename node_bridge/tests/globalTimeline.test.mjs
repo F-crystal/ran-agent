@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   appendTurn,
   buildContinuityNote,
+  compactTimeline,
   getActiveTopic,
   getGlobalRecentHistory,
   getLocalRecentHistory,
@@ -99,4 +100,99 @@ test('timeline sanitizes long JSON logs and base64 blobs', () => {
   const [record] = readTimelineRecords({ timelinePath });
   assert.equal(record.text.includes('data:image/png;base64'), false);
   assert.equal(record.text.includes('x'.repeat(1000)), false);
+});
+
+test('appendTurn truncates long text and stores text_summary', () => {
+  const timelinePath = tempTimelinePath();
+  appendTurn({
+    timelinePath,
+    global_user_id: 'user:ran',
+    platform: 'wechat',
+    channel_type: 'dm',
+    conversation_id: 'wx-long',
+    sender_id: 'u',
+    role: 'user',
+    text: `内莉·布莱 ${'很长的内容'.repeat(600)}`,
+    created_at: 1,
+  });
+
+  const [record] = readTimelineRecords({ timelinePath });
+  assert.ok(record.text.length <= 2000);
+  assert.match(record.text_summary, /内莉/);
+  assert.equal(record.text_summary.length <= 800, true);
+});
+
+test('appendTurn stores stack traces and journal logs as summaries', () => {
+  const timelinePath = tempTimelinePath();
+  appendTurn({
+    timelinePath,
+    global_user_id: 'user:ran',
+    platform: 'desktop',
+    channel_type: 'desktop',
+    conversation_id: 'desktop',
+    sender_id: 'client',
+    role: 'user',
+    text: `journalctl -u ran-agent-node.service\nError: boom\n    at secretFunction (/tmp/app.js:1:2)\n${'line\n'.repeat(200)}`,
+    created_at: 1,
+  });
+
+  const [record] = readTimelineRecords({ timelinePath });
+  assert.match(record.text_summary, /日志或错误堆栈/);
+  assert.equal(record.text.includes('secretFunction'), false);
+});
+
+test('compactTimeline archives old file and preserves recent local history', () => {
+  const timelinePath = tempTimelinePath();
+  const archiveDir = path.join(path.dirname(timelinePath), 'archive');
+  for (let i = 0; i < 8; i += 1) {
+    appendTurn({
+      timelinePath,
+      global_user_id: 'user:ran',
+      platform: 'wechat',
+      channel_type: 'dm',
+      conversation_id: 'wx-compact',
+      sender_id: i % 2 === 0 ? 'u' : 'assistant',
+      role: i % 2 === 0 ? 'user' : 'assistant',
+      text: i < 5 ? `旧话题 ${i}` : `最近内莉·布莱话题 ${i}`,
+      created_at: Date.UTC(2026, 4, 15, 0, 0, i),
+    });
+  }
+
+  const result = compactTimeline({
+    timelinePath,
+    archiveDir,
+    maxTurns: 4,
+    maxBytes: 1024 * 1024,
+    retainRecentTurns: 3,
+  });
+
+  assert.equal(result.compacted, true);
+  assert.equal(result.archive_path.endsWith('.jsonl.gz'), true);
+  assert.equal(fs.existsSync(result.archive_path), true);
+
+  const local = getLocalRecentHistory({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', conversation_id: 'wx-compact', limit: 10, charBudget: 2000 });
+  assert.equal(local.some((item) => item.content.includes('最近内莉·布莱话题')), true);
+  assert.equal(local.some((item) => item.content.includes('旧话题 0')), false);
+});
+
+test('compactTimeline keeps active topic through summary records', () => {
+  const timelinePath = tempTimelinePath();
+  const archiveDir = path.join(path.dirname(timelinePath), 'archive');
+  for (let i = 0; i < 7; i += 1) {
+    appendTurn({
+      timelinePath,
+      global_user_id: 'user:ran',
+      platform: 'feishu',
+      channel_type: 'dm',
+      conversation_id: `fs-${i}`,
+      sender_id: 'u',
+      role: 'user',
+      text: i === 0 ? '我们聊内莉·布莱，她把自己送进疯人院这个故事' : `普通旧话题 ${i}`,
+      created_at: Date.UTC(2026, 4, 15, 0, i, 0),
+    });
+  }
+
+  compactTimeline({ timelinePath, archiveDir, maxTurns: 3, maxBytes: 1024 * 1024, retainRecentTurns: 2 });
+  const activeTopic = getActiveTopic({ timelinePath, global_user_id: 'user:ran', charBudget: 1000 });
+  assert.match(activeTopic, /内莉/);
 });

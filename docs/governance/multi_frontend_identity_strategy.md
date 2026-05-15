@@ -58,6 +58,26 @@ fields are compressed or redacted before writing. XHS/media turns should keep
 the link, title, summary, image/media summary, and user-facing failure reason
 when available.
 
+Retention is bounded. `appendTurn()` keeps recent plain text for short-term
+continuity, truncates single-turn text above 2000 characters into
+`text_summary`, and stores media/log/JSON payloads as summaries rather than raw
+payload. `compactTimeline()` archives the original JSONL as gzip under
+`RAN_AGENT_TIMELINE_ARCHIVE_DIR` and rewrites the live timeline as daily/topic
+summary records plus recent turns when size, turn count, or age thresholds are
+exceeded. The production defaults are:
+
+- `RAN_AGENT_TIMELINE_MAX_BYTES=52428800`
+- `RAN_AGENT_TIMELINE_MAX_TURNS=5000`
+- `RAN_AGENT_TIMELINE_RETENTION_DAYS=30`
+- `RAN_AGENT_TIMELINE_COMPACT_ENABLED=true`
+- `RAN_AGENT_TIMELINE_ARCHIVE_DIR=/opt/ran_agent/.ran_agent_state/timeline_archive`
+
+Manual maintenance entry:
+
+```bash
+bash scripts/compact-global-timeline.sh
+```
+
 ChannelHub builds:
 
 - local recent history for "她 / 这篇 / 那张图 / 刚才那个"
