@@ -1205,6 +1205,35 @@ Do not commit `.env`, runtime state, local caches, temporary package-lock
 changes, `/home/ubuntu/.hermes-ran-agent/*`, `/etc/systemd/*`,
 `.ran_agent_state/`, `.openclaw_state/`, or `local_archive/`.
 
+### Deployment / drift repair
+
+After server `git pull`, Hermes profile reinstall, or any suspected systemd/env
+drift, use the repo script as the single deployment entry:
+
+```bash
+cd /opt/ran_agent
+bash scripts/apply-hermes-runtime-split.sh
+```
+
+The script reinstalls both Hermes profiles, refreshes the lite runtime home,
+rewrites the lite drop-in and full service, upserts only non-sensitive routing
+env keys, restarts `ran-agent-hermes`, `ran-agent-hermes-full`, and
+`ran-agent-node`, then verifies process env and listening ports. Do not hand-edit
+systemd or runtime env for the lite/full split unless the script itself is being
+updated.
+
+When inspecting runtime drift, use the effective merged systemd view, not only
+the main unit file:
+
+```bash
+systemctl cat ran-agent-hermes.service
+systemctl cat ran-agent-hermes-full.service
+```
+
+Lite-critical settings live in
+`/etc/systemd/system/ran-agent-hermes.service.d/90-lite-runtime.conf`; full-debug
+settings live primarily in `/etc/systemd/system/ran-agent-hermes-full.service`.
+
 ### Verified runtime state (2026-05-15)
 
 - 8642 (lite): `ran-assistant-lite` profile, ~22644 prompt tokens
@@ -1231,19 +1260,7 @@ vision errors, lark-cli availability.
 ### Recovery
 
 ```bash
-# Restart lite
-sudo systemctl restart ran-agent-hermes.service
-
-# Restart full
-sudo systemctl restart ran-agent-hermes-full.service
-
-# Restart Node bridge (re-reads capability mode)
-sudo systemctl restart ran-agent-node.service
-
-# Force rebuild lite config
-cp hermes/profile/config.lite.yaml ~/.hermes-ran-agent/lite/config.yaml
-# (append model/web/compression/terminal sections as in setup script)
-sudo systemctl restart ran-agent-hermes.service
+bash scripts/apply-hermes-runtime-split.sh
 ```
 
 ## XHS Troubleshooting

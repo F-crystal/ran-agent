@@ -17,19 +17,33 @@ done
 
 echo ""
 echo "=== 2. Gateway ports ==="
+missing_ports=0
 for port in 8642 8643; do
   if bash -c ":</dev/tcp/127.0.0.1/$port" 2>/dev/null; then
     echo "port $port: LISTENING"
   else
     echo "port $port: NOT LISTENING"
+    missing_ports=1
   fi
 done
+if [ "$missing_ports" -ne 0 ]; then
+  echo "HINT: run bash scripts/apply-hermes-runtime-split.sh to re-apply the lite/full runtime split."
+fi
 
 echo ""
 echo "=== 3. Systemd services ==="
 for svc in ran-agent-hermes ran-agent-hermes-full; do
   status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
   echo "$svc: $status"
+done
+
+echo ""
+echo "=== 3b. Effective systemd runtime snippets ==="
+for svc in ran-agent-hermes.service ran-agent-hermes-full.service; do
+  echo "--- $svc ---"
+  systemctl cat "$svc" 2>/dev/null \
+    | grep -E '^(# /etc/systemd/system/ran-agent-hermes|# /etc/systemd/system/ran-agent-hermes-full|Environment(File)?=|ExecStart=|WorkingDirectory=|User=)' \
+    || echo "NOT FOUND"
 done
 
 echo ""
