@@ -46,6 +46,7 @@ recent_journal() {
 echo "=== 1. Multi-frontend env ==="
 for key in \
   FEISHU_BRIDGE_ENABLED \
+  FEISHU_LARK_CLI_IDENTITY \
   DESKTOP_PROXY_ENABLED \
   RAN_AGENT_DEFAULT_GLOBAL_USER_ID \
   RAN_AGENT_IDENTITY_MAP_PATH \

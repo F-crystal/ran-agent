@@ -1230,7 +1230,8 @@ bash scripts/diagnose-multi-frontend.sh
 
 Feishu requires a valid `lark-cli` auth/config and bot permissions for
 `im.message.receive_v1` plus message sending. The main path is not Hermes native
-Feishu adapter.
+Feishu adapter. `FEISHU_LARK_CLI_IDENTITY=bot` is the production default because
+`lark-cli event consume im.message.receive_v1` only supports bot identity.
 
 Enable desktop OpenAI-compatible proxy:
 
@@ -1257,6 +1258,9 @@ compaction enabled, and archive dir
 `/opt/ran_agent/.ran_agent_state/timeline_archive`. The live
 `global-timeline.jsonl` keeps recent turns for continuity; older content is
 summarized and the original file is gzipped into the archive directory.
+The script does not overwrite existing `FEISHU_BRIDGE_ENABLED=true` or
+`DESKTOP_PROXY_ENABLED=true`; it only writes default `false` when those keys are
+missing.
 
 Rollback:
 

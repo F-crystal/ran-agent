@@ -13,11 +13,19 @@ export function parseFeishuEvent(raw) {
 
 export function normalizeFeishuMessage(event = {}) {
   const body = event.event || event;
-  const message = body.message || {};
+  const message = body.message || body;
   const sender = body.sender || {};
   const senderId = sender.sender_id || sender;
-  const userId = firstNonEmptyString(senderId.user_id, senderId.open_id, senderId.union_id, sender.user_id, sender.open_id);
-  const chatId = firstNonEmptyString(message.chat_id, message.open_chat_id, message.chatId, userId);
+  const userId = firstNonEmptyString(
+    senderId.user_id,
+    senderId.open_id,
+    senderId.union_id,
+    sender.user_id,
+    sender.open_id,
+    message.sender_id,
+    body.sender_id
+  );
+  const chatId = firstNonEmptyString(message.chat_id, message.open_chat_id, message.chatId, body.chat_id, userId);
   const chatType = String(message.chat_type || message.chatType || '').trim().toLowerCase();
   const channelType = chatType === 'group' || chatType === 'chat' ? 'group' : 'dm';
   const text = extractFeishuText(message.content);
@@ -60,27 +68,39 @@ export function createFeishuBridgeState({ maxSeen = 1000 } = {}) {
 
 export async function sendFeishuReply({ target = {}, text = '', execFileImpl = execFile, env = process.env } = {}) {
   const bin = String(env.FEISHU_LARK_CLI_BIN || 'lark-cli').trim() || 'lark-cli';
+  const identity = normalizeLarkCliIdentity(env.FEISHU_LARK_CLI_IDENTITY);
   const channelType = String(target.channel_type || '').trim().toLowerCase();
-  const receiveIdType = channelType === 'group' ? 'chat_id' : 'user_id';
   const receiveId = channelType === 'group'
     ? firstNonEmptyString(target.chat_id, target.conversation_id)
     : firstNonEmptyString(target.user_id, target.sender_id, target.open_id);
+  const receiveFlag = channelType === 'group' ? '--chat-id' : '--user-id';
+  const idempotencySource = firstNonEmptyString(
+    target.idempotency_key,
+    target.idempotencyKey,
+    target.source_message_id,
+    target.message_id,
+    target.id
+  );
+  const idempotencyKey = idempotencySource
+    ? (target.idempotency_key || target.idempotencyKey || `ran-agent-feishu-${shortHash(idempotencySource)}`)
+    : '';
   const args = [
     'im',
     '+messages-send',
-    '--receive-id-type',
-    receiveIdType,
-    '--receive-id',
+    '--as',
+    identity,
+    receiveFlag,
     receiveId,
-    '--msg-type',
-    'text',
     '--text',
     String(text || ''),
   ];
+  if (idempotencyKey) {
+    args.push('--idempotency-key', idempotencyKey);
+  }
   await execFileImpl(bin, args, {
     timeout: Math.max(1000, Number(env.FEISHU_SEND_TIMEOUT_SECONDS || 30) * 1000),
   });
-  return { ok: true, receive_id_type: receiveIdType, receive_id_hash: shortHash(receiveId) };
+  return { ok: true, receive_id_type: channelType === 'group' ? 'chat_id' : 'user_id', receive_id_hash: shortHash(receiveId) };
 }
 
 export function startFeishuBridge(options = {}) {
@@ -92,6 +112,7 @@ export function startFeishuBridge(options = {}) {
   }
   const state = createFeishuBridgeState();
   const bin = String(env.FEISHU_LARK_CLI_BIN || 'lark-cli').trim() || 'lark-cli';
+  const identity = normalizeLarkCliIdentity(env.FEISHU_LARK_CLI_IDENTITY);
   const eventName = String(env.FEISHU_EVENT_NAME || 'im.message.receive_v1').trim();
   let stopped = false;
   let child = null;
@@ -100,7 +121,7 @@ export function startFeishuBridge(options = {}) {
 
   const start = () => {
     if (stopped || restarts > maxRestarts) return;
-    child = (options.spawnImpl || spawn)(bin, ['event', 'consume', eventName], { stdio: ['ignore', 'pipe', 'pipe'] });
+    child = (options.spawnImpl || spawn)(bin, ['event', 'consume', eventName, '--as', identity], { stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdout?.on('data', (chunk) => {
       for (const line of String(chunk || '').split('\n').filter(Boolean)) {
         handleFeishuEventLine(line, { state, logger, env, channelHub: options.channelHub }).catch((error) => {
@@ -108,7 +129,14 @@ export function startFeishuBridge(options = {}) {
         });
       }
     });
-    child.stderr?.on('data', (chunk) => logger.warn?.('[feishu-bridge] stderr', String(chunk || '').trim()));
+    child.stderr?.on('data', (chunk) => {
+      const message = String(chunk || '').trim();
+      if (isUnsupportedFeishuIdentityError(message)) {
+        logger.error?.('[feishu-bridge] identity_error', message);
+      } else {
+        logger.warn?.('[feishu-bridge] stderr', message);
+      }
+    });
     child.on?.('exit', () => {
       if (!stopped) {
         restarts += 1;
@@ -140,14 +168,23 @@ async function handleFeishuEventLine(line, { state, logger, env, channelHub }) {
     env,
     logger,
     adapter: {
-      async sendReply({ target, text }) {
-        await sendFeishuReply({ target, text, env });
+      async sendReply({ target, text, message }) {
+        await sendFeishuReply({
+          target: { ...target, source_message_id: message?.id || message?.message_id },
+          text,
+          env,
+        });
         logger.log?.('[feishu-bridge] reply_sent', JSON.stringify({
           conversation_id_hash: shortHash(target.conversation_id),
         }));
       },
     },
   });
+}
+
+export function isUnsupportedFeishuIdentityError(error) {
+  const text = error instanceof Error ? error.message : String(error || '');
+  return /resolved identity "user" is not supported, this command only supports: bot/i.test(text);
 }
 
 export function redactFeishuMeta(meta = {}) {
@@ -163,6 +200,15 @@ export function redactFeishuMeta(meta = {}) {
 }
 
 function extractFeishuText(content) {
+  if (content && typeof content === 'object') {
+    if (typeof content.text === 'string') return content.text;
+    if (Array.isArray(content.content)) {
+      return content.content.flatMap((line) => Array.isArray(line) ? line : [line])
+        .map((part) => part?.text || '')
+        .join('');
+    }
+    return '';
+  }
   if (typeof content !== 'string') return '';
   try {
     const parsed = JSON.parse(content);
@@ -176,6 +222,11 @@ function extractFeishuText(content) {
     return content;
   }
   return content;
+}
+
+function normalizeLarkCliIdentity(value) {
+  const identity = String(value || 'bot').trim().toLowerCase();
+  return ['bot', 'user', 'auto'].includes(identity) ? identity : 'bot';
 }
 
 function redactError(error) {

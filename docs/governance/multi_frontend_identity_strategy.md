@@ -102,6 +102,9 @@ instead of calling `replyBackend` directly.
 im.message.receive_v1` as the first implementation and keeps the code boundary
 replaceable for a future SDK. The bot needs message receive/send capability,
 including `im.message.receive_v1` and receive-as-bot permissions.
+The bridge runs lark-cli with bot identity by default:
+`FEISHU_LARK_CLI_IDENTITY=bot`. This is required for event consume because
+`im.message.receive_v1` does not support user identity.
 
 ### Desktop Proxy
 
