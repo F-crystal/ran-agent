@@ -29,6 +29,9 @@ Status: CURRENT (2026-05-15)
 
 - Runtime split is closed on `scripts/apply-hermes-runtime-split.sh`; do not
   hand-edit systemd/env as the normal deployment path.
+- Multi-frontend entry is closed on `ChannelHub`: WeChat, Feishu/Lark, and
+  desktop OpenAI-compatible proxy all enter `replyBackend` through the same
+  identity/timeline layer.
 - Prompt slimming is closed for the active Hermes profiles: `SOUL.md`,
   `AGENTS.md`, and Node system instruction stay compact and layered.
 - WeChat continuity is closed on client-side bounded recent history plus stable

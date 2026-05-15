@@ -3,6 +3,7 @@
  */
 
 import { createReplyBackend } from './replyBackend.mjs';
+import { handleIncomingMessage } from './channelHub.mjs';
 import { createInboundMessageBuffer } from './inboundMessageBuffer.mjs';
 
 export { createInboundMessageBuffer } from './inboundMessageBuffer.mjs';
@@ -82,8 +83,12 @@ export async function handleWeChatTextMessage(message, options = {}) {
   try {
     const mediaMerged = Array.isArray(mergedPayload.media) ? mergedPayload.media.length : 0;
     logger.info?.(`handling wechat message sender_id=${mergedPayload.sender_id} channel=${mergedPayload.channel} media_merged=${mediaMerged}`);
-    const response = await backend.getReply(mergedPayload, {
+    const response = await handleIncomingMessage(normalizeWechatMessage(mergedPayload), {
+      env: options.env,
+      logger,
+      replyBackend: backend,
       fetchImpl: options.fetchImpl,
+      mediaContextOptions: options.mediaContextOptions,
     });
     const replyText = sanitizeReplyText(response.replyText, {
       enabled: String(options.env?.NODE_BRIDGE_SANITIZE_META_LEAK || 'true').toLowerCase() !== 'false',
@@ -102,6 +107,28 @@ export async function handleWeChatTextMessage(message, options = {}) {
     logger.error?.(`reply backend failed: ${messageText}`);
     return options.fallbackText || '暂时无法连接到 personal agent，请稍后再试。';
   }
+}
+
+export function normalizeWechatMessage(payload = {}) {
+  return {
+    id: payload.id || payload.message_id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    platform: 'wechat',
+    channel_type: 'dm',
+    conversation_id: payload.conversation_id || payload.sender_id,
+    sender_id: payload.sender_id,
+    text: payload.text || '',
+    image_urls: Array.isArray(payload.image_urls) ? payload.image_urls : [],
+    media: Array.isArray(payload.media)
+      ? payload.media.map((item) => ({
+        type: item.type || '',
+        local_path: item.filePath || item.local_path || '',
+        mime_type: item.mimeType || item.mime_type || '',
+      }))
+      : [],
+    route_hint: payload.route_hint || '',
+    message_batch: Array.isArray(payload.message_batch) ? payload.message_batch : [],
+    created_at: Date.now(),
+  };
 }
 
 function extractMessageBatchFromWeChatRequest(request) {

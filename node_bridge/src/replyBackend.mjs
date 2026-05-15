@@ -25,9 +25,20 @@ export function createReplyBackend(options = {}) {
           text: message.text,
           sender_id: message.sender_id,
           conversation_id: message.conversation_id || message.conversationId || message.sender_id,
-          channel: 'wechat',
+          channel: message.platform || message.channel || 'wechat',
+          platform: message.platform || message.channel || 'wechat',
+          channel_type: message.channel_type || '',
+          global_user_id: message.global_user_id || '',
+          stable_conversation_key: message.stable_conversation_key || '',
+          hermes_session_id: message.hermes_session_id || '',
+          hermes_session_key: message.hermes_session_key || '',
+          recent_local_history: Array.isArray(message.recent_local_history) ? message.recent_local_history : [],
+          recent_global_history: Array.isArray(message.recent_global_history) ? message.recent_global_history : [],
+          active_topic: message.active_topic || '',
+          continuity_note: message.continuity_note || '',
           route_hint: message.route_hint || '',
           message_batch: Array.isArray(message.message_batch) ? message.message_batch : [],
+          prior_messages: Array.isArray(message.prior_messages) ? message.prior_messages : [],
           image_urls: Array.isArray(message.image_urls) ? message.image_urls : [],
           media: normalizeMediaItems(message.media),
         },
@@ -44,8 +55,10 @@ export function createReplyBackend(options = {}) {
       const ingestConfig = backendOptions.ingestConfig || getBackendIngestConfig(env);
       const ingest = options.ingestImpl || ingestExchangeToBackend;
       const ingestPayload = {
-        channel: 'wechat',
+        channel: message.platform || message.channel || 'wechat',
         sender_id: message.sender_id,
+        conversation_id: message.conversation_id || message.conversationId || message.sender_id,
+        global_user_id: message.global_user_id || '',
         user_text: message.text,
         reply_text: response.reply_text,
         source: 'hermes',
@@ -56,7 +69,7 @@ export function createReplyBackend(options = {}) {
       };
       // Debug log for multimedia sync
       const logger = options.logger || console;
-      logger.log?.(`[ingest] sender_id=${ingestPayload.sender_id} text_length=${ingestPayload.user_text?.length || 0} image_urls_count=${ingestPayload.image_urls?.length || 0} media_count=${ingestPayload.media?.length || 0}`);
+      logger.log?.(`[ingest] sender_id_hash=${hashForLog(ingestPayload.sender_id)} text_length=${ingestPayload.user_text?.length || 0} image_urls_count=${ingestPayload.image_urls?.length || 0} media_count=${ingestPayload.media?.length || 0}`);
       if (ingestPayload.media?.length > 0) {
         logger.log?.(`[ingest] media items: ${JSON.stringify(ingestPayload.media.map(m => ({ type: m.type, mimeType: m.mimeType, filePath: m.filePath?.substring(0, 50) })))}`);
       }
@@ -133,15 +146,24 @@ function normalizeMediaItems(media) {
       if (!item || typeof item !== 'object' || Array.isArray(item)) {
         return null;
       }
-      const filePath = typeof item.filePath === 'string' ? item.filePath.trim() : '';
+      const filePath = typeof item.filePath === 'string' ? item.filePath.trim() : (typeof item.local_path === 'string' ? item.local_path.trim() : '');
       if (!filePath) {
         return null;
       }
       return {
         filePath,
-        mimeType: typeof item.mimeType === 'string' ? item.mimeType.trim().toLowerCase() : '',
+        mimeType: typeof item.mimeType === 'string' ? item.mimeType.trim().toLowerCase() : (typeof item.mime_type === 'string' ? item.mime_type.trim().toLowerCase() : ''),
         type: typeof item.type === 'string' ? item.type.trim().toLowerCase() : '',
       };
     })
     .filter(Boolean);
+}
+
+function hashForLog(value) {
+  let hash = 0;
+  const text = String(value || '');
+  for (let index = 0; index < text.length; index += 1) {
+    hash = ((hash << 5) - hash + text.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash).toString(16);
 }

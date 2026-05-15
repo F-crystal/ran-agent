@@ -150,6 +150,14 @@ class TestReplyStyleReview(unittest.TestCase):
         )
         self.assertNotIn("mechanism_leak", result.reasons)
 
+    def test_multi_frontend_mechanism_leak_detected(self) -> None:
+        result = self._review(
+            "因为 API Server 的 session header 没带上，global timeline 里 recent history 不完整。",
+            user_text="你怎么又忘了刚才的内容",
+        )
+        self.assertTrue(result.triggered)
+        self.assertIn("mechanism_leak", result.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

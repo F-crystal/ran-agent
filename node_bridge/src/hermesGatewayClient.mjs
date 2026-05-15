@@ -48,6 +48,9 @@ export function getHermesGatewayConfig(env = process.env) {
   const recentTextCharBudget = Math.max(0, Number.parseInt(String(env.HERMES_RECENT_TEXT_CHAR_BUDGET || '6000'), 10) || 6000);
   const recentTextMaxUserChars = Math.max(100, Number.parseInt(String(env.HERMES_RECENT_TEXT_MAX_USER_CHARS || '1200'), 10) || 1200);
   const recentTextMaxAssistantChars = Math.max(100, Number.parseInt(String(env.HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS || '1200'), 10) || 1200);
+  const globalRecentTurns = Math.max(0, Number.parseInt(String(env.HERMES_GLOBAL_RECENT_TURNS || '6'), 10) || 6);
+  const globalRecentCharBudget = Math.max(0, Number.parseInt(String(env.HERMES_GLOBAL_RECENT_CHAR_BUDGET || '2500'), 10) || 2500);
+  const activeTopicCharBudget = Math.max(0, Number.parseInt(String(env.HERMES_ACTIVE_TOPIC_CHAR_BUDGET || '1200'), 10) || 1200);
 
   return {
     baseUrl,
@@ -66,6 +69,9 @@ export function getHermesGatewayConfig(env = process.env) {
     recentTextCharBudget,
     recentTextMaxUserChars,
     recentTextMaxAssistantChars,
+    globalRecentTurns,
+    globalRecentCharBudget,
+    activeTopicCharBudget,
     mode,
     command,
     timeoutSeconds,
@@ -151,7 +157,15 @@ export async function sendChatToHermesGateway(payload, options = {}) {
 
   const selectedConfig = { ...config, baseUrl: selectedBaseUrl, profile: selectedProfile };
   const sessionContext = buildHermesSessionContext(payload, selectedConfig);
-  const recentMessages = buildRecentHistoryMessages(sessionContext, selectedConfig);
+  const externalRecentMessages = normalizeHistoryMessages(payload.recent_local_history, selectedConfig);
+  const recentMessages = externalRecentMessages.length > 0
+    ? externalRecentMessages
+    : buildRecentHistoryMessages(sessionContext, selectedConfig);
+  const globalRecentMessages = normalizeHistoryMessages(payload.recent_global_history, {
+    ...selectedConfig,
+    recentTextMaxUserChars: 900,
+    recentTextMaxAssistantChars: 900,
+  }).slice(-(selectedConfig.globalRecentTurns || 6) * 2);
 
   const preparedMessage = await buildHermesUserMessage(payload, {
     env,
@@ -159,14 +173,16 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     logger,
     mediaContextOptions: options.mediaContextOptions,
     recentHistoryMessages: recentMessages,
+    globalHistoryMessages: globalRecentMessages,
   });
   logHermesSessionContinuity({
     logger,
     config: selectedConfig,
     sessionContext,
     recentMessages,
+    globalRecentMessages,
     preparedMessage,
-    continuityNoteChars: buildConversationContinuityNote(payload, recentMessages).length,
+    continuityNoteChars: buildEffectiveContinuityNote(payload, recentMessages).length,
     payload,
   });
 
@@ -274,9 +290,11 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
   const courtlyAnchor = buildCourtlyStyleAnchor(payload);
   const socialRoutingHint = buildSocialLinkRoutingHint(payload);
   const recentHistoryMessages = Array.isArray(options.recentHistoryMessages) ? options.recentHistoryMessages : [];
+  const globalHistoryMessages = Array.isArray(options.globalHistoryMessages) ? options.globalHistoryMessages : [];
   const message = [
     buildBridgeTemporalUserContext(payload),
-    buildConversationContinuityNote(payload, recentHistoryMessages),
+    buildEffectiveContinuityNote(payload, recentHistoryMessages),
+    buildGlobalActiveTopicNote(payload, globalHistoryMessages, config),
     courtlyAnchor,
     socialRoutingHint,
     buildSocialMediaRetryHint(payload, recentHistoryMessages),
@@ -403,6 +421,32 @@ function buildConversationContinuityNote(payload = {}, recentMessages = []) {
   ].join('\n');
 }
 
+function buildEffectiveContinuityNote(payload = {}, recentMessages = []) {
+  const supplied = String(payload.continuity_note || '').trim();
+  if (supplied) {
+    return [
+      '【conversation continuity note（非用户原话，不要复述）】',
+      supplied,
+      'do_not_repeat: 不要解释 session header、recent history、context window、token、stateless 或 memory scope',
+    ].join('\n');
+  }
+  return buildConversationContinuityNote(payload, recentMessages);
+}
+
+function buildGlobalActiveTopicNote(payload = {}, globalHistoryMessages = [], config = {}) {
+  const activeTopic = clipText(String(payload.active_topic || '').trim(), config.activeTopicCharBudget || 1200);
+  const history = globalHistoryMessages
+    .map((message) => `${message.role}: ${message.content}`)
+    .join('\n');
+  if (!activeTopic && !history) return '';
+  return [
+    '【global active topic（非用户原话，不要复述）】',
+    activeTopic ? `active_topic: ${activeTopic}` : '',
+    history ? `recent_global:\n${clipText(history, config.globalRecentCharBudget || 2500)}` : '',
+    '跨平台承接只用于理解指代；普通回复不要解释 global timeline、session、上下文窗口或 token。',
+  ].filter(Boolean).join('\n');
+}
+
 export function buildCourtlyStyleAnchor(payload = {}) {
   const env = payload._env || process.env;
   const mode = String(env.RAN_AGENT_COURTLY_MODE || 'on').trim().toLowerCase();
@@ -493,6 +537,16 @@ function buildHermesSessionContext(payload = {}, config = {}) {
   if (config.sessionContinuityEnabled === false) {
     return { enabled: false, stableKey: '', sessionId: '', sessionKey: '' };
   }
+  if (payload.hermes_session_id && payload.hermes_session_key) {
+    return {
+      enabled: true,
+      stableKey: String(payload.stable_conversation_key || `${payload.platform || payload.channel || 'wechat'}:${payload.conversation_id || payload.sender_id || 'unknown'}`),
+      sessionId: String(payload.hermes_session_id),
+      sessionKey: String(payload.hermes_session_key),
+      globalUserId: String(payload.global_user_id || ''),
+      platform: String(payload.platform || payload.channel || ''),
+    };
+  }
   const channel = String(payload.channel || 'wechat').trim().toLowerCase() || 'wechat';
   const conversationId = firstNonEmptyString(
     payload.conversation_id,
@@ -510,6 +564,8 @@ function buildHermesSessionContext(payload = {}, config = {}) {
     stableKey,
     sessionId: `${config.sessionIdPrefix || 'ran-agent-wechat'}-${digest}`,
     sessionKey: `${config.sessionKeyPrefix || 'ran-agent-memory'}-${digest}`,
+    globalUserId: String(payload.global_user_id || ''),
+    platform: channel,
   };
 }
 
@@ -548,6 +604,11 @@ function normalizeRecentMessage(message = {}, config = {}) {
   const content = sanitizeRecentHistoryText(message.content, maxChars);
   if (!content) return null;
   return { role, content };
+}
+
+function normalizeHistoryMessages(messages = [], config = {}) {
+  if (!Array.isArray(messages)) return [];
+  return messages.map((message) => normalizeRecentMessage(message, config)).filter(Boolean);
 }
 
 function sanitizeRecentHistoryText(value, maxChars) {
@@ -615,6 +676,7 @@ function logHermesSessionContinuity({
   config,
   sessionContext,
   recentMessages,
+  globalRecentMessages = [],
   preparedMessage,
   continuityNoteChars,
   payload,
@@ -626,9 +688,14 @@ function logHermesSessionContinuity({
     selected_profile: config.profile,
     session_id_hash: sessionContext.sessionId ? sha256Hex(sessionContext.sessionId).slice(0, 16) : '',
     session_key_hash: sessionContext.sessionKey ? sha256Hex(sessionContext.sessionKey).slice(0, 16) : '',
+    global_user_id_hash: sessionContext.globalUserId ? sha256Hex(sessionContext.globalUserId).slice(0, 16) : '',
+    platform: sessionContext.platform || payload?.platform || payload?.channel || '',
     recent_turns_included: Math.floor(recentMessages.length / 2),
+    local_recent_turns: Math.floor(recentMessages.length / 2),
+    global_recent_turns: Math.floor(globalRecentMessages.length / 2),
     recent_chars: recentChars,
     continuity_note_chars: Number(continuityNoteChars || 0),
+    active_topic_chars: String(payload?.active_topic || '').length,
     has_referential_user_text: /她|他|这个故事|这篇|刚才那个|上面那张图|那张图|那个链接|这件事|图片呢|没看到图|fallback/.test(String(payload?.text || '')),
     current_prompt_chars: String(preparedMessage || '').length,
   }));

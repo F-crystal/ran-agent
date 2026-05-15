@@ -22,7 +22,7 @@ COURTLY_MARKERS = ("陛下", "臣", "微臣")
 COURTLY_DISABLE_PATTERN = re.compile(r"正常说话|别叫陛下|别演|不要角色扮演|先别演")
 AI_PERSONA_LEAK_PATTERN = re.compile(r"作为一个AI语言模型|作为AI助手|作为一个人工智能|我是AI|作为语言模型")
 MECHANISM_LEAK_PATTERN = re.compile(
-    r"提示词|system prompt|技能扫描|工具列表|工具链|工具调用机制|模型限制|上下文窗口|token|压缩机制|内部约束|前置扫描|fallback 链路|vision_analyze|browser_vision|DeepSeek\s*(?:V4)?[^。！？\n]{0,20}(?:没(?:有)?视觉|不能看|无法看)|不能看像素",
+    r"Hermes|API Server|session header|recent history|global timeline|lark-cli|stateless|memory scope|提示词|system prompt|技能扫描|工具列表|工具链|工具调用机制|模型限制|上下文窗口|token|压缩机制|内部约束|前置扫描|fallback 链路|internal fallback|vision_analyze|browser_vision|DeepSeek\s*(?:V4)?[^。！？\n]{0,20}(?:没(?:有)?视觉|不能看|无法看)|不能看像素",
     re.IGNORECASE,
 )
 MECHANISM_QUESTION_PATTERN = re.compile(
@@ -37,7 +37,7 @@ SOCIAL_MEDIA_RETRY_REQUEST_PATTERN = re.compile(
     r"fallback|图片.*(?:读|看|内容)|读取图片|图里|没看到图|图片呢|那张图|媒体资源"
 )
 MECHANISM_EXPLANATION_PATTERN = re.compile(
-    r"工具调用机制|fallback 链路|模型.*(?:视觉|能力|限制)|DeepSeek|上下文窗口|token|session|stateless",
+    r"工具调用机制|fallback 链路|internal fallback|模型.*(?:视觉|能力|限制)|DeepSeek|Hermes|API Server|上下文窗口|token|session|recent history|global timeline|stateless|memory scope|lark-cli",
     re.IGNORECASE,
 )
 

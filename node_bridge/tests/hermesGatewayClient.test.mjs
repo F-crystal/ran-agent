@@ -136,6 +136,58 @@ test('Hermes API requests include stable session headers per WeChat conversation
   assert.match(first['X-Hermes-Session-Key'], /^ran-agent-memory-[a-f0-9]{16}$/);
 });
 
+test('Hermes API requests accept ChannelHub session id and global session key', async () => {
+  let capturedHeaders = null;
+  let capturedBody = null;
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+  });
+
+  await sendChatToHermesGateway(
+    {
+      text: '我觉得她的故事特别令人感动',
+      sender_id: 'ou-user',
+      conversation_id: 'feishu-chat',
+      channel: 'feishu',
+      platform: 'feishu',
+      global_user_id: 'user:ran',
+      hermes_session_id: 'ran-agent-feishu-dm-1111222233334444',
+      hermes_session_key: 'ran-agent-memory-aaaabbbbccccdddd',
+      recent_local_history: [
+        { role: 'user', content: '我们聊内莉·布莱' },
+        { role: 'assistant', content: '她是卧底疯人院的记者。' },
+      ],
+      recent_global_history: [
+        { role: 'user', content: '微信里提到强女故事03｜她把自己送进了疯人院' },
+      ],
+      continuity_note: 'current_topic: 内莉·布莱 / 她把自己送进疯人院\nopen_loop: 接住她的故事',
+    },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        capturedHeaders = options.headers;
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '接上内莉·布莱。' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.equal(capturedHeaders['X-Hermes-Session-Id'], 'ran-agent-feishu-dm-1111222233334444');
+  assert.equal(capturedHeaders['X-Hermes-Session-Key'], 'ran-agent-memory-aaaabbbbccccdddd');
+  assert.deepEqual(capturedBody.messages.slice(1, 3), [
+    { role: 'user', content: '我们聊内莉·布莱' },
+    { role: 'assistant', content: '她是卧底疯人院的记者。' },
+  ]);
+  const finalUser = capturedBody.messages.at(-1).content;
+  assert.match(finalUser, /current_topic: 内莉·布莱/);
+  assert.match(finalUser, /global active topic/i);
+  assert.match(finalUser, /微信里提到强女故事03/);
+});
+
 test('Hermes API requests include recent conversation history before current user', async () => {
   let secondBody = null;
   const conversationId = 'wx-nellie-history';

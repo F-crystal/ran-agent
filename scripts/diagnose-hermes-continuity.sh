@@ -7,6 +7,7 @@ set -euo pipefail
 REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 NODE_ENV_FILE="${RAN_AGENT_NODE_ENV_FILE:-/opt/ran_agent/.env.local}"
 NODE_BRIDGE_ENV_FILE="${RAN_AGENT_NODE_BRIDGE_ENV_FILE:-/opt/ran_agent/node_bridge/.env.local}"
+GLOBAL_TIMELINE_PATH="${RAN_AGENT_GLOBAL_TIMELINE_PATH:-/opt/ran_agent/.ran_agent_state/global-timeline.jsonl}"
 
 print_env_presence() {
   local key="$1"
@@ -48,7 +49,10 @@ for key in \
   HERMES_RECENT_TEXT_TURNS \
   HERMES_RECENT_TEXT_CHAR_BUDGET \
   HERMES_RECENT_TEXT_MAX_USER_CHARS \
-  HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS
+  HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS \
+  HERMES_GLOBAL_RECENT_TURNS \
+  HERMES_GLOBAL_RECENT_CHAR_BUDGET \
+  HERMES_ACTIVE_TOPIC_CHAR_BUDGET
 do
   print_env_presence "$key"
 done
@@ -62,7 +66,32 @@ echo "=== 3. Effective Node routing logs ==="
 print_recent_journal_matches '\[hermes-capability-mode\]' "No recent [hermes-capability-mode] logs"
 
 echo ""
-echo "=== 4. Manual WeChat smoke ==="
+echo "=== 4. Global timeline active topic ==="
+if [ -f "$GLOBAL_TIMELINE_PATH" ]; then
+  python3 - "$GLOBAL_TIMELINE_PATH" <<'PY'
+import json, sys
+items=[]
+path=sys.argv[1]
+try:
+    lines=open(path, encoding="utf-8").read().splitlines()[-12:]
+except Exception:
+    lines=[]
+for line in lines:
+    try:
+        d=json.loads(line)
+    except Exception:
+        continue
+    text=str(d.get("text_summary") or d.get("media_summary") or d.get("text") or "")
+    if text:
+        items.append(f"{d.get('platform')}:{d.get('role')}:{text[:100]}")
+print(" / ".join(items[-6:]) or "No readable active topic")
+PY
+else
+  echo "global timeline: NOT FOUND"
+fi
+
+echo ""
+echo "=== 5. Manual continuity smoke ==="
 cat <<'EOF'
 Send these in the same WeChat conversation:
 1. 我们继续聊内莉·布莱，她把自己送进疯人院这个故事
@@ -72,6 +101,14 @@ Expected:
 - The second reply continues with Nellie Bly / 内莉·布莱.
 - It should not ask “是谁的故事”.
 - It should not explain session headers, recent history, context windows, or tokens.
+
+Cross-platform:
+1. WeChat: 我们聊内莉·布莱，她把自己送进疯人院这个故事
+2. Feishu or desktop proxy: 我觉得她的故事特别令人感动
+
+Expected:
+- The second frontend continues with Nellie Bly / 内莉·布莱.
+- It should not ask “是谁的故事”.
 
 For XHS fallback:
 1. Send an XHS note link.

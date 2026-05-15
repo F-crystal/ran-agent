@@ -11,6 +11,8 @@ import {
   getOutboundServerConfig,
   resolveWeixinAccountConfig,
 } from './outboundServer.mjs';
+import { startDesktopProxyServer } from './desktopProxyServer.mjs';
+import { startFeishuBridge } from './feishuBridge.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import {
   appendPendingOutboundMessage,
@@ -615,6 +617,8 @@ async function main() {
   });
   const outboundConfig = getOutboundServerConfig(process.env);
   const outboundServer = createOutboundServer({ bot: proactiveBot, logger: console });
+  const feishuBridge = startFeishuBridge({ env: process.env, logger: console });
+  const desktopProxyServer = startDesktopProxyServer({ env: process.env, logger: console });
 
   await new Promise((resolve, reject) => {
     outboundServer.once('error', reject);
@@ -627,6 +631,8 @@ async function main() {
   try {
     await startWithRetry(agent, weixinAccountConfig);
   } finally {
+    feishuBridge?.stop?.();
+    await new Promise((resolve) => desktopProxyServer?.close ? desktopProxyServer.close(resolve) : resolve());
     await new Promise((resolve) => outboundServer.close(resolve));
   }
 }

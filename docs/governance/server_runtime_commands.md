@@ -1192,16 +1192,65 @@ Node bridge selects gateway per request:
 
 ### WeChat continuity
 
-Node bridge keeps short-term conversation continuity client-side. Each Hermes
-API request carries stable `X-Hermes-Session-Id` and `X-Hermes-Session-Key`
-headers derived from a hashed platform conversation key, plus a bounded recent
-text history before the current user message. Logs print only hashes and counts
-under `[hermes-session-continuity]`.
+Node bridge keeps short-term conversation continuity client-side. WeChat,
+Feishu/Lark, and desktop proxy all enter `ChannelHub` before `replyBackend`.
+Each Hermes API request carries stable `X-Hermes-Session-Id` and
+`X-Hermes-Session-Key` headers plus bounded local/global recent history before
+the current user message. Logs print only hashes and counts under
+`[hermes-session-continuity]`.
 
 This is required so follow-ups such as "她", "这个故事", "那张图", or "那个链接"
 resolve from the last few turns instead of asking who or what the user means.
 Do not explain session headers, history windows, or token budgeting in ordinary
 user replies.
+
+### Multi-frontend entry
+
+Current architecture:
+
+```text
+WeChatBridge / FeishuBridge / DesktopProxy
+  -> ChannelHub
+  -> replyBackend
+  -> hermesGatewayClient
+  -> Hermes 8642/8643
+```
+
+`global_user_id=user:ran` is shared across platforms for persona and memory
+scope. Platform-specific session ids remain isolated for short-term local
+context. Details: `docs/governance/multi_frontend_identity_strategy.md`.
+
+Enable Feishu bridge:
+
+```bash
+sudo sed -i 's/^FEISHU_BRIDGE_ENABLED=.*/FEISHU_BRIDGE_ENABLED=true/' /opt/ran_agent/.env.local
+sudo systemctl restart ran-agent-node.service
+bash scripts/diagnose-multi-frontend.sh
+```
+
+Feishu requires a valid `lark-cli` auth/config and bot permissions for
+`im.message.receive_v1` plus message sending. The main path is not Hermes native
+Feishu adapter.
+
+Enable desktop OpenAI-compatible proxy:
+
+```bash
+sudo sed -i 's/^DESKTOP_PROXY_ENABLED=.*/DESKTOP_PROXY_ENABLED=true/' /opt/ran_agent/.env.local
+sudo systemctl restart ran-agent-node.service
+bash scripts/diagnose-multi-frontend.sh
+```
+
+Desktop clients should use `base_url=http://127.0.0.1:8650/v1` and model
+`ran-agent`. Directly connecting Open WebUI/Chatbox/LobeChat to Hermes
+8642/8643 is a debug-only path and does not provide the unified timeline entry.
+
+Rollback:
+
+```bash
+sudo sed -i 's/^FEISHU_BRIDGE_ENABLED=.*/FEISHU_BRIDGE_ENABLED=false/' /opt/ran_agent/.env.local
+sudo sed -i 's/^DESKTOP_PROXY_ENABLED=.*/DESKTOP_PROXY_ENABLED=false/' /opt/ran_agent/.env.local
+sudo systemctl restart ran-agent-node.service
+```
 
 ### Runtime config files
 
@@ -1269,11 +1318,13 @@ settings live primarily in `/etc/systemd/system/ran-agent-hermes-full.service`.
 ```bash
 bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-hermes-continuity.sh
+bash scripts/diagnose-multi-frontend.sh
 ```
 
 Checks: both ports listening, both services active, token comparison,
 vision errors, lark-cli availability, session-continuity env/log presence, and
-manual smoke steps for WeChat continuity and XHS image fallback.
+manual smoke steps for WeChat continuity, XHS image fallback, Feishu bridge,
+desktop proxy, identity map, and global timeline.
 
 ### Recovery
 
