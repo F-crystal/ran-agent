@@ -193,10 +193,39 @@ test('sendChatToHermesGateway uses compact system instruction (single line)', as
 
   const systemMsg = capturedBody.messages.find((m) => m.role === 'system');
   assert.ok(systemMsg);
-  assert.ok(!systemMsg.content.includes('\n'), 'system instruction should be single line');
-  assert.ok(systemMsg.content.includes('MANDATORY RULES'), 'should include mandatory rules');
+  assert.ok(systemMsg.content.length <= 1800, 'system instruction should stay compact');
+  assert.ok(!systemMsg.content.includes('MANDATORY RULES'), 'should not inject long mandatory rules');
   assert.ok(systemMsg.content.includes('social_reader'), 'should mention social_reader');
-  assert.ok(systemMsg.content.includes('web_extract and web_search are allowed'), 'should allow web tools for normal pages');
+  assert.ok(systemMsg.content.includes('先回应当前话题'), 'should include short style anchor');
+  assert.ok(!systemMsg.content.includes('web_extract and web_search are allowed'), 'should not spend system prompt on normal web detail');
+});
+
+test('plain feedback gets short continuity note without mechanism terms', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '你有点不连贯', sender_id: 'conv-feedback-style', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '收到' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('conversation continuity note'), 'should inject continuity note');
+  assert.ok(userMsg.content.includes('do_not_repeat'), 'should include concise do_not_repeat guard');
+  assert.ok(userMsg.content.length < 900, 'plain feedback prompt should stay short');
+  for (const forbidden of ['提示词', 'system prompt', '技能扫描', '工具列表', '上下文窗口', 'token', '压缩机制']) {
+    assert.ok(!userMsg.content.includes(forbidden), `plain continuity note should not expose ${forbidden}`);
+  }
 });
 
 test('sendChatToHermesGateway does not inject media generation instruction for plain text', async () => {
@@ -296,6 +325,30 @@ test('sendChatToHermesGateway injects media generation instruction when media pr
 
   const userMsg = capturedBody.messages.find((m) => m.role === 'user');
   assert.ok(userMsg.content.includes('媒体工具指令'), 'media present should include media generation instruction');
+});
+
+test('media instruction is not injected when only plain text exists', async () => {
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '你有点不连贯', sender_id: 'conv-no-media-instruction', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '收到' } }] });
+      },
+      logger: { warn() {} },
+    }
+  );
+
+  const userMsg = capturedBody.messages.find((m) => m.role === 'user');
+  assert.ok(!userMsg.content.includes('微信入站媒体资产'), 'plain text should not include inbound media instruction');
+  assert.ok(!userMsg.content.includes('媒体工具指令'), 'plain text should not include media generation instruction');
 });
 
 // --- Courtly Style Anchor Tests ---
@@ -432,9 +485,8 @@ test('xhslink.com injects social_reader routing instruction', async () => {
   assert.ok(userMsg.content.includes('社交链接路由指令'), 'should inject social routing');
   assert.ok(userMsg.content.includes('小红书'), 'should detect platform');
   assert.ok(userMsg.content.includes('social_reader'), 'should mention social_reader');
-  assert.ok(userMsg.content.includes('resolve_social_url'), 'should include resolve step');
-  assert.ok(userMsg.content.includes('read_social_post_deep'), 'should include deep read step');
   assert.ok(userMsg.content.includes('不要使用 web_extract'), 'should forbid web_extract');
+  assert.ok(!userMsg.content.includes('vision_analyze'), 'social hint should not repeat vision tool bans');
 });
 
 test('bilibili.com injects social_reader routing instruction', async () => {
@@ -511,4 +563,59 @@ test('social routing does not break media context injection', async () => {
   assert.ok(userMsg.content.includes('社交链接路由指令'), 'should include social routing');
   assert.ok(userMsg.content.includes('入站媒体'), 'should include media instruction');
   assert.ok(userMsg.content.includes('媒体工具指令'), 'should include media generation instruction');
+});
+
+test('auto routing sends debug and lark-cli intents to full gateway', async () => {
+  for (const text of ['调试模式', 'systemctl status ran-agent-node', 'journalctl -u ran-agent-node', 'git pull', 'npm test', 'lark-cli user me']) {
+    let capturedUrl = '';
+    await sendChatToHermesGateway(
+      { text, sender_id: `conv-full-${text}`, channel: 'wechat' },
+      {
+        config: getHermesGatewayConfig({
+          HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+          HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+          HERMES_API_KEY: 'token',
+          HERMES_REPLY_MODE: 'api',
+          RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+          RAN_AGENT_CAPABILITY_MODE: 'auto',
+        }),
+        fetchImpl: async (url, init) => {
+          if (init?.body) capturedUrl = url;
+          return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+        },
+        logger: { warn() {}, log() {} },
+      }
+    );
+    assert.equal(capturedUrl, 'http://127.0.0.1:8643/v1/chat/completions', `${text} should route to full`);
+  }
+});
+
+test('auto routing keeps normal chat, XHS, and media on lite gateway', async () => {
+  const cases = [
+    { text: '你有点不连贯', sender_id: 'conv-lite-chat' },
+    { text: '看看 http://xhslink.com/o/abc123', sender_id: 'conv-lite-xhs' },
+    { text: '帮我看看', sender_id: 'conv-lite-media', media: [{ filePath: '/tmp/test.png', mimeType: 'image/png', type: 'image' }] },
+  ];
+  for (const payload of cases) {
+    let capturedUrl = '';
+    await sendChatToHermesGateway(
+      { channel: 'wechat', ...payload },
+      {
+        config: getHermesGatewayConfig({
+          HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+          HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+          HERMES_API_KEY: 'token',
+          HERMES_REPLY_MODE: 'api',
+          RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+          RAN_AGENT_CAPABILITY_MODE: 'auto',
+        }),
+        fetchImpl: async (url, init) => {
+          if (init?.body) capturedUrl = url;
+          return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+        },
+        logger: { warn() {}, log() {} },
+      }
+    );
+    assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions', `${payload.text} should route to lite`);
+  }
 });

@@ -198,6 +198,10 @@ class PersonalAgentService:
             "blacklisted_opening_count": 0,
             "casual_became_advisory_count": 0,
             "intimate_or_emotional_became_meta_count": 0,
+            "mechanism_leak_count": 0,
+            "over_courtly_template_count": 0,
+            "unnatural_conversation_flow_count": 0,
+            "overlong_systemic_explanation_count": 0,
         }
         self._executor_closed = False
 
@@ -1115,6 +1119,10 @@ class PersonalAgentService:
             "recent_state_over_inference": "recent_state_over_inference_count",
             "casual_became_advisory": "casual_became_advisory_count",
             "intimate_or_emotional_became_meta": "intimate_or_emotional_became_meta_count",
+            "mechanism_leak": "mechanism_leak_count",
+            "over_courtly_template": "over_courtly_template_count",
+            "unnatural_conversation_flow": "unnatural_conversation_flow_count",
+            "overlong_systemic_explanation": "overlong_systemic_explanation_count",
         }
         for reason in reasons:
             stat_key = reason_to_stat.get(reason)

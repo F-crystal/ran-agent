@@ -162,7 +162,7 @@ test('xhs_browse_search stores token context and xhs_browse_note reads by read_r
     },
   };
 
-  const search = await handleSocialReaderMcpRequest(
+  const searchResult = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
       params: {
@@ -172,6 +172,7 @@ test('xhs_browse_search stores token context and xhs_browse_note reads by read_r
     },
     options
   );
+  const search = searchResult.structuredContent || searchResult;
 
   assert.equal(search.ok, true);
   assert.equal(search.results[0].note_id, 'note123');
@@ -179,7 +180,7 @@ test('xhs_browse_search stores token context and xhs_browse_note reads by read_r
   assert.equal(Object.hasOwn(search.results[0], 'xsecToken'), false);
   assert.equal(JSON.stringify(search).includes('token123'), false);
 
-  const note = await handleSocialReaderMcpRequest(
+  const noteResult = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
       params: {
@@ -189,6 +190,7 @@ test('xhs_browse_search stores token context and xhs_browse_note reads by read_r
     },
     options
   );
+  const note = noteResult.structuredContent || noteResult;
 
   assert.equal(note.ok, true);
   assert.equal(note.note_id, 'note123');
@@ -284,7 +286,7 @@ test('xhs_browse_note falls back when browse backend returns a failure payload',
     options
   );
 
-  const note = await handleSocialReaderMcpRequest(
+  const noteResult = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
       params: {
@@ -294,6 +296,7 @@ test('xhs_browse_note falls back when browse backend returns a failure payload',
     },
     options
   );
+  const note = noteResult.structuredContent || noteResult;
 
   assert.equal(note.ok, true);
   assert.equal(note.note_id, 'server-note');

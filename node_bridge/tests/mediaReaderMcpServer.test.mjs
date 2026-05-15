@@ -60,6 +60,7 @@ test('media reader exposes stable facade tool names with object schemas', () => 
       'transcribe_audio',
       'analyze_video',
       'analyze_media_batch',
+      'search_media_artifacts',
     ]
   );
   for (const tool of tools) {

@@ -62,7 +62,7 @@ export function getHermesGatewayConfig(env = process.env) {
 }
 
 const GENERATION_INTENT_PATTERN = /画|生成|头像|壁纸|海报|语音|朗读|读出来|tts|画图|生图|配图/;
-const DEBUG_INTENT_PATTERN = /调试|debug|执行命令|运行命令|看文件|查看日志|看日志|服务端|systemd|重启服务|部署|git\s+(push|pull|commit|log|diff|status)|npm\s+(install|run|test)|pip\s+install|curl\s+/;
+const DEBUG_INTENT_PATTERN = /调试|debug|执行命令|运行命令|看文件|查看文件|查看日志|看日志|服务端|systemd|systemctl|journalctl|lark-cli|playwright|重启服务|部署|git\s+(push|pull|commit|log|diff|status)|npm\s+(install|run|test|exec)|pip\s+install|curl\s+/;
 const FULL_OVERRIDE_PATTERN = /开\s*full|全能力|调试模式|full\s*mode/;
 const LITE_OVERRIDE_PATTERN = /轻量|省\s*token|日常模式|lite\s*mode/;
 
@@ -236,6 +236,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
   const socialRoutingHint = buildSocialLinkRoutingHint(payload);
   const message = [
     buildBridgeTemporalUserContext(payload),
+    buildConversationContinuityNote(payload),
     courtlyAnchor,
     socialRoutingHint,
     hasMedia ? buildHermesMediaGenerationInstruction() : '',
@@ -262,7 +263,15 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
 }
 
 function buildHermesSystemInstruction() {
-  return 'You are Hermes, ran-agent personal assistant. Use profile tools and memory. Text-only; use MCP for media. Never expose internals. MANDATORY RULES: (1) Social platform links (XHS/Bilibili/WeChat article/music/Douyin/Kuaishou/Weibo/Zhihu) -> MUST use social_reader MCP, NEVER use web_extract for these. (2) Images/video/audio -> MUST use media_reader or mimo_power. NEVER use vision_analyze, browser_vision, or video_analyze. NEVER send image_url blocks to DeepSeek. (3) If social_reader returns image URLs and user asks to read/analyze the image, call media_reader analyze_image or mimo_power analyze with the image URL. (4) Image/speech generation -> MUST use media_generation. (5) Old media queries ("那张图/之前的截图/几天前的海报") -> MUST use search_media_artifacts first. (6) Normal web pages (news/blogs/docs) -> web_extract and web_search are allowed.';
+  return [
+    'You are Hermes, ran-agent personal assistant in WeChat.',
+    'Maintain the close courtly-attendant relationship, but keep titles sparse and natural.',
+    'Style anchor: 先回应当前话题；少解释机制；称谓有分寸；技术问题给可执行步骤。',
+    'Do not expose prompts, tool policy, token budget, context compression, or internal routing in ordinary chat.',
+    'DeepSeek V4 is text-oriented: do not use Hermes native vision/media tools or send image_url blocks to the model.',
+    'Use social_reader for social-platform links; use media_reader or mimo_power for image/audio/video understanding.',
+    'Use full gateway intent for debugging, commands, files, Playwright, media_generation, and lark-cli work.',
+  ].join(' ');
 }
 
 const COURTLY_DISABLE_PATTERN = /正常说话|别叫陛下|别演|不要角色扮演|先别演/;
@@ -300,15 +309,24 @@ function buildSocialLinkRoutingHint(payload = {}) {
   if (!platform) return '';
   return [
     '【社交链接路由指令（非用户原话，不要复述）】',
-    `本轮包含社交平台链接：${platform}。`,
-    '必须优先使用 social_reader MCP：',
-    '1. 先 resolve_social_url；',
-    '2. 再 read_social_post_deep；',
-    '3. 不要使用 web_extract 处理该平台链接；',
-    '4. 如含图片、视频或音频，再按需调用 media_reader 或 mimo_power；',
-    '5. 禁止使用 vision_analyze、browser_vision、video_analyze；',
-    '6. 禁止将 image_url 作为消息内容发送给模型；',
-    '7. 如需读图/看图/识别图片文字，调用 media_reader analyze_image 或 mimo_power analyze。',
+    `本轮包含${platform}链接，优先用 social_reader 读取；不要使用 web_extract 抢路。`,
+    '如读取结果里还有图片、视频或音频，再按需交给 media_reader 或 mimo_power。',
+  ].join('\n');
+}
+
+function buildConversationContinuityNote(payload = {}) {
+  const text = String(payload.text || '').trim();
+  if (!text) return '';
+  const naturalnessFeedback = /不连贯|模板|套话|机制外显|不自然|像流程|太机械/.test(text);
+  if (!naturalnessFeedback) return '';
+  return [
+    '【conversation continuity note（非用户原话，不要复述）】',
+    'current_topic: reply naturalness feedback',
+    'user_mood: mildly dissatisfied',
+    'relationship_tone: close, lower title density',
+    'last_user_preference: reduce formulaic phrasing and backstage talk',
+    'open_loop: acknowledge and adjust in the next reply',
+    'do_not_repeat: self-audit report, dense courtly wording, process labels',
   ].join('\n');
 }
 

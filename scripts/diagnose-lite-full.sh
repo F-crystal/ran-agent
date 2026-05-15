@@ -1,9 +1,10 @@
 #!/bin/bash
-# Diagnose lite/full capability mode with dual-gateway isolation
+# Diagnose lite/full capability mode with dual-gateway context split.
 # Run: bash scripts/diagnose-lite-full.sh
 # No secrets exposed.
 
 set -euo pipefail
+
 HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="$HERMES_HOME/lite"
 REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -32,7 +33,35 @@ for svc in ran-agent-hermes ran-agent-hermes-full; do
 done
 
 echo ""
-echo "=== 4. Lite gateway config (port 8642) ==="
+echo "=== 4. Prompt length estimates ==="
+for file in "$REPO_ROOT/hermes/profile/SOUL.md" "$REPO_ROOT/hermes/profile/AGENTS.md"; do
+  if [ -f "$file" ]; then
+    chars=$(wc -m < "$file" | tr -d ' ')
+    echo "$(basename "$file") chars: $chars"
+  else
+    echo "$(basename "$file") chars: MISSING"
+  fi
+done
+
+python3 - "$REPO_ROOT/node_bridge/src/hermesGatewayClient.mjs" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding="utf-8")
+match = re.search(r"function buildHermesSystemInstruction\(\) \{(?P<body>.*?)\n\}", text, re.S)
+if not match:
+    print("hermesGatewayClient system instruction estimated chars: UNKNOWN")
+    raise SystemExit(0)
+strings = re.findall(r"'([^']*)'", match.group("body"))
+rendered = " ".join(strings)
+print(f"hermesGatewayClient system instruction estimated chars: {len(rendered)}")
+print(f"system instruction length estimate: {len(rendered)}")
+PY
+
+echo ""
+echo "=== 5. Lite gateway config (port 8642) ==="
 LITE_CONFIG="$LITE_HOME/config.yaml"
 if [ -f "$LITE_CONFIG" ]; then
   echo "EXISTS: $LITE_CONFIG"
@@ -40,18 +69,14 @@ if [ -f "$LITE_CONFIG" ]; then
   grep -A20 'platform_toolsets' "$LITE_CONFIG" | head -15 || echo "NOT FOUND"
   echo "--- disabled_tools ---"
   grep -A10 'disabled_tools' "$LITE_CONFIG" | head -8 || echo "NOT FOUND"
-  echo "--- has terminal? ---"
-  if grep -A20 'platform_toolsets' "$LITE_CONFIG" | grep -q 'terminal'; then
-    echo "WARNING: terminal in lite toolsets"
-  else
-    echo "terminal NOT in toolsets (OK)"
-  fi
+  echo "WARNING: Hermes API Server is not treated as a security sandbox; terminal isolation is not guaranteed on lite-context."
 else
   echo "NOT FOUND"
+  echo "WARNING: Hermes API Server is not treated as a security sandbox; terminal isolation is not guaranteed on lite-context."
 fi
 
 echo ""
-echo "=== 5. Full gateway config (port 8643) ==="
+echo "=== 6. Full gateway config (port 8643) ==="
 FULL_CONFIG="$HERMES_HOME/config.yaml"
 if [ -f "$FULL_CONFIG" ]; then
   echo "EXISTS: $FULL_CONFIG"
@@ -59,16 +84,16 @@ if [ -f "$FULL_CONFIG" ]; then
   grep -A20 'platform_toolsets' "$FULL_CONFIG" | head -10 || echo "NOT FOUND"
   echo "--- has terminal? ---"
   if grep -A20 'platform_toolsets' "$FULL_CONFIG" | grep -q 'terminal'; then
-    echo "terminal in toolsets (OK for full)"
+    echo "terminal in toolsets (OK for full-debug)"
   else
-    echo "WARNING: terminal NOT in full toolsets"
+    echo "WARNING: terminal NOT in full-debug toolsets"
   fi
 else
   echo "NOT FOUND"
 fi
 
 echo ""
-echo "=== 6. Token comparison smoke test ==="
+echo "=== 7. Token comparison smoke test ==="
 PROFILE_ENV="$HERMES_HOME/profiles/ran-assistant/.env"
 KEY="$(grep -E '^(HERMES_API_KEY|API_SERVER_KEY)=' "$PROFILE_ENV" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)"
 if [ -n "$KEY" ]; then
@@ -87,7 +112,7 @@ else
 fi
 
 echo ""
-echo "=== 7. lark-cli availability ==="
+echo "=== 8. lark-cli availability ==="
 if command -v lark-cli >/dev/null 2>&1; then
   echo "lark-cli: $(command -v lark-cli)"
 else
@@ -95,9 +120,9 @@ else
 fi
 
 echo ""
-echo "=== 8. Recent capability mode logs ==="
-sudo journalctl -u ran-agent-node.service --since "1 hour ago" --no-pager 2>/dev/null | grep 'hermes-capability-mode' | tail -5 || echo "No recent capability mode logs"
+echo "=== 9. Recent capability mode logs ==="
+sudo journalctl -u ran-agent-node.service --since "15 minutes ago" --no-pager 2>/dev/null | grep 'hermes-capability-mode' | tail -8 || echo "No recent capability mode logs"
 
 echo ""
-echo "=== 9. Recent vision errors ==="
-sudo journalctl -u ran-agent-hermes.service -u ran-agent-hermes-full.service --since "1 hour ago" --no-pager 2>/dev/null | grep -i 'vision_analyze\|image_url.*BadRequest\|unknown variant.*image_url' | tail -3 || echo "No recent vision errors"
+echo "=== 10. Recent vision errors (5 minutes) ==="
+sudo journalctl -u ran-agent-hermes.service -u ran-agent-hermes-full.service --since "5 minutes ago" --no-pager 2>/dev/null | grep -i 'vision_analyze\|image_url.*BadRequest\|unknown variant.*image_url' | tail -5 || echo "No recent vision errors"

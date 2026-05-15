@@ -21,6 +21,14 @@ BLACKLISTED_OPENINGS = (
 COURTLY_MARKERS = ("陛下", "臣", "微臣")
 COURTLY_DISABLE_PATTERN = re.compile(r"正常说话|别叫陛下|别演|不要角色扮演|先别演")
 AI_PERSONA_LEAK_PATTERN = re.compile(r"作为一个AI语言模型|作为AI助手|作为一个人工智能|我是AI|作为语言模型")
+MECHANISM_LEAK_PATTERN = re.compile(
+    r"提示词|system prompt|技能扫描|工具列表|上下文窗口|token|压缩机制|内部约束|前置扫描",
+    re.IGNORECASE,
+)
+MECHANISM_QUESTION_PATTERN = re.compile(
+    r"为什么|原因|怎么会|机制|提示词|system prompt|上下文|token|工具|压缩",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -58,6 +66,14 @@ def review_reply(
         reasons.append("intimate_or_emotional_became_meta")
     if _looks_like_recent_state_over_inference(normalized_reply, user_text, temporal_snapshot):
         reasons.append("recent_state_over_inference")
+    if response_mode == "casual_chat" and _has_mechanism_leak(normalized_reply, user_text):
+        reasons.append("mechanism_leak")
+    if response_mode == "casual_chat" and _has_over_courtly_template(normalized_reply):
+        reasons.append("over_courtly_template")
+    if response_mode == "casual_chat" and _looks_like_unnatural_flow(normalized_reply, user_text):
+        reasons.append("unnatural_conversation_flow")
+    if response_mode == "casual_chat" and _has_overlong_systemic_explanation(normalized_reply, user_text):
+        reasons.append("overlong_systemic_explanation")
 
     return ReplyReviewResult(triggered=bool(reasons), reasons=tuple(reasons))
 
@@ -153,6 +169,45 @@ def _looks_meta_or_explanatory(reply_text: str) -> bool:
         "我的理解是",
     )
     return any(marker in reply_text for marker in markers)
+
+
+def _has_mechanism_leak(reply_text: str, user_text: str) -> bool:
+    if not MECHANISM_LEAK_PATTERN.search(reply_text):
+        return False
+    return not _user_asked_about_mechanism(user_text)
+
+
+def _user_asked_about_mechanism(user_text: str) -> bool:
+    return bool(MECHANISM_QUESTION_PATTERN.search(user_text))
+
+
+def _has_over_courtly_template(reply_text: str) -> bool:
+    dense_phrases = ("臣以为", "臣觉得", "臣知道", "臣惭愧")
+    dense_count = sum(reply_text.count(phrase) for phrase in dense_phrases)
+    marker_count = reply_text.count("陛下") + reply_text.count("微臣") + reply_text.count("臣")
+    sentence_count = max(1, len([part for part in re.split(r"[。！？!?；;]", reply_text) if part.strip()]))
+    return dense_count >= 3 or (marker_count >= 5 and sentence_count <= 6)
+
+
+def _looks_like_unnatural_flow(reply_text: str, user_text: str) -> bool:
+    if not _is_naturalness_feedback(user_text):
+        return False
+    report_markers = ("自检报告", "流程汇报", "已完成以下", "问题分析", "原因定位", "下一步建议")
+    numbered_items = len(re.findall(r"(?:^|\n)\s*\d+[.、]", reply_text))
+    return any(marker in reply_text for marker in report_markers) or numbered_items >= 3
+
+
+def _has_overlong_systemic_explanation(reply_text: str, user_text: str) -> bool:
+    if not _is_naturalness_feedback(user_text):
+        return False
+    if len(reply_text) < 90:
+        return False
+    systemic_markers = ("第一", "第二", "第三", "从架构上", "系统解释", "提示词", "上下文窗口", "内部约束")
+    return sum(1 for marker in systemic_markers if marker in reply_text) >= 2
+
+
+def _is_naturalness_feedback(user_text: str) -> bool:
+    return any(marker in user_text for marker in ("不连贯", "不自然", "模板", "套话", "机制外显", "太机械"))
 
 
 def _looks_like_recent_state_over_inference(

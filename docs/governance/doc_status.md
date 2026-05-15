@@ -21,6 +21,7 @@ Status: CURRENT (2026-05-15)
 - `docs/governance/cleanup.md`
 - `docs/governance/media-pipeline.md`
 - `docs/governance/mimo-power-mcp.md`
+- `docs/governance/prompt-slimming-audit.md`
 
 ## Publication Notes
 

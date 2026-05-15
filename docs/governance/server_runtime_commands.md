@@ -1133,18 +1133,19 @@ Run `bash scripts/diagnose-hermes-tools.sh` to verify:
 
 ## Hermes Lite/Full Runtime Split
 
-Two Hermes gateway instances run on different ports for cost isolation:
+Final runtime口径：two Hermes gateway instances run on different ports for
+context/capability routing. This is not a DeepSeek model change.
 
 | Instance | Port | Profile | HERMES_HOME | Purpose |
 |----------|------|---------|-------------|---------|
-| `ran-agent-hermes.service` | 8642 | `ran-assistant-lite` | `~/.hermes-ran-agent/lite` | Low-context daily entry |
-| `ran-agent-hermes-full.service` | 8643 | `ran-assistant` | `~/.hermes-ran-agent` | Full debug/tool entry |
+| `ran-agent-hermes.service` | 8642 | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | lite-context daily entry |
+| `ran-agent-hermes-full.service` | 8643 | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | full-debug heavy-tool entry |
 
-**Design decision:** 8642 is a lite-context entry, not a security sandbox.
-8642's value is lower cost / lower context for daily chat.
-8643's value is heavy tools / debug / terminal / media generation.
-Hermes API Server may still retain full tool access on 8642;
-do not treat "8642 cannot execute terminal" as a hard guarantee.
+**Design decision:** 8642 is a lite-context daily entry, not a security sandbox.
+Hermes API Server may still retain full tool access on 8642, so terminal
+isolation is not a hard guarantee and "8642 cannot terminal" is no longer an
+acceptance item. 8643 is the full-debug entry for heavy tools; it has been
+validated to call `lark-cli` through terminal.
 
 ### Systemd services
 
@@ -1179,8 +1180,9 @@ HERMES_FULL_PROFILE=ran-assistant
 
 Node bridge selects gateway per request:
 
-- **Default / chat / XHS / memory / image understanding**: lite (8642)
-- **Debug intent** (调试/执行命令/看日志/systemctl/journalctl/git/npm): full (8643)
+- **Default / chat / XHS / media / memory**: lite (8642)
+- **Debug intent** (调试/执行命令/看日志/systemctl/journalctl/git/npm/lark-cli): full (8643)
+- **File / Playwright / media_generation intent**: full (8643)
 - **Generation intent** (画/生成/语音/朗读/媒体生成): full (8643)
 - **User override**: "开 full / 全能力 / 调试模式" → full; "轻量 / 省 token" → lite
 - **Full unavailable**: fallback to lite with `fallback_reason=full_gateway_unavailable`
@@ -1199,13 +1201,18 @@ Node bridge selects gateway per request:
 | `/home/ubuntu/.hermes-ran-agent/.env` | Full gateway secrets |
 | `/opt/ran_agent/.env.local` | Node bridge env (HERMES_LITE_API_BASE_URL, HERMES_FULL_API_BASE_URL, RAN_AGENT_CAPABILITY_MODE) |
 
+Do not commit `.env`, runtime state, local caches, temporary package-lock
+changes, `/home/ubuntu/.hermes-ran-agent/*`, `/etc/systemd/*`,
+`.ran_agent_state/`, `.openclaw_state/`, or `local_archive/`.
+
 ### Verified runtime state (2026-05-15)
 
 - 8642 (lite): `ran-assistant-lite` profile, ~22644 prompt tokens
 - 8643 (full): `ran-assistant` profile, ~24331 prompt tokens
 - 8643 can invoke `/usr/bin/lark-cli` via terminal
 - Both exclude `vision_analyze`, `browser_vision`, `video_analyze`, `image_generate`, `text_to_speech`
-- Node auto-routes: chat/XHS/media/memory → 8642; debug/commands/lark-cli/playwright/media_generation → 8643
+- Node auto-routes: chat/XHS/media/memory → 8642; debug/commands/lark-cli/file/playwright/media_generation → 8643
+- 8642 terminal isolation is a warning only, not a hard validation target
 
 ### Verified token counts
 
