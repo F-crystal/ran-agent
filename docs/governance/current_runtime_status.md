@@ -25,6 +25,22 @@ Status: CURRENT (2026-05-15)
   `systemctl cat ran-agent-hermes-full.service`; lite-critical settings live in
   `90-lite-runtime.conf`.
 
+## Production Fix Closure
+
+- Runtime split is closed on `scripts/apply-hermes-runtime-split.sh`; do not
+  hand-edit systemd/env as the normal deployment path.
+- Prompt slimming is closed for the active Hermes profiles: `SOUL.md`,
+  `AGENTS.md`, and Node system instruction stay compact and layered.
+- WeChat continuity is closed on client-side bounded recent history plus stable
+  Hermes session headers; ordinary replies must not explain the continuity
+  mechanism.
+- XHS media fallback is closed on `social_reader -> media_reader/mimo_power`
+  behavior. User-facing failures should describe unreadable media plainly, not
+  DeepSeek vision limits or retired Hermes native vision tools.
+- GitHub sync is closed on the `archive-and-push` skill: future commit/push
+  work should use that flow and continue excluding runtime state and local
+  caches.
+
 ## Phase Status
 
 - Phase 5 is code-closed for Hermes profile/gateway migration; current script names are `scripts/phase5_hermes_gateway_smoke.sh` and `scripts/phase5_hermes_full_chain_smoke.mjs`.

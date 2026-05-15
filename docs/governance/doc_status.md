@@ -27,8 +27,12 @@ Status: CURRENT (2026-05-15)
 
 - Server runtime deployment and drift repair are standardized on
   `bash scripts/apply-hermes-runtime-split.sh`; diagnosis is standardized on
-  `bash scripts/diagnose-lite-full.sh`. Do not document manual systemd/env
-  edits as the normal path for the lite/full split.
+  `bash scripts/diagnose-lite-full.sh`, with
+  `bash scripts/diagnose-hermes-continuity.sh` for session-continuity checks.
+  Do not document manual systemd/env edits as the normal path for the
+  lite/full split.
+- Completed code/doc changes that need GitHub synchronization must go through
+  `skills/archive-and-push/SKILL.md`; do not hand-stage broad runtime trees.
 - Historical archive notes and deployment journals are local-only under ignored `local_archive/docs/`; do not force-add them to Git unless the owner explicitly asks for a specific safe file.
 - Future archive records go under `local_archive/docs/governance/archive/`.
 - Future deployment notes go under `local_archive/docs/deployment/`.
@@ -40,3 +44,12 @@ Status: CURRENT (2026-05-15)
 1. Runtime code behavior is first truth.
 2. Then the public source-of-truth docs listed above.
 3. Local archives are context only and are not part of the public release surface.
+
+## Closed Production Fixes
+
+- `dda3499` made `scripts/apply-hermes-runtime-split.sh` the standard server
+  deployment and drift-repair entry for the Hermes lite/full split.
+- `dd04424` closed the Hermes continuity and XHS image fallback fixes:
+  Node sends stable session headers plus bounded recent text history, XHS media
+  fallback normalizes image/video resources for `media_reader`, and reviewer
+  lint blocks mechanism-heavy vision explanations in normal social/media replies.

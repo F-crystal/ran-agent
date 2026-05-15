@@ -44,6 +44,11 @@ Specialist capabilities must stay skillized and loaded on demand:
 
 Do not keep all specialist context always loaded in every turn.
 
+## GitHub Sync Rule
+
+- Any request to commit, push, archive, or sync completed repository changes to GitHub must use `skills/archive-and-push/SKILL.md`.
+- Before committing, stage only intentional source, test, script, and public documentation files. Keep runtime state, local cache, env files, logs, archives, and credentials out of Git.
+
 ## Sub-Agent Rule
 
 Only heavy background tasks are sub-agent candidates: reflection, knowledge maintenance, exploration, heavy `inspect_more`. Do not sub-agentize: frontline chat, memory main flow, life loop, todo capture/reminder main flow.

@@ -23,6 +23,8 @@ Status: CURRENT (2026-05-15)
 - Default chat turn loads only what is needed for that turn.
 - Do not preload all specialist skills into baseline prompt context.
 - Heavy/background operations should be delegated via sub-agent candidates only.
+- GitHub commit/push/archive requests must use `archive-and-push` so staging,
+  commit, and push stay consistent and runtime/private files remain excluded.
 
 ## Skill Sources
 
