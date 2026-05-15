@@ -54,3 +54,11 @@ Status: CURRENT (2026-05-15)
   Node sends stable session headers plus bounded recent text history, XHS media
   fallback normalizes image/video resources for `media_reader`, and reviewer
   lint blocks mechanism-heavy vision explanations in normal social/media replies.
+- `25a6ff2` closed the unified multi-frontend entry: WeChat, Feishu/Lark, and
+  Desktop proxy all enter `ChannelHub` before `replyBackend`.
+- `6b46276` closed GlobalTimeline retention: long turns and payload-like
+  content are summarized, old timeline records compact into daily/topic
+  summaries, and original JSONL files are gzipped to the archive dir.
+- `8a3fa69` closed Feishu bridge production fixes: `lark-cli event consume
+  im.message.receive_v1` uses bot identity by default, plain string content is
+  parsed, and send commands use `im +messages-send` with idempotency keys.

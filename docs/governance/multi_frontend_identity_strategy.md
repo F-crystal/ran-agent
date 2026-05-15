@@ -20,6 +20,26 @@ long-term direct memory entry by pointing them at Hermes 8642/8643. Direct
 Hermes access is only a debug path. Unified memory and persona require the
 ran-agent desktop proxy.
 
+## Production Verification
+
+The multi-frontend architecture is deployed and verified on production runtime:
+
+- `25a6ff2 Add unified multi-frontend agent hub`
+- `6b46276 Add global timeline retention compaction`
+- `8a3fa69 Fix Feishu bridge bot identity handling`
+
+Verified behavior:
+
+- WeChat, Desktop, and Feishu all enter `ChannelHub`.
+- `IdentityMap` single-user mode maps all frontends to `user:ran`.
+- `GlobalTimeline` records cross-platform user and assistant turns.
+- Hermes `X-Hermes-Session-Key` is shared by `global_user_id`; platform-specific
+  `X-Hermes-Session-Id` remains isolated per frontend conversation.
+- Desktop Proxy and Feishu Bridge are verified production entry points.
+- Timeline retention env is active.
+- Feishu Bridge uses bot identity for event consume and accepts plain string
+  `content` from `im.message.receive_v1`.
+
 ## Identity Model
 
 `node_bridge/src/identityMap.mjs` maps platform accounts to one

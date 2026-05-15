@@ -1220,6 +1220,19 @@ WeChatBridge / FeishuBridge / DesktopProxy
 scope. Platform-specific session ids remain isolated for short-term local
 context. Details: `docs/governance/multi_frontend_identity_strategy.md`.
 
+Production verification is closed for:
+
+- `25a6ff2 Add unified multi-frontend agent hub`
+- `6b46276 Add global timeline retention compaction`
+- `8a3fa69 Fix Feishu bridge bot identity handling`
+
+Verified runtime facts: WeChat/Desktop/Feishu all enter `ChannelHub`;
+IdentityMap maps all frontends to `user:ran`; GlobalTimeline records
+cross-platform turns; Hermes session key is shared across frontends while
+platform-specific session ids remain isolated; Desktop Proxy and Feishu Bridge
+are verified; timeline retention env is active; Feishu uses bot identity and
+plain string content parsing is fixed.
+
 Enable Feishu bridge:
 
 ```bash

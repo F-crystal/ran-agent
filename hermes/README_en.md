@@ -13,7 +13,7 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 - Hermes is the frontend conversation shell for ran-agent.
 - The default model is `deepseek-v4-flash`; `deepseek-v4-pro` is opt-in through an explicit template or manual override.
 - DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must be processed by MCP tools first.
-- In production, Node bridge automatically routes requests between lite and full gateways.
+- In production, Node bridge automatically routes requests between lite and full gateways; WeChat, Feishu/Lark, and the desktop proxy all enter ChannelHub before the unified mainline calls Hermes.
 - OpenClaw, Kimi, and GLM are retired as frontend paths and must not be used as runtime, deployment, or debugging authorities.
 
 ---

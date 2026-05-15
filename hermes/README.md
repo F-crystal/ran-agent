@@ -13,7 +13,7 @@ Status: CURRENT (2026-05-15)
 - Hermes 是 ran-agent 的前台对话 shell。
 - 默认模型是 `deepseek-v4-flash`；`deepseek-v4-pro` 只通过显式模板或手动 override 使用。
 - DeepSeek V4 在本项目中按文本模型使用，原始图片、音频、视频和社交平台内容必须先由 MCP 工具处理。
-- Node bridge 生产运行会在 lite/full 两个 gateway 之间自动路由。
+- Node bridge 生产运行会在 lite/full 两个 gateway 之间自动路由；微信、飞书/Lark 和桌面 Proxy 都先进入 ChannelHub，再由统一主链路调用 Hermes。
 - OpenClaw、Kimi、GLM 前台路线已经退休，不再作为运行时、部署目标或调试权威。
 
 ---

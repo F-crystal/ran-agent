@@ -4,7 +4,7 @@ Status: CURRENT (2026-05-15)
 
 ## Frontend Path
 
-- Active path: `WeChat -> Node bridge -> Hermes gateway (lite/full) -> DeepSeek V4 Flash -> reply`
+- Active path: `WeChat / Desktop proxy / Feishu -> ChannelHub -> replyBackend -> Hermes gateway (lite/full) -> DeepSeek V4 Flash -> reply`
 - Provider: `hermes`; model: `deepseek-v4-flash`; fallbacks: none.
 - Kimi, GLM, and OpenClaw retired. Python frontend `/chat` returns 410.
 - Single front speaker: Hermes (personal assistant + chat companion).
@@ -32,6 +32,16 @@ Status: CURRENT (2026-05-15)
 - Multi-frontend entry is closed on `ChannelHub`: WeChat, Feishu/Lark, and
   desktop OpenAI-compatible proxy all enter `replyBackend` through the same
   identity/timeline layer.
+- Deployment verification is closed for:
+  - `25a6ff2 Add unified multi-frontend agent hub`
+  - `6b46276 Add global timeline retention compaction`
+  - `8a3fa69 Fix Feishu bridge bot identity handling`
+- Verified runtime facts: WeChat/Desktop/Feishu all enter ChannelHub;
+  IdentityMap single-user mode maps all frontends to `user:ran`;
+  GlobalTimeline records cross-platform turns; Hermes session key is shared
+  across frontends while platform-specific session ids remain isolated; Desktop
+  Proxy and Feishu Bridge are verified; timeline retention env is active;
+  Feishu bridge uses bot identity and parses plain string content.
 - Prompt slimming is closed for the active Hermes profiles: `SOUL.md`,
   `AGENTS.md`, and Node system instruction stay compact and layered.
 - WeChat continuity is closed on client-side bounded recent history plus stable
@@ -61,7 +71,7 @@ Status: CURRENT (2026-05-15)
 - Node bridge sends stable `X-Hermes-Session-Id` /
   `X-Hermes-Session-Key` headers and a bounded recent text history to the
   Hermes API. This client-side history is the source of truth for short-term
-  pronoun/reference continuity in WeChat conversations.
+  pronoun/reference continuity across WeChat, Desktop, and Feishu conversations.
 
 ## MCP Servers
 
@@ -140,19 +150,23 @@ Status: CURRENT (2026-05-15)
 ## Runtime Sequence (Chat Mainline)
 
 ```text
-WeChat inbound
-  -> weixin-agent-sdk
-  -> node_bridge/src/wechatBridge.mjs
-  -> inboundMessageBuffer (turn aggregation)
-  -> createReplyBackend().getReply(payload)
+WeChat / Desktop / Feishu inbound
+  -> platform adapter
+     - WeChat: weixin-agent-sdk -> wechatBridge -> inboundMessageBuffer
+     - Desktop: desktopProxyServer OpenAI-compatible endpoint
+     - Feishu: feishuBridge -> lark-cli event consume --as bot
+  -> ChannelHub
+  -> IdentityMap (global_user_id=user:ran)
+  -> GlobalTimeline (local recent + global active topic)
+  -> replyBackend.getReply(payload)
   -> sendChatToHermesGateway(payload)
   -> preparePayloadMediaForAgent (path validation, external file copy)
   -> ensureConversationMediaContext (MiMo/media_reader analysis, artifact persistence)
-  -> hermes gateway (port 8642)
+  -> hermes gateway (port 8642 lite or 8643 full by capability route)
   -> DeepSeek V4 Flash
   -> ingestExchangeToBackend() -> POST /ingest
   -> sanitizeReplyText()
-  -> reply to WeChat
+  -> adapter reply
 ```
 
 ## Bridge Hardening
@@ -167,6 +181,11 @@ WeChat inbound
 ## Code Anchors
 
 - `node_bridge/src/wechatBridge.mjs` — message normalization, buffer integration
+- `node_bridge/src/channelHub.mjs` — unified frontend entry and timeline write path
+- `node_bridge/src/identityMap.mjs` — global user mapping and Hermes session ids/keys
+- `node_bridge/src/globalTimeline.mjs` — cross-platform recent history, active topic, retention compaction
+- `node_bridge/src/desktopProxyServer.mjs` — OpenAI-compatible desktop proxy
+- `node_bridge/src/feishuBridge.mjs` — Lark event consumer and bot reply bridge
 - `node_bridge/src/inboundMessageBuffer.mjs` — turn aggregation
 - `node_bridge/src/mediaContextStore.mjs` — media artifact persistence
 - `node_bridge/src/hermesGatewayClient.mjs` — Hermes gateway client

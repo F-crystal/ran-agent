@@ -4,13 +4,13 @@
 
 Status: CURRENT (2026-05-15)
 
-**一个运行在微信里的本地优先个人 AI 助手：Hermes 负责对话，Node bridge 负责微信接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
+**一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信消息接入 Hermes Gateway，再用 DeepSeek V4 Flash 生成回复；同时通过 `media_reader`、`social_reader`、`mimo_power`、`personal_memory`、`obsidian_memory` 等 MCP 工具读取媒体、社交内容、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
+Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 用 DeepSeek V4 Flash 生成回复；同时通过 `media_reader`、`social_reader`、`mimo_power`、`personal_memory`、`obsidian_memory` 等 MCP 工具读取媒体、社交内容、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
 
 OpenClaw、Kimi 和 GLM 前台路线已经退休；当前前台主线只有 Hermes + DeepSeek V4 Flash。
 
@@ -19,11 +19,17 @@ OpenClaw、Kimi 和 GLM 前台路线已经退休；当前前台主线只有 Herm
 ## 当前主线
 
 ```text
-WeChat
-  -> Node bridge
+WeChat / Feishu / Desktop Proxy
+  -> ChannelHub
+  -> replyBackend
   -> Hermes gateway lite/full
   -> DeepSeek V4 Flash
   -> reply
+
+IdentityMap + GlobalTimeline
+  -> global_user_id=user:ran
+  -> shared Hermes session_key, platform-specific session_id
+  -> local recent history + cross-platform active topic
 
 Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
@@ -48,7 +54,11 @@ MCP services
 
 ## 能做什么
 
-**微信对话入口。** 微信消息进入 `node_bridge/src/wechatBridge.mjs`，经入站聚合、媒体上下文处理、Hermes Gateway、DeepSeek V4 Flash 后回到微信。Python 后端会异步接收 `/ingest`，维护近期记忆和后续任务。
+**多前端统一入口。** 微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 都进入 `node_bridge/src/channelHub.mjs`，再走同一个 `replyBackend -> hermesGatewayClient -> Hermes` 主链路。`IdentityMap` 在单用户模式下把所有前端映射到 `user:ran`，`GlobalTimeline` 记录跨平台 turn，Hermes `session_key` 跨前端共享，平台级 `session_id` 保持隔离。
+
+**微信对话入口。** 微信消息进入 `node_bridge/src/wechatBridge.mjs`，经入站聚合、ChannelHub、媒体上下文处理、Hermes Gateway、DeepSeek V4 Flash 后回到微信。Python 后端会异步接收 `/ingest`，维护近期记忆和后续任务。
+
+**飞书和桌面入口。** 飞书桥接通过 `lark-cli event consume im.message.receive_v1 --as bot` 消费消息，并通过 `im +messages-send` 回复；桌面客户端通过 ran-agent 自己的 OpenAI-compatible Proxy 接入，避免绕过统一记忆和 reviewer。
 
 **社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。小红书优先使用通用解析 fallback，搜索上下文会缓存 `read_ref`，避免把平台 token 暴露给模型或日志。
 
@@ -144,6 +154,9 @@ bash scripts/diagnose-lite-full.sh
 |------|----------|------|
 | Hermes / DeepSeek | `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, `API_SERVER_KEY` | Hermes gateway 和模型 provider |
 | Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Node bridge 自动选择 lite/full |
+| Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | 统一身份、跨平台 timeline |
+| Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | timeline 保留和压缩 |
+| Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT` | 多前端可选入口 |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest 和记忆召回 |
 | MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | 深度多模态分析 |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR 和媒体生成 |
@@ -161,9 +174,14 @@ bash scripts/diagnose-lite-full.sh
 ran_agent/
 ├── hermes/                         # Hermes profile distribution
 │   └── profile/                    # ran-assistant / ran-assistant-lite 配置
-├── node_bridge/                    # 微信 bridge、Hermes client、MCP facade
+├── node_bridge/                    # 多前端 bridge、Hermes client、MCP facade
 │   └── src/
 │       ├── mediaReader/            # OCR、ASR、VLM、平台解析器、视频分析
+│       ├── channelHub.mjs
+│       ├── identityMap.mjs
+│       ├── globalTimeline.mjs
+│       ├── desktopProxyServer.mjs
+│       ├── feishuBridge.mjs
 │       ├── inboundMessageBuffer.mjs
 │       ├── hermesGatewayClient.mjs
 │       ├── mediaContextStore.mjs
@@ -194,6 +212,9 @@ ran_agent/
 PYTHONPATH=src pytest -q tests/
 npm --prefix node_bridge test
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-hermes-continuity.sh
+bash scripts/diagnose-multi-frontend.sh
+bash scripts/compact-global-timeline.sh
 bash scripts/diagnose-hermes-tools.sh
 ```
 
@@ -213,6 +234,7 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 |------|------|
 | `docs/governance/current_runtime_status.md` | 当前真实运行时主线 |
 | `docs/governance/server_runtime_commands.md` | 服务器 runbook 和恢复命令 |
+| `docs/governance/multi_frontend_identity_strategy.md` | 多前端统一身份、timeline、session 策略 |
 | `docs/governance/media-pipeline.md` | 微信媒体上下文和 Context Policy v1 |
 | `docs/governance/phase_status.md` | Hermes 迁移和 OpenClaw 退休阶段状态 |
 | `hermes/README.md` | Hermes profile distribution 中文说明 |
