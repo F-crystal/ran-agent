@@ -29,6 +29,7 @@ export function mapWeChatMessageToBridgeRequest(message) {
   const payload = {
     text: extractTextFromWeChatRequest(message),
     sender_id: extractConversationIdFromWeChatRequest(message),
+    conversation_id: extractConversationIdFromWeChatRequest(message),
     channel: 'wechat',
     image_urls: imageUrls,
     route_hint: hasVisualAttachment(imageUrls, media) ? 'vision_understand' : '',

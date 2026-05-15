@@ -18,6 +18,8 @@ Status: CURRENT (2026-05-15)
 - Standard deployment and drift repair entry since `dda3499 Add Hermes runtime split deploy script`:
   `bash scripts/apply-hermes-runtime-split.sh`.
 - Standard diagnosis entry: `bash scripts/diagnose-lite-full.sh`.
+- Conversation continuity diagnosis entry:
+  `bash scripts/diagnose-hermes-continuity.sh`.
 - Do not hand-edit systemd or runtime env for the lite/full split. Inspect effective
   runtime state with `systemctl cat ran-agent-hermes.service` and
   `systemctl cat ran-agent-hermes-full.service`; lite-critical settings live in
@@ -37,6 +39,10 @@ Status: CURRENT (2026-05-15)
 - Config: `hermes/profile/config.yaml`.
 - Startup: managed by `scripts/apply-hermes-runtime-split.sh` in production.
 - Smoke: `scripts/phase5_hermes_gateway_smoke.sh`.
+- Node bridge sends stable `X-Hermes-Session-Id` /
+  `X-Hermes-Session-Key` headers and a bounded recent text history to the
+  Hermes API. This client-side history is the source of truth for short-term
+  pronoun/reference continuity in WeChat conversations.
 
 ## MCP Servers
 

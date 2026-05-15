@@ -163,3 +163,80 @@ test('read_social_post_deep returns WeChat captcha as partial without crashing',
   assert.ok(result.structuredContent.warnings.includes('WECHAT_CAPTCHA_REQUIRED'));
   assert.equal(calls.length, 1);
 });
+
+test('read_social_post_deep normalizes XHS wanyi media and analyzes image fallback', async () => {
+  const backendCalls = [];
+  const mediaCalls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/note123?xsec_token=tok&xsec_source=pc_share',
+          media_detail: 'standard',
+          include_media: true,
+        },
+      },
+    },
+    {
+      fetchImpl: async (url) => ({ url }),
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        backendCalls.push({ server, toolName, arguments: toolArgs });
+        if (server === 'xhs' && toolName === 'get_note_content') {
+          return { content: [{ type: 'text', text: 'cookie已失效' }] };
+        }
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return {
+          content: [
+            {
+              type: 'text',
+              text: JSON.stringify({
+                status: 'success',
+                title: '强女故事03',
+                desc: '她把自己送进了疯人院',
+                images: [
+                  { url_png: 'https://ci.xiaohongshu.com/a.png', url_webp: 'https://ci.xiaohongshu.com/a.webp', width: 1080, height: 1440 },
+                ],
+                media: [
+                  { type: 'image', thumbnail: 'https://ci.xiaohongshu.com/thumb.jpg', width: 720, height: 960 },
+                ],
+                videos: [
+                  { url: 'https://sns-video.xiaohongshu.com/v.mp4', thumbnail: 'https://ci.xiaohongshu.com/v.jpg' },
+                ],
+              }),
+            },
+          ],
+        };
+      },
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        mediaCalls.push({ toolName, arguments: toolArgs });
+        assert.equal(toolName, 'analyze_media_batch');
+        assert.equal(toolArgs.assets.length, 3);
+        assert.equal(toolArgs.assets[0].type, 'image');
+        return {
+          structuredContent: {
+            ok: true,
+            partial: false,
+            items: [{ asset_id: 'image-1', type: 'image', overall_summary: '图片里是内莉·布莱的故事卡片' }],
+            merged_summary: '图片里是内莉·布莱的故事卡片',
+            partial_failures: [],
+            warnings: [],
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial_success, true);
+  assert.equal(result.structuredContent.images.length, 2);
+  assert.equal(result.structuredContent.videos.length, 1);
+  assert.equal(result.structuredContent.media.length, 3);
+  assert.equal(result.structuredContent.media_assets.length, 3);
+  assert.match(result.structuredContent.deep_summary, /内莉·布莱/);
+  assert.equal(result.structuredContent.diagnostics.media_backend.ok, true);
+  assert.equal(mediaCalls.length, 1);
+  assert.ok(backendCalls.some((call) => call.server === 'generic'));
+});

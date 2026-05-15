@@ -1174,6 +1174,9 @@ HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
 RAN_AGENT_CAPABILITY_MODE=auto
 HERMES_LITE_PROFILE=ran-assistant-lite
 HERMES_FULL_PROFILE=ran-assistant
+HERMES_SESSION_CONTINUITY_ENABLED=true
+HERMES_RECENT_TEXT_TURNS=10
+HERMES_RECENT_TEXT_CHAR_BUDGET=6000
 ```
 
 ### Auto detection rules
@@ -1186,6 +1189,19 @@ Node bridge selects gateway per request:
 - **Generation intent** (画/生成/语音/朗读/媒体生成): full (8643)
 - **User override**: "开 full / 全能力 / 调试模式" → full; "轻量 / 省 token" → lite
 - **Full unavailable**: fallback to lite with `fallback_reason=full_gateway_unavailable`
+
+### WeChat continuity
+
+Node bridge keeps short-term conversation continuity client-side. Each Hermes
+API request carries stable `X-Hermes-Session-Id` and `X-Hermes-Session-Key`
+headers derived from a hashed platform conversation key, plus a bounded recent
+text history before the current user message. Logs print only hashes and counts
+under `[hermes-session-continuity]`.
+
+This is required so follow-ups such as "她", "这个故事", "那张图", or "那个链接"
+resolve from the last few turns instead of asking who or what the user means.
+Do not explain session headers, history windows, or token budgeting in ordinary
+user replies.
 
 ### Runtime config files
 
@@ -1252,10 +1268,12 @@ settings live primarily in `/etc/systemd/system/ran-agent-hermes-full.service`.
 
 ```bash
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-hermes-continuity.sh
 ```
 
 Checks: both ports listening, both services active, token comparison,
-vision errors, lark-cli availability.
+vision errors, lark-cli availability, session-continuity env/log presence, and
+manual smoke steps for WeChat continuity and XHS image fallback.
 
 ### Recovery
 

@@ -18,6 +18,7 @@ test('mapWeChatMessageToBridgeRequest extracts text and conversation id', () => 
   assert.deepEqual(payload, {
     text: '今天有点累',
     sender_id: 'wx-user-1',
+    conversation_id: 'wx-user-1',
     channel: 'wechat',
     image_urls: [],
     route_hint: '',
@@ -34,6 +35,7 @@ test('mapWeChatMessageToBridgeRequest extracts image urls for vision routing', (
   assert.deepEqual(payload, {
     text: '',
     sender_id: 'wx-user-image',
+    conversation_id: 'wx-user-image',
     channel: 'wechat',
     image_urls: ['https://example.com/cat.png'],
     route_hint: 'vision_understand',
@@ -54,6 +56,7 @@ test('mapWeChatMessageToBridgeRequest extracts nested image fields', () => {
   assert.deepEqual(payload, {
     text: '',
     sender_id: 'wx-user-image-nested',
+    conversation_id: 'wx-user-image-nested',
     channel: 'wechat',
     image_urls: [],
     media: [

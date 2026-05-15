@@ -126,6 +126,30 @@ class TestReplyStyleReview(unittest.TestCase):
         self.assertTrue(result.triggered)
         self.assertIn("overlong_systemic_explanation", result.reasons)
 
+    def test_wrong_vision_tool_explanation_detected_for_xhs_media(self) -> None:
+        result = self._review(
+            "陛下，我现在在 DeepSeek V4 上跑，不能看像素，可以改用 vision_analyze 工具。",
+            user_text="图片的话，你应该用 fallback 逻辑去读取",
+        )
+        self.assertTrue(result.triggered)
+        self.assertIn("wrong_vision_tool_explanation", result.reasons)
+        self.assertIn("mechanism_leak", result.reasons)
+
+    def test_social_media_retry_needed_when_fallback_request_gets_mechanism_explanation(self) -> None:
+        result = self._review(
+            "陛下，这是工具调用机制的问题，fallback 链路需要模型先判断是否有视觉能力。",
+            user_text="图片内容呢，你没看到图",
+        )
+        self.assertTrue(result.triggered)
+        self.assertIn("social_media_retry_needed", result.reasons)
+
+    def test_no_mechanism_leak_for_natural_context_forgetting_feedback(self) -> None:
+        result = self._review(
+            "陛下，臣刚才接得不好。我们继续说内莉·布莱，她的动人之处在于把自己放进危险里，替被消音的人作证。",
+            user_text="你怎么又忘了刚才的内容",
+        )
+        self.assertNotIn("mechanism_leak", result.reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

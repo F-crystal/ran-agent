@@ -471,6 +471,7 @@ function normalizeGenericParserPayload(text) {
     media_type: firstString(payload.type),
     images: Array.isArray(payload.images) ? payload.images : [],
     media: payload.media,
+    media_list: payload.media_list,
     medias: payload.medias,
     videos: payload.videos,
     audios: payload.audios,
@@ -1536,12 +1537,12 @@ function collectMediaUrlsFromValue(value, output = []) {
     return output;
   }
   if (typeof value === 'object') {
-    for (const key of ['url', 'media_url', 'image_url', 'video_url', 'audio_url', 'src', 'cover_url']) {
+    for (const key of ['url', 'url_png', 'url_webp', 'thumbnail', 'cover_image', 'media_url', 'image_url', 'video_url', 'audio_url', 'src', 'cover_url']) {
       if (typeof value[key] === 'string') {
         collectMediaUrlsFromValue(value[key], output);
       }
     }
-    for (const key of ['media', 'medias', 'images', 'videos', 'audios', 'attachments', 'data']) {
+    for (const key of ['media', 'media_list', 'medias', 'images', 'videos', 'audios', 'attachments', 'data']) {
       if (value[key]) {
         collectMediaUrlsFromValue(value[key], output);
       }
@@ -1565,6 +1566,7 @@ function extractMediaUrlsFromSocialPayload(social) {
   const output = extractMediaUrlsFromPostText(social?.post_text || '');
   collectMediaUrlsFromValue(social?.images, output);
   collectMediaUrlsFromValue(social?.media, output);
+  collectMediaUrlsFromValue(social?.media_list, output);
   collectMediaUrlsFromValue(social?.medias, output);
   collectMediaUrlsFromValue(social?.videos, output);
   collectMediaUrlsFromValue(social?.audios, output);
@@ -1777,7 +1779,38 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
   // Media is already normalized by runXhsMediaPath
   const images = mediaOk ? (media.images || []) : [];
   const videos = mediaOk ? (media.videos || []) : [];
-  const mediaCount = images.length + videos.length;
+  const normalizedMediaItems = mediaOk && Array.isArray(media.media) && media.media.length > 0
+    ? media.media
+    : [...images, ...videos];
+  const mediaCount = normalizedMediaItems.length;
+  const mediaDetail = normalizeMediaDetail(args.media_detail);
+  const includeMedia = args.include_media !== false && mediaDetail !== 'none';
+  let mediaAnalysis = {
+    ok: true,
+    partial: false,
+    items: [],
+    merged_summary: '',
+    timeline: [],
+    partial_failures: [],
+    warnings: [],
+  };
+  const mediaUrls = includeMedia ? normalizedMediaItems.map((item) => item.url).filter(Boolean) : [];
+  const mediaAssets = includeMedia
+    ? buildMediaAssets({
+      mediaUrls,
+      platform: 'xhs',
+      maxAssets: Number(args.max_media_assets || 20),
+    })
+    : [];
+  if (includeMedia && mediaAssets.length > 0) {
+    const mediaResult = await callMediaReaderTool('analyze_media_batch', {
+      assets: mediaAssets,
+      media_detail: mediaDetail,
+      max_assets: Number(args.max_media_assets || 20),
+      task: 'summarize_social_post_media',
+    }, options);
+    mediaAnalysis = mediaResult.structuredContent || mediaResult;
+  }
 
   // Both failed
   if (!detailOk && !mediaOk) {
@@ -1792,6 +1825,8 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
       images: [],
       videos: [],
       media: [],
+      media_assets: [],
+      media_analysis: mediaAnalysis,
       diagnostics,
     });
   }
@@ -1814,6 +1849,8 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
       images: [],
       videos: [],
       media: [],
+      media_assets: [],
+      media_analysis: mediaAnalysis,
       post_text: detail?.post_text || desc,
       comments_text: detail?.comments_text || '',
       diagnostics,
@@ -1837,12 +1874,17 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     tags,
     images,
     videos,
-    media: [],
+    media: normalizedMediaItems,
+    media_assets: mediaAssets,
+    media_analysis: mediaAnalysis,
     post_text: detailOk ? (detail?.post_text || desc) : '',
     comments_text: detail?.comments_text || '',
     message: !detailOk && mediaOk ? '正文未完整获取，但媒体资源已获取' : undefined,
     media_count: mediaCount,
-    vision_hint: mediaCount > 0 ? '如需分析图片/视频内容，使用 media_reader analyze_image 或 mimo_power analyze，不要使用 vision_analyze' : undefined,
+    deep_summary: [
+      detailOk ? (detail?.post_text || desc) : '',
+      mediaAnalysis?.merged_summary ? `媒体: ${mediaAnalysis.merged_summary}` : '',
+    ].filter(Boolean).join('\n\n'),
     diagnostics,
   });
 }
@@ -1933,6 +1975,7 @@ async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
             images: normalized.images,
             videos: normalized.videos,
             media: normalized.media,
+            cover_image: normalized.cover_image,
             raw_fields_seen: extractRawFieldsSeen(data),
           };
         }
@@ -1955,56 +1998,98 @@ async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
 
 // Normalize wanyi media output to standard format
 function normalizeXhsMedia(mediaResult) {
-  if (!mediaResult || mediaResult.ok === false) return { images: [], videos: [], media: [] };
+  if (!mediaResult || mediaResult.ok === false) return { images: [], videos: [], media: [], cover_image: '' };
 
   const images = [];
   const videos = [];
+  const seen = new Set();
 
   const resultType = String(mediaResult.type || '').trim().toLowerCase();
   const resultPlatform = String(mediaResult.platform || '').trim().toLowerCase();
+  const sourceBackend = mediaResult.source_backend
+    || mediaResult.source
+    || (resultPlatform === 'generic' ? 'wanyi-watermark-generic' : 'wanyi-watermark');
+
+  function pushImage(item = {}, fallbackSource = sourceBackend) {
+    if (!item || typeof item !== 'object') return;
+    const url = firstString(item.url_png, item.url_webp, item.url, item.thumbnail, item.cover_image, item.image_url, item.src);
+    if (!url || seen.has(`image:${url}`)) return;
+    seen.add(`image:${url}`);
+    images.push({
+      type: 'image',
+      url,
+      url_png: item.url_png || '',
+      url_webp: item.url_webp || '',
+      thumbnail: item.thumbnail || item.cover_image || '',
+      width: Number(item.width) || 0,
+      height: Number(item.height) || 0,
+      source_backend: item.source_backend || fallbackSource,
+    });
+  }
+
+  function pushVideo(item = {}, fallbackSource = sourceBackend) {
+    if (!item || typeof item !== 'object') return;
+    const url = firstString(item.url, item.video_url, item.media_url, item.src);
+    if (!url || seen.has(`video:${url}`)) return;
+    seen.add(`video:${url}`);
+    videos.push({
+      type: 'video',
+      url,
+      title: item.title || mediaResult.title || '',
+      caption: item.caption || mediaResult.caption || '',
+      thumbnail: item.thumbnail || item.cover_image || item.cover_url || '',
+      source_url: item.source_url || mediaResult.source_url || '',
+      width: Number(item.width) || 0,
+      height: Number(item.height) || 0,
+      source_backend: item.source_backend || fallbackSource,
+    });
+  }
 
   // 1. XHS image note: images[].url_png / images[].url_webp
   if (Array.isArray(mediaResult.images)) {
     for (const img of mediaResult.images) {
-      if (!img || typeof img !== 'object') continue;
-      const url = img.url_png || img.url_webp || img.url || '';
-      if (!url) continue;
-      images.push({
-        type: 'image',
-        url,
-        url_png: img.url_png || '',
-        url_webp: img.url_webp || '',
-        width: img.width || 0,
-        height: img.height || 0,
-        source_backend: 'wanyi-watermark',
-      });
+      pushImage(img, 'wanyi-watermark');
     }
   }
 
   // 2. XHS video note: type=video, url field
   if (resultType === 'video' && mediaResult.url) {
-    videos.push({
-      type: 'video',
-      url: mediaResult.url,
-      title: mediaResult.title || '',
-      caption: mediaResult.caption || '',
-      source_backend: resultPlatform === 'generic' ? 'wanyi-watermark-generic' : 'wanyi-watermark',
-    });
+    pushVideo(mediaResult, sourceBackend);
   }
 
   // 3. Generic fallback video: platform=generic, url + source_url
   if (resultPlatform === 'generic' && mediaResult.url && resultType !== 'video') {
-    videos.push({
-      type: 'video',
-      url: mediaResult.url,
-      title: mediaResult.title || '',
-      caption: mediaResult.caption || '',
-      source_url: mediaResult.source_url || '',
-      source_backend: 'wanyi-watermark-generic',
-    });
+    pushVideo(mediaResult, 'wanyi-watermark-generic');
   }
 
-  return { images, videos, media: [] };
+  for (const { list, forceType } of [
+    { list: mediaResult.media, forceType: '' },
+    { list: mediaResult.media_list, forceType: '' },
+    { list: mediaResult.medias, forceType: '' },
+    { list: mediaResult.videos, forceType: 'video' },
+  ]) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      const type = String(item?.type || '').trim().toLowerCase();
+      if (forceType === 'video' || type === 'video') {
+        pushVideo(item, sourceBackend);
+      } else if (type === 'image' || item?.url_png || item?.url_webp || item?.thumbnail || item?.image_url) {
+        pushImage(item, sourceBackend);
+      } else {
+        pushVideo(item, sourceBackend);
+      }
+    }
+  }
+
+  const coverImage = firstString(
+    mediaResult.cover_image,
+    mediaResult.cover_url,
+    mediaResult.thumbnail,
+    images[0]?.thumbnail,
+    images[0]?.url,
+    videos[0]?.thumbnail
+  );
+  return { images, videos, media: [...images, ...videos], cover_image: coverImage };
 }
 
 function xhsCookieDiagnostics(env) {
@@ -2147,6 +2232,7 @@ async function readGenericSocialPost({ url, platform, includeComments, maxCommen
       ...(normalized.media_type ? { media_type: normalized.media_type } : {}),
       ...(Array.isArray(normalized.images) && normalized.images.length > 0 ? { images: normalized.images } : {}),
       ...(normalized.media ? { media: normalized.media } : {}),
+      ...(normalized.media_list ? { media_list: normalized.media_list } : {}),
       ...(normalized.medias ? { medias: normalized.medias } : {}),
       ...(normalized.videos ? { videos: normalized.videos } : {}),
       ...(normalized.audios ? { audios: normalized.audios } : {}),

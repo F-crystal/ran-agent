@@ -22,11 +22,22 @@ COURTLY_MARKERS = ("陛下", "臣", "微臣")
 COURTLY_DISABLE_PATTERN = re.compile(r"正常说话|别叫陛下|别演|不要角色扮演|先别演")
 AI_PERSONA_LEAK_PATTERN = re.compile(r"作为一个AI语言模型|作为AI助手|作为一个人工智能|我是AI|作为语言模型")
 MECHANISM_LEAK_PATTERN = re.compile(
-    r"提示词|system prompt|技能扫描|工具列表|上下文窗口|token|压缩机制|内部约束|前置扫描",
+    r"提示词|system prompt|技能扫描|工具列表|工具链|工具调用机制|模型限制|上下文窗口|token|压缩机制|内部约束|前置扫描|fallback 链路|vision_analyze|browser_vision|DeepSeek\s*(?:V4)?[^。！？\n]{0,20}(?:没(?:有)?视觉|不能看|无法看)|不能看像素",
     re.IGNORECASE,
 )
 MECHANISM_QUESTION_PATTERN = re.compile(
     r"为什么|原因|怎么会|机制|提示词|system prompt|上下文|token|工具|压缩",
+    re.IGNORECASE,
+)
+WRONG_VISION_TOOL_EXPLANATION_PATTERN = re.compile(
+    r"vision_analyze|browser_vision|DeepSeek\s*(?:V4)?[^。！？\n]{0,20}(?:没(?:有)?视觉|不能看|无法看|text-only)|不能看像素|原生视觉能力",
+    re.IGNORECASE,
+)
+SOCIAL_MEDIA_RETRY_REQUEST_PATTERN = re.compile(
+    r"fallback|图片.*(?:读|看|内容)|读取图片|图里|没看到图|图片呢|那张图|媒体资源"
+)
+MECHANISM_EXPLANATION_PATTERN = re.compile(
+    r"工具调用机制|fallback 链路|模型.*(?:视觉|能力|限制)|DeepSeek|上下文窗口|token|session|stateless",
     re.IGNORECASE,
 )
 
@@ -68,6 +79,10 @@ def review_reply(
         reasons.append("recent_state_over_inference")
     if response_mode == "casual_chat" and _has_mechanism_leak(normalized_reply, user_text):
         reasons.append("mechanism_leak")
+    if response_mode == "casual_chat" and _has_wrong_vision_tool_explanation(normalized_reply, user_text):
+        reasons.append("wrong_vision_tool_explanation")
+    if response_mode == "casual_chat" and _social_media_retry_needed(normalized_reply, user_text):
+        reasons.append("social_media_retry_needed")
     if response_mode == "casual_chat" and _has_over_courtly_template(normalized_reply):
         reasons.append("over_courtly_template")
     if response_mode == "casual_chat" and _looks_like_unnatural_flow(normalized_reply, user_text):
@@ -179,6 +194,22 @@ def _has_mechanism_leak(reply_text: str, user_text: str) -> bool:
 
 def _user_asked_about_mechanism(user_text: str) -> bool:
     return bool(MECHANISM_QUESTION_PATTERN.search(user_text))
+
+
+def _has_wrong_vision_tool_explanation(reply_text: str, user_text: str) -> bool:
+    if not _is_social_media_retry_request(user_text):
+        return False
+    return bool(WRONG_VISION_TOOL_EXPLANATION_PATTERN.search(reply_text))
+
+
+def _social_media_retry_needed(reply_text: str, user_text: str) -> bool:
+    if not _is_social_media_retry_request(user_text):
+        return False
+    return bool(MECHANISM_EXPLANATION_PATTERN.search(reply_text))
+
+
+def _is_social_media_retry_request(user_text: str) -> bool:
+    return bool(SOCIAL_MEDIA_RETRY_REQUEST_PATTERN.search(user_text))
 
 
 def _has_over_courtly_template(reply_text: str) -> bool:

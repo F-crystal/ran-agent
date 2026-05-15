@@ -24,6 +24,7 @@ export function createReplyBackend(options = {}) {
         {
           text: message.text,
           sender_id: message.sender_id,
+          conversation_id: message.conversation_id || message.conversationId || message.sender_id,
           channel: 'wechat',
           route_hint: message.route_hint || '',
           message_batch: Array.isArray(message.message_batch) ? message.message_batch : [],

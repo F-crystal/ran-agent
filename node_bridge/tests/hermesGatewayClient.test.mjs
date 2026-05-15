@@ -96,6 +96,164 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.equal(response.model, 'ran-assistant');
 });
 
+test('Hermes API requests include stable session headers per WeChat conversation', async () => {
+  const headersByConversation = new Map();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    HERMES_SESSION_CONTINUITY_ENABLED: 'true',
+  });
+
+  for (const sender_id of ['wx-session-a', 'wx-session-a', 'wx-session-b']) {
+    await sendChatToHermesGateway(
+      { text: `你好 ${sender_id}`, sender_id, conversation_id: sender_id, channel: 'wechat' },
+      {
+        config,
+        fetchImpl: async (url, options) => {
+          if (options?.body) {
+            const list = headersByConversation.get(sender_id) || [];
+            list.push(options.headers);
+            headersByConversation.set(sender_id, list);
+          }
+          return makeJsonResponse({ choices: [{ message: { content: `reply ${sender_id}` } }] });
+        },
+        logger: { log() {}, warn() {} },
+      }
+    );
+  }
+
+  const first = headersByConversation.get('wx-session-a')[0];
+  const second = headersByConversation.get('wx-session-a')[1];
+  const other = headersByConversation.get('wx-session-b')[0];
+
+  assert.equal(first['X-Hermes-Session-Id'], second['X-Hermes-Session-Id']);
+  assert.equal(first['X-Hermes-Session-Key'], second['X-Hermes-Session-Key']);
+  assert.notEqual(first['X-Hermes-Session-Id'], other['X-Hermes-Session-Id']);
+  assert.notEqual(first['X-Hermes-Session-Key'], other['X-Hermes-Session-Key']);
+  assert.match(first['X-Hermes-Session-Id'], /^ran-agent-wechat-[a-f0-9]{16}$/);
+  assert.match(first['X-Hermes-Session-Key'], /^ran-agent-memory-[a-f0-9]{16}$/);
+});
+
+test('Hermes API requests include recent conversation history before current user', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-nellie-history';
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    HERMES_SESSION_CONTINUITY_ENABLED: 'true',
+    HERMES_RECENT_TEXT_TURNS: '10',
+  });
+
+  await sendChatToHermesGateway(
+    { text: '我们聊内莉·布莱', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '她是1887年卧底疯人院的记者。' } }] }),
+      logger: { log() {}, warn() {} },
+    }
+  );
+  await sendChatToHermesGateway(
+    { text: '我觉得她的故事特别令人感动', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '是的，她的勇气很动人。' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.deepEqual(secondBody.messages.map((message) => message.role), ['system', 'user', 'assistant', 'user']);
+  assert.equal(secondBody.messages[1].content, '我们聊内莉·布莱');
+  assert.equal(secondBody.messages[2].content, '她是1887年卧底疯人院的记者。');
+  assert.match(secondBody.messages[3].content, /我觉得她的故事特别令人感动/);
+});
+
+test('recent history budget trims old text but preserves recent referent', async () => {
+  let finalBody = null;
+  const conversationId = 'wx-budget-nellie';
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    HERMES_RECENT_TEXT_TURNS: '10',
+    HERMES_RECENT_TEXT_CHAR_BUDGET: '220',
+    HERMES_RECENT_TEXT_MAX_USER_CHARS: '120',
+    HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS: '120',
+  });
+
+  await sendChatToHermesGateway(
+    { text: `旧话题 ${'无关内容'.repeat(120)}`, sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: `旧回复 ${'无关回复'.repeat(120)}` } }] }), logger: { log() {}, warn() {} } }
+  );
+  await sendChatToHermesGateway(
+    { text: '我们继续聊内莉·布莱，她把自己送进疯人院这个故事', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '她用卧底调查揭露制度性伤害。' } }] }), logger: { log() {}, warn() {} } }
+  );
+  await sendChatToHermesGateway(
+    { text: '我觉得她的故事特别令人感动', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        finalBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '确实动人。' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  const serialized = JSON.stringify(finalBody.messages, null, 2);
+  assert.match(serialized, /内莉·布莱/);
+  assert.doesNotMatch(serialized, /无关内容无关内容无关内容/);
+  assert.equal(finalBody.messages.at(-1).role, 'user');
+  assert.match(finalBody.messages.at(-1).content, /我觉得她的故事特别令人感动/);
+});
+
+test('XHS fallback follow-up keeps recent link context and forbids mechanism explanation', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-xhs-fallback-history';
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    HERMES_RECENT_TEXT_TURNS: '10',
+  });
+  const xhsText = '强女故事03｜她把自己送进了疯人院 http://xhslink.com/o/AgWWVuPNi6z';
+
+  await sendChatToHermesGateway(
+    { text: xhsText, sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '这篇是内莉·布莱的故事；图片未完整读取。' } }] }),
+      logger: { log() {}, warn() {} },
+    }
+  );
+  await sendChatToHermesGateway(
+    { text: '图片的话，你应该用 fallback 逻辑去读取', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '我重新读图。' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  const serialized = JSON.stringify(secondBody.messages, null, 2);
+  assert.match(serialized, /xhslink\.com\/o\/AgWWVuPNi6z/);
+  assert.match(serialized, /内莉·布莱/);
+  assert.match(serialized, /直接重试/);
+  assert.doesNotMatch(serialized, /vision_analyze|DeepSeek 没视觉|不能看像素/);
+});
+
 test('sendChatToHermesGateway parses Responses-style output_text', async () => {
   const response = await sendChatToHermesGateway(
     { text: 'ping', sender_id: 'conv-responses', channel: 'wechat' },
