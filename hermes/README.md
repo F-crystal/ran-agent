@@ -108,6 +108,15 @@ HERMES_FULL_PROFILE=ran-assistant
 
 `8642` 是低上下文入口，不是安全沙箱；不要把“lite 不会执行终端”当成强安全保证。
 
+生产部署、profile 刷新、systemd/env 漂移修复统一执行：
+
+```bash
+bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-lite-full.sh
+```
+
+不要手工修改 systemd/env 作为常规路径。排查时以 `systemctl cat ran-agent-hermes.service` 和 `systemctl cat ran-agent-hermes-full.service` 的合并视图为准。
+
 ---
 
 ## MCP 工具边界

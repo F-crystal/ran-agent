@@ -108,6 +108,15 @@ Routing rules:
 
 `8642` is a low-context entry, not a security sandbox. Do not treat “lite cannot execute terminal” as a hard security guarantee.
 
+Production deployment, profile refresh, and systemd/env drift repair use:
+
+```bash
+bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-lite-full.sh
+```
+
+Do not hand-edit systemd/env as the normal path. When debugging, trust the merged `systemctl cat ran-agent-hermes.service` and `systemctl cat ran-agent-hermes-full.service` views.
+
 ---
 
 ## MCP Tool Boundary

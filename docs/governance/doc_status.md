@@ -25,6 +25,10 @@ Status: CURRENT (2026-05-15)
 
 ## Publication Notes
 
+- Server runtime deployment and drift repair are standardized on
+  `bash scripts/apply-hermes-runtime-split.sh`; diagnosis is standardized on
+  `bash scripts/diagnose-lite-full.sh`. Do not document manual systemd/env
+  edits as the normal path for the lite/full split.
 - Historical archive notes and deployment journals are local-only under ignored `local_archive/docs/`; do not force-add them to Git unless the owner explicitly asks for a specific safe file.
 - Future archive records go under `local_archive/docs/governance/archive/`.
 - Future deployment notes go under `local_archive/docs/deployment/`.

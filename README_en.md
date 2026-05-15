@@ -125,7 +125,14 @@ cd node_bridge
 ./start_node.sh
 ```
 
-For production systemd, dual gateway setup, Hermes env sync, and recovery commands, see `docs/governance/server_runtime_commands.md`.
+Production systemd, dual gateway setup, Hermes env sync, and drift repair use:
+
+```bash
+bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-lite-full.sh
+```
+
+Do not hand-edit systemd/env as the normal deployment path. See `docs/governance/server_runtime_commands.md` for the detailed runtime contract.
 
 ---
 

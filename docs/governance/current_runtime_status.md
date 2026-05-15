@@ -15,6 +15,13 @@ Status: CURRENT (2026-05-15)
 - **8643 (full):** `ran-assistant` profile, `~/.hermes-ran-agent` home. Full debug entry (~24331 tokens). Used for debug/commands/generation.
 - Node bridge auto-selects per request via `RAN_AGENT_CAPABILITY_MODE=auto`.
 - 8642 is lite-context, not a security sandbox. Full unavailable → fallback to lite with logged reason.
+- Standard deployment and drift repair entry since `dda3499 Add Hermes runtime split deploy script`:
+  `bash scripts/apply-hermes-runtime-split.sh`.
+- Standard diagnosis entry: `bash scripts/diagnose-lite-full.sh`.
+- Do not hand-edit systemd or runtime env for the lite/full split. Inspect effective
+  runtime state with `systemctl cat ran-agent-hermes.service` and
+  `systemctl cat ran-agent-hermes-full.service`; lite-critical settings live in
+  `90-lite-runtime.conf`.
 
 ## Phase Status
 
@@ -28,7 +35,7 @@ Status: CURRENT (2026-05-15)
 
 - Runtime constraints: `hermes/profile/AGENTS.md`.
 - Config: `hermes/profile/config.yaml`.
-- Startup: `hermes -p ran-assistant gateway run --replace --accept-hooks`.
+- Startup: managed by `scripts/apply-hermes-runtime-split.sh` in production.
 - Smoke: `scripts/phase5_hermes_gateway_smoke.sh`.
 
 ## MCP Servers

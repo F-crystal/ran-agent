@@ -125,7 +125,14 @@ cd node_bridge
 ./start_node.sh
 ```
 
-生产 systemd、双 gateway、Hermes env 同步和故障恢复命令见 `docs/governance/server_runtime_commands.md`。
+生产 systemd、双 gateway、Hermes env 同步和漂移修复统一使用：
+
+```bash
+bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-lite-full.sh
+```
+
+不要手工修改 systemd/env 作为常规部署路径；详细口径见 `docs/governance/server_runtime_commands.md`。
 
 ---
 
