@@ -6,6 +6,7 @@
 
 # Runtime state and local data
 .openclaw_state/
+.ran_agent_state/
 data/
 logs/
 debug/

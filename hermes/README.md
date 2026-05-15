@@ -1,123 +1,186 @@
+<p align="right"><b>中文</b> | <a href="README_en.md">English</a></p>
+
 # Hermes Profile Distribution
 
-This directory contains the repo-local Hermes profile distribution for `ran-agent`.
-It is intentionally safe to commit: no secrets, sessions, memories, logs, or
-machine-local state belong here.
+Status: CURRENT (2026-05-15)
 
-## Local And Server Paths
+本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 
-This distribution is portable. Do not hard-code the local checkout path into
-server runtime files. Set paths through environment variables instead.
+---
 
-Recommended path conventions:
+## 当前定位
 
-| Scope | Repo root | Verification `HERMES_HOME` | Runtime `HERMES_HOME` |
-| --- | --- | --- | --- |
-| Local dev | `/Users/fengran/ran_agent` | `/private/tmp/ran-agent-hermes-home` | operator-owned, not required for Phase 5 |
-| Server | `/opt/ran_agent` or the deployed checkout path | `/tmp/ran-agent-hermes-home` | service-owned path such as `/home/ubuntu/.hermes-ran-agent` |
+- Hermes 是 ran-agent 的前台对话 shell。
+- 默认模型是 `deepseek-v4-flash`；`deepseek-v4-pro` 只通过显式模板或手动 override 使用。
+- DeepSeek V4 在本项目中按文本模型使用，原始图片、音频、视频和社交平台内容必须先由 MCP 工具处理。
+- Node bridge 生产运行会在 lite/full 两个 gateway 之间自动路由。
+- OpenClaw、Kimi、GLM 前台路线已经退休，不再作为运行时、部署目标或调试权威。
 
-Required path variables:
+---
 
-```bash
-export RAN_AGENT_REPO_ROOT=/absolute/path/to/ran_agent
-export HERMES_HOME=/path/to/hermes-home
-```
+## 目录内容
 
-Secrets must live in machine-local env files, not in this repository.
+| 文件或目录 | 作用 |
+|------------|------|
+| `profile/config.yaml` | `ran-assistant` full profile，包含完整 MCP 工具面 |
+| `profile/config.lite.yaml` | `ran-assistant-lite` lite profile，低上下文日常入口 |
+| `profile/config.pro.template.yaml` | Pro 模型显式模板 |
+| `profile/distribution.yaml` | profile 元数据和所需环境变量说明 |
+| `profile/AGENTS.md` | Hermes 运行时约束 |
+| `profile/IDENTITY.md`, `profile/SOUL.md` | 人格和长期表达基线 |
+| `profile/HERMES_*.md` | 迁移后的 Hermes 预算参考文件，仓库参考用 |
+| `profile/skills/` | Hermes 内部按需技能 |
 
-## Project-Local Verification
+---
 
-On this local machine, Hermes CLI has been verified at:
+## 路径约定
 
-```bash
-/Users/fengran/.local/bin/hermes
-```
-
-The verified local version is:
-
-```text
-Hermes Agent v0.13.0 (2026.5.7)
-```
-
-Phase 5 MCP verification should not modify the operator's default Hermes
-profile. Use a project-local or temporary `HERMES_HOME` when validating this
-distribution:
+不要把本地 checkout 绝对路径写死到可提交运行文件里。用环境变量传入路径：
 
 ```bash
-export HERMES_HOME=/private/tmp/ran-agent-hermes-home
+export RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
+export HERMES_HOME=/absolute/path/to/hermes-home
+```
+
+推荐约定：
+
+| 场景 | Repo root | Hermes home |
+|------|-----------|-------------|
+| 本地验证 | `/Users/fengran/ran_agent` | `/private/tmp/ran-agent-hermes-home` 或其他临时目录 |
+| 服务器生产 | `/opt/ran_agent` | `/home/ubuntu/.hermes-ran-agent` |
+| 服务器 lite | `/opt/ran_agent` | `/home/ubuntu/.hermes-ran-agent/lite` |
+
+机器本地 Hermes home 才能保存 `.env`、sessions、logs、memories、cron 等运行态文件。不要把这些内容复制回仓库。
+
+---
+
+## 安装 Profile
+
+本地验证不要切换全局 sticky profile。直接安装到临时或项目专用 `HERMES_HOME`：
+
+```bash
 export RAN_AGENT_REPO_ROOT=/Users/fengran/ran_agent
+export HERMES_HOME=/private/tmp/ran-agent-hermes-home
+
 hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
 hermes -p ran-assistant mcp list
 ```
 
-On the server, use the same pattern with server paths:
+服务器生产使用服务器路径：
 
 ```bash
-export HERMES_HOME=/tmp/ran-agent-hermes-home
 export RAN_AGENT_REPO_ROOT=/opt/ran_agent
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+
 hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
 hermes -p ran-assistant mcp list
 ```
 
-Do not run `hermes profile use ran-assistant` during project verification. Keep
-the repo-local config in this directory and use the temporary/project-local
-Hermes home for generated config, sessions, logs, memories, and MCP smoke
-state.
+不要在验证过程中运行 `hermes profile use ran-assistant`。生产机器应由 systemd 或显式环境变量指定 profile 与 Hermes home。
 
-For a real machine deployment, install the profile into that machine's
-dedicated Hermes home and keep secrets in the machine-local `.env`:
+---
 
-```text
-$HERMES_HOME/profiles/ran-assistant/
-  config.yaml
-  .env
-  memories/
-  sessions/
-  logs/
-  cron/
+## Lite / Full Gateway
+
+生产部署有两个 Hermes gateway：
+
+| 服务 | 端口 | Profile | Hermes home | 用途 |
+|------|------|---------|-------------|------|
+| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | 日常低上下文入口 |
+| `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | 调试、命令、Playwright、媒体生成 |
+
+Node bridge 通过以下变量自动路由：
+
+```bash
+HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+RAN_AGENT_CAPABILITY_MODE=auto
+HERMES_LITE_PROFILE=ran-assistant-lite
+HERMES_FULL_PROFILE=ran-assistant
 ```
 
-The previous default personal Hermes home layout is shown only as an example
-of machine-local state, not as the Phase 5 verification target:
+路由规则：
 
-```text
-/Users/fengran/.hermes/profiles/ran-assistant/
-  config.yaml
-  .env
-  memories/
-  sessions/
-  logs/
-  cron/
+- 默认聊天、小红书、记忆、图片理解走 lite。
+- 调试、命令、日志、systemctl、journalctl、git、npm、Playwright、媒体生成走 full。
+- 用户显式说“开 full / 全能力 / 调试模式”走 full。
+- full 不可用时回退 lite，并记录 `fallback_reason=full_gateway_unavailable`。
+
+`8642` 是低上下文入口，不是安全沙箱；不要把“lite 不会执行终端”当成强安全保证。
+
+---
+
+## MCP 工具边界
+
+`profile/config.yaml` 和 `profile/config.lite.yaml` 都禁用 Hermes 内置媒体工具：
+
+```yaml
+disabled_tools:
+  - browser_vision
+  - image_generate
+  - text_to_speech
+  - video_analyze
+  - vision_analyze
 ```
 
-Do not copy secrets into this repository. Put `DEEPSEEK_API_KEY`,
-`HERMES_API_KEY`, platform cookies, and provider tokens in the machine-local
-Hermes `.env`, root `.env.local`, or `node_bridge/.env.local` as appropriate.
+ran-agent 使用仓库内 MCP 服务：
 
-## Server Deployment Boundary
+| MCP | 作用 |
+|-----|------|
+| `time` | `Asia/Shanghai` 时间查询 |
+| `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 |
+| `social_reader` | B 站、小红书、微信公众号、音乐分享 |
+| `mimo_power` | MiMo Token Plan 深度多模态分析 |
+| `personal_memory` | Python backend 个人记忆召回 |
+| `obsidian_memory` | Obsidian vault 语义检索 |
+| `media_generation` | 图片和语音生成，full 默认可用 |
+| `playwright` | 浏览器自动化，full 默认可用 |
+| `tavily` | 可选远端网页搜索 MCP，需要机器本地 API key |
 
-This README defines the portable profile distribution and verification pattern
-for both local and server environments. Full server deployment details
-including systemd units, restart order, log paths, health checks, and resource
-baseline belong in the Phase 9 deployment document.
+社交平台链接必须走 `social_reader`；不要用普通网页抽取工具替代小红书、B 站等平台解析器。
 
-Until Phase 9, server validation should only prove that the profile can be
-installed under a service-owned `HERMES_HOME` and that the MCP servers can be
-listed/tested without relying on local absolute paths.
+---
+
+## 必需和常用环境变量
+
+| 变量 | 作用 |
+|------|------|
+| `RAN_AGENT_REPO_ROOT` | ran-agent checkout 绝对路径 |
+| `DEEPSEEK_API_KEY` | Hermes DeepSeek provider key |
+| `API_SERVER_KEY`, `HERMES_API_KEY` | Hermes gateway 与 Node bridge API 鉴权 |
+| `PYTHON_BACKEND_BASE_URL` | Python backend，默认 `http://127.0.0.1:8787` |
+| `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen 视觉、ASR、媒体生成 |
+| `MIMO_TOKEN_PLAN_API_KEY` | MiMo Power MCP |
+| `TAVILY_API_KEY` | Tavily MCP，可选 |
+| `XHS_COOKIE`, `SESSDATA` | 小红书、B 站平台认证 |
+| `OBSIDIAN_MEMORY_VAULT_DIR` | Obsidian vault 路径 |
+| `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB 路径 |
+| `OBSIDIAN_INDEX_DEVICE` | Linux 服务器默认 `cpu` |
+| `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | 只在显式维护时设为 `1` |
+
+Secrets 必须放在机器本地 `.env`，例如：
+
+```text
+/home/ubuntu/.hermes-ran-agent/.env
+/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
+/home/ubuntu/.hermes-ran-agent/lite/.env
+```
+
+不要把 `DEEPSEEK_API_KEY`、`HERMES_API_KEY`、平台 Cookie、代理 URL 或登录态写入本仓库。
+
+---
 
 ## Obsidian Memory MCP
 
-`obsidian_memory` uses `obsidian-index` semantic search. The repo launcher wraps
-the upstream package so Linux servers can run the embedding model on CPU and so
-index maintenance is explicit instead of happening on every production start.
+`obsidian_memory` 使用 `obsidian-index` 语义检索。仓库启动器会包装上游包，使 Linux 服务器可以在 CPU 上运行 embedding 模型，并把索引维护变成显式操作。
 
-Recommended server defaults:
+服务器推荐值：
 
 ```bash
 export HF_ENDPOINT=https://hf-mirror.com
-export HF_HOME=/tmp/ran-agent-hermes-home-phase5/hf-home
-export TRANSFORMERS_CACHE=/tmp/ran-agent-hermes-home-phase5/hf-home
-export SENTENCE_TRANSFORMERS_HOME=/tmp/ran-agent-hermes-home-phase5/sentence-transformers
+export HF_HOME=/home/ubuntu/.hermes-ran-agent/hf-home
+export TRANSFORMERS_CACHE=/home/ubuntu/.hermes-ran-agent/hf-home
+export SENTENCE_TRANSFORMERS_HOME=/home/ubuntu/.hermes-ran-agent/sentence-transformers
 export OBSIDIAN_MEMORY_VAULT_DIR=/opt/ran_agent/vault
 export OBSIDIAN_MEMORY_INDEX_PATH=/opt/ran_agent/data/obsidian-memory-index.duckdb
 export OBSIDIAN_INDEX_DEVICE=cpu
@@ -125,54 +188,41 @@ export OBSIDIAN_MEMORY_REINDEX=0
 export OBSIDIAN_MEMORY_WATCH=0
 ```
 
-Use `OBSIDIAN_MEMORY_REINDEX=1` or `OBSIDIAN_MEMORY_WATCH=1` only during
-explicit maintenance/prewarm sessions. The DuckDB index path is single-writer;
-do not run multiple `obsidian_memory` MCP instances against the same database.
+`OBSIDIAN_MEMORY_INDEX_PATH` 是单写 DuckDB 文件。不要让多个 `obsidian_memory` MCP 实例同时写同一个数据库。
 
-## Model Policy
+---
 
-`ran-assistant` defaults to:
-
-```yaml
-model:
-  provider: deepseek
-  default: deepseek-v4-flash
-```
-
-`deepseek-v4-pro` is available only through the explicit Pro template or a
-manual model override. It is not the default daily chat model.
-
-## Runtime Boundary
-
-Hermes is the front personality shell. Node bridge, media artifact handling,
-MCP tools, Python backend, memory, vault, night cycle, and persona evolution
-remain separate runtime assets.
-
-DeepSeek V4 is treated as text-only for this project. Raw images, audio, video,
-and social-platform media must be handled first by `mimo_power`, `media_reader`,
-`social_reader`, OCR, ASR, or other dedicated tools. Hermes receives compact
-tool results, not raw media.
-
-## Useful Commands
+## 常用命令
 
 ```bash
 hermes --help
 hermes profile --help
 hermes profile show ran-assistant
-hermes gateway run --replace --accept-hooks
-hermes -p ran-assistant -z "ping"
-hermes mcp list
-hermes mcp test media_reader
+hermes -p ran-assistant mcp list
+hermes -p ran-assistant mcp test media_reader
+hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
-Gateway foreground mode is:
+前台启动 gateway：
 
 ```bash
 hermes -p ran-assistant gateway run --replace --accept-hooks
 ```
 
-One-shot smoke test is:
+诊断：
 
 ```bash
-hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "用一句中文回复：Hermes online"
+bash scripts/diagnose-hermes-tools.sh
+bash scripts/diagnose-lite-full.sh
 ```
+
+服务器完整 runbook 见 `docs/governance/server_runtime_commands.md`。
+
+---
+
+## 安全边界
+
+- 本目录可提交，但只应包含 profile distribution。
+- 不提交 Hermes home、`.env`、sessions、memories、logs、cron、平台登录态。
+- 不在文档、日志或工具输出里打印 API key、Cookie、token、代理 URL。
+- Hermes 是前台人格 shell；Node bridge、媒体 artifact、MCP 工具、Python backend、memory、vault、night cycle 和 persona evolution 仍是独立运行资产。

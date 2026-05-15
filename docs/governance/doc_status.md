@@ -6,6 +6,7 @@ Status: CURRENT (2026-05-15)
 ## Public Source Of Truth
 
 - `README.md` / `README_en.md`
+- `hermes/README.md` / `hermes/README_en.md`
 - `AGENTS.md`
 - `CLAUDE.md`
 - `hermes/profile/AGENTS.md`

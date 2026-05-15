@@ -2,260 +2,236 @@
 
 # Ran Agent
 
-**A local-first personal AI agent that lives in WeChat, understands social media content, and manages knowledge — all on infrastructure you control.**
+Status: CURRENT (2026-05-15)
+
+**A local-first personal AI agent that lives in WeChat: Hermes handles conversation, Node bridge handles WeChat transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent connects WeChat to an LLM-powered conversation runtime with memory, reflection, and multi-modal understanding. Share a Bilibili link or a Xiaohongshu post, and the agent actually reads it — extracting subtitles from videos, running vision-language models on frames, and transcribing audio. Everything runs on a single server you own.
+Ran Agent is a personal runtime, not a SaaS product. It routes WeChat messages into Hermes Gateway, replies with DeepSeek V4 Flash, and uses MCP tools such as `media_reader`, `social_reader`, `mimo_power`, `personal_memory`, and `obsidian_memory` for media, social content, personal memory, and vault retrieval. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
+
+OpenClaw, Kimi, and GLM are retired as frontend paths. The current frontend mainline is Hermes + DeepSeek V4 Flash.
 
 ---
 
-## Table of Contents
+## Current Mainline
 
-- [What It Does](#what-it-does)
-- [Architecture](#architecture)
-- [MCP Services](#mcp-services)
-- [Quick Start](#quick-start)
-- [Configuration](#configuration)
-- [Project Structure](#project-structure)
-- [Testing](#testing)
-- [Platform Support](#platform-support)
-- [License](#license)
-- [Privacy](#privacy)
+```text
+WeChat
+  -> Node bridge
+  -> Hermes gateway lite/full
+  -> DeepSeek V4 Flash
+  -> reply
+
+Python backend
+  -> ingest / memory / knowledge / reflection / scheduler / reminders
+
+MCP services
+  -> media_reader / social_reader / mimo_power / media_generation
+  -> personal_memory / obsidian_memory / time / playwright / tavily
+```
+
+### Lite / Full Gateway
+
+Production uses two Hermes gateway instances. Node bridge selects the gateway per request:
+
+| Gateway | Port | Profile | Purpose |
+|---------|------|---------|---------|
+| lite | `8642` | `ran-assistant-lite` | Daily chat, Xiaohongshu, memory, image understanding |
+| full | `8643` | `ran-assistant` | Debugging, commands, logs, Playwright, media generation |
+
+`8642` is a low-context entry, not a security sandbox. If full is unavailable, Node bridge falls back to lite and logs the reason.
 
 ---
 
 ## What It Does
 
-**WeChat Agent.** Messages flow `WeChat → Node bridge → Hermes Gateway → Claude/Qwen → reply`. Natural conversation, not prompt-and-response. The agent remembers past conversations and evolves its persona over time.
+**WeChat conversation entry.** Messages enter `node_bridge/src/wechatBridge.mjs`, pass through inbound aggregation, media context handling, Hermes Gateway, and DeepSeek V4 Flash, then return to WeChat. The Python backend receives `/ingest` asynchronously for recent memory and downstream tasks.
 
-**Social Media Understanding.** Drop a Bilibili video, a Xiaohongshu note, or a WeChat article link into chat. The agent resolves the platform, extracts content, and summarizes it for you:
+**Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. Xiaohongshu uses the generic parser fallback as the primary read path, while search context stores `read_ref` handles without exposing platform tokens to the model or logs.
 
-- Bilibili: subtitle extraction (manual + AI-generated), cover image VLM, video frame analysis, ASR fallback
-- Xiaohongshu: note text extraction, image understanding, video metadata, comment reading
-- WeChat Articles: content parsing, captcha detection, structured degradation
+**Multimodal understanding.** WeChat images, audio, video, and documents first pass trusted-path validation. MiMo Power analyzes them first; `media_reader` is the fallback. Video analysis is subtitle-first: subtitles, audio ASR, keyframe VLM, then metadata fallback.
 
-**Knowledge Management.** An Obsidian vault stores structured knowledge. The Python backend runs periodic maintenance jobs — organizing notes, updating the knowledge index, and keeping the vault current. No dumping everything into a prompt window.
+**Media follow-up context.** Inbound media becomes conversation-scoped artifacts. When the user says “that image from earlier” or “use MiMo to look at it,” the inbound message buffer binds the text to recent media explicitly or as a soft candidate. Context Policy v1 injects at most 3 compact artifacts per turn by default.
 
-**Media Understanding Pipeline.** Send an image and follow up with "use mimo to look at it" — the system automatically merges the image and text into a single request. Media analysis results are persisted as conversation-level artifacts, so saying "that image from earlier" correctly resolves to the prior analysis. Supports deep multimodal analysis of images, audio, video, and documents.
+**Memory and knowledge.** `personal_memory` recalls personal memory through the Python backend. `obsidian_memory` searches the Obsidian vault through a semantic index. Long-term writes, reflection, night-cycle work, and knowledge maintenance stay in the Python backend and on-demand skills instead of always living in the main prompt.
 
-**Context Compression Policy.** Context Policy v1 enabled by default: max 3 media artifacts injected per turn, each compact-rendered (≤180 chars), prioritizing explicit refs and current media. Fallback to full media context via `RAN_AGENT_CONTEXT_POLICY=legacy`. See `docs/governance/media-pipeline.md`.
-
-**Memory and Reflection.** The agent builds a working memory across conversations. A nightly reflection cycle reviews the day's interactions and suggests persona refinements. You stay in control of what sticks and what fades.
-
----
-
-## Architecture
-
-```
-WeChat ──┬── inbound ──► Inbound Aggregation ──► Node Bridge ──► Hermes Gateway Runtime ──► Claude/Qwen
-         │                (image+text merge)          ▲                │    │    │
-         │                                            │                │    │    └──► media_generation
-         │                                            │                │    └───────► social_reader
-         │                                            │                └────────────► media_reader + mimo_power
-         │                                            │
-         └── outbound ◄── Node Bridge ◄── reply ◄────┘
-                              ▲
-                              │
-                    Python Backend
-                    ┌─────────┼─────────┐
-                    │ memory  │ scheduler│
-                    │ knowledge│ todo    │
-                    │ reflection         │
-                    └────────────────────┘
-```
-
-**Key Design Decisions:**
-
-- **MCP Facade Pattern.** Hermes sees clean, stable tools (`media_reader__analyze_video`, `social_reader__read_social_post_deep`, etc.). Behind each facade are platform resolvers, provider adapters, and format converters. Tools don't leak internals to the agent.
-
-- **Subtitle-First Video Understanding.** Four-tier progressive fallback: downloadable subtitles (~2s) → audio-only ASR transcription (~10s) → keyframe VLM analysis without OCR (~30s) → metadata as last resort (~1s). Long videos never blindly download full files.
-
-- **Media Artifact Pipeline.** Inbound media is analyzed (MiMo first, media_reader fallback) and stored as conversation-scoped artifacts. Follow-up references like "that image from earlier" resolve to prior analysis results without reprocessing.
-
-- **Local-First Everything.** State in SQLite. Knowledge in Obsidian vault. Conversations on your machine. No cloud database, no hosted service, no telemetry. Single-user by design — there is no user management, no RBAC, no API rate limiting, because there's only you.
+**Sendable media generation.** The full gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.
 
 ---
 
 ## MCP Services
 
-The agent's capabilities are organized as MCP (Model Context Protocol) services. Each service exposes a focused set of tools to Hermes.
+| Service | Purpose | Default Entry |
+|---------|---------|---------------|
+| `time` | Timezone-aware time queries, default `Asia/Shanghai` | lite/full |
+| `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis | lite/full |
+| `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | lite/full |
+| `mimo_power` | Deep multimodal analysis through MiMo Token Plan | lite/full |
+| `personal_memory` | Personal memory recall and backend health check | lite/full |
+| `obsidian_memory` | Obsidian vault semantic search | lite/full |
+| `media_generation` | Image and speech generation | full |
+| `playwright` | Browser automation and dynamic-page debugging | full |
+| `tavily` | Optional web search MCP, requires a local API key | lite/full |
 
-### Built-in Services
-
-**`media_reader`** — The agent's eyes and ears for media content.
-
-| Tool | Description |
-|------|-------------|
-| `extract_media_assets` | Extract media URLs from social text or message content |
-| `analyze_image` | OCR + vision-language model analysis of images |
-| `resolve_platform_media` | Resolve Bilibili/XHS/WeChat links into normalized media |
-| `transcribe_audio` | Speech-to-text transcription with language detection |
-| `analyze_video` | Video analysis: metadata, subtitle extraction, frame VLM, ASR |
-| `analyze_media_batch` | Batch analysis with partial-failure tolerance |
-
-**`social_reader`** — Platform-aware social content reading.
-
-| Tool | Description |
-|------|-------------|
-| `resolve_social_url` | Identify platform and extract canonical URL from share text |
-| `read_social_post` | Read a social media post with platform-specific extraction |
-| `read_social_post_deep` | Deep read: resolve platform media + analyze all assets |
-| `read_music_share` | Parse shared music links (NetEase, etc.) |
-| `check_social_login` | Check platform authentication status |
-
-**`media_generation`** — Create sendable media for WeChat responses.
-
-| Tool | Description |
-|------|-------------|
-| `generate_image` | Generate images via Qwen image generation |
-| `generate_speech` | Text-to-speech audio generation |
-
-**`mimo_power`** — Deep multimodal analysis service.
-
-| Tool | Description |
-|------|-------------|
-| `analyze` | Deep multimodal analysis (image/audio/video/document) via MiMo Token Plan |
-
-**`ombre_brain`** — Emotional memory system for long-term memory management.
-
-| Tool | Description |
-|------|-------------|
-| `breath` | Recall memories by emotional relevance |
-| `trace` | Trace memory associations and connections |
-| `pulse` | Surface active/emotionally charged memories |
-| `hold` | Store a long-term memory entry |
-| `grow` | Store a core (identity-forming) memory |
-
-Implements Russell's valence/arousal model, Ebbinghaus forgetting curve, and Obsidian-compatible Markdown storage.
-
-<sub>Integrated from [P0luz/Ombre-Brain](https://github.com/P0luz/Ombre-Brain), used directly as the memory management MCP.</sub>
-
-### External Services
-
-| Service | Description |
-|---------|-------------|
-| `playwright` | Browser automation for web interaction |
-| `time` | Timezone-aware time and date queries |
-| `tavily` | Web search via Tavily API |
+DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must go through MCP tools first. Hermes receives structured text results.
 
 ---
 
 ## Quick Start
 
-**Prerequisites:** Node.js ≥22, Python ≥3.10, ffmpeg, ffprobe
+**Prerequisites:** Node.js >= 22, Python >= 3.10, ffmpeg, ffprobe, Hermes CLI >= 0.13.0.
 
 ```bash
 git clone https://github.com/F-crystal/ran-agent.git
 cd ran-agent
 
-# Install dependencies
 npm install
-python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-# Configure credentials
 cp .env.example .env.local
-# Edit .env.local — at minimum you need ANTHROPIC_BASE_URL and ANTHROPIC_AUTH_TOKEN
 ```
 
-Then start each service in its own terminal:
+At minimum, configure the model, Hermes gateway, and Python backend variables:
 
 ```bash
-hermes -p ran-assistant gateway run       # Agent runtime
-./start_python.sh          # Backend services (memory, scheduler, knowledge)
-cd node_bridge && ./start_node.sh  # WeChat bridge
+RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
+NODE_BRIDGE_REPLY_BACKEND=hermes
+HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+RAN_AGENT_CAPABILITY_MODE=auto
+PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
+DEEPSEEK_API_KEY=...
 ```
 
+For local development, a single full gateway is enough. Production should run lite and full:
+
+```bash
+# Terminal 1: Python backend
+./start_python.sh
+
+# Terminal 2: Hermes gateway
+export RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
+export HERMES_HOME=/absolute/path/to/hermes-home
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
+hermes -p ran-assistant gateway run --replace --accept-hooks
+
+# Terminal 3: Node bridge
+cd node_bridge
+./start_node.sh
+```
+
+For production systemd, dual gateway setup, Hermes env sync, and recovery commands, see `docs/governance/server_runtime_commands.md`.
 
 ---
 
 ## Configuration
 
-All configuration lives in `.env.local` (never committed). Copy the template and fill in your values:
-
-```bash
-cp .env.example .env.local
-```
-
-Configuration by module:
+All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-local Hermes `.env` files. Do not commit them.
 
 | Module | Key Variables | Notes |
-|--------|--------------|-------|
-| Model Provider | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` | Claude-compatible API (required) |
-| Vision | `PERSONAL_AGENT_VISION_PROVIDER`, `PERSONAL_AGENT_VISION_MODEL` | Default `dashscope-qwen-vl` / `qwen3-vl-flash` |
-| ASR | `PERSONAL_AGENT_ASR_PROVIDER`, `PERSONAL_AGENT_ASR_MODEL` | Default `dashscope-asr` / `qwen3-asr-flash` |
-| Web Search | `TAVILY_API_KEY` | Tavily search API |
-| Bilibili | `PERSONAL_AGENT_BILIBILI_ENABLED`, `PERSONAL_AGENT_YTDLP_PATH` | yt-dlp path + proxy/auth |
-| Xiaohongshu | `PERSONAL_AGENT_XHS_ENABLED`, `PERSONAL_AGENT_XHS_PROVIDER` | Backend MCP or social reader |
-| Video Processing | `PERSONAL_AGENT_FFMPEG_PATH`, `PERSONAL_AGENT_FFPROBE_PATH` | ffmpeg/ffprobe paths |
-| Cache/Concurrency | `PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY`, `PERSONAL_AGENT_MEDIA_CACHE_DIR` | Batch concurrency, cache dir |
+|--------|---------------|-------|
+| Hermes / DeepSeek | `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, `API_SERVER_KEY` | Hermes gateway and model provider |
+| Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Node bridge lite/full auto-selection |
+| Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest and memory recall |
+| MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | Deep multimodal analysis |
+| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR and media generation |
+| Social platforms | `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
+| Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault retrieval and indexing |
+| Media context | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | compact by default, legacy fallback available |
 
-Full variable list: see `.env.example`.
+The full template is `.env.example`. The authoritative current runtime state is `docs/governance/current_runtime_status.md`.
 
 ---
 
 ## Project Structure
 
-```
+```text
 ran_agent/
-├── hermes/                      # Hermes Gateway config and runtime
-├── node_bridge/                 # WeChat bridge + MCP facade servers
+├── hermes/                         # Hermes profile distribution
+│   └── profile/                    # ran-assistant / ran-assistant-lite config
+├── node_bridge/                    # WeChat bridge, Hermes client, MCP facades
 │   └── src/
-│       ├── mediaReader/         # OCR, VLM, ASR, ffmpeg, platform resolvers
-│       │   └── platformResolvers/  # Bilibili, XHS, WeChat resolvers
-│       ├── inboundMessageBuffer.mjs  # Turn aggregation (image+text merge)
-│       ├── mediaContextStore.mjs     # Media artifact persistence
-│       ├── trustedMediaPaths.mjs     # Trusted media path validation
-│       ├── mimoPowerMcpServer.mjs    # MiMo Power MCP service
-│       ├── socialReaderMcpServer.mjs
+│       ├── mediaReader/            # OCR, ASR, VLM, platform resolvers, video analysis
+│       ├── inboundMessageBuffer.mjs
+│       ├── hermesGatewayClient.mjs
+│       ├── mediaContextStore.mjs
 │       ├── mediaReaderMcpServer.mjs
+│       ├── socialReaderMcpServer.mjs
+│       ├── mimoPowerMcpServer.mjs
 │       ├── mediaGenerationMcpServer.mjs
-│       └── wechatBridge.mjs     # WeChat inbound/outbound message handling
-├── src/personal_agent/          # Python backend
-│   ├── memory.py                # Conversation memory
-│   ├── knowledge_agent.py       # Knowledge extraction and vault management
-│   ├── scheduler.py             # Cron job scheduler
-│   └── night_cycle.py           # Nightly reflection and persona evolution
-├── skills/                      # On-demand operational skills
-├── scripts/                     # Startup scripts, deploy tooling
-├── vault/                       # Obsidian knowledge vault (templates only)
-├── docs/governance/             # Runtime constraints and status
-└── local_archive/               # Deployment guides (private, not in git)
+│       └── personalMemoryMcpServer.mjs
+├── src/personal_agent/             # Python backend
+│   ├── http_server.py
+│   ├── service.py
+│   ├── memory.py
+│   ├── knowledge_agent.py
+│   ├── scheduler.py
+│   └── night_cycle.py
+├── scripts/                        # MCP launchers, diagnostics, deploy helpers
+├── skills/                         # On-demand project skills
+├── docs/governance/                # Current runtime status and governance
+├── vault/                          # Obsidian vault template, no private content
+└── local_archive/                  # Local deployment records, ignored by Git
 ```
 
 ---
 
-## Testing
+## Testing And Diagnostics
 
 ```bash
-# Python tests
 PYTHONPATH=src pytest -q tests/
-
-# Node.js tests
 npm --prefix node_bridge test
+bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-hermes-tools.sh
 ```
+
+Hermes profile smoke:
+
+```bash
+hermes -p ran-assistant mcp list
+hermes -p ran-assistant mcp test media_reader
+hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+```
+
+---
+
+## Documentation
+
+| Document | Contents |
+|----------|----------|
+| `docs/governance/current_runtime_status.md` | Current runtime mainline |
+| `docs/governance/server_runtime_commands.md` | Server runbook and recovery commands |
+| `docs/governance/media-pipeline.md` | WeChat media context and Context Policy v1 |
+| `docs/governance/phase_status.md` | Hermes migration and OpenClaw retirement status |
+| `hermes/README.md` | Hermes profile distribution, Chinese |
+| `hermes/README_en.md` | Hermes profile distribution, English |
 
 ---
 
 ## Platform Support
 
-| Platform | Resolver | Subtitles | Video Frames | Auth Support |
-|----------|----------|-----------|--------------|--------------|
-| Bilibili | yt-dlp + MCP | manual + AI-generated | VLM frame analysis | SESSDATA cookie |
-| Xiaohongshu | Backend MCP | note text as content | cover image VLM | Cookie auth |
-| WeChat Articles | HTML fetch + parser | article body | — | Login-free |
-| Direct media URLs | ffmpeg + DashScope | ASR transcription | VLM frame analysis | — |
+| Platform | Current Path | Auth |
+|----------|--------------|------|
+| Bilibili | `social_reader` + `media_reader`, subtitle-first with ASR/keyframe fallback | optional `SESSDATA` |
+| Xiaohongshu | `social_reader`, generic parser fallback + token-aware compatibility path | optional but common `XHS_COOKIE` |
+| WeChat articles | HTML fetch, body parsing, captcha detection, structured degradation | usually login-free |
+| Images/audio/video/documents | `mimo_power` first, `media_reader` fallback | trusted local path or remote URL |
+
+---
+
+## Security And Privacy
+
+This is a single-user personal system. Never commit these paths or values: `.env.local`, `node_bridge/.env.local`, `.ran_agent_state/`, `data/`, `logs/`, `debug/`, `state/`, `local_archive/`, private `vault/` content, cookies, API keys, proxy URLs, or platform login state.
+
+Platform resolver credentials such as `SESSDATA`, `XHS_COOKIE`, and proxy URLs must not appear in logs, docs, tool output, or Git history.
 
 ---
 
 ## License
 
-PolyForm Noncommercial License 1.0.0 — free for personal use, research, and learning. Commercial use requires permission. See [LICENSE.md](LICENSE.md).
-
----
-
-## Privacy
-
-This is a personal agent. None of these should ever enter version control: `.env.local`, `.ran_agent_state/`, chat logs, cookies, API keys, vault content, state databases. The `.gitignore` is configured to block these by default — always verify before making your fork public.
+PolyForm Noncommercial License 1.0.0. Free for personal use, research, and learning. Commercial use requires permission. See [LICENSE.md](LICENSE.md).

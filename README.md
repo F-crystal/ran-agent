@@ -2,260 +2,236 @@
 
 # Ran Agent
 
-**一个运行在微信里的本地优先个人 AI 助手，能理解社交媒体内容、管理知识——所有数据都在你自己的服务器上。**
+Status: CURRENT (2026-05-15)
+
+**一个运行在微信里的本地优先个人 AI 助手：Hermes 负责对话，Node bridge 负责微信接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent 是一个端到端的个人 Agent 运行时。它把微信消息接入 LLM 对话引擎，加上记忆和反思能力，再通过多模态理解管线让 Agent"看见"内容——发给它一个 B站链接或小红书帖子，它真的会去看、去读、去总结。一切在你自己的服务器上运行。
+Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信消息接入 Hermes Gateway，再用 DeepSeek V4 Flash 生成回复；同时通过 `media_reader`、`social_reader`、`mimo_power`、`personal_memory`、`obsidian_memory` 等 MCP 工具读取媒体、社交内容、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
+
+OpenClaw、Kimi 和 GLM 前台路线已经退休；当前前台主线只有 Hermes + DeepSeek V4 Flash。
 
 ---
 
-## 目录
+## 当前主线
 
-- [能做什么](#能做什么)
-- [架构](#架构)
-- [MCP 服务](#mcp-服务)
-- [快速开始](#快速开始)
-- [配置说明](#配置说明)
-- [项目结构](#项目结构)
-- [测试](#测试)
-- [平台支持](#平台支持)
-- [许可证](#许可证)
-- [隐私](#隐私)
+```text
+WeChat
+  -> Node bridge
+  -> Hermes gateway lite/full
+  -> DeepSeek V4 Flash
+  -> reply
+
+Python backend
+  -> ingest / memory / knowledge / reflection / scheduler / reminders
+
+MCP services
+  -> media_reader / social_reader / mimo_power / media_generation
+  -> personal_memory / obsidian_memory / time / playwright / tavily
+```
+
+### Lite / Full Gateway
+
+生产部署使用两个 Hermes gateway，由 Node bridge 按请求自动选择：
+
+| Gateway | 端口 | Profile | 用途 |
+|---------|------|---------|------|
+| lite | `8642` | `ran-assistant-lite` | 日常聊天、小红书、记忆、图片理解 |
+| full | `8643` | `ran-assistant` | 调试、命令、日志、Playwright、媒体生成 |
+
+`8642` 是低上下文入口，不是安全沙箱。full 不可用时，Node bridge 会回退到 lite 并记录原因。
 
 ---
 
 ## 能做什么
 
-**微信 Agent。** 消息路径：`微信 → Node Bridge → Hermes Gateway → Claude/Qwen → 回复`。像跟朋友聊天，不像在提示词框里打字。Agent 会记住你们的对话，并在长期交互中演化自己的性格。
+**微信对话入口。** 微信消息进入 `node_bridge/src/wechatBridge.mjs`，经入站聚合、媒体上下文处理、Hermes Gateway、DeepSeek V4 Flash 后回到微信。Python 后端会异步接收 `/ingest`，维护近期记忆和后续任务。
 
-**社交媒体理解。** 把 B站视频、小红书笔记、微信公众号文章链接发到对话框里，Agent 会解析内容并总结给你：
+**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。小红书优先使用通用解析 fallback，搜索上下文会缓存 `read_ref`，避免把平台 token 暴露给模型或日志。
 
-- B站：字幕提取（人工字幕 + AI 生成字幕）、封面图视觉理解、视频帧分析、语音转写兜底
-- 小红书：笔记正文提取、图片内容理解、视频元数据、评论读取
-- 微信公众号：正文解析、验证码识别、结构化降级
+**多模态理解。** 微信图片、音频、视频和文档先经过可信路径校验，再由 MiMo Power 优先分析，失败时回退到 `media_reader`。视频采用字幕优先策略：字幕、音频 ASR、关键帧 VLM、元数据逐级降级。
 
-**知识管理。** Obsidian 知识库存储结构化知识，Python 后端定期运行维护任务——整理笔记、更新知识索引、保持知识库更新。不需要把全部内容塞进 prompt。
+**媒体上下文追问。** 入站媒体会生成会话级 artifact。用户说“刚才那张图”“用 mimo 看一下”时，入站消息缓冲会把文本与最近媒体显式或软绑定。默认 Context Policy v1 每轮最多注入 3 个紧凑 artifact。
 
-**媒体理解管线。** 发图片后说"用 mimo 看一下"，系统自动将图片和文字合并为一个请求处理。媒体分析结果在会话中持久化，后续说"刚才那张图"能正确指代之前的分析结果。支持图片、音频、视频、文档的深度多模态分析。
+**记忆和知识。** `personal_memory` 通过 Python backend 召回个人记忆；`obsidian_memory` 通过 Obsidian vault 语义索引检索知识。长期写入、反思、夜间循环和知识维护留在 Python 后端和按需 skill 中，不常驻主 prompt。
 
-
-**上下文压缩策略。** 默认开启 Context Policy v1：每轮最多注入 3 个媒体 artifact，每个 artifact 紧凑渲染（≤180 字符），优先注入显式引用和当前媒体。可通过 `RAN_AGENT_CONTEXT_POLICY=legacy` 回退到完整媒体上下文模式。详见 `docs/governance/media-pipeline.md`。
-**记忆与反思。** Agent 在对话中构建工作记忆。每晚运行反思周期，回顾当天互动，提出性格微调建议。你始终控制哪些内容被记住、哪些被遗忘。
-
----
-
-## 架构
-
-```
-微信 ──┬── 消息接入 ──► 入站消息聚合 ──► Node Bridge ──► Hermes Gateway ──► Claude/Qwen
-       │                  (图片+文字合并)       ▲               │    │    │
-       │                                        │               │    │    └──► media_generation
-       │                                        │               │    └───────► social_reader
-       │                                        │               └────────────► media_reader + mimo_power
-       │                                        │
-       └── 消息发出 ◄── Node Bridge ◄── 回复 ◄──┘
-                            ▲
-                            │
-                  Python 后端服务
-                  ┌─────────┼─────────┐
-                  │ 记忆    │ 调度器   │
-                  │ 知识库  │ 待办     │
-                  │ 反思              │
-                  └────────────────────┘
-```
-
-**关键设计决策：**
-
-- **MCP 门面模式。** Hermes 只看到 6 个干净稳定的工具（`media_reader__analyze_video` 等），背后是平台解析器、Provider 适配器、格式转换器。内部细节不泄露给 Agent。
-
-- **字幕优先的视频理解。** 四层逐级降级：软字幕直接提取（~2s）→ 纯音频 ASR 转写（~10s，仅下载音频）→ 关键帧 VLM 分析（~30s，不含 OCR）→ 元数据兜底（~1s）。长视频不盲目下载全片。
-
-- **媒体制品管线。** 入站媒体经 MiMo 分析（media_reader 兜底）后存为会话级制品。后续引用如"刚才那张图"自动解析到先前的分析结果，无需重复处理。
-
-- **数据完全本地。** 状态存 SQLite，知识存 Obsidian Vault，聊天记录在你的机器上。没有云数据库、没有托管服务、没有遥测。单用户设计——没有用户管理、权限控制、API 限流，因为只有你一个人用。
+**可发送媒体生成。** full gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
 
 ---
 
 ## MCP 服务
 
-Agent 的能力以 MCP（模型上下文协议）服务的形式组织，每个服务向 Hermes 暴露一组聚焦的工具。
+| 服务 | 作用 | 默认入口 |
+|------|------|----------|
+| `time` | 时区感知时间查询，默认 `Asia/Shanghai` | lite/full |
+| `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | lite/full |
+| `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | lite/full |
+| `mimo_power` | MiMo Token Plan 深度多模态分析 | lite/full |
+| `personal_memory` | 个人记忆召回与 backend 健康检查 | lite/full |
+| `obsidian_memory` | Obsidian vault 语义检索 | lite/full |
+| `media_generation` | 图片和语音生成 | full |
+| `playwright` | 浏览器自动化和动态页面调试 | full |
+| `tavily` | 可选网页搜索 MCP，需要本机 API key | lite/full |
 
-### 自建服务
-
-**`media_reader`** — Agent 的"眼睛和耳朵"。
-
-| 工具 | 描述 |
-|------|------|
-| `extract_media_assets` | 从社交文本或消息中提取媒体 URL |
-| `analyze_image` | 图片 OCR + 视觉语言模型分析 |
-| `resolve_platform_media` | 解析 B站/小红书/微信链接为标准化媒体 |
-| `transcribe_audio` | 语音转文字，支持语言检测 |
-| `analyze_video` | 视频分析：元数据、字幕提取、帧 VLM、语音转写 |
-| `analyze_media_batch` | 批量分析，支持部分失败容错 |
-
-**`social_reader`** — 平台感知的社交内容阅读。
-
-| 工具 | 描述 |
-|------|------|
-| `resolve_social_url` | 识别平台，从分享文案中提取规范 URL |
-| `read_social_post` | 读取社交帖子，平台特定的内容提取 |
-| `read_social_post_deep` | 深度读取：解析平台媒体 + 分析所有资源 |
-| `read_music_share` | 解析音乐分享链接（网易云等） |
-| `check_social_login` | 检查平台认证状态 |
-
-**`media_generation`** — 为微信回复生成可发送的媒体。
-
-| 工具 | 描述 |
-|------|------|
-| `generate_image` | 通过 Qwen 生成图片 |
-| `generate_speech` | 文字转语音 |
-
-**`mimo_power`** — 深度多模态分析服务。
-
-| 工具 | 描述 |
-|------|------|
-| `analyze` | 深度多模态分析（图片/音频/视频/文档），使用 MiMo Token Plan |
-
-**`ombre_brain`** — 情感记忆系统，用于长期记忆管理。
-
-| 工具 | 描述 |
-|------|------|
-| `breath` | 按情感相关性召回记忆 |
-| `trace` | 追踪记忆关联和连接 |
-| `pulse` | 浮现活跃/高情感记忆 |
-| `hold` | 存储长期记忆条目 |
-| `grow` | 存储核心（身份形成性）记忆 |
-
-实现 Russell 效价/唤醒度模型、Ebbinghaus 遗忘曲线、Obsidian 兼容 Markdown 存储。
-
-<sub>集成自 [P0luz/Ombre-Brain](https://github.com/P0luz/Ombre-Brain)，直接作为记忆管理 MCP 使用。</sub>
-
-### 外部服务
-
-| 服务 | 描述 |
-|------|------|
-| `playwright` | 浏览器自动化，用于网页交互 |
-| `time` | 时区感知的时间和日期查询 |
-| `tavily` | 通过 Tavily API 进行网页搜索 |
+DeepSeek V4 在本项目中按文本模型使用。原始图片、音频、视频和社交平台内容必须先交给 MCP 工具，Hermes 只接收结构化文本结果。
 
 ---
 
 ## 快速开始
 
-**前提：** Node.js ≥22，Python ≥3.10，ffmpeg，ffprobe
+**前提：** Node.js >= 22，Python >= 3.10，ffmpeg，ffprobe，Hermes CLI >= 0.13.0。
 
 ```bash
 git clone https://github.com/F-crystal/ran-agent.git
 cd ran-agent
 
-# 安装依赖
 npm install
-python3 -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 
-# 配置凭据
 cp .env.example .env.local
-# 编辑 .env.local — 最少需要 ANTHROPIC_BASE_URL 和 ANTHROPIC_AUTH_TOKEN
 ```
 
-三个终端分别启动：
+最少需要配置模型、Hermes gateway 和 Python backend 相关变量：
 
 ```bash
-hermes -p ran-assistant gateway run       # Agent 运行时
-./start_python.sh          # 后端服务（记忆、调度、知识库）
-cd node_bridge && ./start_node.sh  # 微信 Bridge
+RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
+NODE_BRIDGE_REPLY_BACKEND=hermes
+HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+RAN_AGENT_CAPABILITY_MODE=auto
+PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
+DEEPSEEK_API_KEY=...
 ```
-三个终端分别启动。停止用 `Ctrl+C`。
+
+开发机可只启动一个 full gateway；生产口径建议同时启动 lite/full：
+
+```bash
+# 终端 1：Python backend
+./start_python.sh
+
+# 终端 2：Hermes gateway
+export RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
+export HERMES_HOME=/absolute/path/to/hermes-home
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
+hermes -p ran-assistant gateway run --replace --accept-hooks
+
+# 终端 3：Node bridge
+cd node_bridge
+./start_node.sh
+```
+
+生产 systemd、双 gateway、Hermes env 同步和故障恢复命令见 `docs/governance/server_runtime_commands.md`。
 
 ---
 
-## 配置说明
+## 配置
 
-所有配置在 `.env.local` 中（不提交到 Git）。复制模板并根据需要填写：
-
-```bash
-cp .env.example .env.local
-```
-
-配置按模块分组：
+所有密钥都放在本机 `.env.local`、`node_bridge/.env.local` 或机器本地 Hermes `.env`，不要提交。
 
 | 模块 | 关键变量 | 说明 |
 |------|----------|------|
-| 模型 Provider | `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` | Claude 兼容 API（必填） |
-| 视觉理解 | `PERSONAL_AGENT_VISION_PROVIDER`, `PERSONAL_AGENT_VISION_MODEL` | 默认 `dashscope-qwen-vl` / `qwen3-vl-flash` |
-| 语音识别 | `PERSONAL_AGENT_ASR_PROVIDER`, `PERSONAL_AGENT_ASR_MODEL` | 默认 `dashscope-asr` / `qwen3-asr-flash` |
-| 网页搜索 | `TAVILY_API_KEY` | Tavily 搜索 API |
-| B站 | `PERSONAL_AGENT_BILIBILI_ENABLED`, `PERSONAL_AGENT_YTDLP_PATH` | yt-dlp 路径 + 代理/认证 |
-| 小红书 | `PERSONAL_AGENT_XHS_ENABLED`, `PERSONAL_AGENT_XHS_PROVIDER` | 后端 MCP 或 social reader |
-| 视频处理 | `PERSONAL_AGENT_FFMPEG_PATH`, `PERSONAL_AGENT_FFPROBE_PATH` | ffmpeg/ffprobe 路径 |
-| 缓存/并发 | `PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY`, `PERSONAL_AGENT_MEDIA_CACHE_DIR` | 批次并发数、缓存目录 |
+| Hermes / DeepSeek | `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, `API_SERVER_KEY` | Hermes gateway 和模型 provider |
+| Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Node bridge 自动选择 lite/full |
+| Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest 和记忆召回 |
+| MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | 深度多模态分析 |
+| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR 和媒体生成 |
+| 社交平台 | `XHS_COOKIE`, `SESSDATA` | 小红书、B 站等平台认证 |
+| Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault 检索与索引 |
+| 媒体上下文 | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | 默认 compact，可回退 legacy |
 
-完整变量列表见 `.env.example`。
+完整变量模板见 `.env.example`。服务器当前状态和最新部署口径见 `docs/governance/current_runtime_status.md`。
 
 ---
 
 ## 项目结构
 
-```
+```text
 ran_agent/
-├── hermes/                      # Hermes Gateway 配置和运行时
-├── node_bridge/                 # 微信 Bridge + MCP 门面服务
+├── hermes/                         # Hermes profile distribution
+│   └── profile/                    # ran-assistant / ran-assistant-lite 配置
+├── node_bridge/                    # 微信 bridge、Hermes client、MCP facade
 │   └── src/
-│       ├── mediaReader/         # OCR、VLM、ASR、ffmpeg、平台解析器
-│       │   └── platformResolvers/  # B站、小红书、微信公众号解析器
-│       ├── inboundMessageBuffer.mjs  # 入站消息聚合（图片+文字合并）
-│       ├── mediaContextStore.mjs     # 媒体制品持久化
-│       ├── trustedMediaPaths.mjs     # 可信媒体路径校验
-│       ├── mimoPowerMcpServer.mjs    # MiMo Power MCP 服务
-│       ├── socialReaderMcpServer.mjs
+│       ├── mediaReader/            # OCR、ASR、VLM、平台解析器、视频分析
+│       ├── inboundMessageBuffer.mjs
+│       ├── hermesGatewayClient.mjs
+│       ├── mediaContextStore.mjs
 │       ├── mediaReaderMcpServer.mjs
+│       ├── socialReaderMcpServer.mjs
+│       ├── mimoPowerMcpServer.mjs
 │       ├── mediaGenerationMcpServer.mjs
-│       └── wechatBridge.mjs     # 微信消息收发处理
-├── src/personal_agent/          # Python 后端
-│   ├── memory.py                # 对话记忆
-│   ├── knowledge_agent.py       # 知识提取和 Vault 管理
-│   ├── scheduler.py             # 定时任务调度
-│   └── night_cycle.py           # 夜间反思和性格演化
-├── skills/                      # 按需加载的专业技能
-├── scripts/                     # 启动脚本、部署工具
-├── vault/                       # Obsidian 知识库（仅模板）
-├── docs/governance/             # 运行时约束和状态
-└── local_archive/               # 部署指南（私有，不入 Git）
+│       └── personalMemoryMcpServer.mjs
+├── src/personal_agent/             # Python backend
+│   ├── http_server.py
+│   ├── service.py
+│   ├── memory.py
+│   ├── knowledge_agent.py
+│   ├── scheduler.py
+│   └── night_cycle.py
+├── scripts/                        # MCP 启动器、诊断、部署辅助
+├── skills/                         # 按需加载的项目技能
+├── docs/governance/                # 当前运行时状态和治理口径
+├── vault/                          # Obsidian vault 模板，不提交私有内容
+└── local_archive/                  # 本地部署记录，忽略不入 Git
 ```
 
 ---
 
-## 测试
+## 测试与诊断
 
 ```bash
-# Python 测试
 PYTHONPATH=src pytest -q tests/
-
-# Node.js 测试
 npm --prefix node_bridge test
+bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-hermes-tools.sh
 ```
+
+Hermes profile smoke：
+
+```bash
+hermes -p ran-assistant mcp list
+hermes -p ran-assistant mcp test media_reader
+hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+```
+
+---
+
+## 文档入口
+
+| 文档 | 内容 |
+|------|------|
+| `docs/governance/current_runtime_status.md` | 当前真实运行时主线 |
+| `docs/governance/server_runtime_commands.md` | 服务器 runbook 和恢复命令 |
+| `docs/governance/media-pipeline.md` | 微信媒体上下文和 Context Policy v1 |
+| `docs/governance/phase_status.md` | Hermes 迁移和 OpenClaw 退休阶段状态 |
+| `hermes/README.md` | Hermes profile distribution 中文说明 |
+| `hermes/README_en.md` | Hermes profile distribution 英文说明 |
 
 ---
 
 ## 平台支持
 
-| 平台 | 解析方式 | 字幕 | 视频帧 | 认证支持 |
-|------|----------|------|--------|----------|
-| B站 | yt-dlp + MCP | 人工 + AI | VLM 逐帧分析 | SESSDATA Cookie |
-| 小红书 | 后端 MCP | 笔记正文 | 封面图 VLM | Cookie 认证 |
-| 微信公众号 | HTML 抓取 + 解析 | 文章正文 | — | 无需登录 |
-| 直接媒体链接 | ffmpeg + DashScope | ASR 转写 | VLM 逐帧分析 | — |
+| 平台 | 当前路径 | 认证 |
+|------|----------|------|
+| B 站 | `social_reader` + `media_reader`，字幕优先、ASR/关键帧兜底 | `SESSDATA` 可选 |
+| 小红书 | `social_reader`，generic parser fallback + token-aware compatibility path | `XHS_COOKIE` 可选但常用 |
+| 微信公众号 | HTML 抓取、正文解析、验证码识别和结构化降级 | 通常无需登录 |
+| 图片/音频/视频/文档 | `mimo_power` 优先，`media_reader` 兜底 | 本地可信路径或远程 URL |
+
+---
+
+## 安全与隐私
+
+这是单用户个人系统。不要提交这些路径或内容：`.env.local`、`node_bridge/.env.local`、`.ran_agent_state/`、`data/`、`logs/`、`debug/`、`state/`、`local_archive/`、`vault/` 私有内容、Cookie、API key、代理 URL、平台登录态。
+
+平台 resolver 凭据如 `SESSDATA`、`XHS_COOKIE` 和代理 URL 也不能出现在日志、文档、工具输出或 Git 历史里。
 
 ---
 
 ## 许可证
 
-PolyForm Noncommercial License 1.0.0 — 个人使用、研究和学习免费。商业使用需授权。详见 [LICENSE.md](LICENSE.md)。
-
----
-
-## 隐私
-
-这是一个个人 Agent。以下内容永远不应进入版本控制：`.env.local`、`.ran_agent_state/`、聊天记录、Cookie、API 密钥、Vault 内容、状态数据库。`.gitignore` 已默认阻止这些文件——在公开你的 Fork 前务必再次确认。
+PolyForm Noncommercial License 1.0.0。个人使用、研究和学习免费；商业使用需另行授权。详见 [LICENSE.md](LICENSE.md)。
