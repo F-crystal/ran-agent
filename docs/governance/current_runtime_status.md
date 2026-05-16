@@ -11,8 +11,13 @@ Status: CURRENT (2026-05-17)
 
 ## Lite/Full Runtime
 
-- **8642 (lite):** `ran-assistant-lite` profile, `~/.hermes-ran-agent/lite` home. Low-context daily entry (~22644 tokens). Used for normal chat, XHS, memory, image understanding.
-- **8643 (full):** `ran-assistant` profile, `~/.hermes-ran-agent` home. Full debug entry (~24331 tokens). Used for debug/commands/generation.
+- **8642 (lite):** `ran-assistant-lite` profile, `/home/ubuntu/.hermes-ran-agent/lite` home. Low-context daily entry (~22644 tokens). Used for normal chat, XHS, memory, image understanding.
+- **8643 (full):** `ran-assistant` profile, `/home/ubuntu/.hermes-ran-agent` home. Full debug entry (~24331 tokens). Used for debug/commands/generation.
+- Phase 11.1 systemd compact is the current target: `ran-agent-hermes.service`
+  directly represents lite (8642 / `ran-assistant-lite`), and
+  `ran-agent-hermes-full.service` directly represents full (8643 /
+  `ran-assistant`). Lite is no longer produced by layering
+  `90-lite-runtime.conf` over an old/full main unit.
 - Search Hub MCP is registered in both lite and full. Lite/full differ by
   Search Hub provider capability, not by whether the tool exists.
 - Lite Search Hub uses lightweight public providers by default: Tavily, AIHOT,
@@ -29,10 +34,11 @@ Status: CURRENT (2026-05-17)
 - Search Hub diagnosis entry: `bash scripts/diagnose-search-hub.sh`.
 - Conversation continuity diagnosis entry:
   `bash scripts/diagnose-hermes-continuity.sh`.
-- Do not hand-edit systemd or runtime env for the lite/full split. Inspect effective
-  runtime state with `systemctl cat ran-agent-hermes.service` and
-  `systemctl cat ran-agent-hermes-full.service`; lite-critical settings live in
-  `90-lite-runtime.conf`.
+- Do not hand-edit systemd or runtime env for the lite/full split. Inspect
+  compact effective runtime state with `systemctl cat ran-agent-hermes.service`
+  and `systemctl cat ran-agent-hermes-full.service`; stale
+  `90-lite-runtime.conf`, `30-hermes-runtime.conf`, and `30-hermes-env.conf`
+  should be absent after running `scripts/apply-hermes-runtime-split.sh`.
 
 ## Production Fix Closure
 

@@ -142,12 +142,19 @@ cd node_bridge
 
 ```bash
 bash scripts/apply-hermes-runtime-split.sh
-bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-hermes-tools.sh
 ```
 
-不要手工修改 `/home/ubuntu/.hermes-ran-agent` 或 systemd/env 作为常规部署路径。Hermes runtime 配置变更必须从 repo 源配置进入，再通过 `scripts/apply-hermes-runtime-split.sh` 应用；详细口径见 `docs/governance/server_runtime_commands.md`。
+Phase 11.1 后，`ran-agent-hermes.service` 主 unit 直接表示 lite gateway
+（8642 / `ran-assistant-lite`），`ran-agent-hermes-full.service` 主 unit
+直接表示 full gateway（8643 / `ran-assistant`）；不再依赖
+`90-lite-runtime.conf` 覆盖旧 full 配置。不要手工修改
+`/home/ubuntu/.hermes-ran-agent` 或 systemd/env 作为常规部署路径。Hermes
+runtime 配置变更必须从 repo 源配置进入，再通过
+`scripts/apply-hermes-runtime-split.sh` 应用；详细口径见
+`docs/governance/server_runtime_commands.md`。
 
 ---
 

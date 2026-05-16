@@ -15,8 +15,14 @@ NODE_ENV_FILE="${RAN_AGENT_NODE_ENV_FILE:-/opt/ran_agent/.env.local}"
 NODE_BRIDGE_ENV_FILE="${RAN_AGENT_NODE_BRIDGE_ENV_FILE:-/opt/ran_agent/node_bridge/.env.local}"
 HERMES_GLOBAL_ENV_FILE="${HERMES_GLOBAL_ENV_FILE:-/home/ubuntu/.hermes/.env}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
-LITE_DROPIN="$SYSTEMD_DIR/ran-agent-hermes.service.d/90-lite-runtime.conf"
+LITE_SERVICE="$SYSTEMD_DIR/ran-agent-hermes.service"
 FULL_SERVICE="$SYSTEMD_DIR/ran-agent-hermes-full.service"
+LITE_DROPIN_DIR="$SYSTEMD_DIR/ran-agent-hermes.service.d"
+STALE_LITE_DROPINS=(
+  "$LITE_DROPIN_DIR/30-hermes-env.conf"
+  "$LITE_DROPIN_DIR/30-hermes-runtime.conf"
+  "$LITE_DROPIN_DIR/90-lite-runtime.conf"
+)
 API_HOST="${API_SERVER_HOST:-127.0.0.1}"
 LITE_PORT="${HERMES_LITE_API_PORT:-8642}"
 FULL_PORT="${HERMES_FULL_API_PORT:-8643}"
@@ -59,8 +65,8 @@ write_file() {
   local dest="$2"
   local tmp
   tmp="$(mktemp)"
-  cat > "$tmp"
-  "${SUDO[@]}" install -D -m "$mode" "$tmp" "$dest"
+  cat >| "$tmp"
+  install_file_portable "$mode" "$tmp" "$dest"
   rm -f "$tmp"
 }
 
@@ -416,8 +422,15 @@ EOF
 
 write_systemd_units() {
   log "refreshing systemd units"
-  write_file 0644 "$LITE_DROPIN" <<EOF
+  write_file 0644 "$LITE_SERVICE" <<EOF
+[Unit]
+Description=Ran Agent Hermes Lite Gateway (port $LITE_PORT)
+After=network-online.target ran-agent-python.service
+Wants=network-online.target
+
 [Service]
+Type=simple
+User=$RUNTIME_USER
 WorkingDirectory=/opt/ran_agent
 EnvironmentFile=-$NODE_ENV_FILE
 EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
@@ -440,8 +453,13 @@ Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
 Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
 Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false
 Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false
-ExecStart=
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p $LITE_PROFILE gateway run --replace --accept-hooks'
+Restart=always
+RestartSec=5
+TimeoutStopSec=240
+
+[Install]
+WantedBy=multi-user.target
 EOF
 
   write_file 0644 "$FULL_SERVICE" <<EOF
@@ -483,6 +501,15 @@ TimeoutStopSec=240
 [Install]
 WantedBy=multi-user.target
 EOF
+
+  cleanup_stale_lite_dropins
+}
+
+cleanup_stale_lite_dropins() {
+  local dropin
+  for dropin in "${STALE_LITE_DROPINS[@]}"; do
+    "${SUDO[@]}" rm -f "$dropin"
+  done
 }
 
 restart_services() {
@@ -490,9 +517,9 @@ restart_services() {
   "${SUDO[@]}" systemctl daemon-reload
   "${SUDO[@]}" systemctl reset-failed ran-agent-hermes.service ran-agent-hermes-full.service || true
   "${SUDO[@]}" systemctl restart ran-agent-hermes.service
-  sleep 10
+  wait_for_gateway_port "$LITE_PORT" ran-agent-hermes.service || true
   "${SUDO[@]}" systemctl restart ran-agent-hermes-full.service
-  sleep 10
+  wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service || true
   "${SUDO[@]}" systemctl restart ran-agent-node.service
 }
 
@@ -524,6 +551,29 @@ port_is_listening() {
   ss -ltnH | awk '{ print $4 }' | grep -Eq "(:|\\])$port$"
 }
 
+wait_for_gateway_port() {
+  local port="$1"
+  local service="$2"
+  local waited=0
+  while [ "$waited" -le 90 ]; do
+    if port_is_listening "$port"; then
+      return 0
+    fi
+    if ! "${SUDO[@]}" systemctl is-active --quiet "$service"; then
+      return 1
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
+  return 1
+}
+
+systemd_cat_contains() {
+  local service="$1"
+  local pattern="$2"
+  "${SUDO[@]}" systemctl cat "$service" 2>/dev/null | grep -Eq "$pattern"
+}
+
 config_has_toolset() {
   local file="$1"
   local toolset="$2"
@@ -537,6 +587,55 @@ config_has_toolset() {
 verify_runtime() {
   local lite_pid
   local full_pid
+
+  log "verifying compact systemd units"
+  if ! systemd_cat_contains ran-agent-hermes.service 'HERMES_HOME=/home/ubuntu/\.hermes-ran-agent/lite'; then
+    echo "ERROR: lite systemd unit is not compacted to lite HERMES_HOME" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes.service 'HERMES_PROFILE=ran-assistant-lite'; then
+    echo "ERROR: lite systemd unit missing ran-assistant-lite profile" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes.service 'API_SERVER_PORT=8642'; then
+    echo "ERROR: lite systemd unit missing API_SERVER_PORT=8642" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes.service 'API_SERVER_MODEL_NAME=ran-assistant-lite'; then
+    echo "ERROR: lite systemd unit missing ran-assistant-lite model name" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes.service 'ExecStart=.*hermes -p ran-assistant-lite gateway run'; then
+    echo "ERROR: lite systemd unit ExecStart is not ran-assistant-lite gateway" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'HERMES_HOME=/home/ubuntu/\.hermes-ran-agent'; then
+    echo "ERROR: full systemd unit missing full HERMES_HOME" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'HERMES_PROFILE=ran-assistant'; then
+    echo "ERROR: full systemd unit missing ran-assistant profile" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'API_SERVER_PORT=8643'; then
+    echo "ERROR: full systemd unit missing API_SERVER_PORT=8643" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'API_SERVER_MODEL_NAME=ran-assistant'; then
+    echo "ERROR: full systemd unit missing ran-assistant model name" >&2
+    exit 1
+  fi
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'ExecStart=.*hermes -p ran-assistant gateway run'; then
+    echo "ERROR: full systemd unit ExecStart is not ran-assistant gateway" >&2
+    exit 1
+  fi
+  local stale_dropin
+  for stale_dropin in "${STALE_LITE_DROPINS[@]}"; do
+    if "${SUDO[@]}" test -e "$stale_dropin"; then
+      echo "ERROR: stale Hermes runtime drop-in remains: $stale_dropin" >&2
+      exit 1
+    fi
+  done
 
   log "verifying gateway processes and ports"
   sleep 2
@@ -555,6 +654,8 @@ verify_runtime() {
     print_failure_context
     exit 1
   fi
+  wait_for_gateway_port "$LITE_PORT" ran-agent-hermes.service || true
+  wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service || true
   if ! port_is_listening "$LITE_PORT" || ! port_is_listening "$FULL_PORT"; then
     print_failure_context
     exit 1

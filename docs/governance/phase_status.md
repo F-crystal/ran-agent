@@ -120,6 +120,25 @@ Scope:
   profile reinstall, and service restart converge runtime config without
   hand-editing `/home/ubuntu/.hermes-ran-agent`.
 
+## Phase 11.1: Hermes Systemd Compact
+
+Phase 11.1 is code-closed for compact lite/full systemd convergence.
+
+Scope:
+- `ran-agent-hermes.service` is generated as the lite gateway main unit
+  directly: port 8642, `HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite`,
+  profile/model `ran-assistant-lite`.
+- `ran-agent-hermes-full.service` is generated as the full gateway main unit
+  directly: port 8643, `HERMES_HOME=/home/ubuntu/.hermes-ran-agent`,
+  profile/model `ran-assistant`.
+- `scripts/apply-hermes-runtime-split.sh` removes stale lite override drop-ins
+  (`90-lite-runtime.conf`, `30-hermes-runtime.conf`, `30-hermes-env.conf`) and
+  verifies compact systemd state, Search Hub split, and gateway ports.
+- `scripts/diagnose-lite-full.sh` reports compact status and warns when stale
+  runtime drop-ins remain. Systemd unit edits still flow through
+  `scripts/apply-hermes-runtime-split.sh`, not manual `/etc/systemd/system`
+  edits.
+
 ## Migration Checklist
 
 - [x] Close Hermes profile/gateway script naming under Phase 5.
@@ -133,4 +152,5 @@ Scope:
 - [x] Migrate state directory from `.openclaw_state` to `.ran_agent_state` (Phase 9).
 - [x] Replace Python backend model client with Hermes (Phase 10).
 - [x] Add Search Hub MCP and lite/full provider-mode runtime convergence (Phase 11).
+- [x] Compact Hermes lite/full systemd units and stale drop-in cleanup (Phase 11.1).
 - [x] Update all documentation to reflect OpenClaw-free state.

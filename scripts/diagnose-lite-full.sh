@@ -8,6 +8,22 @@ set -euo pipefail
 HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="$HERMES_HOME/lite"
 REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+
+systemd_cat_has() {
+  local service="$1"
+  local pattern="$2"
+  systemctl cat "$service" 2>/dev/null | grep -Eq "$pattern"
+}
+
+dropin_state() {
+  local path="$1"
+  if [ -e "$path" ]; then
+    echo "PRESENT"
+  else
+    echo "ABSENT"
+  fi
+}
 
 echo "=== 1. Env vars ==="
 for key in RAN_AGENT_CAPABILITY_MODE HERMES_LITE_API_BASE_URL HERMES_FULL_API_BASE_URL HERMES_API_BASE_URL HERMES_PROFILE HERMES_DEFAULT_MODEL; do
@@ -36,6 +52,44 @@ for svc in ran-agent-hermes ran-agent-hermes-full; do
   status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
   echo "$svc: $status"
 done
+
+echo ""
+echo "=== Systemd compact status ==="
+if systemd_cat_has ran-agent-hermes.service 'HERMES_HOME=/home/ubuntu/\.hermes-ran-agent/lite' \
+  && systemd_cat_has ran-agent-hermes.service 'HERMES_PROFILE=ran-assistant-lite' \
+  && systemd_cat_has ran-agent-hermes.service 'API_SERVER_PORT=8642' \
+  && systemd_cat_has ran-agent-hermes.service 'API_SERVER_MODEL_NAME=ran-assistant-lite' \
+  && systemd_cat_has ran-agent-hermes.service 'ExecStart=.*hermes -p ran-assistant-lite gateway run'; then
+  echo "lite unit compact: OK"
+else
+  echo "lite unit compact: FAIL"
+fi
+if systemd_cat_has ran-agent-hermes-full.service 'HERMES_HOME=/home/ubuntu/\.hermes-ran-agent' \
+  && systemd_cat_has ran-agent-hermes-full.service 'HERMES_PROFILE=ran-assistant' \
+  && systemd_cat_has ran-agent-hermes-full.service 'API_SERVER_PORT=8643' \
+  && systemd_cat_has ran-agent-hermes-full.service 'API_SERVER_MODEL_NAME=ran-assistant' \
+  && systemd_cat_has ran-agent-hermes-full.service 'ExecStart=.*hermes -p ran-assistant gateway run'; then
+  echo "full unit compact: OK"
+else
+  echo "full unit compact: FAIL"
+fi
+dropin_90=$(dropin_state "$SYSTEMD_DIR/ran-agent-hermes.service.d/90-lite-runtime.conf")
+dropin_30_runtime=$(dropin_state "$SYSTEMD_DIR/ran-agent-hermes.service.d/30-hermes-runtime.conf")
+dropin_30_env=$(dropin_state "$SYSTEMD_DIR/ran-agent-hermes.service.d/30-hermes-env.conf")
+echo "stale 90-lite-runtime.conf: $dropin_90"
+echo "stale 30-hermes-runtime.conf: $dropin_30_runtime"
+echo "stale 30-hermes-env.conf: $dropin_30_env"
+lite_effective_profile=$(systemctl cat ran-agent-hermes.service 2>/dev/null | sed -n 's/^Environment=HERMES_PROFILE=//p' | tail -n 1)
+full_effective_profile=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null | sed -n 's/^Environment=HERMES_PROFILE=//p' | tail -n 1)
+lite_effective_port=$(systemctl cat ran-agent-hermes.service 2>/dev/null | sed -n 's/^Environment=API_SERVER_PORT=//p' | tail -n 1)
+full_effective_port=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null | sed -n 's/^Environment=API_SERVER_PORT=//p' | tail -n 1)
+echo "lite effective profile: ${lite_effective_profile:-UNKNOWN}"
+echo "full effective profile: ${full_effective_profile:-UNKNOWN}"
+echo "lite port: ${lite_effective_port:-UNKNOWN}"
+echo "full port: ${full_effective_port:-UNKNOWN}"
+if [ "$dropin_90" = "PRESENT" ] || [ "$dropin_30_runtime" = "PRESENT" ] || [ "$dropin_30_env" = "PRESENT" ]; then
+  echo "WARNING: stale Hermes runtime drop-in remains; run scripts/apply-hermes-runtime-split.sh"
+fi
 
 echo ""
 echo "=== 3b. Effective systemd runtime snippets ==="

@@ -165,195 +165,38 @@ References checked:
 - Hermes config analysis: `HERMES_RESTART_DRAIN_TIMEOUT` overrides
   `agent.restart_drain_timeout`.
 
-Paste this on the server to suppress both warnings for the local bridge runtime:
+Run the converged runtime script; do not hand-write env files or drop-ins:
 
 ```bash
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
 
-export HERMES_PROFILE=ran-assistant
-export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
-PROFILE_ENV="$HERMES_HOME/profiles/$HERMES_PROFILE/.env"
-GLOBAL_ENV=/home/ubuntu/.hermes/.env
-
-mkdir -p "$(dirname "$PROFILE_ENV")" "$(dirname "$GLOBAL_ENV")"
-touch "$PROFILE_ENV"
-touch "$GLOBAL_ENV"
-chmod 600 "$PROFILE_ENV"
-chmod 600 "$GLOBAL_ENV"
-cp -p "$PROFILE_ENV" "$PROFILE_ENV.bak.$(date +%Y%m%d%H%M%S)"
-cp -p "$GLOBAL_ENV" "$GLOBAL_ENV.bak.$(date +%Y%m%d%H%M%S)"
-
-for ENV_FILE in "$PROFILE_ENV" "$GLOBAL_ENV"; do
-  sed -i '/^HERMES_RESTART_DRAIN_TIMEOUT=/d' "$ENV_FILE"
-  printf 'HERMES_RESTART_DRAIN_TIMEOUT=60\n' >> "$ENV_FILE"
-done
-
-for ENV_FILE in "$PROFILE_ENV" "$GLOBAL_ENV"; do
-  sed -i '/^GATEWAY_ALLOW_ALL_USERS=/d' "$ENV_FILE"
-  printf 'GATEWAY_ALLOW_ALL_USERS=true\n' >> "$ENV_FILE"
-done
-
-sudo mkdir -p /etc/systemd/system/ran-agent-hermes.service.d
-sudo tee /etc/systemd/system/ran-agent-hermes.service.d/30-hermes-env.conf >/dev/null <<'EOF'
-[Service]
-EnvironmentFile=-/home/ubuntu/.hermes/.env
-EnvironmentFile=-/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
-Environment=HERMES_RESTART_DRAIN_TIMEOUT=60
-EOF
-
-sudo systemctl daemon-reload
-sudo systemctl restart ran-agent-hermes.service
-sleep 5
-sudo systemctl restart ran-agent-node.service
-
-for key in HERMES_RESTART_DRAIN_TIMEOUT GATEWAY_ALLOW_ALL_USERS; do
-  value="$(grep -E "^${key}=" "$GLOBAL_ENV" | tail -n 1 | cut -d= -f2- || true)"
-  if [ -n "$value" ]; then
-    echo "$key: SET len=${#value}"
-  else
-    echo "$key: UNSET"
-  fi
-done
-
-sudo systemctl show ran-agent-hermes.service -p TimeoutStopUSec --no-pager
-sudo journalctl -u ran-agent-hermes -n 80 --no-pager
+bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-lite-full.sh
 ```
 
-If the allowlist warning still appears, use an explicit cross-platform allowlist
-instead of global allow-all:
-
-```bash
-cd /opt/ran_agent
-
-GLOBAL_ENV=/home/ubuntu/.hermes/.env
-PROFILE_ENV=/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
-ALLOWED_WECHAT_USER='replace-with-wechat-user-id'
-
-for ENV_FILE in "$GLOBAL_ENV" "$PROFILE_ENV"; do
-  sed -i '/^GATEWAY_ALLOW_ALL_USERS=/d' "$ENV_FILE"
-  sed -i '/^GATEWAY_ALLOWED_USERS=/d' "$ENV_FILE"
-  printf 'GATEWAY_ALLOWED_USERS=%s\n' "$ALLOWED_WECHAT_USER" >> "$ENV_FILE"
-done
-
-sudo systemctl restart ran-agent-hermes.service
-sleep 5
-sudo systemctl restart ran-agent-node.service
-
-sudo journalctl -u ran-agent-hermes -n 80 --no-pager
-```
+If the allowlist warning still appears, update the repo-managed runtime script
+or source config and re-run `scripts/apply-hermes-runtime-split.sh`; do not add
+ad hoc `/etc/systemd/system/ran-agent-hermes.service.d/*.conf` files.
 
 ## Systemd Cutover To Hermes Runtime
 
 Use this when `systemctl list-units 'ran-agent*' --type=service` shows the
 server is already managed by systemd. This is the normal production path.
 
-Paste this on the server:
+Run the repo-managed convergence script. It writes compact lite/full systemd
+main units, removes stale lite override drop-ins, preserves existing secrets,
+and restarts the runtime:
 
 ```bash
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
 git pull
 
-export RAN_AGENT_REPO_ROOT=/opt/ran_agent
-export HERMES_PROFILE=ran-assistant
-export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
-export HERMES_HOST=127.0.0.1
-export HERMES_PORT=8642
-export HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
-export PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
-
-mkdir -p "$HERMES_HOME" /opt/ran_agent/logs
-hermes profile install /opt/ran_agent/hermes/profile --name "$HERMES_PROFILE" --force -y
-
-sudo systemctl stop ran-agent-node.service ran-agent-python.service 2>/dev/null || true
-sudo systemctl disable 2>/dev/null || true
-
-pkill -f '/tmp/ran-agent-hermes-home-phase5' 2>/dev/null || true
-pkill -f 'obsidian-index mcp' 2>/dev/null || true
-pkill -f 'hermes .*gateway run' 2>/dev/null || true
-pkill -f 'personal_agent.http_runner' 2>/dev/null || true
-pkill -f 'node_bridge/src/wechatBridge.mjs' 2>/dev/null || true
-
-sudo tee /etc/systemd/system/ran-agent-hermes.service >/dev/null <<'EOF'
-[Unit]
-Description=Ran Agent Hermes Gateway
-After=network-online.target ran-agent-python.service
-Wants=network-online.target
-
-[Service]
-Type=simple
-User=ubuntu
-WorkingDirectory=/opt/ran_agent
-EnvironmentFile=-/opt/ran_agent/.env.local
-EnvironmentFile=-/opt/ran_agent/node_bridge/.env.local
-EnvironmentFile=-/home/ubuntu/.hermes/.env
-EnvironmentFile=-/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
-Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
-Environment=HERMES_PROFILE=ran-assistant
-Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent
-Environment=API_SERVER_ENABLED=true
-Environment=API_SERVER_HOST=127.0.0.1
-Environment=API_SERVER_PORT=8642
-Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
-Environment=HERMES_REPLY_MODE=api
-Environment=HERMES_REPLY_TIMEOUT_SECONDS=180
-Environment=HERMES_RESTART_DRAIN_TIMEOUT=60
-Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
-Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
-Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
-Environment=HF_ENDPOINT=https://hf-mirror.com
-Environment=HF_HOME=/home/ubuntu/.hermes-ran-agent/hf-home
-Environment=TRANSFORMERS_CACHE=/home/ubuntu/.hermes-ran-agent/hf-home
-Environment=SENTENCE_TRANSFORMERS_HOME=/home/ubuntu/.hermes-ran-agent/sentence-transformers
-Environment=OBSIDIAN_MEMORY_VAULT_DIR=/opt/ran_agent/vault
-Environment=OBSIDIAN_MEMORY_INDEX_PATH=/opt/ran_agent/data/obsidian-memory-index.duckdb
-Environment=OBSIDIAN_INDEX_DEVICE=cpu
-Environment=OBSIDIAN_MEMORY_REINDEX=0
-Environment=OBSIDIAN_MEMORY_WATCH=0
-ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p ran-assistant gateway run --replace --accept-hooks'
-Restart=always
-RestartSec=5
-TimeoutStopSec=240
-
-[Install]
-WantedBy=multi-user.target
-EOF
-
-sudo mkdir -p /etc/systemd/system/ran-agent-node.service.d
-printf '%s\n' \
-  '[Unit]' \
-  '# Reset legacy dependencies from the base unit. Older installs had' \
-  '# Requires=ran-agent-openclaw.service, which makes systemd stop/restart the' \
-  '# Node bridge when the retired OpenClaw service stops.' \
-  'Requires=' \
-  'After=' \
-  'After=ran-agent-hermes.service ran-agent-python.service' \
-  'Wants=ran-agent-hermes.service ran-agent-python.service' \
-  '' \
-  '[Service]' \
-  'Environment=NODE_BRIDGE_REPLY_BACKEND=hermes' \
-  'Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1' \
-  'Environment=HERMES_REPLY_MODE=api' \
-  'Environment=HERMES_REPLY_TIMEOUT_SECONDS=180' \
-  'Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787' \
-  'Environment=PYTHON_BACKEND_INGEST_ENABLED=true' \
-  'Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000' \
-  'Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000' \
-  | sudo tee /etc/systemd/system/ran-agent-node.service.d/10-hermes.conf >/dev/null
-
-sudo systemctl daemon-reload
-sudo systemctl enable ran-agent-python.service ran-agent-hermes.service ran-agent-node.service
-sudo systemctl restart ran-agent-python.service
-sleep 3
-sudo systemctl restart ran-agent-hermes.service
-sleep 5
-sudo systemctl restart ran-agent-node.service
-
-systemctl status ran-agent-python.service --no-pager
-systemctl status ran-agent-hermes.service --no-pager
-systemctl status ran-agent-node.service --no-pager
-ss -ltnp | grep -E ':(8787|8791|8642)\b' || true
+bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-search-hub.sh
+bash scripts/diagnose-hermes-tools.sh
 ```
 
 ## Fix Node Bridge Still Bound To Retired OpenClaw
@@ -1152,7 +995,6 @@ validated to call `lark-cli` through terminal.
 **Lite (8642):**
 ```
 /etc/systemd/system/ran-agent-hermes.service
-  drop-in: 90-lite-runtime.conf
   HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite
   HERMES_PROFILE=ran-assistant-lite
   API_SERVER_PORT=8642
@@ -1287,7 +1129,7 @@ sudo systemctl restart ran-agent-node.service
 
 | File | Purpose |
 |------|---------|
-| `/etc/systemd/system/ran-agent-hermes.service.d/90-lite-runtime.conf` | Lite gateway systemd drop-in (HERMES_HOME=lite, profile=ran-assistant-lite, port 8642) |
+| `/etc/systemd/system/ran-agent-hermes.service` | Lite gateway compact systemd service (HERMES_HOME=lite, profile=ran-assistant-lite, port 8642) |
 | `/etc/systemd/system/ran-agent-hermes-full.service` | Full gateway systemd service (HERMES_HOME=default, profile=ran-assistant, port 8643) |
 | `/home/ubuntu/.hermes-ran-agent/lite/config.yaml` | Lite runtime config (restricted toolsets) |
 | `/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml` | Lite profile MCP servers |
@@ -1312,23 +1154,27 @@ bash scripts/apply-hermes-runtime-split.sh
 ```
 
 The script reinstalls both Hermes profiles, refreshes the lite runtime home,
-rewrites the lite drop-in and full service, upserts only non-sensitive routing
-env keys, restarts `ran-agent-hermes`, `ran-agent-hermes-full`, and
-`ran-agent-node`, then verifies process env and listening ports. Do not hand-edit
+writes compact main units for both lite and full, removes stale lite override
+drop-ins (`90-lite-runtime.conf`, `30-hermes-runtime.conf`,
+`30-hermes-env.conf`), upserts only non-sensitive routing env keys, restarts
+`ran-agent-hermes`, `ran-agent-hermes-full`, and `ran-agent-node`, then verifies
+process env, compact systemd state, and listening ports. Do not hand-edit
 systemd or runtime env for the lite/full split unless the script itself is being
 updated.
 
-When inspecting runtime drift, use the effective merged systemd view, not only
-the main unit file:
+When inspecting runtime drift, use the effective systemd view:
 
 ```bash
 systemctl cat ran-agent-hermes.service
 systemctl cat ran-agent-hermes-full.service
 ```
 
-Lite-critical settings live in
-`/etc/systemd/system/ran-agent-hermes.service.d/90-lite-runtime.conf`; full-debug
-settings live primarily in `/etc/systemd/system/ran-agent-hermes-full.service`.
+After Phase 11.1 compact, lite-critical settings live directly in
+`/etc/systemd/system/ran-agent-hermes.service`; full-debug settings live directly
+in `/etc/systemd/system/ran-agent-hermes-full.service`. The old
+`90-lite-runtime.conf`, `30-hermes-runtime.conf`, and `30-hermes-env.conf`
+drop-ins should be absent. `20-timeout.conf` may remain as a harmless timeout
+drop-in while `TimeoutStopSec=240` is also present in the compact main unit.
 
 ### Verified runtime state (2026-05-15)
 
@@ -1388,8 +1234,8 @@ Deployment and drift repair:
 ```bash
 cd /opt/ran_agent
 bash scripts/apply-hermes-runtime-split.sh
-bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-hermes-tools.sh
 ```
 
