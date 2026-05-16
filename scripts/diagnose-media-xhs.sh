@@ -48,7 +48,7 @@ echo "=== 2. Profile config MCP check ==="
 PROFILE_CONFIG="$HERMES_HOME/profiles/ran-assistant/config.yaml"
 if [ -f "$PROFILE_CONFIG" ]; then
   echo "profile config: EXISTS"
-  grep -A2 'social_reader\|media_reader\|mimo_power\|tavily' "$PROFILE_CONFIG" 2>/dev/null | head -20 || echo "no MCP entries found"
+  grep -A2 'search_hub\|social_reader\|media_reader\|mimo_power\|tavily' "$PROFILE_CONFIG" 2>/dev/null | head -30 || echo "no MCP entries found"
 else
   echo "profile config: NOT FOUND"
 fi

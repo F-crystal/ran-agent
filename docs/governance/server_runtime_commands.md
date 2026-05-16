@@ -1347,15 +1347,57 @@ settings live primarily in `/etc/systemd/system/ran-agent-hermes-full.service`.
 ### Diagnostic
 
 ```bash
+bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-multi-frontend.sh
 ```
 
 Checks: both ports listening, both services active, token comparison,
-vision errors, lark-cli availability, session-continuity env/log presence, and
-manual smoke steps for WeChat continuity, XHS image fallback, Feishu bridge,
-desktop proxy, identity map, and global timeline.
+Search Hub registration and provider mode, vision errors, lark-cli availability,
+session-continuity env/log presence, and manual smoke steps for WeChat
+continuity, XHS image fallback, Feishu bridge, desktop proxy, identity map, and
+global timeline.
+
+## Search Hub MCP
+
+Search Hub is the unified frontend entry for fresh web facts, news, ordinary URL
+reading, academic discovery, AI hot topics, and platform search routing.
+Register it in both lite and full; do not place it only in full. The lite/full
+split is inside Search Hub provider capability:
+
+- **Lite (8642):** `SEARCH_HUB_PROFILE_MODE=lite`, lightweight public providers
+  only. Tavily, AIHOT, OpenCLI public-only adapters, and public academic
+  adapters such as OpenAlex/arxiv/pubmed are allowed. OpenCLI browser-backed
+  adapters and Playwright fallback stay disabled.
+- **Full (8643):** `SEARCH_HUB_PROFILE_MODE=full`, keeps the same Search Hub
+  tools and may additionally use OpenCLI browser-backed adapters and Playwright
+  fallback for debug/heavy web work.
+
+Social platform link reading remains `social_reader` first. Search Hub can route
+platform search requests, but it must not replace `social_reader` for reading
+actual XHS/Bilibili/Zhihu/WeChat links.
+
+Tavily, OpenCLI, Playwright, and AIHOT are Search Hub providers. Do not expose
+them as the ordinary Hermes search path; use direct lower-level tools only when
+Search Hub fails and the user is explicitly debugging the tool chain. OpenCLI is
+read-only and allowlisted.
+
+Deployment and drift repair:
+
+```bash
+cd /opt/ran_agent
+bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-search-hub.sh
+bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-hermes-tools.sh
+```
+
+Do not edit `/home/ubuntu/.hermes-ran-agent` or
+`/home/ubuntu/.hermes-ran-agent/lite` runtime configs directly. All Hermes MCP
+runtime changes must start from repo source config (`.mcp.json`,
+`hermes/profile/config.yaml`, `hermes/profile/config.lite.yaml`) and converge
+through `scripts/apply-hermes-runtime-split.sh`.
 
 ### Recovery
 

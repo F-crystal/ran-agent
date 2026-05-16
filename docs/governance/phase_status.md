@@ -1,6 +1,6 @@
 # Phase Status
 
-Status: CURRENT (2026-05-14)
+Status: CURRENT (2026-05-17)
 
 ## Phase 5: Hermes Profile And Gateway
 
@@ -102,6 +102,24 @@ Scope:
 - Replace `OpenClawChatCompletionsModelClient` with `HermesChatCompletionsModelClient`.
 - Python backend now calls Hermes gateway (DeepSeek V4) instead of OpenClaw gateway.
 
+## Phase 11: Search Hub MCP
+
+Phase 11 is code-closed for Search Hub source/runtime convergence.
+
+Scope:
+- Add `search_hub` MCP as the unified frontend entry for fresh web facts,
+  news, academic search, AI hot topics, normal URL reading, and platform search
+  routing.
+- Register `mcp-search_hub` in both `ran-assistant-lite` and `ran-assistant`.
+- Keep lite/full split inside Search Hub provider mode: lite uses lightweight
+  public providers; full can enable OpenCLI browser-backed adapters and
+  Playwright fallback.
+- Keep social platform link reading on `social_reader`; Search Hub does not
+  replace the XHS/Bilibili/Zhihu/WeChat link-read mainline.
+- Wire Search Hub into `scripts/apply-hermes-runtime-split.sh` so git pull,
+  profile reinstall, and service restart converge runtime config without
+  hand-editing `/home/ubuntu/.hermes-ran-agent`.
+
 ## Migration Checklist
 
 - [x] Close Hermes profile/gateway script naming under Phase 5.
@@ -114,4 +132,5 @@ Scope:
 - [x] Remove OpenClaw infrastructure and npm dependency (Phase 8).
 - [x] Migrate state directory from `.openclaw_state` to `.ran_agent_state` (Phase 9).
 - [x] Replace Python backend model client with Hermes (Phase 10).
+- [x] Add Search Hub MCP and lite/full provider-mode runtime convergence (Phase 11).
 - [x] Update all documentation to reflect OpenClaw-free state.

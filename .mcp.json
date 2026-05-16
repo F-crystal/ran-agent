@@ -51,6 +51,12 @@
         "scripts/start_mimo_power_mcp.sh"
       ]
     },
+    "search_hub": {
+      "command": "bash",
+      "args": [
+        "scripts/start_search_hub_mcp.sh"
+      ]
+    },
     "tavily": {
       "url": "https://mcp.tavily.com/mcp/?tavilyApiKey=${TAVILY_API_KEY}"
     }

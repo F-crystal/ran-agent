@@ -25,8 +25,8 @@ FULL_PROFILE="ran-assistant"
 MODEL_NAME="deepseek-v4-flash"
 BACKUP_DIR="$(mktemp -d)"
 
-if [ "$EUID" -eq 0 ]; then
-  SUDO=()
+if [ "${RAN_AGENT_NO_SUDO:-}" = "1" ] || [ "$EUID" -eq 0 ]; then
+  SUDO=(env)
 else
   SUDO=(sudo)
 fi
@@ -64,6 +64,18 @@ write_file() {
   rm -f "$tmp"
 }
 
+install_file_portable() {
+  local mode="$1"
+  local src="$2"
+  local dest="$3"
+  if "${SUDO[@]}" install -D -m "$mode" "$src" "$dest" 2>/dev/null; then
+    return 0
+  fi
+  "${SUDO[@]}" mkdir -p "$(dirname "$dest")"
+  "${SUDO[@]}" cp "$src" "$dest"
+  "${SUDO[@]}" chmod "$mode" "$dest"
+}
+
 backup_env_file() {
   local label="$1"
   local file="$2"
@@ -85,12 +97,15 @@ upsert_env_file() {
   local file="$1"
   shift
   local tmp
-  local key_regex
   tmp="$(mktemp)"
-  key_regex='^(HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT)='
 
   if "${SUDO[@]}" test -f "$file"; then
-    "${SUDO[@]}" grep -Ev "$key_regex" "$file" > "$tmp" || true
+    while IFS= read -r line; do
+      local key="${line%%=*}"
+      if [[ "$line" != *=* ]] || ! is_managed_env_key "$key"; then
+        printf '%s\n' "$line" >> "$tmp"
+      fi
+    done < <("${SUDO[@]}" cat "$file")
   fi
   for assignment in "$@"; do
     if [[ "$assignment" == \?*=* ]]; then
@@ -103,9 +118,20 @@ upsert_env_file() {
     fi
     printf '%s\n' "$assignment" >> "$tmp"
   done
-  "${SUDO[@]}" install -D -m 600 "$tmp" "$file"
+  install_file_portable 600 "$tmp" "$file"
   chown_if_user_exists "$file"
   rm -f "$tmp"
+}
+
+is_managed_env_key() {
+  case "$1" in
+    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 install_profiles() {
@@ -126,7 +152,24 @@ write_runtime_env() {
     "API_SERVER_HOST=$API_HOST" \
     "API_SERVER_PORT=$FULL_PORT" \
     "API_SERVER_MODEL_NAME=$FULL_PROFILE" \
-    "HERMES_API_BASE_URL=http://$API_HOST:$FULL_PORT/v1"
+    "HERMES_API_BASE_URL=http://$API_HOST:$FULL_PORT/v1" \
+    "PERSONAL_AGENT_PROACTIVE_ENABLED=false" \
+    "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false" \
+    "SEARCH_HUB_ENABLED=true" \
+    "SEARCH_HUB_PROFILE_MODE=full" \
+    "SEARCH_HUB_DEFAULT_LIMIT=5" \
+    "SEARCH_HUB_TIMEOUT_MS=30000" \
+    "SEARCH_HUB_CACHE_TTL_MS=300000" \
+    "SEARCH_HUB_CACHE_PATH=/opt/ran_agent/.ran_agent_state/search_hub/cache.jsonl" \
+    "SEARCH_HUB_ENABLE_TAVILY=true" \
+    "SEARCH_HUB_ENABLE_AIHOT=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI_BROWSER=true" \
+    "SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK=true" \
+    "SEARCH_HUB_OPENCLI_BIN=opencli" \
+    "SEARCH_HUB_OPENCLI_TIMEOUT_MS=60000" \
+    "SEARCH_HUB_PUBLIC_ONLY_DEFAULT=false" \
+    "?OPENALEX_MAILTO="
 
   upsert_env_file "$FULL_HOME/profiles/$FULL_PROFILE/.env" \
     "HERMES_HOME=$FULL_HOME" \
@@ -135,7 +178,24 @@ write_runtime_env() {
     "API_SERVER_HOST=$API_HOST" \
     "API_SERVER_PORT=$FULL_PORT" \
     "API_SERVER_MODEL_NAME=$FULL_PROFILE" \
-    "HERMES_API_BASE_URL=http://$API_HOST:$FULL_PORT/v1"
+    "HERMES_API_BASE_URL=http://$API_HOST:$FULL_PORT/v1" \
+    "PERSONAL_AGENT_PROACTIVE_ENABLED=false" \
+    "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false" \
+    "SEARCH_HUB_ENABLED=true" \
+    "SEARCH_HUB_PROFILE_MODE=full" \
+    "SEARCH_HUB_DEFAULT_LIMIT=5" \
+    "SEARCH_HUB_TIMEOUT_MS=30000" \
+    "SEARCH_HUB_CACHE_TTL_MS=300000" \
+    "SEARCH_HUB_CACHE_PATH=/opt/ran_agent/.ran_agent_state/search_hub/cache.jsonl" \
+    "SEARCH_HUB_ENABLE_TAVILY=true" \
+    "SEARCH_HUB_ENABLE_AIHOT=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI_BROWSER=true" \
+    "SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK=true" \
+    "SEARCH_HUB_OPENCLI_BIN=opencli" \
+    "SEARCH_HUB_OPENCLI_TIMEOUT_MS=60000" \
+    "SEARCH_HUB_PUBLIC_ONLY_DEFAULT=false" \
+    "?OPENALEX_MAILTO="
 
   upsert_env_file "$LITE_HOME/.env" \
     "HERMES_HOME=$LITE_HOME" \
@@ -144,7 +204,24 @@ write_runtime_env() {
     "API_SERVER_HOST=$API_HOST" \
     "API_SERVER_PORT=$LITE_PORT" \
     "API_SERVER_MODEL_NAME=$LITE_PROFILE" \
-    "HERMES_API_BASE_URL=http://$API_HOST:$LITE_PORT/v1"
+    "HERMES_API_BASE_URL=http://$API_HOST:$LITE_PORT/v1" \
+    "PERSONAL_AGENT_PROACTIVE_ENABLED=false" \
+    "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false" \
+    "SEARCH_HUB_ENABLED=true" \
+    "SEARCH_HUB_PROFILE_MODE=lite" \
+    "SEARCH_HUB_DEFAULT_LIMIT=5" \
+    "SEARCH_HUB_TIMEOUT_MS=30000" \
+    "SEARCH_HUB_CACHE_TTL_MS=300000" \
+    "SEARCH_HUB_CACHE_PATH=/opt/ran_agent/.ran_agent_state/search_hub/cache.jsonl" \
+    "SEARCH_HUB_ENABLE_TAVILY=true" \
+    "SEARCH_HUB_ENABLE_AIHOT=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false" \
+    "SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK=false" \
+    "SEARCH_HUB_OPENCLI_BIN=opencli" \
+    "SEARCH_HUB_OPENCLI_TIMEOUT_MS=60000" \
+    "SEARCH_HUB_PUBLIC_ONLY_DEFAULT=true" \
+    "?OPENALEX_MAILTO="
 
   upsert_env_file "$LITE_HOME/profiles/$LITE_PROFILE/.env" \
     "HERMES_HOME=$LITE_HOME" \
@@ -153,7 +230,24 @@ write_runtime_env() {
     "API_SERVER_HOST=$API_HOST" \
     "API_SERVER_PORT=$LITE_PORT" \
     "API_SERVER_MODEL_NAME=$LITE_PROFILE" \
-    "HERMES_API_BASE_URL=http://$API_HOST:$LITE_PORT/v1"
+    "HERMES_API_BASE_URL=http://$API_HOST:$LITE_PORT/v1" \
+    "PERSONAL_AGENT_PROACTIVE_ENABLED=false" \
+    "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false" \
+    "SEARCH_HUB_ENABLED=true" \
+    "SEARCH_HUB_PROFILE_MODE=lite" \
+    "SEARCH_HUB_DEFAULT_LIMIT=5" \
+    "SEARCH_HUB_TIMEOUT_MS=30000" \
+    "SEARCH_HUB_CACHE_TTL_MS=300000" \
+    "SEARCH_HUB_CACHE_PATH=/opt/ran_agent/.ran_agent_state/search_hub/cache.jsonl" \
+    "SEARCH_HUB_ENABLE_TAVILY=true" \
+    "SEARCH_HUB_ENABLE_AIHOT=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false" \
+    "SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK=false" \
+    "SEARCH_HUB_OPENCLI_BIN=opencli" \
+    "SEARCH_HUB_OPENCLI_TIMEOUT_MS=60000" \
+    "SEARCH_HUB_PUBLIC_ONLY_DEFAULT=true" \
+    "?OPENALEX_MAILTO="
 
   upsert_env_file "$NODE_ENV_FILE" \
     "HERMES_API_BASE_URL=http://$API_HOST:$LITE_PORT/v1" \
@@ -177,6 +271,19 @@ write_runtime_env() {
     "RAN_AGENT_TIMELINE_RETENTION_DAYS=30" \
     "RAN_AGENT_TIMELINE_COMPACT_ENABLED=true" \
     "RAN_AGENT_TIMELINE_ARCHIVE_DIR=/opt/ran_agent/.ran_agent_state/timeline_archive" \
+    "PERSONAL_AGENT_PROACTIVE_ENABLED=false" \
+    "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false" \
+    "SEARCH_HUB_ENABLED=true" \
+    "SEARCH_HUB_DEFAULT_LIMIT=5" \
+    "SEARCH_HUB_TIMEOUT_MS=30000" \
+    "SEARCH_HUB_CACHE_TTL_MS=300000" \
+    "SEARCH_HUB_CACHE_PATH=/opt/ran_agent/.ran_agent_state/search_hub/cache.jsonl" \
+    "SEARCH_HUB_ENABLE_TAVILY=true" \
+    "SEARCH_HUB_ENABLE_AIHOT=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI=true" \
+    "SEARCH_HUB_OPENCLI_BIN=opencli" \
+    "SEARCH_HUB_OPENCLI_TIMEOUT_MS=60000" \
+    "?OPENALEX_MAILTO=" \
     "?FEISHU_BRIDGE_ENABLED=false" \
     "FEISHU_LARK_CLI_BIN=lark-cli" \
     "FEISHU_LARK_CLI_IDENTITY=bot" \
@@ -266,11 +373,11 @@ platform_toolsets:
     - mcp-social_reader
     - mcp-media_reader
     - mcp-mimo_power
+    - mcp-search_hub
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
     - mcp-playwright
-    - mcp-tavily
   gateway:
     - web
     - terminal
@@ -283,11 +390,11 @@ platform_toolsets:
     - mcp-social_reader
     - mcp-media_reader
     - mcp-mimo_power
+    - mcp-search_hub
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
     - mcp-playwright
-    - mcp-tavily
 
 EOF
 
@@ -331,6 +438,8 @@ Environment=HERMES_RESTART_DRAIN_TIMEOUT=60
 Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
 Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
 Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
+Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false
+Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false
 ExecStart=
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p $LITE_PROFILE gateway run --replace --accept-hooks'
 EOF
@@ -364,6 +473,8 @@ Environment=HERMES_RESTART_DRAIN_TIMEOUT=60
 Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
 Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
 Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
+Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false
+Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p $FULL_PROFILE gateway run --replace --accept-hooks'
 Restart=always
 RestartSec=5
@@ -413,6 +524,16 @@ port_is_listening() {
   ss -ltnH | awk '{ print $4 }' | grep -Eq "(:|\\])$port$"
 }
 
+config_has_toolset() {
+  local file="$1"
+  local toolset="$2"
+  awk '
+    /^mcp_servers:/ { in_toolsets=0 }
+    /^platform_toolsets:/ { in_toolsets=1 }
+    in_toolsets { print }
+  ' "$file" | grep -q -- "$toolset"
+}
+
 verify_runtime() {
   local lite_pid
   local full_pid
@@ -436,6 +557,52 @@ verify_runtime() {
   fi
   if ! port_is_listening "$LITE_PORT" || ! port_is_listening "$FULL_PORT"; then
     print_failure_context
+    exit 1
+  fi
+
+  log "verifying Search Hub source and runtime config"
+  if ! grep -q '"search_hub"' "$REPO_ROOT/.mcp.json"; then
+    echo "ERROR: .mcp.json does not register search_hub" >&2
+    exit 1
+  fi
+  if ! grep -q 'mcp-search_hub' "$REPO_ROOT/hermes/profile/config.yaml"; then
+    echo "ERROR: full source profile missing mcp-search_hub" >&2
+    exit 1
+  fi
+  if ! grep -q 'mcp-search_hub' "$REPO_ROOT/hermes/profile/config.lite.yaml"; then
+    echo "ERROR: lite source profile missing mcp-search_hub" >&2
+    exit 1
+  fi
+  if ! grep -q '^  search_hub:' "$FULL_HOME/config.yaml"; then
+    echo "ERROR: full runtime config missing search_hub MCP server" >&2
+    exit 1
+  fi
+  if ! grep -q '^  search_hub:' "$LITE_HOME/config.yaml"; then
+    echo "ERROR: lite runtime config missing search_hub MCP server" >&2
+    exit 1
+  fi
+  if ! config_has_toolset "$LITE_HOME/config.yaml" 'mcp-search_hub'; then
+    echo "ERROR: lite runtime toolset missing mcp-search_hub" >&2
+    exit 1
+  fi
+  if config_has_toolset "$LITE_HOME/config.yaml" 'mcp-playwright'; then
+    echo "ERROR: lite runtime toolset exposes mcp-playwright" >&2
+    exit 1
+  fi
+  if config_has_toolset "$LITE_HOME/config.yaml" 'mcp-media_generation'; then
+    echo "ERROR: lite runtime toolset exposes mcp-media_generation" >&2
+    exit 1
+  fi
+  if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-search_hub'; then
+    echo "ERROR: full runtime toolset missing mcp-search_hub" >&2
+    exit 1
+  fi
+  if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-playwright'; then
+    echo "ERROR: full runtime toolset missing mcp-playwright" >&2
+    exit 1
+  fi
+  if ! test -x "$REPO_ROOT/scripts/start_search_hub_mcp.sh"; then
+    echo "ERROR: scripts/start_search_hub_mcp.sh missing or not executable" >&2
     exit 1
   fi
 
@@ -472,4 +639,6 @@ main() {
   verify_runtime
 }
 
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+  main "$@"
+fi

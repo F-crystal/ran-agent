@@ -29,11 +29,11 @@ platform_toolsets:
     - mcp-social_reader
     - mcp-media_reader
     - mcp-mimo_power
+    - mcp-search_hub
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
     - mcp-playwright
-    - mcp-tavily
   gateway:
     - web
     - terminal
@@ -46,11 +46,11 @@ platform_toolsets:
     - mcp-social_reader
     - mcp-media_reader
     - mcp-mimo_power
+    - mcp-search_hub
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
     - mcp-playwright
-    - mcp-tavily
 
 mcp_servers:
   time:
@@ -110,6 +110,19 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_mimo_power_mcp.sh
     timeout: 600
     connect_timeout: 90
+
+  search_hub:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_search_hub_mcp.sh
+    env:
+      SEARCH_HUB_PROFILE_MODE: full
+      SEARCH_HUB_ENABLE_OPENCLI_BROWSER: "true"
+      SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK: "true"
+      SEARCH_HUB_PUBLIC_ONLY_DEFAULT: "false"
+    timeout: 120
+    connect_timeout: 60
 
   playwright:
     command: bash

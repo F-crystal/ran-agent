@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-17)
 
 ## Frontend Path
 
@@ -13,11 +13,20 @@ Status: CURRENT (2026-05-15)
 
 - **8642 (lite):** `ran-assistant-lite` profile, `~/.hermes-ran-agent/lite` home. Low-context daily entry (~22644 tokens). Used for normal chat, XHS, memory, image understanding.
 - **8643 (full):** `ran-assistant` profile, `~/.hermes-ran-agent` home. Full debug entry (~24331 tokens). Used for debug/commands/generation.
+- Search Hub MCP is registered in both lite and full. Lite/full differ by
+  Search Hub provider capability, not by whether the tool exists.
+- Lite Search Hub uses lightweight public providers by default: Tavily, AIHOT,
+  OpenCLI public-only adapters, and public academic adapters such as
+  OpenAlex/arxiv/pubmed. It does not enable OpenCLI browser-backed adapters or
+  Playwright fallback.
+- Full Search Hub may use OpenCLI browser-backed adapters and Playwright
+  fallback for debug/heavy web work. OpenCLI remains read-only and allowlisted.
 - Node bridge auto-selects per request via `RAN_AGENT_CAPABILITY_MODE=auto`.
 - 8642 is lite-context, not a security sandbox. Full unavailable → fallback to lite with logged reason.
 - Standard deployment and drift repair entry since `dda3499 Add Hermes runtime split deploy script`:
   `bash scripts/apply-hermes-runtime-split.sh`.
 - Standard diagnosis entry: `bash scripts/diagnose-lite-full.sh`.
+- Search Hub diagnosis entry: `bash scripts/diagnose-search-hub.sh`.
 - Conversation continuity diagnosis entry:
   `bash scripts/diagnose-hermes-continuity.sh`.
 - Do not hand-edit systemd or runtime env for the lite/full split. Inspect effective
@@ -78,6 +87,7 @@ Status: CURRENT (2026-05-15)
 | Server | Tool Prefix | Purpose |
 |--------|-------------|---------|
 | `playwright` | `playwright__` | Browser automation for dynamic/visual pages |
+| `search_hub` | `search_hub__` | Unified fresh web/news/academic/platform search entry |
 | `time` | — | Timezone-aware time queries (`Asia/Shanghai`) |
 | `media_generation` | `media_generation__` | Image and speech generation (DashScope) |
 | `media_reader` | `media_reader__` | Unified media facade (OCR, ASR, VLM, video, batch) |
@@ -87,6 +97,13 @@ Status: CURRENT (2026-05-15)
 | `personal_memory` | — | Personal memory management |
 
 - Bundled `browser` plugin disabled; Playwright via `mcp.servers.playwright`.
+- Fresh web facts, news, academic search, AI hot topics, platform search, and
+  normal URL reads should enter through `search_hub`. Tavily, OpenCLI,
+  Playwright, and AIHOT are Search Hub providers, not normal frontend search
+  tools.
+- Social platform link reading still uses `social_reader` first. Search Hub can
+  route platform search requests, but it must not replace `social_reader` for
+  actual XHS/Bilibili/Zhihu/WeChat link reading.
 - Media pipeline details: `docs/governance/media-pipeline.md`.
 - XHS content reading uses generic parser fallback (`wanyi-watermark`) as the primary read path. `jobson-xhs-mcp` is retained as a token-aware compatibility path when a fresh `xsec_token` is available.
 - XHS browse search stores `note_id -> xsec_token` context in `.openclaw_state/social_reader/xhs-note-token-cache.json` by default and returns `read_ref` handles without exposing token values.
@@ -160,6 +177,7 @@ WeChat / Desktop / Feishu inbound
   -> GlobalTimeline (local recent + global active topic)
   -> replyBackend.getReply(payload)
   -> sendChatToHermesGateway(payload)
+  -> search_hub for fresh web/news/academic/platform search when needed
   -> preparePayloadMediaForAgent (path validation, external file copy)
   -> ensureConversationMediaContext (MiMo/media_reader analysis, artifact persistence)
   -> hermes gateway (port 8642 lite or 8643 full by capability route)

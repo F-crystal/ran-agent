@@ -107,6 +107,39 @@ else
 fi
 
 echo ""
+echo "=== 6b. Search Hub mode and lite/full toolsets ==="
+if [ -f "$LITE_CONFIG" ]; then
+  if awk '/^mcp_servers:/ { in_toolsets=0 } /^platform_toolsets:/ { in_toolsets=1 } in_toolsets { print }' "$LITE_CONFIG" | grep -q 'mcp-search_hub'; then
+    echo "lite mcp-search_hub: PRESENT"
+  else
+    echo "WARNING: lite mcp-search_hub missing"
+  fi
+  if awk '/^mcp_servers:/ { in_toolsets=0 } /^platform_toolsets:/ { in_toolsets=1 } in_toolsets { print }' "$LITE_CONFIG" | grep -q 'mcp-playwright'; then
+    echo "WARNING: lite exposes mcp-playwright"
+  else
+    echo "lite mcp-playwright: absent from toolsets (OK)"
+  fi
+  if awk '/^mcp_servers:/ { in_toolsets=0 } /^platform_toolsets:/ { in_toolsets=1 } in_toolsets { print }' "$LITE_CONFIG" | grep -q 'mcp-media_generation'; then
+    echo "WARNING: lite exposes mcp-media_generation"
+  else
+    echo "lite mcp-media_generation: absent from toolsets (OK)"
+  fi
+  lite_mode=$(grep -E '^SEARCH_HUB_PROFILE_MODE=' "$LITE_HOME/.env" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+  echo "lite SEARCH_HUB_PROFILE_MODE: ${lite_mode:-NOT SET}"
+fi
+if [ -f "$FULL_CONFIG" ]; then
+  for mcp in mcp-search_hub mcp-playwright mcp-media_generation; do
+    if awk '/^mcp_servers:/ { in_toolsets=0 } /^platform_toolsets:/ { in_toolsets=1 } in_toolsets { print }' "$FULL_CONFIG" | grep -q "$mcp"; then
+      echo "full $mcp: PRESENT"
+    else
+      echo "WARNING: full $mcp missing"
+    fi
+  done
+  full_mode=$(grep -E '^SEARCH_HUB_PROFILE_MODE=' "$HERMES_HOME/.env" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+  echo "full SEARCH_HUB_PROFILE_MODE: ${full_mode:-NOT SET}"
+fi
+
+echo ""
 echo "=== 7. Token comparison smoke test ==="
 PROFILE_ENV="$HERMES_HOME/profiles/ran-assistant/.env"
 KEY="$(grep -E '^(HERMES_API_KEY|API_SERVER_KEY)=' "$PROFILE_ENV" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)"

@@ -128,6 +128,7 @@ collect_sensitive_paths() {
   SENSITIVE_PRESENT=()
   for path in \
     ".env.local" \
+    ".ran_agent_state" \
     ".openclaw_state" \
     "data" \
     "logs" \
@@ -145,6 +146,7 @@ collect_sensitive_paths() {
     ".npm" \
     ".pytest_cache" \
     ".venv" \
+    "node_bridge/.ran_agent_state" \
     "node_modules" \
     "__pycache__"
   do
@@ -178,6 +180,7 @@ collect_stage_candidates() {
   done < <(
     cd "$ROOT_DIR" && find . \
       \( -path './.git' -o -path './.git/*' \
+         -o -path './.ran_agent_state' -o -path './.ran_agent_state/*' \
          -o -path './.openclaw_state' -o -path './.openclaw_state/*' \
          -o -path './data' -o -path './data/*' \
          -o -path './logs' -o -path './logs/*' \
@@ -195,6 +198,7 @@ collect_stage_candidates() {
          -o -path './.npm' -o -path './.npm/*' \
          -o -path './.pytest_cache' -o -path './.pytest_cache/*' \
          -o -path './.venv' -o -path './.venv/*' \
+         -o -path './node_bridge/.ran_agent_state' -o -path './node_bridge/.ran_agent_state/*' \
          -o -path './node_modules' -o -path './node_modules/*' \
          -o -path './__pycache__' -o -path './__pycache__/*' \
       \) -prune -o -type f -print0
@@ -228,6 +232,7 @@ stage_allowed_files() {
   run_cmd git -C "$ROOT_DIR" add -A -- .
   run_cmd git -C "$ROOT_DIR" reset -q -- \
     .env.local \
+    .ran_agent_state \
     .openclaw_state \
     data \
     logs \
@@ -240,6 +245,7 @@ stage_allowed_files() {
     .npm \
     .pytest_cache \
     .venv \
+    node_bridge/.ran_agent_state \
     node_modules \
     __pycache__
 }
@@ -257,7 +263,7 @@ ensure_no_forbidden_staged() {
       continue
     fi
     case "$path" in
-      .env|.env.local|.openclaw_state/*|.openclaw_state|data/*|data|logs/*|logs|debug/*|debug|state/*|state|local_archive/*|local_archive|docs/deployment/*|docs/deployment|docs/governance/archive/*|docs/governance/archive|vault/inbox/*|vault/inbox|vault/raw/*|vault/raw|vault/wiki/*|vault/wiki|vault/.obsidian/workspace.json|vault/.qwen/settings.json|vault/.qwen/settings.json.orig|.npm/*|.npm|.pytest_cache/*|.pytest_cache|.venv/*|.venv|node_modules/*|node_modules|__pycache__/*|__pycache__|*.pyc)
+      .env|.env.local|.ran_agent_state/*|.ran_agent_state|node_bridge/.ran_agent_state/*|node_bridge/.ran_agent_state|.openclaw_state/*|.openclaw_state|data/*|data|logs/*|logs|debug/*|debug|state/*|state|local_archive/*|local_archive|docs/deployment/*|docs/deployment|docs/governance/archive/*|docs/governance/archive|vault/inbox/*|vault/inbox|vault/raw/*|vault/raw|vault/wiki/*|vault/wiki|vault/.obsidian/workspace.json|vault/.qwen/settings.json|vault/.qwen/settings.json.orig|.npm/*|.npm|.pytest_cache/*|.pytest_cache|.venv/*|.venv|node_modules/*|node_modules|__pycache__/*|__pycache__|*.pyc)
         bad+=("$path")
         ;;
     esac
@@ -320,6 +326,7 @@ Date: $(date '+%Y-%m-%d')
 ## Sensitive Paths
 
 - \`.env.local\`
+- \`.ran_agent_state/\`
 - \`.openclaw_state/\`
 - \`data/\`
 - \`logs/\`
@@ -337,6 +344,7 @@ Date: $(date '+%Y-%m-%d')
 - \`.npm/\`
 - \`.pytest_cache/\`
 - \`.venv/\`
+- \`node_bridge/.ran_agent_state/\`
 - \`node_modules/\`
 - \`__pycache__/\`
 

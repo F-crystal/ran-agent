@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-17)
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -35,8 +35,8 @@ Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
 
 MCP services
-  -> media_reader / social_reader / mimo_power / media_generation
-  -> personal_memory / obsidian_memory / time / playwright / tavily
+  -> search_hub / media_reader / social_reader / mimo_power / media_generation
+  -> personal_memory / obsidian_memory / time / playwright
 ```
 
 ### Lite / Full Gateway
@@ -60,7 +60,9 @@ MCP services
 
 **飞书和桌面入口。** 飞书桥接通过 `lark-cli event consume im.message.receive_v1 --as bot` 消费消息，并通过 `im +messages-send` 回复；桌面客户端通过 ran-agent 自己的 OpenAI-compatible Proxy 接入，避免绕过统一记忆和 reviewer。
 
-**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。小红书优先使用通用解析 fallback，搜索上下文会缓存 `read_ref`，避免把平台 token 暴露给模型或日志。
+**联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。它同时注册到 lite/full；lite 使用 Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed 等轻量 provider，full 允许 OpenCLI browser-backed adapter 和 Playwright fallback。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
+
+**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书优先使用通用解析 fallback，搜索上下文会缓存 `read_ref`，避免把平台 token 暴露给模型或日志。
 
 **多模态理解。** 微信图片、音频、视频和文档先经过可信路径校验，再由 MiMo Power 优先分析，失败时回退到 `media_reader`。视频采用字幕优先策略：字幕、音频 ASR、关键帧 VLM、元数据逐级降级。
 
@@ -76,6 +78,7 @@ MCP services
 
 | 服务 | 作用 | 默认入口 |
 |------|------|----------|
+| `search_hub` | 统一联网搜索入口：新闻、网页事实、学术检索、AI 热点、平台搜索路由 | lite/full |
 | `time` | 时区感知时间查询，默认 `Asia/Shanghai` | lite/full |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | lite/full |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | lite/full |
@@ -84,7 +87,7 @@ MCP services
 | `obsidian_memory` | Obsidian vault 语义检索 | lite/full |
 | `media_generation` | 图片和语音生成 | full |
 | `playwright` | 浏览器自动化和动态页面调试 | full |
-| `tavily` | 可选网页搜索 MCP，需要本机 API key | lite/full |
+| `tavily` | 可选底层 provider，仅供 Search Hub 兼容使用 | 内部/兼容 |
 
 DeepSeek V4 在本项目中按文本模型使用。原始图片、音频、视频和社交平台内容必须先交给 MCP 工具，Hermes 只接收结构化文本结果。
 
@@ -139,10 +142,12 @@ cd node_bridge
 
 ```bash
 bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-hermes-tools.sh
 ```
 
-不要手工修改 systemd/env 作为常规部署路径；详细口径见 `docs/governance/server_runtime_commands.md`。
+不要手工修改 `/home/ubuntu/.hermes-ran-agent` 或 systemd/env 作为常规部署路径。Hermes runtime 配置变更必须从 repo 源配置进入，再通过 `scripts/apply-hermes-runtime-split.sh` 应用；详细口径见 `docs/governance/server_runtime_commands.md`。
 
 ---
 
@@ -212,6 +217,7 @@ ran_agent/
 PYTHONPATH=src pytest -q tests/
 npm --prefix node_bridge test
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-multi-frontend.sh
 bash scripts/compact-global-timeline.sh
