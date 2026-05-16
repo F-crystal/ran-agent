@@ -67,3 +67,4 @@ docs/governance/archive/
 .codex/
 .playwright-mcp/
 vault/ombre/
+.openclaw_state/
