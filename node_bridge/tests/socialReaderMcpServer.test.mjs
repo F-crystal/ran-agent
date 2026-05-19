@@ -203,8 +203,25 @@ test('xhs_browse_search stores token context and xhs_browse_note reads by read_r
 });
 
 test('xhs_browse_note falls back when browse backend returns a failure payload', async () => {
+  // Set up a temporary marker for the XHS generic fallback
+  const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const markerDir = mkdtempSync(join(tmpdir(), 'xhs-marker-'));
+  const markerPath = join(markerDir, 'generic-fallback-ready.json');
+  writeFileSync(markerPath, JSON.stringify({
+    ok: true,
+    package: 'wanyi-watermark',
+    tool_name: 'parse_xhs_link',
+    command: 'echo',
+    args: [],
+    backend_python: 'echo',
+    backend_module: 'test',
+  }));
+
   const calls = [];
   const env = {
+    XHS_GENERIC_FALLBACK_READY_PATH: markerPath,
     XHS_BROWSE_ENABLED: 'true',
     XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
     XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
@@ -355,6 +372,17 @@ test('read_social_post normalizes successful XHS generic parser JSON', async () 
 });
 
 test('read_social_post treats XHS generic parser error JSON as failure', async () => {
+  // Set up a temporary marker for the XHS generic fallback
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const markerDir = mkdtempSync(join(tmpdir(), 'xhs-marker-'));
+  const markerPath = join(markerDir, 'generic-fallback-ready.json');
+  writeFileSync(markerPath, JSON.stringify({
+    ok: true, package: 'wanyi-watermark', tool_name: 'parse_xhs_link',
+    command: 'echo', args: [], backend_python: 'echo', backend_module: 'test',
+  }));
+
   const result = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
@@ -366,7 +394,7 @@ test('read_social_post treats XHS generic parser error JSON as failure', async (
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: { XHS_COOKIE: 'a1=demo', XHS_GENERIC_FALLBACK_READY_PATH: markerPath },
       mcpCallImpl: async ({ server, toolName }) => {
         if (server === 'generic' && toolName === 'parse_xhs_link') {
           return {

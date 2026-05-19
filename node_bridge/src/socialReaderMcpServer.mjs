@@ -698,6 +698,31 @@ function genericParserToolForPlatform(platform) {
   return 'parse_generic_link';
 }
 
+function readGenericFallbackMarker(env = process.env) {
+  const markerPath = env.XHS_GENERIC_FALLBACK_READY_PATH
+    || '/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json';
+  try {
+    return JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function getXhsFallbackServerConfig(env = process.env) {
+  const marker = readGenericFallbackMarker(env);
+  if (marker?.ok && marker.command) {
+    return {
+      command: marker.command,
+      args: marker.args || [],
+      env: {},
+    };
+  }
+  if (env.SOCIAL_READER_ALLOW_RUNTIME_UVX_FALLBACK === 'true') {
+    return genericParserServerConfig(env);
+  }
+  return null;
+}
+
 function normalizeXhsScheme(url) {
   // Normalize xhslink short URLs from http:// to https:// to avoid
   // mixed-content redirects and terminal/browser security blocks.
@@ -1978,18 +2003,20 @@ async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, ar
 async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
   const envRef = options.env || env || process.env;
   const xhsTimeoutMs = resolveXhsBackendTimeoutMs(envRef);
+  const xhsFallbackConfig = getXhsFallbackServerConfig(envRef);
   // Priority: original short link > canonical URL
   const urls = [wanyiUrl, resolved?.canonical_url, resolved?.resolved_url].filter(Boolean);
   const uniqueUrls = [...new Set(urls)];
 
   for (const tryUrl of uniqueUrls) {
     try {
+      if (!xhsFallbackConfig) continue;
       const result = await readGenericSocialPost({
         url: tryUrl,
         platform: 'xhs',
         includeComments: false,
         maxComments: 0,
-      }, { ...options, xhsTimeoutMs });
+      }, { ...options, xhsTimeoutMs, _xhsFallbackConfig: xhsFallbackConfig });
       if (result?.structuredContent?.ok === true) {
         const data = result.structuredContent;
         const normalized = normalizeXhsMedia(data);
@@ -2171,7 +2198,10 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
       });
     }
     if (genericFallbackEnabled) {
-      return await readGenericSocialPost({ url: resolved.resolved_url || resolved.original_url || String(rawText), platform: 'xhs', includeComments, maxComments }, { ...options, xhsTimeoutMs });
+      const xhsFallbackConfig = getXhsFallbackServerConfig(env);
+      if (xhsFallbackConfig) {
+        return await readGenericSocialPost({ url: resolved.resolved_url || resolved.original_url || String(rawText), platform: 'xhs', includeComments, maxComments }, { ...options, _xhsFallbackConfig: xhsFallbackConfig });
+      }
     }
     return buildErrorResult(prepared.error || prepared.error_code, prepared);
   }
@@ -2209,8 +2239,34 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
     });
   } catch (error) {
     if (genericFallbackEnabled) {
-      // Use default generic timeout, NOT the XHS-specific timeout
-      const fallback = await readGenericSocialPost({ url, platform: 'xhs', includeComments, maxComments }, options);
+      // Check marker before attempting generic fallback
+      const xhsFallbackConfig = getXhsFallbackServerConfig(options.env || process.env);
+      if (!xhsFallbackConfig) {
+        const errorCode = classifyXhsError(error);
+        return buildTextResult({
+          ok: true,
+          partial: true,
+          content_available: false,
+          full_text_available: false,
+          evidence_level: 'metadata_only',
+          should_answer_from_content: false,
+          platform: 'xhs',
+          url: resolved.resolved_url || resolved.canonical_url || url,
+          note_id: resolved.note_id || '',
+          source: 'partial_fallback',
+          post_text: '',
+          comments_text: '',
+          warnings: [
+            { code: errorCode, message: `XHS backend failed: ${error instanceof Error ? error.message : String(error)}` },
+            { code: 'XHS_GENERIC_FALLBACK_NOT_READY', message: 'Generic fallback tool not prepared; run scripts/prepare-xhs-generic-fallback.sh' },
+            { code: 'PARTIAL_RESULT', message: 'Returning URL and metadata only; full content unavailable' },
+          ],
+          fallback_chain: ['jobson_xhs_mcp', 'partial'],
+          xhs_error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      // Marker ready — try generic fallback with marker-gated config
+      const fallback = await readGenericSocialPost({ url, platform: 'xhs', includeComments, maxComments }, { ...options, _xhsFallbackConfig: xhsFallbackConfig });
       if (fallback.structuredContent?.ok === true) {
         fallback.structuredContent.partial = true;
         fallback.structuredContent.content_available = true;
@@ -2267,11 +2323,34 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
 
 async function readGenericSocialPost({ url, platform, includeComments, maxComments }, options = {}) {
   const toolName = genericParserToolForPlatform(platform);
-  const backendOptions = options.xhsTimeoutMs
-    ? { ...options, _overrideTimeoutMs: options.xhsTimeoutMs }
-    : options;
+  const env = options.env || process.env;
+  const timeoutMs = options._overrideTimeoutMs
+    || options.xhsTimeoutMs
+    || resolveTimeoutMs(env);
+
+  // Use marker-gated config if provided (XHS fallback path), otherwise default
+  const xhsConfig = options._xhsFallbackConfig;
+  let result;
   try {
-    const result = await callBackendMcpTool('generic', toolName, { share_link: url }, backendOptions);
+    if (xhsConfig) {
+      if (typeof options.mcpCallImpl === 'function') {
+        result = await options.mcpCallImpl({ server: 'generic', toolName, arguments: { share_link: url } });
+      } else {
+        result = await callMcpToolViaStdio({
+          command: xhsConfig.command,
+          args: xhsConfig.args,
+          env: { ...process.env, ...xhsConfig.env },
+          toolName,
+          arguments: { share_link: url },
+          timeoutMs,
+        });
+      }
+    } else {
+      result = await callBackendMcpTool('generic', toolName, { share_link: url }, {
+        ...options,
+        ...(options.xhsTimeoutMs ? { _overrideTimeoutMs: options.xhsTimeoutMs } : {}),
+      });
+    }
     const normalized = normalizeGenericParserPayload(textFromMcpResult(result));
     if (!normalized.ok) {
       return buildErrorResult(normalized.error, {
@@ -3121,12 +3200,14 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = 
 async function fallbackXhsBrowseNote({ noteId, lookup, cachedEntry, fallbackFrom }, options = {}) {
   const fallbackUrl = lookup?.url || cachedEntry?.url || cachedEntry?.canonical_url || buildXhsCanonicalUrl(noteId);
   const envRef = options.env || process.env;
+  const xhsFallbackConfig = getXhsFallbackServerConfig(envRef);
+  if (!xhsFallbackConfig) return null;
   const fallback = await readGenericSocialPost({
     url: fallbackUrl,
     platform: 'xhs',
     includeComments: false,
     maxComments: 0,
-  }, { ...options, xhsTimeoutMs: resolveXhsBackendTimeoutMs(envRef) });
+  }, { ...options, xhsTimeoutMs: resolveXhsBackendTimeoutMs(envRef), _xhsFallbackConfig: xhsFallbackConfig });
 
   if (fallback.structuredContent?.ok !== true) {
     return null;

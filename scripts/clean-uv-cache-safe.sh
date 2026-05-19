@@ -83,6 +83,14 @@ echo "Cleaning UV cache: $UV_CACHE_DIR"
 rm -rf "${UV_CACHE_DIR:?}"/*
 mkdir -p "$UV_CACHE_DIR" "$UV_TOOL_DIR"
 
+# Remove generic fallback readiness marker (tool env may be gone)
+MARKER_PATH="${XHS_GENERIC_FALLBACK_READY_PATH:-/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json}"
+if [ -f "$MARKER_PATH" ]; then
+  echo "Removing generic fallback readiness marker: $MARKER_PATH"
+  rm -f "$MARKER_PATH"
+fi
+echo "NOTE: run scripts/prepare-xhs-generic-fallback.sh to re-enable XHS generic fallback"
+
 # Ensure ~/.cache/uv is a symlink to the managed cache
 if [ -e "$HOME_UV_DIR" ] && [ ! -L "$HOME_UV_DIR" ]; then
   echo "Replacing ~/.cache/uv with symlink to $UV_CACHE_DIR"

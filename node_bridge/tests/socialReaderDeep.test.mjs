@@ -165,6 +165,18 @@ test('read_social_post_deep returns WeChat captcha as partial without crashing',
 });
 
 test('read_social_post_deep normalizes XHS wanyi media and analyzes image fallback', async () => {
+  // Set up a temporary marker for the XHS generic fallback
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const markerDir = mkdtempSync(join(tmpdir(), 'xhs-deep-marker-'));
+  const markerPath = join(markerDir, 'generic-fallback-ready.json');
+  writeFileSync(markerPath, JSON.stringify({
+    ok: true, package: 'wanyi-watermark', tool_name: 'parse_xhs_link',
+    command: 'echo', args: [], backend_executable: '', backend_args: [],
+    backend_python: 'echo', backend_module: 'test',
+  }));
+
   const backendCalls = [];
   const mediaCalls = [];
   const result = await handleSocialReaderMcpRequest(
@@ -180,6 +192,7 @@ test('read_social_post_deep normalizes XHS wanyi media and analyzes image fallba
       },
     },
     {
+      env: { XHS_GENERIC_FALLBACK_READY_PATH: markerPath },
       fetchImpl: async (url) => ({ url }),
       mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
         backendCalls.push({ server, toolName, arguments: toolArgs });

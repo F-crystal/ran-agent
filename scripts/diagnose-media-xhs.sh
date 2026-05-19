@@ -142,10 +142,38 @@ else
 fi
 
 echo ""
-echo "--- Fallback availability ---"
+echo "--- Generic fallback readiness ---"
+MARKER_PATH="${XHS_GENERIC_FALLBACK_READY_PATH:-/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json}"
 echo "SOCIAL_READER_GENERIC_FALLBACK_ENABLED: ${SOCIAL_READER_GENERIC_FALLBACK_ENABLED:-true}"
+echo "marker path: $MARKER_PATH"
 
-# Check token cache (read-only, no side effects)
+if [ -f "$MARKER_PATH" ]; then
+  echo "marker: EXISTS"
+  MARKER_OK=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('ok', False))" 2>/dev/null || echo "parse_error")
+  echo "marker ok: $MARKER_OK"
+  MARKER_CMD=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('command', ''))" 2>/dev/null || echo "")
+  echo "marker command: ${MARKER_CMD:-NOT SET}"
+  MARKER_TOOL=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('tool_name', ''))" 2>/dev/null || echo "")
+  echo "marker tool_name: ${MARKER_TOOL:-NOT SET}"
+  MARKER_PYTHON=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_python', ''))" 2>/dev/null || echo "")
+  echo "marker backend_python: ${MARKER_PYTHON:-NOT SET}"
+  MARKER_MODULE=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_module', ''))" 2>/dev/null || echo "")
+  echo "marker backend_module: ${MARKER_MODULE:-NOT SET}"
+  MARKER_VERSION=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('version', ''))" 2>/dev/null || echo "")
+  echo "marker version: ${MARKER_VERSION:-NOT SET}"
+  if [ "$MARKER_OK" = "True" ]; then
+    echo "generic fallback: READY"
+  else
+    echo "generic fallback: NOT READY (marker ok=false)"
+    echo "hint: run scripts/prepare-xhs-generic-fallback.sh"
+  fi
+else
+  echo "marker: NOT FOUND"
+  echo "generic fallback: NOT READY"
+  echo "hint: run scripts/prepare-xhs-generic-fallback.sh"
+fi
+
+# Token cache (read-only, no side effects)
 for cache_path in ".ran_agent_state/social_reader/xhs-note-token-cache.json" "node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json"; do
   if [ -f "$cache_path" ]; then
     count=$(python3 -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "?")
@@ -155,50 +183,38 @@ for cache_path in ".ran_agent_state/social_reader/xhs-note-token-cache.json" "no
   fi
 done
 
-# Check generic parser availability (no side effects — no uvx execution)
-if command -v uvx >/dev/null 2>&1; then
-  echo "uvx: $(command -v uvx)"
-  if uv tool list 2>/dev/null | grep -q 'wanyi-watermark'; then
-    echo "generic parser (wanyi-watermark): INSTALLED"
-  else
-    echo "generic parser (wanyi-watermark): NOT INSTALLED (use --smoke-generic to test)"
-    echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
-  fi
-else
-  echo "uvx: NOT FOUND"
-  echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
-fi
-
 echo "browser fallback: DISABLED (lite default)"
 
-# Optional: real smoke test (requires --smoke-generic flag, side-effect-ful)
+# Optional: real smoke test (only if marker ok=true, uses marker command)
 if [ "${1:-}" = "--smoke-generic" ]; then
   echo ""
-  echo "--- Generic parser smoke test (timeout 15s) ---"
-  if command -v uvx >/dev/null 2>&1; then
-    SMOKE_RESULT=$(timeout 15 uvx --from wanyi-watermark python -c "
-import json, sys
-try:
-    from importlib.metadata import entry_points
-    eps = entry_points()
-    if hasattr(eps, 'select'):
-        tools = eps.select(group='mcp.tools')
-    else:
-        tools = eps.get('mcp.tools', [])
-    names = [ep.name for ep in tools]
-    print(json.dumps({'available_tools': names, 'has_parse_xhs_link': 'parse_xhs_link' in names}))
-except Exception as e:
-    print(json.dumps({'error': str(e)}))
-" 2>&1) || SMOKE_RESULT='{"error":"timeout or execution failed"}'
-    echo "smoke result: $SMOKE_RESULT"
-    if echo "$SMOKE_RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('has_parse_xhs_link') else 1)" 2>/dev/null; then
-      echo "parse_xhs_link: CONFIRMED"
-    else
-      echo "parse_xhs_link: NOT CONFIRMED"
-      echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
-    fi
+  echo "--- Generic parser smoke test ---"
+  if [ ! -f "$MARKER_PATH" ]; then
+    echo "SKIPPED: marker not found. Run scripts/prepare-xhs-generic-fallback.sh first."
   else
-    echo "uvx: NOT FOUND, cannot smoke test"
+    MARKER_OK=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('ok', False))" 2>/dev/null || echo "False")
+    if [ "$MARKER_OK" != "True" ]; then
+      echo "SKIPPED: marker ok=false. Run scripts/prepare-xhs-generic-fallback.sh first."
+    else
+      SMOKE_CMD=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('command', ''))" 2>/dev/null)
+      if [ -n "$SMOKE_CMD" ] && [ -x "$SMOKE_CMD" ]; then
+        echo "smoke testing via $SMOKE_CMD (timeout 15s)..."
+        SMOKE_RESULT=$(timeout 15 "$SMOKE_CMD" <<'MCP_EOF' 2>/dev/null || true
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"diag-probe","version":"0.1.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+MCP_EOF
+)
+        if echo "$SMOKE_RESULT" | grep -q 'parse_xhs_link'; then
+          echo "parse_xhs_link: CONFIRMED"
+        else
+          echo "parse_xhs_link: NOT CONFIRMED in smoke response"
+          echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
+        fi
+      else
+        echo "SKIPPED: marker command not executable: $SMOKE_CMD"
+      fi
+    fi
   fi
 fi
 

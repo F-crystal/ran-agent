@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { MediaReaderError, hostFromUrl } from '../assetResolver.mjs';
 import {
   assertSafePlatformUrl,
@@ -37,6 +38,16 @@ function hasXsecToken(url) {
 
 function warning(code, extra = {}) {
   return { code, ...extra };
+}
+
+function readGenericFallbackMarker(env = process.env) {
+  const markerPath = env.XHS_GENERIC_FALLBACK_READY_PATH
+    || '/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json';
+  try {
+    return JSON.parse(readFileSync(markerPath, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 function isRecoverableXhsError(error) {
@@ -190,16 +201,41 @@ export async function resolveXhsMedia(args = {}, options = {}) {
       throw new MediaReaderError(code, `${code}: XHS backend resolver failed`);
     }
 
-    // For recoverable errors, try generic parser fallback
+    // For recoverable errors, try generic parser fallback via readiness marker
+    const marker = readGenericFallbackMarker(env);
+    if (!marker?.ok) {
+      // No generic fallback available — return metadata-only partial
+      return {
+        ok: true,
+        partial: true,
+        content_available: false,
+        full_text_available: false,
+        evidence_level: 'metadata_only',
+        should_answer_from_content: false,
+        platform: 'xhs',
+        resolver: 'xhsResolver',
+        original_url: originalUrl,
+        resolved_url: resolvedUrl,
+        metadata: { note_id: noteId, source_url_host: hostFromUrl(resolvedUrl) },
+        post_text: '',
+        comments: [],
+        media: [],
+        max_assets: maxAssets,
+        warnings: [
+          warning(code, { message: `XHS backend failed: ${error?.message || error}` }),
+          warning('XHS_GENERIC_FALLBACK_NOT_READY'),
+          warning('PARTIAL_RESULT'),
+        ],
+      };
+    }
+
     try {
-      const { callMcpToolViaStdio, parseJsonArrayEnv, textFromMcpResult } = await import('./mcpClient.mjs');
-      const genericCommand = env.GENERIC_PARSER_MCP_COMMAND || 'uvx';
-      const genericArgs = parseJsonArrayEnv(env.GENERIC_PARSER_MCP_ARGS_JSON, ['wanyi-watermark']);
+      const { callMcpToolViaStdio, textFromMcpResult } = await import('./mcpClient.mjs');
       const genericResult = await callMcpToolViaStdio({
-        command: genericCommand,
-        args: genericArgs,
+        command: marker.command,
+        args: marker.args || [],
         env: process.env,
-        toolName: 'parse_xhs_link',
+        toolName: marker.tool_name || 'parse_xhs_link',
         arguments: { share_link: resolvedUrl },
         timeoutMs: Number(env.SOCIAL_READER_MCP_TIMEOUT_MS || 45000),
       });
