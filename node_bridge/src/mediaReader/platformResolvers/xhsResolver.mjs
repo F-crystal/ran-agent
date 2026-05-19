@@ -39,6 +39,21 @@ function warning(code, extra = {}) {
   return { code, ...extra };
 }
 
+function isRecoverableXhsError(error) {
+  const code = String(error?.error_code || '').trim();
+  // Non-recoverable: auth, cookie, risk control, config errors
+  if (['XHS_AUTH_REQUIRED', 'XHS_COOKIE_MISSING', 'XHS_RISK_CONTROL', 'PLATFORM_RESOLVER_NOT_CONFIGURED'].includes(code)) return false;
+  // Recoverable by explicit code
+  if (['XHS_BACKEND_TIMEOUT', 'XHS_BACKEND_MCP_ERROR', 'XHS_NETWORK_ERROR', 'XHS_SHORTLINK_RESOLVE_FAILED'].includes(code)) return true;
+  // Recoverable by message inspection (only when no explicit error_code)
+  if (!code) {
+    const msg = String(error?.message || error || '').toLowerCase();
+    if (msg.includes('timed out') || msg.includes('timeout')) return true;
+    if (msg.includes('enotfound') || msg.includes('econnrefused') || msg.includes('network')) return true;
+  }
+  return false;
+}
+
 function mapXhsError(error) {
   const code = String(error?.error_code || '').trim();
   if (code) return code;
@@ -168,11 +183,77 @@ export async function resolveXhsMedia(args = {}, options = {}) {
       }
     }
   } catch (error) {
-    if (error instanceof MediaReaderError) {
-      throw error;
-    }
     const code = mapXhsError(error);
-    throw new MediaReaderError(code, `${code}: XHS backend resolver failed`);
+    // Only attempt fallback for recoverable errors
+    if (!isRecoverableXhsError(error)) {
+      if (error instanceof MediaReaderError) throw error;
+      throw new MediaReaderError(code, `${code}: XHS backend resolver failed`);
+    }
+
+    // For recoverable errors, try generic parser fallback
+    try {
+      const { callMcpToolViaStdio, parseJsonArrayEnv, textFromMcpResult } = await import('./mcpClient.mjs');
+      const genericCommand = env.GENERIC_PARSER_MCP_COMMAND || 'uvx';
+      const genericArgs = parseJsonArrayEnv(env.GENERIC_PARSER_MCP_ARGS_JSON, ['wanyi-watermark']);
+      const genericResult = await callMcpToolViaStdio({
+        command: genericCommand,
+        args: genericArgs,
+        env: process.env,
+        toolName: 'parse_xhs_link',
+        arguments: { share_link: resolvedUrl },
+        timeoutMs: Number(env.SOCIAL_READER_MCP_TIMEOUT_MS || 45000),
+      });
+      const text = textFromMcpResult(genericResult);
+      if (text) {
+        return {
+          ok: true,
+          partial: true,
+          content_available: true,
+          full_text_available: false,
+          evidence_level: 'generic_parser',
+          should_answer_from_content: true,
+          source: 'generic_parser_fallback',
+          platform: 'xhs',
+          resolver: 'xhsResolver',
+          original_url: originalUrl,
+          resolved_url: resolvedUrl,
+          metadata: { note_id: noteId, source_url_host: hostFromUrl(resolvedUrl) },
+          post_text: text,
+          comments: [],
+          media: [],
+          max_assets: maxAssets,
+          warnings: [
+            warning('GENERIC_PARSER_FALLBACK'),
+            warning('FULL_TEXT_UNAVAILABLE'),
+          ],
+        };
+      }
+    } catch {
+      // Generic parser also failed — fall through to metadata-only partial result
+    }
+
+    // Metadata-only partial result
+    return {
+      ok: true,
+      partial: true,
+      content_available: false,
+      full_text_available: false,
+      evidence_level: 'metadata_only',
+      should_answer_from_content: false,
+      platform: 'xhs',
+      resolver: 'xhsResolver',
+      original_url: originalUrl,
+      resolved_url: resolvedUrl,
+      metadata: { note_id: noteId, source_url_host: hostFromUrl(resolvedUrl) },
+      post_text: '',
+      comments: [],
+      media: [],
+      max_assets: maxAssets,
+      warnings: [
+        warning(code, { message: `XHS backend failed: ${error?.message || error}` }),
+        warning('PARTIAL_RESULT'),
+      ],
+    };
   }
 
   const media = normalizeMedia(providerResult?.media || [], maxAssets);

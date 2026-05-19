@@ -1094,6 +1094,16 @@ function normalizeSearchText(text) {
     .trim();
 }
 
+function classifyXhsError(error) {
+  const msg = String(error?.message || error || '').toLowerCase();
+  if (msg.includes('timed out') || msg.includes('timeout')) return 'XHS_BACKEND_TIMEOUT';
+  if (msg.includes('cookie') || msg.includes('login') || msg.includes('401')) return 'XHS_COOKIE_INVALID';
+  if (msg.includes('xsec')) return 'XHS_SHORTLINK_RESOLVE_FAILED';
+  if (msg.includes('captcha') || msg.includes('risk') || msg.includes('verify')) return 'XHS_ANTI_BOT_OR_CAPTCHA';
+  if (msg.includes('enotfound') || msg.includes('econnrefused') || msg.includes('network')) return 'XHS_NETWORK_ERROR';
+  return 'XHS_BACKEND_MCP_ERROR';
+}
+
 function backendErrorPayload(error, extra = {}) {
   const message = error instanceof Error ? error.message : String(error);
   const lower = message.toLowerCase();
@@ -2199,21 +2209,57 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
     });
   } catch (error) {
     if (genericFallbackEnabled) {
-      const fallback = await readGenericSocialPost({ url, platform: 'xhs', includeComments, maxComments }, { ...options, xhsTimeoutMs });
-      fallback.structuredContent.xhs_error = error instanceof Error ? error.message : String(error);
-      fallback.structuredContent.fallback = true;
-      fallback.structuredContent.fallback_from = error?.error_code || 'XHS_BACKEND_EXCEPTION';
-      fallback.structuredContent.diagnostics = buildXhsDiagnostic({
-        platform: 'xhs', url, whichBackend: 'generic_parser', backendToolName: 'wanyi-watermark',
-        errorCode: error?.error_code || 'XHS_BACKEND_EXCEPTION',
-        backendError: error instanceof Error ? error.message : String(error),
-        hasCookie, hasXsecToken: Boolean(resolved.xsec_token),
-        usedCachedToken: Boolean(prepared.source === 'xhs_browse_cache'),
-        usedCanonicalUrl: Boolean(prepared.backend_url),
-        env,
+      // Use default generic timeout, NOT the XHS-specific timeout
+      const fallback = await readGenericSocialPost({ url, platform: 'xhs', includeComments, maxComments }, options);
+      if (fallback.structuredContent?.ok === true) {
+        fallback.structuredContent.partial = true;
+        fallback.structuredContent.content_available = true;
+        fallback.structuredContent.full_text_available = false;
+        fallback.structuredContent.evidence_level = 'generic_parser';
+        fallback.structuredContent.should_answer_from_content = true;
+        fallback.structuredContent.source = 'generic_parser_fallback';
+        fallback.structuredContent.xhs_error = error instanceof Error ? error.message : String(error);
+        fallback.structuredContent.fallback = true;
+        fallback.structuredContent.fallback_from = error?.error_code || 'XHS_BACKEND_EXCEPTION';
+        fallback.structuredContent.warnings = [
+          { code: 'GENERIC_PARSER_FALLBACK', message: 'Used generic parser after XHS backend failure' },
+          { code: 'FULL_TEXT_UNAVAILABLE', message: 'Content from generic parser, not original XHS backend' },
+        ];
+        fallback.structuredContent.diagnostics = buildXhsDiagnostic({
+          platform: 'xhs', url, whichBackend: 'generic_parser', backendToolName: 'wanyi-watermark',
+          errorCode: error?.error_code || 'XHS_BACKEND_EXCEPTION',
+          backendError: error instanceof Error ? error.message : String(error),
+          hasCookie, hasXsecToken: Boolean(resolved.xsec_token),
+          usedCachedToken: Boolean(prepared.source === 'xhs_browse_cache'),
+          usedCanonicalUrl: Boolean(prepared.backend_url),
+          env,
+        });
+        fallback.content[0].text = JSON.stringify(fallback.structuredContent, null, 2);
+        return fallback;
+      }
+      // Generic parser also failed — return metadata-only partial result
+      const errorCode = classifyXhsError(error);
+      return buildTextResult({
+        ok: true,
+        partial: true,
+        content_available: false,
+        full_text_available: false,
+        evidence_level: 'metadata_only',
+        should_answer_from_content: false,
+        platform: 'xhs',
+        url: resolved.resolved_url || resolved.canonical_url || url,
+        note_id: resolved.note_id || '',
+        source: 'partial_fallback',
+        post_text: '',
+        comments_text: '',
+        warnings: [
+          { code: errorCode, message: `XHS backend failed: ${error instanceof Error ? error.message : String(error)}` },
+          { code: 'GENERIC_PARSER_FAILED', message: 'Generic parser also failed' },
+          { code: 'PARTIAL_RESULT', message: 'Returning URL and metadata only; full content unavailable' },
+        ],
+        fallback_chain: ['jobson_xhs_mcp', 'wanyi_watermark', 'partial'],
+        xhs_error: error instanceof Error ? error.message : String(error),
       });
-      fallback.content[0].text = JSON.stringify(fallback.structuredContent, null, 2);
-      return fallback;
     }
     return backendErrorResult(error, { platform: 'xhs', url });
   }

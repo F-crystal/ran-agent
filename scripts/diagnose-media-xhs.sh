@@ -142,6 +142,67 @@ else
 fi
 
 echo ""
+echo "--- Fallback availability ---"
+echo "SOCIAL_READER_GENERIC_FALLBACK_ENABLED: ${SOCIAL_READER_GENERIC_FALLBACK_ENABLED:-true}"
+
+# Check token cache (read-only, no side effects)
+for cache_path in ".ran_agent_state/social_reader/xhs-note-token-cache.json" "node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json"; do
+  if [ -f "$cache_path" ]; then
+    count=$(python3 -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "?")
+    echo "token cache: $cache_path ($count entries)"
+  else
+    echo "token cache: $cache_path NOT FOUND"
+  fi
+done
+
+# Check generic parser availability (no side effects — no uvx execution)
+if command -v uvx >/dev/null 2>&1; then
+  echo "uvx: $(command -v uvx)"
+  if uv tool list 2>/dev/null | grep -q 'wanyi-watermark'; then
+    echo "generic parser (wanyi-watermark): INSTALLED"
+  else
+    echo "generic parser (wanyi-watermark): NOT INSTALLED (use --smoke-generic to test)"
+    echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
+  fi
+else
+  echo "uvx: NOT FOUND"
+  echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
+fi
+
+echo "browser fallback: DISABLED (lite default)"
+
+# Optional: real smoke test (requires --smoke-generic flag, side-effect-ful)
+if [ "${1:-}" = "--smoke-generic" ]; then
+  echo ""
+  echo "--- Generic parser smoke test (timeout 15s) ---"
+  if command -v uvx >/dev/null 2>&1; then
+    SMOKE_RESULT=$(timeout 15 uvx --from wanyi-watermark python -c "
+import json, sys
+try:
+    from importlib.metadata import entry_points
+    eps = entry_points()
+    if hasattr(eps, 'select'):
+        tools = eps.select(group='mcp.tools')
+    else:
+        tools = eps.get('mcp.tools', [])
+    names = [ep.name for ep in tools]
+    print(json.dumps({'available_tools': names, 'has_parse_xhs_link': 'parse_xhs_link' in names}))
+except Exception as e:
+    print(json.dumps({'error': str(e)}))
+" 2>&1) || SMOKE_RESULT='{"error":"timeout or execution failed"}'
+    echo "smoke result: $SMOKE_RESULT"
+    if echo "$SMOKE_RESULT" | python3 -c "import json,sys; d=json.load(sys.stdin); sys.exit(0 if d.get('has_parse_xhs_link') else 1)" 2>/dev/null; then
+      echo "parse_xhs_link: CONFIRMED"
+    else
+      echo "parse_xhs_link: NOT CONFIRMED"
+      echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
+    fi
+  else
+    echo "uvx: NOT FOUND, cannot smoke test"
+  fi
+fi
+
+echo ""
 echo "=== 7. Recent hermes XHS/social logs ==="
 sudo journalctl -u ran-agent-hermes.service --since "30 min ago" --no-pager 2>/dev/null | grep -i 'social_reader\|xhs\|xhslink\|web_extract\|read_social_post' | tail -10 || echo "No recent XHS logs"
 

@@ -432,6 +432,47 @@ test('resolve_platform_media returns structured XHS shortlink and auth errors', 
   assert.equal(authFailure.structuredContent.error_code, 'XHS_AUTH_REQUIRED');
 });
 
+test('resolve_platform_media XHS timeout triggers generic fallback, not hard error', async () => {
+  const result = await callResolve(
+    { url_or_text: 'https://www.xiaohongshu.com/explore/fallback-test?xsec_token=tok', platform: 'xhs' },
+    {
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      platformProviders: {
+        xhs: {
+          resolve: async () => {
+            throw new Error('MCP backend timed out after 90000ms: uvx');
+          },
+        },
+      },
+    }
+  );
+  // Should return partial result (ok: true), not error (isError: true)
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'xhs');
+  assert.equal(result.structuredContent.resolver, 'xhsResolver');
+});
+
+test('resolve_platform_media XHS non-recoverable error still throws', async () => {
+  const result = await callResolve(
+    { url_or_text: 'https://www.xiaohongshu.com/explore/nonrecoverable?xsec_token=tok', platform: 'xhs' },
+    {
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      platformProviders: {
+        xhs: {
+          resolve: async () => {
+            const error = new Error('PLATFORM_RESOLVER_NOT_CONFIGURED');
+            error.error_code = 'PLATFORM_RESOLVER_NOT_CONFIGURED';
+            throw error;
+          },
+        },
+      },
+    }
+  );
+  // Non-recoverable errors should still be errors
+  assert.equal(result.isError, true);
+});
+
 test('analyze_video routes platform pages through platform resolver instead of direct ffprobe', async () => {
   let providerCalled = false;
   const result = await handleMediaReaderMcpRequest(

@@ -1207,12 +1207,16 @@ test('read_social_post returns XHS_BACKEND_TIMEOUT on backend timeout', async ()
     }
   );
 
-  assert.equal(result.structuredContent.ok, false);
-  assert.equal(result.structuredContent.error_code, 'XHS_BACKEND_TIMEOUT');
-  assert.equal(result.structuredContent.retryable, true);
+  // With fallback chain: XHS timeout → generic fallback → partial result
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.content_available, false);
+  assert.equal(result.structuredContent.should_answer_from_content, false);
+  assert.equal(result.structuredContent.post_text, '');
+  assert.match(result.structuredContent.xhs_error, /timed out/);
 });
 
-test('read_social_post returns XHS_BACKEND_MCP_ERROR on generic backend failure', async () => {
+test('read_social_post returns partial result on generic backend failure', async () => {
   const result = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
@@ -1231,8 +1235,12 @@ test('read_social_post returns XHS_BACKEND_MCP_ERROR on generic backend failure'
     }
   );
 
-  assert.equal(result.structuredContent.ok, false);
-  assert.equal(result.structuredContent.error_code, 'BACKEND_MCP_ERROR');
+  // With fallback chain: XHS error → generic fallback → partial result
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.content_available, false);
+  assert.equal(result.structuredContent.should_answer_from_content, false);
+  assert.equal(result.structuredContent.post_text, '');
 });
 
 test('XHS timeout error message shows XHS-specific timeout (90000ms) not generic (45000ms)', async () => {
@@ -1261,10 +1269,11 @@ test('XHS timeout error message shows XHS-specific timeout (90000ms) not generic
     }
   );
 
-  assert.equal(result.structuredContent.ok, false);
-  assert.equal(result.structuredContent.error_code, 'XHS_BACKEND_TIMEOUT');
-  assert.match(result.structuredContent.error, /90000ms/);
-  assert.doesNotMatch(result.structuredContent.error, /45000ms/);
+  // With fallback chain: XHS timeout → generic fallback → partial result
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.match(result.structuredContent.xhs_error, /90000ms/);
+  assert.doesNotMatch(result.structuredContent.xhs_error, /45000ms/);
 });
 
 test('readSocialPost XHS path passes XHS timeout to readGenericSocialPost', async () => {
