@@ -657,6 +657,11 @@ function resolveTimeoutMs(env = process.env) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
 }
 
+function resolveXhsBackendTimeoutMs(env = process.env) {
+  const parsed = Number(env.SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS || env.XHS_BACKEND_MCP_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
+}
+
 function xhsServerConfig(env = process.env) {
   return {
     command: env.XHS_MCP_COMMAND || 'uvx',
@@ -693,6 +698,12 @@ function genericParserToolForPlatform(platform) {
   return 'parse_generic_link';
 }
 
+function normalizeXhsScheme(url) {
+  // Normalize xhslink short URLs from http:// to https:// to avoid
+  // mixed-content redirects and terminal/browser security blocks.
+  return String(url || '').replace(/^http:\/\/xhslink\.com\//i, 'https://xhslink.com/');
+}
+
 export function extractFirstUrl(text) {
   const raw = String(text || '');
   const match = raw.match(/https?:\/\/[^\s"'<>【】「」《》，。！？、；：]+/i);
@@ -706,6 +717,8 @@ export function extractFirstUrl(text) {
   }
   let url = match[0];
   url = url.replace(/[，。！？、；：）)\]}】》」'".]+$/u, '');
+  // Normalize xhslink short URLs from http to https to avoid redirect/security issues
+  url = normalizeXhsScheme(url);
   return {
     url,
     before_text: raw.slice(0, match.index).trim(),
@@ -1089,11 +1102,14 @@ function backendErrorPayload(error, extra = {}) {
     errorCode = 'CAPTCHA_OR_RISK_CONTROL';
   } else if (/cookie|login|unauthorized|401|登录/.test(lower)) {
     errorCode = 'LOGIN_REQUIRED';
+  } else if (/timed out|timeout|ETIMEDOUT/.test(lower)) {
+    errorCode = 'XHS_BACKEND_TIMEOUT';
   }
   return {
     ok: false,
     error_code: errorCode,
     error: `${errorCode}: ${message}`,
+    retryable: errorCode === 'XHS_BACKEND_TIMEOUT',
     ...extra,
   };
 }
@@ -2266,6 +2282,9 @@ async function callBackendMcpTool(server, toolName, toolArguments = {}, options 
     : server === 'bilibili'
       ? bilibiliServerConfig(env)
       : genericParserServerConfig(env);
+  const timeoutMs = server === 'xhs'
+    ? resolveXhsBackendTimeoutMs(env)
+    : resolveTimeoutMs(env);
   return await callMcpToolViaStdio({
     command: config.command,
     args: config.args,
@@ -2275,7 +2294,7 @@ async function callBackendMcpTool(server, toolName, toolArguments = {}, options 
     },
     toolName,
     arguments: toolArguments,
-    timeoutMs: resolveTimeoutMs(env),
+    timeoutMs,
   });
 }
 

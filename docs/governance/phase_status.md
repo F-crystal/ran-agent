@@ -139,6 +139,31 @@ Scope:
   `scripts/apply-hermes-runtime-split.sh`, not manual `/etc/systemd/system`
   edits.
 
+## Phase 11.1.1: Stability Hotfix
+
+Phase 11.1.1 is code-closed for compact checker, UV tooling, XHS timeout, and
+OpenCLI defaults.
+
+Scope:
+- Fix compact checker false positive: `diagnose-lite-full.sh` and
+  `apply-hermes-runtime-split.sh` now use `grep -qF` (fixed string matching)
+  instead of `grep -Eq` (regex). 20-timeout.conf is allowed; only 90/30 legacy
+  drop-ins count as stale.
+- Stabilize UV/UVX tooling: all systemd units and runtime env files now set
+  `UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache`,
+  `UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools`,
+  `UV_LINK_MODE=copy`, `UV_PYTHON_DOWNLOADS=never`.
+  `scripts/clean-uv-cache-safe.sh` provides emergency cache cleanup without
+  touching XHS cache/token, vault, or data directories.
+- Fix XHS backend timeout: `SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS` and
+  `XHS_BACKEND_MCP_TIMEOUT_MS` (default 90000ms) control XHS uvx backend
+  timeout separately from the general social reader timeout. Timeout errors
+  return typed `XHS_BACKEND_TIMEOUT` code with `retryable: true`. xhslink
+  http:// URLs are normalized to https:// before resolution.
+- OpenCLI browser-backed defaults to false for both lite and full. Full retains
+  Playwright fallback. 2C4G/60G servers should not enable browser-backed
+  OpenCLI by default; it is deferred to Phase 11.2 as optional enhancement.
+
 ## Migration Checklist
 
 - [x] Close Hermes profile/gateway script naming under Phase 5.
@@ -153,4 +178,5 @@ Scope:
 - [x] Replace Python backend model client with Hermes (Phase 10).
 - [x] Add Search Hub MCP and lite/full provider-mode runtime convergence (Phase 11).
 - [x] Compact Hermes lite/full systemd units and stale drop-in cleanup (Phase 11.1).
+- [x] Stabilize compact checker, UV tooling, XHS timeout, OpenCLI defaults (Phase 11.1.1).
 - [x] Update all documentation to reflect OpenClaw-free state.

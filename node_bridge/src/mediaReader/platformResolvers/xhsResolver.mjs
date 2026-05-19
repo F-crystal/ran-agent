@@ -46,6 +46,7 @@ function mapXhsError(error) {
   if (text.includes('risk') || text.includes('captcha') || text.includes('verify')) return 'XHS_RISK_CONTROL';
   if (text.includes('login') || text.includes('auth') || text.includes('cookie')) return 'XHS_AUTH_REQUIRED';
   if (text.includes('xsec')) return 'XHS_MISSING_XSEC_TOKEN';
+  if (text.includes('timed out') || text.includes('timeout')) return 'XHS_BACKEND_TIMEOUT';
   return 'XHS_BACKEND_MCP_ERROR';
 }
 
@@ -94,7 +95,7 @@ async function callXhsMcp({ toolName, resolvedUrl, maxComments }, options = {}) 
     arguments: toolName === 'get_note_comments'
       ? { url: resolvedUrl, max_count: maxComments }
       : { url: resolvedUrl },
-    timeoutMs: Number(env.PERSONAL_AGENT_PLATFORM_RESOLVE_TIMEOUT_MS || 15000),
+    timeoutMs: Number(env.XHS_BACKEND_MCP_TIMEOUT_MS || env.PERSONAL_AGENT_PLATFORM_RESOLVE_TIMEOUT_MS || 90000),
   });
 }
 

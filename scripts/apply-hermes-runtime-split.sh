@@ -131,7 +131,7 @@ upsert_env_file() {
 
 is_managed_env_key() {
   case "$1" in
-    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT)
+    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS)
       return 0
       ;;
     *)
@@ -170,11 +170,17 @@ write_runtime_env() {
     "SEARCH_HUB_ENABLE_TAVILY=true" \
     "SEARCH_HUB_ENABLE_AIHOT=true" \
     "SEARCH_HUB_ENABLE_OPENCLI=true" \
-    "SEARCH_HUB_ENABLE_OPENCLI_BROWSER=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false" \
     "SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK=true" \
     "SEARCH_HUB_OPENCLI_BIN=opencli" \
     "SEARCH_HUB_OPENCLI_TIMEOUT_MS=60000" \
     "SEARCH_HUB_PUBLIC_ONLY_DEFAULT=false" \
+    "UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache" \
+    "UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools" \
+    "UV_LINK_MODE=copy" \
+    "UV_PYTHON_DOWNLOADS=never" \
+    "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
+    "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$FULL_HOME/profiles/$FULL_PROFILE/.env" \
@@ -196,11 +202,17 @@ write_runtime_env() {
     "SEARCH_HUB_ENABLE_TAVILY=true" \
     "SEARCH_HUB_ENABLE_AIHOT=true" \
     "SEARCH_HUB_ENABLE_OPENCLI=true" \
-    "SEARCH_HUB_ENABLE_OPENCLI_BROWSER=true" \
+    "SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false" \
     "SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK=true" \
     "SEARCH_HUB_OPENCLI_BIN=opencli" \
     "SEARCH_HUB_OPENCLI_TIMEOUT_MS=60000" \
     "SEARCH_HUB_PUBLIC_ONLY_DEFAULT=false" \
+    "UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache" \
+    "UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools" \
+    "UV_LINK_MODE=copy" \
+    "UV_PYTHON_DOWNLOADS=never" \
+    "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
+    "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$LITE_HOME/.env" \
@@ -227,6 +239,12 @@ write_runtime_env() {
     "SEARCH_HUB_OPENCLI_BIN=opencli" \
     "SEARCH_HUB_OPENCLI_TIMEOUT_MS=60000" \
     "SEARCH_HUB_PUBLIC_ONLY_DEFAULT=true" \
+    "UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache" \
+    "UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools" \
+    "UV_LINK_MODE=copy" \
+    "UV_PYTHON_DOWNLOADS=never" \
+    "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
+    "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$LITE_HOME/profiles/$LITE_PROFILE/.env" \
@@ -295,7 +313,13 @@ write_runtime_env() {
     "FEISHU_LARK_CLI_IDENTITY=bot" \
     "?DESKTOP_PROXY_ENABLED=false" \
     "DESKTOP_PROXY_HOST=127.0.0.1" \
-    "DESKTOP_PROXY_PORT=8650"
+    "DESKTOP_PROXY_PORT=8650" \
+    "UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache" \
+    "UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools" \
+    "UV_LINK_MODE=copy" \
+    "UV_PYTHON_DOWNLOADS=never" \
+    "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
+    "XHS_BACKEND_MCP_TIMEOUT_MS=90000"
 }
 
 write_lite_runtime_config() {
@@ -453,6 +477,12 @@ Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
 Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
 Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false
 Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false
+Environment=UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache
+Environment=UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
+Environment=UV_LINK_MODE=copy
+Environment=UV_PYTHON_DOWNLOADS=never
+Environment=SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
+Environment=XHS_BACKEND_MCP_TIMEOUT_MS=90000
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p $LITE_PROFILE gateway run --replace --accept-hooks'
 Restart=always
 RestartSec=5
@@ -493,6 +523,12 @@ Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
 Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000
 Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false
 Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false
+Environment=UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache
+Environment=UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
+Environment=UV_LINK_MODE=copy
+Environment=UV_PYTHON_DOWNLOADS=never
+Environment=SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
+Environment=XHS_BACKEND_MCP_TIMEOUT_MS=90000
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p $FULL_PROFILE gateway run --replace --accept-hooks'
 Restart=always
 RestartSec=5
@@ -571,7 +607,7 @@ wait_for_gateway_port() {
 systemd_cat_contains() {
   local service="$1"
   local pattern="$2"
-  "${SUDO[@]}" systemctl cat "$service" 2>/dev/null | grep -Eq "$pattern"
+  "${SUDO[@]}" systemctl cat "$service" 2>/dev/null | grep -qF "$pattern"
 }
 
 config_has_toolset() {
@@ -589,46 +625,56 @@ verify_runtime() {
   local full_pid
 
   log "verifying compact systemd units"
-  if ! systemd_cat_contains ran-agent-hermes.service 'HERMES_HOME=/home/ubuntu/\.hermes-ran-agent/lite'; then
+  if ! systemd_cat_contains ran-agent-hermes.service 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite'; then
     echo "ERROR: lite systemd unit is not compacted to lite HERMES_HOME" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes.service 'HERMES_PROFILE=ran-assistant-lite'; then
+  if ! systemd_cat_contains ran-agent-hermes.service 'Environment=HERMES_PROFILE=ran-assistant-lite'; then
     echo "ERROR: lite systemd unit missing ran-assistant-lite profile" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes.service 'API_SERVER_PORT=8642'; then
+  if ! systemd_cat_contains ran-agent-hermes.service 'Environment=API_SERVER_PORT=8642'; then
     echo "ERROR: lite systemd unit missing API_SERVER_PORT=8642" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes.service 'API_SERVER_MODEL_NAME=ran-assistant-lite'; then
+  if ! systemd_cat_contains ran-agent-hermes.service 'Environment=API_SERVER_MODEL_NAME=ran-assistant-lite'; then
     echo "ERROR: lite systemd unit missing ran-assistant-lite model name" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes.service 'ExecStart=.*hermes -p ran-assistant-lite gateway run'; then
+  if ! systemd_cat_contains ran-agent-hermes.service 'hermes -p ran-assistant-lite gateway run'; then
     echo "ERROR: lite systemd unit ExecStart is not ran-assistant-lite gateway" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'HERMES_HOME=/home/ubuntu/\.hermes-ran-agent'; then
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent'; then
     echo "ERROR: full systemd unit missing full HERMES_HOME" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'HERMES_PROFILE=ran-assistant'; then
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'Environment=HERMES_PROFILE=ran-assistant'; then
     echo "ERROR: full systemd unit missing ran-assistant profile" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'API_SERVER_PORT=8643'; then
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'Environment=API_SERVER_PORT=8643'; then
     echo "ERROR: full systemd unit missing API_SERVER_PORT=8643" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'API_SERVER_MODEL_NAME=ran-assistant'; then
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'Environment=API_SERVER_MODEL_NAME=ran-assistant'; then
     echo "ERROR: full systemd unit missing ran-assistant model name" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'ExecStart=.*hermes -p ran-assistant gateway run'; then
+  if ! systemd_cat_contains ran-agent-hermes-full.service 'hermes -p ran-assistant gateway run'; then
     echo "ERROR: full systemd unit ExecStart is not ran-assistant gateway" >&2
     exit 1
   fi
+  for uv_env in 'UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache' 'UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools' 'UV_LINK_MODE=copy' 'UV_PYTHON_DOWNLOADS=never'; do
+    if ! systemd_cat_contains ran-agent-hermes.service "$uv_env"; then
+      echo "ERROR: lite systemd unit missing $uv_env" >&2
+      exit 1
+    fi
+    if ! systemd_cat_contains ran-agent-hermes-full.service "$uv_env"; then
+      echo "ERROR: full systemd unit missing $uv_env" >&2
+      exit 1
+    fi
+  done
   local stale_dropin
   for stale_dropin in "${STALE_LITE_DROPINS[@]}"; do
     if "${SUDO[@]}" test -e "$stale_dropin"; then

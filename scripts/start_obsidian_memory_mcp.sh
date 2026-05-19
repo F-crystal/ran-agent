@@ -27,6 +27,12 @@ fi
 
 export PATH="$ROOT_DIR/.venv/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
+# Stabilize uv/uvx: fixed cache and tool dirs prevent repeated multi-G archive builds
+export UV_CACHE_DIR="${UV_CACHE_DIR:-/opt/ran_agent/.ran_agent_state/uv-cache}"
+export UV_TOOL_DIR="${UV_TOOL_DIR:-/opt/ran_agent/.ran_agent_state/uv-tools}"
+export UV_LINK_MODE="${UV_LINK_MODE:-copy}"
+export UV_PYTHON_DOWNLOADS="${UV_PYTHON_DOWNLOADS:-never}"
+
 VAULT_DIR="${OBSIDIAN_MEMORY_VAULT_DIR:-$ROOT_DIR/vault}"
 INDEX_PATH="${OBSIDIAN_MEMORY_INDEX_PATH:-$ROOT_DIR/data/obsidian-memory-index.duckdb}"
 PROVIDER="${OBSIDIAN_MEMORY_MCP_PROVIDER:-obsidian-index}"

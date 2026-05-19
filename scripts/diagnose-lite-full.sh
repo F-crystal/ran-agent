@@ -13,7 +13,7 @@ SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 systemd_cat_has() {
   local service="$1"
   local pattern="$2"
-  systemctl cat "$service" 2>/dev/null | grep -Eq "$pattern"
+  systemctl cat "$service" 2>/dev/null | grep -qF "$pattern"
 }
 
 dropin_state() {
@@ -55,20 +55,22 @@ done
 
 echo ""
 echo "=== Systemd compact status ==="
-if systemd_cat_has ran-agent-hermes.service 'HERMES_HOME=/home/ubuntu/\.hermes-ran-agent/lite' \
-  && systemd_cat_has ran-agent-hermes.service 'HERMES_PROFILE=ran-assistant-lite' \
-  && systemd_cat_has ran-agent-hermes.service 'API_SERVER_PORT=8642' \
-  && systemd_cat_has ran-agent-hermes.service 'API_SERVER_MODEL_NAME=ran-assistant-lite' \
-  && systemd_cat_has ran-agent-hermes.service 'ExecStart=.*hermes -p ran-assistant-lite gateway run'; then
+# Compact check uses fixed-string grep -F matching on systemctl cat output.
+# 20-timeout.conf is allowed; only 90/30 legacy drop-ins are stale.
+if systemd_cat_has ran-agent-hermes.service 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite' \
+  && systemd_cat_has ran-agent-hermes.service 'Environment=HERMES_PROFILE=ran-assistant-lite' \
+  && systemd_cat_has ran-agent-hermes.service 'Environment=API_SERVER_PORT=8642' \
+  && systemd_cat_has ran-agent-hermes.service 'Environment=API_SERVER_MODEL_NAME=ran-assistant-lite' \
+  && systemd_cat_has ran-agent-hermes.service 'hermes -p ran-assistant-lite gateway run'; then
   echo "lite unit compact: OK"
 else
   echo "lite unit compact: FAIL"
 fi
-if systemd_cat_has ran-agent-hermes-full.service 'HERMES_HOME=/home/ubuntu/\.hermes-ran-agent' \
-  && systemd_cat_has ran-agent-hermes-full.service 'HERMES_PROFILE=ran-assistant' \
-  && systemd_cat_has ran-agent-hermes-full.service 'API_SERVER_PORT=8643' \
-  && systemd_cat_has ran-agent-hermes-full.service 'API_SERVER_MODEL_NAME=ran-assistant' \
-  && systemd_cat_has ran-agent-hermes-full.service 'ExecStart=.*hermes -p ran-assistant gateway run'; then
+if systemd_cat_has ran-agent-hermes-full.service 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent' \
+  && systemd_cat_has ran-agent-hermes-full.service 'Environment=HERMES_PROFILE=ran-assistant' \
+  && systemd_cat_has ran-agent-hermes-full.service 'Environment=API_SERVER_PORT=8643' \
+  && systemd_cat_has ran-agent-hermes-full.service 'Environment=API_SERVER_MODEL_NAME=ran-assistant' \
+  && systemd_cat_has ran-agent-hermes-full.service 'hermes -p ran-assistant gateway run'; then
   echo "full unit compact: OK"
 else
   echo "full unit compact: FAIL"
@@ -89,6 +91,52 @@ echo "lite port: ${lite_effective_port:-UNKNOWN}"
 echo "full port: ${full_effective_port:-UNKNOWN}"
 if [ "$dropin_90" = "PRESENT" ] || [ "$dropin_30_runtime" = "PRESENT" ] || [ "$dropin_30_env" = "PRESENT" ]; then
   echo "WARNING: stale Hermes runtime drop-in remains; run scripts/apply-hermes-runtime-split.sh"
+fi
+
+echo ""
+echo "=== UV cache status ==="
+lite_uv_cache=$(systemctl cat ran-agent-hermes.service 2>/dev/null | sed -n 's/^Environment=UV_CACHE_DIR=//p' | tail -n 1)
+full_uv_cache=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null | sed -n 's/^Environment=UV_CACHE_DIR=//p' | tail -n 1)
+lite_uv_tool=$(systemctl cat ran-agent-hermes.service 2>/dev/null | sed -n 's/^Environment=UV_TOOL_DIR=//p' | tail -n 1)
+full_uv_tool=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null | sed -n 's/^Environment=UV_TOOL_DIR=//p' | tail -n 1)
+echo "lite UV_CACHE_DIR: ${lite_uv_cache:-NOT SET}"
+echo "full UV_CACHE_DIR: ${full_uv_cache:-NOT SET}"
+echo "lite UV_TOOL_DIR: ${lite_uv_tool:-NOT SET}"
+echo "full UV_TOOL_DIR: ${full_uv_tool:-NOT SET}"
+if [ -d /opt/ran_agent/.ran_agent_state/uv-cache ]; then
+  uv_cache_size=$(du -sh /opt/ran_agent/.ran_agent_state/uv-cache 2>/dev/null | cut -f1)
+  echo "uv-cache (/opt/ran_agent/.ran_agent_state/uv-cache): $uv_cache_size"
+else
+  echo "uv-cache (/opt/ran_agent/.ran_agent_state/uv-cache): NOT FOUND"
+fi
+if [ -d /opt/ran_agent/.ran_agent_state/uv-tools ]; then
+  uv_tools_size=$(du -sh /opt/ran_agent/.ran_agent_state/uv-tools 2>/dev/null | cut -f1)
+  echo "uv-tools (/opt/ran_agent/.ran_agent_state/uv-tools): $uv_tools_size"
+else
+  echo "uv-tools (/opt/ran_agent/.ran_agent_state/uv-tools): NOT FOUND"
+fi
+if [ -e ~/.cache/uv ]; then
+  if [ -L ~/.cache/uv ]; then
+    echo "~/.cache/uv: symlink -> $(readlink ~/.cache/uv)"
+  else
+    home_uv_size=$(du -sh ~/.cache/uv 2>/dev/null | cut -f1)
+    echo "~/.cache/uv: $home_uv_size (NOT symlink)"
+    home_uv_bytes=$(du -s ~/.cache/uv 2>/dev/null | awk '{print $1}')
+    if [ "${home_uv_bytes:-0}" -gt 2097152 ]; then
+      echo "WARNING: ~/.cache/uv is >2G and not a symlink; consider linking to /opt/ran_agent/.ran_agent_state/uv-cache"
+    fi
+  fi
+else
+  echo "~/.cache/uv: NOT FOUND"
+fi
+# Check uv-cache size warnings
+if [ -d /opt/ran_agent/.ran_agent_state/uv-cache ]; then
+  uv_cache_kb=$(du -s /opt/ran_agent/.ran_agent_state/uv-cache 2>/dev/null | awk '{print $1}')
+  if [ "${uv_cache_kb:-0}" -gt 10485760 ]; then
+    echo "ERROR: uv-cache >10G; stop services and run scripts/clean-uv-cache-safe.sh --yes"
+  elif [ "${uv_cache_kb:-0}" -gt 6291456 ]; then
+    echo "WARNING: uv-cache >6G; consider running scripts/clean-uv-cache-safe.sh"
+  fi
 fi
 
 echo ""

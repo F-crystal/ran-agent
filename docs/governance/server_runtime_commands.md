@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-19)
 
 This is the pasteable server runbook for the real `/opt/ran_agent` runtime.
 It does not run Phase 5 smoke tests.
@@ -1317,3 +1317,54 @@ The two paths run in parallel. Results are merged:
 
 Check `diagnostics.detail_backend.error_code` and
 `diagnostics.media_backend.error_code` separately to understand which path failed.
+
+## Phase 11.1.1 Stability Hotfix
+
+After `git pull --ff-only`, run:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+
+bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-media-xhs.sh
+```
+
+### What changed
+
+1. **Compact checker**: `diagnose-lite-full.sh` now uses `grep -qF` (fixed
+   string) instead of `grep -Eq` (regex). 20-timeout.conf is allowed; only
+   90/30 legacy drop-ins are stale.
+
+2. **UV cache pinned**: systemd units and env files set
+   `UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache`,
+   `UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools`,
+   `UV_LINK_MODE=copy`, `UV_PYTHON_DOWNLOADS=never`.
+
+3. **XHS timeout**: `SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000` and
+   `XHS_BACKEND_MCP_TIMEOUT_MS=90000` control XHS uvx backend timeout.
+   Timeout returns typed `XHS_BACKEND_TIMEOUT` error. xhslink http:// is
+   normalized to https://.
+
+4. **OpenCLI browser-backed disabled**: both lite and full set
+   `SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false`. Full retains Playwright fallback.
+
+### Disk emergency
+
+If system disk >90%:
+
+```bash
+# Review only (no delete)
+bash scripts/diagnose-lite-full.sh  # check UV cache status section
+
+# Safe cleanup (stops services, clears uv cache, restarts)
+bash scripts/clean-uv-cache-safe.sh --yes
+```
+
+Protected directories (never delete):
+- `/opt/ran_agent/.ran_agent_state/social_reader/` (XHS token cache)
+- `/opt/ran_agent/node_bridge/.ran_agent_state/social_reader/`
+- `/opt/ran_agent/debug/wechat/xhs_notes`
+- `/opt/ran_agent/vault`
+- `/opt/ran_agent/data`

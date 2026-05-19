@@ -93,9 +93,42 @@ for bucket, count in buckets.items():
 "
 
 echo ""
-echo "=== 5. Recent hermes XHS/social logs ==="
+echo "=== 5. XHS token cache status ==="
+XHS_CACHE_PATHS=(
+  ".ran_agent_state/social_reader/xhs-note-token-cache.json"
+  "node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json"
+)
+for cache_path in "${XHS_CACHE_PATHS[@]}"; do
+  if [ -f "$cache_path" ]; then
+    entry_count=$(python3 -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "parse_error")
+    echo "$cache_path: EXISTS ($entry_count entries)"
+  else
+    echo "$cache_path: NOT FOUND"
+  fi
+done
+
+echo ""
+echo "=== 6. UV cache and XHS timeout env ==="
+for f in .env.local node_bridge/.env.local "$HERMES_HOME/.env" "$HERMES_HOME/profiles/ran-assistant/.env"; do
+  if [ -f "$f" ]; then
+    for key in UV_CACHE_DIR UV_TOOL_DIR SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS XHS_BACKEND_MCP_TIMEOUT_MS SOCIAL_READER_MCP_TIMEOUT_MS; do
+      val=$(grep "^${key}=" "$f" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+      if [ -n "$val" ]; then
+        echo "$f: $key=$val"
+      fi
+    done
+  fi
+done
+if [ -d /opt/ran_agent/.ran_agent_state/uv-cache ]; then
+  echo "uv-cache size: $(du -sh /opt/ran_agent/.ran_agent_state/uv-cache 2>/dev/null | cut -f1)"
+else
+  echo "uv-cache: NOT FOUND"
+fi
+
+echo ""
+echo "=== 7. Recent hermes XHS/social logs ==="
 sudo journalctl -u ran-agent-hermes.service --since "30 min ago" --no-pager 2>/dev/null | grep -i 'social_reader\|xhs\|xhslink\|web_extract\|read_social_post' | tail -10 || echo "No recent XHS logs"
 
 echo ""
-echo "=== 6. Recent hermes tool usage logs ==="
+echo "=== 8. Recent hermes tool usage logs ==="
 sudo journalctl -u ran-agent-hermes.service --since "30 min ago" --no-pager 2>/dev/null | grep -i 'tool.*call\|tool.*return\|mcp.*tool' | tail -10 || echo "No recent tool logs"

@@ -60,7 +60,7 @@ MCP services
 
 **飞书和桌面入口。** 飞书桥接通过 `lark-cli event consume im.message.receive_v1 --as bot` 消费消息，并通过 `im +messages-send` 回复；桌面客户端通过 ran-agent 自己的 OpenAI-compatible Proxy 接入，避免绕过统一记忆和 reviewer。
 
-**联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。它同时注册到 lite/full；lite 使用 Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed 等轻量 provider，full 允许 OpenCLI browser-backed adapter 和 Playwright fallback。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
+**联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。它同时注册到 lite/full；lite 使用 Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed 等轻量 provider，full 使用 Playwright fallback。OpenCLI browser-backed 默认关闭（2C4G/60G 服务器约束），后续 Phase 11.2 可选增强。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
 
 **社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书优先使用通用解析 fallback，搜索上下文会缓存 `read_ref`，避免把平台 token 暴露给模型或日志。
 
@@ -175,6 +175,8 @@ runtime 配置变更必须从 repo 源配置进入，再通过
 | 社交平台 | `XHS_COOKIE`, `SESSDATA` | 小红书、B 站等平台认证 |
 | Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault 检索与索引 |
 | 媒体上下文 | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | 默认 compact，可回退 legacy |
+| UV cache | `UV_CACHE_DIR`, `UV_TOOL_DIR`, `UV_LINK_MODE`, `UV_PYTHON_DOWNLOADS` | 固定 uv/uvx 缓存路径，防止磁盘膨胀 |
+| XHS timeout | `SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS`, `XHS_BACKEND_MCP_TIMEOUT_MS` | XHS 后端超时（默认 90s），与通用 social reader 超时独立 |
 
 完整变量模板见 `.env.example`。服务器当前状态和最新部署口径见 `docs/governance/current_runtime_status.md`。
 

@@ -118,7 +118,7 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_search_hub_mcp.sh
     env:
       SEARCH_HUB_PROFILE_MODE: full
-      SEARCH_HUB_ENABLE_OPENCLI_BROWSER: "true"
+      SEARCH_HUB_ENABLE_OPENCLI_BROWSER: "false"
       SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK: "true"
       SEARCH_HUB_PUBLIC_ONLY_DEFAULT: "false"
     timeout: 120

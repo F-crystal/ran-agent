@@ -766,7 +766,7 @@ test('read_social_post routes netease music links to the music reader', async ()
 test('extractFirstUrl trims Chinese punctuation and share text tails', () => {
   assert.equal(
     extractFirstUrl('FIFA回应 http://xhslink.com/o/r5Ot5yz9ty \n先复制再打开【小红书】').url,
-    'http://xhslink.com/o/r5Ot5yz9ty'
+    'https://xhslink.com/o/r5Ot5yz9ty'
   );
   assert.equal(
     extractFirstUrl('看这个：https://xhslink.com/a/abc123，复制打开小红书').url,
@@ -775,6 +775,22 @@ test('extractFirstUrl trims Chinese punctuation and share text tails', () => {
   assert.equal(
     extractFirstUrl('没有链接').error_code,
     'NO_URL_FOUND'
+  );
+});
+
+test('extractFirstUrl normalizes xhslink http to https', () => {
+  assert.equal(
+    extractFirstUrl('分享 http://xhslink.com/o/abc123 打开小红书').url,
+    'https://xhslink.com/o/abc123'
+  );
+  assert.equal(
+    extractFirstUrl('分享 https://xhslink.com/a/def456 打开小红书').url,
+    'https://xhslink.com/a/def456'
+  );
+  // Non-xhslink URLs should not be affected
+  assert.equal(
+    extractFirstUrl('看这个 http://example.com/page').url,
+    'http://example.com/page'
   );
 });
 
@@ -1170,4 +1186,51 @@ test('read_social_post caps max_comments to 1-100', async () => {
   seen.push(high.structuredContent.max_comments);
 
   assert.deepEqual(seen, [1, '0. A', 100]);
+});
+
+test('read_social_post returns XHS_BACKEND_TIMEOUT on backend timeout', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/timeout-test?xsec_token=tok',
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      mcpCallImpl: async () => {
+        throw new Error('MCP backend timed out after 90000ms: uvx');
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.error_code, 'XHS_BACKEND_TIMEOUT');
+  assert.equal(result.structuredContent.retryable, true);
+});
+
+test('read_social_post returns XHS_BACKEND_MCP_ERROR on generic backend failure', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/generic-error?xsec_token=tok',
+        },
+      },
+    },
+    {
+      env: { XHS_COOKIE: 'a1=demo' },
+      mcpCallImpl: async () => {
+        throw new Error('some unexpected backend error');
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.error_code, 'BACKEND_MCP_ERROR');
 });

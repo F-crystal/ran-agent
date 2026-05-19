@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-17)
+Status: CURRENT (2026-05-19)
 
 ## Frontend Path
 
@@ -24,8 +24,10 @@ Status: CURRENT (2026-05-17)
   OpenCLI public-only adapters, and public academic adapters such as
   OpenAlex/arxiv/pubmed. It does not enable OpenCLI browser-backed adapters or
   Playwright fallback.
-- Full Search Hub may use OpenCLI browser-backed adapters and Playwright
-  fallback for debug/heavy web work. OpenCLI remains read-only and allowlisted.
+- Full Search Hub uses Playwright fallback for debug/heavy web work. OpenCLI
+  browser-backed is disabled by default (2C4G/60G server constraint). OpenCLI
+  public adapters remain available. Browser-backed OpenCLI is deferred to
+  Phase 11.2 as optional enhancement.
 - Node bridge auto-selects per request via `RAN_AGENT_CAPABILITY_MODE=auto`.
 - 8642 is lite-context, not a security sandbox. Full unavailable → fallback to lite with logged reason.
 - Standard deployment and drift repair entry since `dda3499 Add Hermes runtime split deploy script`:
@@ -115,6 +117,11 @@ Status: CURRENT (2026-05-17)
 - XHS browse search stores `note_id -> xsec_token` context in `.openclaw_state/social_reader/xhs-note-token-cache.json` by default and returns `read_ref` handles without exposing token values.
 - XHS browse note treats backend `success:false` / `ok:false` payloads as read failures and retries through the generic parser fallback before returning `XHS_NOTE_READ_FAILED`.
 - Generic parser JSON payloads are normalized before output: `status:success` exposes readable text and image metadata, while `status:error` becomes `GENERIC_PARSE_FAILED`.
+- XHS backend timeout is controlled by `SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS`
+  and `XHS_BACKEND_MCP_TIMEOUT_MS` (default 90000ms), separate from the general
+  `SOCIAL_READER_MCP_TIMEOUT_MS`. Timeout errors return typed
+  `XHS_BACKEND_TIMEOUT` code with `retryable: true`. xhslink http:// URLs are
+  normalized to https:// before resolution.
 
 ## Tools Config
 
@@ -123,6 +130,22 @@ Status: CURRENT (2026-05-17)
 - Listed agent adds `read` on top.
 - Native `todo-tools` disabled (bridge-managed).
 - After changing `tools.profile` or `tools.allow`, run `/new` or `/reset`.
+
+## UV Cache Management
+
+- UV/UVX cache is pinned to `/opt/ran_agent/.ran_agent_state/uv-cache` and
+  `/opt/ran_agent/.ran_agent_state/uv-tools` via systemd `Environment=` and
+  runtime env files.
+- `UV_LINK_MODE=copy` and `UV_PYTHON_DOWNLOADS=never` prevent uvx from
+  downloading Python or creating hardlink-heavy archives.
+- `~/.cache/uv` should be a symlink to the managed cache directory.
+- If uv-cache exceeds 6G, run `scripts/clean-uv-cache-safe.sh` to review.
+  If it exceeds 10G, stop services and run `scripts/clean-uv-cache-safe.sh --yes`.
+- Do NOT delete `/opt/ran_agent/.ran_agent_state/social_reader/` or
+  `/opt/ran_agent/node_bridge/.ran_agent_state/social_reader/` — these contain
+  XHS token cache required for note reading.
+- Do NOT delete `/opt/ran_agent/debug/wechat/xhs_notes`,
+  `/opt/ran_agent/vault`, or `/opt/ran_agent/data`.
 
 ## Session And Context
 
