@@ -7,6 +7,7 @@
 # Runtime state and local data
 .openclaw_state/
 .ran_agent_state/
+node_bridge/.ran_agent_state/
 data/
 logs/
 debug/
@@ -67,4 +68,3 @@ docs/governance/archive/
 .codex/
 .playwright-mcp/
 vault/ombre/
-.openclaw_state/
