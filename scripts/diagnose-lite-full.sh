@@ -13,7 +13,9 @@ SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 systemd_cat_has() {
   local service="$1"
   local pattern="$2"
-  systemctl cat "$service" 2>/dev/null | grep -qF "$pattern"
+  local output
+  output=$(systemctl cat "$service" 2>/dev/null) || return 1
+  printf '%s\n' "$output" | grep -qF "$pattern"
 }
 
 dropin_state() {
@@ -57,23 +59,39 @@ echo ""
 echo "=== Systemd compact status ==="
 # Compact check uses fixed-string grep -F matching on systemctl cat output.
 # 20-timeout.conf is allowed; only 90/30 legacy drop-ins are stale.
-if systemd_cat_has ran-agent-hermes.service 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite' \
-  && systemd_cat_has ran-agent-hermes.service 'Environment=HERMES_PROFILE=ran-assistant-lite' \
-  && systemd_cat_has ran-agent-hermes.service 'Environment=API_SERVER_PORT=8642' \
-  && systemd_cat_has ran-agent-hermes.service 'Environment=API_SERVER_MODEL_NAME=ran-assistant-lite' \
-  && systemd_cat_has ran-agent-hermes.service 'hermes -p ran-assistant-lite gateway run'; then
+LITE_CAT=$(systemctl cat ran-agent-hermes.service 2>/dev/null) || LITE_CAT=""
+FULL_CAT=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null) || FULL_CAT=""
+
+lite_compact_ok=1
+for pat in 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite' \
+  'Environment=HERMES_PROFILE=ran-assistant-lite' \
+  'Environment=API_SERVER_PORT=8642' \
+  'Environment=API_SERVER_MODEL_NAME=ran-assistant-lite' \
+  'hermes -p ran-assistant-lite gateway run'; do
+  if ! printf '%s\n' "$LITE_CAT" | grep -qF "$pat"; then
+    echo "lite unit compact: FAIL (missing: $pat)"
+    lite_compact_ok=0
+    break
+  fi
+done
+if [ "$lite_compact_ok" -eq 1 ]; then
   echo "lite unit compact: OK"
-else
-  echo "lite unit compact: FAIL"
 fi
-if systemd_cat_has ran-agent-hermes-full.service 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent' \
-  && systemd_cat_has ran-agent-hermes-full.service 'Environment=HERMES_PROFILE=ran-assistant' \
-  && systemd_cat_has ran-agent-hermes-full.service 'Environment=API_SERVER_PORT=8643' \
-  && systemd_cat_has ran-agent-hermes-full.service 'Environment=API_SERVER_MODEL_NAME=ran-assistant' \
-  && systemd_cat_has ran-agent-hermes-full.service 'hermes -p ran-assistant gateway run'; then
+
+full_compact_ok=1
+for pat in 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent' \
+  'Environment=HERMES_PROFILE=ran-assistant' \
+  'Environment=API_SERVER_PORT=8643' \
+  'Environment=API_SERVER_MODEL_NAME=ran-assistant' \
+  'hermes -p ran-assistant gateway run'; do
+  if ! printf '%s\n' "$FULL_CAT" | grep -qF "$pat"; then
+    echo "full unit compact: FAIL (missing: $pat)"
+    full_compact_ok=0
+    break
+  fi
+done
+if [ "$full_compact_ok" -eq 1 ]; then
   echo "full unit compact: OK"
-else
-  echo "full unit compact: FAIL"
 fi
 dropin_90=$(dropin_state "$SYSTEMD_DIR/ran-agent-hermes.service.d/90-lite-runtime.conf")
 dropin_30_runtime=$(dropin_state "$SYSTEMD_DIR/ran-agent-hermes.service.d/30-hermes-runtime.conf")

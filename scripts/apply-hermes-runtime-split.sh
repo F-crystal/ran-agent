@@ -551,6 +551,7 @@ cleanup_stale_lite_dropins() {
 restart_services() {
   log "reloading systemd and restarting services"
   "${SUDO[@]}" systemctl daemon-reload
+  sleep 1
   "${SUDO[@]}" systemctl reset-failed ran-agent-hermes.service ran-agent-hermes-full.service || true
   "${SUDO[@]}" systemctl restart ran-agent-hermes.service
   wait_for_gateway_port "$LITE_PORT" ran-agent-hermes.service || true
@@ -607,7 +608,9 @@ wait_for_gateway_port() {
 systemd_cat_contains() {
   local service="$1"
   local pattern="$2"
-  "${SUDO[@]}" systemctl cat "$service" 2>/dev/null | grep -qF "$pattern"
+  local output
+  output=$("${SUDO[@]}" systemctl cat "$service" 2>/dev/null) || return 1
+  printf '%s\n' "$output" | grep -qF "$pattern"
 }
 
 config_has_toolset() {
@@ -625,52 +628,65 @@ verify_runtime() {
   local full_pid
 
   log "verifying compact systemd units"
-  if ! systemd_cat_contains ran-agent-hermes.service 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite'; then
+  # Cache systemctl cat output once for all checks
+  local lite_cat full_cat
+  lite_cat=$("${SUDO[@]}" systemctl cat ran-agent-hermes.service 2>/dev/null) || lite_cat=""
+  full_cat=$("${SUDO[@]}" systemctl cat ran-agent-hermes-full.service 2>/dev/null) || full_cat=""
+
+  systemd_cat_contains_cached() {
+    local cat_output="$1"
+    local pattern="$2"
+    printf '%s\n' "$cat_output" | grep -qF "$pattern"
+  }
+
+  if ! systemd_cat_contains_cached "$lite_cat" 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite'; then
     echo "ERROR: lite systemd unit is not compacted to lite HERMES_HOME" >&2
+    echo "--- systemctl cat ran-agent-hermes.service (first 30 lines) ---" >&2
+    printf '%s\n' "$lite_cat" | head -30 >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes.service 'Environment=HERMES_PROFILE=ran-assistant-lite'; then
+  if ! systemd_cat_contains_cached "$lite_cat" 'Environment=HERMES_PROFILE=ran-assistant-lite'; then
     echo "ERROR: lite systemd unit missing ran-assistant-lite profile" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes.service 'Environment=API_SERVER_PORT=8642'; then
+  if ! systemd_cat_contains_cached "$lite_cat" 'Environment=API_SERVER_PORT=8642'; then
     echo "ERROR: lite systemd unit missing API_SERVER_PORT=8642" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes.service 'Environment=API_SERVER_MODEL_NAME=ran-assistant-lite'; then
+  if ! systemd_cat_contains_cached "$lite_cat" 'Environment=API_SERVER_MODEL_NAME=ran-assistant-lite'; then
     echo "ERROR: lite systemd unit missing ran-assistant-lite model name" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes.service 'hermes -p ran-assistant-lite gateway run'; then
+  if ! systemd_cat_contains_cached "$lite_cat" 'hermes -p ran-assistant-lite gateway run'; then
     echo "ERROR: lite systemd unit ExecStart is not ran-assistant-lite gateway" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent'; then
+  if ! systemd_cat_contains_cached "$full_cat" 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent'; then
     echo "ERROR: full systemd unit missing full HERMES_HOME" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'Environment=HERMES_PROFILE=ran-assistant'; then
+  if ! systemd_cat_contains_cached "$full_cat" 'Environment=HERMES_PROFILE=ran-assistant'; then
     echo "ERROR: full systemd unit missing ran-assistant profile" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'Environment=API_SERVER_PORT=8643'; then
+  if ! systemd_cat_contains_cached "$full_cat" 'Environment=API_SERVER_PORT=8643'; then
     echo "ERROR: full systemd unit missing API_SERVER_PORT=8643" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'Environment=API_SERVER_MODEL_NAME=ran-assistant'; then
+  if ! systemd_cat_contains_cached "$full_cat" 'Environment=API_SERVER_MODEL_NAME=ran-assistant'; then
     echo "ERROR: full systemd unit missing ran-assistant model name" >&2
     exit 1
   fi
-  if ! systemd_cat_contains ran-agent-hermes-full.service 'hermes -p ran-assistant gateway run'; then
+  if ! systemd_cat_contains_cached "$full_cat" 'hermes -p ran-assistant gateway run'; then
     echo "ERROR: full systemd unit ExecStart is not ran-assistant gateway" >&2
     exit 1
   fi
   for uv_env in 'UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache' 'UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools' 'UV_LINK_MODE=copy' 'UV_PYTHON_DOWNLOADS=never'; do
-    if ! systemd_cat_contains ran-agent-hermes.service "$uv_env"; then
+    if ! systemd_cat_contains_cached "$lite_cat" "$uv_env"; then
       echo "ERROR: lite systemd unit missing $uv_env" >&2
       exit 1
     fi
-    if ! systemd_cat_contains ran-agent-hermes-full.service "$uv_env"; then
+    if ! systemd_cat_contains_cached "$full_cat" "$uv_env"; then
       echo "ERROR: full systemd unit missing $uv_env" >&2
       exit 1
     fi
@@ -763,6 +779,11 @@ main() {
   require_command journalctl
   require_command pgrep
   require_command ss
+
+  # Ensure UV cache and tool directories exist
+  mkdir -p /opt/ran_agent/.ran_agent_state/uv-cache /opt/ran_agent/.ran_agent_state/uv-tools
+  chown_if_user_exists /opt/ran_agent/.ran_agent_state/uv-cache
+  chown_if_user_exists /opt/ran_agent/.ran_agent_state/uv-tools
 
   backup_env_file full_home_env "$FULL_HOME/.env"
   backup_env_file full_profile_env "$FULL_HOME/profiles/$FULL_PROFILE/.env"

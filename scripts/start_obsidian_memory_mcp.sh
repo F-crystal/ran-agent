@@ -58,8 +58,12 @@ fi
 
 case "$PROVIDER" in
   obsidian-index)
+    # Pre-warm: ensure the package is installed into UV_TOOL_DIR so uvx
+    # doesn't need to rebuild the environment on every cold start.
+    # uv tool install is idempotent and fast when already installed.
+    uv tool install "$OBSIDIAN_INDEX_PACKAGE" --force 2>/dev/null || true
     ARGS=(
-      --with "$OBSIDIAN_INDEX_PACKAGE"
+      --from "$OBSIDIAN_INDEX_PACKAGE"
       python "$OBSIDIAN_INDEX_LAUNCHER"
       mcp
       --vault "$VAULT_DIR"
