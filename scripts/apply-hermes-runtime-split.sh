@@ -131,7 +131,7 @@ upsert_env_file() {
 
 is_managed_env_key() {
   case "$1" in
-    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS)
+    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS|OBSIDIAN_MEMORY_MCP_ENABLED)
       return 0
       ;;
     *)
@@ -181,6 +181,7 @@ write_runtime_env() {
     "UV_PYTHON_DOWNLOADS=never" \
     "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
     "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
+    "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$FULL_HOME/profiles/$FULL_PROFILE/.env" \
@@ -213,6 +214,7 @@ write_runtime_env() {
     "UV_PYTHON_DOWNLOADS=never" \
     "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
     "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
+    "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$LITE_HOME/.env" \
@@ -245,6 +247,7 @@ write_runtime_env() {
     "UV_PYTHON_DOWNLOADS=never" \
     "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
     "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
+    "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$LITE_HOME/profiles/$LITE_PROFILE/.env" \
@@ -319,13 +322,35 @@ write_runtime_env() {
     "UV_LINK_MODE=copy" \
     "UV_PYTHON_DOWNLOADS=never" \
     "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
-    "XHS_BACKEND_MCP_TIMEOUT_MS=90000"
+    "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
+    "OBSIDIAN_MEMORY_MCP_ENABLED=false"
+}
+
+filter_obsidian_memory_from_config() {
+  local file="$1"
+  local tmp_filter
+  tmp_filter="$(mktemp)"
+  awk '
+    /^mcp_servers:/ { in_mcp=1 }
+    in_mcp && /^  obsidian_memory:/ { skip=1; next }
+    in_mcp && skip && /^  [^ ]/ { skip=0 }
+    in_mcp && skip { next }
+    /^platform_toolsets:/ { in_pt=1 }
+    in_pt && /mcp-obsidian_memory/ { next }
+    { print }
+  ' "$file" >| "$tmp_filter"
+  "${SUDO[@]}" cp "$tmp_filter" "$file"
+  rm -f "$tmp_filter"
 }
 
 write_lite_runtime_config() {
   log "refreshing lite runtime config"
   "${SUDO[@]}" install -D -m 644 "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/config.yaml"
   "${SUDO[@]}" install -D -m 644 "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
+  if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
+    filter_obsidian_memory_from_config "$LITE_HOME/config.yaml"
+    filter_obsidian_memory_from_config "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
+  fi
   chown_if_user_exists "$LITE_HOME"
 }
 
@@ -439,6 +464,10 @@ EOF
 EOF
   fi
 
+  if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
+    filter_obsidian_memory_from_config "$tmp"
+  fi
+
   "${SUDO[@]}" install -D -m 644 "$tmp" "$runtime_config"
   chown_if_user_exists "$runtime_config"
   rm -f "$tmp"
@@ -483,6 +512,7 @@ Environment=UV_LINK_MODE=copy
 Environment=UV_PYTHON_DOWNLOADS=never
 Environment=SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
 Environment=XHS_BACKEND_MCP_TIMEOUT_MS=90000
+Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p $LITE_PROFILE gateway run --replace --accept-hooks'
 Restart=always
 RestartSec=5
@@ -529,6 +559,7 @@ Environment=UV_LINK_MODE=copy
 Environment=UV_PYTHON_DOWNLOADS=never
 Environment=SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
 Environment=XHS_BACKEND_MCP_TIMEOUT_MS=90000
+Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec hermes -p $FULL_PROFILE gateway run --replace --accept-hooks'
 Restart=always
 RestartSec=5
@@ -767,6 +798,26 @@ verify_runtime() {
   if ! test -x "$REPO_ROOT/scripts/start_search_hub_mcp.sh"; then
     echo "ERROR: scripts/start_search_hub_mcp.sh missing or not executable" >&2
     exit 1
+  fi
+
+  log "verifying obsidian_memory MCP config"
+  if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
+    if config_has_toolset "$LITE_HOME/config.yaml" 'mcp-obsidian_memory'; then
+      echo "ERROR: lite runtime toolset exposes mcp-obsidian_memory but OBSIDIAN_MEMORY_MCP_ENABLED=false" >&2
+      exit 1
+    fi
+    if config_has_toolset "$FULL_HOME/config.yaml" 'mcp-obsidian_memory'; then
+      echo "ERROR: full runtime toolset exposes mcp-obsidian_memory but OBSIDIAN_MEMORY_MCP_ENABLED=false" >&2
+      exit 1
+    fi
+    if grep -q '^  obsidian_memory:' "$LITE_HOME/config.yaml"; then
+      echo "ERROR: lite runtime config has mcp_servers.obsidian_memory but OBSIDIAN_MEMORY_MCP_ENABLED=false" >&2
+      exit 1
+    fi
+    if grep -q '^  obsidian_memory:' "$FULL_HOME/config.yaml"; then
+      echo "ERROR: full runtime config has mcp_servers.obsidian_memory but OBSIDIAN_MEMORY_MCP_ENABLED=false" >&2
+      exit 1
+    fi
   fi
 
   log "OK: $LITE_PROFILE pid=$lite_pid port=$LITE_PORT"

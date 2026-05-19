@@ -58,10 +58,13 @@ fi
 
 case "$PROVIDER" in
   obsidian-index)
-    # Pre-warm: ensure the package is installed into UV_TOOL_DIR so uvx
-    # doesn't need to rebuild the environment on every cold start.
-    # uv tool install is idempotent and fast when already installed.
-    uv tool install "$OBSIDIAN_INDEX_PACKAGE" --force 2>/dev/null || true
+    # Check tool readiness without installing. Install is done separately via
+    # scripts/prepare-obsidian-memory-tool.sh to avoid blocking Hermes startup.
+    if ! "$OBSIDIAN_MEMORY_UVX_BIN" --from "$OBSIDIAN_INDEX_PACKAGE" python -c "pass" 2>/dev/null; then
+      echo "OBSIDIAN_MEMORY_TOOL_NOT_PREPARED: $OBSIDIAN_INDEX_PACKAGE not installed." >&2
+      echo "Run: bash scripts/prepare-obsidian-memory-tool.sh" >&2
+      exit 1
+    fi
     ARGS=(
       --from "$OBSIDIAN_INDEX_PACKAGE"
       python "$OBSIDIAN_INDEX_LAUNCHER"

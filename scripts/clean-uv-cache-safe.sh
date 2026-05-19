@@ -74,6 +74,9 @@ echo "Killing stale uvx processes..."
 pkill -f 'uvx.*obsidian' 2>/dev/null || true
 pkill -f 'uvx.*xhs' 2>/dev/null || true
 pkill -f 'uvx.*wanyi' 2>/dev/null || true
+pkill -f 'start_obsidian_memory_mcp.sh' 2>/dev/null || true
+pkill -f 'uv tool install iflow-mcp-tcsavage-obsidian-index' 2>/dev/null || true
+pkill -f '/tmp/ran-agent-hermes-home-phase5' 2>/dev/null || true
 sleep 2
 
 echo "Cleaning UV cache: $UV_CACHE_DIR"

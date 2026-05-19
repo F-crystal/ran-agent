@@ -101,7 +101,7 @@ Status: CURRENT (2026-05-19)
 | `media_reader` | `media_reader__` | Unified media facade (OCR, ASR, VLM, video, batch) |
 | `social_reader` | `social_reader__` | Social content reading (Bilibili, XHS, music) |
 | `mimo_power` | `mimo_power__` | Deep multimodal analysis (MiMo Token Plan) |
-| `obsidian_memory` | — | Obsidian vault memory integration |
+| `obsidian_memory` | — | Obsidian vault memory integration (optional, disabled by default via `OBSIDIAN_MEMORY_MCP_ENABLED=false`) |
 | `personal_memory` | — | Personal memory management |
 
 - Bundled `browser` plugin disabled; Playwright via `mcp.servers.playwright`.

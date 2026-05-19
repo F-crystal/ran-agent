@@ -170,3 +170,151 @@ test('clean-uv-cache-safe.sh does not delete XHS cache or protected directories'
   // The actual rm should only target UV_CACHE_DIR contents
   assert.equal(script.includes('UV_CACHE_DIR:?'), true);
 });
+
+test('apply script filter_obsidian_memory_from_config removes obsidian_memory from toolsets and mcp_servers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'obsidian-filter-'));
+  const configFile = join(dir, 'config.yaml');
+  writeFileSync(configFile, [
+    'platform_toolsets:',
+    '  cli:',
+    '    - mcp-search_hub',
+    '    - mcp-obsidian_memory',
+    '    - mcp-playwright',
+    '  gateway:',
+    '    - mcp-search_hub',
+    '    - mcp-obsidian_memory',
+    '    - mcp-playwright',
+    '',
+    'mcp_servers:',
+    '  search_hub:',
+    '    command: bash',
+    '    args: ["-lc", "echo search_hub"]',
+    '    timeout: 30',
+    '  obsidian_memory:',
+    '    command: bash',
+    '    args: ["-lc", "echo obsidian"]',
+    '    timeout: 180',
+    '  playwright:',
+    '    command: npx',
+    '    args: ["@anthropic-ai/mcp-playwright"]',
+    '    timeout: 60',
+  ].join('\n'));
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    'source scripts/apply-hermes-runtime-split.sh',
+    `filter_obsidian_memory_from_config ${JSON.stringify(configFile)}`,
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const text = readFileSync(configFile, 'utf8');
+  // obsidian_memory removed from toolsets
+  assert.doesNotMatch(text, /mcp-obsidian_memory/);
+  // obsidian_memory removed from mcp_servers
+  assert.doesNotMatch(text, /obsidian_memory:/);
+  // search_hub and playwright preserved
+  assert.match(text, /mcp-search_hub/);
+  assert.match(text, /mcp-playwright/);
+  assert.match(text, /search_hub:/);
+  assert.match(text, /playwright:/);
+});
+
+test('apply script filter_obsidian_memory_from_config preserves other MCP servers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'obsidian-filter-keep-'));
+  const configFile = join(dir, 'config.yaml');
+  writeFileSync(configFile, [
+    'platform_toolsets:',
+    '  gateway:',
+    '    - mcp-search_hub',
+    '    - mcp-media_generation',
+    '    - mcp-obsidian_memory',
+    '    - mcp-personal_memory',
+    '',
+    'mcp_servers:',
+    '  search_hub:',
+    '    command: bash',
+    '    timeout: 30',
+    '  media_generation:',
+    '    command: bash',
+    '    timeout: 60',
+    '  obsidian_memory:',
+    '    command: bash',
+    '    timeout: 180',
+    '  personal_memory:',
+    '    command: bash',
+    '    timeout: 30',
+  ].join('\n'));
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    'source scripts/apply-hermes-runtime-split.sh',
+    `filter_obsidian_memory_from_config ${JSON.stringify(configFile)}`,
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const text = readFileSync(configFile, 'utf8');
+  assert.doesNotMatch(text, /mcp-obsidian_memory/);
+  assert.doesNotMatch(text, /  obsidian_memory:/);
+  assert.match(text, /mcp-search_hub/);
+  assert.match(text, /mcp-media_generation/);
+  assert.match(text, /mcp-personal_memory/);
+  assert.match(text, /  personal_memory:/);
+});
+
+test('start_obsidian_memory_mcp.sh does not contain uv tool install --force', () => {
+  const scriptPath = new URL('../../scripts/start_obsidian_memory_mcp.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+  assert.doesNotMatch(script, /uv tool install.*--force/);
+  assert.match(script, /OBSIDIAN_MEMORY_TOOL_NOT_PREPARED/);
+});
+
+test('prepare-obsidian-memory-tool.sh uses flock and supports --force', () => {
+  const scriptPath = new URL('../../scripts/prepare-obsidian-memory-tool.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+  assert.match(script, /flock/);
+  assert.match(script, /\-\-force/);
+  assert.match(script, /UV_CACHE_DIR/);
+  assert.match(script, /UV_TOOL_DIR/);
+});
+
+test('clean-uv-cache-safe.sh kills obsidian install processes and protects XHS cache', () => {
+  const scriptPath = new URL('../../scripts/clean-uv-cache-safe.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+  assert.match(script, /start_obsidian_memory_mcp\.sh/);
+  assert.match(script, /uv tool install iflow-mcp-tcsavage-obsidian-index/);
+  assert.match(script, /\/tmp\/ran-agent-hermes-home-phase5/);
+  // Protected directories must not be deleted
+  assert.match(script, /social_reader/);
+  assert.match(script, /xhs_notes/);
+  assert.match(script, /vault/);
+  assert.match(script, /data/);
+});
+
+test('apply script systemd units include OBSIDIAN_MEMORY_MCP_ENABLED=false', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'obsidian-systemd-'));
+  const systemdDir = join(dir, 'systemd');
+  mkdirSync(systemdDir, { recursive: true });
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    `export SYSTEMD_DIR=${JSON.stringify(systemdDir)}`,
+    'source scripts/apply-hermes-runtime-split.sh',
+    'write_systemd_units',
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const liteUnit = readFileSync(join(systemdDir, 'ran-agent-hermes.service'), 'utf8');
+  const fullUnit = readFileSync(join(systemdDir, 'ran-agent-hermes-full.service'), 'utf8');
+
+  assert.match(liteUnit, /Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false/);
+  assert.match(fullUnit, /Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false/);
+});

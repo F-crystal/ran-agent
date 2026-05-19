@@ -260,6 +260,41 @@ if [ -f "$FULL_CONFIG" ]; then
 fi
 
 echo ""
+echo "=== 6c. Obsidian memory MCP status ==="
+obsidian_enabled=$(grep -E '^OBSIDIAN_MEMORY_MCP_ENABLED=' "$LITE_HOME/.env" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+obsidian_enabled="${obsidian_enabled:-NOT SET}"
+echo "OBSIDIAN_MEMORY_MCP_ENABLED: $obsidian_enabled"
+
+for cfg_label in "lite" "full"; do
+  if [ "$cfg_label" = "lite" ]; then cfg="$LITE_CONFIG"; else cfg="$FULL_CONFIG"; fi
+  if [ -f "$cfg" ]; then
+    if awk '/^mcp_servers:/ { in_toolsets=0 } /^platform_toolsets:/ { in_toolsets=1 } in_toolsets { print }' "$cfg" | grep -q 'mcp-obsidian_memory'; then
+      echo "$cfg_label mcp-obsidian_memory in toolsets: PRESENT"
+    else
+      echo "$cfg_label mcp-obsidian_memory in toolsets: absent"
+    fi
+    if grep -q '^  obsidian_memory:' "$cfg"; then
+      echo "$cfg_label mcp_servers.obsidian_memory: PRESENT"
+    else
+      echo "$cfg_label mcp_servers.obsidian_memory: absent"
+    fi
+    if [ "$obsidian_enabled" = "false" ] && grep -q '^  obsidian_memory:' "$cfg"; then
+      echo "ERROR: $cfg_label config has obsidian_memory but OBSIDIAN_MEMORY_MCP_ENABLED=false"
+    fi
+  fi
+done
+
+echo "--- stale processes ---"
+for pat in 'start_obsidian_memory_mcp.sh' 'uv tool install iflow-mcp' '/tmp/ran-agent-hermes-home-phase5'; do
+  count=$(pgrep -fc "$pat" 2>/dev/null || echo 0)
+  if [ "$count" -gt 0 ]; then
+    echo "ERROR: $count process(es) matching '$pat'"
+  else
+    echo "$pat: none"
+  fi
+done
+
+echo ""
 echo "=== 7. Token comparison smoke test ==="
 PROFILE_ENV="$HERMES_HOME/profiles/ran-assistant/.env"
 KEY="$(grep -E '^(HERMES_API_KEY|API_SERVER_KEY)=' "$PROFILE_ENV" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)"

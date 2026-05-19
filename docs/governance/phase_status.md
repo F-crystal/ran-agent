@@ -164,6 +164,28 @@ Scope:
   Playwright fallback. 2C4G/60G servers should not enable browser-backed
   OpenCLI by default; it is deferred to Phase 11.2 as optional enhancement.
 
+## Phase 11.1.2: Optional Obsidian Memory MCP
+
+Phase 11.1.2 is code-closed for making obsidian_memory MCP optional and
+non-blocking.
+
+Scope:
+- `OBSIDIAN_MEMORY_MCP_ENABLED` env var (default `false`) controls whether
+  obsidian_memory appears in runtime config toolsets and mcp_servers.
+- `apply-hermes-runtime-split.sh` conditionally generates config: when disabled,
+  `filter_obsidian_memory_from_config` removes `mcp-obsidian_memory` from
+  `platform_toolsets` and `obsidian_memory:` from `mcp_servers`.
+- `start_obsidian_memory_mcp.sh` no longer runs `uv tool install --force` on
+  startup. It checks tool readiness and fails fast with
+  `OBSIDIAN_MEMORY_TOOL_NOT_PREPARED` if the tool is not installed.
+- `scripts/prepare-obsidian-memory-tool.sh` is the new isolated install entry
+  point with flock protection against concurrent installs.
+- `clean-uv-cache-safe.sh` kills additional stale processes:
+  `start_obsidian_memory_mcp.sh`, `uv tool install iflow-mcp`, and
+  `/tmp/ran-agent-hermes-home-phase5`.
+- `diagnose-lite-full.sh` section 6c reports obsidian_memory MCP status, config
+  presence, and stale process detection.
+
 ## Migration Checklist
 
 - [x] Close Hermes profile/gateway script naming under Phase 5.
@@ -179,4 +201,5 @@ Scope:
 - [x] Add Search Hub MCP and lite/full provider-mode runtime convergence (Phase 11).
 - [x] Compact Hermes lite/full systemd units and stale drop-in cleanup (Phase 11.1).
 - [x] Stabilize compact checker, UV tooling, XHS timeout, OpenCLI defaults (Phase 11.1.1).
+- [x] Make obsidian_memory MCP optional and non-blocking (Phase 11.1.2).
 - [x] Update all documentation to reflect OpenClaw-free state.
