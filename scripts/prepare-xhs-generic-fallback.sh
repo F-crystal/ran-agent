@@ -28,9 +28,12 @@ fi
 
 write_marker() {
   local ok="$1" backend_executable="$2" backend_args="$3" backend_python="$4" backend_module="$5" version="$6"
-  local now
+  local now tmp_marker
   now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-  cat > "$MARKER_PATH" <<MARKER
+  tmp_marker="$(mktemp "${MARKER_PATH}.tmp.XXXXXX")"
+
+  # Write to temp file
+  cat > "$tmp_marker" <<MARKER
 {
   "ok": $ok,
   "package": "$PACKAGE",
@@ -45,6 +48,15 @@ write_marker() {
   "version": "$version"
 }
 MARKER
+
+  # Validate JSON before committing
+  if python3 -m json.tool "$tmp_marker" > /dev/null 2>&1; then
+    mv -f "$tmp_marker" "$MARKER_PATH"
+  else
+    echo "ERROR: generated marker is not valid JSON, discarding" >&2
+    rm -f "$tmp_marker"
+    return 1
+  fi
 }
 
 (
@@ -53,13 +65,13 @@ MARKER
   # Skip if already ready (unless --force)
   if [ -z "$FORCE_FLAG" ] && [ -f "$MARKER_PATH" ]; then
     if python3 -c "import json,sys; d=json.load(open('$MARKER_PATH')); sys.exit(0 if d.get('ok') else 1)" 2>/dev/null; then
-      echo "Already prepared. Use --force to reinstall."
-      cat "$MARKER_PATH"
+      echo "Already prepared. Use --force to reinstall." >&2
+      cat "$MARKER_PATH" >&2
       exit 0
     fi
   fi
 
-  echo "Installing $PACKAGE into $UV_TOOL_DIR..."
+  echo "Installing $PACKAGE into $UV_TOOL_DIR..." >&2
   # shellcheck disable=SC2086
   uv tool install "$PACKAGE" --python "$PYTHON_SOURCE" $FORCE_FLAG
 
@@ -77,7 +89,7 @@ MARKER
   if [ -x "$CONSOLE_SCRIPT" ]; then
     BACKEND_EXECUTABLE="$CONSOLE_SCRIPT"
     BACKEND_ARGS="[]"
-    echo "Found console script: $CONSOLE_SCRIPT"
+    echo "Found console script: $CONSOLE_SCRIPT" >&2
   fi
 
   # 2. Fallback: discover python -m module
@@ -92,7 +104,7 @@ MARKER
       for module_candidate in "douyin_mcp_server" "wanyi_watermark"; do
         if "$BACKEND_PYTHON" -c "import $module_candidate" 2>/dev/null; then
           BACKEND_MODULE="$module_candidate"
-          echo "Found module: $module_candidate"
+          echo "Found module: $module_candidate" >&2
           break
         fi
       done
@@ -102,12 +114,12 @@ MARKER
   if [ -z "$BACKEND_EXECUTABLE" ] && [ -z "$BACKEND_MODULE" ]; then
     echo "ERROR: could not discover MCP server entry for $PACKAGE" >&2
     write_marker "false" "" "[]" "" "" "unknown"
-    echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
+    echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED" >&2
     exit 1
   fi
 
   # Smoke test: real MCP tools/list (initialize + notifications/initialized + tools/list)
-  echo "Smoke testing MCP tools/list (timeout 15s)..."
+  echo "Smoke testing MCP tools/list (timeout 15s)..." >&2
   TOOL_CONFIRMED=false
 
   if [ -n "$BACKEND_EXECUTABLE" ]; then
@@ -128,18 +140,18 @@ MCP_EOF
 
   if echo "$SMOKE_OUTPUT" | grep -q "$TOOL_NAME"; then
     TOOL_CONFIRMED=true
-    echo "parse_xhs_link: CONFIRMED"
+    echo "parse_xhs_link: CONFIRMED" >&2
   else
-    echo "WARNING: $TOOL_NAME not found in MCP tools/list response"
-    echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED"
+    echo "WARNING: $TOOL_NAME not found in MCP tools/list response" >&2
+    echo "GENERIC_FALLBACK_TOOL_UNCONFIRMED" >&2
   fi
 
   # Write marker
   if [ "$TOOL_CONFIRMED" = "true" ]; then
     write_marker "true" "$BACKEND_EXECUTABLE" "$BACKEND_ARGS" "$BACKEND_PYTHON" "$BACKEND_MODULE" "$VERSION"
-    echo "Prepared successfully."
+    echo "Prepared successfully." >&2
   else
     write_marker "false" "$BACKEND_EXECUTABLE" "$BACKEND_ARGS" "$BACKEND_PYTHON" "$BACKEND_MODULE" "$VERSION"
   fi
-  cat "$MARKER_PATH"
+  cat "$MARKER_PATH" >&2
 ) 200>"$LOCK_FILE"

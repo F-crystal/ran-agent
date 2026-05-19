@@ -149,23 +149,33 @@ echo "marker path: $MARKER_PATH"
 
 if [ -f "$MARKER_PATH" ]; then
   echo "marker: EXISTS"
-  MARKER_OK=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('ok', False))" 2>/dev/null || echo "parse_error")
-  echo "marker ok: $MARKER_OK"
-  MARKER_CMD=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('command', ''))" 2>/dev/null || echo "")
-  echo "marker command: ${MARKER_CMD:-NOT SET}"
-  MARKER_TOOL=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('tool_name', ''))" 2>/dev/null || echo "")
-  echo "marker tool_name: ${MARKER_TOOL:-NOT SET}"
-  MARKER_PYTHON=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_python', ''))" 2>/dev/null || echo "")
-  echo "marker backend_python: ${MARKER_PYTHON:-NOT SET}"
-  MARKER_MODULE=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_module', ''))" 2>/dev/null || echo "")
-  echo "marker backend_module: ${MARKER_MODULE:-NOT SET}"
-  MARKER_VERSION=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('version', ''))" 2>/dev/null || echo "")
-  echo "marker version: ${MARKER_VERSION:-NOT SET}"
-  if [ "$MARKER_OK" = "True" ]; then
-    echo "generic fallback: READY"
+  # Validate JSON first
+  if ! python3 -m json.tool "$MARKER_PATH" > /dev/null 2>&1; then
+    echo "ERROR: marker CORRUPTED (not valid JSON)"
+    echo "marker content (first 200 chars): $(head -c 200 "$MARKER_PATH" 2>/dev/null)"
+    echo "hint: delete marker and re-prepare: rm '$MARKER_PATH' && bash scripts/prepare-xhs-generic-fallback.sh"
+    echo "generic fallback: NOT READY (marker corrupted)"
   else
-    echo "generic fallback: NOT READY (marker ok=false)"
-    echo "hint: run scripts/prepare-xhs-generic-fallback.sh"
+    MARKER_OK=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('ok', False))" 2>/dev/null || echo "parse_error")
+    echo "marker ok: $MARKER_OK"
+    MARKER_CMD=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('command', ''))" 2>/dev/null || echo "")
+    echo "marker command: ${MARKER_CMD:-NOT SET}"
+    MARKER_TOOL=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('tool_name', ''))" 2>/dev/null || echo "")
+    echo "marker tool_name: ${MARKER_TOOL:-NOT SET}"
+    MARKER_EXEC=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_executable', ''))" 2>/dev/null || echo "")
+    echo "marker backend_executable: ${MARKER_EXEC:-NOT SET}"
+    MARKER_PYTHON=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_python', ''))" 2>/dev/null || echo "")
+    echo "marker backend_python: ${MARKER_PYTHON:-NOT SET}"
+    MARKER_MODULE=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_module', ''))" 2>/dev/null || echo "")
+    echo "marker backend_module: ${MARKER_MODULE:-NOT SET}"
+    MARKER_VERSION=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('version', ''))" 2>/dev/null || echo "")
+    echo "marker version: ${MARKER_VERSION:-NOT SET}"
+    if [ "$MARKER_OK" = "True" ]; then
+      echo "generic fallback: READY"
+    else
+      echo "generic fallback: NOT READY (marker ok=false)"
+      echo "hint: run scripts/prepare-xhs-generic-fallback.sh"
+    fi
   fi
 else
   echo "marker: NOT FOUND"
