@@ -1,6 +1,6 @@
 # Phase Status
 
-Status: CURRENT (2026-05-17)
+Status: CURRENT (2026-05-19)
 
 ## Phase 5: Hermes Profile And Gateway
 
@@ -112,8 +112,8 @@ Scope:
   routing.
 - Register `mcp-search_hub` in both `ran-assistant-lite` and `ran-assistant`.
 - Keep lite/full split inside Search Hub provider mode: lite uses lightweight
-  public providers; full can enable OpenCLI browser-backed adapters and
-  Playwright fallback.
+  public providers; full retains Playwright fallback. OpenCLI browser-backed
+  defaults to false (Phase 11.1.1 confirmed; Phase 11.2 optional enhancement).
 - Keep social platform link reading on `social_reader`; Search Hub does not
   replace the XHS/Bilibili/Zhihu/WeChat link-read mainline.
 - Wire Search Hub into `scripts/apply-hermes-runtime-split.sh` so git pull,

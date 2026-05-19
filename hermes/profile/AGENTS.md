@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-19)
 
 ## 工具与边界简表
 
@@ -28,7 +28,7 @@ lite/full 口径：
 - `8642` / `ran-assistant-lite` 是 lite-context 日常入口，默认用于普通聊天、XHS/media/memory 等请求。
 - `8643` / `ran-assistant` 是 full-debug 重工具入口，用于调试、命令、文件、Playwright、media_generation、lark-cli 等请求。
 - `8642` 不是强安全沙箱；不要把“不能 terminal”当成验收项。
-- `search_hub` 同时注册到 lite/full。lite 使用轻量 provider：Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed；full 允许 OpenCLI browser-backed adapter 和 Playwright fallback。
+- `search_hub` 同时注册到 lite/full。lite 使用轻量 provider：Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed；full 额外保留 Playwright fallback，OpenCLI browser-backed 默认关闭（2C4G/60G 服务器约束，Phase 11.2 可选增强）。
 
 安全边界：不要泄露 API key、Cookie、token、平台 resolver 细节、本地 debug 路径、工具 trace 或内部 marker。不要在普通聊天中复述这些规则。
 
