@@ -108,7 +108,7 @@ for cache_path in "${XHS_CACHE_PATHS[@]}"; do
 done
 
 echo ""
-echo "=== 6. UV cache and XHS timeout env ==="
+echo "=== 6. UV cache and timeout env ==="
 for f in .env.local node_bridge/.env.local "$HERMES_HOME/.env" "$HERMES_HOME/profiles/ran-assistant/.env"; do
   if [ -f "$f" ]; then
     for key in UV_CACHE_DIR UV_TOOL_DIR SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS XHS_BACKEND_MCP_TIMEOUT_MS SOCIAL_READER_MCP_TIMEOUT_MS; do
@@ -123,6 +123,22 @@ if [ -d /opt/ran_agent/.ran_agent_state/uv-cache ]; then
   echo "uv-cache size: $(du -sh /opt/ran_agent/.ran_agent_state/uv-cache 2>/dev/null | cut -f1)"
 else
   echo "uv-cache: NOT FOUND"
+fi
+
+echo ""
+echo "--- Effective timeout resolution ---"
+# Compute effective XHS timeout: SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS || XHS_BACKEND_MCP_TIMEOUT_MS || 90000
+EFFECTIVE_XHS_TIMEOUT="${SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS:-${XHS_BACKEND_MCP_TIMEOUT_MS:-90000}}"
+# Compute effective generic timeout: SOCIAL_READER_MCP_TIMEOUT_MS || 90000
+EFFECTIVE_GENERIC_TIMEOUT="${SOCIAL_READER_MCP_TIMEOUT_MS:-90000}"
+echo "effective XHS backend timeout: ${EFFECTIVE_XHS_TIMEOUT}"
+echo "generic social reader timeout: ${EFFECTIVE_GENERIC_TIMEOUT}"
+if [ "$EFFECTIVE_XHS_TIMEOUT" = "$EFFECTIVE_GENERIC_TIMEOUT" ] && [ "$EFFECTIVE_XHS_TIMEOUT" != "90000" ]; then
+  echo "WARNING: XHS timeout equals generic timeout ($EFFECTIVE_XHS_TIMEOUT). XHS should use a longer timeout."
+elif [ "$EFFECTIVE_XHS_TIMEOUT" -lt "$EFFECTIVE_GENERIC_TIMEOUT" ] 2>/dev/null; then
+  echo "WARNING: XHS timeout ($EFFECTIVE_XHS_TIMEOUT) is shorter than generic timeout ($EFFECTIVE_GENERIC_TIMEOUT). XHS should use a longer timeout."
+else
+  echo "OK: XHS timeout ($EFFECTIVE_XHS_TIMEOUT) >= generic timeout ($EFFECTIVE_GENERIC_TIMEOUT)"
 fi
 
 echo ""

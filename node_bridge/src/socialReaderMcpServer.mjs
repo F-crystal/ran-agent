@@ -1966,6 +1966,8 @@ async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, ar
 
 // Media path: wanyi-watermark generic parser (independent of detail)
 async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
+  const envRef = options.env || env || process.env;
+  const xhsTimeoutMs = resolveXhsBackendTimeoutMs(envRef);
   // Priority: original short link > canonical URL
   const urls = [wanyiUrl, resolved?.canonical_url, resolved?.resolved_url].filter(Boolean);
   const uniqueUrls = [...new Set(urls)];
@@ -1977,7 +1979,7 @@ async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
         platform: 'xhs',
         includeComments: false,
         maxComments: 0,
-      }, options);
+      }, { ...options, xhsTimeoutMs });
       if (result?.structuredContent?.ok === true) {
         const data = result.structuredContent;
         const normalized = normalizeXhsMedia(data);
@@ -2126,13 +2128,14 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
   const hasCookie = String(env.XHS_COOKIE || '').trim();
   const cookieDiag = xhsCookieDiagnostics(env);
   const genericFallbackEnabled = String(env.SOCIAL_READER_GENERIC_FALLBACK_ENABLED || 'true') !== 'false';
+  const xhsTimeoutMs = resolveXhsBackendTimeoutMs(env);
   if (genericFallbackEnabled) {
     const generic = await readGenericSocialPost({
       url: resolved.resolved_url || resolved.canonical_url || resolved.url || String(rawText),
       platform: 'xhs',
       includeComments,
       maxComments,
-    }, options);
+    }, { ...options, xhsTimeoutMs });
     if (generic.structuredContent?.ok === true) {
       generic.structuredContent.primary = true;
       generic.content[0].text = JSON.stringify(generic.structuredContent, null, 2);
@@ -2158,7 +2161,7 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
       });
     }
     if (genericFallbackEnabled) {
-      return await readGenericSocialPost({ url: resolved.resolved_url || resolved.original_url || String(rawText), platform: 'xhs', includeComments, maxComments }, options);
+      return await readGenericSocialPost({ url: resolved.resolved_url || resolved.original_url || String(rawText), platform: 'xhs', includeComments, maxComments }, { ...options, xhsTimeoutMs });
     }
     return buildErrorResult(prepared.error || prepared.error_code, prepared);
   }
@@ -2196,7 +2199,7 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
     });
   } catch (error) {
     if (genericFallbackEnabled) {
-      const fallback = await readGenericSocialPost({ url, platform: 'xhs', includeComments, maxComments }, options);
+      const fallback = await readGenericSocialPost({ url, platform: 'xhs', includeComments, maxComments }, { ...options, xhsTimeoutMs });
       fallback.structuredContent.xhs_error = error instanceof Error ? error.message : String(error);
       fallback.structuredContent.fallback = true;
       fallback.structuredContent.fallback_from = error?.error_code || 'XHS_BACKEND_EXCEPTION';
@@ -2218,8 +2221,11 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
 
 async function readGenericSocialPost({ url, platform, includeComments, maxComments }, options = {}) {
   const toolName = genericParserToolForPlatform(platform);
+  const backendOptions = options.xhsTimeoutMs
+    ? { ...options, _overrideTimeoutMs: options.xhsTimeoutMs }
+    : options;
   try {
-    const result = await callBackendMcpTool('generic', toolName, { share_link: url }, options);
+    const result = await callBackendMcpTool('generic', toolName, { share_link: url }, backendOptions);
     const normalized = normalizeGenericParserPayload(textFromMcpResult(result));
     if (!normalized.ok) {
       return buildErrorResult(normalized.error, {
@@ -2282,9 +2288,10 @@ async function callBackendMcpTool(server, toolName, toolArguments = {}, options 
     : server === 'bilibili'
       ? bilibiliServerConfig(env)
       : genericParserServerConfig(env);
-  const timeoutMs = server === 'xhs'
-    ? resolveXhsBackendTimeoutMs(env)
-    : resolveTimeoutMs(env);
+  const timeoutMs = options._overrideTimeoutMs
+    || (server === 'xhs'
+      ? resolveXhsBackendTimeoutMs(env)
+      : resolveTimeoutMs(env));
   return await callMcpToolViaStdio({
     command: config.command,
     args: config.args,
@@ -3067,12 +3074,13 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = 
 
 async function fallbackXhsBrowseNote({ noteId, lookup, cachedEntry, fallbackFrom }, options = {}) {
   const fallbackUrl = lookup?.url || cachedEntry?.url || cachedEntry?.canonical_url || buildXhsCanonicalUrl(noteId);
+  const envRef = options.env || process.env;
   const fallback = await readGenericSocialPost({
     url: fallbackUrl,
     platform: 'xhs',
     includeComments: false,
     maxComments: 0,
-  }, options);
+  }, { ...options, xhsTimeoutMs: resolveXhsBackendTimeoutMs(envRef) });
 
   if (fallback.structuredContent?.ok !== true) {
     return null;

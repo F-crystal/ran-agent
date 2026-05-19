@@ -1234,3 +1234,98 @@ test('read_social_post returns XHS_BACKEND_MCP_ERROR on generic backend failure'
   assert.equal(result.structuredContent.ok, false);
   assert.equal(result.structuredContent.error_code, 'BACKEND_MCP_ERROR');
 });
+
+test('XHS timeout error message shows XHS-specific timeout (90000ms) not generic (45000ms)', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/timeout-msg-test?xsec_token=tok',
+        },
+      },
+    },
+    {
+      env: {
+        XHS_COOKIE: 'a1=demo',
+        SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS: '90000',
+        SOCIAL_READER_MCP_TIMEOUT_MS: '45000',
+      },
+      mcpCallImpl: async ({ server }) => {
+        if (server === 'generic') {
+          throw new Error('MCP backend timed out after 90000ms: uvx');
+        }
+        throw new Error('MCP backend timed out after 90000ms: uvx');
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.error_code, 'XHS_BACKEND_TIMEOUT');
+  assert.match(result.structuredContent.error, /90000ms/);
+  assert.doesNotMatch(result.structuredContent.error, /45000ms/);
+});
+
+test('readSocialPost XHS path passes XHS timeout to readGenericSocialPost', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/timeout-passthrough?xsec_token=tok',
+        },
+      },
+    },
+    {
+      env: {
+        XHS_COOKIE: 'a1=demo',
+        SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS: '90000',
+        SOCIAL_READER_MCP_TIMEOUT_MS: '45000',
+      },
+      mcpCallImpl: async ({ server, toolName }) => {
+        calls.push({ server, toolName });
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
+          return { content: [{ type: 'text', text: '{"ok":true,"post_text":"test","title":"t"}' }] };
+        }
+        throw new Error(`unexpected: ${server}.${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'xhs');
+  assert.ok(calls.some((c) => c.server === 'generic' && c.toolName === 'parse_xhs_link'));
+});
+
+test('non-XHS platform uses generic SOCIAL_READER_MCP_TIMEOUT_MS', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.bilibili.com/video/BV1test12345',
+        },
+      },
+    },
+    {
+      env: {
+        SOCIAL_READER_MCP_TIMEOUT_MS: '45000',
+        SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS: '90000',
+      },
+      mcpCallImpl: async ({ server }) => {
+        if (server === 'generic') {
+          throw new Error('MCP backend timed out after 45000ms: uvx');
+        }
+        throw new Error('MCP backend timed out after 45000ms: uvx');
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.platform, 'bilibili');
+  assert.match(result.structuredContent.error, /45000ms/);
+});
