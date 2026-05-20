@@ -32,22 +32,26 @@ write_marker() {
   now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
   tmp_marker="$(mktemp "${MARKER_PATH}.tmp.XXXXXX")"
 
-  # Write to temp file
-  cat > "$tmp_marker" <<MARKER
-{
-  "ok": $ok,
-  "package": "$PACKAGE",
-  "tool_name": "$TOOL_NAME",
-  "command": "$WRAPPER",
-  "args": [],
-  "backend_executable": "$backend_executable",
-  "backend_args": $backend_args,
-  "backend_python": "$backend_python",
-  "backend_module": "$backend_module",
-  "prepared_at": "$now",
-  "version": "$version"
+  # All values via sys.argv. Entire python3 command (including heredoc redirect and > redirect)
+  # must be on ONE line so shell correctly passes "$version" as the last argument.
+  python3 - "$ok" "$PACKAGE" "$TOOL_NAME" "$WRAPPER" "$backend_executable" "$backend_args" "$backend_python" "$backend_module" "$now" "$version" > "$tmp_marker" <<'PYEOF'
+import json, sys
+ok_str, package, tool_name, command, backend_exec, backend_args_json, backend_py, backend_mod, prepared_at, ver = sys.argv[1:]
+marker = {
+    "ok": ok_str == "true",
+    "package": package,
+    "tool_name": tool_name,
+    "command": command,
+    "args": [],
+    "backend_executable": backend_exec,
+    "backend_args": json.loads(backend_args_json) if backend_args_json else [],
+    "backend_python": backend_py,
+    "backend_module": backend_mod,
+    "prepared_at": prepared_at,
+    "version": ver.splitlines()[0].strip() if ver else "unknown",
 }
-MARKER
+json.dump(marker, sys.stdout, ensure_ascii=False, indent=2)
+PYEOF
 
   # Validate JSON before committing
   if python3 -m json.tool "$tmp_marker" > /dev/null 2>&1; then

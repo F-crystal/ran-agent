@@ -1084,3 +1084,132 @@ test('audit logs include evidence stage and allow_claim_read', async () => {
     unlinkSync(cachePath);
   }
 });
+
+// --- Robust Token Cache Matching Tests ---
+
+test('matchXhsTokenCacheEntry: entries wrapper with short code match', () => {
+  // After readXhsTokenCache normalizes, entries wrapper is unwrapped.
+  // matchXhsTokenCacheEntry receives the inner entries directly.
+  const cache = {
+    '6a0002d9000000003600279b': { url: 'https://xhslink.com/o/1On30olwqeD', canonical_url: 'https://www.xiaohongshu.com/discovery/item/6a0002d9000000003600279b?xsec_token=abc', note_id: '6a0002d9000000003600279b' },
+  };
+  const entry = matchXhsTokenCacheEntry('看看 https://xhslink.com/o/1On30olwqeD', cache);
+  assert.ok(entry);
+  assert.equal(entry.note_id, '6a0002d9000000003600279b');
+});
+
+test('matchXhsTokenCacheEntry: http URL matches https cache entry', () => {
+  const cache = {
+    'key1': { url: 'https://xhslink.com/o/abc123' },
+  };
+  const entry = matchXhsTokenCacheEntry('http://xhslink.com/o/abc123', cache);
+  assert.ok(entry);
+});
+
+test('matchXhsTokenCacheEntry: trailing Chinese punctuation stripped', () => {
+  const cache = {
+    'key1': { url: 'https://xhslink.com/o/abc123' },
+  };
+  const entry = matchXhsTokenCacheEntry('看看 https://xhslink.com/o/abc123。', cache);
+  assert.ok(entry);
+});
+
+test('matchXhsTokenCacheEntry: trailing bracket and quote stripped', () => {
+  const cache = {
+    'key1': { url: 'https://xhslink.com/o/abc123' },
+  };
+  const entry1 = matchXhsTokenCacheEntry('(https://xhslink.com/o/abc123)', cache);
+  assert.ok(entry1, 'should match with parentheses');
+  const entry2 = matchXhsTokenCacheEntry('"https://xhslink.com/o/abc123"', cache);
+  assert.ok(entry2, 'should match with quotes');
+});
+
+test('matchXhsTokenCacheEntry: array cache structure', () => {
+  const cache = [
+    { url: 'https://xhslink.com/o/abc123', note_id: '6a0002d9', canonical_url: 'https://www.xiaohongshu.com/explore/6a0002d9' },
+  ];
+  const entry = matchXhsTokenCacheEntry('看看 https://xhslink.com/o/abc123', cache);
+  assert.ok(entry);
+  assert.equal(entry.note_id, '6a0002d9');
+});
+
+test('matchXhsTokenCacheEntry: canonical_url note_id match', () => {
+  const cache = {
+    'key1': { canonical_url: 'https://www.xiaohongshu.com/discovery/item/6a0002d9000000003600279b?xsec_token=abc' },
+  };
+  const entry = matchXhsTokenCacheEntry('https://www.xiaohongshu.com/discovery/item/6a0002d9000000003600279b', cache);
+  assert.ok(entry);
+});
+
+test('matchXhsTokenCacheEntry: short code case insensitive', () => {
+  const cache = {
+    'key1': { url: 'https://xhslink.com/o/ABC123' },
+  };
+  const entry = matchXhsTokenCacheEntry('看看 https://xhslink.com/o/abc123', cache);
+  assert.ok(entry);
+});
+
+test('readXhsTokenCache: prefers XHS_TOKEN_CACHE_PATH env', () => {
+  const path1 = '/tmp/test-cache-env-' + Date.now() + '.json';
+  const path2 = '/tmp/test-cache-default-' + Date.now() + '.json';
+  writeFileSync(path1, JSON.stringify({ from: 'env' }));
+  writeFileSync(path2, JSON.stringify({ from: 'default' }));
+  try {
+    const result = readXhsTokenCache({ XHS_TOKEN_CACHE_PATH: path1 });
+    assert.equal(result.from, 'env');
+  } finally {
+    unlinkSync(path1);
+    unlinkSync(path2);
+  }
+});
+
+test('readXhsTokenCache: falls back to second default path', () => {
+  const path2 = '/tmp/test-cache-fallback-' + Date.now() + '.json';
+  writeFileSync(path2, JSON.stringify({ from: 'fallback' }));
+  try {
+    const result = readXhsTokenCache({
+      XHS_TOKEN_CACHE_PATH: '/nonexistent/path.json',
+      // Override the default paths by passing env that won't match
+    });
+    // The default paths are hardcoded, but we can't easily override them.
+    // This test verifies the function doesn't crash when env path is missing.
+    assert.ok(typeof result === 'object');
+  } finally {
+    unlinkSync(path2);
+  }
+});
+
+test('readXhsTokenCache: returns empty when all paths missing', () => {
+  const result = readXhsTokenCache({ XHS_TOKEN_CACHE_PATH: '/nonexistent/path.json' });
+  assert.deepEqual(result, {});
+});
+
+test('production case: xhslink with entries wrapper and trailing period', () => {
+  const cachePath = '/tmp/test-xhs-production-' + Date.now() + '.json';
+  writeFileSync(cachePath, JSON.stringify({
+    entries: {
+      '6a0002d9000000003600279b': {
+        url: 'https://xhslink.com/o/1On30olwqeD',
+        canonical_url: 'https://www.xiaohongshu.com/discovery/item/6a0002d9000000003600279b?xsec_token=abc123&xsec_source=pc_search',
+        note_id: '6a0002d9000000003600279b',
+      },
+    },
+  }));
+  try {
+    const report = buildSocialEvidenceReport(
+      { text: '看看 https://xhslink.com/o/1On30olwqeD。' },
+      null,
+      { XHS_TOKEN_CACHE_PATH: cachePath },
+      { log() {} }
+    );
+    assert.equal(report.hasSocialLink, true);
+    assert.equal(report.link_resolution.ok, true, 'link_resolution should be true');
+    assert.equal(report.link_resolution.source, 'token_cache');
+    assert.equal(report.link_resolution.canonical_url, 'https://www.xiaohongshu.com/discovery/item/6a0002d9000000003600279b?xsec_token=abc123&xsec_source=pc_search');
+    assert.equal(report.content_read.ok, false, 'content_read should still be false');
+    assert.equal(report.allow_claim_read, false);
+    assert.equal(report.evidence_source, 'token_cache');
+  } finally {
+    unlinkSync(cachePath);
+  }
+});

@@ -403,26 +403,94 @@ function buildSocialMediaRetryHint(payload = {}, recentMessages = []) {
 
 // --- Social Link Evidence Gate ---
 
-const XHS_TOKEN_CACHE_PATH = '/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json';
+const XHS_TOKEN_CACHE_PATHS = [
+  '/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json',
+  '/opt/ran_agent/node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json',
+];
+
+function normalizeXhsTokenCache(raw) {
+  // { entries: { note_id: entry } }
+  if (raw.entries && typeof raw.entries === 'object' && !Array.isArray(raw.entries)) return raw.entries;
+  // Array of entries
+  if (Array.isArray(raw)) {
+    const map = {};
+    for (const entry of raw) {
+      if (!entry || typeof entry !== 'object') continue;
+      if (entry.note_id) map[entry.note_id] = entry;
+      if (entry.url) map[entry.url] = entry;
+      if (entry.canonical_url) map[entry.canonical_url] = entry;
+    }
+    return map;
+  }
+  // Direct object { key: entry }
+  return raw;
+}
 
 export function readXhsTokenCache(env = process.env) {
-  const cachePath = env.XHS_TOKEN_CACHE_PATH || XHS_TOKEN_CACHE_PATH;
-  try {
-    return JSON.parse(readFileSync(cachePath, 'utf8'));
-  } catch {
-    return {};
+  const candidates = [env.XHS_TOKEN_CACHE_PATH, ...XHS_TOKEN_CACHE_PATHS].filter(Boolean);
+  for (const cachePath of candidates) {
+    try {
+      const raw = JSON.parse(readFileSync(cachePath, 'utf8'));
+      if (raw && typeof raw === 'object') return normalizeXhsTokenCache(raw);
+    } catch { /* try next path */ }
   }
+  return {};
+}
+
+// Normalize a URL for comparison: strip trailing punctuation, remove protocol, remove trailing slash, lowercase
+const TRAILING_PUNCT_RE = /[、。！？；：“”‘’（）《》【】\[\]()\s,.!?;:　]+$/;
+function normalizeComparableUrl(u) {
+  let s = u.replace(TRAILING_PUNCT_RE, '').replace(/\/+$/, '');
+  s = s.replace(/^https?:\/\//i, '');
+  return s.toLowerCase();
+}
+
+// Extract short code from xhslink URLs: /o/<code> or /a/<code>, lowercase for comparison
+function extractShortCode(u) {
+  const m = u.match(/xhslink\.com\/[oa]\/([A-Za-z0-9_-]+)/i);
+  return m ? m[1].toLowerCase() : null;
+}
+
+// Extract note_id from xiaohongshu URLs
+function extractNoteId(u) {
+  const m = u.match(/(?:explore|discovery\/item|note)\/([a-f0-9]+)/i);
+  return m ? m[1] : null;
 }
 
 export function matchXhsTokenCacheEntry(text, cache) {
-  const urlMatch = String(text || '').match(/https?:\/\/(?:www\.)?(?:xhslink\.com|xiaohongshu\.com|xhs\.com)[^\s]*/i);
-  if (!urlMatch) return null;
-  const url = urlMatch[0];
-  for (const [key, entry] of Object.entries(cache || {})) {
-    if (!entry || typeof entry !== 'object') continue;
-    if (entry.url === url || entry.canonical_url === url || key === url) return entry;
-    const noteIdMatch = url.match(/(?:explore|discovery\/item|note)\/([a-f0-9]+)/i);
-    if (noteIdMatch && entry.note_id === noteIdMatch[1]) return entry;
+  const rawText = String(text || '');
+  // Extract all URLs from text — stop at whitespace and trailing CJK/fullwidth punctuation only.
+  // Do NOT exclude . ? & = which are valid URL-internal characters.
+  const urlMatches = rawText.match(/https?:\/\/[^\s　。！？；：“”‘’（）《》]+/gi) || [];
+  if (urlMatches.length === 0) return null;
+
+  const entries = Object.values(cache || {}).filter((e) => e && typeof e === 'object');
+
+  for (const rawUrl of urlMatches) {
+    const url = normalizeComparableUrl(rawUrl);
+    const shortCode = extractShortCode(rawUrl);
+    const noteId = extractNoteId(rawUrl);
+
+    for (const entry of entries) {
+      const entryUrl = entry.url ? normalizeComparableUrl(entry.url) : '';
+      const entryCanonical = entry.canonical_url ? normalizeComparableUrl(entry.canonical_url) : '';
+
+      // Exact URL match (normalized: protocol-agnostic, trailing-punctuation-stripped)
+      if (entryUrl && entryUrl === url) return entry;
+      if (entryCanonical && entryCanonical === url) return entry;
+
+      // Short code match: extract from both URLs and compare (case-insensitive)
+      if (shortCode) {
+        const entryShortCode = extractShortCode(entry.url || '') || extractShortCode(entry.canonical_url || '');
+        if (entryShortCode && entryShortCode === shortCode) return entry;
+      }
+
+      // Note ID match
+      if (noteId && entry.note_id === noteId) return entry;
+
+      // Canonical URL contains note_id
+      if (noteId && entryCanonical && entryCanonical.includes(noteId)) return entry;
+    }
   }
   return null;
 }
