@@ -1,6 +1,6 @@
 # Phase Status
 
-Status: CURRENT (2026-05-19)
+Status: CURRENT (2026-05-20)
 
 ## Phase 5: Hermes Profile And Gateway
 
@@ -186,6 +186,61 @@ Scope:
 - `diagnose-lite-full.sh` section 6c reports obsidian_memory MCP status, config
   presence, and stale process detection.
 
+## Phase 11.1.5: Social Link Evidence Gate
+
+Phase 11.1.5 is code-closed for social link evidence gate and honest reply
+enforcement.
+
+Problem: When a user sends an xhslink, the node_bridge detects
+`has_social_link=true` and the social_reader resolves the short link to a
+canonical URL (writing to token cache). But the content_read stage never
+succeeds — no actual post text. The Hermes model hallucinates content based
+on just having a canonical URL, claiming "读到了" when only link_resolution
+succeeded.
+
+Scope:
+- `hermesGatewayClient.mjs` adds `buildSocialEvidenceReport()` that classifies
+  evidence into three stages: `link_resolution` (canonical_url only),
+  `metadata_read` (title/user/cover), `content_read` (post_text/desc/note_text).
+  Only `content_read.ok=true` allows `allow_claim_read=true`.
+- `applySocialLinkEvidenceGate()` post-processes Hermes replies: if
+  has_social_link=true and reply claims "读到了" but no content_read evidence,
+  rewrites with honest courtly-style text based on which stage succeeded.
+- System instruction strengthened: social_reader/media_reader must be first,
+  browser_navigate not first path, canonical URL ≠ content read.
+- Routing hint upgraded: includes exact tool name
+  `mcp_social_reader_read_social_post`, fallback chain, canonical URL warning.
+- Structured `[xhs-evidence]` audit logging with request_id, stage, ok, source,
+  fields, allow_claim_read, evidence_source.
+
+Code anchors:
+- `node_bridge/src/hermesGatewayClient.mjs` — `buildSocialEvidenceReport`,
+  `applySocialLinkEvidenceGate`, `applyEvidenceGateToResponse`
+- `node_bridge/tests/hermesGatewayClient.test.mjs` — evidence gate tests
+
+## Phase 11.1.5b: Marker JSON + Token Cache Matching Fixes
+
+Phase 11.1.5b is code-closed for marker JSON generation fix and robust token
+cache matching.
+
+Scope:
+- `prepare-xhs-generic-fallback.sh` `write_marker` now uses Python `json.dump`
+  via heredoc (`python3 - ... > tmp <<'PYEOF'`). All values passed via
+  `sys.argv`, no shell interpolation into Python code. `version.splitlines()[0]`
+  prevents multi-line version from breaking JSON. Atomic write preserved:
+  tmp → `python3 -m json.tool` validate → `mv`.
+- `hermesGatewayClient.mjs` `readXhsTokenCache` tries multiple paths: env →
+  default → node_bridge fallback. `normalizeXhsTokenCache` handles
+  `{ entries: {} }` wrapper, arrays, and direct objects.
+- `matchXhsTokenCacheEntry` rewritten: extracts URLs from text (not just social
+  URLs), strips trailing CJK/English punctuation, normalizes http/https,
+  extracts short codes and note_ids, case-insensitive short code comparison.
+
+Code anchors:
+- `scripts/prepare-xhs-generic-fallback.sh` — `write_marker`
+- `node_bridge/src/hermesGatewayClient.mjs` — `readXhsTokenCache`,
+  `normalizeXhsTokenCache`, `matchXhsTokenCacheEntry`
+
 ## Migration Checklist
 
 - [x] Close Hermes profile/gateway script naming under Phase 5.
@@ -202,4 +257,6 @@ Scope:
 - [x] Compact Hermes lite/full systemd units and stale drop-in cleanup (Phase 11.1).
 - [x] Stabilize compact checker, UV tooling, XHS timeout, OpenCLI defaults (Phase 11.1.1).
 - [x] Make obsidian_memory MCP optional and non-blocking (Phase 11.1.2).
+- [x] Add social link evidence gate and honest reply enforcement (Phase 11.1.5).
+- [x] Fix marker JSON generation and robust token cache matching (Phase 11.1.5b).
 - [x] Update all documentation to reflect OpenClaw-free state.

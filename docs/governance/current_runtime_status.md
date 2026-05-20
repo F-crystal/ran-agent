@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-19)
+Status: CURRENT (2026-05-20)
 
 ## Frontend Path
 
@@ -122,6 +122,21 @@ Status: CURRENT (2026-05-19)
   `SOCIAL_READER_MCP_TIMEOUT_MS`. Timeout errors return typed
   `XHS_BACKEND_TIMEOUT` code with `retryable: true`. xhslink http:// URLs are
   normalized to https:// before resolution.
+- **Social link evidence gate** (Phase 11.1.5): `hermesGatewayClient.mjs` adds
+  `buildSocialEvidenceReport()` that classifies evidence into three stages:
+  `link_resolution` (canonical_url only), `metadata_read` (title/user/cover),
+  `content_read` (post_text/desc/note_text). Only `content_read.ok=true` allows
+  `allow_claim_read=true`. `applySocialLinkEvidenceGate()` post-processes Hermes
+  replies to rewrite false "读到了" claims with honest courtly-style text.
+  Structured `[xhs-evidence]` audit logging with request_id, stage, allow_claim_read.
+- **XHS token cache matching** (Phase 11.1.5b): `readXhsTokenCache` tries
+  multiple paths (env → default → node_bridge fallback), handles `{ entries: {} }`
+  wrapper and array cache structures. `matchXhsTokenCacheEntry` does robust URL
+  matching: http/https normalization, trailing punctuation stripping, short code
+  extraction, note_id matching.
+- **XHS generic fallback marker** (Phase 11.1.5b): `prepare-xhs-generic-fallback.sh`
+  `write_marker` uses Python `json.dump` via heredoc, all values via `sys.argv`,
+  `version.splitlines()[0]` prevents multi-line version from breaking JSON.
 
 ## Tools Config
 
