@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { writeFileSync, unlinkSync } from 'node:fs';
 
 import {
   getHermesGatewayConfig,
   sendChatToHermesGateway,
   buildCourtlyStyleAnchor,
+  readXhsTokenCache,
+  matchXhsTokenCacheEntry,
+  buildSocialEvidenceReport,
+  applySocialLinkEvidenceGate,
 } from '../src/hermesGatewayClient.mjs';
 
 function makeJsonResponse(body, ok = true, status = 200) {
@@ -695,7 +700,8 @@ test('xhslink.com injects social_reader routing instruction', async () => {
   assert.ok(userMsg.content.includes('社交链接路由指令'), 'should inject social routing');
   assert.ok(userMsg.content.includes('小红书'), 'should detect platform');
   assert.ok(userMsg.content.includes('social_reader'), 'should mention social_reader');
-  assert.ok(userMsg.content.includes('不要使用 web_extract'), 'should forbid web_extract');
+  assert.ok(userMsg.content.includes('mcp_social_reader_read_social_post'), 'should include tool name');
+  assert.ok(userMsg.content.includes('canonical URL 不等于正文'), 'should warn about canonical URL');
   assert.ok(!userMsg.content.includes('vision_analyze'), 'social hint should not repeat vision tool bans');
 });
 
@@ -827,5 +833,254 @@ test('auto routing keeps normal chat, XHS, and media on lite gateway', async () 
       }
     );
     assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions', `${payload.text} should route to lite`);
+  }
+});
+
+// --- Social Link Evidence Gate Tests ---
+
+test('buildSocialEvidenceReport: no social link returns empty report', () => {
+  const report = buildSocialEvidenceReport({ text: '你好' }, null, {}, { log() {} });
+  assert.equal(report.hasSocialLink, false);
+  assert.equal(report.platform, '');
+  assert.equal(report.allow_claim_read, false);
+  assert.equal(report.evidence_source, 'none');
+});
+
+test('buildSocialEvidenceReport: XHS link with empty cache sets link_resolution false', () => {
+  const report = buildSocialEvidenceReport(
+    { text: '看看 http://xhslink.com/o/abc123' },
+    null,
+    { XHS_TOKEN_CACHE_PATH: '/nonexistent/cache.json' },
+    { log() {} }
+  );
+  assert.equal(report.hasSocialLink, true);
+  assert.equal(report.platform, '小红书');
+  assert.equal(report.link_resolution.ok, false);
+  assert.equal(report.content_read.ok, false);
+  assert.equal(report.allow_claim_read, false);
+});
+
+test('matchXhsTokenCacheEntry: matches by URL', () => {
+  const cache = {
+    'key1': { url: 'https://xhslink.com/o/abc123', canonical_url: 'https://www.xiaohongshu.com/explore/6a0002d9', note_id: '6a0002d9' },
+  };
+  const entry = matchXhsTokenCacheEntry('看看 https://xhslink.com/o/abc123', cache);
+  assert.ok(entry);
+  assert.equal(entry.canonical_url, 'https://www.xiaohongshu.com/explore/6a0002d9');
+});
+
+test('matchXhsTokenCacheEntry: matches by canonical_url', () => {
+  const cache = {
+    'key1': { canonical_url: 'https://www.xiaohongshu.com/explore/6a0002d9' },
+  };
+  const entry = matchXhsTokenCacheEntry('https://www.xiaohongshu.com/explore/6a0002d9', cache);
+  assert.ok(entry);
+});
+
+test('matchXhsTokenCacheEntry: returns null for non-matching URL', () => {
+  const cache = {
+    'key1': { url: 'https://xhslink.com/o/other' },
+  };
+  const entry = matchXhsTokenCacheEntry('看看 https://xhslink.com/o/abc123', cache);
+  assert.equal(entry, null);
+});
+
+test('buildSocialEvidenceReport: token cache hit sets link_resolution true but content_read false', () => {
+  const cachePath = '/tmp/test-xhs-cache-' + Date.now() + '.json';
+  writeFileSync(cachePath, JSON.stringify({
+    'key1': { url: 'https://xhslink.com/o/abc123', canonical_url: 'https://www.xiaohongshu.com/explore/6a0002d9', note_id: '6a0002d9' },
+  }));
+  try {
+    const report = buildSocialEvidenceReport(
+      { text: '看看 https://xhslink.com/o/abc123' },
+      null,
+      { XHS_TOKEN_CACHE_PATH: cachePath },
+      { log() {} }
+    );
+    assert.equal(report.hasSocialLink, true);
+    assert.equal(report.link_resolution.ok, true);
+    assert.equal(report.link_resolution.source, 'token_cache');
+    assert.equal(report.link_resolution.canonical_url, 'https://www.xiaohongshu.com/explore/6a0002d9');
+    assert.equal(report.content_read.ok, false);
+    assert.equal(report.allow_claim_read, false);
+    assert.equal(report.evidence_source, 'token_cache');
+  } finally {
+    unlinkSync(cachePath);
+  }
+});
+
+test('buildSocialEvidenceReport: token cache with metadata sets metadata_read true', () => {
+  const cachePath = '/tmp/test-xhs-cache-meta-' + Date.now() + '.json';
+  writeFileSync(cachePath, JSON.stringify({
+    'key1': { url: 'https://xhslink.com/o/abc123', canonical_url: 'https://www.xiaohongshu.com/explore/6a0002d9', title: '测试笔记', user: 'testuser' },
+  }));
+  try {
+    const report = buildSocialEvidenceReport(
+      { text: '看看 https://xhslink.com/o/abc123' },
+      null,
+      { XHS_TOKEN_CACHE_PATH: cachePath },
+      { log() {} }
+    );
+    assert.equal(report.metadata_read.ok, true);
+    assert.deepEqual(report.metadata_read.fields, ['title', 'user']);
+    assert.equal(report.content_read.ok, false);
+    assert.equal(report.allow_claim_read, false);
+  } finally {
+    unlinkSync(cachePath);
+  }
+});
+
+test('applySocialLinkEvidenceGate: no social link passes through', () => {
+  const result = applySocialLinkEvidenceGate(
+    { text: '你好' },
+    '读到了，全文是...',
+    { hasSocialLink: false },
+    { log() {} }
+  );
+  assert.equal(result.evidenceGateTriggered, false);
+  assert.equal(result.replyText, '读到了，全文是...');
+});
+
+test('applySocialLinkEvidenceGate: social link + claim + no content_read triggers gate', () => {
+  const result = applySocialLinkEvidenceGate(
+    { text: '看看 http://xhslink.com/o/abc123' },
+    '我读到了这篇帖子，全文是关于...',
+    { hasSocialLink: true, platform: 'xhs', link_resolution: { ok: false }, metadata_read: { ok: false }, content_read: { ok: false }, allow_claim_read: false, evidence_source: 'token_cache' },
+    { log() {} }
+  );
+  assert.equal(result.evidenceGateTriggered, true);
+  assert.match(result.replyText, /没有成功解析这个链接/);
+});
+
+test('applySocialLinkEvidenceGate: link_resolution only + claim triggers gate with link_resolution text', () => {
+  const result = applySocialLinkEvidenceGate(
+    { text: '看看 http://xhslink.com/o/abc123' },
+    '我读到了这篇帖子的内容',
+    { hasSocialLink: true, platform: 'xhs', link_resolution: { ok: true }, metadata_read: { ok: false }, content_read: { ok: false }, allow_claim_read: false, evidence_source: 'token_cache' },
+    { log() {} }
+  );
+  assert.equal(result.evidenceGateTriggered, true);
+  assert.match(result.replyText, /只确认链接已解析/);
+});
+
+test('applySocialLinkEvidenceGate: metadata_read only + claim triggers gate with metadata text', () => {
+  const result = applySocialLinkEvidenceGate(
+    { text: '看看 http://xhslink.com/o/abc123' },
+    '我读到了这篇帖子',
+    { hasSocialLink: true, platform: 'xhs', link_resolution: { ok: true }, metadata_read: { ok: true }, content_read: { ok: false }, allow_claim_read: false, evidence_source: 'token_cache' },
+    { log() {} }
+  );
+  assert.equal(result.evidenceGateTriggered, true);
+  assert.match(result.replyText, /只拿到了一些标题/);
+});
+
+test('applySocialLinkEvidenceGate: content_read ok passes through', () => {
+  const result = applySocialLinkEvidenceGate(
+    { text: '看看 http://xhslink.com/o/abc123' },
+    '我读到了这篇帖子，全文是...',
+    { hasSocialLink: true, platform: 'xhs', link_resolution: { ok: true }, metadata_read: { ok: true }, content_read: { ok: true }, allow_claim_read: true, evidence_source: 'tool_result' },
+    { log() {} }
+  );
+  assert.equal(result.evidenceGateTriggered, false);
+  assert.equal(result.replyText, '我读到了这篇帖子，全文是...');
+});
+
+test('applySocialLinkEvidenceGate: failure acknowledgment does not trigger gate', () => {
+  const result = applySocialLinkEvidenceGate(
+    { text: '看看 http://xhslink.com/o/abc123' },
+    '臣这边只确认链接已解析，但没有拿到正文内容',
+    { hasSocialLink: true, platform: 'xhs', link_resolution: { ok: true }, metadata_read: { ok: false }, content_read: { ok: false }, allow_claim_read: false, evidence_source: 'token_cache' },
+    { log() {} }
+  );
+  assert.equal(result.evidenceGateTriggered, false);
+});
+
+test('applySocialLinkEvidenceGate: no claim in reply does not trigger gate', () => {
+  const result = applySocialLinkEvidenceGate(
+    { text: '看看 http://xhslink.com/o/abc123' },
+    '这个链接看起来不错',
+    { hasSocialLink: true, platform: 'xhs', link_resolution: { ok: true }, metadata_read: { ok: false }, content_read: { ok: false }, allow_claim_read: false, evidence_source: 'token_cache' },
+    { log() {} }
+  );
+  assert.equal(result.evidenceGateTriggered, false);
+});
+
+test('social routing hint includes mcp_social_reader tool name', async () => {
+  let capturedBody = '';
+  await sendChatToHermesGateway(
+    { text: '看看 http://xhslink.com/o/abc123', sender_id: 'conv-hint-test', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, init) => {
+        if (init?.body) capturedBody = init.body;
+        return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+      },
+      logger: { warn() {}, log() {} },
+    }
+  );
+  const body = JSON.parse(capturedBody);
+  const userMsg = body.messages.find((m) => m.role === 'user');
+  assert.ok(userMsg.content.includes('mcp_social_reader_read_social_post'), 'should include mcp_social_reader tool name');
+  assert.ok(userMsg.content.includes('canonical URL 不等于正文'), 'should include canonical URL warning');
+});
+
+test('system instruction contains canonical URL evidence rule', async () => {
+  let capturedBody = '';
+  await sendChatToHermesGateway(
+    { text: '你好', sender_id: 'conv-sys-test', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, init) => {
+        if (init?.body) capturedBody = init.body;
+        return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+      },
+      logger: { warn() {}, log() {} },
+    }
+  );
+  const body = JSON.parse(capturedBody);
+  const sysMsg = body.messages.find((m) => m.role === 'system');
+  assert.ok(sysMsg.content.includes('Canonical URL resolution does NOT equal content read'), 'system instruction should contain evidence rule');
+  assert.ok(sysMsg.content.length < 1800, `system instruction should be under 1800 chars, got ${sysMsg.content.length}`);
+});
+
+test('audit logs include evidence stage and allow_claim_read', async () => {
+  const logs = [];
+  const cachePath = '/tmp/test-xhs-audit-' + Date.now() + '.json';
+  writeFileSync(cachePath, JSON.stringify({
+    'key1': { url: 'https://xhslink.com/o/audit123', canonical_url: 'https://www.xiaohongshu.com/explore/audit' },
+  }));
+  try {
+    await sendChatToHermesGateway(
+      { text: '看看 https://xhslink.com/o/audit123', sender_id: 'conv-audit', channel: 'wechat' },
+      {
+        config: getHermesGatewayConfig({
+          HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+          HERMES_API_KEY: 'token',
+          HERMES_REPLY_MODE: 'api',
+          RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+          XHS_TOKEN_CACHE_PATH: cachePath,
+        }),
+        fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+        logger: { warn() {}, log(msg) { logs.push(msg); } },
+      }
+    );
+    const evidenceLogs = logs.filter((l) => l.includes('[xhs-evidence]'));
+    assert.ok(evidenceLogs.length > 0, 'should have evidence logs');
+    assert.ok(evidenceLogs.some((l) => l.includes('stage=link_resolution')), 'should log link_resolution stage');
+    assert.ok(evidenceLogs.some((l) => l.includes('stage=content_read')), 'should log content_read stage');
+    assert.ok(evidenceLogs.some((l) => l.includes('allow_claim_read=')), 'should log allow_claim_read');
+    assert.ok(evidenceLogs.some((l) => l.includes('evidence_source=')), 'should log evidence_source');
+  } finally {
+    unlinkSync(cachePath);
   }
 });

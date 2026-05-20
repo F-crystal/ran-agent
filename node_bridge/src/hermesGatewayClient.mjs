@@ -7,6 +7,7 @@
 
 import { execFile as execFileCallback } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { ensureConversationMediaContext } from './mediaContextStore.mjs';
 import {
@@ -192,7 +193,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       execFileImpl: options.execFileImpl,
     });
     recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
-    return response;
+    return applyEvidenceGateToResponse(payload, response, env, logger);
   }
 
   try {
@@ -203,7 +204,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       recentMessages,
     });
     recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
-    return response;
+    return applyEvidenceGateToResponse(payload, response, env, logger);
   } catch (error) {
     if (config.mode !== 'auto') {
       throw error;
@@ -214,7 +215,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       execFileImpl: options.execFileImpl,
     });
     recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
-    return response;
+    return applyEvidenceGateToResponse(payload, response, env, logger);
   }
 }
 
@@ -330,7 +331,7 @@ function buildHermesSystemInstruction() {
     'For media/social failures, retry the allowed MCP path or say the media was unavailable; do not explain pixel access or internal fallback mechanics.',
     'Treat raw media as unread until media_reader or mimo_power returns text; do not use native Hermes media tools or image_url blocks.',
     'Fresh web facts, news, academic search, platform search, and normal URL reading must use search_hub first.',
-    'Social-platform links still use social_reader first; do not let search_hub steal link reading for XHS/Bilibili/Zhihu/WeChat social URLs.',
+    'Social-platform links must use social_reader/media_reader first; do not use browser_navigate as the first-read path. Only when social_reader/media_reader explicitly fails and user requests browser debugging may browser_navigate be attempted. Canonical URL resolution does NOT equal content read — only claim "读到了" if tool returned actual post text (post_text/desc/note_text).',
     'Do not call Tavily, OpenCLI, or Playwright directly unless search_hub fails and the user is explicitly debugging the tool chain.',
     'Use media_reader or mimo_power for image/audio/video understanding.',
     'Do not expose provider internals, tokens, cookies, signed URLs, or raw tool logs; if tool evidence is insufficient, say you are uncertain rather than guessing.',
@@ -374,9 +375,13 @@ function buildSocialLinkRoutingHint(payload = {}) {
   if (!platform) return '';
   return [
     '【社交链接路由指令（非用户原话，不要复述）】',
-    `本轮包含${platform}链接，优先用 social_reader 读取；不要使用 web_extract 抢路。`,
+    `本轮包含${platform}链接。`,
+    '首个工具：mcp_social_reader_read_social_post 或 mcp_social_reader_resolve_social_url。',
+    '备选：mcp_media_reader_resolve_platform_media / generic_parser。',
+    '不要把 browser_navigate 作为第一读取路径；只有 social_reader/media_reader 明确失败且用户请求浏览器调试时才允许尝试。',
+    'canonical URL 不等于正文。只有工具返回了 post_text/desc/note_text 等正文字段，才能说自己读到了。',
+    '如果没有 content_read evidence，直接告诉用户"链接已解析，但正文未能读取"，不要猜测或编造内容。',
     '如读取结果里还有图片、视频或音频，再按需交给 media_reader 或 mimo_power。',
-    '如果用户追问图片/视频/图里内容，直接补读媒体资源；普通回复不要解释模型能力或内部工具机制。',
   ].join('\n');
 }
 
@@ -394,6 +399,147 @@ function buildSocialMediaRetryHint(payload = {}, recentMessages = []) {
     '若拿到图片、视频或媒体 URL，继续交给 media_reader 或 mimo_power 做 OCR/摘要。',
     '回复只说正在重读或说明哪些媒体未能读取；不要解释模型能力、像素限制、内部工具调用机制。',
   ].join('\n');
+}
+
+// --- Social Link Evidence Gate ---
+
+const XHS_TOKEN_CACHE_PATH = '/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json';
+
+export function readXhsTokenCache(env = process.env) {
+  const cachePath = env.XHS_TOKEN_CACHE_PATH || XHS_TOKEN_CACHE_PATH;
+  try {
+    return JSON.parse(readFileSync(cachePath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+export function matchXhsTokenCacheEntry(text, cache) {
+  const urlMatch = String(text || '').match(/https?:\/\/(?:www\.)?(?:xhslink\.com|xiaohongshu\.com|xhs\.com)[^\s]*/i);
+  if (!urlMatch) return null;
+  const url = urlMatch[0];
+  for (const [key, entry] of Object.entries(cache || {})) {
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.url === url || entry.canonical_url === url || key === url) return entry;
+    const noteIdMatch = url.match(/(?:explore|discovery\/item|note)\/([a-f0-9]+)/i);
+    if (noteIdMatch && entry.note_id === noteIdMatch[1]) return entry;
+  }
+  return null;
+}
+
+export function buildSocialEvidenceReport(payload, toolTraceOrResults = null, env = process.env, logger = console) {
+  const text = String(payload?.text || '');
+  const platform = detectSocialPlatform(text);
+  const emptyReport = {
+    platform: '', hasSocialLink: false,
+    link_resolution: { ok: false, source: null, canonical_url: null },
+    metadata_read: { ok: false, source: null, fields: [] },
+    content_read: { ok: false, source: null, fields: [] },
+    allow_claim_read: false, evidence_source: 'none',
+  };
+  if (!platform) return emptyReport;
+
+  const report = {
+    platform,
+    hasSocialLink: true,
+    link_resolution: { ok: false, source: null, canonical_url: null },
+    metadata_read: { ok: false, source: null, fields: [] },
+    content_read: { ok: false, source: null, fields: [] },
+    allow_claim_read: false,
+    evidence_source: 'none',
+  };
+
+  // 1. Check token cache for link_resolution evidence
+  const cache = readXhsTokenCache(env);
+  const cacheEntry = matchXhsTokenCacheEntry(text, cache);
+  if (cacheEntry?.canonical_url || cacheEntry?.note_id) {
+    report.link_resolution = { ok: true, source: 'token_cache', canonical_url: cacheEntry.canonical_url || null };
+    report.evidence_source = 'token_cache';
+    const metaFields = ['title', 'user', 'author', 'cover', 'type'].filter((f) => cacheEntry[f]);
+    if (metaFields.length > 0) {
+      report.metadata_read = { ok: true, source: 'token_cache', fields: metaFields };
+    }
+  }
+
+  // 2. If tool trace available, parse for higher-level evidence
+  if (toolTraceOrResults) {
+    report.evidence_source = 'tool_result';
+    // Parse tool results for content_read fields:
+    // post_text, desc, note_text, content, ocr_text, image_text, full_text
+  }
+
+  // 3. Determine allow_claim_read
+  report.allow_claim_read = report.content_read?.ok === true;
+
+  // 4. Log evidence stages
+  const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+  logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} has_social_link=true`);
+  logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=link_resolution ok=${report.link_resolution.ok} source=${report.link_resolution.source || 'null'} canonical_url=${report.link_resolution.canonical_url || 'null'}`);
+  logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=metadata_read ok=${report.metadata_read.ok} fields=${JSON.stringify(report.metadata_read.fields)}`);
+  logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=content_read ok=${report.content_read.ok} source=${report.content_read.source || 'null'} fields=${JSON.stringify(report.content_read.fields)}`);
+  logger?.log?.(`[xhs-evidence] request_id=${requestId} allow_claim_read=${report.allow_claim_read} evidence_source=${report.evidence_source}`);
+  if (!toolTraceOrResults) {
+    logger?.log?.(`[xhs-evidence] request_id=${requestId} WARNING: tool_result trace not available; using token_cache + reply_text_only fallback`);
+  }
+
+  return report;
+}
+
+const SOCIAL_CLAIM_PATTERN = /读到了|读到.*(?:全文|正文|原文|内容)|我看到了.*(?:全文|正文|帖子|笔记)|(?:全文|原文|正文|内容)\s*(?:是|如下)|帖子说|笔记说|文章说/;
+const SOCIAL_FAILURE_ACK_PATTERN = /没能读|无法读|没有读到|读不到|未能读取|链接已解析|正文未能|只确认链接|只拿到了/;
+
+export function applySocialLinkEvidenceGate(payload, replyText, evidenceReport, logger = console) {
+  if (!evidenceReport?.hasSocialLink) {
+    return { replyText, evidenceGateTriggered: false, evidenceStage: 'none' };
+  }
+
+  const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+
+  // If evidence confirms content_read → allow
+  if (evidenceReport.content_read?.ok && evidenceReport.allow_claim_read) {
+    logger?.log?.(`[xhs-evidence] request_id=${requestId} allow_claim_read=true evidence_source=${evidenceReport.evidence_source} evidence_gate_triggered=false`);
+    return { replyText, evidenceGateTriggered: false, evidenceStage: 'content_read' };
+  }
+
+  // Check reply text for content claims (last-resort detection)
+  const hasClaim = SOCIAL_CLAIM_PATTERN.test(replyText);
+  const hasFailureAck = SOCIAL_FAILURE_ACK_PATTERN.test(replyText);
+
+  if (!hasClaim || hasFailureAck) {
+    logger?.log?.(`[xhs-evidence] request_id=${requestId} allow_claim_read=false evidence_source=${evidenceReport.evidence_source} evidence_gate_triggered=false`);
+    return { replyText, evidenceGateTriggered: false, evidenceStage: 'none' };
+  }
+
+  // Gate triggered — rewrite in courtly style, honest about what stage succeeded
+  // Order: metadata_read → link_resolution → none
+  let rewrite;
+  let rewriteReason;
+  if (evidenceReport.metadata_read?.ok) {
+    rewrite = '臣这边只拿到了一些标题/作者等元数据，但没有拿到正文内容。';
+    rewriteReason = 'metadata_only';
+  } else if (evidenceReport.link_resolution?.ok) {
+    rewrite = '臣这边只确认链接已解析，但没有拿到正文内容，不能说已经读到了全文。';
+    rewriteReason = 'link_resolution_only';
+  } else {
+    rewrite = '臣这边没有成功解析这个链接，也没有读到正文。';
+    rewriteReason = 'no_evidence';
+  }
+
+  logger?.log?.(`[xhs-evidence] request_id=${requestId} allow_claim_read=false evidence_source=${evidenceReport.evidence_source} evidence_gate_triggered=true rewrite_reason=${rewriteReason}`);
+
+  const stage = evidenceReport.metadata_read?.ok ? 'metadata_read' : evidenceReport.link_resolution?.ok ? 'link_resolution' : 'none';
+  return { replyText: rewrite, evidenceGateTriggered: true, evidenceStage: stage };
+}
+
+// --- End Social Link Evidence Gate ---
+
+function applyEvidenceGateToResponse(payload, response, env, logger) {
+  const evidenceReport = buildSocialEvidenceReport(payload, null, env, logger);
+  const gateResult = applySocialLinkEvidenceGate(payload, response.reply_text, evidenceReport, logger);
+  if (gateResult.evidenceGateTriggered) {
+    return { ...response, reply_text: gateResult.replyText };
+  }
+  return response;
 }
 
 function buildConversationContinuityNote(payload = {}, recentMessages = []) {
