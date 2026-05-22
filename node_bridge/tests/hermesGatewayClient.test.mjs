@@ -688,12 +688,13 @@ test('sendChatToHermesGateway does not break media routing with courtly anchor',
 
 test('xhslink.com injects social_reader routing instruction', async () => {
   let capturedBody = null;
+  const logs = [];
   await sendChatToHermesGateway(
     { text: '帮我看看 http://xhslink.com/o/abc123', sender_id: 'conv-xhs', channel: 'wechat' },
     {
       config: getHermesGatewayConfig({ HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1', HERMES_API_KEY: 'token', HERMES_REPLY_MODE: 'api', RAN_AGENT_CONTEXT_SIZE_LOG: '0' }),
       fetchImpl: async (url, options) => { capturedBody = JSON.parse(options.body); return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }); },
-      logger: { warn() {} },
+      logger: { warn() {}, log(msg) { logs.push(msg); } },
     }
   );
   const userMsg = capturedBody.messages.find((m) => m.role === 'user');
@@ -701,8 +702,13 @@ test('xhslink.com injects social_reader routing instruction', async () => {
   assert.ok(userMsg.content.includes('小红书'), 'should detect platform');
   assert.ok(userMsg.content.includes('social_reader'), 'should mention social_reader');
   assert.ok(userMsg.content.includes('mcp_social_reader_read_social_post'), 'should include tool name');
+  assert.ok(userMsg.content.includes('首个工具必须是 mcp_social_reader_read_social_post'), 'should require social_reader first');
+  assert.ok(userMsg.content.includes('terminal 不得处理 xhslink'), 'should disallow terminal for xhslink');
+  assert.ok(userMsg.content.includes('browser_navigate 不得作为第一读取路径'), 'should disallow browser first');
   assert.ok(userMsg.content.includes('canonical URL 不等于正文'), 'should warn about canonical URL');
   assert.ok(!userMsg.content.includes('vision_analyze'), 'social hint should not repeat vision tool bans');
+  assert.ok(logs.some((line) => line.includes('[social-link-routing]') && line.includes('platform=xhs') && line.includes('preferred_first_tool=mcp_social_reader_read_social_post')));
+  assert.ok(logs.some((line) => line.includes('[social-link-routing]') && line.includes('browser_first_disallowed=true') && line.includes('terminal_disallowed=true')));
 });
 
 test('bilibili.com injects social_reader routing instruction', async () => {
@@ -748,6 +754,8 @@ test('normal web link does NOT inject social_reader routing', async () => {
   const userMsg = capturedBody.messages.find((m) => m.role === 'user');
   assert.ok(!userMsg.content.includes('社交链接路由指令'), 'should NOT inject social routing for normal web');
   assert.ok(!userMsg.content.includes('social_reader'), 'should NOT mention social_reader');
+  assert.ok(!userMsg.content.includes('terminal 不得处理 xhslink'), 'should NOT inject xhs terminal rule for normal web');
+  assert.ok(!userMsg.content.includes('browser_navigate 不得作为第一读取路径'), 'should NOT inject browser first rule for normal web');
 });
 
 test('social routing does not break courtly style anchor', async () => {
@@ -1085,6 +1093,56 @@ test('audit logs include evidence stage and allow_claim_read', async () => {
   }
 });
 
+test('buildSocialEvidenceReport and applySocialLinkEvidenceGate use provided request_id', () => {
+  const logs = [];
+  const logger = { log(msg) { logs.push(msg); } };
+  const report = buildSocialEvidenceReport(
+    { text: '看看 https://xhslink.com/o/no-cache' },
+    null,
+    { XHS_TOKEN_CACHE_PATH: '/tmp/missing-xhs-cache.json' },
+    logger,
+    'req-fixed-1'
+  );
+  applySocialLinkEvidenceGate(
+    { text: '看看 https://xhslink.com/o/no-cache' },
+    '我读到了正文，内容如下',
+    report,
+    logger,
+    'req-fixed-1'
+  );
+  const evidenceLogs = logs.filter((line) => line.includes('[xhs-evidence]'));
+  assert.ok(evidenceLogs.length > 0);
+  assert.ok(evidenceLogs.every((line) => line.includes('request_id=req-fixed-1')));
+});
+
+test('same Hermes request reuses request_id for context, routing, evidence, and gate logs', async () => {
+  const logs = [];
+  await sendChatToHermesGateway(
+    { text: '看看 http://xhslink.com/o/abc123', sender_id: 'conv-request-id', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+        XHS_TOKEN_CACHE_PATH: '/tmp/missing-xhs-cache.json',
+      }),
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '我读到了正文，内容如下' } }] }),
+      logger: { warn() {}, log(msg) { logs.push(msg); } },
+    }
+  );
+  const requestIds = logs
+    .filter((line) => line.includes('[hermes-context-size]') || line.includes('[social-link-routing]') || line.includes('[xhs-evidence]'))
+    .map((line) => {
+      const jsonStart = line.indexOf('{');
+      if (jsonStart >= 0) return JSON.parse(line.slice(jsonStart)).request_id;
+      return line.match(/request_id=([^\s]+)/)?.[1];
+    })
+    .filter(Boolean);
+  assert.ok(requestIds.length >= 4);
+  assert.equal(new Set(requestIds).size, 1);
+});
+
 // --- Robust Token Cache Matching Tests ---
 
 test('matchXhsTokenCacheEntry: entries wrapper with short code match', () => {
@@ -1111,6 +1169,14 @@ test('matchXhsTokenCacheEntry: trailing Chinese punctuation stripped', () => {
     'key1': { url: 'https://xhslink.com/o/abc123' },
   };
   const entry = matchXhsTokenCacheEntry('看看 https://xhslink.com/o/abc123。', cache);
+  assert.ok(entry);
+});
+
+test('matchXhsTokenCacheEntry: trailing Chinese comma stripped', () => {
+  const cache = {
+    'key1': { url: 'https://xhslink.com/o/abc123' },
+  };
+  const entry = matchXhsTokenCacheEntry('看看 https://xhslink.com/o/abc123，', cache);
   assert.ok(entry);
 });
 

@@ -378,7 +378,7 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
             logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--with iflow-mcp-tcsavage-obsidian-index python", logged_argv)
+        self.assertIn("--from iflow-mcp-tcsavage-obsidian-index python", logged_argv)
         self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", logged_argv)
         self.assertIn(f"--vault {temp_path / 'vault'}", logged_argv)
         self.assertIn(f"--database {temp_path / 'data' / 'obsidian-memory-index.duckdb'}", logged_argv)
@@ -440,7 +440,7 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
             logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--with iflow-mcp-tcsavage-obsidian-index python", logged_argv)
+        self.assertIn("--from iflow-mcp-tcsavage-obsidian-index python", logged_argv)
         self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", logged_argv)
 
 

@@ -113,7 +113,7 @@ test('apply script env upsert includes UV cache and XHS timeout vars', () => {
     'set -euo pipefail',
     'export RAN_AGENT_NO_SUDO=1',
     'source scripts/apply-hermes-runtime-split.sh',
-    `upsert_env_file ${JSON.stringify(envFile)} UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000 XHS_BACKEND_MCP_TIMEOUT_MS=90000 SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false`,
+    `upsert_env_file ${JSON.stringify(envFile)} UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000 XHS_BACKEND_MCP_TIMEOUT_MS=90000 XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false`,
   ].join('\n')], {
     cwd: new URL('../..', import.meta.url).pathname,
     stdio: 'pipe',
@@ -125,9 +125,29 @@ test('apply script env upsert includes UV cache and XHS timeout vars', () => {
   assert.match(text, /UV_TOOL_DIR=\/opt\/ran_agent\/\.ran_agent_state\/uv-tools/);
   assert.match(text, /UV_LINK_MODE=copy/);
   assert.match(text, /UV_PYTHON_DOWNLOADS=never/);
+  assert.match(text, /SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true/);
   assert.match(text, /SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000/);
   assert.match(text, /XHS_BACKEND_MCP_TIMEOUT_MS=90000/);
+  assert.match(text, /XHS_GENERIC_FALLBACK_READY_PATH=\/opt\/ran_agent\/\.ran_agent_state\/social_reader\/generic-fallback-ready\.json/);
   assert.match(text, /SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false/);
+});
+
+test('apply script keeps Node and Hermes marker path env consistent', () => {
+  const scriptPath = new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+  const markerPath = 'XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json';
+  const escaped = markerPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const occurrences = script.match(new RegExp(escaped, 'g')) || [];
+  assert.ok(occurrences.length >= 5, 'marker path should be present in full, lite, and Node env writes');
+});
+
+test('apply script wraps XHS generic fallback prepare with timeout and keeps failure non-blocking', () => {
+  const scriptPath = new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+  assert.match(script, /XHS_GENERIC_FALLBACK_PREPARE_TIMEOUT_SECONDS="\$\{XHS_GENERIC_FALLBACK_PREPARE_TIMEOUT_SECONDS:-120\}"/);
+  assert.match(script, /timeout "\$XHS_GENERIC_FALLBACK_PREPARE_TIMEOUT_SECONDS" bash "\$REPO_ROOT\/scripts\/prepare-xhs-generic-fallback\.sh"/);
+  assert.match(script, /WARNING: XHS generic fallback preparation failed or timed out \(non-blocking\)/);
+  assert.match(script, /restart_services/);
 });
 
 test('apply script full env has OpenCLI browser-backed disabled and Playwright fallback enabled', () => {
@@ -281,6 +301,16 @@ test('prepare-obsidian-memory-tool.sh uses flock and supports --force', () => {
   assert.match(script, /\-\-force/);
   assert.match(script, /UV_CACHE_DIR/);
   assert.match(script, /UV_TOOL_DIR/);
+});
+
+test('prepare-xhs-generic-fallback.sh validates ready marker schema before skipping', () => {
+  const scriptPath = new URL('../../scripts/prepare-xhs-generic-fallback.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+  assert.match(script, /marker_is_ready\(\)/);
+  assert.match(script, /d\.get\('command'\) == wrapper/);
+  assert.match(script, /d\.get\('args'\) == \[\]/);
+  assert.match(script, /d\.get\('tool_name'\) == tool_name/);
+  assert.match(script, /backend_executable/);
 });
 
 test('clean-uv-cache-safe.sh kills obsidian install processes and protects XHS cache', () => {

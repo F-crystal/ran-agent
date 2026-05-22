@@ -116,6 +116,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
   const env = options.env || process.env;
   const config = options.config || getHermesGatewayConfig(env);
   const logger = options.logger || console;
+  const requestId = options.requestId || createRequestId();
 
   // Determine capability mode and select base URL + profile
   const capResult = resolveCapabilityMode(payload, config);
@@ -153,8 +154,10 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     has_debug_intent: capResult.hasDebugIntent,
     selected_base_url: selectedBaseUrl,
     selected_profile: selectedProfile,
+    request_id: requestId,
     fallback_reason: fallbackReason || undefined,
   }));
+  logSocialLinkRouting(payload, logger, requestId);
 
   const selectedConfig = { ...config, baseUrl: selectedBaseUrl, profile: selectedProfile };
   const sessionContext = buildHermesSessionContext(payload, selectedConfig);
@@ -175,6 +178,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     mediaContextOptions: options.mediaContextOptions,
     recentHistoryMessages: recentMessages,
     globalHistoryMessages: globalRecentMessages,
+    requestId,
   });
   logHermesSessionContinuity({
     logger,
@@ -193,7 +197,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       execFileImpl: options.execFileImpl,
     });
     recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
-    return applyEvidenceGateToResponse(payload, response, env, logger);
+    return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
   }
 
   try {
@@ -204,7 +208,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       recentMessages,
     });
     recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
-    return applyEvidenceGateToResponse(payload, response, env, logger);
+    return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
   } catch (error) {
     if (config.mode !== 'auto') {
       throw error;
@@ -215,7 +219,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       execFileImpl: options.execFileImpl,
     });
     recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
-    return applyEvidenceGateToResponse(payload, response, env, logger);
+    return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
   }
 }
 
@@ -314,7 +318,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     options.logger?.log?.('[hermes-context-size]', JSON.stringify({
       ...sizeLog,
       media_artifact_count: Array.isArray(mediaContext.artifacts) ? mediaContext.artifacts.length : 0,
-      request_id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      request_id: options.requestId || createRequestId(),
       context_policy_mode: config.contextPolicyMode,
     }));
   }
@@ -352,37 +356,57 @@ function shouldForceCourtlyStyle(text) {
 }
 
 const SOCIAL_PLATFORM_NAMES = [
-  { pattern: /xhslink\.com|xiaohongshu\.com|xhs\.com/i, name: '小红书' },
-  { pattern: /bilibili\.com|b23\.tv/i, name: 'B站' },
-  { pattern: /mp\.weixin\.qq\.com/i, name: '微信公众号' },
-  { pattern: /douyin\.com/i, name: '抖音' },
-  { pattern: /kuaishou\.com/i, name: '快手' },
-  { pattern: /weibo\.com/i, name: '微博' },
-  { pattern: /zhihu\.com/i, name: '知乎' },
-  { pattern: /music\.163\.com|y\.music\.163\.com/i, name: '网易云音乐' },
+  { pattern: /xhslink\.com|xiaohongshu\.com|xhs\.com|小红书/i, name: '小红书', key: 'xhs' },
+  { pattern: /bilibili\.com|b23\.tv/i, name: 'B站', key: 'bilibili' },
+  { pattern: /mp\.weixin\.qq\.com/i, name: '微信公众号', key: 'wechat_article' },
+  { pattern: /douyin\.com/i, name: '抖音', key: 'douyin' },
+  { pattern: /kuaishou\.com/i, name: '快手', key: 'kuaishou' },
+  { pattern: /weibo\.com/i, name: '微博', key: 'weibo' },
+  { pattern: /zhihu\.com/i, name: '知乎', key: 'zhihu' },
+  { pattern: /music\.163\.com|y\.music\.163\.com/i, name: '网易云音乐', key: 'netease_music' },
 ];
 
-function detectSocialPlatform(text) {
-  for (const { pattern, name } of SOCIAL_PLATFORM_NAMES) {
-    if (pattern.test(text)) return name;
+function detectSocialPlatformInfo(text) {
+  for (const item of SOCIAL_PLATFORM_NAMES) {
+    if (item.pattern.test(text)) return item;
   }
-  return '';
+  return null;
+}
+
+function detectSocialPlatform(text) {
+  return detectSocialPlatformInfo(text)?.name || '';
 }
 
 function buildSocialLinkRoutingHint(payload = {}) {
   const text = String(payload.text || '');
-  const platform = detectSocialPlatform(text);
-  if (!platform) return '';
+  const platformInfo = detectSocialPlatformInfo(text);
+  const platform = platformInfo?.name || '';
+  if (!platformInfo) return '';
+  const xhsRules = platformInfo.key === 'xhs'
+    ? [
+        '首个工具必须是 mcp_social_reader_read_social_post 或 mcp_social_reader_resolve_social_url；不要先走浏览器或终端。',
+        'terminal 不得处理 xhslink/xiaohongshu/小红书链接，也不要把 URL 交给命令执行。',
+        'browser_navigate 不得作为第一读取路径；只有 social_reader/media_reader 明确失败且用户请求浏览器调试时才允许尝试。',
+      ]
+    : [];
   return [
     '【社交链接路由指令（非用户原话，不要复述）】',
     `本轮包含${platform}链接。`,
     '首个工具：mcp_social_reader_read_social_post 或 mcp_social_reader_resolve_social_url。',
+    ...xhsRules,
     '备选：mcp_media_reader_resolve_platform_media / generic_parser。',
     '不要把 browser_navigate 作为第一读取路径；只有 social_reader/media_reader 明确失败且用户请求浏览器调试时才允许尝试。',
     'canonical URL 不等于正文。只有工具返回了 post_text/desc/note_text 等正文字段，才能说自己读到了。',
     '如果没有 content_read evidence，直接告诉用户"链接已解析，但正文未能读取"，不要猜测或编造内容。',
     '如读取结果里还有图片、视频或音频，再按需交给 media_reader 或 mimo_power。',
   ].join('\n');
+}
+
+function logSocialLinkRouting(payload = {}, logger = console, requestId = createRequestId()) {
+  const platformInfo = detectSocialPlatformInfo(String(payload.text || ''));
+  if (!platformInfo || platformInfo.key !== 'xhs') return;
+  logger?.log?.(`[social-link-routing] request_id=${requestId} has_social_link=true platform=xhs preferred_first_tool=mcp_social_reader_read_social_post`);
+  logger?.log?.(`[social-link-routing] request_id=${requestId} browser_first_disallowed=true terminal_disallowed=true`);
 }
 
 function buildSocialMediaRetryHint(payload = {}, recentMessages = []) {
@@ -495,7 +519,7 @@ export function matchXhsTokenCacheEntry(text, cache) {
   return null;
 }
 
-export function buildSocialEvidenceReport(payload, toolTraceOrResults = null, env = process.env, logger = console) {
+export function buildSocialEvidenceReport(payload, toolTraceOrResults = null, env = process.env, logger = console, requestId = createRequestId()) {
   const text = String(payload?.text || '');
   const platform = detectSocialPlatform(text);
   const emptyReport = {
@@ -540,7 +564,6 @@ export function buildSocialEvidenceReport(payload, toolTraceOrResults = null, en
   report.allow_claim_read = report.content_read?.ok === true;
 
   // 4. Log evidence stages
-  const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} has_social_link=true`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=link_resolution ok=${report.link_resolution.ok} source=${report.link_resolution.source || 'null'} canonical_url=${report.link_resolution.canonical_url || 'null'}`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=metadata_read ok=${report.metadata_read.ok} fields=${JSON.stringify(report.metadata_read.fields)}`);
@@ -556,12 +579,10 @@ export function buildSocialEvidenceReport(payload, toolTraceOrResults = null, en
 const SOCIAL_CLAIM_PATTERN = /读到了|读到.*(?:全文|正文|原文|内容)|我看到了.*(?:全文|正文|帖子|笔记)|(?:全文|原文|正文|内容)\s*(?:是|如下)|帖子说|笔记说|文章说/;
 const SOCIAL_FAILURE_ACK_PATTERN = /没能读|无法读|没有读到|读不到|未能读取|链接已解析|正文未能|只确认链接|只拿到了/;
 
-export function applySocialLinkEvidenceGate(payload, replyText, evidenceReport, logger = console) {
+export function applySocialLinkEvidenceGate(payload, replyText, evidenceReport, logger = console, requestId = createRequestId()) {
   if (!evidenceReport?.hasSocialLink) {
     return { replyText, evidenceGateTriggered: false, evidenceStage: 'none' };
   }
-
-  const requestId = `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
 
   // If evidence confirms content_read → allow
   if (evidenceReport.content_read?.ok && evidenceReport.allow_claim_read) {
@@ -601,9 +622,9 @@ export function applySocialLinkEvidenceGate(payload, replyText, evidenceReport, 
 
 // --- End Social Link Evidence Gate ---
 
-function applyEvidenceGateToResponse(payload, response, env, logger) {
-  const evidenceReport = buildSocialEvidenceReport(payload, null, env, logger);
-  const gateResult = applySocialLinkEvidenceGate(payload, response.reply_text, evidenceReport, logger);
+function applyEvidenceGateToResponse(payload, response, env, logger, requestId) {
+  const evidenceReport = buildSocialEvidenceReport(payload, null, env, logger, requestId);
+  const gateResult = applySocialLinkEvidenceGate(payload, response.reply_text, evidenceReport, logger, requestId);
   if (gateResult.evidenceGateTriggered) {
     return { ...response, reply_text: gateResult.replyText };
   }
@@ -1057,4 +1078,8 @@ function inferMediaTypeFromMime(mimeType) {
 
 function formatErrorMessage(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function createRequestId() {
+  return `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
 }

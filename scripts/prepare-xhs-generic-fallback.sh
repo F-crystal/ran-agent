@@ -63,15 +63,56 @@ PYEOF
   fi
 }
 
+marker_is_ready() {
+  python3 - "$MARKER_PATH" "$WRAPPER" "$TOOL_NAME" <<'PYEOF'
+import json
+import os
+import sys
+
+marker_path, wrapper, tool_name = sys.argv[1:]
+with open(marker_path, "r", encoding="utf-8") as fh:
+    d = json.load(fh)
+
+backend_executable = str(d.get('backend_executable') or '')
+backend_python = str(d.get('backend_python') or '')
+backend_module = str(d.get('backend_module') or '')
+
+has_executable_backend = (
+    bool(backend_executable)
+    and backend_executable != wrapper
+    and os.path.isfile(backend_executable)
+    and os.access(backend_executable, os.X_OK)
+)
+has_python_backend = (
+    bool(backend_python)
+    and bool(backend_module)
+    and os.path.isfile(backend_python)
+    and os.access(backend_python, os.X_OK)
+)
+
+ok = (
+    d.get('ok') is True
+    and d.get('command') == wrapper
+    and d.get('args') == []
+    and d.get('tool_name') == tool_name
+    and isinstance(d.get('backend_args'), list)
+    and (has_executable_backend or has_python_backend)
+)
+sys.exit(0 if ok else 1)
+PYEOF
+}
+
 (
   flock -n 200 || { echo "ERROR: another prepare is running; aborting." >&2; exit 1; }
 
   # Skip if already ready (unless --force)
   if [ -z "$FORCE_FLAG" ] && [ -f "$MARKER_PATH" ]; then
-    if python3 -c "import json,sys; d=json.load(open('$MARKER_PATH')); sys.exit(0 if d.get('ok') else 1)" 2>/dev/null; then
+    if marker_is_ready 2>/dev/null; then
       echo "Already prepared. Use --force to reinstall." >&2
       cat "$MARKER_PATH" >&2
       exit 0
+    else
+      echo "Existing marker is missing required schema/backend readiness; preparing again." >&2
     fi
   fi
 
