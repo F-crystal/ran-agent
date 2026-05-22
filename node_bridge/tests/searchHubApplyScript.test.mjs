@@ -138,7 +138,9 @@ test('apply script keeps Node and Hermes marker path env consistent', () => {
   const markerPath = 'XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json';
   const escaped = markerPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const occurrences = script.match(new RegExp(escaped, 'g')) || [];
-  assert.ok(occurrences.length >= 5, 'marker path should be present in full, lite, and Node env writes');
+  assert.ok(occurrences.length >= 6, 'marker path should be present in full, lite, root Node, and node_bridge env writes');
+  assert.match(script, /NODE_BRIDGE_ENV_FILE="\$\{RAN_AGENT_NODE_BRIDGE_ENV_FILE:-\/opt\/ran_agent\/node_bridge\/\.env\.local\}"/);
+  assert.match(script, new RegExp(`upsert_env_file "\\$NODE_BRIDGE_ENV_FILE"[\\s\\S]*"${escaped}"`));
 });
 
 test('apply script wraps XHS generic fallback prepare with timeout and keeps failure non-blocking', () => {

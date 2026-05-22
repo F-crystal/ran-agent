@@ -286,7 +286,7 @@ done
 
 echo "--- stale processes ---"
 for pat in 'start_obsidian_memory_mcp.sh' 'uv tool install iflow-mcp' '/tmp/ran-agent-hermes-home-phase5'; do
-  count=$(pgrep -fc "$pat" 2>/dev/null || echo 0)
+  count=$({ pgrep -fc "$pat" 2>/dev/null || true; } | awk '{ sum += $1 } END { print sum + 0 }')
   if [ "$count" -gt 0 ]; then
     echo "ERROR: $count process(es) matching '$pat'"
   else

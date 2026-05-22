@@ -342,6 +342,12 @@ write_runtime_env() {
     "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json"
+
+  upsert_env_file "$NODE_BRIDGE_ENV_FILE" \
+    "SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true" \
+    "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
+    "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
+    "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json"
 }
 
 filter_obsidian_memory_from_config() {
@@ -861,6 +867,7 @@ main() {
   backup_env_file lite_home_env "$LITE_HOME/.env"
   backup_env_file lite_profile_env "$LITE_HOME/profiles/$LITE_PROFILE/.env"
   backup_env_file node_env "$NODE_ENV_FILE"
+  backup_env_file node_bridge_env "$NODE_BRIDGE_ENV_FILE"
 
   install_profiles
 
@@ -869,6 +876,7 @@ main() {
   restore_env_file lite_home_env "$LITE_HOME/.env"
   restore_env_file lite_profile_env "$LITE_HOME/profiles/$LITE_PROFILE/.env"
   restore_env_file node_env "$NODE_ENV_FILE"
+  restore_env_file node_bridge_env "$NODE_BRIDGE_ENV_FILE"
 
   write_lite_runtime_config
   write_full_runtime_config
