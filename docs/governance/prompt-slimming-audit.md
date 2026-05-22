@@ -1,58 +1,34 @@
 # Prompt Slimming Audit
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-22)
 
-## Scope
+This document records ownership boundaries after prompt slimming. It is not a
+runtime prompt and should stay short.
 
-Audited prompt/style duplication across:
-
-- `hermes/profile/SOUL.md`
-- `hermes/profile/AGENTS.md`
-- `node_bridge/src/hermesGatewayClient.mjs`
-- `src/personal_agent/reply_reviewer.py`
-- `node_bridge/src/contextPolicy.mjs`
-- `docs/governance/server_runtime_commands.md`
-- `scripts/diagnose-lite-full.sh`
-
-## Repeated Rule Types Found
-
-### Persona Rules
-
-- `SOUL.md` carried the long-term courtly attendant identity.
-- `hermesGatewayClient.mjs` injected a courtly style anchor every turn.
-- `courtly-attendant` skill also documents examples, but it is on-demand and not part of the default prompt.
-
-Resolution: `SOUL.md` now owns long-term persona. Gateway keeps only a short per-turn style anchor: respond to the current topic, avoid mechanism talk, keep titles sparse, and give executable technical steps.
-
-### Tool Rules
-
-- `AGENTS.md` described DeepSeek text-only, media tools, social tools, and banned Hermes native tools.
-- `hermesGatewayClient.mjs` repeated those rules in a long `MANDATORY RULES` system instruction.
-- Social routing hint repeated media and vision bans.
-
-Resolution: `AGENTS.md` owns the tool boundary. Gateway system instruction keeps only runtime-critical constraints. Social routing hint appears only for detected social links and stays short.
-
-### Reply Style Rules
-
-- `SOUL.md` described natural chat style, no reports, no self-analysis.
-- `hermesGatewayClient.mjs` injected style every turn.
-- `reply_reviewer.py` already checked some casual/advisory drift.
-
-Resolution: `SOUL.md` owns style principles. Gateway uses one short style anchor. Reviewer now catches `mechanism_leak`, `over_courtly_template`, `unnatural_conversation_flow`, and `overlong_systemic_explanation`.
-
-### Project Context Rules
-
-- `README` and governance docs describe ran-agent architecture and lite/full design.
-- `AGENTS.md` and gateway prompt also carried some runtime context.
-
-Resolution: project architecture stays in governance docs. `AGENTS.md` keeps only the tool/routing boundary. `SOUL.md` does not mention XHS, lite/full, or tool internals.
-
-## Layered Ownership
+## Ownership
 
 | Layer | Owns | Does Not Own |
 |-------|------|--------------|
-| `SOUL.md` | Long-term persona, relation tone, natural expression | Tool inventory, XHS details, lite/full details |
-| `AGENTS.md` | Tool boundaries and runtime routing rules | Long-form persona manual |
-| `hermesGatewayClient.mjs` | Short runtime system instruction and conditional hints | Long project background or duplicated tool manual |
-| `reply_reviewer.py` | Post-generation style lint | Prompt assembly or tool routing |
-| `server_runtime_commands.md` | Operational lite/full runbook | Persona rules |
+| `hermes/profile/SOUL.md` | Long-term persona and relation tone | Tool inventory, XHS details, lite/full runtime facts |
+| `hermes/profile/AGENTS.md` | Hermes runtime constraints and tool boundary | Long-form persona manual |
+| `node_bridge/src/hermesGatewayClient.mjs` | Short system instruction, conditional routing hints, request logging | Long project background or duplicated tool manuals |
+| `src/personal_agent/reply_reviewer.py` | Post-generation style lint | Prompt assembly or tool routing |
+| `docs/governance/` | Architecture and operational facts | Per-turn prompt prose |
+
+## Current Rules
+
+- Gateway prompt stays compact and conditional.
+- Social routing hints appear only when social links are detected.
+- Tool and routing facts live in `AGENTS.md`, `hermes/profile/AGENTS.md`, and
+  governance docs rather than in every user turn.
+- Replies should not expose mechanism details such as continuity internals,
+  fallback chains, or unavailable hidden tools unless the user is debugging.
+- `request_id` is generated once per Hermes request and reused across
+  context-size, routing, evidence, and gate logs.
+
+## Regression Checks
+
+- Keep `SOUL.md` free of XHS, lite/full, or tool inventory details.
+- Keep `hermesGatewayClient.mjs` free of long static project manuals.
+- Keep `server_runtime_commands.md` script-first; do not paste large repair
+  transcripts into public docs.

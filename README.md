@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-05-19)
+Status: CURRENT (2026-05-22)
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -248,7 +248,8 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 | 文档 | 内容 |
 |------|------|
 | `docs/governance/current_runtime_status.md` | 当前真实运行时主线 |
-| `docs/governance/server_runtime_commands.md` | 服务器 runbook 和恢复命令 |
+| `docs/governance/server_runtime_commands.md` | 脚本优先的服务器 runbook |
+| `docs/governance/doc_status.md` | 公开文档索引和冲突规则 |
 | `docs/governance/multi_frontend_identity_strategy.md` | 多前端统一身份、timeline、session 策略 |
 | `docs/governance/media-pipeline.md` | 微信媒体上下文和 Context Policy v1 |
 | `docs/governance/phase_status.md` | Hermes 迁移和 OpenClaw 退休阶段状态 |

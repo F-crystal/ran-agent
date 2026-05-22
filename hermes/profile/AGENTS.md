@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-05-19)
+Status: CURRENT (2026-05-22)
 
 ## 工具与边界简表
 

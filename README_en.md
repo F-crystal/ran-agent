@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-22)
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -233,7 +233,8 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 | Document | Contents |
 |----------|----------|
 | `docs/governance/current_runtime_status.md` | Current runtime mainline |
-| `docs/governance/server_runtime_commands.md` | Server runbook and recovery commands |
+| `docs/governance/server_runtime_commands.md` | Script-first server runbook |
+| `docs/governance/doc_status.md` | Public documentation index and conflict rule |
 | `docs/governance/multi_frontend_identity_strategy.md` | Multi-frontend identity, timeline, and session strategy |
 | `docs/governance/media-pipeline.md` | WeChat media context and Context Policy v1 |
 | `docs/governance/phase_status.md` | Hermes migration and OpenClaw retirement status |

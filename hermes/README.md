@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-22)
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 

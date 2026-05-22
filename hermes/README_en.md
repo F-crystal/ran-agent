@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-22)
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 

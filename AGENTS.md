@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-05-15)
+Status: CURRENT (2026-05-22)
 
 ## Scope
 

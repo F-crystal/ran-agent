@@ -1,64 +1,67 @@
 # Documentation Status
 
-Status: CURRENT (2026-05-20)
+Status: CURRENT (2026-05-22)
 
+This file is the public documentation index and conflict rule. Historical
+deployment notes belong under ignored `local_archive/`, not under
+`docs/governance/`.
 
 ## Public Source Of Truth
 
-- `README.md` / `README_en.md`
-- `hermes/README.md` / `hermes/README_en.md`
-- `AGENTS.md`
-- `CLAUDE.md`
-- `hermes/profile/AGENTS.md`
-- `docs/governance/doc_status.md`
-- `docs/governance/current_runtime_status.md`
-- `docs/governance/phase_status.md`
-- `docs/governance/server_runtime_commands.md`
-- `docs/governance/wechat-bridge-media-buffer.md`
-- `docs/governance/constraints.md`
-- `docs/governance/skills.md`
-- `docs/governance/sub_agents.md`
-- `docs/governance/cleanup.md`
-- `docs/governance/media-pipeline.md`
-- `docs/governance/mimo-power-mcp.md`
-- `docs/governance/prompt-slimming-audit.md`
-- `docs/governance/multi_frontend_identity_strategy.md`
-
-## Publication Notes
-
-- Server runtime deployment and drift repair are standardized on
-  `bash scripts/apply-hermes-runtime-split.sh`; diagnosis is standardized on
-  `bash scripts/diagnose-lite-full.sh`, with
-  `bash scripts/diagnose-hermes-continuity.sh` for session-continuity checks.
-  Do not document manual systemd/env edits as the normal path for the
-  lite/full split.
-- Completed code/doc changes that need GitHub synchronization must go through
-  `skills/archive-and-push/SKILL.md`; do not hand-stage broad runtime trees.
-- Historical archive notes and deployment journals are local-only under ignored `local_archive/docs/`; do not force-add them to Git unless the owner explicitly asks for a specific safe file.
-- Future archive records go under `local_archive/docs/governance/archive/`.
-- Future deployment notes go under `local_archive/docs/deployment/`.
-- Runtime state, private vault content, logs, databases, debug outputs, env files, and local archive material must remain ignored.
-- `docs/governance/current_runtime_status.md` is the detailed current-state reference; this file only tracks which docs are authoritative for public readers.
+| Document | Ownership |
+|----------|-----------|
+| `README.md` / `README_en.md` | User-facing project overview |
+| `hermes/README.md` / `hermes/README_en.md` | Hermes profile distribution overview |
+| `AGENTS.md` | Repo-root operating rules |
+| `CLAUDE.md` | Claude-compatible repo-root operating rules |
+| `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
+| `docs/governance/doc_status.md` | Documentation index and conflict rule |
+| `docs/governance/current_runtime_status.md` | Compact current runtime truth |
+| `docs/governance/server_runtime_commands.md` | Script-first server runbook |
+| `docs/governance/phase_status.md` | Historical phase closure status |
+| `docs/governance/constraints.md` | Runtime and implementation constraints |
+| `docs/governance/skills.md` | On-demand skill map |
+| `docs/governance/sub_agents.md` | Sub-agent candidate policy |
+| `docs/governance/cleanup.md` | Retired/deleted component record |
+| `docs/governance/media-pipeline.md` | Media pipeline and context policy |
+| `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |
+| `docs/governance/mimo-power-mcp.md` | MiMo Power MCP configuration |
+| `docs/governance/multi_frontend_identity_strategy.md` | Multi-frontend identity and timeline |
+| `docs/governance/prompt-slimming-audit.md` | Prompt slimming ownership audit |
 
 ## Conflict Rule
 
 1. Runtime code behavior is first truth.
 2. Then the public source-of-truth docs listed above.
-3. Local archives are context only and are not part of the public release surface.
+3. Local archives are context only and are not part of the public release
+   surface.
 
-## Closed Production Fixes
+## Governance Rules
 
-- `dda3499` made `scripts/apply-hermes-runtime-split.sh` the standard server
-  deployment and drift-repair entry for the Hermes lite/full split.
-- `dd04424` closed the Hermes continuity and XHS image fallback fixes:
-  Node sends stable session headers plus bounded recent text history, XHS media
-  fallback normalizes image/video resources for `media_reader`, and reviewer
-  lint blocks mechanism-heavy vision explanations in normal social/media replies.
-- `25a6ff2` closed the unified multi-frontend entry: WeChat, Feishu/Lark, and
-  Desktop proxy all enter `ChannelHub` before `replyBackend`.
-- `6b46276` closed GlobalTimeline retention: long turns and payload-like
-  content are summarized, old timeline records compact into daily/topic
-  summaries, and original JSONL files are gzipped to the archive dir.
-- `8a3fa69` closed Feishu bridge production fixes: `lark-cli event consume
-  im.message.receive_v1` uses bot identity by default, plain string content is
-  parsed, and send commands use `im +messages-send` with idempotency keys.
+- Keep `AGENTS.md` / `CLAUDE.md` light. Detailed runtime facts belong in
+  `docs/governance/` or skills.
+- Keep `docs/governance/current_runtime_status.md` compact; move commands to
+  `server_runtime_commands.md` and historical detail to `phase_status.md`.
+- Keep `server_runtime_commands.md` script-first. Do not add one-off pasteable
+  repair logs.
+- Keep governance docs in English. README files may be Chinese/English pairs.
+- Keep runtime state, private vault content, logs, databases, debug outputs,
+  env files, and local archive material out of Git.
+- Completed code/doc changes that need GitHub synchronization must go through
+  `skills/archive-and-push/SKILL.md`.
+
+## Current Closed Runtime Fixes
+
+- Hermes lite/full runtime split is closed on
+  `scripts/apply-hermes-runtime-split.sh` and
+  `scripts/diagnose-lite-full.sh`.
+- Search Hub is the unified fresh web/news/academic search entry; actual
+  social links still read through `social_reader` / `media_reader`.
+- XHS generic fallback is prepared at deploy time and uses the marker at
+  `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
+- XHS evidence gate separates `link_resolution`, `metadata_read`, and
+  `content_read`; token cache hits cannot claim content read.
+- Request id logging is unified across context-size, routing, evidence, and
+  evidence-gate logs.
+- Node root env and `node_bridge/.env.local` are both managed for XHS fallback
+  marker consistency.
