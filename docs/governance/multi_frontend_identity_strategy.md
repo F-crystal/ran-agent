@@ -1,6 +1,6 @@
 # Multi-Frontend Identity Strategy
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-05-28)
 
 Multi-frontend is not multi-agent. WeChat, Feishu/Lark, and desktop
 OpenAI-compatible clients all enter the same ran-agent mainline:
@@ -70,6 +70,11 @@ Feishu uses `lark-cli event consume im.message.receive_v1` with bot identity by
 default and sends replies with idempotency keys. Desktop proxy exposes an
 OpenAI-compatible local endpoint for desktop clients, but it still routes
 through `ChannelHub`.
+
+For scheduled AI daily digest delivery, Node bridge records the latest Feishu DM
+target from normal incoming private-message events and reuses that target for a
+synthetic scheduled turn. The scheduled turn still enters `ChannelHub`, so
+Hermes session and timeline semantics match normal Feishu chat.
 
 ## Security
 

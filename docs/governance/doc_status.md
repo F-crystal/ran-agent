@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-05-28)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -65,3 +65,6 @@ deployment notes belong under ignored `local_archive/`, not under
   evidence-gate logs.
 - Node root env and `node_bridge/.env.local` are both managed for XHS fallback
   marker consistency.
+- Opt-in AI daily digest is the only scheduled outbound allowlist path; it uses
+  the learned Feishu DM target and the normal Hermes/Feishu reply flow without
+  reopening proactive check-ins or reminders.

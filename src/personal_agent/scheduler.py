@@ -11,6 +11,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from personal_agent.config import AppConfig
 from personal_agent.db import Database
 from personal_agent.jobs import (
+    ai_daily_digest_job,
     brain_loop_job,
     hermes_bounded_context_job,
     knowledge_agent_job,
@@ -107,6 +108,24 @@ def create_scheduler(
                 "logger": logger,
             },
         )
+    if config.ai_daily_digest_enabled:
+        scheduler.add_job(
+            ai_daily_digest_job,
+            trigger=CronTrigger(
+                hour=config.ai_daily_digest_hour,
+                minute=config.ai_daily_digest_minute,
+                timezone=config.scheduler_timezone,
+            ),
+            id="ai_daily_digest",
+            name="ai_daily_digest",
+            replace_existing=True,
+            kwargs={
+                "config": config,
+                "database": database,
+                "message_service": message_service,
+                "logger": logger,
+            },
+        )
     if config.reminder_delivery_enabled:
         scheduler.add_job(
             reminder_check_job,
@@ -122,7 +141,7 @@ def create_scheduler(
             },
         )
     logger.info(
-        "scheduler configured with brain_loop interval=%s minutes life_loop interval=%s minutes knowledge interval=%s minutes enabled=%s self_reflection interval=%s minutes enabled=%s hermes_bounded_context interval=%s minutes enabled=%s night_cycle=%s %02d:%02d enabled=%s reminder_check interval=%s minutes enabled=%s",
+        "scheduler configured with brain_loop interval=%s minutes life_loop interval=%s minutes knowledge interval=%s minutes enabled=%s self_reflection interval=%s minutes enabled=%s hermes_bounded_context interval=%s minutes enabled=%s night_cycle=%s %02d:%02d enabled=%s ai_daily_digest=%02d:%02d enabled=%s reminder_check interval=%s minutes enabled=%s",
         config.brain_loop_interval_minutes,
         config.proactive_check_interval_minutes,
         config.knowledge_check_interval_minutes,
@@ -135,6 +154,9 @@ def create_scheduler(
         config.night_cycle_hour,
         config.night_cycle_minute,
         config.night_cycle_enabled,
+        config.ai_daily_digest_hour,
+        config.ai_daily_digest_minute,
+        config.ai_daily_digest_enabled,
         config.reminder_check_interval_minutes,
         config.reminder_delivery_enabled,
     )

@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-05-28)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -90,6 +90,9 @@ UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
 UV_LINK_MODE=copy
 UV_PYTHON_DOWNLOADS=never
 OBSIDIAN_MEMORY_MCP_ENABLED=false
+AI_DAILY_DIGEST_ENABLED=false
+AI_DAILY_DIGEST_HOUR=10
+AI_DAILY_DIGEST_MINUTE=0
 ```
 
 Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform
@@ -119,6 +122,23 @@ paste key-bearing curl commands into public docs.
   be first-read through `browser_navigate` or terminal.
 - Token-cache hits are link resolution evidence only; they do not mean content
   was read.
+
+## Scheduled AI Daily Digest
+
+- Enable only in local env with `AI_DAILY_DIGEST_ENABLED=true`; keep the default
+  disabled in public templates.
+- The digest target is learned from the latest normal Feishu DM handled by
+  `node_bridge/src/feishuBridge.mjs` and stored under runtime state. To bind it,
+  send the bot any private Feishu message once after deployment.
+- Manual smoke from the server can POST facts to the local Node bridge endpoint:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8791/scheduled/ai-daily-digest \
+  -H 'Content-Type: application/json' \
+  -d '{"facts":"AI daily digest smoke facts"}'
+```
+
+Do not enable `PERSONAL_AGENT_PROACTIVE_ENABLED` for this feature.
 
 ## XHS Fallback
 

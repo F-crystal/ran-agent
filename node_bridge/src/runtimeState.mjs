@@ -8,6 +8,7 @@ const RUNTIME_DIR_NAME = 'node-bridge-runtime';
 const CHECKIN_RANGE_FILE = 'checkin-range.json';
 const PROACTIVE_DISPATCH_FILE = 'proactive-dispatch.json';
 const PENDING_OUTBOUND_FILE = 'pending-outbound.json';
+const FEISHU_HOME_DM_TARGET_FILE = 'feishu-home-dm-target.json';
 const MAX_PENDING_OUTBOUND_MESSAGES = 50;
 
 function assertWithinProject(absolutePath) {
@@ -185,4 +186,37 @@ export function drainPendingOutboundMessages(limit = 10, env = process.env, now 
   }
   writeJsonFile(filePath, { messages: remaining, updatedAt: new Date().toISOString() });
   return drained;
+}
+
+export function setFeishuHomeDmTarget(target = {}, env = process.env) {
+  const normalized = normalizeFeishuHomeDmTarget(target);
+  if (!normalized) {
+    return null;
+  }
+  writeJsonFile(resolveRuntimePath(FEISHU_HOME_DM_TARGET_FILE, env), {
+    ...normalized,
+    updatedAt: new Date().toISOString(),
+  });
+  return normalized;
+}
+
+export function getFeishuHomeDmTarget(env = process.env) {
+  const payload = readJsonFile(resolveRuntimePath(FEISHU_HOME_DM_TARGET_FILE, env), {});
+  return normalizeFeishuHomeDmTarget(payload);
+}
+
+function normalizeFeishuHomeDmTarget(target = {}) {
+  const platform = String(target.platform || 'feishu').trim().toLowerCase();
+  const channelType = String(target.channel_type || target.channelType || 'dm').trim().toLowerCase();
+  const conversationId = String(target.conversation_id || target.conversationId || '').trim();
+  const senderId = String(target.sender_id || target.senderId || target.open_id || target.user_id || '').trim();
+  if (platform !== 'feishu' || channelType !== 'dm' || !conversationId || !senderId) {
+    return null;
+  }
+  return {
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: conversationId,
+    sender_id: senderId,
+  };
 }

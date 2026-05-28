@@ -6,10 +6,13 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 
+import { handleIncomingMessage } from './channelHub.mjs';
+import { sendFeishuReply } from './feishuBridge.mjs';
 import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
   getCheckinRange,
+  getFeishuHomeDmTarget,
   getProactiveDispatchState,
   resolveStateDir,
   setProactiveDispatchState,
@@ -353,6 +356,95 @@ export async function handleOutboundRequest({ bot, logger = console, method, url
   }
 }
 
+export async function handleScheduledAiDigestRequest({
+  logger = console,
+  env = process.env,
+  bodyText = '',
+  channelHub = handleIncomingMessage,
+  execFileImpl,
+} = {}) {
+  let payload;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    return {
+      status: 400,
+      payload: { error: 'request body must be valid JSON' },
+    };
+  }
+
+  const facts = String(payload.facts || '').trim();
+  if (!facts) {
+    return {
+      status: 400,
+      payload: { error: "field 'facts' must be a non-empty string" },
+    };
+  }
+
+  const target = getFeishuHomeDmTarget(env);
+  if (!target) {
+    logger.warn?.('scheduled AI daily digest skipped because Feishu home DM target is missing');
+    return {
+      status: 200,
+      payload: { ok: true, skipped: true, reason: 'feishu_home_dm_target_missing' },
+    };
+  }
+
+  const idempotencyKey = `ran-agent-ai-daily-digest-${new Date().toISOString().slice(0, 10)}`;
+  const message = {
+    id: idempotencyKey,
+    message_id: idempotencyKey,
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: target.conversation_id,
+    sender_id: target.sender_id,
+    route_hint: 'scheduled_ai_daily_digest',
+    text: buildScheduledAiDigestPrompt(facts),
+    media: [],
+    created_at: Date.now(),
+  };
+
+  const response = await channelHub(message, {
+    env,
+    logger,
+    adapter: {
+      async sendReply({ target: replyTarget, text, message: sourceMessage }) {
+        await sendFeishuReply({
+          target: {
+            ...replyTarget,
+            source_message_id: sourceMessage?.id || sourceMessage?.message_id || idempotencyKey,
+          },
+          text,
+          env,
+          execFileImpl,
+        });
+      },
+    },
+  });
+
+  return {
+    status: 200,
+    payload: { ok: true, reply_length: String(response?.replyText || '').length },
+  };
+}
+
+function buildScheduledAiDigestPrompt(facts) {
+  if (String(facts || '').includes('[AIHOT/Search Hub 事实材料]')) {
+    return String(facts || '').trim();
+  }
+  return [
+    '这是用户订阅的每日 10:00 AI 日报任务。',
+    '请只基于下面事实材料写一条适合飞书私聊阅读的中文 AI 日报。',
+    '偏好开头像“给陛下呈上今日 AI 日报”，但不要逐字死板套模板。',
+    '优先突出最重要事件；可以自然分组、改名、合并或省略空栏目。',
+    '每条尽量包含“发生了什么 + 为什么值得看”。',
+    '不要问候、不要追问、不要安排后续主动消息，不要解释内部机制。',
+    '',
+    '[事实材料]',
+    facts,
+  ].join('\n');
+}
+
 function isProactiveDeliveryEnabled(env = process.env) {
   return ['1', 'true', 'yes', 'on'].includes(
     String(env.PERSONAL_AGENT_PROACTIVE_ENABLED || 'false').trim().toLowerCase()
@@ -403,13 +495,15 @@ export function createOutboundServer({ bot, logger = console } = {}) {
     });
 
     request.on('end', async () => {
-      const result = await handleOutboundRequest({
-        bot,
-        logger,
-        method: request.method,
-        url: request.url,
-        bodyText: rawBody,
-      });
+      const result = request.method === 'POST' && request.url === '/scheduled/ai-daily-digest'
+        ? await handleScheduledAiDigestRequest({ logger, env: process.env, bodyText: rawBody })
+        : await handleOutboundRequest({
+          bot,
+          logger,
+          method: request.method,
+          url: request.url,
+          bodyText: rawBody,
+        });
       response.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify(result.payload));
     });

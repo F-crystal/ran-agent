@@ -1,6 +1,6 @@
 # Phase Status
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-05-28)
 
 This file tracks closed phase boundaries. Detailed design and deployment notes
 belong in code, tests, or local archive records, not here.
@@ -21,6 +21,7 @@ belong in code, tests, or local archive records, not here.
 | 11.1.5 | code-closed | XHS evidence gate and generic fallback marker |
 | 11.1.5b | code-closed | XHS token cache matching and deploy marker hardening |
 | 11.1.5c | prompt/routing guard closed | XHS first-read hint forbids browser/terminal first hop |
+| 11.1.6 | code-closed | Opt-in scheduled AI daily digest through Feishu/Hermes |
 
 ## Current Runtime Closure
 
@@ -37,6 +38,8 @@ belong in code, tests, or local archive records, not here.
   `content_read`; only content evidence allows "read" claims.
 - Node root env and `node_bridge/.env.local` both receive the XHS fallback
   marker path during apply.
+- Scheduled AI daily digest is an allowlisted Feishu/Hermes path only and does
+  not reopen old proactive/life-loop outbound behavior.
 
 ## Historical Notes
 

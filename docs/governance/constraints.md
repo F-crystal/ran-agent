@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-05-28)
 
 ## Split Of Responsibility
 
@@ -17,6 +17,7 @@ Status: CURRENT (2026-05-22)
 - Chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Proactive mainline: `scheduler -> life-loop skill -> orchestrator judgment -> front speaker -> Node bridge`
+- Scheduled digest mainline: `scheduler -> AIHOT facts -> synthetic Feishu turn -> Hermes -> Feishu reply`
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
 - Kimi, GLM, and OpenClaw are retired. Hermes (DeepSeek V4) is the sole frontend.
 
@@ -25,6 +26,8 @@ Status: CURRENT (2026-05-22)
 - Specialists are skillized and on-demand only.
 - Do not keep all specialist blocks in default turn context.
 - Memory, reflection, knowledge-state, life-loop, night-cycle, ombre-memory remain support layers.
+- The scheduled AI daily digest is an explicit allowlist path and must not be
+  generalized into open-ended proactive check-ins.
 
 ## Technical Limits
 

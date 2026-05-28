@@ -29,3 +29,18 @@ class NodeBridgeOutboundClient:
         if payload.get("ok") is not True:
             raise RuntimeError("node bridge outbound response missing ok=true")
         return payload
+
+    def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
+        """Send one scheduled AI digest trigger through the local Node bridge."""
+
+        request = urllib.request.Request(
+            url=f"{self._config.node_bridge_outbound_base_url}/scheduled/ai-daily-digest",
+            data=json.dumps({"facts": facts}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if payload.get("ok") is not True:
+            raise RuntimeError("node bridge scheduled digest response missing ok=true")
+        return payload

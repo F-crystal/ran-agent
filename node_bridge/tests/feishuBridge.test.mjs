@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 
 import {
   createFeishuBridgeState,
+  handleFeishuEventLine,
   isUnsupportedFeishuIdentityError,
   normalizeFeishuMessage,
   parseFeishuEvent,
@@ -10,6 +13,9 @@ import {
   sendFeishuReply,
   startFeishuBridge,
 } from '../src/feishuBridge.mjs';
+import { getFeishuHomeDmTarget } from '../src/runtimeState.mjs';
+
+const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
 test('parseFeishuEvent parses lark-cli NDJSON event line', () => {
   const event = parseFeishuEvent('{"schema":"2.0","event":{"message":{"message_id":"om_1","chat_id":"oc_1","chat_type":"p2p","content":"{\\"text\\":\\"你是谁\\"}"},"sender":{"sender_id":{"open_id":"ou_1","user_id":"u_1"}}}}');
@@ -75,6 +81,38 @@ test('feishu bridge state dedupes message ids', () => {
   const state = createFeishuBridgeState();
   assert.equal(state.markSeen('om-1'), true);
   assert.equal(state.markSeen('om-1'), false);
+});
+
+test('handleFeishuEventLine records latest DM target for scheduled digests', async () => {
+  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
+  const tempStateDir = await fs.promises.mkdtemp(path.join(PROJECT_ROOT, '.ran_agent_state', 'feishu-target-'));
+  process.env.RAN_AGENT_STATE_DIR = tempStateDir;
+
+  try {
+    const state = createFeishuBridgeState();
+    await handleFeishuEventLine(
+      '{"schema":"2.0","event":{"message":{"message_id":"om-dm-target","chat_id":"oc-dm-target","chat_type":"p2p","content":"{\\"text\\":\\"绑定日报\\"}"},"sender":{"sender_id":{"open_id":"ou-target"}}}}',
+      {
+        state,
+        logger: { log() {}, warn() {}, error() {} },
+        env: process.env,
+        channelHub: async () => ({ replyText: 'ok' }),
+      }
+    );
+
+    assert.deepEqual(getFeishuHomeDmTarget(process.env), {
+      platform: 'feishu',
+      channel_type: 'dm',
+      conversation_id: 'oc-dm-target',
+      sender_id: 'ou-target',
+    });
+  } finally {
+    if (previousStateDir === undefined) {
+      delete process.env.RAN_AGENT_STATE_DIR;
+    } else {
+      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
+    }
+  }
 });
 
 test('sendFeishuReply constructs lark-cli send command', async () => {

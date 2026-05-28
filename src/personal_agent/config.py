@@ -130,6 +130,9 @@ class AppConfig:
     reminder_check_interval_minutes: int = 5
     proactive_enabled: bool = False
     reminder_delivery_enabled: bool = False
+    ai_daily_digest_enabled: bool = False
+    ai_daily_digest_hour: int = 10
+    ai_daily_digest_minute: int = 0
     proactive_idle_minutes: int = 60
     proactive_daily_limit: int = 5
     proactive_silent_start_hour: int = 0
@@ -271,6 +274,12 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
             "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED",
             "false",
         ).strip().lower() in {"1", "true", "yes", "on"},
+        ai_daily_digest_enabled=os.getenv(
+            "AI_DAILY_DIGEST_ENABLED",
+            "false",
+        ).strip().lower() in {"1", "true", "yes", "on"},
+        ai_daily_digest_hour=int(os.getenv("AI_DAILY_DIGEST_HOUR", "10").strip()),
+        ai_daily_digest_minute=int(os.getenv("AI_DAILY_DIGEST_MINUTE", "0").strip()),
         proactive_idle_minutes=int(
             os.getenv("PERSONAL_AGENT_PROACTIVE_IDLE_MINUTES", "60").strip()
         ),

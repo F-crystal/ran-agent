@@ -2,6 +2,7 @@ import { spawn, execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import { handleIncomingMessage } from './channelHub.mjs';
 import { shortHash } from './identityMap.mjs';
+import { setFeishuHomeDmTarget } from './runtimeState.mjs';
 
 const execFile = promisify(execFileCallback);
 
@@ -153,11 +154,20 @@ export function startFeishuBridge(options = {}) {
   };
 }
 
-async function handleFeishuEventLine(line, { state, logger, env, channelHub }) {
+export async function handleFeishuEventLine(line, { state, logger, env, channelHub }) {
   const parsed = parseFeishuEvent(line);
   const normalized = normalizeFeishuMessage(parsed);
   logger.log?.('[feishu-bridge] event_received', JSON.stringify(normalized.raw_event_meta));
   if (!state.markSeen(normalized.message_id)) return;
+  if (normalized.channel_type === 'dm') {
+    const saved = setFeishuHomeDmTarget(normalized, env);
+    if (saved) {
+      logger.log?.('[feishu-bridge] home_dm_target_recorded', JSON.stringify({
+        conversation_id_hash: shortHash(saved.conversation_id),
+        sender_id_hash: shortHash(saved.sender_id),
+      }));
+    }
+  }
   logger.log?.('[feishu-bridge] normalized_message', JSON.stringify({
     message_id_hash: shortHash(normalized.message_id),
     conversation_id_hash: shortHash(normalized.conversation_id),

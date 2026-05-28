@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 
+from personal_agent.ai_daily_digest import run_ai_daily_digest
 from personal_agent.config import AppConfig
 from personal_agent.db import Database
 from personal_agent.knowledge_agent import KnowledgeAgent
@@ -165,6 +166,24 @@ def night_cycle_job(
         result.knowledge_action,
         result.knowledge_status,
     )
+
+
+def ai_daily_digest_job(
+    config: AppConfig,
+    database: Database,
+    message_service: PersonalAgentService,
+    logger: logging.Logger,
+) -> None:
+    """Send the scheduled AI daily digest through the Feishu/Hermes path."""
+
+    logger.info("AI daily digest job started")
+    result = run_ai_daily_digest(
+        config=config,
+        database=database,
+        outbound_client=message_service,
+        logger=logger,
+    )
+    logger.info("AI daily digest job finished sent=%s reason=%s", result.get("sent"), result.get("reason", ""))
 
 
 def reminder_check_job(

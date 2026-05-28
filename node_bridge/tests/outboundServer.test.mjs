@@ -3,10 +3,16 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 
-import { getOutboundServerConfig, handleOutboundRequest, resolveStateDir } from '../src/outboundServer.mjs';
+import {
+  getOutboundServerConfig,
+  handleOutboundRequest,
+  handleScheduledAiDigestRequest,
+  resolveStateDir,
+} from '../src/outboundServer.mjs';
 import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
+  setFeishuHomeDmTarget,
   setProactiveDispatchState,
 } from '../src/runtimeState.mjs';
 
@@ -62,6 +68,64 @@ test('handleOutboundRequest sends proactive message through bot', async () => {
   } else {
     assert.equal(sentPayload, null);
   }
+});
+
+test('handleScheduledAiDigestRequest routes digest through existing Feishu DM flow', async () => {
+  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
+  fs.mkdirSync(stateBaseDir, { recursive: true });
+  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'scheduled-digest-'));
+  const env = {
+    ...process.env,
+    RAN_AGENT_STATE_DIR: tempStateDir,
+    FEISHU_LARK_CLI_BIN: 'lark-cli',
+    FEISHU_LARK_CLI_IDENTITY: 'bot',
+  };
+  setFeishuHomeDmTarget(
+    {
+      platform: 'feishu',
+      channel_type: 'dm',
+      conversation_id: 'oc-home',
+      sender_id: 'ou-home',
+    },
+    env
+  );
+
+  let channelMessage = null;
+  const calls = [];
+  const result = await handleScheduledAiDigestRequest({
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    env,
+    bodyText: JSON.stringify({ facts: '今日 AI 事实材料' }),
+    channelHub: async (message, options) => {
+      channelMessage = message;
+      await options.adapter.sendReply({
+        target: {
+          channel_type: 'dm',
+          conversation_id: message.conversation_id,
+          sender_id: message.sender_id,
+        },
+        text: '给陛下呈上今日 AI 日报',
+        message,
+      });
+      return { replyText: '给陛下呈上今日 AI 日报' };
+    },
+    execFileImpl: async (bin, args) => {
+      calls.push({ bin, args });
+      return { stdout: '{"ok":true}' };
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(channelMessage.platform, 'feishu');
+  assert.equal(channelMessage.channel_type, 'dm');
+  assert.equal(channelMessage.conversation_id, 'oc-home');
+  assert.equal(channelMessage.sender_id, 'ou-home');
+  assert.equal(channelMessage.route_hint, 'scheduled_ai_daily_digest');
+  assert.match(channelMessage.text, /今日 AI 事实材料/);
+  assert.equal(calls[0].bin, 'lark-cli');
+  assert.equal(calls[0].args.includes('--user-id'), true);
+  assert.equal(calls[0].args.includes('ou-home'), true);
 });
 
 test('handleOutboundRequest drops checkin when proactive delivery is disabled', async () => {

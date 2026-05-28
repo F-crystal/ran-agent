@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-05-28)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -25,6 +25,9 @@ Python backend
 - OpenClaw, Kimi, and GLM are retired frontend paths.
 - WeChat, Feishu/Lark, and Desktop proxy share `ChannelHub`, `IdentityMap`,
   `GlobalTimeline`, and the same `replyBackend` path.
+- The only scheduled outbound message is the opt-in AI daily digest. It runs
+  through the Feishu/Hermes mainline and does not reopen old proactive
+  check-ins, reminders, or life-loop outbound behavior.
 
 ## Lite/Full Runtime
 
@@ -129,6 +132,22 @@ state, vault, data, or XHS note debug output.
 - WeChat media buffer details:
   `docs/governance/wechat-bridge-media-buffer.md`.
 - MiMo Power config details: `docs/governance/mimo-power-mcp.md`.
+
+## Scheduled AI Daily Digest
+
+- Enable with `AI_DAILY_DIGEST_ENABLED=true`; default time is `10:00`
+  `Asia/Shanghai` through `AI_DAILY_DIGEST_HOUR=10` and
+  `AI_DAILY_DIGEST_MINUTE=0`.
+- The job fetches AIHOT facts, builds a flexible digest instruction, and sends a
+  synthetic Feishu DM turn to Node bridge `/scheduled/ai-daily-digest`.
+- Node bridge records the latest Feishu DM target from normal incoming Feishu
+  private messages. If no DM target exists, the digest is skipped; do not hard
+  code raw Feishu ids in public docs.
+- Delivery reuses `ChannelHub -> replyBackend -> hermesGatewayClient ->
+  sendFeishuReply()`, so follow-up questions stay in the same Feishu/Hermes
+  timeline.
+- `PERSONAL_AGENT_PROACTIVE_ENABLED` and
+  `PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED` remain `false`.
 
 ## Protected Local State
 
