@@ -136,6 +136,7 @@ ran-agent 使用仓库内 MCP 服务：
 
 | MCP | 作用 |
 |-----|------|
+| `search_hub` | 统一联网搜索入口：新闻、网页事实、学术检索、AI 热点、平台搜索路由 |
 | `time` | `Asia/Shanghai` 时间查询 |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享 |
@@ -144,9 +145,9 @@ ran-agent 使用仓库内 MCP 服务：
 | `obsidian_memory` | Obsidian vault 语义检索 |
 | `media_generation` | 图片和语音生成，full 默认可用 |
 | `playwright` | 浏览器自动化，full 默认可用 |
-| `tavily` | 可选远端网页搜索 MCP，需要机器本地 API key |
+| `tavily` | 可选底层网页搜索 provider，仅供 Search Hub 兼容使用 |
 
-社交平台链接必须走 `social_reader`；不要用普通网页抽取工具替代小红书、B 站等平台解析器。
+最新网页事实、新闻、学术检索和普通 URL 读取优先走 `search_hub`。社交平台链接必须走 `social_reader`；不要用普通网页抽取工具替代小红书、B 站等平台解析器。
 
 ---
 
@@ -160,7 +161,7 @@ ran-agent 使用仓库内 MCP 服务：
 | `PYTHON_BACKEND_BASE_URL` | Python backend，默认 `http://127.0.0.1:8787` |
 | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen 视觉、ASR、媒体生成 |
 | `MIMO_TOKEN_PLAN_API_KEY` | MiMo Power MCP |
-| `TAVILY_API_KEY` | Tavily MCP，可选 |
+| `TAVILY_API_KEY` | Search Hub 的可选 Tavily provider |
 | `XHS_COOKIE`, `SESSDATA` | 小红书、B 站平台认证 |
 | `OBSIDIAN_MEMORY_VAULT_DIR` | Obsidian vault 路径 |
 | `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB 路径 |
@@ -223,6 +224,7 @@ hermes -p ran-assistant gateway run --replace --accept-hooks
 ```bash
 bash scripts/diagnose-hermes-tools.sh
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-search-hub.sh
 ```
 
 服务器完整 runbook 见 `docs/governance/server_runtime_commands.md`。

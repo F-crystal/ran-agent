@@ -136,6 +136,7 @@ ran-agent uses repo-owned MCP services:
 
 | MCP | Purpose |
 |-----|---------|
+| `search_hub` | Unified online search entry for news, web facts, academic lookup, AI hot topics, and platform-search routing |
 | `time` | `Asia/Shanghai` time queries |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares |
@@ -144,9 +145,9 @@ ran-agent uses repo-owned MCP services:
 | `obsidian_memory` | Obsidian vault semantic search |
 | `media_generation` | Image and speech generation, available on full by default |
 | `playwright` | Browser automation, available on full by default |
-| `tavily` | Optional remote web search MCP, requires a machine-local API key |
+| `tavily` | Optional lower-level web search provider for Search Hub compatibility |
 
-Social-platform links must use `social_reader`; do not use generic web extraction as a replacement for Xiaohongshu, Bilibili, or similar platform resolvers.
+Fresh web facts, news, academic lookup, and normal URL reads should use `search_hub` first. Social-platform links must use `social_reader`; do not use generic web extraction as a replacement for Xiaohongshu, Bilibili, or similar platform resolvers.
 
 ---
 
@@ -160,7 +161,7 @@ Social-platform links must use `social_reader`; do not use generic web extractio
 | `PYTHON_BACKEND_BASE_URL` | Python backend, default `http://127.0.0.1:8787` |
 | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen vision, ASR, media generation |
 | `MIMO_TOKEN_PLAN_API_KEY` | MiMo Power MCP |
-| `TAVILY_API_KEY` | Optional Tavily MCP |
+| `TAVILY_API_KEY` | Optional Tavily provider for Search Hub |
 | `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
 | `OBSIDIAN_MEMORY_VAULT_DIR` | Obsidian vault path |
 | `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB path |
@@ -223,6 +224,7 @@ Diagnostics:
 ```bash
 bash scripts/diagnose-hermes-tools.sh
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-search-hub.sh
 ```
 
 The complete server runbook is `docs/governance/server_runtime_commands.md`.

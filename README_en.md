@@ -35,8 +35,8 @@ Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
 
 MCP services
-  -> media_reader / social_reader / mimo_power / media_generation
-  -> personal_memory / obsidian_memory / time / playwright / tavily
+  -> search_hub / media_reader / social_reader / mimo_power / media_generation
+  -> personal_memory / obsidian_memory / time / playwright
 ```
 
 ### Lite / Full Gateway
@@ -62,6 +62,8 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 **Daily AI digest.** Optionally enable `AI_DAILY_DIGEST_ENABLED=true`; the Python scheduler fetches AIHOT facts at 10:00, sends a synthetic Feishu DM turn through `ChannelHub -> Hermes`, lets Hermes write the short digest, and delivers it through the existing Feishu reply path. This does not re-enable old proactive check-ins, reminders, or life-loop outbound messages.
 
+**Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. It is registered in both lite and full; lite uses lightweight providers such as Tavily, AIHOT, OpenCLI public-only, OpenAlex/arxiv/pubmed, while full may use Playwright fallback. OpenCLI browser-backed mode is disabled by default for the 2C4G/60G server and remains an optional Phase 11.2 enhancement. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.
+
 **Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. Xiaohongshu uses the generic parser fallback as the primary read path, while search context stores `read_ref` handles without exposing platform tokens to the model or logs.
 
 **Multimodal understanding.** WeChat images, audio, video, and documents first pass trusted-path validation. MiMo Power analyzes them first; `media_reader` is the fallback. Video analysis is subtitle-first: subtitles, audio ASR, keyframe VLM, then metadata fallback.
@@ -78,6 +80,7 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 | Service | Purpose | Default Entry |
 |---------|---------|---------------|
+| `search_hub` | Unified fresh web search entry: news, web facts, academic lookup, AI hot topics, platform-search routing | lite/full |
 | `time` | Timezone-aware time queries, default `Asia/Shanghai` | lite/full |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis | lite/full |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | lite/full |
@@ -86,7 +89,7 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 | `obsidian_memory` | Obsidian vault semantic search | lite/full |
 | `media_generation` | Image and speech generation | full |
 | `playwright` | Browser automation and dynamic-page debugging | full |
-| `tavily` | Optional web search MCP, requires a local API key | lite/full |
+| `tavily` | Optional lower-level provider, used only for Search Hub compatibility | internal/compat |
 
 DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must go through MCP tools first. Hermes receives structured text results.
 
@@ -142,6 +145,8 @@ Production systemd, dual gateway setup, Hermes env sync, and drift repair use:
 ```bash
 bash scripts/apply-hermes-runtime-split.sh
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-search-hub.sh
+bash scripts/diagnose-hermes-tools.sh
 ```
 
 Do not hand-edit systemd/env as the normal deployment path. See `docs/governance/server_runtime_commands.md` for the detailed runtime contract.
@@ -166,6 +171,8 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Social platforms | `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
 | Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault retrieval and indexing |
 | Media context | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | compact by default, legacy fallback available |
+| UV cache | `UV_CACHE_DIR`, `UV_TOOL_DIR`, `UV_LINK_MODE`, `UV_PYTHON_DOWNLOADS` | Fixed uv/uvx cache paths to prevent disk growth |
+| XHS timeout | `SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS`, `XHS_BACKEND_MCP_TIMEOUT_MS` | XHS backend timeout, independent from generic social reader timeout |
 
 The full template is `.env.example`. The authoritative current runtime state is `docs/governance/current_runtime_status.md`.
 
@@ -215,6 +222,7 @@ ran_agent/
 PYTHONPATH=src pytest -q tests/
 npm --prefix node_bridge test
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-multi-frontend.sh
 bash scripts/compact-global-timeline.sh
