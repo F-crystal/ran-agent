@@ -30,6 +30,7 @@ platform_toolsets:
     - mcp-media_reader
     - mcp-mimo_power
     - mcp-search_hub
+    - mcp-co_reading
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
@@ -47,6 +48,7 @@ platform_toolsets:
     - mcp-media_reader
     - mcp-mimo_power
     - mcp-search_hub
+    - mcp-co_reading
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
@@ -122,6 +124,14 @@ mcp_servers:
       SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK: "true"
       SEARCH_HUB_PUBLIC_ONLY_DEFAULT: "false"
     timeout: 120
+    connect_timeout: 60
+
+  co_reading:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_co_reading_mcp.sh
+    timeout: 180
     connect_timeout: 60
 
   playwright:

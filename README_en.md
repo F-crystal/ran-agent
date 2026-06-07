@@ -81,6 +81,7 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 | Service | Purpose | Default Entry |
 |---------|---------|---------------|
 | `search_hub` | Unified fresh web search entry: news, web facts, academic lookup, AI hot topics, platform-search routing | lite/full |
+| `co_reading` | Private shared reading room: EPUB/TXT/Markdown/pasted text/PDF text-layer import, chunk reading, progress, shared annotations, Hermes margin replies | lite/full |
 | `time` | Timezone-aware time queries, default `Asia/Shanghai` | lite/full |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis | lite/full |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | lite/full |

@@ -81,6 +81,7 @@ MCP services
 | 服务 | 作用 | 默认入口 |
 |------|------|----------|
 | `search_hub` | 统一联网搜索入口：新闻、网页事实、学术检索、AI 热点、平台搜索路由 | lite/full |
+| `co_reading` | 私有共享读书室：EPUB/TXT/Markdown/粘贴正文/PDF 文本层导入、chunk 阅读、进度、共享批注、Hermes 边栏回复 | lite/full |
 | `time` | 时区感知时间查询，默认 `Asia/Shanghai` | lite/full |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | lite/full |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | lite/full |

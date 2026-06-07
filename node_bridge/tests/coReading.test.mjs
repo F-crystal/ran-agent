@@ -1,0 +1,312 @@
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import test from 'node:test';
+
+import { buildCoReadingApiContract } from '../src/coReading/apiContract.mjs';
+import {
+  BOOK_STATES,
+  buildCoReadingTools,
+  handleCoReadingMcpRequest,
+} from '../src/coReading/mcpServer.mjs';
+import {
+  createCoReadingStore,
+  readChunkText,
+} from '../src/coReading/store.mjs';
+
+async function tempRoot() {
+  return await mkdtemp(path.join(os.tmpdir(), 'co-reading-'));
+}
+
+async function withStore(fn) {
+  const root = await tempRoot();
+  try {
+    const store = createCoReadingStore({ rootDir: root });
+    await store.initialize();
+    await fn({ root, store });
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+}
+
+function callTool(name, args, options = {}) {
+  return handleCoReadingMcpRequest(
+    {
+      method: 'tools/call',
+      params: { name, arguments: args },
+    },
+    options
+  );
+}
+
+function run(command, args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, options);
+    let stdout = '';
+    let stderr = '';
+    child.stdout?.on('data', (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on('data', (chunk) => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(new Error(`${command} exited ${code}: ${stderr}`));
+      }
+    });
+  });
+}
+
+async function createMinimalEpub(filePath) {
+  const script = `
+import zipfile
+from pathlib import Path
+p = Path(${JSON.stringify(filePath)})
+with zipfile.ZipFile(p, "w") as z:
+    z.writestr("mimetype", "application/epub+zip")
+    z.writestr("META-INF/container.xml", """<?xml version='1.0'?><container version='1.0' xmlns='urn:oasis:names:tc:opendocument:xmlns:container'><rootfiles><rootfile full-path='OPS/content.opf' media-type='application/oebps-package+xml'/></rootfiles></container>""")
+    z.writestr("OPS/content.opf", """<?xml version='1.0'?><package xmlns='http://www.idpf.org/2007/opf' version='3.0'><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:title>EPUB Title</dc:title><dc:creator>EPUB Author</dc:creator></metadata><manifest><item id='c1' href='chapter1.xhtml' media-type='application/xhtml+xml'/></manifest><spine><itemref idref='c1'/></spine></package>""")
+    z.writestr("OPS/chapter1.xhtml", """<html xmlns='http://www.w3.org/1999/xhtml'><body><h1>Chapter One</h1><p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p></body></html>""")
+`;
+  await run('python3', ['-c', script]);
+}
+
+test('co_reading initializes required SQLite tables and FTS metadata table', async () => {
+  await withStore(async ({ store }) => {
+    const tables = store.listTables();
+
+    assert.deepEqual(
+      [
+        'reading_annotations',
+        'reading_books',
+        'reading_chunk_fts',
+        'reading_chunks',
+        'reading_events',
+        'reading_imports',
+        'reading_progress',
+        'reading_sections',
+        'reading_sessions',
+        'reading_storage_stats',
+        'reading_threads',
+      ].every((name) => tables.includes(name)),
+      true
+    );
+  });
+});
+
+test('co_reading imports pasted text into gzipped chunks and searches by FTS while reading chunk files as source', async () => {
+  await withStore(async ({ root }) => {
+    const result = await callTool(
+      'reading_import_pasted_text',
+      {
+        owner_token: 'owner',
+        title: 'Shared Reading',
+        text: '第一章\n这里讨论共同阅读和边栏批注。\n\n第二章\nHermes 只能读被允许的上下文。',
+        format: 'markdown',
+      },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+
+    assert.equal(result.structuredContent.ok, true);
+    assert.equal(result.structuredContent.book.state, BOOK_STATES.ACTIVE);
+    assert.equal(result.structuredContent.chunks.length >= 1, true);
+
+    const chunk = result.structuredContent.chunks[0];
+    assert.match(chunk.path, /\.txt\.gz$/);
+    const text = await readChunkText({ rootDir: root }, chunk);
+    assert.match(text, /共同阅读/);
+
+    const search = await callTool(
+      'reading_search',
+      { book_id: result.structuredContent.book.id, query: '边栏批注' },
+      { rootDir: root }
+    );
+    assert.equal(search.structuredContent.ok, true);
+    assert.equal(search.structuredContent.results.length, 1);
+    assert.equal(search.structuredContent.results[0].chunk_id, chunk.id);
+    assert.match(search.structuredContent.results[0].text, /边栏批注/);
+  });
+});
+
+test('private annotations are hidden from list tools and Hermes-readable chunks', async () => {
+  await withStore(async ({ root }) => {
+    const imported = await callTool(
+      'reading_import_pasted_text',
+      { owner_token: 'owner', title: 'Privacy Book', text: '隐私批注测试正文。' },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    const bookId = imported.structuredContent.book.id;
+    const chunkId = imported.structuredContent.chunks[0].id;
+
+    await callTool(
+      'reading_add_annotation',
+      {
+        owner_token: 'owner',
+        book_id: bookId,
+        chunk_id: chunkId,
+        quote: '隐私批注',
+        note: '不该给 Hermes 看',
+        visibility: 'private',
+      },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    const shared = await callTool(
+      'reading_add_annotation',
+      {
+        owner_token: 'owner',
+        book_id: bookId,
+        chunk_id: chunkId,
+        quote: '测试正文',
+        note: '这条可以共享',
+        visibility: 'shared',
+      },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+
+    const listed = await callTool(
+      'reading_list_annotations',
+      { book_id: bookId, chunk_id: chunkId },
+      { rootDir: root }
+    );
+    assert.deepEqual(listed.structuredContent.annotations.map((item) => item.id), [
+      shared.structuredContent.annotation.id,
+    ]);
+
+    const read = await callTool(
+      'reading_read_chunk',
+      { book_id: bookId, chunk_id: chunkId },
+      { rootDir: root }
+    );
+    assert.equal(read.structuredContent.annotations.length, 1);
+    assert.doesNotMatch(JSON.stringify(read.structuredContent), /不该给 Hermes 看/);
+  });
+});
+
+test('write tools require owner token and destructive state changes write events with trash retention', async () => {
+  await withStore(async ({ root }) => {
+    const denied = await callTool(
+      'reading_import_pasted_text',
+      { title: 'Denied', text: 'no owner' },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    assert.equal(denied.isError, true);
+    assert.equal(denied.structuredContent.error_code, 'CO_READING_PERMISSION_DENIED');
+
+    const imported = await callTool(
+      'reading_import_pasted_text',
+      { owner_token: 'owner', title: 'State Book', text: '状态机正文。' },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    const bookId = imported.structuredContent.book.id;
+
+    const archived = await callTool(
+      'reading_archive_book',
+      { owner_token: 'owner', book_id: bookId },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    assert.equal(archived.structuredContent.book.state, BOOK_STATES.ARCHIVED);
+
+    const deleted = await callTool(
+      'reading_delete_book',
+      { owner_token: 'owner', book_id: bookId, confirm: true },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    assert.equal(deleted.structuredContent.book.state, BOOK_STATES.TRASH);
+    assert.equal(typeof deleted.structuredContent.trash_expires_at, 'string');
+
+    const events = await callTool('reading_list_events', { book_id: bookId }, { rootDir: root });
+    assert.deepEqual(events.structuredContent.events.map((event) => event.event_type), [
+      'book_imported',
+      'book_archived',
+      'book_trashed',
+    ]);
+  });
+});
+
+test('importer supports txt markdown epub and marks PDF text layer or OCR requirement without OCR', async () => {
+  await withStore(async ({ root }) => {
+    const txtPath = path.join(root, 'sample.txt');
+    const mdPath = path.join(root, 'sample.md');
+    const epubPath = path.join(root, 'sample.epub');
+    const pdfPath = path.join(root, 'sample.pdf');
+    await writeFile(txtPath, 'TXT title\nTXT body text');
+    await writeFile(mdPath, '# Markdown Title\n\nMarkdown body text');
+    await createMinimalEpub(epubPath);
+    await writeFile(pdfPath, '%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nendobj\nstream\nBT (PDF text layer) Tj ET\nendstream\n%%EOF');
+
+    for (const filePath of [txtPath, mdPath, epubPath]) {
+      const imported = await callTool(
+        'reading_import_book',
+        { owner_token: 'owner', file_path: filePath },
+        { rootDir: root, ownerToken: 'owner' }
+      );
+      assert.equal(imported.structuredContent.ok, true);
+      assert.equal(imported.structuredContent.book.state, BOOK_STATES.ACTIVE);
+      assert.equal(imported.structuredContent.chunks.length >= 1, true);
+    }
+
+    const pdf = await callTool(
+      'reading_import_book',
+      { owner_token: 'owner', file_path: pdfPath },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    assert.equal(pdf.structuredContent.ok, true);
+    assert.equal(pdf.structuredContent.book.format, 'pdf');
+    assert.equal(pdf.structuredContent.book.ocr_required, false);
+
+    await writeFile(pdfPath, '%PDF-1.4\n/Type /Page\n/Image\n%%EOF');
+    const scannedPdf = await callTool(
+      'reading_import_book',
+      { owner_token: 'owner', file_path: pdfPath, title: 'Scanned PDF' },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    assert.equal(scannedPdf.structuredContent.book.ocr_required, true);
+    assert.equal(scannedPdf.structuredContent.chunks.length, 0);
+  });
+});
+
+test('MCP tool names and Web reader API contract expose permission layers', async () => {
+  const tools = buildCoReadingTools();
+  assert.deepEqual(tools.map((tool) => tool.name), [
+    'reading_list_books',
+    'reading_list_chunks',
+    'reading_get_progress',
+    'reading_continue',
+    'reading_read_chunk',
+    'reading_get_context_window',
+    'reading_search',
+    'reading_list_annotations',
+    'reading_read_thread',
+    'reading_get_storage_stats',
+    'reading_list_events',
+    'reading_import_book',
+    'reading_import_pasted_text',
+    'reading_add_annotation',
+    'reading_share_annotation',
+    'reading_reply_to_annotation',
+    'reading_mark_progress',
+    'reading_archive_book',
+    'reading_restore_book',
+    'reading_delete_book',
+    'reading_cleanup_trash',
+  ]);
+  assert.equal(tools.find((tool) => tool.name === 'reading_import_book').annotations.destructiveHint, false);
+  assert.equal(tools.find((tool) => tool.name === 'reading_delete_book').annotations.destructiveHint, true);
+  assert.equal(tools.find((tool) => tool.name === 'reading_read_chunk').annotations.readOnlyHint, true);
+
+  const initialized = await handleCoReadingMcpRequest({ method: 'initialize' });
+  assert.deepEqual(initialized.capabilities, { tools: {} });
+  assert.equal(initialized.serverInfo.name, 'ran-agent-co-reading');
+
+  const contract = buildCoReadingApiContract();
+  assert.equal(contract.service, 'co_reading_web_reader');
+  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/books/import'), true);
+  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/books/:book_id/annotations/:annotation_id/share'), true);
+  assert.equal(contract.security.owner_only_writes, true);
+});

@@ -87,6 +87,7 @@ state, vault, data, or XHS note debug output.
 | Server | Purpose |
 |--------|---------|
 | `search_hub` | Fresh web/news/academic/platform search entry |
+| `co_reading` | Private shared reading room with chunked books, synced progress, shared annotations, and Hermes-visible reading context |
 | `time` | Timezone-aware time queries (`Asia/Shanghai`) |
 | `media_reader` | OCR, ASR, VLM, video, batch media analysis |
 | `social_reader` | Social content reading (Bilibili, XHS, WeChat articles, music) |
@@ -99,6 +100,11 @@ state, vault, data, or XHS note debug output.
 - Search Hub is registered in both lite and full. Lite uses lightweight public
   providers; full may use Playwright fallback. OpenCLI browser-backed remains
   disabled by default for the 2C4G/60G server.
+- Co Reading is registered in both lite and full. Chunk text lives under
+  `.ran_agent_state/co_reading/library/**/*.txt.gz`; SQLite stores metadata,
+  FTS index rows, progress, annotations, threads, events, imports, and storage
+  stats. Private annotations are not returned to Hermes-facing read/search
+  tools.
 - Actual social links still use `social_reader` / `media_reader` first. Search
   Hub must not replace the XHS/Bilibili/Zhihu/WeChat link-read mainline.
 - XHS links must not first-read through browser navigation or terminal.

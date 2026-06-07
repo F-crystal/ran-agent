@@ -31,6 +31,10 @@
       "command": "bash",
       "args": ["-lc", "cd \"$RAN_AGENT_REPO_ROOT\" && exec bash scripts/start_personal_memory_mcp.sh"]
     },
+    "co_reading": {
+      "command": "bash",
+      "args": ["-lc", "cd \"$RAN_AGENT_REPO_ROOT\" && exec bash scripts/start_co_reading_mcp.sh"]
+    },
     "mimo_power": {
       "command": "bash",
       "args": ["-lc", "cd \"$RAN_AGENT_REPO_ROOT\" && exec bash scripts/start_mimo_power_mcp.sh"]
