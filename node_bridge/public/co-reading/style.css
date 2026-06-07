@@ -1,0 +1,80 @@
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: #f6f3ed;
+  color: #222;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: minmax(240px, 320px) minmax(0, 1fr) minmax(260px, 360px);
+  gap: 16px;
+  padding: 16px;
+}
+
+.panel {
+  background: #fffaf2;
+  border: 1px solid #e6dac8;
+  border-radius: 12px;
+  padding: 16px;
+  min-height: 100px;
+}
+
+label {
+  display: block;
+  margin: 10px 0;
+}
+
+input, textarea, select, button {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 4px;
+  padding: 8px;
+  border: 1px solid #d8c9b7;
+  border-radius: 8px;
+  background: white;
+}
+
+button {
+  cursor: pointer;
+  background: #24201b;
+  color: #fff;
+}
+
+.reader-toolbar {
+  display: grid;
+  grid-template-columns: 100px 100px 1fr 90px;
+  gap: 8px;
+}
+
+.chunk-text {
+  white-space: pre-wrap;
+  line-height: 1.85;
+  font-size: 18px;
+}
+
+.list {
+  list-style: none;
+  padding: 0;
+}
+
+.list button {
+  margin-bottom: 8px;
+  text-align: left;
+}
+
+.annotation-card, .search-hit {
+  border-top: 1px solid #e6dac8;
+  padding: 12px 0;
+}
+
+.meta {
+  color: #766a5d;
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+  }
+}

@@ -94,6 +94,12 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must go through MCP tools first. Hermes receives structured text results.
 
+`co_reading` also has an optional Tailscale-only Web reader. Enable
+`CO_READING_WEB_ENABLED=true`, open `/reader`, and use `/api/co-reading/*` from
+the browser. The browser uses only `CO_READING_WEB_ACCESS_TOKEN`;
+`CO_READING_OWNER_TOKEN` stays on the server. Do not expose the reader through
+public Funnel, Cloudflare WARP global mode, or the Bilibili SOCKS proxy.
+
 ---
 
 ## Quick Start

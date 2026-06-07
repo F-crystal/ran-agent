@@ -12,6 +12,7 @@ import {
   resolveWeixinAccountConfig,
 } from './outboundServer.mjs';
 import { startDesktopProxyServer } from './desktopProxyServer.mjs';
+import { startCoReadingWebServer } from './coReading/webServer.mjs';
 import { startFeishuBridge } from './feishuBridge.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import {
@@ -619,6 +620,7 @@ async function main() {
   const outboundServer = createOutboundServer({ bot: proactiveBot, logger: console });
   const feishuBridge = startFeishuBridge({ env: process.env, logger: console });
   const desktopProxyServer = startDesktopProxyServer({ env: process.env, logger: console });
+  const coReadingWebServer = startCoReadingWebServer({ env: process.env, logger: console });
 
   await new Promise((resolve, reject) => {
     outboundServer.once('error', reject);
@@ -632,6 +634,7 @@ async function main() {
     await startWithRetry(agent, weixinAccountConfig);
   } finally {
     feishuBridge?.stop?.();
+    await new Promise((resolve) => coReadingWebServer?.close ? coReadingWebServer.close(resolve) : resolve());
     await new Promise((resolve) => desktopProxyServer?.close ? desktopProxyServer.close(resolve) : resolve());
     await new Promise((resolve) => outboundServer.close(resolve));
   }

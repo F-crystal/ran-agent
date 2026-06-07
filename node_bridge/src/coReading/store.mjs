@@ -410,9 +410,9 @@ export class CoReadingStore {
     return rowToObject(this.db.prepare('SELECT * FROM reading_threads WHERE id = ?').get(threadId));
   }
 
-  readThread(annotationId) {
+  readThread(annotationId, { includePrivate = false } = {}) {
     this.open();
-    const annotation = this.getAnnotation(annotationId, { includePrivate: false });
+    const annotation = this.getAnnotation(annotationId, { includePrivate });
     if (!annotation) return null;
     const replies = this.db.prepare('SELECT * FROM reading_threads WHERE annotation_id = ? ORDER BY created_at ASC').all(annotationId).map(rowToObject);
     return { annotation, replies };

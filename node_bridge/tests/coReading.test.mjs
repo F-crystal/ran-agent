@@ -15,6 +15,7 @@ import {
   createCoReadingStore,
   readChunkText,
 } from '../src/coReading/store.mjs';
+import { createCoReadingWebApp, getCoReadingWebConfig } from '../src/coReading/webServer.mjs';
 
 async function tempRoot() {
   return await mkdtemp(path.join(os.tmpdir(), 'co-reading-'));
@@ -39,6 +40,15 @@ function callTool(name, args, options = {}) {
     },
     options
   );
+}
+
+function req(method, url, { token = 'web', body = null } = {}) {
+  return {
+    method,
+    url,
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+    json: async () => body || {},
+  };
 }
 
 function run(command, args, options = {}) {
@@ -306,7 +316,164 @@ test('MCP tool names and Web reader API contract expose permission layers', asyn
 
   const contract = buildCoReadingApiContract();
   assert.equal(contract.service, 'co_reading_web_reader');
-  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/books/import'), true);
-  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/books/:book_id/annotations/:annotation_id/share'), true);
+  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/import-paste'), true);
+  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/annotations/:annotation_id/ask-hermes'), true);
   assert.equal(contract.security.owner_only_writes, true);
+});
+
+test('co_reading Web API protects owner token and supports shelf import read progress search annotations', async () => {
+  await withStore(async ({ root, store }) => {
+    const app = createCoReadingWebApp({
+      store,
+      config: {
+        accessToken: 'web-token',
+        ownerToken: 'server-owner-secret',
+        rootDir: root,
+      },
+    });
+
+    const denied = await app.handleRequest(req('GET', '/api/co-reading/books', { token: '' }));
+    assert.equal(denied.status, 401);
+
+    const reader = await app.handleRequest(req('GET', '/reader', { token: '' }));
+    assert.equal(reader.status, 200);
+    assert.match(reader.text, /co-reading-reader/);
+    assert.doesNotMatch(reader.text, /server-owner-secret/);
+
+    const imported = await app.handleRequest(req('POST', '/api/co-reading/import-paste', {
+      token: 'web-token',
+      body: {
+        title: 'Web Reader Book',
+        format: 'markdown',
+        text: '# 第一章\n\n这是第一段。\n\n这是第二段，包含搜索词。',
+      },
+    }));
+    assert.equal(imported.status, 200);
+    assert.equal(imported.body.ok, true);
+    assert.doesNotMatch(JSON.stringify(imported.body), /server-owner-secret/);
+    const bookId = imported.body.book.id;
+    const chunkId = imported.body.chunks[0].id;
+
+    const shelf = await app.handleRequest(req('GET', '/api/co-reading/books', { token: 'web-token' }));
+    assert.equal(shelf.body.books.some((book) => book.id === bookId), true);
+
+    const chunk = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}`, { token: 'web-token' }));
+    assert.equal(chunk.status, 200);
+    assert.match(chunk.body.text, /搜索词/);
+
+    const progressWrite = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/progress`, {
+      token: 'web-token',
+      body: { chunk_id: chunkId, offset: 12, device_id: 'desktop' },
+    }));
+    assert.equal(progressWrite.body.progress.offset, 12);
+    const progressRead = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/progress?device_id=desktop`, { token: 'web-token' }));
+    assert.equal(progressRead.body.progress.chunk_id, chunkId);
+
+    const search = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/search?q=${encodeURIComponent('搜索词')}`, { token: 'web-token' }));
+    assert.equal(search.status, 200);
+    assert.equal(search.body.results.length, 1);
+    assert.match(search.body.results[0].text, /搜索词/);
+
+    const annotation = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/annotations`, {
+      token: 'web-token',
+      body: {
+        chunk_id: chunkId,
+        quote: '第一段',
+        note: 'private margin note',
+        visibility: 'private',
+      },
+    }));
+    assert.equal(annotation.body.annotation.visibility, 'private');
+
+    const listed = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}`, { token: 'web-token' }));
+    assert.equal(listed.body.annotations.some((item) => item.note === 'private margin note'), true);
+  });
+});
+
+test('co_reading Web ask-Hermes route only accepts shared annotations and stores replies in reading_threads', async () => {
+  await withStore(async ({ root, store }) => {
+    const imported = await callTool(
+      'reading_import_pasted_text',
+      { owner_token: 'owner', title: 'Hermes Ask Book', text: '共读正文。\n\n这一段可以问 Hermes。' },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    const bookId = imported.structuredContent.book.id;
+    const chunkId = imported.structuredContent.chunks[0].id;
+    const privateAnn = store.addAnnotation({
+      bookId,
+      chunkId,
+      quote: '共读正文',
+      note: 'private-not-for-hermes',
+      visibility: 'private',
+    });
+    const sharedAnn = store.addAnnotation({
+      bookId,
+      chunkId,
+      quote: '这一段',
+      note: 'shared-question-context',
+      visibility: 'shared',
+    });
+
+    const hermesBodies = [];
+    const app = createCoReadingWebApp({
+      store,
+      config: {
+        accessToken: 'web-token',
+        ownerToken: 'owner',
+        rootDir: root,
+        hermesBaseUrl: 'http://hermes.test/v1',
+        hermesApiKey: 'api-key',
+      },
+      fetchImpl: async (url, options) => {
+        hermesBodies.push({ url, body: String(options.body || '') });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: 'Hermes reply saved.' } }],
+          }),
+        };
+      },
+    });
+
+    const denied = await app.handleRequest(req('POST', `/api/co-reading/annotations/${encodeURIComponent(privateAnn.id)}/ask-hermes`, {
+      token: 'web-token',
+      body: { question: '能解释吗？' },
+    }));
+    assert.equal(denied.status, 403);
+    assert.equal(hermesBodies.length, 0);
+
+    const asked = await app.handleRequest(req('POST', `/api/co-reading/annotations/${encodeURIComponent(sharedAnn.id)}/ask-hermes`, {
+      token: 'web-token',
+      body: { question: '请回应这段。' },
+    }));
+    assert.equal(asked.status, 200);
+    assert.equal(asked.body.reply.author, 'hermes');
+    assert.equal(asked.body.reply.text, 'Hermes reply saved.');
+    assert.equal(hermesBodies.length, 1);
+    assert.match(hermesBodies[0].body, /shared-question-context/);
+    assert.doesNotMatch(hermesBodies[0].body, /private-not-for-hermes/);
+
+    const thread = store.readThread(sharedAnn.id);
+    assert.equal(thread.replies.length, 1);
+    assert.equal(thread.replies[0].text, 'Hermes reply saved.');
+  });
+});
+
+test('co_reading Web config supports Tailscale host env without reusing Bilibili SOCKS proxy', () => {
+  const config = getCoReadingWebConfig({
+    CO_READING_WEB_ENABLED: 'true',
+    CO_READING_WEB_HOST: '100.64.0.12',
+    CO_READING_WEB_PORT: '8787',
+    CO_READING_WEB_ACCESS_TOKEN: 'web-token',
+    CO_READING_OWNER_TOKEN: 'owner-token',
+    PERSONAL_AGENT_YTDLP_PROXY: 'socks5h://127.0.0.1:10808',
+  });
+
+  assert.equal(config.enabled, true);
+  assert.equal(config.host, '100.64.0.12');
+  assert.equal(config.port, 8787);
+  assert.equal(config.accessToken, 'web-token');
+  assert.equal(config.ownerToken, 'owner-token');
+  assert.equal(config.ytdlpProxy, undefined);
 });

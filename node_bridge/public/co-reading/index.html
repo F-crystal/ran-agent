@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Co Reading</title>
+    <link rel="stylesheet" href="/reader/style.css">
+  </head>
+  <body>
+    <main id="co-reading-reader" class="layout">
+      <section class="panel shelf-panel">
+        <h1>Co Reading</h1>
+        <label>
+          Access token
+          <input id="access-token" type="password" autocomplete="current-password" placeholder="CO_READING_WEB_ACCESS_TOKEN">
+        </label>
+        <button id="save-token">Use token</button>
+
+        <h2>书架</h2>
+        <button id="refresh-books">刷新书架</button>
+        <ul id="book-list" class="list"></ul>
+
+        <h2>导入粘贴文本</h2>
+        <label>标题 <input id="import-title" placeholder="书名"></label>
+        <label>格式
+          <select id="import-format">
+            <option value="text">Text</option>
+            <option value="markdown">Markdown</option>
+          </select>
+        </label>
+        <textarea id="import-text" rows="8" placeholder="粘贴 TXT / Markdown 正文"></textarea>
+        <button id="import-submit">导入</button>
+      </section>
+
+      <section class="panel reader-panel">
+        <div class="reader-toolbar">
+          <button id="prev-chunk">上一段</button>
+          <button id="next-chunk">下一段</button>
+          <input id="search-query" placeholder="书内搜索">
+          <button id="search-submit">搜索</button>
+        </div>
+        <h2 id="chunk-title">未打开书籍</h2>
+        <article id="chunk-text" class="chunk-text"></article>
+        <div id="search-results" class="search-results"></div>
+      </section>
+
+      <aside class="panel annotations-panel">
+        <h2>边栏批注</h2>
+        <label>选段/引用 <input id="annotation-quote" placeholder="可复制当前段中的一句"></label>
+        <label>批注 <textarea id="annotation-note" rows="4"></textarea></label>
+        <label>可见性
+          <select id="annotation-visibility">
+            <option value="private">private</option>
+            <option value="shared">shared</option>
+          </select>
+        </label>
+        <button id="annotation-submit">保存批注</button>
+        <div id="annotation-list"></div>
+      </aside>
+    </main>
+    <script src="/reader/app.js"></script>
+  </body>
+</html>

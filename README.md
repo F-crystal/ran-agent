@@ -94,6 +94,12 @@ MCP services
 
 DeepSeek V4 在本项目中按文本模型使用。原始图片、音频、视频和社交平台内容必须先交给 MCP 工具，Hermes 只接收结构化文本结果。
 
+`co_reading` 另有可选 Tailscale 内网 Web reader：启用
+`CO_READING_WEB_ENABLED=true` 后访问 `/reader`，HTTP API 位于
+`/api/co-reading/*`。浏览器只使用 `CO_READING_WEB_ACCESS_TOKEN`；
+`CO_READING_OWNER_TOKEN` 只留在服务器环境中。不要用公网 Funnel、WARP
+全局模式或 B 站 SOCKS 代理暴露 reader。
+
 ---
 
 ## 快速开始

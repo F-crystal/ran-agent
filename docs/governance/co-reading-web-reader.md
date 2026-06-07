@@ -1,0 +1,196 @@
+# Co-Reading Web Reader
+
+Status: CURRENT (2026-06-08)
+
+This document owns the private Tailscale-only Web reader for `co_reading`.
+It does not change the Bilibili yt-dlp proxy path.
+
+## Network Model
+
+`/reader` is a Web service running on the ran-agent server. Phones, laptops, and
+the server must already be in the same Tailscale tailnet.
+
+Recommended access order:
+
+1. Listen directly on the server Tailscale IP.
+2. Bind to `127.0.0.1`, then use Tailscale Serve to share the local port inside
+   the tailnet.
+
+Do not use Tailscale Funnel for this reader. Funnel is a public internet entry.
+Do not use Cloudflare WARP global mode. Do not use a Tailscale exit node as the
+normal reader path.
+
+If `CO_READING_WEB_HOST=0.0.0.0`, verify the cloud firewall and security group
+do not expose port `8787` to the public internet. Prefer the Tailscale IP or
+`127.0.0.1 + tailscale serve`.
+
+## Find The Server Tailscale IP
+
+Run this on the server:
+
+```bash
+tailscale ip -4
+```
+
+Use the returned `100.x.y.z` address as `<server-tailscale-ip>`.
+
+## Mode A: Listen On The Tailscale IP
+
+Recommended `.env.local` values:
+
+```bash
+CO_READING_WEB_ENABLED=true
+CO_READING_WEB_HOST=<server-tailscale-ip>
+CO_READING_WEB_PORT=8787
+CO_READING_WEB_ACCESS_TOKEN=replace-me
+CO_READING_OWNER_TOKEN=replace-me-server-only
+CO_READING_ROOT_DIR=/opt/ran_agent/.ran_agent_state/co_reading
+CO_READING_NODE_BIN=/opt/nodejs/node-v22.22.2-linux-x64/bin/node
+```
+
+Phone or computer:
+
+```text
+http://<server-tailscale-ip>:8787/reader
+```
+
+## Mode B: Bind Localhost And Use Tailscale Serve
+
+Recommended `.env.local` values:
+
+```bash
+CO_READING_WEB_ENABLED=true
+CO_READING_WEB_HOST=127.0.0.1
+CO_READING_WEB_PORT=8787
+CO_READING_WEB_ACCESS_TOKEN=replace-me
+CO_READING_OWNER_TOKEN=replace-me-server-only
+CO_READING_ROOT_DIR=/opt/ran_agent/.ran_agent_state/co_reading
+CO_READING_NODE_BIN=/opt/nodejs/node-v22.22.2-linux-x64/bin/node
+```
+
+Then manually configure Tailscale Serve on the server, for example:
+
+```bash
+tailscale serve 8787
+```
+
+Tailscale Serve shares local services with devices inside the tailnet. Tailscale
+Funnel is for public internet access and is not used for this stage.
+
+Reference:
+
+- Tailscale Serve documentation: `https://tailscale.com/docs/features/tailscale-serve`
+- Tailscale Funnel documentation: `https://tailscale.com/docs/features/tailscale-funnel`
+- Local Bilibili SOCKS runbook:
+  `local_archive/docs/deployment/2026-05-09-cloudflare-warp-server-proxy-guide.md`
+
+## Security Rules
+
+- `CO_READING_OWNER_TOKEN` is server-only. It must not appear in browser
+  JavaScript, HTML, `localStorage`, logs, API responses, or Git.
+- The browser uses only `CO_READING_WEB_ACCESS_TOKEN`.
+- Web API routes are under `/api/co-reading/*` and require
+  `Authorization: Bearer <CO_READING_WEB_ACCESS_TOKEN>`.
+- Browser requests never call MCP directly.
+- Browser write actions are server-side wrappers. The server updates SQLite and
+  chunk state without sending owner credentials to the browser.
+- Private annotations are shown only in the authenticated owner Web UI. They are
+  not sent to Hermes.
+- Only shared annotations can use `ask Hermes`.
+- Hermes replies are stored in `reading_threads` and then displayed in the
+  sidebar.
+- Chunk text remains in `.txt.gz` files. Do not store whole books in SQLite,
+  `localStorage`, or browser caches.
+- Do not commit tokens, cookies, proxy passwords, or real access URLs.
+
+## Bilibili SOCKS Proxy Boundary
+
+The Mac home-network SOCKS proxy is only for Bilibili yt-dlp inside
+`media_reader` / `social_reader`.
+
+Keep these boundaries:
+
+- Do not delete or change `PERSONAL_AGENT_YTDLP_PROXY` for this reader.
+- `/reader` must not use `socks5h://127.0.0.1:10808`.
+- The Mac SOCKS tunnel is not a dependency of `co_reading`.
+- If a future book import adds Bilibili video or web article import, route that
+  through existing `media_reader` / `social_reader` providers.
+- `co_reading` Web reader is a Tailscale internal Web service; the Bilibili
+  proxy is a media resolver egress setting. They are independent.
+
+## Reader Functions
+
+Minimal current UI:
+
+- Book shelf.
+- Pasted Text / Markdown import.
+- Open a book and display one chunk.
+- Previous and next chunk.
+- Read and write browser progress.
+- Book search.
+- Create private or shared annotations.
+- Sidebar annotations with thread replies.
+- Ask Hermes for shared annotations.
+- Store Hermes replies in `reading_threads`.
+
+Current non-goals:
+
+- OCR.
+- Complex web page import.
+- Public deployment.
+- Cloudflare Access.
+- Cloudflare WARP global mode.
+- Tailscale exit node as the normal reader route.
+- Multi-user role system.
+
+## Manual Server Commands
+
+Codex must not SSH to the server or restart services. Run commands manually on
+the server.
+
+After `git pull --ff-only`, set local env values and repair runtime drift:
+
+```bash
+cd /opt/ran_agent
+
+tailscale ip -4
+
+# Edit .env.local manually or append values with your real tokens.
+# Do not commit .env.local.
+
+bash scripts/apply-hermes-runtime-split.sh
+sudo systemctl restart ran-agent-node
+```
+
+For standalone smoke without changing the node bridge service:
+
+```bash
+cd /opt/ran_agent
+source .env.local
+bash scripts/start_co_reading_web.sh
+```
+
+Then open:
+
+```text
+http://<server-tailscale-ip>:8787/reader
+```
+
+## Acceptance Checklist
+
+Use a TXT or Markdown sample:
+
+1. Start the Web reader.
+2. Open `/reader` from phone or computer through the Tailscale IP.
+3. Enter `CO_READING_WEB_ACCESS_TOKEN`.
+4. Import pasted text.
+5. Confirm the new book appears in the shelf.
+6. Open the book.
+7. Move previous / next chunk.
+8. Confirm progress restores on reload.
+9. Search text and jump to the hit.
+10. Create a private annotation.
+11. Create a shared annotation.
+12. Ask Hermes on the shared annotation.
+13. Confirm Hermes reply appears in the sidebar.
+14. Confirm the private annotation is not sent through the Hermes request path.

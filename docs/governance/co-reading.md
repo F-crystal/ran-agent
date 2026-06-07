@@ -119,6 +119,9 @@ The canonical API contract is exported from
 `node_bridge/src/coReading/apiContract.mjs` and exposed as MCP resource
 `co-reading://api-contract`.
 
+Tailscale-only Web reader deployment and security rules live in
+`docs/governance/co-reading-web-reader.md`.
+
 Important routes:
 
 - `GET /api/books`
@@ -134,4 +137,3 @@ Important routes:
 - `POST /api/books/:book_id/restore`
 - `DELETE /api/books/:book_id`
 - `POST /api/trash/cleanup`
-

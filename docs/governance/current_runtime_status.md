@@ -104,7 +104,8 @@ state, vault, data, or XHS note debug output.
   `.ran_agent_state/co_reading/library/**/*.txt.gz`; SQLite stores metadata,
   FTS index rows, progress, annotations, threads, events, imports, and storage
   stats. Private annotations are not returned to Hermes-facing read/search
-  tools.
+  tools. Optional Web reader `/reader` is controlled by
+  `CO_READING_WEB_ENABLED` and should be exposed only through Tailscale.
 - Actual social links still use `social_reader` / `media_reader` first. Search
   Hub must not replace the XHS/Bilibili/Zhihu/WeChat link-read mainline.
 - XHS links must not first-read through browser navigation or terminal.
