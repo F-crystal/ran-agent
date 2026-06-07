@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-05-28)
+Status: CURRENT (2026-06-07)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -138,8 +138,9 @@ state, vault, data, or XHS note debug output.
 - Enable with `AI_DAILY_DIGEST_ENABLED=true`; default time is `10:00`
   `Asia/Shanghai` through `AI_DAILY_DIGEST_HOUR=10` and
   `AI_DAILY_DIGEST_MINUTE=0`.
-- The job fetches AIHOT facts, builds a flexible digest instruction, and sends a
-  synthetic Feishu DM turn to Node bridge `/scheduled/ai-daily-digest`.
+- The job fetches AIHOT facts, applies the editable report-style template at
+  `src/personal_agent/prompts/ai_daily_digest_report.md`, and sends a synthetic
+  Feishu DM turn to Node bridge `/scheduled/ai-daily-digest`.
 - Node bridge records the latest Feishu DM target from normal incoming Feishu
   private messages. If no DM target exists, the digest is skipped; do not hard
   code raw Feishu ids in public docs.

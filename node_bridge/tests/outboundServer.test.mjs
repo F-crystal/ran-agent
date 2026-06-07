@@ -71,6 +71,9 @@ test('handleOutboundRequest sends proactive message through bot', async () => {
 });
 
 test('handleScheduledAiDigestRequest routes digest through existing Feishu DM flow', async () => {
+  const templatePath = path.join(PROJECT_ROOT, 'src/personal_agent/prompts/ai_daily_digest_report.md');
+  assert.equal(fs.existsSync(templatePath), true);
+
   const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(stateBaseDir, { recursive: true });
   const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'scheduled-digest-'));
@@ -123,6 +126,12 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   assert.equal(channelMessage.sender_id, 'ou-home');
   assert.equal(channelMessage.route_hint, 'scheduled_ai_daily_digest');
   assert.match(channelMessage.text, /今日 AI 事实材料/);
+  assert.match(channelMessage.text, /标题、来源、正文/);
+  assert.match(channelMessage.text, /50-200/);
+  assert.match(channelMessage.text, /报道式自然段/);
+  assert.match(channelMessage.text, /不要使用“看点\/意义\/适合\/今日信号”/);
+  assert.doesNotMatch(channelMessage.text, /\{facts\}/);
+  assert.doesNotMatch(channelMessage.text, /发生了什么 \+ 为什么值得看/);
   assert.equal(calls[0].bin, 'lark-cli');
   assert.equal(calls[0].args.includes('--user-id'), true);
   assert.equal(calls[0].args.includes('ou-home'), true);

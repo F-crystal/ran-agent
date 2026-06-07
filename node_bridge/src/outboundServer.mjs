@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { handleIncomingMessage } from './channelHub.mjs';
 import { sendFeishuReply } from './feishuBridge.mjs';
@@ -21,6 +22,11 @@ export { resolveStateDir } from './runtimeState.mjs';
 
 const DEFAULT_OUTBOUND_RETRY_DELAY_MS = 5 * 60 * 1000;
 const DEFAULT_OUTBOUND_SEGMENT_DELAY_MS = 800;
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const AI_DAILY_DIGEST_TEMPLATE_PATH = path.join(
+  PROJECT_ROOT,
+  'src/personal_agent/prompts/ai_daily_digest_report.md'
+);
 
 function normalizeAccountId(raw) {
   return String(raw).trim().toLowerCase().replace(/[@.]/g, '-');
@@ -432,17 +438,12 @@ function buildScheduledAiDigestPrompt(facts) {
   if (String(facts || '').includes('[AIHOT/Search Hub 事实材料]')) {
     return String(facts || '').trim();
   }
-  return [
-    '这是用户订阅的每日 10:00 AI 日报任务。',
-    '请只基于下面事实材料写一条适合飞书私聊阅读的中文 AI 日报。',
-    '偏好开头像“给陛下呈上今日 AI 日报”，但不要逐字死板套模板。',
-    '优先突出最重要事件；可以自然分组、改名、合并或省略空栏目。',
-    '每条尽量包含“发生了什么 + 为什么值得看”。',
-    '不要问候、不要追问、不要安排后续主动消息，不要解释内部机制。',
-    '',
-    '[事实材料]',
-    facts,
-  ].join('\n');
+  const template = fs.readFileSync(AI_DAILY_DIGEST_TEMPLATE_PATH, 'utf-8');
+  const factsText = String(facts || '').trim();
+  if (template.includes('{facts}')) {
+    return template.replace('{facts}', factsText).trim();
+  }
+  return [template.trim(), '', '[AIHOT/Search Hub 事实材料]', factsText].join('\n').trim();
 }
 
 function isProactiveDeliveryEnabled(env = process.env) {

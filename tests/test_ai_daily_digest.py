@@ -49,12 +49,19 @@ class AiDailyDigestTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_build_digest_prompt_keeps_format_flexible(self) -> None:
+    def test_build_digest_prompt_uses_editable_report_template(self) -> None:
+        template_path = Path("src/personal_agent/prompts/ai_daily_digest_report.md")
+        self.assertTrue(template_path.exists())
+
         prompt = build_digest_prompt("FACTS")
 
         self.assertIn("给陛下呈上今日 AI 日报", prompt)
-        self.assertIn("允许你自然分组、改名、合并或省略空栏目", prompt)
+        self.assertIn("标题、来源、正文", prompt)
+        self.assertIn("50-200", prompt)
+        self.assertIn("报道式自然段", prompt)
+        self.assertIn("不要使用“看点/意义/适合/今日信号”", prompt)
         self.assertIn("FACTS", prompt)
+        self.assertNotIn("{facts}", prompt)
         self.assertNotIn("必须逐字使用", prompt)
 
     def test_run_ai_daily_digest_sends_once_per_local_date(self) -> None:

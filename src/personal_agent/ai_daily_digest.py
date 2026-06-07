@@ -7,12 +7,14 @@ import logging
 import urllib.error
 import urllib.request
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Protocol
 
 from personal_agent.config import AppConfig
 from personal_agent.db import Database
 
 AI_DAILY_DIGEST_SENT_PREFIX = "ai_daily_digest:sent:"
+AI_DAILY_DIGEST_TEMPLATE_PATH = Path(__file__).with_name("prompts") / "ai_daily_digest_report.md"
 AIHOT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
@@ -28,19 +30,15 @@ class DigestOutboundClient(Protocol):
 def build_digest_prompt(facts: str) -> str:
     """Build the facts package that Hermes will turn into a digest."""
 
-    return "\n".join(
-        [
-            "这是用户订阅的每日 10:00 AI 日报任务。",
-            "可以用“给陛下呈上今日 AI 日报”作为开场，但不是强制套用固定模板。",
-            "请基于事实材料写一条适合飞书私聊阅读的中文简报。",
-            "优先突出最重要事件；允许你自然分组、改名、合并或省略空栏目。",
-            "每条尽量包含“发生了什么 + 为什么值得看”。",
-            "不要问候、不要追问、不要安排后续主动消息，不要解释内部机制。",
-            "",
-            "[AIHOT/Search Hub 事实材料]",
-            facts.strip(),
-        ]
-    ).strip()
+    template = _load_digest_template()
+    facts_text = facts.strip()
+    if "{facts}" in template:
+        return template.replace("{facts}", facts_text).strip()
+    return "\n".join([template.strip(), "", "[AIHOT/Search Hub 事实材料]", facts_text]).strip()
+
+
+def _load_digest_template() -> str:
+    return AI_DAILY_DIGEST_TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
 def load_aihot_facts(urlopen: Callable[..., object] | None = None) -> str:
