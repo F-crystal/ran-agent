@@ -1,15 +1,19 @@
 #!/usr/bin/env node
 import http from 'node:http';
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { importFromPastedText } from './importers.mjs';
+import { importFromFile, importFromPastedText, importFromUrlText } from './importers.mjs';
 import { ANNOTATION_VISIBILITY, createCoReadingStore, readChunkText } from './store.mjs';
+import { routeSearchHubRead } from '../searchHub/router.mjs';
+import { handleSocialReaderMcpRequest } from '../socialReaderMcpServer.mjs';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const PUBLIC_ROOT = path.join(PROJECT_ROOT, 'node_bridge/public/co-reading');
 const DEFAULT_HERMES_BASE_URL = 'http://127.0.0.1:8643/v1';
+const SOCIAL_URL_PATTERN = /https?:\/\/\S*(xhslink\.com|xiaohongshu\.com|xhs\.com|bilibili\.com|b23\.tv|mp\.weixin\.qq\.com|douyin\.com|kuaishou\.com|weibo\.com|zhihu\.com|music\.163\.com)/i;
 
 export function getCoReadingWebConfig(env = process.env) {
   return {
@@ -28,6 +32,8 @@ export function createCoReadingWebApp(options = {}) {
   const env = options.env || process.env;
   const config = { ...getCoReadingWebConfig(env), ...(options.config || {}) };
   const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const searchHubReadImpl = options.searchHubReadImpl || ((args) => routeSearchHubRead(args, { env, fetchImpl }));
+  const socialReaderRequestImpl = options.socialReaderRequestImpl || ((request) => handleSocialReaderMcpRequest(request, { env, fetchImpl }));
   let storePromise = null;
 
   async function getStore() {
@@ -59,7 +65,7 @@ export function createCoReadingWebApp(options = {}) {
     }
     const store = await getStore();
     try {
-      return await routeApi({ req, url, store, config, fetchImpl });
+      return await routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl, socialReaderRequestImpl });
     } catch (error) {
       return jsonResponse(500, {
         ok: false,
@@ -97,7 +103,7 @@ export function startCoReadingWebServer(options = {}) {
   return server;
 }
 
-async function routeApi({ req, url, store, config, fetchImpl }) {
+async function routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl, socialReaderRequestImpl }) {
   const pathParts = url.pathname.split('/').filter(Boolean).slice(2);
   if (req.method === 'GET' && pathParts.length === 1 && pathParts[0] === 'books') {
     return jsonResponse(200, { ok: true, books: store.listBooks({ includeTrash: url.searchParams.get('include_trash') === 'true' }) });
@@ -109,6 +115,32 @@ async function routeApi({ req, url, store, config, fetchImpl }) {
       author: body.author || '',
       text: body.text,
       format: body.format || 'text',
+    });
+    const imported = await store.importBook(parsed);
+    return jsonResponse(200, { ok: true, ...imported });
+  }
+  if (req.method === 'POST' && pathParts.join('/') === 'import-file') {
+    const body = await readJsonBody(req);
+    const parsed = await importUploadedFile({
+      filename: body.filename,
+      dataBase64: body.data_base64 || body.dataBase64,
+      title: body.title,
+      author: body.author || '',
+    });
+    parsed.sourceKind = 'upload';
+    parsed.sourceUri = safeUploadSourceUri(body.filename);
+    parsed.originalRetained = false;
+    const imported = await store.importBook(parsed);
+    return jsonResponse(200, { ok: true, ...imported });
+  }
+  if (req.method === 'POST' && pathParts.join('/') === 'import-url') {
+    const body = await readJsonBody(req);
+    const parsed = await importUrlThroughExistingReaders({
+      url: body.url,
+      title: body.title,
+      author: body.author || '',
+      searchHubReadImpl,
+      socialReaderRequestImpl,
     });
     const imported = await store.importBook(parsed);
     return jsonResponse(200, { ok: true, ...imported });
@@ -170,6 +202,88 @@ async function routeApi({ req, url, store, config, fetchImpl }) {
     return await askHermesForAnnotation({ store, annotationId, question: body.question || '', config, fetchImpl });
   }
   return jsonResponse(404, { ok: false, error: 'not found' });
+}
+
+async function importUploadedFile({ filename, dataBase64, title, author }) {
+  const safeName = safeUploadFilename(filename);
+  const data = String(dataBase64 || '').trim();
+  if (!safeName) throw new Error('filename is required');
+  if (!data) throw new Error('data_base64 is required');
+  const buffer = Buffer.from(data, 'base64');
+  if (buffer.length === 0) throw new Error('uploaded file is empty');
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'co-reading-upload-'));
+  const filePath = path.join(tempDir, safeName);
+  try {
+    await writeFile(filePath, buffer);
+    return await importFromFile({ filePath, title, author });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function importUrlThroughExistingReaders({ url, title, author, searchHubReadImpl, socialReaderRequestImpl }) {
+  const rawUrl = String(url || '').trim();
+  if (!rawUrl) throw new Error('url is required');
+  if (SOCIAL_URL_PATTERN.test(rawUrl)) {
+    const result = await socialReaderRequestImpl({
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: rawUrl,
+          include_comments: false,
+          max_comments: 0,
+        },
+      },
+    });
+    const payload = result?.structuredContent || {};
+    if (result?.isError || payload.ok === false) {
+      throw new Error(payload.error || payload.error_code || 'social_reader URL import failed');
+    }
+    const text = extractSocialReaderText(payload);
+    return await importFromUrlText({
+      url: payload.url || rawUrl,
+      title,
+      author: author || payload.platform || 'social_reader',
+      sourceTitle: payload.title || payload.name || payload.platform || 'Social URL',
+      text,
+      format: 'social',
+    });
+  }
+
+  const result = await searchHubReadImpl({ url: rawUrl, depth: 'full' });
+  const item = result?.item || {};
+  const content = result?.content || item.content || item.snippet || '';
+  return await importFromUrlText({
+    url: item.url || rawUrl,
+    title,
+    author: author || item.source || item.provider || 'search_hub',
+    sourceTitle: item.title || 'Imported URL',
+    text: content,
+    format: 'url',
+  });
+}
+
+function extractSocialReaderText(payload = {}) {
+  return [
+    payload.post_text,
+    payload.note_text,
+    payload.desc,
+    payload.description,
+    payload.content,
+    payload.text,
+    payload.deep_summary,
+    payload.comments_text,
+  ].map((part) => String(part || '').trim()).filter(Boolean).join('\n\n');
+}
+
+function safeUploadFilename(filename) {
+  return path.basename(String(filename || '').trim()).replace(/[^\p{Letter}\p{Number}._ -]+/gu, '_').slice(0, 160);
+}
+
+function safeUploadSourceUri(filename) {
+  const safeName = safeUploadFilename(filename);
+  return safeName ? `upload://${safeName}` : 'upload://unknown';
 }
 
 async function readChunkForWeb(store, bookId, chunkId) {

@@ -44,6 +44,19 @@ export async function importFromFile({ filePath, title, author }) {
       ocrRequired: false,
     };
   }
+  if (ext === '.html' || ext === '.htm') {
+    const html = await readFile(absolutePath, 'utf8');
+    const parsed = extractHtmlText(html);
+    return {
+      title: title || parsed.title || path.basename(absolutePath, ext),
+      author: author || '',
+      format: 'html',
+      sourceKind: 'file',
+      sourceUri: absolutePath,
+      chunks: chunkPlainText(parsed.text, { maxChars: DEFAULT_MAX_CHARS, sectionTitle: parsed.title || 'HTML' }),
+      ocrRequired: false,
+    };
+  }
   if (ext === '.epub') {
     const parsed = await extractEpub(absolutePath);
     const textChunks = [];
@@ -76,6 +89,23 @@ export async function importFromFile({ filePath, title, author }) {
     };
   }
   throw new Error(`unsupported co_reading import format: ${ext || 'unknown'}`);
+}
+
+export async function importFromUrlText({ url, title, author = '', text, format = 'url', sourceTitle = '' }) {
+  const normalized = normalizeText(text);
+  if (!normalized) {
+    throw new Error('URL import returned no readable text');
+  }
+  const resolvedTitle = title || sourceTitle || firstHeading(normalized) || 'Imported URL';
+  return {
+    title: resolvedTitle,
+    author,
+    format,
+    sourceKind: 'url',
+    sourceUri: String(url || ''),
+    chunks: chunkPlainText(normalized, { maxChars: DEFAULT_MAX_CHARS, sectionTitle: resolvedTitle }),
+    ocrRequired: false,
+  };
 }
 
 export function createWebImportProviderRegistry(providers = {}) {
@@ -118,6 +148,36 @@ function firstHeading(text) {
 function markdownTitle(text) {
   const match = String(text || '').match(/^#\s+(.+)$/m);
   return match?.[1]?.trim() || firstHeading(text);
+}
+
+function extractHtmlText(html) {
+  const raw = String(html || '');
+  const title = decodeHtmlEntities((raw.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || '').replace(/<[^>]+>/g, ' ').trim());
+  const body = raw.match(/<body[^>]*>([\s\S]*?)<\/body>/i)?.[1] || raw;
+  const withBreaks = body
+    .replace(/<script\b[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style\b[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<\/(p|div|article|section|li|h[1-6]|blockquote|tr)>/gi, '\n\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<[^>]+>/g, ' ');
+  const text = decodeHtmlEntities(withBreaks)
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+  return { title, text };
+}
+
+function decodeHtmlEntities(value) {
+  return String(value || '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)));
 }
 
 function chunkMarkdown(text, { maxChars = DEFAULT_MAX_CHARS } = {}) {

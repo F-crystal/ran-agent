@@ -390,6 +390,118 @@ test('co_reading Web API protects owner token and supports shelf import read pro
   });
 });
 
+test('co_reading Web API imports uploaded HTML and PDF files without retaining browser payloads', async () => {
+  await withStore(async ({ root, store }) => {
+    const app = createCoReadingWebApp({
+      store,
+      config: {
+        accessToken: 'web-token',
+        ownerToken: 'server-owner-secret',
+        rootDir: root,
+      },
+    });
+
+    const html = Buffer.from('<!doctype html><title>HTML Book</title><article><h1>HTML Chapter</h1><p>Readable HTML body for co reading.</p></article>', 'utf8').toString('base64');
+    const importedHtml = await app.handleRequest(req('POST', '/api/co-reading/import-file', {
+      token: 'web-token',
+      body: {
+        filename: 'html-book.html',
+        data_base64: html,
+      },
+    }));
+    assert.equal(importedHtml.status, 200);
+    assert.equal(importedHtml.body.book.format, 'html');
+    assert.equal(importedHtml.body.book.source_kind, 'upload');
+    assert.equal(importedHtml.body.book.original_retained, false);
+    assert.match(importedHtml.body.chunks[0].title, /HTML/);
+
+    const htmlChunk = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(importedHtml.body.book.id)}/chunks/${encodeURIComponent(importedHtml.body.chunks[0].id)}`, { token: 'web-token' }));
+    assert.match(htmlChunk.body.text, /Readable HTML body/);
+
+    const pdfWithoutTextLayer = Buffer.from('%PDF-1.4\n1 0 obj <<>> endobj\n%%EOF', 'latin1').toString('base64');
+    const importedPdf = await app.handleRequest(req('POST', '/api/co-reading/import-file', {
+      token: 'web-token',
+      body: {
+        filename: 'scan.pdf',
+        data_base64: pdfWithoutTextLayer,
+      },
+    }));
+    assert.equal(importedPdf.status, 200);
+    assert.equal(importedPdf.body.book.format, 'pdf');
+    assert.equal(importedPdf.body.book.ocr_required, true);
+    assert.equal(importedPdf.body.chunks.length, 0);
+  });
+});
+
+test('co_reading Web API imports normal URLs through search_hub and social URLs through social_reader', async () => {
+  await withStore(async ({ root, store }) => {
+    const searchHubCalls = [];
+    const socialReaderCalls = [];
+    const app = createCoReadingWebApp({
+      store,
+      config: {
+        accessToken: 'web-token',
+        ownerToken: 'server-owner-secret',
+        rootDir: root,
+      },
+      searchHubReadImpl: async (args) => {
+        searchHubCalls.push(args);
+        return {
+          item: {
+            title: 'Search Hub Article',
+            url: 'https://example.com/article',
+            provider: 'tavily',
+            source: 'example.com',
+          },
+          content: 'Search Hub extracted article text for the reading room.',
+          warnings: [],
+        };
+      },
+      socialReaderRequestImpl: async (request) => {
+        socialReaderCalls.push(request);
+        return {
+          structuredContent: {
+            ok: true,
+            platform: 'bilibili',
+            title: 'Social Reader Post',
+            url: 'https://www.bilibili.com/video/BV123',
+            post_text: 'Social reader extracted post text for co reading.',
+            comments_text: 'comment one',
+            warnings: [],
+          },
+        };
+      },
+    });
+
+    const normal = await app.handleRequest(req('POST', '/api/co-reading/import-url', {
+      token: 'web-token',
+      body: {
+        url: 'https://example.com/article?token=secret',
+      },
+    }));
+    assert.equal(normal.status, 200);
+    assert.equal(normal.body.book.format, 'url');
+    assert.equal(normal.body.book.source_kind, 'url');
+    assert.match(normal.body.chunks[0].title, /Search Hub/);
+    assert.equal(searchHubCalls.length, 1);
+    assert.equal(socialReaderCalls.length, 0);
+
+    const social = await app.handleRequest(req('POST', '/api/co-reading/import-url', {
+      token: 'web-token',
+      body: {
+        url: 'https://www.bilibili.com/video/BV123',
+      },
+    }));
+    assert.equal(social.status, 200);
+    assert.equal(social.body.book.format, 'social');
+    assert.equal(social.body.book.source_kind, 'url');
+    assert.equal(searchHubCalls.length, 1);
+    assert.equal(socialReaderCalls.length, 1);
+    assert.equal(socialReaderCalls[0].params.name, 'read_social_post');
+    assert.match(JSON.stringify(social.body), /Social Reader Post/);
+  });
+});
+
 test('co_reading Web ask-Hermes route only accepts shared annotations and stores replies in reading_threads', async () => {
   await withStore(async ({ root, store }) => {
     const imported = await callTool(

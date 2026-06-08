@@ -120,23 +120,34 @@ Keep these boundaries:
 
 ## Reader Functions
 
-Minimal current UI:
+Current UI:
 
-- Book shelf.
+- Desktop reader with a top status bar plus shelf, chunks, reader, and margin
+  panels.
+- Mobile reader with bottom tabs: shelf, chunks, reader, and margin.
+- Book shelf with active / archived / trash filters.
 - Pasted Text / Markdown import.
+- Browser file import through `/api/co-reading/import-file` for TXT,
+  Markdown, EPUB, PDF text-layer detection, and local HTML files. Uploaded
+  originals are temporary; canonical text remains chunk `.txt.gz`.
+- URL import through `/api/co-reading/import-url`. Normal URLs reuse
+  `search_hub` read. Social URLs reuse `social_reader`. The browser never
+  calls MCP directly.
 - Open a book and display one chunk.
 - Previous and next chunk.
 - Read and write browser progress.
 - Book search.
-- Create private or shared annotations.
+- Selection-based private or shared annotations.
+- Inline annotation composer; no core `prompt()` / `alert()` flow.
 - Sidebar annotations with thread replies.
-- Ask Hermes for shared annotations.
-- Store Hermes replies in `reading_threads`.
+- Inline Hermes question box on shared annotation cards.
+- Store Hermes replies in `reading_threads` and show them in the margin.
 
 Current non-goals:
 
 - OCR.
-- Complex web page import.
+- Complex new web crawling pipeline. URL import must reuse existing
+  `search_hub` / `social_reader` paths.
 - Public deployment.
 - Cloudflare Access.
 - Cloudflare WARP global mode.
@@ -178,19 +189,22 @@ http://<server-tailscale-ip>:8787/reader
 
 ## Acceptance Checklist
 
-Use a TXT or Markdown sample:
+Use a TXT or Markdown sample, plus one file or URL import smoke when available:
 
 1. Start the Web reader.
 2. Open `/reader` from phone or computer through the Tailscale IP.
 3. Enter `CO_READING_WEB_ACCESS_TOKEN`.
-4. Import pasted text.
+4. Import pasted text, uploaded file, or URL.
 5. Confirm the new book appears in the shelf.
 6. Open the book.
 7. Move previous / next chunk.
 8. Confirm progress restores on reload.
 9. Search text and jump to the hit.
-10. Create a private annotation.
-11. Create a shared annotation.
-12. Ask Hermes on the shared annotation.
-13. Confirm Hermes reply appears in the sidebar.
-14. Confirm the private annotation is not sent through the Hermes request path.
+10. Select text in the reader and confirm the annotation composer opens.
+11. Create a private annotation.
+12. Confirm the private card has no Hermes question box.
+13. Create a shared annotation.
+14. Ask Hermes inline on the shared annotation.
+15. Confirm loading state appears while sending.
+16. Confirm Hermes reply appears in the sidebar and persists after refresh.
+17. Confirm the private annotation is not sent through the Hermes request path.

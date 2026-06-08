@@ -3,9 +3,10 @@
 Status: CURRENT (2026-06-08)
 
 `co_reading` is the private shared reading room for Hermes and the owner. It is
-book-first: EPUB, TXT, Markdown, pasted text, and PDF metadata/text-layer import
-are supported. Web URL import is intentionally a provider interface only; it is
-not hardwired to `search_hub` or `social_reader`.
+book-first: EPUB, TXT, Markdown, pasted text, local HTML, and PDF
+metadata/text-layer import are supported. Web reader URL import reuses existing
+read paths: normal URLs go through `search_hub`, and social URLs go through
+`social_reader`. It does not introduce a separate crawling stack.
 
 ## Storage
 
@@ -122,18 +123,17 @@ The canonical API contract is exported from
 Tailscale-only Web reader deployment and security rules live in
 `docs/governance/co-reading-web-reader.md`.
 
-Important routes:
+Important Web reader routes:
 
-- `GET /api/books`
-- `POST /api/books/import`
-- `POST /api/books/import-paste`
-- `POST /api/books/import-url`
-- `GET /api/books/:book_id/chunks/:chunk_id`
-- `GET /api/books/:book_id/context-window`
-- `GET /api/books/:book_id/search`
-- `POST /api/books/:book_id/annotations`
-- `POST /api/books/:book_id/annotations/:annotation_id/share`
-- `POST /api/books/:book_id/archive`
-- `POST /api/books/:book_id/restore`
-- `DELETE /api/books/:book_id`
-- `POST /api/trash/cleanup`
+- `GET /reader`
+- `GET /api/co-reading/books`
+- `POST /api/co-reading/import-paste`
+- `POST /api/co-reading/import-file`
+- `POST /api/co-reading/import-url`
+- `GET /api/co-reading/books/:book_id/chunks`
+- `GET /api/co-reading/books/:book_id/chunks/:chunk_id`
+- `GET /api/co-reading/books/:book_id/search`
+- `GET /api/co-reading/books/:book_id/progress`
+- `POST /api/co-reading/books/:book_id/progress`
+- `POST /api/co-reading/books/:book_id/annotations`
+- `POST /api/co-reading/annotations/:annotation_id/ask-hermes`

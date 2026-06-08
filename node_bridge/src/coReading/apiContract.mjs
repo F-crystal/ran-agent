@@ -24,6 +24,8 @@ export function buildCoReadingApiContract() {
       endpoint('GET', '/api/co-reading/books', 'List non-trash books by default.', 'web-token'),
       endpoint('GET', '/api/co-reading/books/:book_id', 'Read one book manifest and storage summary.', 'web-token'),
       endpoint('POST', '/api/co-reading/import-paste', 'Server-side import of pasted text or Markdown. Browser never sends owner token.', 'web-token-write-wrapper'),
+      endpoint('POST', '/api/co-reading/import-file', 'Server-side import of browser-uploaded TXT/Markdown/EPUB/PDF/HTML. Uploaded originals are temporary; chunks remain .txt.gz.', 'web-token-write-wrapper'),
+      endpoint('POST', '/api/co-reading/import-url', 'Server-side URL import. Normal URLs reuse search_hub read; social URLs reuse social_reader. No browser MCP access.', 'web-token-write-wrapper'),
       endpoint('GET', '/api/co-reading/books/:book_id/chunks', 'List chunks for the reader.', 'web-token'),
       endpoint('GET', '/api/co-reading/books/:book_id/chunks/:chunk_id', 'Read one chunk plus owner-visible sidebar annotations. Text is read back from .txt.gz chunk files.', 'web-token'),
       endpoint('GET', '/api/co-reading/books/:book_id/search', 'FTS lookup, then chunk file readback.', 'web-token'),
@@ -38,6 +40,17 @@ export function buildCoReadingApiContract() {
         author: 'string optional',
         format: 'text|txt|markdown',
         text: 'string',
+      },
+      import_file: {
+        filename: 'string',
+        data_base64: 'string',
+        title: 'string optional',
+        author: 'string optional',
+      },
+      import_url: {
+        url: 'string',
+        title: 'string optional',
+        author: 'string optional',
       },
       import_book: {
         file_path: 'absolute server path or upload token resolved by the future HTTP layer',

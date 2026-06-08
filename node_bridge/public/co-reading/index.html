@@ -4,60 +4,128 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Co Reading</title>
+    <link rel="icon" href="data:,">
     <link rel="stylesheet" href="/reader/style.css">
   </head>
   <body>
-    <main id="co-reading-reader" class="layout">
-      <section class="panel shelf-panel">
-        <h1>Co Reading</h1>
-        <label>
-          Access token
-          <input id="access-token" type="password" autocomplete="current-password" placeholder="CO_READING_WEB_ACCESS_TOKEN">
-        </label>
-        <button id="save-token">Use token</button>
+    <header class="topbar">
+      <div class="brand">
+        <button id="toggle-shelf" class="icon-button" type="button" aria-label="切换书架">书架</button>
+        <div>
+          <h1>Co Reading</h1>
+          <p id="reader-subtitle">私人共读阅读器</p>
+        </div>
+      </div>
+      <div class="token-box">
+        <label class="token-label" for="access-token">Access token</label>
+        <input id="access-token" type="password" autocomplete="current-password" placeholder="CO_READING_WEB_ACCESS_TOKEN">
+        <button id="save-token" type="button">使用</button>
+      </div>
+      <div id="app-status" class="status" role="status">未连接</div>
+    </header>
 
-        <h2>书架</h2>
-        <button id="refresh-books">刷新书架</button>
-        <ul id="book-list" class="list"></ul>
+    <main id="co-reading-reader" class="layout" data-view="reader">
+      <section id="shelf-panel" class="panel shelf-panel view-panel" data-panel="shelf" aria-label="书架">
+        <div class="panel-heading">
+          <h2>书架</h2>
+          <button id="refresh-books" class="secondary" type="button">刷新</button>
+        </div>
+        <div class="segmented" role="group" aria-label="书籍状态过滤">
+          <button class="filter-button is-active" type="button" data-filter="active">active</button>
+          <button class="filter-button" type="button" data-filter="archived">archived</button>
+          <button class="filter-button" type="button" data-filter="trash">trash</button>
+        </div>
+        <ul id="book-list" class="book-list"></ul>
 
-        <h2>导入粘贴文本</h2>
-        <label>标题 <input id="import-title" placeholder="书名"></label>
-        <label>格式
-          <select id="import-format">
-            <option value="text">Text</option>
-            <option value="markdown">Markdown</option>
-          </select>
-        </label>
-        <textarea id="import-text" rows="8" placeholder="粘贴 TXT / Markdown 正文"></textarea>
-        <button id="import-submit">导入</button>
+        <details class="import-box" open>
+          <summary>导入粘贴文本</summary>
+          <label>标题 <input id="import-title" placeholder="书名"></label>
+          <label>作者/来源 <input id="import-author" placeholder="作者或来源"></label>
+          <label>格式
+            <select id="import-format">
+              <option value="text">Text</option>
+              <option value="markdown">Markdown</option>
+            </select>
+          </label>
+          <textarea id="import-text" rows="7" placeholder="粘贴 TXT / Markdown 正文"></textarea>
+          <button id="import-submit" type="button">导入粘贴</button>
+        </details>
+
+        <details class="import-box">
+          <summary>导入文件</summary>
+          <label>标题 <input id="file-title" placeholder="可选"></label>
+          <label>作者/来源 <input id="file-author" placeholder="可选"></label>
+          <input id="file-input" type="file" accept=".txt,.text,.md,.markdown,.epub,.pdf,.html,.htm">
+          <button id="file-import-submit" type="button">导入文件</button>
+          <p class="hint">支持 TXT / Markdown / EPUB / PDF 文本层检测 / HTML；原文件只临时解析。</p>
+        </details>
+
+        <details class="import-box">
+          <summary>导入 URL</summary>
+          <label>URL <input id="url-input" type="url" placeholder="https://example.com/book"></label>
+          <label>标题 <input id="url-title" placeholder="可选"></label>
+          <label>作者/来源 <input id="url-author" placeholder="可选"></label>
+          <button id="url-import-submit" type="button">导入 URL</button>
+          <p class="hint">普通网页复用 search_hub；社交链接复用 social_reader。</p>
+        </details>
       </section>
 
-      <section class="panel reader-panel">
-        <div class="reader-toolbar">
-          <button id="prev-chunk">上一段</button>
-          <button id="next-chunk">下一段</button>
-          <input id="search-query" placeholder="书内搜索">
-          <button id="search-submit">搜索</button>
+      <section id="toc-panel" class="panel toc-panel view-panel" data-panel="toc" aria-label="目录">
+        <div class="panel-heading">
+          <h2>目录 / Chunks</h2>
+          <span id="chunk-count" class="pill">0</span>
         </div>
-        <h2 id="chunk-title">未打开书籍</h2>
-        <article id="chunk-text" class="chunk-text"></article>
+        <div id="chunk-list" class="chunk-list empty">打开一本书后显示目录</div>
+      </section>
+
+      <section id="reader-panel" class="panel reader-panel view-panel" data-panel="reader" aria-label="正文">
+        <div class="reader-toolbar">
+          <button id="prev-chunk" class="secondary" type="button">上一段</button>
+          <button id="next-chunk" class="secondary" type="button">下一段</button>
+          <input id="search-query" placeholder="书内搜索">
+          <button id="search-submit" type="button">搜索</button>
+        </div>
+        <div class="reader-title-row">
+          <div>
+            <p id="chunk-kicker" class="kicker">未打开书籍</p>
+            <h2 id="chunk-title">选择一本书开始阅读</h2>
+          </div>
+          <span id="chunk-position" class="pill">--</span>
+        </div>
+        <article id="chunk-text" class="chunk-text" tabindex="0"></article>
         <div id="search-results" class="search-results"></div>
       </section>
 
-      <aside class="panel annotations-panel">
-        <h2>边栏批注</h2>
-        <label>选段/引用 <input id="annotation-quote" placeholder="可复制当前段中的一句"></label>
-        <label>批注 <textarea id="annotation-note" rows="4"></textarea></label>
-        <label>可见性
-          <select id="annotation-visibility">
-            <option value="private">private</option>
-            <option value="shared">shared</option>
-          </select>
-        </label>
-        <button id="annotation-submit">保存批注</button>
-        <div id="annotation-list"></div>
+      <aside id="annotations-panel" class="panel annotations-panel view-panel" data-panel="annotations" aria-label="边注">
+        <div class="panel-heading">
+          <h2>边注 / Hermes</h2>
+          <span id="annotation-count" class="pill">0</span>
+        </div>
+
+        <div id="annotation-composer" class="annotation-composer hidden" aria-live="polite">
+          <p class="kicker">选中文本已生成 quote</p>
+          <blockquote id="annotation-quote-preview"></blockquote>
+          <label>批注
+            <textarea id="annotation-note" rows="4" placeholder="写下这段的想法"></textarea>
+          </label>
+          <div class="composer-actions">
+            <button id="save-private" type="button">保存 private</button>
+            <button id="save-shared" class="secondary" type="button">保存 shared</button>
+            <button id="cancel-annotation" class="ghost" type="button">取消</button>
+          </div>
+        </div>
+
+        <div id="annotation-list" class="annotation-list empty">暂无批注。选中正文中的文字即可创建。</div>
       </aside>
     </main>
+
+    <nav class="mobile-tabs" aria-label="移动端视图">
+      <button type="button" data-view="shelf">书架</button>
+      <button type="button" data-view="toc">目录</button>
+      <button class="is-active" type="button" data-view="reader">阅读</button>
+      <button type="button" data-view="annotations">边注</button>
+    </nav>
+
     <script src="/reader/app.js"></script>
   </body>
 </html>
