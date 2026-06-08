@@ -45,6 +45,9 @@ CO_READING_WEB_PORT=8787
 CO_READING_WEB_ACCESS_TOKEN=replace-me
 CO_READING_OWNER_TOKEN=replace-me-server-only
 CO_READING_ROOT_DIR=/opt/ran_agent/.ran_agent_state/co_reading
+CO_READING_ASK_CONTEXT_CHARS=1000
+CO_READING_ASK_THREAD_LIMIT=6
+CO_READING_VAULT_DIR=/opt/ran_agent/vault
 CO_READING_NODE_BIN=/opt/nodejs/node-v22.22.2-linux-x64/bin/node
 CO_READING_TRANSLATION_ENABLED=true
 CO_READING_TRANSLATION_PROVIDER=hermes
@@ -68,6 +71,9 @@ CO_READING_WEB_PORT=8787
 CO_READING_WEB_ACCESS_TOKEN=replace-me
 CO_READING_OWNER_TOKEN=replace-me-server-only
 CO_READING_ROOT_DIR=/opt/ran_agent/.ran_agent_state/co_reading
+CO_READING_ASK_CONTEXT_CHARS=1000
+CO_READING_ASK_THREAD_LIMIT=6
+CO_READING_VAULT_DIR=/opt/ran_agent/vault
 CO_READING_NODE_BIN=/opt/nodejs/node-v22.22.2-linux-x64/bin/node
 CO_READING_TRANSLATION_ENABLED=true
 CO_READING_TRANSLATION_PROVIDER=hermes
@@ -110,6 +116,16 @@ Reference:
 - Manual follow-up questions are stored as `author=user` rows in
   `reading_threads`; Hermes replies are stored as `author=hermes` rows and then
   displayed in the sidebar.
+- Hermes annotation replies use narrow context by default: shared quote, note,
+  recent thread, and a bounded nearby source window. They do not receive the
+  full chunk unless a future explicit scope mode is added.
+- The default nearby source window is intentionally moderate rather than tiny:
+  about 1000 characters before and after the quote, plus the latest 6 thread
+  replies. Lower `CO_READING_ASK_CONTEXT_CHARS` only when token cost matters
+  more than reading nuance for that deployment.
+- Shared annotation cards can be explicitly deposited into
+  `vault/inbox/co_reading/` as Markdown. Private annotations cannot be
+  deposited.
 - Chunk text remains in `.txt.gz` files. Do not store whole books in SQLite,
   `localStorage`, or browser caches.
 - Do not commit tokens, cookies, proxy passwords, or real access URLs.
@@ -171,6 +187,9 @@ Current UI:
 - Inline Hermes follow-up box on shared annotation cards.
 - Store manual follow-up questions and Hermes replies in `reading_threads` and
   show both in the margin.
+- Explicit `沉淀到 Vault` action on shared annotation cards. It writes a
+  Markdown inbox note with book/chunk metadata, quote, user annotation, and
+  thread replies.
 - Shelf actions for archive, restore, and soft-delete to trash. Trash keeps a
   retention expiry and can be restored before cleanup.
 
@@ -261,7 +280,10 @@ Use a TXT or Markdown sample, plus one file or URL import smoke when available:
     appears as the next thread item.
 20. Collapse and expand the shared annotation card and confirm the reply count
     remains visible when collapsed.
-21. Confirm the private annotation is not sent through the Hermes request path.
-22. Scroll the reader and confirm TOC/margin panels remain reachable on desktop.
-23. Scroll to the end of a long chunk and confirm the footer previous / next
+21. Deposit the shared annotation to Vault and confirm a Markdown note is
+    written under `vault/inbox/co_reading/`.
+22. Confirm the private annotation is not sent through the Hermes request path
+    and cannot be deposited.
+23. Scroll the reader and confirm TOC/margin panels remain reachable on desktop.
+24. Scroll to the end of a long chunk and confirm the footer previous / next
     buttons work.

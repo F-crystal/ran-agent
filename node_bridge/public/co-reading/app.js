@@ -25,6 +25,7 @@ const state = {
   selectedAnchorLang: 'source',
   pendingTrashBookId: '',
   loadingHermes: new Set(),
+  depositingVault: new Set(),
   hermesErrors: new Map(),
   collapsedAnnotations: loadCollapsedAnnotations(),
   localThreadReplies: new Map(),
@@ -415,10 +416,40 @@ function renderAnnotations() {
     `;
     card.querySelector('.annotation-toggle').onclick = () => toggleAnnotation(annotation.id);
     if (annotation.visibility === 'shared' && !collapsed) {
+      const actions = document.createElement('div');
+      actions.className = 'annotation-actions';
+      actions.appendChild(createDepositButton(annotation));
+      card.appendChild(actions);
       card.appendChild(createHermesBox(annotation));
     }
     list.appendChild(card);
   }
+}
+
+function createDepositButton(annotation) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'secondary compact';
+  const loading = state.depositingVault.has(annotation.id);
+  button.textContent = loading ? '沉淀中...' : '沉淀到 Vault';
+  button.disabled = loading;
+  button.onclick = async () => {
+    state.depositingVault.add(annotation.id);
+    renderAnnotations();
+    try {
+      const body = await api(`/annotations/${encodeURIComponent(annotation.id)}/deposit-vault`, {
+        method: 'POST',
+        body: JSON.stringify({}),
+      });
+      setStatus(`已沉淀到 ${body.deposited?.vault_relative_path || 'vault inbox'}`, 'ok');
+    } catch (error) {
+      setStatus(`沉淀失败：${error.message || String(error)}`, 'error');
+    } finally {
+      state.depositingVault.delete(annotation.id);
+      renderAnnotations();
+    }
+  };
+  return button;
 }
 
 function renderableReplies(annotation) {

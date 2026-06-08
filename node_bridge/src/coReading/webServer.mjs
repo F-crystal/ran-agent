@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import http from 'node:http';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,6 +22,8 @@ const PUBLIC_ROOT = path.join(PROJECT_ROOT, 'node_bridge/public/co-reading');
 const DEFAULT_HERMES_BASE_URL = 'http://127.0.0.1:8643/v1';
 const DEFAULT_TRANSLATION_PROVIDER = 'hermes';
 const DEFAULT_TRANSLATION_TARGET_LANG = 'zh-CN';
+const DEFAULT_ASK_CONTEXT_CHARS = 1000;
+const DEFAULT_ASK_THREAD_LIMIT = 6;
 const SOCIAL_URL_PATTERN = /https?:\/\/\S*(xhslink\.com|xiaohongshu\.com|xhs\.com|bilibili\.com|b23\.tv|mp\.weixin\.qq\.com|douyin\.com|kuaishou\.com|weibo\.com|zhihu\.com|music\.163\.com)/i;
 
 export function getCoReadingWebConfig(env = process.env) {
@@ -37,6 +39,9 @@ export function getCoReadingWebConfig(env = process.env) {
     translationEnabled: String(env.CO_READING_TRANSLATION_ENABLED || 'true').trim().toLowerCase() !== 'false',
     translationProvider: String(env.CO_READING_TRANSLATION_PROVIDER || DEFAULT_TRANSLATION_PROVIDER).trim().toLowerCase() || DEFAULT_TRANSLATION_PROVIDER,
     translationTargetLang: String(env.CO_READING_TRANSLATION_TARGET_LANG || DEFAULT_TRANSLATION_TARGET_LANG).trim() || DEFAULT_TRANSLATION_TARGET_LANG,
+    askContextChars: Math.max(120, Math.min(Number.parseInt(String(env.CO_READING_ASK_CONTEXT_CHARS || DEFAULT_ASK_CONTEXT_CHARS), 10) || DEFAULT_ASK_CONTEXT_CHARS, 4000)),
+    askThreadLimit: Math.max(0, Math.min(Number.parseInt(String(env.CO_READING_ASK_THREAD_LIMIT || DEFAULT_ASK_THREAD_LIMIT), 10) || DEFAULT_ASK_THREAD_LIMIT, 12)),
+    vaultDir: String(env.CO_READING_VAULT_DIR || env.OBSIDIAN_MEMORY_VAULT_DIR || path.join(PROJECT_ROOT, 'vault')).trim(),
   };
 }
 
@@ -255,6 +260,9 @@ async function routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl,
       config,
       fetchImpl,
     });
+  }
+  if (pathParts[0] === 'annotations' && pathParts[1] && pathParts[2] === 'deposit-vault' && req.method === 'POST') {
+    return await depositAnnotationToVault({ store, annotationId: decodeURIComponent(pathParts[1]), config });
   }
   return jsonResponse(404, { ok: false, error: 'not found' });
 }
@@ -509,25 +517,35 @@ async function askHermesForAnnotation({ store, annotationId, question, recordUse
   }
   const chunk = store.getChunk(annotation.book_id, annotation.chunk_id);
   if (!chunk) return jsonResponse(404, { ok: false, error: 'chunk not found' });
+  const book = store.getBook(annotation.book_id);
   const text = await readChunkText({ rootDir: store.rootDir }, chunk);
   const cleanedQuestion = String(question || '').trim();
   const userReply = recordUserQuestion && cleanedQuestion
     ? store.replyToAnnotation({ annotationId, text: cleanedQuestion, author: 'user', actor: 'web' })
     : null;
+  const thread = store.readThread(annotationId, { includePrivate: true })?.replies || [];
+  const context = buildAnnotationAskContext({ text, annotation, thread, config });
   const messages = [
     {
       role: 'system',
-      content: 'You are Hermes in the co_reading Web reader. Reply as a co-reader with a concise observation, feeling, or follow-up question. Private annotations are unavailable.',
+      content: [
+        'You are Hermes in the co_reading Web reader.',
+        'Reply as a co-reader to the quoted annotation, not as a chapter summarizer.',
+        'Use only the provided quote, note, recent thread, and nearby context window.',
+        'If evidence is insufficient, say what is missing or ask one narrow follow-up.',
+        'Keep the reply concise, ideally 120-220 Chinese characters. Private annotations are unavailable.',
+      ].join(' '),
     },
     {
       role: 'user',
       content: [
-        `Book: ${annotation.book_id}`,
-        `Chunk: ${chunk.title || chunk.id}`,
+        `Book: ${book?.title || annotation.book_id}`,
+        `Chunk id: ${chunk.id}`,
         `Annotation anchor: ${annotation.anchor_kind || 'original'} (${annotation.anchor_lang || 'source'})`,
-        `Chunk text:\n${text}`,
         `Shared quote: ${annotation.quote}`,
         `Shared note: ${annotation.note}`,
+        context.nearby ? `Nearby source context:\n${context.nearby}` : 'Nearby source context: unavailable for this annotation anchor.',
+        context.thread ? `Recent thread:\n${context.thread}` : 'Recent thread: none.',
         `Reader request: ${cleanedQuestion || 'As a co-reader, share a concrete reading response to this shared annotation without merely repeating it.'}`,
       ].join('\n\n'),
     },
@@ -551,6 +569,130 @@ async function askHermesForAnnotation({ store, annotationId, question, recordUse
   const replyText = extractHermesText(payload);
   const reply = store.replyToAnnotation({ annotationId, text: replyText, author: 'hermes', actor: 'hermes' });
   return jsonResponse(200, { ok: true, reply, user_reply: userReply });
+}
+
+function buildAnnotationAskContext({ text, annotation, thread = [], config }) {
+  const nearby = extractQuoteWindow({
+    text,
+    quote: annotation.quote,
+    quoteOffset: annotation.quote_offset,
+    windowChars: config.askContextChars || DEFAULT_ASK_CONTEXT_CHARS,
+  });
+  const visibleThread = thread
+    .slice(-(config.askThreadLimit || DEFAULT_ASK_THREAD_LIMIT))
+    .map((reply) => `${reply.author || 'unknown'}: ${truncateText(reply.text || '', 360)}`)
+    .join('\n');
+  return { nearby, thread: visibleThread };
+}
+
+function extractQuoteWindow({ text, quote, quoteOffset, windowChars }) {
+  const source = String(text || '');
+  if (!source) return '';
+  const quoteText = String(quote || '').trim();
+  let start = Number.isInteger(quoteOffset) && quoteOffset >= 0 ? quoteOffset : -1;
+  if (start < 0 && quoteText) start = source.indexOf(quoteText);
+  if (start < 0) return '';
+  const safeWindow = Math.max(120, Math.min(Number(windowChars) || DEFAULT_ASK_CONTEXT_CHARS, 4000));
+  const quoteLength = quoteText.length || 1;
+  const from = Math.max(0, start - safeWindow);
+  const to = Math.min(source.length, start + quoteLength + safeWindow);
+  return source.slice(from, to).trim();
+}
+
+async function depositAnnotationToVault({ store, annotationId, config }) {
+  const annotation = store.getAnnotation(annotationId, { includePrivate: true });
+  if (!annotation) return jsonResponse(404, { ok: false, error: 'annotation not found' });
+  if (annotation.visibility !== ANNOTATION_VISIBILITY.SHARED) {
+    return jsonResponse(403, { ok: false, error: 'Only shared annotations can be deposited to vault' });
+  }
+  const book = store.getBook(annotation.book_id);
+  const chunk = store.getChunk(annotation.book_id, annotation.chunk_id);
+  if (!book || !chunk) return jsonResponse(404, { ok: false, error: 'book or chunk not found' });
+  const thread = store.readThread(annotationId, { includePrivate: true })?.replies || [];
+  const vaultDir = path.resolve(config.vaultDir || path.join(PROJECT_ROOT, 'vault'));
+  const inboxDir = path.join(vaultDir, 'inbox', 'co_reading');
+  await mkdir(inboxDir, { recursive: true });
+  const fileName = `${new Date().toISOString().slice(0, 10)}-${sanitizeVaultFileName(book.title || book.id)}-${sanitizeVaultFileName(annotation.id)}.md`;
+  const filePath = path.join(inboxDir, fileName);
+  const markdown = renderVaultDepositMarkdown({ book, chunk, annotation, thread });
+  await writeFile(filePath, markdown, 'utf8');
+  store.recordEvent({
+    bookId: annotation.book_id,
+    eventType: 'annotation_deposited_to_vault',
+    actor: 'web',
+    payload: { annotation_id: annotationId, vault_path: path.relative(vaultDir, filePath) },
+  });
+  return jsonResponse(200, {
+    ok: true,
+    deposited: {
+      vault_relative_path: path.relative(vaultDir, filePath),
+      annotation_id: annotationId,
+    },
+  });
+}
+
+function renderVaultDepositMarkdown({ book, chunk, annotation, thread }) {
+  const lines = [
+    '---',
+    `source: co_reading`,
+    `book_id: ${yamlScalar(book.id)}`,
+    `book_title: ${yamlScalar(book.title || '')}`,
+    `chunk_id: ${yamlScalar(chunk.id)}`,
+    `annotation_id: ${yamlScalar(annotation.id)}`,
+    `created_at: ${yamlScalar(new Date().toISOString())}`,
+    'tags:',
+    '  - co-reading',
+    '  - reading-note',
+    '---',
+    '',
+    `# ${book.title || book.id}`,
+    '',
+    `- Author/source: ${book.author || book.source_uri || 'unknown'}`,
+    `- Chunk: ${chunk.title || chunk.id}`,
+    `- Anchor: ${annotation.anchor_kind || 'original'} (${annotation.anchor_lang || 'source'})`,
+    `- Annotation ID: \`${annotation.id}\``,
+    '',
+    '## Quote',
+    '',
+    blockquote(annotation.quote || ''),
+    '',
+    '## My Annotation',
+    '',
+    annotation.note || '（无批注正文）',
+    '',
+    '## Co-reading Thread',
+    '',
+    ...(thread.length ? thread.flatMap((reply) => [
+      `### ${reply.author || 'unknown'} · ${reply.created_at || ''}`,
+      '',
+      reply.text || '',
+      '',
+    ]) : ['No thread replies yet.', '']),
+  ];
+  return `${lines.join('\n').trim()}\n`;
+}
+
+function yamlScalar(value) {
+  return JSON.stringify(String(value || ''));
+}
+
+function blockquote(text) {
+  const value = String(text || '').trim();
+  if (!value) return '> ';
+  return value.split(/\r?\n/).map((line) => `> ${line}`).join('\n');
+}
+
+function sanitizeVaultFileName(value) {
+  return String(value || 'note')
+    .normalize('NFKD')
+    .replace(/[^\p{Letter}\p{Number}._-]+/gu, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || 'note';
+}
+
+function truncateText(text, maxChars) {
+  const value = String(text || '');
+  return value.length > maxChars ? `${value.slice(0, maxChars)}...` : value;
 }
 
 function extractHermesText(payload = {}) {

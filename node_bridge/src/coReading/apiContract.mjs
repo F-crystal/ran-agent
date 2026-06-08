@@ -38,6 +38,7 @@ export function buildCoReadingApiContract() {
       endpoint('POST', '/api/co-reading/books/:book_id/progress', 'Server-side wrapper updates progress and writes reading_events.', 'web-token-write-wrapper'),
       endpoint('POST', '/api/co-reading/books/:book_id/annotations', 'Server-side wrapper creates private/shared annotation. Default private.', 'web-token-write-wrapper'),
       endpoint('POST', '/api/co-reading/annotations/:annotation_id/ask-hermes', 'Server-side route asks Hermes only for shared annotations and stores the reply in reading_threads.', 'web-token-write-wrapper'),
+      endpoint('POST', '/api/co-reading/annotations/:annotation_id/deposit-vault', 'Server-side route writes one shared annotation and thread to vault/inbox/co_reading as Markdown.', 'web-token-write-wrapper'),
     ],
     request_shapes: {
       import_paste: {
@@ -61,6 +62,11 @@ export function buildCoReadingApiContract() {
         target: 'query string, default zh-CN',
         force: 'query string true forces regeneration and cache overwrite',
         provider: 'server env CO_READING_TRANSLATION_PROVIDER, default hermes',
+      },
+      ask_hermes: {
+        question: 'string optional',
+        record_user_question: 'boolean optional; when true stores the manual follow-up as author=user in reading_threads',
+        context: 'server sends only quote, note, recent thread, and a bounded nearby source window by default',
       },
       import_book: {
         file_path: 'absolute server path or upload token resolved by the future HTTP layer',

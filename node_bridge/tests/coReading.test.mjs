@@ -642,9 +642,11 @@ test('co_reading Web API imports normal URLs through search_hub and social URLs 
 
 test('co_reading Web ask-Hermes route only accepts shared annotations and stores replies in reading_threads', async () => {
   await withStore(async ({ root, store }) => {
+    const farContext = `FULL_CHUNK_SHOULD_NOT_BE_SENT ${'远处正文'.repeat(160)}`;
+    const targetContext = '目标上下文之前。这一段可以问 Hermes。目标上下文之后。';
     const imported = await callTool(
       'reading_import_pasted_text',
-      { owner_token: 'owner', title: 'Hermes Ask Book', text: '共读正文。\n\n这一段可以问 Hermes。' },
+      { owner_token: 'owner', title: 'Hermes Ask Book', text: `${farContext}\n\n${targetContext}` },
       { rootDir: root, ownerToken: 'owner' }
     );
     const bookId = imported.structuredContent.book.id;
@@ -675,6 +677,8 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
         rootDir: root,
         hermesBaseUrl: 'http://hermes.test/v1',
         hermesApiKey: 'api-key',
+        askContextChars: 120,
+        vaultDir: path.join(root, 'vault'),
       },
       fetchImpl: async (url, options) => {
         hermesBodies.push({ url, body: String(options.body || '') });
@@ -707,6 +711,8 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
     assert.equal(hermesBodies.length, 1);
     assert.match(hermesBodies[0].body, /shared-question-context/);
     assert.match(hermesBodies[0].body, /Annotation anchor: translation \(zh-CN\)/);
+    assert.match(hermesBodies[0].body, /目标上下文之前/);
+    assert.doesNotMatch(hermesBodies[0].body, /FULL_CHUNK_SHOULD_NOT_BE_SENT/);
     assert.doesNotMatch(hermesBodies[0].body, /private-not-for-hermes/);
 
     const thread = store.readThread(sharedAnn.id);
@@ -715,6 +721,24 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
     assert.equal(thread.replies[0].text, '请回应这段。');
     assert.equal(thread.replies[1].author, 'hermes');
     assert.equal(thread.replies[1].text, 'Hermes reply saved.');
+
+    const privateDeposit = await app.handleRequest(req('POST', `/api/co-reading/annotations/${encodeURIComponent(privateAnn.id)}/deposit-vault`, {
+      token: 'web-token',
+      body: {},
+    }));
+    assert.equal(privateDeposit.status, 403);
+
+    const deposited = await app.handleRequest(req('POST', `/api/co-reading/annotations/${encodeURIComponent(sharedAnn.id)}/deposit-vault`, {
+      token: 'web-token',
+      body: {},
+    }));
+    assert.equal(deposited.status, 200);
+    assert.match(deposited.body.deposited.vault_relative_path, /^inbox\/co_reading\//);
+    assert.equal(deposited.body.deposited.path, undefined);
+    const vaultText = await readFile(path.join(root, 'vault', deposited.body.deposited.vault_relative_path), 'utf8');
+    assert.match(vaultText, /shared-question-context/);
+    assert.match(vaultText, /Hermes reply saved/);
+    assert.doesNotMatch(vaultText, /private-not-for-hermes/);
   });
 });
 

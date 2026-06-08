@@ -83,6 +83,17 @@ Annotation visibility:
 In the Web reader, saving a `shared` annotation automatically invites Hermes to
 write one co-reading response into `reading_threads`. The inline Hermes box on
 the annotation card is for follow-up questions, not the primary trigger.
+Hermes receives only the shared quote, note, recent thread, and a bounded
+nearby source window by default; the full chunk is not sent for ordinary
+annotation replies.
+The default window is moderate rather than minimal: about 1000 characters
+before and after the quote plus the latest 6 thread replies. Deployments can
+lower `CO_READING_ASK_CONTEXT_CHARS` or `CO_READING_ASK_THREAD_LIMIT` when
+token cost matters more than interpretive nuance.
+
+Shared annotations can be explicitly deposited into the Obsidian vault inbox as
+Markdown notes under `vault/inbox/co_reading/`. Private annotations are never
+deposited by the Web route.
 
 Annotation anchors:
 
@@ -197,3 +208,4 @@ Important Web reader routes:
 - `POST /api/co-reading/books/:book_id/progress`
 - `POST /api/co-reading/books/:book_id/annotations`
 - `POST /api/co-reading/annotations/:annotation_id/ask-hermes`
+- `POST /api/co-reading/annotations/:annotation_id/deposit-vault`

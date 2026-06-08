@@ -565,6 +565,12 @@ code {
   display: none;
 }
 
+.annotation-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
 .annotation-meta {
   display: flex;
   gap: 8px;
