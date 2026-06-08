@@ -155,7 +155,7 @@ code {
   gap: 12px;
   align-items: start;
   padding: 14px;
-  overflow-x: auto;
+  overflow: visible;
 }
 
 .layout.shelf-collapsed {
@@ -180,6 +180,7 @@ code {
 .annotations-panel {
   position: sticky;
   top: 72px;
+  align-self: start;
   max-height: calc(100vh - 92px);
   overflow-y: auto;
 }

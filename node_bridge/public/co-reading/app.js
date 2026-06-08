@@ -1,6 +1,7 @@
 const TOKEN_KEY = 'CO_READING_WEB_ACCESS_TOKEN';
 const VIEW_KEY = 'co_reading_current_view';
 const DEVICE_ID = 'browser';
+const AUTO_HERMES_QUESTION = '请作为共读者，对这条 shared annotation 分享你的读后感、联想或提醒。回应要具体、简洁，不要只是复述批注。';
 
 const state = {
   token: sessionStorage.getItem(TOKEN_KEY) || '',
@@ -396,11 +397,13 @@ function createHermesBox(annotation) {
   box.className = 'hermes-box';
   const input = document.createElement('textarea');
   input.rows = 2;
-  input.placeholder = '问 Hermes 关于这条 shared annotation 的问题';
+  input.placeholder = (annotation.replies || []).length
+    ? '继续追问 Hermes...'
+    : 'Hermes 会自动回应；这里可继续追问';
   const button = document.createElement('button');
   button.type = 'button';
   const loading = state.loadingHermes.has(annotation.id);
-  button.textContent = loading ? '发送中...' : '问 Hermes';
+  button.textContent = loading ? '回应中...' : '追问';
   button.disabled = loading;
   button.onclick = async () => {
     const question = input.value.trim();
@@ -408,10 +411,7 @@ function createHermesBox(annotation) {
     state.loadingHermes.add(annotation.id);
     renderAnnotations();
     try {
-      await api(`/annotations/${encodeURIComponent(annotation.id)}/ask-hermes`, {
-        method: 'POST',
-        body: JSON.stringify({ question }),
-      });
+      await askHermes(annotation.id, question);
       await openChunk(state.chunkId);
       setStatus('Hermes 已回复', 'ok');
     } catch (error) {
@@ -425,6 +425,13 @@ function createHermesBox(annotation) {
   };
   box.append(input, button);
   return box;
+}
+
+async function askHermes(annotationId, question) {
+  return await api(`/annotations/${encodeURIComponent(annotationId)}/ask-hermes`, {
+    method: 'POST',
+    body: JSON.stringify({ question }),
+  });
 }
 
 async function importPaste() {
@@ -493,7 +500,7 @@ function fileToBase64(file) {
 async function saveAnnotation(visibility) {
   if (!state.bookId || !state.chunkId) throw new Error('先打开一个 chunk');
   if (!state.selectedQuote.trim()) throw new Error('请先在正文中选中文字');
-  await api(`/books/${encodeURIComponent(state.bookId)}/annotations`, {
+  const body = await api(`/books/${encodeURIComponent(state.bookId)}/annotations`, {
     method: 'POST',
     body: JSON.stringify({
       chunk_id: state.chunkId,
@@ -506,8 +513,33 @@ async function saveAnnotation(visibility) {
     }),
   });
   clearComposer();
+  if (visibility === 'shared' && body.annotation?.id) {
+    await autoAskHermes(body.annotation.id);
+  } else {
+    await openChunk(state.chunkId);
+  }
+  setView('annotations');
+}
+
+async function autoAskHermes(annotationId) {
+  let hermesError = null;
+  state.hermesErrors.delete(annotationId);
+  state.loadingHermes.add(annotationId);
   await openChunk(state.chunkId);
   setView('annotations');
+  try {
+    await askHermes(annotationId, AUTO_HERMES_QUESTION);
+  } catch (error) {
+    hermesError = error.message || String(error);
+    state.hermesErrors.set(annotationId, hermesError);
+  } finally {
+    state.loadingHermes.delete(annotationId);
+    await openChunk(state.chunkId);
+    setView('annotations');
+  }
+  if (hermesError) {
+    throw new Error(`批注已保存，但 Hermes 自动回应失败：${hermesError}`);
+  }
 }
 
 async function search() {
@@ -621,7 +653,7 @@ function bindEvents() {
   $('file-import-submit').onclick = () => runAction('导入文件', importFile);
   $('url-import-submit').onclick = () => runAction('导入 URL', importUrl);
   $('save-private').onclick = () => runAction('保存 private 批注', () => saveAnnotation('private'));
-  $('save-shared').onclick = () => runAction('保存 shared 批注', () => saveAnnotation('shared'));
+  $('save-shared').onclick = () => runAction('保存 shared 批注并邀请 Hermes', () => saveAnnotation('shared'));
   $('cancel-annotation').onclick = clearComposer;
   $('search-submit').onclick = () => runAction('搜索', search);
   $('prev-chunk').onclick = () => move(-1);

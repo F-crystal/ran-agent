@@ -104,7 +104,9 @@ Reference:
   Hermes, DeepL, Google, or LibreTranslate credentials.
 - Private annotations are shown only in the authenticated owner Web UI. They are
   not sent to Hermes.
-- Only shared annotations can use `ask Hermes`.
+- Saving a shared annotation automatically invites Hermes to leave one
+  co-reading response. The inline Hermes box is for follow-up questions.
+- Only shared annotations can use the Hermes route.
 - Hermes replies are stored in `reading_threads` and then displayed in the
   sidebar.
 - Chunk text remains in `.txt.gz` files. Do not store whole books in SQLite,
@@ -159,7 +161,9 @@ Current UI:
   cards show whether the quote is anchored to original text or translated text.
 - Inline annotation composer; no core `prompt()` / `alert()` flow.
 - Sidebar annotations with thread replies.
-- Inline Hermes question box on shared annotation cards.
+- Shared annotations automatically ask Hermes for one co-reading response when
+  saved.
+- Inline Hermes follow-up box on shared annotation cards.
 - Store Hermes replies in `reading_threads` and show them in the margin.
 - Shelf actions for archive, restore, and soft-delete to trash. Trash keeps a
   retention expiry and can be restored before cleanup.
@@ -241,8 +245,8 @@ Use a TXT or Markdown sample, plus one file or URL import smoke when available:
 13. Create a private annotation.
 14. Confirm the private card has no Hermes question box.
 15. Create a shared annotation.
-16. Ask Hermes inline on the shared annotation.
-17. Confirm loading state appears while sending.
-18. Confirm Hermes reply appears in the sidebar and persists after refresh.
+16. Confirm Hermes is invited automatically and loading state appears.
+17. Confirm Hermes reply appears in the sidebar and persists after refresh.
+18. Ask a follow-up inline on the shared annotation.
 19. Confirm the private annotation is not sent through the Hermes request path.
 20. Scroll the reader and confirm TOC/margin panels remain reachable on desktop.

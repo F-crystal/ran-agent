@@ -80,6 +80,10 @@ Annotation visibility:
 - `private`: never returned by Hermes-facing list/read/search tools.
 - `shared`: visible to Hermes and the Web reader shared context.
 
+In the Web reader, saving a `shared` annotation automatically invites Hermes to
+write one co-reading response into `reading_threads`. The inline Hermes box on
+the annotation card is for follow-up questions, not the primary trigger.
+
 Annotation anchors:
 
 - `anchor_kind=original` anchors the quote to source chunk text.
@@ -133,6 +137,8 @@ paragraph.
   context unless separately surfaced by a future explicit tool.
 - Users may annotate original or translated text. Shared translated annotations
   carry their anchor kind/language into the Hermes request context.
+- Shared translated annotations can trigger the same automatic Hermes
+  co-reading response as source-text annotations.
 
 ## MCP Tools
 

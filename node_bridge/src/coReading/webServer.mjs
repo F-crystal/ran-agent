@@ -469,7 +469,7 @@ async function askHermesForAnnotation({ store, annotationId, question, config, f
   const messages = [
     {
       role: 'system',
-      content: 'You are Hermes in the co_reading Web reader. Reply to the shared annotation. Private annotations are unavailable.',
+      content: 'You are Hermes in the co_reading Web reader. Reply as a co-reader with a concise observation, feeling, or follow-up question. Private annotations are unavailable.',
     },
     {
       role: 'user',
@@ -480,7 +480,7 @@ async function askHermesForAnnotation({ store, annotationId, question, config, f
         `Chunk text:\n${text}`,
         `Shared quote: ${annotation.quote}`,
         `Shared note: ${annotation.note}`,
-        `Reader question: ${question || 'Please respond to this shared note.'}`,
+        `Reader request: ${question || 'As a co-reader, share a concrete reading response to this shared annotation without merely repeating it.'}`,
       ].join('\n\n'),
     },
   ];
