@@ -59,6 +59,7 @@ export function buildCoReadingApiContract() {
       },
       chunk_translation: {
         target: 'query string, default zh-CN',
+        force: 'query string true forces regeneration and cache overwrite',
         provider: 'server env CO_READING_TRANSLATION_PROVIDER, default hermes',
       },
       import_book: {

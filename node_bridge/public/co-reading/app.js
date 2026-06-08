@@ -192,6 +192,7 @@ function clearCurrentBook() {
   $('reader-subtitle').textContent = '私人共读阅读器';
   $('chunk-kicker').textContent = '未打开书籍';
   $('chunk-position').textContent = '--';
+  $('chunk-position-bottom').textContent = '--';
   renderChunks();
   renderAnnotations();
   clearComposer();
@@ -252,19 +253,25 @@ async function openChunk(chunkId) {
   loadTranslation(chunkId);
 }
 
-async function loadTranslation(chunkId) {
+async function loadTranslation(chunkId, options = {}) {
   if (!state.bookId || !chunkId) return;
   const requestId = `${state.bookId}:${chunkId}:${Date.now()}`;
   state.translationRequestId = requestId;
   state.translationStatus = 'loading';
+  if (options.force === true) {
+    state.translationText = '';
+    state.translationCached = false;
+  }
   renderReaderText();
   try {
-    const body = await api(`/books/${encodeURIComponent(state.bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`);
+    const forceParam = options.force === true ? '&force=true' : '';
+    const body = await api(`/books/${encodeURIComponent(state.bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN${forceParam}`);
     if (state.translationRequestId !== requestId || state.chunkId !== chunkId) return;
     state.translationText = body.translation?.text || '';
     state.translationCached = body.cached === true;
     state.translationStatus = state.translationText ? 'ready' : 'error';
     renderReaderText();
+    if (options.force === true) setStatus('翻译已刷新', 'ok');
   } catch (error) {
     if (state.translationRequestId !== requestId || state.chunkId !== chunkId) return;
     state.translationText = '';
@@ -272,6 +279,11 @@ async function loadTranslation(chunkId) {
     renderReaderText();
     setStatus(`翻译失败：${error.message || String(error)}`, 'error');
   }
+}
+
+async function refreshTranslation() {
+  if (!state.bookId || !state.chunkId) throw new Error('先打开一个 chunk');
+  await loadTranslation(state.chunkId, { force: true });
 }
 
 function renderReaderText() {
@@ -318,7 +330,9 @@ function renderChunkMeta(chunk = {}) {
   const book = state.books.find((item) => item.id === state.bookId);
   $('reader-subtitle').textContent = book?.title || '私人共读阅读器';
   $('chunk-kicker').textContent = book ? `${book.title}${book.author ? ` · ${book.author}` : ''}` : '未打开书籍';
-  $('chunk-position').textContent = index >= 0 ? `${index + 1} / ${state.chunks.length}` : '--';
+  const positionText = index >= 0 ? `${index + 1} / ${state.chunks.length}` : '--';
+  $('chunk-position').textContent = positionText;
+  $('chunk-position-bottom').textContent = positionText;
   if (chunk?.char_count) $('chunk-position').title = `${chunk.char_count} 字符`;
 }
 
@@ -411,7 +425,7 @@ function createHermesBox(annotation) {
     state.loadingHermes.add(annotation.id);
     renderAnnotations();
     try {
-      await askHermes(annotation.id, question);
+      await askHermes(annotation.id, question, { recordUserQuestion: true });
       await openChunk(state.chunkId);
       setStatus('Hermes 已回复', 'ok');
     } catch (error) {
@@ -427,10 +441,13 @@ function createHermesBox(annotation) {
   return box;
 }
 
-async function askHermes(annotationId, question) {
+async function askHermes(annotationId, question, options = {}) {
   return await api(`/annotations/${encodeURIComponent(annotationId)}/ask-hermes`, {
     method: 'POST',
-    body: JSON.stringify({ question }),
+    body: JSON.stringify({
+      question,
+      record_user_question: options.recordUserQuestion === true,
+    }),
   });
 }
 
@@ -656,8 +673,11 @@ function bindEvents() {
   $('save-shared').onclick = () => runAction('保存 shared 批注并邀请 Hermes', () => saveAnnotation('shared'));
   $('cancel-annotation').onclick = clearComposer;
   $('search-submit').onclick = () => runAction('搜索', search);
+  $('refresh-translation').onclick = () => runAction('刷新翻译', refreshTranslation);
   $('prev-chunk').onclick = () => move(-1);
   $('next-chunk').onclick = () => move(1);
+  $('prev-chunk-bottom').onclick = () => move(-1);
+  $('next-chunk-bottom').onclick = () => move(1);
   $('toggle-shelf').onclick = () => setShelfCollapsed(!state.shelfCollapsed);
   $('chunk-text').addEventListener('mouseup', captureSelection);
   $('chunk-text').addEventListener('keyup', captureSelection);

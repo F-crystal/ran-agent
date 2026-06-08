@@ -247,7 +247,14 @@ async function routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl,
   if (pathParts[0] === 'annotations' && pathParts[1] && pathParts[2] === 'ask-hermes' && req.method === 'POST') {
     const annotationId = decodeURIComponent(pathParts[1]);
     const body = await readJsonBody(req);
-    return await askHermesForAnnotation({ store, annotationId, question: body.question || '', config, fetchImpl });
+    return await askHermesForAnnotation({
+      store,
+      annotationId,
+      question: body.question || '',
+      recordUserQuestion: body.record_user_question === true,
+      config,
+      fetchImpl,
+    });
   }
   return jsonResponse(404, { ok: false, error: 'not found' });
 }
@@ -370,11 +377,17 @@ async function translateChunkForWeb({ store, bookId, chunkId, targetLang, force 
   const lang = normalizeTargetLang(targetLang || config.translationTargetLang);
   if (!force) {
     const cached = await store.readTranslation({ chunkId, targetLang: lang, provider, sourceHash });
-    if (cached) {
+    if (cached && !isLikelyBadTranslation({ sourceText: text, translatedText: cached.text, targetLang: lang })) {
       return jsonResponse(200, { ok: true, cached: true, translation: translationPayload(cached) });
     }
   }
-  const translated = await translateText({ text, targetLang: lang, provider, config, fetchImpl });
+  let translated = await translateText({ text, targetLang: lang, provider, config, fetchImpl });
+  if (isLikelyBadTranslation({ sourceText: text, translatedText: translated, targetLang: lang })) {
+    translated = await translateText({ text, targetLang: lang, provider, config, fetchImpl, retry: true });
+  }
+  if (isLikelyBadTranslation({ sourceText: text, translatedText: translated, targetLang: lang })) {
+    return jsonResponse(502, { ok: false, error: 'translation output looked like untranslated source text; retry refresh later' });
+  }
   const saved = await store.saveTranslation({
     bookId,
     chunkId,
@@ -412,7 +425,7 @@ function translationPayload(row = {}) {
   };
 }
 
-async function translateText({ text, targetLang, provider, config, fetchImpl }) {
+async function translateText({ text, targetLang, provider, config, fetchImpl, retry = false }) {
   if (provider !== 'hermes') {
     throw new Error(`translation provider not implemented: ${provider}`);
   }
@@ -428,6 +441,7 @@ async function translateText({ text, targetLang, provider, config, fetchImpl }) 
         'Preserve paragraph breaks, names, titles, numbers, and Markdown-like structure when present.',
         'Return only the translated text. Do not add explanations, summaries, headings, or notes.',
         'If the source text is already Chinese, return it unchanged.',
+        retry ? 'The previous attempt looked untranslated. Do not copy English sentences unchanged; produce Simplified Chinese prose.' : '',
       ].join('\n'),
     },
     {
@@ -454,7 +468,37 @@ async function translateText({ text, targetLang, provider, config, fetchImpl }) 
   return extractHermesText(payload);
 }
 
-async function askHermesForAnnotation({ store, annotationId, question, config, fetchImpl }) {
+function isLikelyBadTranslation({ sourceText, translatedText, targetLang }) {
+  const target = String(targetLang || '').toLowerCase();
+  if (!target.startsWith('zh')) return false;
+  const source = String(sourceText || '').trim();
+  const translated = String(translatedText || '').trim();
+  if (!translated) return true;
+  const sourceCjk = countCjk(source);
+  const sourceLatin = countLatin(source);
+  if (sourceCjk >= Math.max(8, sourceLatin * 0.2)) return false;
+  if (sourceLatin < 40) return false;
+  const translatedCjk = countCjk(translated);
+  if (translatedCjk < 4) return true;
+  const sourceNorm = normalizeForSimilarity(source);
+  const translatedNorm = normalizeForSimilarity(translated);
+  if (sourceNorm.length >= 80 && sourceNorm === translatedNorm) return true;
+  return false;
+}
+
+function countCjk(text) {
+  return (String(text || '').match(/[\u3400-\u9fff]/g) || []).length;
+}
+
+function countLatin(text) {
+  return (String(text || '').match(/[A-Za-z]/g) || []).length;
+}
+
+function normalizeForSimilarity(text) {
+  return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+async function askHermesForAnnotation({ store, annotationId, question, recordUserQuestion = false, config, fetchImpl }) {
   if (typeof fetchImpl !== 'function') {
     return jsonResponse(503, { ok: false, error: 'fetch unavailable for Hermes request' });
   }
@@ -466,6 +510,10 @@ async function askHermesForAnnotation({ store, annotationId, question, config, f
   const chunk = store.getChunk(annotation.book_id, annotation.chunk_id);
   if (!chunk) return jsonResponse(404, { ok: false, error: 'chunk not found' });
   const text = await readChunkText({ rootDir: store.rootDir }, chunk);
+  const cleanedQuestion = String(question || '').trim();
+  const userReply = recordUserQuestion && cleanedQuestion
+    ? store.replyToAnnotation({ annotationId, text: cleanedQuestion, author: 'user', actor: 'web' })
+    : null;
   const messages = [
     {
       role: 'system',
@@ -480,7 +528,7 @@ async function askHermesForAnnotation({ store, annotationId, question, config, f
         `Chunk text:\n${text}`,
         `Shared quote: ${annotation.quote}`,
         `Shared note: ${annotation.note}`,
-        `Reader request: ${question || 'As a co-reader, share a concrete reading response to this shared annotation without merely repeating it.'}`,
+        `Reader request: ${cleanedQuestion || 'As a co-reader, share a concrete reading response to this shared annotation without merely repeating it.'}`,
       ].join('\n\n'),
     },
   ];
@@ -502,7 +550,7 @@ async function askHermesForAnnotation({ store, annotationId, question, config, f
   const payload = await response.json();
   const replyText = extractHermesText(payload);
   const reply = store.replyToAnnotation({ annotationId, text: replyText, author: 'hermes', actor: 'hermes' });
-  return jsonResponse(200, { ok: true, reply });
+  return jsonResponse(200, { ok: true, reply, user_reply: userReply });
 }
 
 function extractHermesText(payload = {}) {

@@ -13,6 +13,7 @@ import {
 } from '../src/coReading/mcpServer.mjs';
 import {
   createCoReadingStore,
+  hashText,
   readChunkText,
 } from '../src/coReading/store.mjs';
 import { createCoReadingWebApp, getCoReadingWebConfig } from '../src/coReading/webServer.mjs';
@@ -445,6 +446,11 @@ test('co_reading Web API protects owner token and supports shelf import read pro
     assert.equal(translationCalls.length, 1);
     assert.equal(store.getStorageStats(bookId).asset_bytes > 0, true);
 
+    const refreshedTranslation = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN&force=true`, { token: 'web-token' }));
+    assert.equal(refreshedTranslation.status, 200);
+    assert.equal(refreshedTranslation.body.cached, false);
+    assert.equal(translationCalls.length, 2);
+
     const archived = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/archive`, { token: 'web-token' }));
     assert.equal(archived.status, 200);
     assert.equal(archived.body.book.state, BOOK_STATES.ARCHIVED);
@@ -471,6 +477,52 @@ test('co_reading Web API protects owner token and supports shelf import read pro
       'book_restored',
       'book_trashed',
     ]);
+  });
+});
+
+test('co_reading Web translation skips cached untranslated English output', async () => {
+  await withStore(async ({ root, store }) => {
+    const source = 'Remus gave Sirius a look that was half exasperated, half amused, and turned back to the page.';
+    const imported = await callTool(
+      'reading_import_pasted_text',
+      { owner_token: 'owner', title: 'Translation Guard Book', text: source },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    const bookId = imported.structuredContent.book.id;
+    const chunkId = imported.structuredContent.chunks[0].id;
+    await store.saveTranslation({
+      bookId,
+      chunkId,
+      targetLang: 'zh-CN',
+      provider: 'hermes',
+      sourceHash: hashText(source),
+      text: source,
+    });
+    const translationCalls = [];
+    const app = createCoReadingWebApp({
+      store,
+      config: {
+        accessToken: 'web-token',
+        ownerToken: 'owner',
+        rootDir: root,
+      },
+      fetchImpl: async (url, request) => {
+        translationCalls.push({ url, body: JSON.parse(request.body) });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: '莱姆斯看了小天狼星一眼，半是恼火，半是好笑，然后又低头看书。' } }],
+          }),
+        };
+      },
+    });
+
+    const translated = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
+    assert.equal(translated.status, 200);
+    assert.equal(translated.body.cached, false);
+    assert.match(translated.body.translation.text, /莱姆斯/);
+    assert.equal(translationCalls.length, 1);
   });
 });
 
@@ -645,9 +697,11 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
 
     const asked = await app.handleRequest(req('POST', `/api/co-reading/annotations/${encodeURIComponent(sharedAnn.id)}/ask-hermes`, {
       token: 'web-token',
-      body: { question: '请回应这段。' },
+      body: { question: '请回应这段。', record_user_question: true },
     }));
     assert.equal(asked.status, 200);
+    assert.equal(asked.body.user_reply.author, 'user');
+    assert.equal(asked.body.user_reply.text, '请回应这段。');
     assert.equal(asked.body.reply.author, 'hermes');
     assert.equal(asked.body.reply.text, 'Hermes reply saved.');
     assert.equal(hermesBodies.length, 1);
@@ -656,8 +710,11 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
     assert.doesNotMatch(hermesBodies[0].body, /private-not-for-hermes/);
 
     const thread = store.readThread(sharedAnn.id);
-    assert.equal(thread.replies.length, 1);
-    assert.equal(thread.replies[0].text, 'Hermes reply saved.');
+    assert.equal(thread.replies.length, 2);
+    assert.equal(thread.replies[0].author, 'user');
+    assert.equal(thread.replies[0].text, '请回应这段。');
+    assert.equal(thread.replies[1].author, 'hermes');
+    assert.equal(thread.replies[1].text, 'Hermes reply saved.');
   });
 });
 

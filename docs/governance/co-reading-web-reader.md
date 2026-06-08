@@ -107,8 +107,9 @@ Reference:
 - Saving a shared annotation automatically invites Hermes to leave one
   co-reading response. The inline Hermes box is for follow-up questions.
 - Only shared annotations can use the Hermes route.
-- Hermes replies are stored in `reading_threads` and then displayed in the
-  sidebar.
+- Manual follow-up questions are stored as `author=user` rows in
+  `reading_threads`; Hermes replies are stored as `author=hermes` rows and then
+  displayed in the sidebar.
 - Chunk text remains in `.txt.gz` files. Do not store whole books in SQLite,
   `localStorage`, or browser caches.
 - Do not commit tokens, cookies, proxy passwords, or real access URLs.
@@ -153,6 +154,8 @@ Current UI:
 - Open a book and display one chunk.
 - Bilingual reader rendering: original paragraph plus cached Chinese
   translation below it.
+- Manual translation refresh regenerates the current chunk with
+  `force=true` and overwrites the translation cache.
 - Previous and next chunk.
 - Read and write browser progress.
 - Book search.
@@ -164,7 +167,8 @@ Current UI:
 - Shared annotations automatically ask Hermes for one co-reading response when
   saved.
 - Inline Hermes follow-up box on shared annotation cards.
-- Store Hermes replies in `reading_threads` and show them in the margin.
+- Store manual follow-up questions and Hermes replies in `reading_threads` and
+  show both in the margin.
 - Shelf actions for archive, restore, and soft-delete to trash. Trash keeps a
   retention expiry and can be restored before cleanup.
 
@@ -175,6 +179,9 @@ Translation behavior:
 - Cache identity is `chunk_id + target language + provider + source hash`.
 - Translation cache storage is counted in `asset_bytes`.
 - The UI may briefly show `翻译中...` while a cache miss is being translated.
+- For Chinese targets, cached or newly generated output that looks like
+  untranslated English source text is rejected and not treated as valid
+  translation.
 - Desktop table-of-contents and margin panels are sticky within the viewport.
   The current chunk is scrolled into view automatically when the reader moves.
 
@@ -248,5 +255,9 @@ Use a TXT or Markdown sample, plus one file or URL import smoke when available:
 16. Confirm Hermes is invited automatically and loading state appears.
 17. Confirm Hermes reply appears in the sidebar and persists after refresh.
 18. Ask a follow-up inline on the shared annotation.
-19. Confirm the private annotation is not sent through the Hermes request path.
-20. Scroll the reader and confirm TOC/margin panels remain reachable on desktop.
+19. Confirm the follow-up question appears as a user thread item and Hermes
+    appears as the next thread item.
+20. Confirm the private annotation is not sent through the Hermes request path.
+21. Scroll the reader and confirm TOC/margin panels remain reachable on desktop.
+22. Scroll to the end of a long chunk and confirm the footer previous / next
+    buttons work.

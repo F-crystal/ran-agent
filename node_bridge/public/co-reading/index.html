@@ -90,9 +90,17 @@
             <p id="chunk-kicker" class="kicker">未打开书籍</p>
             <h2 id="chunk-title">选择一本书开始阅读</h2>
           </div>
-          <span id="chunk-position" class="pill">--</span>
+          <div class="reader-title-actions">
+            <button id="refresh-translation" class="ghost" type="button">刷新翻译</button>
+            <span id="chunk-position" class="pill">--</span>
+          </div>
         </div>
         <article id="chunk-text" class="chunk-text" tabindex="0"></article>
+        <div class="reader-footer-nav" aria-label="页尾翻页">
+          <button id="prev-chunk-bottom" class="secondary" type="button">上一段</button>
+          <span id="chunk-position-bottom" class="pill">--</span>
+          <button id="next-chunk-bottom" class="secondary" type="button">下一段</button>
+        </div>
         <div id="search-results" class="search-results"></div>
       </section>
 
