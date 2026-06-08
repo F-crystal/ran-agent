@@ -19,6 +19,8 @@ const state = {
   translationRequestId: '',
   selectedQuote: '',
   selectedQuoteOffset: null,
+  selectedAnchorKind: 'original',
+  selectedAnchorLang: 'source',
   pendingTrashBookId: '',
   loadingHermes: new Set(),
   hermesErrors: new Map(),
@@ -345,6 +347,7 @@ function renderChunks() {
     };
     list.appendChild(button);
   });
+  list.querySelector('.chunk-item.is-active')?.scrollIntoView({ block: 'center', inline: 'nearest' });
 }
 
 function renderAnnotations() {
@@ -364,6 +367,7 @@ function renderAnnotations() {
     card.innerHTML = `
       <div class="annotation-meta">
         <span class="visibility ${escapeHtml(annotation.visibility)}">${escapeHtml(annotation.visibility)}</span>
+        <span class="anchor-badge">${escapeHtml(anchorLabel(annotation))}</span>
         <time>${formatDate(annotation.created_at)}</time>
       </div>
       <blockquote>${escapeHtml(annotation.quote || '')}</blockquote>
@@ -495,6 +499,8 @@ async function saveAnnotation(visibility) {
       chunk_id: state.chunkId,
       quote: state.selectedQuote,
       quote_offset: state.selectedQuoteOffset,
+      anchor_kind: state.selectedAnchorKind,
+      anchor_lang: state.selectedAnchorLang,
       note: $('annotation-note').value,
       visibility,
     }),
@@ -538,11 +544,17 @@ function captureSelection() {
   if (!quote) return;
   const range = selection.rangeCount ? selection.getRangeAt(0) : null;
   if (!range || !$('chunk-text').contains(range.commonAncestorContainer)) return;
-  if (!closestElement(range.commonAncestorContainer, 'original-text')) return;
+  const originalAnchor = closestElement(range.commonAncestorContainer, 'original-text');
+  const translationAnchor = closestElement(range.commonAncestorContainer, 'translation-text');
+  if (!originalAnchor && !translationAnchor) return;
   state.selectedQuote = quote.slice(0, 1200);
-  state.selectedQuoteOffset = state.chunkText.indexOf(quote);
+  state.selectedAnchorKind = translationAnchor ? 'translation' : 'original';
+  state.selectedAnchorLang = translationAnchor ? 'zh-CN' : 'source';
+  const sourceText = translationAnchor ? state.translationText : state.chunkText;
+  state.selectedQuoteOffset = sourceText.indexOf(quote);
   if (state.selectedQuoteOffset < 0) state.selectedQuoteOffset = null;
   $('annotation-quote-preview').textContent = state.selectedQuote;
+  $('annotation-quote-preview').dataset.anchorKind = state.selectedAnchorKind;
   $('annotation-composer').classList.remove('hidden');
   setView(window.matchMedia('(max-width: 760px)').matches ? 'annotations' : state.currentView);
 }
@@ -559,8 +571,11 @@ function closestElement(node, className) {
 function clearComposer() {
   state.selectedQuote = '';
   state.selectedQuoteOffset = null;
+  state.selectedAnchorKind = 'original';
+  state.selectedAnchorLang = 'source';
   $('annotation-note').value = '';
   $('annotation-quote-preview').textContent = '';
+  $('annotation-quote-preview').dataset.anchorKind = 'original';
   $('annotation-composer').classList.add('hidden');
 }
 
@@ -588,6 +603,10 @@ function formatDate(value) {
 
 function escapeHtml(value) {
   return String(value || '').replace(/[&<>"']/g, (ch) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
+}
+
+function anchorLabel(annotation = {}) {
+  return annotation.anchor_kind === 'translation' ? `译文 ${annotation.anchor_lang || 'zh-CN'}` : '原文';
 }
 
 function bindEvents() {

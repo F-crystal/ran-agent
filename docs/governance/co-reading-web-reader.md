@@ -155,6 +155,8 @@ Current UI:
 - Read and write browser progress.
 - Book search.
 - Selection-based private or shared annotations.
+- Original and translated text can both be selected for annotations. Annotation
+  cards show whether the quote is anchored to original text or translated text.
 - Inline annotation composer; no core `prompt()` / `alert()` flow.
 - Sidebar annotations with thread replies.
 - Inline Hermes question box on shared annotation cards.
@@ -169,6 +171,8 @@ Translation behavior:
 - Cache identity is `chunk_id + target language + provider + source hash`.
 - Translation cache storage is counted in `asset_bytes`.
 - The UI may briefly show `翻译中...` while a cache miss is being translated.
+- Desktop table-of-contents and margin panels are sticky within the viewport.
+  The current chunk is scrolled into view automatically when the reader moves.
 
 Current non-goals:
 
@@ -233,10 +237,12 @@ Use a TXT or Markdown sample, plus one file or URL import smoke when available:
 9. Confirm progress restores on reload.
 10. Search text and jump to the hit.
 11. Select original text in the reader and confirm the annotation composer opens.
-12. Create a private annotation.
-13. Confirm the private card has no Hermes question box.
-14. Create a shared annotation.
-15. Ask Hermes inline on the shared annotation.
-16. Confirm loading state appears while sending.
-17. Confirm Hermes reply appears in the sidebar and persists after refresh.
-18. Confirm the private annotation is not sent through the Hermes request path.
+12. Select translated text and confirm the annotation composer also opens.
+13. Create a private annotation.
+14. Confirm the private card has no Hermes question box.
+15. Create a shared annotation.
+16. Ask Hermes inline on the shared annotation.
+17. Confirm loading state appears while sending.
+18. Confirm Hermes reply appears in the sidebar and persists after refresh.
+19. Confirm the private annotation is not sent through the Hermes request path.
+20. Scroll the reader and confirm TOC/margin panels remain reachable on desktop.

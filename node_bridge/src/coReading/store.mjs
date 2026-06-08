@@ -77,6 +77,8 @@ const SCHEMA = [
     chunk_id TEXT NOT NULL,
     quote TEXT NOT NULL DEFAULT '',
     quote_offset INTEGER,
+    anchor_kind TEXT NOT NULL DEFAULT 'original',
+    anchor_lang TEXT NOT NULL DEFAULT 'source',
     note TEXT NOT NULL DEFAULT '',
     author TEXT NOT NULL DEFAULT 'user',
     visibility TEXT NOT NULL CHECK (visibility IN ('private','shared')),
@@ -224,7 +226,18 @@ export class CoReadingStore {
     for (const statement of SCHEMA) {
       this.db.exec(statement);
     }
+    this.migrate();
     this.db.exec('PRAGMA journal_mode = WAL');
+  }
+
+  migrate() {
+    const annotationColumns = new Set(this.db.prepare('PRAGMA table_info(reading_annotations)').all().map((row) => row.name));
+    if (!annotationColumns.has('anchor_kind')) {
+      this.db.exec("ALTER TABLE reading_annotations ADD COLUMN anchor_kind TEXT NOT NULL DEFAULT 'original'");
+    }
+    if (!annotationColumns.has('anchor_lang')) {
+      this.db.exec("ALTER TABLE reading_annotations ADD COLUMN anchor_lang TEXT NOT NULL DEFAULT 'source'");
+    }
   }
 
   open() {
@@ -375,16 +388,18 @@ export class CoReadingStore {
     return rows.map(rowToObject);
   }
 
-  addAnnotation({ bookId, chunkId, quote = '', quoteOffset = null, note = '', visibility = ANNOTATION_VISIBILITY.PRIVATE, author = 'user', actor = 'owner' }) {
+  addAnnotation({ bookId, chunkId, quote = '', quoteOffset = null, anchorKind = 'original', anchorLang = 'source', note = '', visibility = ANNOTATION_VISIBILITY.PRIVATE, author = 'user', actor = 'owner' }) {
     this.open();
     const createdAt = nowIso();
     const annotationId = id('ann');
     const normalizedVisibility = visibility === ANNOTATION_VISIBILITY.SHARED ? ANNOTATION_VISIBILITY.SHARED : ANNOTATION_VISIBILITY.PRIVATE;
+    const normalizedAnchorKind = anchorKind === 'translation' ? 'translation' : 'original';
+    const normalizedAnchorLang = normalizedAnchorKind === 'translation' ? String(anchorLang || 'zh-CN') : 'source';
     this.db.prepare(`
-      INSERT INTO reading_annotations (id, book_id, chunk_id, quote, quote_offset, note, author, visibility, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(annotationId, bookId, chunkId, quote, quoteOffset === null || quoteOffset === undefined ? null : Number(quoteOffset), note, author, normalizedVisibility, createdAt, createdAt);
-    this.recordEvent({ bookId, eventType: 'annotation_added', actor, payload: { annotation_id: annotationId, chunk_id: chunkId, visibility: normalizedVisibility } });
+      INSERT INTO reading_annotations (id, book_id, chunk_id, quote, quote_offset, anchor_kind, anchor_lang, note, author, visibility, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(annotationId, bookId, chunkId, quote, quoteOffset === null || quoteOffset === undefined ? null : Number(quoteOffset), normalizedAnchorKind, normalizedAnchorLang, note, author, normalizedVisibility, createdAt, createdAt);
+    this.recordEvent({ bookId, eventType: 'annotation_added', actor, payload: { annotation_id: annotationId, chunk_id: chunkId, visibility: normalizedVisibility, anchor_kind: normalizedAnchorKind, anchor_lang: normalizedAnchorLang } });
     return this.getAnnotation(annotationId, { includePrivate: true });
   }
 

@@ -176,6 +176,14 @@ code {
   padding: 14px;
 }
 
+.toc-panel,
+.annotations-panel {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 92px);
+  overflow-y: auto;
+}
+
 .panel-heading,
 .reader-title-row,
 .composer-actions {
@@ -305,13 +313,19 @@ code {
 
 .book-badges span,
 .pill,
-.visibility {
+.visibility,
+.anchor-badge {
   display: inline-flex;
   border: 1px solid var(--border);
   border-radius: 999px;
   color: var(--muted);
   padding: 2px 7px;
   font-size: 12px;
+}
+
+.anchor-badge {
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+  background: color-mix(in srgb, var(--quote-bg) 55%, transparent);
 }
 
 .state-archived,
@@ -574,6 +588,13 @@ code {
   .panel {
     min-height: calc(100vh - 204px);
     padding: 14px;
+  }
+
+  .toc-panel,
+  .annotations-panel {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
   }
 
   .view-panel {

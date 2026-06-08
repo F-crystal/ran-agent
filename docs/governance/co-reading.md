@@ -80,6 +80,13 @@ Annotation visibility:
 - `private`: never returned by Hermes-facing list/read/search tools.
 - `shared`: visible to Hermes and the Web reader shared context.
 
+Annotation anchors:
+
+- `anchor_kind=original` anchors the quote to source chunk text.
+- `anchor_kind=translation` anchors the quote to cached translated text.
+- `anchor_lang=source` is used for original anchors; translated anchors use the
+  target language such as `zh-CN`.
+
 Hermes can read only:
 
 - explicit chunks requested by `reading_read_chunk`;
@@ -124,6 +131,8 @@ paragraph.
   not reused.
 - Translations are not inserted into FTS and are not used as Hermes private
   context unless separately surfaced by a future explicit tool.
+- Users may annotate original or translated text. Shared translated annotations
+  carry their anchor kind/language into the Hermes request context.
 
 ## MCP Tools
 

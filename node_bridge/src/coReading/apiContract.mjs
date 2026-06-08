@@ -70,6 +70,8 @@ export function buildCoReadingApiContract() {
         chunk_id: 'string',
         quote: 'string optional',
         quote_offset: 'integer optional',
+        anchor_kind: 'original|translation, default original',
+        anchor_lang: 'source|zh-CN, default source',
         note: 'string',
         visibility: 'private|shared, default private',
       },

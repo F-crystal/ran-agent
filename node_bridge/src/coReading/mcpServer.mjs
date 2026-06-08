@@ -66,7 +66,7 @@ export function buildCoReadingTools() {
     ['reading_list_events', 'List co-reading audit events. Destructive changes and cleanup are recorded here.', schema({ book_id: str(), limit: int(1, 500) })],
     ['reading_import_book', 'Owner-only import of EPUB/TXT/Markdown/PDF files. PDF OCR is not performed; scanned PDFs are marked ocr_required.', ownerSchema({ file_path: str(), title: str(), author: str() }, ['file_path'])],
     ['reading_import_pasted_text', 'Owner-only import from pasted TXT/Markdown/plain text.', ownerSchema({ title: str(), author: str(), text: str(), format: str() }, ['title', 'text'])],
-    ['reading_add_annotation', 'Owner-only add of a private or shared margin annotation. Defaults to private.', ownerSchema({ book_id: str(), chunk_id: str(), quote: str(), quote_offset: int(0), note: str(), visibility: str(['private', 'shared']) }, ['book_id', 'chunk_id', 'note'])],
+    ['reading_add_annotation', 'Owner-only add of a private or shared margin annotation. Defaults to private.', ownerSchema({ book_id: str(), chunk_id: str(), quote: str(), quote_offset: int(0), anchor_kind: str(['original', 'translation']), anchor_lang: str(), note: str(), visibility: str(['private', 'shared']) }, ['book_id', 'chunk_id', 'note'])],
     ['reading_share_annotation', 'Owner-only publish of one private annotation so Hermes can read and reply to it.', ownerSchema({ annotation_id: str() }, ['annotation_id'])],
     ['reading_reply_to_annotation', 'Owner-only append a reply under a visible annotation. Hermes may not reply to private annotations.', ownerSchema({ annotation_id: str(), text: str(), author: str(['user', 'hermes']) }, ['annotation_id', 'text'])],
     ['reading_mark_progress', 'Owner-only update of synchronized reading progress and audit event.', ownerSchema({ book_id: str(), chunk_id: str(), offset: int(0), user_id: str(), device_id: str() }, ['book_id', 'chunk_id'])],
@@ -199,6 +199,8 @@ async function dispatchTool({ name, args, store, options }) {
       chunkId: args.chunk_id,
       quote: args.quote || '',
       quoteOffset: args.quote_offset ?? null,
+      anchorKind: args.anchor_kind || 'original',
+      anchorLang: args.anchor_lang || 'source',
       note: args.note || '',
       visibility: args.visibility === ANNOTATION_VISIBILITY.SHARED ? ANNOTATION_VISIBILITY.SHARED : ANNOTATION_VISIBILITY.PRIVATE,
     });

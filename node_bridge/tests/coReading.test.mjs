@@ -411,9 +411,26 @@ test('co_reading Web API protects owner token and supports shelf import read pro
       },
     }));
     assert.equal(annotation.body.annotation.visibility, 'private');
+    assert.equal(annotation.body.annotation.anchor_kind, 'original');
+    assert.equal(annotation.body.annotation.anchor_lang, 'source');
+
+    const translationAnnotation = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/annotations`, {
+      token: 'web-token',
+      body: {
+        chunk_id: chunkId,
+        quote: '第一段中文译文',
+        note: 'translation margin note',
+        visibility: 'private',
+        anchor_kind: 'translation',
+        anchor_lang: 'zh-CN',
+      },
+    }));
+    assert.equal(translationAnnotation.body.annotation.anchor_kind, 'translation');
+    assert.equal(translationAnnotation.body.annotation.anchor_lang, 'zh-CN');
 
     const listed = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}`, { token: 'web-token' }));
     assert.equal(listed.body.annotations.some((item) => item.note === 'private margin note'), true);
+    assert.equal(listed.body.annotations.some((item) => item.note === 'translation margin note' && item.anchor_kind === 'translation'), true);
 
     const translated = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
     assert.equal(translated.status, 200);
@@ -593,6 +610,8 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
       quote: '这一段',
       note: 'shared-question-context',
       visibility: 'shared',
+      anchorKind: 'translation',
+      anchorLang: 'zh-CN',
     });
 
     const hermesBodies = [];
@@ -633,6 +652,7 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
     assert.equal(asked.body.reply.text, 'Hermes reply saved.');
     assert.equal(hermesBodies.length, 1);
     assert.match(hermesBodies[0].body, /shared-question-context/);
+    assert.match(hermesBodies[0].body, /Annotation anchor: translation \(zh-CN\)/);
     assert.doesNotMatch(hermesBodies[0].body, /private-not-for-hermes/);
 
     const thread = store.readThread(sharedAnn.id);
