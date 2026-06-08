@@ -6,7 +6,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { importFromFile, importFromPastedText, importFromUrlText } from './importers.mjs';
-import { ANNOTATION_VISIBILITY, createCoReadingStore, readChunkText } from './store.mjs';
+import {
+  ANNOTATION_VISIBILITY,
+  BOOK_STATES,
+  DEFAULT_TRASH_RETENTION_DAYS,
+  createCoReadingStore,
+  readChunkText,
+} from './store.mjs';
 import { routeSearchHubRead } from '../searchHub/router.mjs';
 import { handleSocialReaderMcpRequest } from '../socialReaderMcpServer.mjs';
 
@@ -131,7 +137,7 @@ async function routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl,
     parsed.sourceUri = safeUploadSourceUri(body.filename);
     parsed.originalRetained = false;
     const imported = await store.importBook(parsed);
-    return jsonResponse(200, { ok: true, ...imported });
+    return jsonResponse(200, { ok: true, ...imported, import_summary: importSummary(parsed, imported) });
   }
   if (req.method === 'POST' && pathParts.join('/') === 'import-url') {
     const body = await readJsonBody(req);
@@ -143,12 +149,27 @@ async function routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl,
       socialReaderRequestImpl,
     });
     const imported = await store.importBook(parsed);
-    return jsonResponse(200, { ok: true, ...imported });
+    return jsonResponse(200, { ok: true, ...imported, import_summary: importSummary(parsed, imported) });
   }
   if (pathParts[0] === 'books' && pathParts[1]) {
     const bookId = decodeURIComponent(pathParts[1]);
     if (req.method === 'GET' && pathParts.length === 2) {
       return jsonResponse(200, { ok: true, book: store.getBook(bookId), storage: store.getStorageStats(bookId) });
+    }
+    if (req.method === 'POST' && pathParts[2] === 'archive' && pathParts.length === 3) {
+      return jsonResponse(200, { ok: true, book: await store.setBookState({ bookId, state: BOOK_STATES.ARCHIVED, actor: 'web' }) });
+    }
+    if (req.method === 'POST' && pathParts[2] === 'restore' && pathParts.length === 3) {
+      return jsonResponse(200, { ok: true, book: await store.setBookState({ bookId, state: BOOK_STATES.ACTIVE, actor: 'web' }) });
+    }
+    if (req.method === 'POST' && pathParts[2] === 'trash' && pathParts.length === 3) {
+      const body = await readJsonBody(req);
+      if (body.confirm !== true) {
+        return jsonResponse(400, { ok: false, error: 'trash requires confirm=true' });
+      }
+      const trashRetentionDays = body.trash_retention_days ?? DEFAULT_TRASH_RETENTION_DAYS;
+      const book = await store.setBookState({ bookId, state: BOOK_STATES.TRASH, actor: 'web', trashRetentionDays });
+      return jsonResponse(200, { ok: true, book, trash_expires_at: book.trash_expires_at });
     }
     if (req.method === 'GET' && pathParts[2] === 'chunks' && pathParts.length === 3) {
       return jsonResponse(200, { ok: true, chunks: store.listChunks(bookId) });
@@ -196,12 +217,29 @@ async function routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl,
       return jsonResponse(200, { ok: true, annotation });
     }
   }
+  if (pathParts[0] === 'trash' && pathParts[1] === 'cleanup' && req.method === 'POST') {
+    const body = await readJsonBody(req);
+    const pruned = await store.cleanupTrash({
+      actor: 'web',
+      now: body.now_iso ? new Date(body.now_iso) : new Date(),
+    });
+    return jsonResponse(200, { ok: true, pruned });
+  }
   if (pathParts[0] === 'annotations' && pathParts[1] && pathParts[2] === 'ask-hermes' && req.method === 'POST') {
     const annotationId = decodeURIComponent(pathParts[1]);
     const body = await readJsonBody(req);
     return await askHermesForAnnotation({ store, annotationId, question: body.question || '', config, fetchImpl });
   }
   return jsonResponse(404, { ok: false, error: 'not found' });
+}
+
+function importSummary(parsed = {}, imported = {}) {
+  const chunkCount = Array.isArray(imported.chunks) ? imported.chunks.length : Array.isArray(parsed.chunks) ? parsed.chunks.length : 0;
+  return {
+    format: parsed.format || imported.book?.format || '',
+    ocr_required: parsed.ocrRequired === true || imported.book?.ocr_required === true,
+    chunk_count: chunkCount,
+  };
 }
 
 async function importUploadedFile({ filename, dataBase64, title, author }) {

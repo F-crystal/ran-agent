@@ -57,6 +57,16 @@ Book states:
 Archive, restore, delete, progress writes, annotation writes, and cleanup write
 `reading_events`. Trash cleanup prunes only expired trash records.
 
+The Web reader exposes the same state transitions through server-side wrapper
+routes. Browser clients use only `CO_READING_WEB_ACCESS_TOKEN`; they never send
+`CO_READING_OWNER_TOKEN`.
+
+- Active books can be archived or moved to trash from the shelf.
+- Archived books can be restored to active or moved to trash.
+- Trash books can be restored until cleanup prunes expired trash records.
+- Moving a book to trash is soft delete. It keeps retention metadata in
+  `trashed_at` and `trash_expires_at`.
+
 ## Privacy And Permission
 
 Annotation visibility:
@@ -78,12 +88,21 @@ such as `confirm: true`.
 ## Import Rules
 
 - EPUB: Python stdlib extractor reads OPF spine and XHTML/HTML body text.
-- TXT: plain text chunking with loose chapter heading detection.
-- Markdown: heading-aware chunking.
+  Imported sections are split into page-sized chunks so long chapters do not
+  become one oversized reader chunk.
+- TXT: plain text chunking with loose chapter heading detection and page-sized
+  splitting for long paragraphs.
+- Markdown: heading-aware chunking with page-sized splitting inside long
+  sections.
 - Pasted text: direct text/Markdown import.
-- PDF: detect simple text layer and import that text. Scanned PDFs are stored as
-  book records with `ocr_required=true`; OCR is not performed.
+- PDF: prefer `pdftotext` from Poppler for text-layer extraction, then fall
+  back to a simple text operator scan. Scanned PDFs are stored as book records
+  with `ocr_required=true`; OCR is not performed.
 - Web URL: provider interface only, reserved for later integration.
+
+Uploaded browser files are temporary. If a previous EPUB/PDF upload was
+imported before parser changes, re-upload the file to generate new chunks. The
+old upload payload is not retained for automatic reprocessing.
 
 ## MCP Tools
 
@@ -132,6 +151,10 @@ Important Web reader routes:
 - `POST /api/co-reading/import-url`
 - `GET /api/co-reading/books/:book_id/chunks`
 - `GET /api/co-reading/books/:book_id/chunks/:chunk_id`
+- `POST /api/co-reading/books/:book_id/archive`
+- `POST /api/co-reading/books/:book_id/restore`
+- `POST /api/co-reading/books/:book_id/trash`
+- `POST /api/co-reading/trash/cleanup`
 - `GET /api/co-reading/books/:book_id/search`
 - `GET /api/co-reading/books/:book_id/progress`
 - `POST /api/co-reading/books/:book_id/progress`

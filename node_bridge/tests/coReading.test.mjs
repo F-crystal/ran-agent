@@ -73,16 +73,17 @@ function run(command, args, options = {}) {
   });
 }
 
-async function createMinimalEpub(filePath) {
+async function createMinimalEpub(filePath, bodyHtml = '<h1>Chapter One</h1><p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p>') {
   const script = `
 import zipfile
 from pathlib import Path
 p = Path(${JSON.stringify(filePath)})
+body_html = ${JSON.stringify(bodyHtml)}
 with zipfile.ZipFile(p, "w") as z:
     z.writestr("mimetype", "application/epub+zip")
     z.writestr("META-INF/container.xml", """<?xml version='1.0'?><container version='1.0' xmlns='urn:oasis:names:tc:opendocument:xmlns:container'><rootfiles><rootfile full-path='OPS/content.opf' media-type='application/oebps-package+xml'/></rootfiles></container>""")
     z.writestr("OPS/content.opf", """<?xml version='1.0'?><package xmlns='http://www.idpf.org/2007/opf' version='3.0'><metadata xmlns:dc='http://purl.org/dc/elements/1.1/'><dc:title>EPUB Title</dc:title><dc:creator>EPUB Author</dc:creator></metadata><manifest><item id='c1' href='chapter1.xhtml' media-type='application/xhtml+xml'/></manifest><spine><itemref idref='c1'/></spine></package>""")
-    z.writestr("OPS/chapter1.xhtml", """<html xmlns='http://www.w3.org/1999/xhtml'><body><h1>Chapter One</h1><p>First EPUB paragraph.</p><p>Second EPUB paragraph.</p></body></html>""")
+    z.writestr("OPS/chapter1.xhtml", "<html xmlns='http://www.w3.org/1999/xhtml'><body>" + body_html + "</body></html>")
 `;
   await run('python3', ['-c', script]);
 }
@@ -244,10 +245,12 @@ test('importer supports txt markdown epub and marks PDF text layer or OCR requir
     const txtPath = path.join(root, 'sample.txt');
     const mdPath = path.join(root, 'sample.md');
     const epubPath = path.join(root, 'sample.epub');
+    const longEpubPath = path.join(root, 'long.epub');
     const pdfPath = path.join(root, 'sample.pdf');
     await writeFile(txtPath, 'TXT title\nTXT body text');
     await writeFile(mdPath, '# Markdown Title\n\nMarkdown body text');
     await createMinimalEpub(epubPath);
+    await createMinimalEpub(longEpubPath, `<h1>Long Chapter</h1><p>${'Long EPUB sentence. '.repeat(420)}</p>`);
     await writeFile(pdfPath, '%PDF-1.4\n1 0 obj\n<< /Type /Page >>\nendobj\nstream\nBT (PDF text layer) Tj ET\nendstream\n%%EOF');
 
     for (const filePath of [txtPath, mdPath, epubPath]) {
@@ -260,6 +263,15 @@ test('importer supports txt markdown epub and marks PDF text layer or OCR requir
       assert.equal(imported.structuredContent.book.state, BOOK_STATES.ACTIVE);
       assert.equal(imported.structuredContent.chunks.length >= 1, true);
     }
+
+    const longEpub = await callTool(
+      'reading_import_book',
+      { owner_token: 'owner', file_path: longEpubPath },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    assert.equal(longEpub.structuredContent.book.format, 'epub');
+    assert.equal(longEpub.structuredContent.chunks.length > 1, true);
+    assert.equal(longEpub.structuredContent.chunks.every((chunk) => chunk.char_count <= 4500), true);
 
     const pdf = await callTool(
       'reading_import_book',
@@ -317,6 +329,8 @@ test('MCP tool names and Web reader API contract expose permission layers', asyn
   const contract = buildCoReadingApiContract();
   assert.equal(contract.service, 'co_reading_web_reader');
   assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/import-paste'), true);
+  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/books/:book_id/archive'), true);
+  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/books/:book_id/trash'), true);
   assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/annotations/:annotation_id/ask-hermes'), true);
   assert.equal(contract.security.owner_only_writes, true);
 });
@@ -387,6 +401,33 @@ test('co_reading Web API protects owner token and supports shelf import read pro
 
     const listed = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}`, { token: 'web-token' }));
     assert.equal(listed.body.annotations.some((item) => item.note === 'private margin note'), true);
+
+    const archived = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/archive`, { token: 'web-token' }));
+    assert.equal(archived.status, 200);
+    assert.equal(archived.body.book.state, BOOK_STATES.ARCHIVED);
+
+    const restored = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/restore`, { token: 'web-token' }));
+    assert.equal(restored.body.book.state, BOOK_STATES.ACTIVE);
+
+    const deniedTrash = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/trash`, { token: 'web-token' }));
+    assert.equal(deniedTrash.status, 400);
+
+    const trashed = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/trash`, {
+      token: 'web-token',
+      body: { confirm: true },
+    }));
+    assert.equal(trashed.body.book.state, BOOK_STATES.TRASH);
+    assert.equal(typeof trashed.body.trash_expires_at, 'string');
+
+    const activeShelf = await app.handleRequest(req('GET', '/api/co-reading/books', { token: 'web-token' }));
+    assert.equal(activeShelf.body.books.some((book) => book.id === bookId), false);
+    const fullShelf = await app.handleRequest(req('GET', '/api/co-reading/books?include_trash=true', { token: 'web-token' }));
+    assert.equal(fullShelf.body.books.some((book) => book.id === bookId && book.state === BOOK_STATES.TRASH), true);
+    assert.deepEqual(store.listEvents({ bookId }).map((event) => event.event_type).slice(-3), [
+      'book_archived',
+      'book_restored',
+      'book_trashed',
+    ]);
   });
 });
 
@@ -430,6 +471,8 @@ test('co_reading Web API imports uploaded HTML and PDF files without retaining b
     assert.equal(importedPdf.body.book.format, 'pdf');
     assert.equal(importedPdf.body.book.ocr_required, true);
     assert.equal(importedPdf.body.chunks.length, 0);
+    assert.equal(importedPdf.body.import_summary.ocr_required, true);
+    assert.equal(importedPdf.body.import_summary.chunk_count, 0);
   });
 });
 

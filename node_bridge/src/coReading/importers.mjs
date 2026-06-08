@@ -2,7 +2,8 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 
-const DEFAULT_MAX_CHARS = 7000;
+const DEFAULT_MAX_CHARS = 4500;
+const MIN_SPLIT_CHARS = 1200;
 
 export async function importFromPastedText({ title, author = '', text, format = 'text' }) {
   const normalized = normalizeText(text);
@@ -218,16 +219,49 @@ function chunkPlainText(text, { maxChars = DEFAULT_MAX_CHARS, sectionTitle = nul
     let buffer = '';
     let part = 1;
     for (const paragraph of paragraphs.length ? paragraphs : [section.text]) {
-      if (buffer && buffer.length + paragraph.length + 2 > maxChars) {
-        chunks.push(makeChunk(section.title, buffer, part));
-        part += 1;
-        buffer = '';
+      const pages = splitLongTextUnit(paragraph, maxChars);
+      for (const page of pages) {
+        if (buffer && buffer.length + page.length + 2 > maxChars) {
+          chunks.push(makeChunk(section.title, buffer, part));
+          part += 1;
+          buffer = '';
+        }
+        buffer = buffer ? `${buffer}\n\n${page}` : page;
+        if (buffer.length >= maxChars) {
+          chunks.push(makeChunk(section.title, buffer, part));
+          part += 1;
+          buffer = '';
+        }
       }
-      buffer = buffer ? `${buffer}\n\n${paragraph}` : paragraph;
     }
     if (buffer) chunks.push(makeChunk(section.title, buffer, part));
   }
   return chunks;
+}
+
+function splitLongTextUnit(text, maxChars) {
+  const value = String(text || '').trim();
+  if (value.length <= maxChars) return value ? [value] : [];
+  const pages = [];
+  let rest = value;
+  while (rest.length > maxChars) {
+    const splitAt = chooseSplitPoint(rest, maxChars);
+    const page = rest.slice(0, splitAt).trim();
+    if (page) pages.push(page);
+    rest = rest.slice(splitAt).trim();
+  }
+  if (rest) pages.push(rest);
+  return pages;
+}
+
+function chooseSplitPoint(text, maxChars) {
+  const windowStart = Math.max(MIN_SPLIT_CHARS, Math.floor(maxChars * 0.65));
+  const candidates = ['\n', '。', '！', '？', '.', '!', '?', ';', '；', ',', '，', ' '];
+  for (const marker of candidates) {
+    const index = text.lastIndexOf(marker, maxChars);
+    if (index >= windowStart) return index + marker.length;
+  }
+  return maxChars;
 }
 
 function splitByLooseHeadings(text) {
@@ -249,7 +283,7 @@ function splitByLooseHeadings(text) {
 }
 
 function makeChunk(sectionTitle, text, part) {
-  const suffix = part > 1 ? ` Part ${part}` : '';
+  const suffix = part > 1 ? ` Page ${part}` : '';
   return {
     title: `${sectionTitle || 'Main'}${suffix}`,
     sectionTitle: sectionTitle || 'Main',
@@ -268,6 +302,13 @@ async function extractEpub(filePath) {
 }
 
 async function inspectPdfTextLayer(filePath) {
+  const extracted = await tryPdftotext(filePath);
+  if (extracted) {
+    return {
+      ocrRequired: false,
+      text: extracted,
+    };
+  }
   const buffer = await readFile(filePath);
   const raw = buffer.toString('latin1');
   const textMatches = [...raw.matchAll(/\(([^)]{3,})\)\s*Tj/g)].map((match) => match[1]);
@@ -277,6 +318,16 @@ async function inspectPdfTextLayer(filePath) {
     ocrRequired: text.length < 10,
     text,
   };
+}
+
+async function tryPdftotext(filePath) {
+  try {
+    const { stdout } = await run('pdftotext', ['-layout', '-enc', 'UTF-8', filePath, '-']);
+    const text = normalizeText(stdout);
+    return text.length >= 10 ? text : '';
+  } catch {
+    return '';
+  }
 }
 
 function run(command, args) {

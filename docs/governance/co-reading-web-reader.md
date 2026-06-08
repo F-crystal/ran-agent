@@ -130,6 +130,13 @@ Current UI:
 - Browser file import through `/api/co-reading/import-file` for TXT,
   Markdown, EPUB, PDF text-layer detection, and local HTML files. Uploaded
   originals are temporary; canonical text remains chunk `.txt.gz`.
+- EPUB/TXT/Markdown/URL imports are split into page-sized chunks. Existing
+  books imported before a chunking change keep their old chunks until the file
+  or URL is imported again.
+- PDF text-layer import uses `pdftotext` when available. On Ubuntu install it
+  with `sudo apt-get install -y poppler-utils`. If a PDF has no readable text
+  layer, the reader stores the book with `ocr_required=true` and creates no
+  chunks; OCR is intentionally not run in this stage.
 - URL import through `/api/co-reading/import-url`. Normal URLs reuse
   `search_hub` read. Social URLs reuse `social_reader`. The browser never
   calls MCP directly.
@@ -142,6 +149,8 @@ Current UI:
 - Sidebar annotations with thread replies.
 - Inline Hermes question box on shared annotation cards.
 - Store Hermes replies in `reading_threads` and show them in the margin.
+- Shelf actions for archive, restore, and soft-delete to trash. Trash keeps a
+  retention expiry and can be restored before cleanup.
 
 Current non-goals:
 
@@ -165,6 +174,10 @@ After `git pull --ff-only`, set local env values and repair runtime drift:
 cd /opt/ran_agent
 
 tailscale ip -4
+
+# Required for PDF text-layer extraction. Scanned/image PDFs still require OCR,
+# which is not enabled for this reader stage.
+sudo apt-get install -y poppler-utils
 
 # Edit .env.local manually or append values with your real tokens.
 # Do not commit .env.local.

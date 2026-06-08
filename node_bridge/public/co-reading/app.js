@@ -15,6 +15,7 @@ const state = {
   chunkText: '',
   selectedQuote: '',
   selectedQuoteOffset: null,
+  pendingTrashBookId: '',
   loadingHermes: new Set(),
   hermesErrors: new Map(),
 };
@@ -72,10 +73,12 @@ function renderBooks() {
   }
   for (const book of books) {
     const li = document.createElement('li');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = `book-card ${book.id === state.bookId ? 'is-active' : ''} ${book.state !== 'active' ? 'is-muted' : ''}`;
-    button.innerHTML = `
+    const card = document.createElement('article');
+    card.className = `book-card ${book.id === state.bookId ? 'is-active' : ''} ${book.state !== 'active' ? 'is-muted' : ''}`;
+    const openButton = document.createElement('button');
+    openButton.type = 'button';
+    openButton.className = 'book-open';
+    openButton.innerHTML = `
       <span class="book-title">${escapeHtml(book.title || 'Untitled')}</span>
       <span class="book-meta">${escapeHtml(book.author || book.source_uri || '来源未记录')}</span>
       <span class="book-badges">
@@ -84,21 +87,109 @@ function renderBooks() {
       </span>
       <span class="book-placeholders">${escapeHtml(bookStateLine(book))}</span>
     `;
-    button.onclick = () => {
+    openButton.onclick = () => {
       if (book.state && book.state !== 'active') {
         setStatus(bookStateLine(book), 'error');
         return;
       }
       openBook(book.id);
     };
-    li.appendChild(button);
+    card.appendChild(openButton);
+    card.appendChild(createBookActions(book));
+    li.appendChild(card);
     list.appendChild(li);
   }
+}
+
+function createBookActions(book) {
+  const actions = document.createElement('div');
+  actions.className = 'book-actions';
+  const stateName = book.state || 'active';
+  if (stateName === 'active') {
+    actions.append(
+      bookActionButton('归档', 'secondary compact', () => mutateBookState(book, 'archive')),
+      bookActionButton(state.pendingTrashBookId === book.id ? '确认回收' : '回收站', 'danger compact', () => trashBook(book))
+    );
+  } else if (stateName === 'archived') {
+    actions.append(
+      bookActionButton('恢复', 'secondary compact', () => mutateBookState(book, 'restore')),
+      bookActionButton(state.pendingTrashBookId === book.id ? '确认回收' : '回收站', 'danger compact', () => trashBook(book))
+    );
+  } else if (stateName === 'trash') {
+    actions.append(bookActionButton('恢复', 'secondary compact', () => mutateBookState(book, 'restore')));
+  }
+  return actions;
+}
+
+function bookActionButton(label, className, onClick) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = className;
+  button.textContent = label;
+  button.onclick = (event) => {
+    event.stopPropagation();
+    Promise.resolve(onClick()).catch((error) => setStatus(error.message || String(error), 'error'));
+  };
+  return button;
+}
+
+async function mutateBookState(book, action) {
+  state.pendingTrashBookId = '';
+  const body = await api(`/books/${encodeURIComponent(book.id)}/${action}`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+  await refreshBooks();
+  const nextState = body.book?.state || '';
+  if (book.id === state.bookId && nextState !== 'active') {
+    clearCurrentBook();
+  }
+  setStatus(`${book.title || book.id} 已${actionLabel(action)}`, 'ok');
+}
+
+async function trashBook(book) {
+  if (state.pendingTrashBookId !== book.id) {
+    state.pendingTrashBookId = book.id;
+    renderBooks();
+    setStatus(`再点一次“确认回收”把《${book.title || book.id}》移入回收站`, 'error');
+    return;
+  }
+  const body = await api(`/books/${encodeURIComponent(book.id)}/trash`, {
+    method: 'POST',
+    body: JSON.stringify({ confirm: true }),
+  });
+  state.pendingTrashBookId = '';
+  await refreshBooks();
+  if (book.id === state.bookId) clearCurrentBook();
+  setStatus(`已移入回收站，保留至 ${formatDate(body.trash_expires_at)}`, 'ok');
+}
+
+function actionLabel(action) {
+  if (action === 'archive') return '归档';
+  if (action === 'restore') return '恢复';
+  return action;
+}
+
+function clearCurrentBook() {
+  state.bookId = '';
+  state.chunkId = '';
+  state.chunks = [];
+  state.annotations = [];
+  state.chunkText = '';
+  $('chunk-title').textContent = '未打开书籍';
+  $('chunk-text').textContent = '';
+  $('reader-subtitle').textContent = '私人共读阅读器';
+  $('chunk-kicker').textContent = '未打开书籍';
+  $('chunk-position').textContent = '--';
+  renderChunks();
+  renderAnnotations();
+  clearComposer();
 }
 
 function bookStateLine(book) {
   if (book.state === 'archived') return '正文已归档，不作为继续阅读入口';
   if (book.state === 'trash') return `回收站 · ${book.trash_expires_at ? `保留至 ${formatDate(book.trash_expires_at)}` : '等待清理'}`;
+  if (book.ocr_required) return 'PDF 无可读文本层，需要 OCR；当前 reader 不做 OCR';
   return '进度同步中 · 最近阅读由 progress 恢复';
 }
 
@@ -119,7 +210,12 @@ async function openBook(bookId) {
     await openChunk(nextChunkId);
     setView('reader');
   } else {
-    setStatus('这本书没有 chunk', 'error');
+    const book = state.books.find((item) => item.id === bookId);
+    if (book?.ocr_required) {
+      setStatus('这个 PDF 没有可读文本层，需要 OCR；当前 reader 不做 OCR', 'error');
+    } else {
+      setStatus('这本书没有可读 chunk', 'error');
+    }
   }
 }
 
@@ -285,6 +381,11 @@ async function importFile() {
     }),
   });
   await refreshBooks();
+  if (body.import_summary?.ocr_required && body.import_summary?.chunk_count === 0) {
+    setStatus('PDF 已入库，但没有可读文本层，需要 OCR；当前 reader 不做 OCR', 'error');
+    renderBooks();
+    return;
+  }
   if (body.book?.id) await openBook(body.book.id);
 }
 
