@@ -97,8 +97,10 @@ DeepSeek V4 在本项目中按文本模型使用。原始图片、音频、视�
 `co_reading` 另有可选 Tailscale 内网 Web reader：启用
 `CO_READING_WEB_ENABLED=true` 后访问 `/reader`，HTTP API 位于
 `/api/co-reading/*`。浏览器只使用 `CO_READING_WEB_ACCESS_TOKEN`；
-`CO_READING_OWNER_TOKEN` 只留在服务器环境中。不要用公网 Funnel、WARP
-全局模式或 B 站 SOCKS 代理暴露 reader。
+`CO_READING_OWNER_TOKEN` 只留在服务器环境中。reader 支持原文 + 中文译文
+双语显示，译文通过服务器端 provider 生成并缓存到本地，不把 provider
+凭据交给浏览器。不要用公网 Funnel、WARP 全局模式或 B 站 SOCKS 代理暴露
+reader。
 
 ---
 

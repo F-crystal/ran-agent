@@ -1,4 +1,5 @@
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { gunzip, gzip } from 'node:zlib';
@@ -129,6 +130,21 @@ const SCHEMA = [
     updated_at TEXT NOT NULL,
     FOREIGN KEY (book_id) REFERENCES reading_books(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS reading_translations (
+    id TEXT PRIMARY KEY,
+    book_id TEXT NOT NULL,
+    chunk_id TEXT NOT NULL,
+    target_lang TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    path TEXT NOT NULL,
+    char_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(chunk_id, target_lang, provider, source_hash),
+    FOREIGN KEY (book_id) REFERENCES reading_books(id),
+    FOREIGN KEY (chunk_id) REFERENCES reading_chunks(id)
+  )`,
   `CREATE VIRTUAL TABLE IF NOT EXISTS reading_chunk_fts USING fts5(
     book_id UNINDEXED,
     chunk_id UNINDEXED,
@@ -139,6 +155,7 @@ const SCHEMA = [
   `CREATE INDEX IF NOT EXISTS idx_reading_annotations_book_chunk ON reading_annotations(book_id, chunk_id)`,
   `CREATE INDEX IF NOT EXISTS idx_reading_threads_annotation ON reading_threads(annotation_id)`,
   `CREATE INDEX IF NOT EXISTS idx_reading_events_book ON reading_events(book_id, created_at)`,
+  `CREATE INDEX IF NOT EXISTS idx_reading_translations_chunk ON reading_translations(chunk_id, target_lang, provider)`,
 ];
 
 function nowIso() {
@@ -162,6 +179,16 @@ function slugify(value, fallback = 'book') {
 
 function relativeChunkPath(bookId, chunkId) {
   return path.posix.join('library', bookId, 'chunks', `${chunkId}.txt.gz`);
+}
+
+function relativeTranslationPath(bookId, chunkId, targetLang, provider, sourceHash) {
+  const safeLang = sanitizePathToken(targetLang || 'zh-CN');
+  const safeProvider = sanitizePathToken(provider || 'hermes');
+  return path.posix.join('library', bookId, 'translations', `${chunkId}.${safeProvider}.${safeLang}.${String(sourceHash || '').slice(0, 16)}.txt.gz`);
+}
+
+function sanitizePathToken(value) {
+  return String(value || '').replace(/[^A-Za-z0-9._-]+/g, '_').slice(0, 48) || 'value';
 }
 
 function safeJson(value) {
@@ -418,6 +445,39 @@ export class CoReadingStore {
     return { annotation, replies };
   }
 
+  async readTranslation({ chunkId, targetLang = 'zh-CN', provider = 'hermes', sourceHash }) {
+    this.open();
+    const row = rowToObject(this.db.prepare(`
+      SELECT * FROM reading_translations
+      WHERE chunk_id = ? AND target_lang = ? AND provider = ? AND source_hash = ?
+      LIMIT 1
+    `).get(chunkId, targetLang, provider, sourceHash));
+    if (!row) return null;
+    return {
+      ...row,
+      text: await readGzipText({ rootDir: this.rootDir }, row.path),
+    };
+  }
+
+  async saveTranslation({ bookId, chunkId, targetLang = 'zh-CN', provider = 'hermes', sourceHash, text, actor = 'web' }) {
+    this.open();
+    const chunk = this.getChunk(bookId, chunkId);
+    if (!chunk) throw new Error(`chunk not found: ${chunkId}`);
+    const at = nowIso();
+    const translationText = String(text || '').trim();
+    const relPath = relativeTranslationPath(bookId, chunkId, targetLang, provider, sourceHash);
+    await writeGzipText({ rootDir: this.rootDir }, relPath, translationText);
+    this.db.prepare(`
+      INSERT INTO reading_translations (id, book_id, chunk_id, target_lang, provider, source_hash, path, char_count, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(chunk_id, target_lang, provider, source_hash)
+      DO UPDATE SET path = excluded.path, char_count = excluded.char_count, updated_at = excluded.updated_at
+    `).run(id('translation'), bookId, chunkId, targetLang, provider, sourceHash, relPath, translationText.length, at, at);
+    this.recordEvent({ bookId, eventType: 'chunk_translated', actor, payload: { chunk_id: chunkId, target_lang: targetLang, provider, source_hash: sourceHash } });
+    await this.refreshStorageStats(bookId);
+    return await this.readTranslation({ chunkId, targetLang, provider, sourceHash });
+  }
+
   async setBookState({ bookId, state, actor = 'owner', trashRetentionDays = DEFAULT_TRASH_RETENTION_DAYS }) {
     this.open();
     const book = this.getBook(bookId);
@@ -446,6 +506,7 @@ export class CoReadingStore {
       this.recordEvent({ bookId: book.id, eventType: 'book_trash_pruned', actor, payload: { trash_expires_at: book.trash_expires_at } });
       this.db.prepare('DELETE FROM reading_chunk_fts WHERE book_id = ?').run(book.id);
       this.db.prepare('DELETE FROM reading_threads WHERE book_id = ?').run(book.id);
+      this.db.prepare('DELETE FROM reading_translations WHERE book_id = ?').run(book.id);
       this.db.prepare('DELETE FROM reading_annotations WHERE book_id = ?').run(book.id);
       this.db.prepare('DELETE FROM reading_progress WHERE book_id = ?').run(book.id);
       this.db.prepare('DELETE FROM reading_chunks WHERE book_id = ?').run(book.id);
@@ -485,11 +546,21 @@ export class CoReadingStore {
         // Missing chunk files are reported through read errors; stats stay best-effort.
       }
     }
+    const translations = this.db.prepare('SELECT path FROM reading_translations WHERE book_id = ?').all(bookId);
+    let assetBytes = 0;
+    for (const translation of translations) {
+      try {
+        const item = await stat(path.join(this.rootDir, translation.path));
+        assetBytes += item.size;
+      } catch {
+        // Missing translation files are reported through read errors; stats stay best-effort.
+      }
+    }
     this.db.prepare(`
       INSERT INTO reading_storage_stats (book_id, chunk_bytes, original_bytes, asset_bytes, updated_at)
-      VALUES (?, ?, 0, 0, ?)
-      ON CONFLICT(book_id) DO UPDATE SET chunk_bytes = excluded.chunk_bytes, updated_at = excluded.updated_at
-    `).run(bookId, chunkBytes, nowIso());
+      VALUES (?, ?, 0, ?, ?)
+      ON CONFLICT(book_id) DO UPDATE SET chunk_bytes = excluded.chunk_bytes, asset_bytes = excluded.asset_bytes, updated_at = excluded.updated_at
+    `).run(bookId, chunkBytes, assetBytes, nowIso());
     return this.getStorageStats(bookId);
   }
 
@@ -514,6 +585,10 @@ function uniqueBookId(db, title) {
 }
 
 export async function writeChunkText({ rootDir }, relativePath, text) {
+  return await writeGzipText({ rootDir }, relativePath, text);
+}
+
+export async function writeGzipText({ rootDir }, relativePath, text) {
   const absolute = path.join(rootDir, relativePath);
   await mkdir(path.dirname(absolute), { recursive: true });
   await writeFile(absolute, await gzipAsync(Buffer.from(String(text || ''), 'utf8')));
@@ -522,8 +597,16 @@ export async function writeChunkText({ rootDir }, relativePath, text) {
 
 export async function readChunkText({ rootDir }, chunkOrPath) {
   const relPath = typeof chunkOrPath === 'string' ? chunkOrPath : chunkOrPath.path;
-  const buffer = await readFile(path.join(rootDir, relPath));
+  return await readGzipText({ rootDir }, relPath);
+}
+
+export async function readGzipText({ rootDir }, relativePath) {
+  const buffer = await readFile(path.join(rootDir, relativePath));
   return String(await gunzipAsync(buffer), 'utf8');
+}
+
+export function hashText(text) {
+  return createHash('sha256').update(String(text || ''), 'utf8').digest('hex');
 }
 
 export async function moveBookToTrashDir({ rootDir, bookId }) {

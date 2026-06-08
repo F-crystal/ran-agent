@@ -28,6 +28,11 @@ storage stats, and FTS index rows. Chunk text source-of-truth is always the
 gzip file under `library/<book_id>/chunks/`. FTS hits must be resolved by
 `chunk_id` and then read back from the chunk file.
 
+Chinese chunk translations are cached under
+`library/<book_id>/translations/*.txt.gz`. SQLite stores translation metadata,
+target language, provider, source hash, and path. Translation cache bytes are
+counted in `reading_storage_stats.asset_bytes`.
+
 Private content must not be committed. Keep `CO_READING_ROOT_DIR` under
 `.ran_agent_state/` or another machine-local ignored path.
 
@@ -44,6 +49,7 @@ Private content must not be committed. Keep `CO_READING_ROOT_DIR` under
 - `reading_sessions`
 - `reading_storage_stats`
 - `reading_chunk_fts`
+- `reading_translations`
 
 ## State Machine
 
@@ -104,6 +110,21 @@ Uploaded browser files are temporary. If a previous EPUB/PDF upload was
 imported before parser changes, re-upload the file to generate new chunks. The
 old upload payload is not retained for automatic reprocessing.
 
+## Translation Rules
+
+The Web reader renders bilingual reading by default: original text remains the
+annotation anchor, and the Chinese translation is displayed below each original
+paragraph.
+
+- Browser clients request `/translation` with only `CO_READING_WEB_ACCESS_TOKEN`.
+- Provider credentials stay on the server.
+- Default provider is `hermes`, using `CO_READING_HERMES_API_BASE_URL`.
+- Cache key is `chunk_id + target_lang + provider + source_hash`.
+- If the chunk text changes, `source_hash` changes and the old translation is
+  not reused.
+- Translations are not inserted into FTS and are not used as Hermes private
+  context unless separately surfaced by a future explicit tool.
+
 ## MCP Tools
 
 Read tools:
@@ -151,6 +172,7 @@ Important Web reader routes:
 - `POST /api/co-reading/import-url`
 - `GET /api/co-reading/books/:book_id/chunks`
 - `GET /api/co-reading/books/:book_id/chunks/:chunk_id`
+- `GET /api/co-reading/books/:book_id/chunks/:chunk_id/translation`
 - `POST /api/co-reading/books/:book_id/archive`
 - `POST /api/co-reading/books/:book_id/restore`
 - `POST /api/co-reading/books/:book_id/trash`

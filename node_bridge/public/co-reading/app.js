@@ -13,6 +13,10 @@ const state = {
   bookId: '',
   chunkId: '',
   chunkText: '',
+  translationText: '',
+  translationStatus: 'idle',
+  translationCached: false,
+  translationRequestId: '',
   selectedQuote: '',
   selectedQuoteOffset: null,
   pendingTrashBookId: '',
@@ -175,6 +179,10 @@ function clearCurrentBook() {
   state.chunkId = '';
   state.chunks = [];
   state.annotations = [];
+  state.translationText = '';
+  state.translationStatus = 'idle';
+  state.translationCached = false;
+  state.translationRequestId = '';
   state.chunkText = '';
   $('chunk-title').textContent = '未打开书籍';
   $('chunk-text').textContent = '';
@@ -223,11 +231,14 @@ async function openChunk(chunkId) {
   if (!state.bookId || !chunkId) return;
   state.chunkId = chunkId;
   clearComposer();
+  state.translationText = '';
+  state.translationStatus = 'loading';
+  state.translationCached = false;
   const body = await api(`/books/${encodeURIComponent(state.bookId)}/chunks/${encodeURIComponent(chunkId)}`);
   state.chunkText = body.text || '';
   state.annotations = body.annotations || [];
   $('chunk-title').textContent = body.chunk?.title || body.chunk?.id || 'Untitled chunk';
-  $('chunk-text').textContent = state.chunkText;
+  renderReaderText();
   renderChunkMeta(body.chunk);
   renderChunks();
   renderAnnotations();
@@ -235,6 +246,68 @@ async function openChunk(chunkId) {
     method: 'POST',
     body: JSON.stringify({ chunk_id: chunkId, offset: 0, device_id: DEVICE_ID }),
   });
+  loadTranslation(chunkId);
+}
+
+async function loadTranslation(chunkId) {
+  if (!state.bookId || !chunkId) return;
+  const requestId = `${state.bookId}:${chunkId}:${Date.now()}`;
+  state.translationRequestId = requestId;
+  state.translationStatus = 'loading';
+  renderReaderText();
+  try {
+    const body = await api(`/books/${encodeURIComponent(state.bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`);
+    if (state.translationRequestId !== requestId || state.chunkId !== chunkId) return;
+    state.translationText = body.translation?.text || '';
+    state.translationCached = body.cached === true;
+    state.translationStatus = state.translationText ? 'ready' : 'error';
+    renderReaderText();
+  } catch (error) {
+    if (state.translationRequestId !== requestId || state.chunkId !== chunkId) return;
+    state.translationText = '';
+    state.translationStatus = 'error';
+    renderReaderText();
+    setStatus(`翻译失败：${error.message || String(error)}`, 'error');
+  }
+}
+
+function renderReaderText() {
+  const container = $('chunk-text');
+  container.innerHTML = '';
+  if (!state.chunkText) return;
+  const originals = splitParagraphs(state.chunkText);
+  const translations = splitParagraphs(state.translationText);
+  originals.forEach((original, index) => {
+    const block = document.createElement('section');
+    block.className = 'bilingual-block';
+    const originalNode = document.createElement('p');
+    originalNode.className = 'original-text';
+    originalNode.textContent = original;
+    const translationNode = document.createElement('p');
+    translationNode.className = `translation-text translation-${state.translationStatus}`;
+    translationNode.textContent = translationLineFor(index, translations);
+    block.append(originalNode, translationNode);
+    container.appendChild(block);
+  });
+  if (translations.length > originals.length) {
+    const extra = document.createElement('section');
+    extra.className = 'bilingual-block translation-extra';
+    const translationNode = document.createElement('p');
+    translationNode.className = 'translation-text translation-ready';
+    translationNode.textContent = translations.slice(originals.length).join('\n\n');
+    extra.appendChild(translationNode);
+    container.appendChild(extra);
+  }
+}
+
+function translationLineFor(index, translations) {
+  if (state.translationStatus === 'loading') return index === 0 ? '翻译中...' : '';
+  if (state.translationStatus === 'error') return index === 0 ? '翻译暂不可用，原文仍可阅读。' : '';
+  return translations[index] || '';
+}
+
+function splitParagraphs(text) {
+  return String(text || '').split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
 }
 
 function renderChunkMeta(chunk = {}) {
@@ -465,12 +538,22 @@ function captureSelection() {
   if (!quote) return;
   const range = selection.rangeCount ? selection.getRangeAt(0) : null;
   if (!range || !$('chunk-text').contains(range.commonAncestorContainer)) return;
+  if (!closestElement(range.commonAncestorContainer, 'original-text')) return;
   state.selectedQuote = quote.slice(0, 1200);
   state.selectedQuoteOffset = state.chunkText.indexOf(quote);
   if (state.selectedQuoteOffset < 0) state.selectedQuoteOffset = null;
   $('annotation-quote-preview').textContent = state.selectedQuote;
   $('annotation-composer').classList.remove('hidden');
   setView(window.matchMedia('(max-width: 760px)').matches ? 'annotations' : state.currentView);
+}
+
+function closestElement(node, className) {
+  let current = node?.nodeType === Node.ELEMENT_NODE ? node : node?.parentElement;
+  while (current) {
+    if (current.classList?.contains(className)) return current;
+    current = current.parentElement;
+  }
+  return null;
 }
 
 function clearComposer() {

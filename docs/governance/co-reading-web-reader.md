@@ -46,6 +46,9 @@ CO_READING_WEB_ACCESS_TOKEN=replace-me
 CO_READING_OWNER_TOKEN=replace-me-server-only
 CO_READING_ROOT_DIR=/opt/ran_agent/.ran_agent_state/co_reading
 CO_READING_NODE_BIN=/opt/nodejs/node-v22.22.2-linux-x64/bin/node
+CO_READING_TRANSLATION_ENABLED=true
+CO_READING_TRANSLATION_PROVIDER=hermes
+CO_READING_TRANSLATION_TARGET_LANG=zh-CN
 ```
 
 Phone or computer:
@@ -66,6 +69,9 @@ CO_READING_WEB_ACCESS_TOKEN=replace-me
 CO_READING_OWNER_TOKEN=replace-me-server-only
 CO_READING_ROOT_DIR=/opt/ran_agent/.ran_agent_state/co_reading
 CO_READING_NODE_BIN=/opt/nodejs/node-v22.22.2-linux-x64/bin/node
+CO_READING_TRANSLATION_ENABLED=true
+CO_READING_TRANSLATION_PROVIDER=hermes
+CO_READING_TRANSLATION_TARGET_LANG=zh-CN
 ```
 
 Then manually configure Tailscale Serve on the server, for example:
@@ -94,6 +100,8 @@ Reference:
 - Browser requests never call MCP directly.
 - Browser write actions are server-side wrappers. The server updates SQLite and
   chunk state without sending owner credentials to the browser.
+- Translation requests are server-side wrappers. Browser clients never receive
+  Hermes, DeepL, Google, or LibreTranslate credentials.
 - Private annotations are shown only in the authenticated owner Web UI. They are
   not sent to Hermes.
 - Only shared annotations can use `ask Hermes`.
@@ -141,6 +149,8 @@ Current UI:
   `search_hub` read. Social URLs reuse `social_reader`. The browser never
   calls MCP directly.
 - Open a book and display one chunk.
+- Bilingual reader rendering: original paragraph plus cached Chinese
+  translation below it.
 - Previous and next chunk.
 - Read and write browser progress.
 - Book search.
@@ -151,6 +161,14 @@ Current UI:
 - Store Hermes replies in `reading_threads` and show them in the margin.
 - Shelf actions for archive, restore, and soft-delete to trash. Trash keeps a
   retention expiry and can be restored before cleanup.
+
+Translation behavior:
+
+- Default provider is `hermes`.
+- Cache files are stored under `library/<book_id>/translations/*.txt.gz`.
+- Cache identity is `chunk_id + target language + provider + source hash`.
+- Translation cache storage is counted in `asset_bytes`.
+- The UI may briefly show `翻译中...` while a cache miss is being translated.
 
 Current non-goals:
 
@@ -210,14 +228,15 @@ Use a TXT or Markdown sample, plus one file or URL import smoke when available:
 4. Import pasted text, uploaded file, or URL.
 5. Confirm the new book appears in the shelf.
 6. Open the book.
-7. Move previous / next chunk.
-8. Confirm progress restores on reload.
-9. Search text and jump to the hit.
-10. Select text in the reader and confirm the annotation composer opens.
-11. Create a private annotation.
-12. Confirm the private card has no Hermes question box.
-13. Create a shared annotation.
-14. Ask Hermes inline on the shared annotation.
-15. Confirm loading state appears while sending.
-16. Confirm Hermes reply appears in the sidebar and persists after refresh.
-17. Confirm the private annotation is not sent through the Hermes request path.
+7. Confirm original text and Chinese translation both appear.
+8. Move previous / next chunk.
+9. Confirm progress restores on reload.
+10. Search text and jump to the hit.
+11. Select original text in the reader and confirm the annotation composer opens.
+12. Create a private annotation.
+13. Confirm the private card has no Hermes question box.
+14. Create a shared annotation.
+15. Ask Hermes inline on the shared annotation.
+16. Confirm loading state appears while sending.
+17. Confirm Hermes reply appears in the sidebar and persists after refresh.
+18. Confirm the private annotation is not sent through the Hermes request path.

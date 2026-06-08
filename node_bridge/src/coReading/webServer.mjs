@@ -11,6 +11,7 @@ import {
   BOOK_STATES,
   DEFAULT_TRASH_RETENTION_DAYS,
   createCoReadingStore,
+  hashText,
   readChunkText,
 } from './store.mjs';
 import { routeSearchHubRead } from '../searchHub/router.mjs';
@@ -19,6 +20,8 @@ import { handleSocialReaderMcpRequest } from '../socialReaderMcpServer.mjs';
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const PUBLIC_ROOT = path.join(PROJECT_ROOT, 'node_bridge/public/co-reading');
 const DEFAULT_HERMES_BASE_URL = 'http://127.0.0.1:8643/v1';
+const DEFAULT_TRANSLATION_PROVIDER = 'hermes';
+const DEFAULT_TRANSLATION_TARGET_LANG = 'zh-CN';
 const SOCIAL_URL_PATTERN = /https?:\/\/\S*(xhslink\.com|xiaohongshu\.com|xhs\.com|bilibili\.com|b23\.tv|mp\.weixin\.qq\.com|douyin\.com|kuaishou\.com|weibo\.com|zhihu\.com|music\.163\.com)/i;
 
 export function getCoReadingWebConfig(env = process.env) {
@@ -31,6 +34,9 @@ export function getCoReadingWebConfig(env = process.env) {
     rootDir: String(env.CO_READING_ROOT_DIR || path.join(PROJECT_ROOT, '.ran_agent_state/co_reading')).trim(),
     hermesBaseUrl: String(env.CO_READING_HERMES_API_BASE_URL || env.HERMES_FULL_API_BASE_URL || DEFAULT_HERMES_BASE_URL).trim().replace(/\/$/, ''),
     hermesApiKey: String(env.CO_READING_HERMES_API_KEY || env.HERMES_API_KEY || env.API_SERVER_KEY || '').trim(),
+    translationEnabled: String(env.CO_READING_TRANSLATION_ENABLED || 'true').trim().toLowerCase() !== 'false',
+    translationProvider: String(env.CO_READING_TRANSLATION_PROVIDER || DEFAULT_TRANSLATION_PROVIDER).trim().toLowerCase() || DEFAULT_TRANSLATION_PROVIDER,
+    translationTargetLang: String(env.CO_READING_TRANSLATION_TARGET_LANG || DEFAULT_TRANSLATION_TARGET_LANG).trim() || DEFAULT_TRANSLATION_TARGET_LANG,
   };
 }
 
@@ -175,6 +181,17 @@ async function routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl,
       return jsonResponse(200, { ok: true, chunks: store.listChunks(bookId) });
     }
     if (req.method === 'GET' && pathParts[2] === 'chunks' && pathParts[3]) {
+      if (pathParts[4] === 'translation') {
+        return await translateChunkForWeb({
+          store,
+          bookId,
+          chunkId: decodeURIComponent(pathParts[3]),
+          targetLang: url.searchParams.get('target') || config.translationTargetLang,
+          force: url.searchParams.get('force') === 'true',
+          config,
+          fetchImpl,
+        });
+      }
       return await readChunkForWeb(store, bookId, decodeURIComponent(pathParts[3]));
     }
     if (pathParts[2] === 'progress') {
@@ -337,6 +354,102 @@ async function readChunkForWeb(store, bookId, chunkId) {
     text: await readChunkText({ rootDir: store.rootDir }, chunk),
     annotations,
   });
+}
+
+async function translateChunkForWeb({ store, bookId, chunkId, targetLang, force = false, config, fetchImpl }) {
+  if (!config.translationEnabled) {
+    return jsonResponse(503, { ok: false, error: 'co_reading translation is disabled' });
+  }
+  const chunk = store.getChunk(bookId, chunkId);
+  if (!chunk) return jsonResponse(404, { ok: false, error: 'chunk not found' });
+  const text = await readChunkText({ rootDir: store.rootDir }, chunk);
+  const sourceHash = hashText(text);
+  const provider = normalizeTranslationProvider(config.translationProvider);
+  const lang = normalizeTargetLang(targetLang || config.translationTargetLang);
+  if (!force) {
+    const cached = await store.readTranslation({ chunkId, targetLang: lang, provider, sourceHash });
+    if (cached) {
+      return jsonResponse(200, { ok: true, cached: true, translation: translationPayload(cached) });
+    }
+  }
+  const translated = await translateText({ text, targetLang: lang, provider, config, fetchImpl });
+  const saved = await store.saveTranslation({
+    bookId,
+    chunkId,
+    targetLang: lang,
+    provider,
+    sourceHash,
+    text: translated,
+    actor: 'web',
+  });
+  return jsonResponse(200, { ok: true, cached: false, translation: translationPayload(saved) });
+}
+
+function normalizeTranslationProvider(provider) {
+  const value = String(provider || DEFAULT_TRANSLATION_PROVIDER).trim().toLowerCase();
+  return value || DEFAULT_TRANSLATION_PROVIDER;
+}
+
+function normalizeTargetLang(lang) {
+  const value = String(lang || DEFAULT_TRANSLATION_TARGET_LANG).trim();
+  return value || DEFAULT_TRANSLATION_TARGET_LANG;
+}
+
+function translationPayload(row = {}) {
+  return {
+    id: row.id,
+    book_id: row.book_id,
+    chunk_id: row.chunk_id,
+    target_lang: row.target_lang,
+    provider: row.provider,
+    source_hash: row.source_hash,
+    char_count: row.char_count,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+    text: row.text || '',
+  };
+}
+
+async function translateText({ text, targetLang, provider, config, fetchImpl }) {
+  if (provider !== 'hermes') {
+    throw new Error(`translation provider not implemented: ${provider}`);
+  }
+  if (typeof fetchImpl !== 'function') {
+    throw new Error('fetch unavailable for translation request');
+  }
+  const messages = [
+    {
+      role: 'system',
+      content: [
+        'You are a literary translation engine inside a private co_reading reader.',
+        `Translate the user source text into ${targetLang === 'zh-CN' ? 'natural Simplified Chinese' : targetLang}.`,
+        'Preserve paragraph breaks, names, titles, numbers, and Markdown-like structure when present.',
+        'Return only the translated text. Do not add explanations, summaries, headings, or notes.',
+        'If the source text is already Chinese, return it unchanged.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: String(text || ''),
+    },
+  ];
+  const response = await fetchImpl(`${config.hermesBaseUrl || DEFAULT_HERMES_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(config.hermesApiKey ? { Authorization: `Bearer ${config.hermesApiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model: 'ran-assistant',
+      messages,
+      temperature: 0.1,
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`translation request failed: HTTP ${response.status || 'unknown'}`);
+  }
+  const payload = await response.json();
+  return extractHermesText(payload);
 }
 
 async function askHermesForAnnotation({ store, annotationId, question, config, fetchImpl }) {

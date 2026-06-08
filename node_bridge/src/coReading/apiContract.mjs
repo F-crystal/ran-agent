@@ -28,6 +28,7 @@ export function buildCoReadingApiContract() {
       endpoint('POST', '/api/co-reading/import-url', 'Server-side URL import. Normal URLs reuse search_hub read; social URLs reuse social_reader. No browser MCP access.', 'web-token-write-wrapper'),
       endpoint('GET', '/api/co-reading/books/:book_id/chunks', 'List chunks for the reader.', 'web-token'),
       endpoint('GET', '/api/co-reading/books/:book_id/chunks/:chunk_id', 'Read one chunk plus owner-visible sidebar annotations. Text is read back from .txt.gz chunk files.', 'web-token'),
+      endpoint('GET', '/api/co-reading/books/:book_id/chunks/:chunk_id/translation', 'Read or generate cached Chinese translation for a chunk. Browser never receives provider credentials.', 'web-token'),
       endpoint('POST', '/api/co-reading/books/:book_id/archive', 'Server-side wrapper archives a book and writes reading_events. Browser never sends owner token.', 'web-token-write-wrapper'),
       endpoint('POST', '/api/co-reading/books/:book_id/restore', 'Server-side wrapper restores archived/trash books to active and writes reading_events.', 'web-token-write-wrapper'),
       endpoint('POST', '/api/co-reading/books/:book_id/trash', 'Server-side wrapper soft-deletes into trash. Requires confirm=true and writes retention metadata.', 'web-token-write-wrapper'),
@@ -55,6 +56,10 @@ export function buildCoReadingApiContract() {
         url: 'string',
         title: 'string optional',
         author: 'string optional',
+      },
+      chunk_translation: {
+        target: 'query string, default zh-CN',
+        provider: 'server env CO_READING_TRANSLATION_PROVIDER, default hermes',
       },
       import_book: {
         file_path: 'absolute server path or upload token resolved by the future HTTP layer',

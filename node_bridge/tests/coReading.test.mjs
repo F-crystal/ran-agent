@@ -104,6 +104,7 @@ test('co_reading initializes required SQLite tables and FTS metadata table', asy
         'reading_sections',
         'reading_sessions',
         'reading_storage_stats',
+        'reading_translations',
         'reading_threads',
       ].every((name) => tables.includes(name)),
       true
@@ -331,18 +332,30 @@ test('MCP tool names and Web reader API contract expose permission layers', asyn
   assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/import-paste'), true);
   assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/books/:book_id/archive'), true);
   assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/books/:book_id/trash'), true);
+  assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'GET' && endpoint.path === '/api/co-reading/books/:book_id/chunks/:chunk_id/translation'), true);
   assert.equal(contract.endpoints.some((endpoint) => endpoint.method === 'POST' && endpoint.path === '/api/co-reading/annotations/:annotation_id/ask-hermes'), true);
   assert.equal(contract.security.owner_only_writes, true);
 });
 
 test('co_reading Web API protects owner token and supports shelf import read progress search annotations', async () => {
   await withStore(async ({ root, store }) => {
+    const translationCalls = [];
     const app = createCoReadingWebApp({
       store,
       config: {
         accessToken: 'web-token',
         ownerToken: 'server-owner-secret',
         rootDir: root,
+      },
+      fetchImpl: async (url, request) => {
+        translationCalls.push({ url, body: JSON.parse(request.body) });
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: '第一段中文译文。\n\n第二段中文译文。' } }],
+          }),
+        };
       },
     });
 
@@ -401,6 +414,19 @@ test('co_reading Web API protects owner token and supports shelf import read pro
 
     const listed = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}`, { token: 'web-token' }));
     assert.equal(listed.body.annotations.some((item) => item.note === 'private margin note'), true);
+
+    const translated = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
+    assert.equal(translated.status, 200);
+    assert.equal(translated.body.cached, false);
+    assert.match(translated.body.translation.text, /中文译文/);
+    assert.equal(translationCalls.length, 1);
+    assert.doesNotMatch(JSON.stringify(translated.body), /server-owner-secret/);
+
+    const cachedTranslation = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
+    assert.equal(cachedTranslation.status, 200);
+    assert.equal(cachedTranslation.body.cached, true);
+    assert.equal(translationCalls.length, 1);
+    assert.equal(store.getStorageStats(bookId).asset_bytes > 0, true);
 
     const archived = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/archive`, { token: 'web-token' }));
     assert.equal(archived.status, 200);
