@@ -522,6 +522,49 @@ code {
   padding-top: 12px;
 }
 
+.annotation-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.annotation-toggle {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: center;
+  width: 100%;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+
+.annotation-toggle span {
+  color: var(--accent);
+  font-size: 12px;
+}
+
+.annotation-toggle b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.reply-count {
+  min-width: 28px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--muted);
+  padding: 3px 8px;
+  text-align: center;
+}
+
+.annotation-card.is-collapsed .annotation-body {
+  display: none;
+}
+
 .annotation-meta {
   display: flex;
   gap: 8px;
@@ -545,6 +588,11 @@ code {
   padding: 8px;
 }
 
+.reply-local {
+  border-style: dashed;
+  background: color-mix(in srgb, var(--quote-bg) 55%, transparent);
+}
+
 .reply time {
   float: right;
   color: var(--muted);
@@ -555,6 +603,12 @@ code {
   clear: both;
   margin: 6px 0 0;
   line-height: 1.45;
+}
+
+.reply small {
+  display: block;
+  color: var(--muted);
+  margin-top: 6px;
 }
 
 .hermes-box {

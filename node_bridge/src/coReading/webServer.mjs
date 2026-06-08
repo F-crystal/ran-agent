@@ -251,7 +251,7 @@ async function routeApi({ req, url, store, config, fetchImpl, searchHubReadImpl,
       store,
       annotationId,
       question: body.question || '',
-      recordUserQuestion: body.record_user_question === true,
+      recordUserQuestion: body.record_user_question === true || body.recordUserQuestion === true,
       config,
       fetchImpl,
     });

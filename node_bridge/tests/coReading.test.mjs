@@ -697,7 +697,7 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
 
     const asked = await app.handleRequest(req('POST', `/api/co-reading/annotations/${encodeURIComponent(sharedAnn.id)}/ask-hermes`, {
       token: 'web-token',
-      body: { question: '请回应这段。', record_user_question: true },
+      body: { question: '请回应这段。', recordUserQuestion: true },
     }));
     assert.equal(asked.status, 200);
     assert.equal(asked.body.user_reply.author, 'user');

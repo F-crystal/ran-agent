@@ -1,5 +1,6 @@
 const TOKEN_KEY = 'CO_READING_WEB_ACCESS_TOKEN';
 const VIEW_KEY = 'co_reading_current_view';
+const COLLAPSED_ANNOTATIONS_KEY = 'co_reading_collapsed_annotations';
 const DEVICE_ID = 'browser';
 const AUTO_HERMES_QUESTION = '请作为共读者，对这条 shared annotation 分享你的读后感、联想或提醒。回应要具体、简洁，不要只是复述批注。';
 
@@ -25,6 +26,8 @@ const state = {
   pendingTrashBookId: '',
   loadingHermes: new Set(),
   hermesErrors: new Map(),
+  collapsedAnnotations: loadCollapsedAnnotations(),
+  localThreadReplies: new Map(),
 };
 
 const $ = (id) => document.getElementById(id);
@@ -376,34 +379,106 @@ function renderAnnotations() {
   }
   for (const annotation of state.annotations) {
     const card = document.createElement('article');
-    card.className = 'annotation-card';
-    const replies = annotation.replies || [];
+    const collapsed = state.collapsedAnnotations.has(annotation.id);
+    card.className = `annotation-card ${collapsed ? 'is-collapsed' : ''}`;
+    const replies = renderableReplies(annotation);
     const error = state.hermesErrors.get(annotation.id);
     card.innerHTML = `
+      <header class="annotation-header">
+        <button class="annotation-toggle" type="button" aria-expanded="${collapsed ? 'false' : 'true'}">
+          <span>${collapsed ? '展开' : '折叠'}</span>
+          <b>${escapeHtml(annotation.note || annotation.quote || '批注')}</b>
+        </button>
+        <span class="reply-count">${replies.length}</span>
+      </header>
       <div class="annotation-meta">
         <span class="visibility ${escapeHtml(annotation.visibility)}">${escapeHtml(annotation.visibility)}</span>
         <span class="anchor-badge">${escapeHtml(anchorLabel(annotation))}</span>
         <time>${formatDate(annotation.created_at)}</time>
       </div>
-      <blockquote>${escapeHtml(annotation.quote || '')}</blockquote>
-      <p class="annotation-note">${escapeHtml(annotation.note || '（无批注正文）')}</p>
-      <div class="thread">
-        <div class="thread-title">thread / replies · ${replies.length}</div>
-        ${replies.map((reply) => `
-          <div class="reply">
+      <div class="annotation-body">
+        <blockquote>${escapeHtml(annotation.quote || '')}</blockquote>
+        <p class="annotation-note">${escapeHtml(annotation.note || '（无批注正文）')}</p>
+        <div class="thread">
+          <div class="thread-title">thread / replies · ${replies.length}</div>
+          ${replies.map((reply) => `
+          <div class="reply ${reply.local ? 'reply-local' : ''}">
             <b>${escapeHtml(reply.author || 'unknown')}</b>
             <time>${formatDate(reply.created_at)}</time>
             <p>${escapeHtml(reply.text || '')}</p>
+            ${reply.local ? '<small>本地待同步显示；若刷新后消失，请重启服务器 Node 服务。</small>' : ''}
           </div>
-        `).join('')}
+          `).join('')}
+        </div>
+        ${error ? `<div class="inline-error">${escapeHtml(error)}</div>` : ''}
       </div>
-      ${error ? `<div class="inline-error">${escapeHtml(error)}</div>` : ''}
     `;
-    if (annotation.visibility === 'shared') {
+    card.querySelector('.annotation-toggle').onclick = () => toggleAnnotation(annotation.id);
+    if (annotation.visibility === 'shared' && !collapsed) {
       card.appendChild(createHermesBox(annotation));
     }
     list.appendChild(card);
   }
+}
+
+function renderableReplies(annotation) {
+  const serverReplies = annotation.replies || [];
+  const serverKeys = new Set(serverReplies.map(replyKey));
+  const localReplies = state.localThreadReplies.get(annotation.id) || [];
+  return [
+    ...serverReplies,
+    ...localReplies.filter((reply) => !serverKeys.has(replyKey(reply))),
+  ];
+}
+
+function replyKey(reply = {}) {
+  return `${reply.author || ''}:${reply.text || ''}`;
+}
+
+function toggleAnnotation(annotationId) {
+  if (state.collapsedAnnotations.has(annotationId)) {
+    state.collapsedAnnotations.delete(annotationId);
+  } else {
+    state.collapsedAnnotations.add(annotationId);
+  }
+  saveCollapsedAnnotations();
+  renderAnnotations();
+}
+
+function loadCollapsedAnnotations() {
+  try {
+    const values = JSON.parse(sessionStorage.getItem(COLLAPSED_ANNOTATIONS_KEY) || '[]');
+    return new Set(Array.isArray(values) ? values.filter((item) => typeof item === 'string') : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function saveCollapsedAnnotations() {
+  sessionStorage.setItem(COLLAPSED_ANNOTATIONS_KEY, JSON.stringify([...state.collapsedAnnotations]));
+}
+
+function addLocalThreadReply(annotationId, text) {
+  const value = String(text || '').trim();
+  if (!value) return null;
+  const reply = {
+    id: `local-${Date.now()}`,
+    author: 'user',
+    text: value,
+    created_at: new Date().toISOString(),
+    local: true,
+  };
+  const replies = state.localThreadReplies.get(annotationId) || [];
+  state.localThreadReplies.set(annotationId, [...replies, reply]);
+  return reply.id;
+}
+
+function removeLocalThreadReply(annotationId, localId) {
+  if (!localId) return;
+  const replies = state.localThreadReplies.get(annotationId) || [];
+  const next = replies.filter((reply) => reply.id !== localId);
+  if (next.length) state.localThreadReplies.set(annotationId, next);
+  else state.localThreadReplies.delete(annotationId);
 }
 
 function createHermesBox(annotation) {
@@ -421,13 +496,19 @@ function createHermesBox(annotation) {
   button.disabled = loading;
   button.onclick = async () => {
     const question = input.value.trim();
+    const localReplyId = addLocalThreadReply(annotation.id, question);
     state.hermesErrors.delete(annotation.id);
     state.loadingHermes.add(annotation.id);
     renderAnnotations();
     try {
-      await askHermes(annotation.id, question, { recordUserQuestion: true });
+      const body = await askHermes(annotation.id, question, { recordUserQuestion: true });
+      if (body.user_reply?.id) {
+        removeLocalThreadReply(annotation.id, localReplyId);
+      } else if (question) {
+        setStatus('Hermes 已回复；服务器后端可能还未重启，追问暂以本地待同步显示', 'error');
+      }
       await openChunk(state.chunkId);
-      setStatus('Hermes 已回复', 'ok');
+      if (body.user_reply?.id || !question) setStatus('Hermes 已回复', 'ok');
     } catch (error) {
       state.hermesErrors.set(annotation.id, error.message || String(error));
       setStatus('Hermes 请求失败', 'error');

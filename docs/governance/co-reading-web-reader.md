@@ -164,6 +164,8 @@ Current UI:
   cards show whether the quote is anchored to original text or translated text.
 - Inline annotation composer; no core `prompt()` / `alert()` flow.
 - Sidebar annotations with thread replies.
+- Annotation cards can be collapsed and expanded from the sidebar. Collapsed
+  cards keep a compact title and reply count visible.
 - Shared annotations automatically ask Hermes for one co-reading response when
   saved.
 - Inline Hermes follow-up box on shared annotation cards.
@@ -257,7 +259,9 @@ Use a TXT or Markdown sample, plus one file or URL import smoke when available:
 18. Ask a follow-up inline on the shared annotation.
 19. Confirm the follow-up question appears as a user thread item and Hermes
     appears as the next thread item.
-20. Confirm the private annotation is not sent through the Hermes request path.
-21. Scroll the reader and confirm TOC/margin panels remain reachable on desktop.
-22. Scroll to the end of a long chunk and confirm the footer previous / next
+20. Collapse and expand the shared annotation card and confirm the reply count
+    remains visible when collapsed.
+21. Confirm the private annotation is not sent through the Hermes request path.
+22. Scroll the reader and confirm TOC/margin panels remain reachable on desktop.
+23. Scroll to the end of a long chunk and confirm the footer previous / next
     buttons work.
