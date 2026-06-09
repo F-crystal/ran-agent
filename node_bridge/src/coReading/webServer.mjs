@@ -385,16 +385,30 @@ async function translateChunkForWeb({ store, bookId, chunkId, targetLang, force 
   const lang = normalizeTargetLang(targetLang || config.translationTargetLang);
   if (!force) {
     const cached = await store.readTranslation({ chunkId, targetLang: lang, provider, sourceHash });
-    if (cached && !isLikelyBadTranslation({ sourceText: text, translatedText: cached.text, targetLang: lang })) {
-      return jsonResponse(200, { ok: true, cached: true, translation: translationPayload(cached) });
+    if (cached) {
+      const cachedJudgment = await judgeTranslationCandidate({ sourceText: text, translatedText: cached.text, targetLang: lang, config, fetchImpl });
+      if (cachedJudgment.valid) {
+        return jsonResponse(200, { ok: true, cached: true, translation: translationPayload(cached) });
+      }
     }
   }
-  let translated = await translateText({ text, targetLang: lang, provider, config, fetchImpl });
-  if (isLikelyBadTranslation({ sourceText: text, translatedText: translated, targetLang: lang })) {
-    translated = await translateText({ text, targetLang: lang, provider, config, fetchImpl, retry: true });
+  let translated = '';
+  let judgment = { valid: false, reason: 'translation has not been judged yet' };
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    translated = await translateText({
+      text,
+      targetLang: lang,
+      provider,
+      config,
+      fetchImpl,
+      retry: attempt > 0,
+      rejectionReason: judgment.reason,
+    });
+    judgment = await judgeTranslationCandidate({ sourceText: text, translatedText: translated, targetLang: lang, config, fetchImpl });
+    if (judgment.valid) break;
   }
-  if (isLikelyBadTranslation({ sourceText: text, translatedText: translated, targetLang: lang })) {
-    return jsonResponse(502, { ok: false, error: 'translation output looked like untranslated source text; retry refresh later' });
+  if (!judgment.valid) {
+    return jsonResponse(502, { ok: false, error: `translation judge rejected output: ${judgment.reason || 'not a faithful translation'}` });
   }
   const saved = await store.saveTranslation({
     bookId,
@@ -433,7 +447,7 @@ function translationPayload(row = {}) {
   };
 }
 
-async function translateText({ text, targetLang, provider, config, fetchImpl, retry = false }) {
+async function translateText({ text, targetLang, provider, config, fetchImpl, retry = false, rejectionReason = '' }) {
   if (provider !== 'hermes') {
     throw new Error(`translation provider not implemented: ${provider}`);
   }
@@ -450,7 +464,7 @@ async function translateText({ text, targetLang, provider, config, fetchImpl, re
         'Translate every source paragraph directly, preserving paragraph breaks, names, titles, numbers, and Markdown-like structure when present.',
         'Return only the translated body text. Do not add explanations, summaries, headings, notes, reactions, literary commentary, or co-reading opinions.',
         'If the source text is already Chinese, return it unchanged.',
-        retry ? 'The previous attempt was rejected because it looked like untranslated text or commentary. Return direct Simplified Chinese translation only.' : '',
+        retry ? `The previous attempt was rejected by a translation judge: ${rejectionReason || 'not a faithful direct translation'}. Return direct Simplified Chinese translation only.` : '',
       ].join('\n'),
     },
     {
@@ -477,43 +491,66 @@ async function translateText({ text, targetLang, provider, config, fetchImpl, re
   return extractHermesText(payload);
 }
 
-function isLikelyBadTranslation({ sourceText, translatedText, targetLang }) {
-  const target = String(targetLang || '').toLowerCase();
-  if (!target.startsWith('zh')) return false;
-  const source = String(sourceText || '').trim();
-  const translated = String(translatedText || '').trim();
-  if (!translated) return true;
-  const sourceCjk = countCjk(source);
-  const sourceLatin = countLatin(source);
-  if (sourceCjk >= Math.max(8, sourceLatin * 0.2)) return false;
-  if (sourceLatin < 40) return false;
-  const translatedCjk = countCjk(translated);
-  if (translatedCjk < 4) return true;
-  if (looksLikeTranslationCommentary({ sourceText: source, translatedText: translated })) return true;
-  const sourceNorm = normalizeForSimilarity(source);
-  const translatedNorm = normalizeForSimilarity(translated);
-  if (sourceNorm.length >= 80 && sourceNorm === translatedNorm) return true;
-  return false;
+async function judgeTranslationCandidate({ sourceText, translatedText, targetLang, config, fetchImpl }) {
+  if (typeof fetchImpl !== 'function') {
+    return { valid: false, reason: 'fetch unavailable for translation judge' };
+  }
+  const candidate = String(translatedText || '').trim();
+  if (!candidate) return { valid: false, reason: 'candidate is empty' };
+  const messages = [
+    {
+      role: 'system',
+      content: [
+        'You are a strict translation QA judge for a private co_reading reader.',
+        `Target language: ${targetLang === 'zh-CN' ? 'Simplified Chinese' : targetLang}.`,
+        'Decide whether the candidate is a direct, faithful translation of the source text.',
+        'Reject if the candidate is a summary, explanation, literary analysis, co-reading reaction, assistant persona reply, continuation, or untranslated source copy.',
+        'Accept natural localization and minor phrasing changes if the source meaning is preserved.',
+        'Return only compact JSON: {"valid":true|false,"reason":"short reason"}.',
+      ].join('\n'),
+    },
+    {
+      role: 'user',
+      content: [
+        'SOURCE:',
+        String(sourceText || ''),
+        '',
+        'CANDIDATE:',
+        candidate,
+      ].join('\n'),
+    },
+  ];
+  const response = await fetchImpl(`${config.hermesBaseUrl || DEFAULT_HERMES_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(config.hermesApiKey ? { Authorization: `Bearer ${config.hermesApiKey}` } : {}),
+    },
+    body: JSON.stringify({
+      model: 'ran-assistant',
+      messages,
+      temperature: 0,
+    }),
+  });
+  if (!response.ok) {
+    return { valid: false, reason: `judge request failed: HTTP ${response.status || 'unknown'}` };
+  }
+  const payload = await response.json();
+  return parseTranslationJudgment(extractHermesText(payload));
 }
 
-function looksLikeTranslationCommentary({ sourceText, translatedText }) {
-  const source = String(sourceText || '');
-  const translated = String(translatedText || '');
-  const commentaryPattern = /(Hermes|共读|读后感|点评|总结|可以从中看出|体现了|这段(?:文字|内容|话|文本)|作者(?:在|通过|想))/i;
-  if (!commentaryPattern.test(translated)) return false;
-  return !commentaryPattern.test(source);
-}
-
-function countCjk(text) {
-  return (String(text || '').match(/[\u3400-\u9fff]/g) || []).length;
-}
-
-function countLatin(text) {
-  return (String(text || '').match(/[A-Za-z]/g) || []).length;
-}
-
-function normalizeForSimilarity(text) {
-  return String(text || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+function parseTranslationJudgment(text) {
+  const raw = String(text || '').trim();
+  const jsonText = raw.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();
+  try {
+    const parsed = JSON.parse(jsonText);
+    return {
+      valid: parsed.valid === true,
+      reason: String(parsed.reason || (parsed.valid === true ? 'accepted' : 'rejected')).slice(0, 240),
+    };
+  } catch {
+    return { valid: false, reason: 'judge returned non-JSON response' };
+  }
 }
 
 async function askHermesForAnnotation({ store, annotationId, question, recordUserQuestion = false, config, fetchImpl }) {

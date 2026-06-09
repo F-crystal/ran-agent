@@ -146,8 +146,10 @@ paragraph.
 - Cache key is `chunk_id + target_lang + provider + source_hash`.
 - If the chunk text changes, `source_hash` changes and the old translation is
   not reused.
-- Translation calls are translation-only. Commentary, summaries, or source-text
-  copies are treated as bad translation output and retried before cache write.
+- Translation calls are translation-only. Cached or newly generated candidates
+  must pass a model-based translation QA judgment before cache write; commentary,
+  summaries, persona replies, co-reading reactions, or source-text copies are
+  rejected and retried.
 - Translations are not inserted into FTS and are not used as Hermes private
   context unless separately surfaced by a future explicit tool.
 - Users may annotate original or translated text. Shared translated annotations

@@ -174,8 +174,9 @@ Current UI:
 - Manual translation refresh regenerates the current chunk with
   `force=true` and overwrites the translation cache.
 - Translation requests are strict translation-only calls. If Hermes returns a
-  co-reading comment, summary, or untranslated source copy, the server rejects
-  it and retries before writing the translation cache.
+  co-reading comment, summary, or untranslated source copy, a separate strict
+  translation QA judge rejects it and the server retries before writing the
+  translation cache.
 - Previous and next chunk.
 - Read and write browser progress.
 - Book search.
@@ -207,9 +208,9 @@ Translation behavior:
 - Cache identity is `chunk_id + target language + provider + source hash`.
 - Translation cache storage is counted in `asset_bytes`.
 - The UI may briefly show `翻译中...` while a cache miss is being translated.
-- For Chinese targets, cached or newly generated output that looks like
-  untranslated English source text, commentary, or summary is rejected and not
-  treated as valid translation.
+- Cached or newly generated output must pass a model-based translation QA
+  judgment before it is treated as valid. The judge rejects untranslated source
+  copies, commentary, summaries, persona replies, and co-reading reactions.
 - Desktop table-of-contents and margin panels are sticky within the viewport.
   The current chunk is scrolled into view automatically when the reader moves.
 

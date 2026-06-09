@@ -358,12 +358,14 @@ test('co_reading Web API protects owner token and supports shelf import read pro
         rootDir: root,
       },
       fetchImpl: async (url, request) => {
-        translationCalls.push({ url, body: JSON.parse(request.body) });
+        const body = JSON.parse(request.body);
+        translationCalls.push({ url, body });
+        const isJudge = /translation QA judge/i.test(body.messages?.[0]?.content || '');
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            choices: [{ message: { content: '第一段中文译文。\n\n第二段中文译文。' } }],
+            choices: [{ message: { content: isJudge ? '{"valid":true,"reason":"direct translation"}' : '第一段中文译文。\n\n第二段中文译文。' } }],
           }),
         };
       },
@@ -446,19 +448,19 @@ test('co_reading Web API protects owner token and supports shelf import read pro
     assert.equal(translated.status, 200);
     assert.equal(translated.body.cached, false);
     assert.match(translated.body.translation.text, /中文译文/);
-    assert.equal(translationCalls.length, 1);
+    assert.equal(translationCalls.length, 2);
     assert.doesNotMatch(JSON.stringify(translated.body), /server-owner-secret/);
 
     const cachedTranslation = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
     assert.equal(cachedTranslation.status, 200);
     assert.equal(cachedTranslation.body.cached, true);
-    assert.equal(translationCalls.length, 1);
+    assert.equal(translationCalls.length, 3);
     assert.equal(store.getStorageStats(bookId).asset_bytes > 0, true);
 
     const refreshedTranslation = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN&force=true`, { token: 'web-token' }));
     assert.equal(refreshedTranslation.status, 200);
     assert.equal(refreshedTranslation.body.cached, false);
-    assert.equal(translationCalls.length, 2);
+    assert.equal(translationCalls.length, 5);
 
     const archived = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/archive`, { token: 'web-token' }));
     assert.equal(archived.status, 200);
@@ -516,12 +518,19 @@ test('co_reading Web translation skips cached untranslated English output', asyn
         rootDir: root,
       },
       fetchImpl: async (url, request) => {
-        translationCalls.push({ url, body: JSON.parse(request.body) });
+        const body = JSON.parse(request.body);
+        translationCalls.push({ url, body });
+        const isJudge = /translation QA judge/i.test(body.messages?.[0]?.content || '');
+        const content = isJudge
+          ? (translationCalls.length === 1
+            ? '{"valid":false,"reason":"candidate copies the English source"}'
+            : '{"valid":true,"reason":"candidate is a direct translation"}')
+          : '莱姆斯看了小天狼星一眼，半是恼火，半是好笑，然后又低头看书。';
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            choices: [{ message: { content: '莱姆斯看了小天狼星一眼，半是恼火，半是好笑，然后又低头看书。' } }],
+            choices: [{ message: { content } }],
           }),
         };
       },
@@ -531,11 +540,14 @@ test('co_reading Web translation skips cached untranslated English output', asyn
     assert.equal(translated.status, 200);
     assert.equal(translated.body.cached, false);
     assert.match(translated.body.translation.text, /莱姆斯/);
-    assert.equal(translationCalls.length, 1);
+    assert.equal(translationCalls.length, 3);
+    assert.match(translationCalls[0].body.messages[0].content, /translation QA judge/i);
+    assert.doesNotMatch(translationCalls[1].body.messages[0].content, /translation QA judge/i);
+    assert.match(translationCalls[2].body.messages[0].content, /translation QA judge/i);
   });
 });
 
-test('co_reading Web translation retries Hermes commentary and stores only translation text', async () => {
+test('co_reading Web translation uses model judge to reject co-reading commentary and stores only translation text', async () => {
   await withStore(async ({ root, store }) => {
     const source = 'Remus looked at Sirius and lowered his voice. The corridor was quiet, but the old fear had not disappeared.';
     const imported = await callTool(
@@ -556,10 +568,16 @@ test('co_reading Web translation retries Hermes commentary and stores only trans
         hermesApiKey: 'api-key',
       },
       fetchImpl: async (url, options) => {
-        calls.push(JSON.parse(options.body));
-        const content = calls.length === 1
-          ? '这段文字体现了两个人之间压抑的关系，Hermes 可以从中看出旧日恐惧仍在影响他们。'
-          : '莱姆斯看着小天狼星，压低了声音。走廊很安静，但旧日的恐惧并没有消失。';
+        const body = JSON.parse(options.body);
+        calls.push(body);
+        const isJudge = /translation QA judge/i.test(body.messages?.[0]?.content || '');
+        const content = isJudge
+          ? (calls.length === 2
+            ? '{"valid":false,"reason":"candidate is a co-reading reaction, not a translation"}'
+            : '{"valid":true,"reason":"candidate is a direct Simplified Chinese translation"}')
+          : (calls.length === 1
+            ? '臣读完了——这个改写太有趣了。Sirius全程暴躁，Remus咬着牙附和，俩人一起对Dumbledore的策略表示强烈不满，效果拉满。'
+            : '莱姆斯看着小天狼星，压低了声音。走廊很安静，但旧日的恐惧并没有消失。');
         return {
           ok: true,
           status: 200,
@@ -571,9 +589,14 @@ test('co_reading Web translation retries Hermes commentary and stores only trans
     const translated = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
 
     assert.equal(translated.status, 200);
-    assert.equal(calls.length, 2);
+    assert.equal(calls.length, 4);
+    assert.doesNotMatch(calls[0].messages[0].content, /translation QA judge/i);
+    assert.match(calls[1].messages[0].content, /translation QA judge/i);
+    assert.doesNotMatch(calls[2].messages[0].content, /translation QA judge/i);
+    assert.match(calls[3].messages[0].content, /translation QA judge/i);
+    assert.match(calls[2].messages[0].content, /co-reading reaction, not a translation/);
     assert.match(translated.body.translation.text, /莱姆斯看着小天狼星/);
-    assert.doesNotMatch(translated.body.translation.text, /Hermes|体现了|可以从中看出/);
+    assert.doesNotMatch(translated.body.translation.text, /臣读完了|改写太有趣了|效果拉满/);
   });
 });
 
