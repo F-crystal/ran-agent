@@ -19,6 +19,7 @@ const state = {
   translationStatus: 'idle',
   translationCached: false,
   translationRequestId: '',
+  translationCache: new Map(),
   selectedQuote: '',
   selectedQuoteOffset: null,
   selectedAnchorKind: 'original',
@@ -259,12 +260,22 @@ async function openChunk(chunkId) {
 
 async function loadTranslation(chunkId, options = {}) {
   if (!state.bookId || !chunkId) return;
+  const cacheKey = translationCacheKey(state.bookId, chunkId, 'zh-CN');
   const requestId = `${state.bookId}:${chunkId}:${Date.now()}`;
   state.translationRequestId = requestId;
   state.translationStatus = 'loading';
   if (options.force === true) {
     state.translationText = '';
     state.translationCached = false;
+    state.translationCache.delete(cacheKey);
+  } else {
+    const cached = state.translationCache.get(cacheKey);
+    if (cached?.text) {
+      state.translationText = cached.text;
+      state.translationCached = true;
+      state.translationStatus = 'ready';
+      renderReaderText();
+    }
   }
   renderReaderText();
   try {
@@ -274,6 +285,9 @@ async function loadTranslation(chunkId, options = {}) {
     state.translationText = body.translation?.text || '';
     state.translationCached = body.cached === true;
     state.translationStatus = state.translationText ? 'ready' : 'error';
+    if (state.translationText) {
+      state.translationCache.set(cacheKey, { text: state.translationText, cached: state.translationCached });
+    }
     renderReaderText();
     if (options.force === true) setStatus('翻译已刷新', 'ok');
   } catch (error) {
@@ -283,6 +297,10 @@ async function loadTranslation(chunkId, options = {}) {
     renderReaderText();
     setStatus(`翻译失败：${error.message || String(error)}`, 'error');
   }
+}
+
+function translationCacheKey(bookId, chunkId, targetLang) {
+  return `${bookId}:${chunkId}:${targetLang}`;
 }
 
 async function refreshTranslation() {

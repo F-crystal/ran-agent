@@ -386,9 +386,14 @@ async function translateChunkForWeb({ store, bookId, chunkId, targetLang, force 
   if (!force) {
     const cached = await store.readTranslation({ chunkId, targetLang: lang, provider, sourceHash });
     if (cached) {
+      if (cached.qa_validated_at) {
+        return jsonResponse(200, { ok: true, cached: true, translation: translationPayload(cached) });
+      }
       const cachedJudgment = await judgeTranslationCandidate({ sourceText: text, translatedText: cached.text, targetLang: lang, config, fetchImpl });
       if (cachedJudgment.valid) {
-        return jsonResponse(200, { ok: true, cached: true, translation: translationPayload(cached) });
+        store.markTranslationValidated({ translationId: cached.id, actor: 'web' });
+        const validated = await store.readTranslation({ chunkId, targetLang: lang, provider, sourceHash });
+        return jsonResponse(200, { ok: true, cached: true, translation: translationPayload(validated) });
       }
     }
   }

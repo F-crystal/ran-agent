@@ -211,6 +211,9 @@ Translation behavior:
 - Cached or newly generated output must pass a model-based translation QA
   judgment before it is treated as valid. The judge rejects untranslated source
   copies, commentary, summaries, persona replies, and co-reading reactions.
+- Translation cache rows written after QA carry a validation marker and are
+  served directly on later reads. Older unmarked cache rows are judged once; if
+  rejected, the server regenerates and overwrites the cache.
 - Desktop table-of-contents and margin panels are sticky within the viewport.
   The current chunk is scrolled into view automatically when the reader moves.
 

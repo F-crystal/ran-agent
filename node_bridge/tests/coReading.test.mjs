@@ -344,6 +344,8 @@ test('co_reading Web static UI keeps mobile annotation composer in reader view',
 
   assert.doesNotMatch(appJs, /setView\(window\.matchMedia\('\(max-width: 760px\)'\)\.matches \? 'annotations'/);
   assert.match(appJs, /composer-open/);
+  assert.match(appJs, /translationCache: new Map/);
+  assert.match(appJs, /translationCacheKey/);
   assert.match(css, /\.layout\[data-view="reader"\]\.composer-open \.annotations-panel/);
 });
 
@@ -454,13 +456,13 @@ test('co_reading Web API protects owner token and supports shelf import read pro
     const cachedTranslation = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
     assert.equal(cachedTranslation.status, 200);
     assert.equal(cachedTranslation.body.cached, true);
-    assert.equal(translationCalls.length, 3);
+    assert.equal(translationCalls.length, 2);
     assert.equal(store.getStorageStats(bookId).asset_bytes > 0, true);
 
     const refreshedTranslation = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN&force=true`, { token: 'web-token' }));
     assert.equal(refreshedTranslation.status, 200);
     assert.equal(refreshedTranslation.body.cached, false);
-    assert.equal(translationCalls.length, 5);
+    assert.equal(translationCalls.length, 4);
 
     const archived = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/archive`, { token: 'web-token' }));
     assert.equal(archived.status, 200);
@@ -509,6 +511,7 @@ test('co_reading Web translation skips cached untranslated English output', asyn
       sourceHash: hashText(source),
       text: source,
     });
+    store.db.prepare('UPDATE reading_translations SET qa_validated_at = NULL WHERE chunk_id = ?').run(chunkId);
     const translationCalls = [];
     const app = createCoReadingWebApp({
       store,

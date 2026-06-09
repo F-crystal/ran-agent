@@ -150,6 +150,9 @@ paragraph.
   must pass a model-based translation QA judgment before cache write; commentary,
   summaries, persona replies, co-reading reactions, or source-text copies are
   rejected and retried.
+- Validated translation rows carry `qa_validated_at` and are served directly on
+  later reads. Older unmarked cache rows are judged once and overwritten if the
+  judge rejects them.
 - Translations are not inserted into FTS and are not used as Hermes private
   context unless separately surfaced by a future explicit tool.
 - Users may annotate original or translated text. Shared translated annotations

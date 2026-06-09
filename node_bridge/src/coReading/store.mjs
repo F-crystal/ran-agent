@@ -141,6 +141,7 @@ const SCHEMA = [
     source_hash TEXT NOT NULL,
     path TEXT NOT NULL,
     char_count INTEGER NOT NULL DEFAULT 0,
+    qa_validated_at TEXT,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     UNIQUE(chunk_id, target_lang, provider, source_hash),
@@ -237,6 +238,10 @@ export class CoReadingStore {
     }
     if (!annotationColumns.has('anchor_lang')) {
       this.db.exec("ALTER TABLE reading_annotations ADD COLUMN anchor_lang TEXT NOT NULL DEFAULT 'source'");
+    }
+    const translationColumns = new Set(this.db.prepare('PRAGMA table_info(reading_translations)').all().map((row) => row.name));
+    if (!translationColumns.has('qa_validated_at')) {
+      this.db.exec('ALTER TABLE reading_translations ADD COLUMN qa_validated_at TEXT');
     }
   }
 
@@ -483,14 +488,25 @@ export class CoReadingStore {
     const relPath = relativeTranslationPath(bookId, chunkId, targetLang, provider, sourceHash);
     await writeGzipText({ rootDir: this.rootDir }, relPath, translationText);
     this.db.prepare(`
-      INSERT INTO reading_translations (id, book_id, chunk_id, target_lang, provider, source_hash, path, char_count, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO reading_translations (id, book_id, chunk_id, target_lang, provider, source_hash, path, char_count, qa_validated_at, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(chunk_id, target_lang, provider, source_hash)
-      DO UPDATE SET path = excluded.path, char_count = excluded.char_count, updated_at = excluded.updated_at
-    `).run(id('translation'), bookId, chunkId, targetLang, provider, sourceHash, relPath, translationText.length, at, at);
+      DO UPDATE SET path = excluded.path, char_count = excluded.char_count, qa_validated_at = excluded.qa_validated_at, updated_at = excluded.updated_at
+    `).run(id('translation'), bookId, chunkId, targetLang, provider, sourceHash, relPath, translationText.length, at, at, at);
     this.recordEvent({ bookId, eventType: 'chunk_translated', actor, payload: { chunk_id: chunkId, target_lang: targetLang, provider, source_hash: sourceHash } });
     await this.refreshStorageStats(bookId);
     return await this.readTranslation({ chunkId, targetLang, provider, sourceHash });
+  }
+
+  markTranslationValidated({ translationId, actor = 'web' }) {
+    this.open();
+    const at = nowIso();
+    this.db.prepare('UPDATE reading_translations SET qa_validated_at = ?, updated_at = ? WHERE id = ?').run(at, at, translationId);
+    const row = rowToObject(this.db.prepare('SELECT * FROM reading_translations WHERE id = ?').get(translationId));
+    if (row) {
+      this.recordEvent({ bookId: row.book_id, eventType: 'translation_validated', actor, payload: { translation_id: translationId, chunk_id: row.chunk_id, target_lang: row.target_lang, provider: row.provider } });
+    }
+    return row;
   }
 
   async setBookState({ bookId, state, actor = 'owner', trashRetentionDays = DEFAULT_TRASH_RETENTION_DAYS }) {
