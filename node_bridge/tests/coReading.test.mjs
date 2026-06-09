@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 import { buildCoReadingApiContract } from '../src/coReading/apiContract.mjs';
 import {
@@ -17,6 +18,8 @@ import {
   readChunkText,
 } from '../src/coReading/store.mjs';
 import { createCoReadingWebApp, getCoReadingWebConfig } from '../src/coReading/webServer.mjs';
+
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
 async function tempRoot() {
   return await mkdtemp(path.join(os.tmpdir(), 'co-reading-'));
@@ -339,14 +342,28 @@ test('MCP tool names and Web reader API contract expose permission layers', asyn
 });
 
 test('co_reading Web static UI keeps mobile annotation composer in reader view', async () => {
-  const appJs = await readFile(path.resolve('node_bridge/public/co-reading/app.js'), 'utf8');
-  const css = await readFile(path.resolve('node_bridge/public/co-reading/style.css'), 'utf8');
+  const appJs = await readFile(path.join(REPO_ROOT, 'node_bridge/public/co-reading/app.js'), 'utf8');
+  const css = await readFile(path.join(REPO_ROOT, 'node_bridge/public/co-reading/style.css'), 'utf8');
 
   assert.doesNotMatch(appJs, /setView\(window\.matchMedia\('\(max-width: 760px\)'\)\.matches \? 'annotations'/);
   assert.match(appJs, /composer-open/);
   assert.match(appJs, /translationCache: new Map/);
   assert.match(appJs, /translationCacheKey/);
   assert.match(css, /\.layout\[data-view="reader"\]\.composer-open \.annotations-panel/);
+});
+
+test('co_reading Web static UI supports mobile selection and annotation quote focus', async () => {
+  const appJs = await readFile(path.join(REPO_ROOT, 'node_bridge/public/co-reading/app.js'), 'utf8');
+  const css = await readFile(path.join(REPO_ROOT, 'node_bridge/public/co-reading/style.css'), 'utf8');
+
+  assert.match(appJs, /scheduleSelectionCapture/);
+  assert.match(appJs, /selectionchange/);
+  assert.match(appJs, /touchend/);
+  assert.match(appJs, /activeAnnotationId/);
+  assert.match(appJs, /focusAnnotationQuote/);
+  assert.match(appJs, /annotation-highlight/);
+  assert.match(css, /\.annotation-highlight/);
+  assert.match(css, /\.annotation-card\.is-active/);
 });
 
 test('co_reading Web API protects owner token and supports shelf import read progress search annotations', async () => {

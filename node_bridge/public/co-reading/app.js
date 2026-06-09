@@ -30,6 +30,8 @@ const state = {
   hermesErrors: new Map(),
   collapsedAnnotations: loadCollapsedAnnotations(),
   localThreadReplies: new Map(),
+  activeAnnotationId: '',
+  selectionCaptureTimer: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -192,6 +194,7 @@ function clearCurrentBook() {
   state.translationCached = false;
   state.translationRequestId = '';
   state.chunkText = '';
+  state.activeAnnotationId = '';
   $('chunk-title').textContent = '未打开书籍';
   $('chunk-text').textContent = '';
   $('reader-subtitle').textContent = '私人共读阅读器';
@@ -238,6 +241,7 @@ async function openBook(bookId) {
 
 async function openChunk(chunkId) {
   if (!state.bookId || !chunkId) return;
+  if (state.chunkId && state.chunkId !== chunkId) state.activeAnnotationId = '';
   state.chunkId = chunkId;
   clearComposer();
   state.translationText = '';
@@ -312,17 +316,18 @@ function renderReaderText() {
   const container = $('chunk-text');
   container.innerHTML = '';
   if (!state.chunkText) return;
-  const originals = splitParagraphs(state.chunkText);
-  const translations = splitParagraphs(state.translationText);
+  const originals = splitParagraphsWithOffsets(state.chunkText);
+  const translations = splitParagraphsWithOffsets(state.translationText);
+  const activeAnnotation = currentActiveAnnotation();
   originals.forEach((original, index) => {
     const block = document.createElement('section');
     block.className = 'bilingual-block';
     const originalNode = document.createElement('p');
     originalNode.className = 'original-text';
-    originalNode.textContent = original;
+    renderTextWithAnnotation(originalNode, original, activeAnnotation, 'original');
     const translationNode = document.createElement('p');
     translationNode.className = `translation-text translation-${state.translationStatus}`;
-    translationNode.textContent = translationLineFor(index, translations);
+    renderTextWithAnnotation(translationNode, translationLineFor(index, translations), activeAnnotation, 'translation');
     block.append(originalNode, translationNode);
     container.appendChild(block);
   });
@@ -331,20 +336,80 @@ function renderReaderText() {
     extra.className = 'bilingual-block translation-extra';
     const translationNode = document.createElement('p');
     translationNode.className = 'translation-text translation-ready';
-    translationNode.textContent = translations.slice(originals.length).join('\n\n');
+    renderTextWithAnnotation(
+      translationNode,
+      {
+        text: translations.slice(originals.length).map((paragraph) => paragraph.text).join('\n\n'),
+        offset: translations[originals.length]?.offset ?? null,
+      },
+      activeAnnotation,
+      'translation'
+    );
     extra.appendChild(translationNode);
     container.appendChild(extra);
   }
 }
 
 function translationLineFor(index, translations) {
-  if (state.translationStatus === 'loading') return index === 0 ? '翻译中...' : '';
-  if (state.translationStatus === 'error') return index === 0 ? '翻译暂不可用，原文仍可阅读。' : '';
-  return translations[index] || '';
+  if (state.translationStatus === 'loading') return { text: index === 0 ? '翻译中...' : '', offset: null };
+  if (state.translationStatus === 'error') return { text: index === 0 ? '翻译暂不可用，原文仍可阅读。' : '', offset: null };
+  return translations[index] || { text: '', offset: null };
 }
 
-function splitParagraphs(text) {
-  return String(text || '').split(/\n{2,}/).map((part) => part.trim()).filter(Boolean);
+function splitParagraphsWithOffsets(text) {
+  const source = String(text || '');
+  const paragraphs = [];
+  const regex = /\S[\s\S]*?(?=\n{2,}|$)/g;
+  for (const match of source.matchAll(regex)) {
+    const raw = match[0];
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const leading = raw.search(/\S/);
+    paragraphs.push({ text: trimmed, offset: match.index + (leading < 0 ? 0 : leading) });
+  }
+  return paragraphs;
+}
+
+function currentActiveAnnotation() {
+  if (!state.activeAnnotationId) return null;
+  return state.annotations.find((annotation) => annotation.id === state.activeAnnotationId) || null;
+}
+
+function renderTextWithAnnotation(node, paragraph, annotation, anchorKind) {
+  const text = typeof paragraph === 'string' ? paragraph : paragraph?.text || '';
+  const paragraphOffset = typeof paragraph?.offset === 'number' ? paragraph.offset : null;
+  const highlight = annotationHighlightRange(text, paragraphOffset, annotation, anchorKind);
+  if (!highlight) {
+    node.textContent = text;
+    return;
+  }
+  node.append(
+    document.createTextNode(text.slice(0, highlight.start)),
+    createAnnotationHighlight(text.slice(highlight.start, highlight.end)),
+    document.createTextNode(text.slice(highlight.end))
+  );
+}
+
+function annotationHighlightRange(text, paragraphOffset, annotation, anchorKind) {
+  const quote = String(annotation?.quote || '').trim();
+  if (!quote || annotation?.anchor_kind !== anchorKind) return null;
+  const start = text.indexOf(quote);
+  if (start < 0) return null;
+  const quoteOffset = Number.isInteger(annotation.quote_offset) ? annotation.quote_offset : null;
+  if (quoteOffset !== null && paragraphOffset !== null) {
+    const localOffset = quoteOffset - paragraphOffset;
+    if (localOffset >= 0 && localOffset + quote.length <= text.length && text.slice(localOffset, localOffset + quote.length) === quote) {
+      return { start: localOffset, end: localOffset + quote.length };
+    }
+  }
+  return { start, end: start + quote.length };
+}
+
+function createAnnotationHighlight(text) {
+  const mark = document.createElement('mark');
+  mark.className = 'annotation-highlight';
+  mark.textContent = text;
+  return mark;
 }
 
 function renderChunkMeta(chunk = {}) {
@@ -399,7 +464,7 @@ function renderAnnotations() {
   for (const annotation of state.annotations) {
     const card = document.createElement('article');
     const collapsed = state.collapsedAnnotations.has(annotation.id);
-    card.className = `annotation-card ${collapsed ? 'is-collapsed' : ''}`;
+    card.className = `annotation-card ${collapsed ? 'is-collapsed' : ''} ${state.activeAnnotationId === annotation.id ? 'is-active' : ''}`;
     const replies = renderableReplies(annotation);
     const error = state.hermesErrors.get(annotation.id);
     card.innerHTML = `
@@ -433,6 +498,10 @@ function renderAnnotations() {
       </div>
     `;
     card.querySelector('.annotation-toggle').onclick = () => toggleAnnotation(annotation.id);
+    card.querySelector('.annotation-body')?.addEventListener('click', (event) => {
+      if (event.target.closest('button, textarea, input, select, a')) return;
+      focusAnnotationQuote(annotation);
+    });
     if (annotation.visibility === 'shared' && !collapsed) {
       const actions = document.createElement('div');
       actions.className = 'annotation-actions';
@@ -492,6 +561,17 @@ function toggleAnnotation(annotationId) {
   }
   saveCollapsedAnnotations();
   renderAnnotations();
+}
+
+function focusAnnotationQuote(annotation) {
+  if (!annotation?.id) return;
+  state.activeAnnotationId = annotation.id;
+  renderReaderText();
+  renderAnnotations();
+  setView('reader');
+  requestAnimationFrame(() => {
+    $('chunk-text').querySelector('.annotation-highlight')?.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+  });
 }
 
 function loadCollapsedAnnotations() {
@@ -735,7 +815,14 @@ function captureSelection() {
   $('annotation-quote-preview').textContent = state.selectedQuote;
   $('annotation-quote-preview').dataset.anchorKind = state.selectedAnchorKind;
   $('annotation-composer').classList.remove('hidden');
+  state.activeAnnotationId = '';
+  renderAnnotations();
   setComposerOpen(true);
+}
+
+function scheduleSelectionCapture() {
+  clearTimeout(state.selectionCaptureTimer);
+  state.selectionCaptureTimer = setTimeout(captureSelection, 180);
 }
 
 function closestElement(node, className) {
@@ -814,8 +901,10 @@ function bindEvents() {
   $('prev-chunk-bottom').onclick = () => move(-1);
   $('next-chunk-bottom').onclick = () => move(1);
   $('toggle-shelf').onclick = () => setShelfCollapsed(!state.shelfCollapsed);
-  $('chunk-text').addEventListener('mouseup', captureSelection);
-  $('chunk-text').addEventListener('keyup', captureSelection);
+  $('chunk-text').addEventListener('mouseup', scheduleSelectionCapture);
+  $('chunk-text').addEventListener('keyup', scheduleSelectionCapture);
+  $('chunk-text').addEventListener('touchend', scheduleSelectionCapture, { passive: true });
+  document.addEventListener('selectionchange', scheduleSelectionCapture);
   document.querySelectorAll('.filter-button').forEach((button) => {
     button.onclick = () => {
       state.bookFilter = button.dataset.filter;

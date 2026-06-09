@@ -476,6 +476,13 @@ code {
   background: color-mix(in srgb, var(--accent) 28%, transparent);
 }
 
+.annotation-highlight {
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 30%, #fff4c2);
+  color: inherit;
+  padding: 0 2px;
+}
+
 .search-results {
   display: grid;
   gap: 8px;
@@ -520,6 +527,15 @@ code {
 .annotation-card {
   border-top: 1px solid var(--border);
   padding-top: 12px;
+}
+
+.annotation-card.is-active {
+  border-top-color: var(--accent);
+}
+
+.annotation-card.is-active .annotation-toggle {
+  border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  background: color-mix(in srgb, var(--quote-bg) 68%, transparent);
 }
 
 .annotation-header {
