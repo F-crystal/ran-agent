@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-06-09)
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 
@@ -137,6 +137,7 @@ ran-agent 使用仓库内 MCP 服务：
 | MCP | 作用 |
 |-----|------|
 | `search_hub` | 统一联网搜索入口：新闻、网页事实、学术检索、AI 热点、平台搜索路由 |
+| `co_reading` | 私有共享读书室：chunk 阅读、进度、shared annotation、Hermes 共读边注 |
 | `time` | `Asia/Shanghai` 时间查询 |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享 |
@@ -163,6 +164,10 @@ ran-agent 使用仓库内 MCP 服务：
 | `MIMO_TOKEN_PLAN_API_KEY` | MiMo Power MCP |
 | `TAVILY_API_KEY` | Search Hub 的可选 Tavily provider |
 | `XHS_COOKIE`, `SESSDATA` | 小红书、B 站平台认证 |
+| `CO_READING_ROOT_DIR`, `CO_READING_OWNER_TOKEN` | co_reading 本地状态目录和 owner-only 写入鉴权 |
+| `CO_READING_WEB_ENABLED`, `CO_READING_WEB_ACCESS_TOKEN` | 可选 Tailscale Web reader 开关和浏览器访问 token |
+| `CO_READING_ASK_CONTEXT_CHARS`, `CO_READING_ASK_THREAD_LIMIT` | Hermes 共读边注的上下文窗口和 thread 数量上限 |
+| `CO_READING_VAULT_DIR` | shared annotation 显式沉淀到 Vault 的目标目录 |
 | `OBSIDIAN_MEMORY_VAULT_DIR` | Obsidian vault 路径 |
 | `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB 路径 |
 | `OBSIDIAN_INDEX_DEVICE` | Linux 服务器默认 `cpu` |

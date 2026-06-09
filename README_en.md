@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-05-28)
+Status: CURRENT (2026-06-09)
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -81,7 +81,7 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 | Service | Purpose | Default Entry |
 |---------|---------|---------------|
 | `search_hub` | Unified fresh web search entry: news, web facts, academic lookup, AI hot topics, platform-search routing | lite/full |
-| `co_reading` | Private shared reading room: EPUB/TXT/Markdown/pasted text/PDF text-layer import, chunk reading, progress, shared annotations, Hermes margin replies | lite/full |
+| `co_reading` | Private shared reading room: EPUB/TXT/Markdown/pasted text/HTML/URL/PDF text-layer import, chunk reading, bilingual display, progress, shared annotations, Hermes margin replies, Vault deposit | lite/full |
 | `time` | Timezone-aware time queries, default `Asia/Shanghai` | lite/full |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis | lite/full |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | lite/full |
@@ -97,8 +97,15 @@ DeepSeek V4 is treated as a text model in this project. Raw images, audio, video
 `co_reading` also has an optional Tailscale-only Web reader. Enable
 `CO_READING_WEB_ENABLED=true`, open `/reader`, and use `/api/co-reading/*` from
 the browser. The browser uses only `CO_READING_WEB_ACCESS_TOKEN`;
-`CO_READING_OWNER_TOKEN` stays on the server. Do not expose the reader through
-public Funnel, Cloudflare WARP global mode, or the Bilibili SOCKS proxy.
+`CO_READING_OWNER_TOKEN` stays on the server. The reader supports original text
+plus cached Chinese translations generated server-side without exposing
+provider credentials to the browser. Saving a shared annotation automatically
+invites one Hermes co-reading reply, follow-up questions are stored in
+`reading_threads`, and shared annotations can be explicitly deposited to
+`vault/inbox/co_reading/`. Hermes receives the quote, note, recent thread, and a
+bounded nearby context window by default, not the whole chapter. Do not expose
+the reader through public Funnel, Cloudflare WARP global mode, or the Bilibili
+SOCKS proxy.
 
 ---
 
@@ -253,6 +260,8 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 | `docs/governance/current_runtime_status.md` | Current runtime mainline |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/doc_status.md` | Public documentation index and conflict rule |
+| `docs/governance/co-reading.md` | co_reading storage, import, MCP, and privacy boundary |
+| `docs/governance/co-reading-web-reader.md` | Tailscale-only Web reader deployment and acceptance |
 | `docs/governance/multi_frontend_identity_strategy.md` | Multi-frontend identity, timeline, and session strategy |
 | `docs/governance/media-pipeline.md` | WeChat media context and Context Policy v1 |
 | `docs/governance/phase_status.md` | Hermes migration and OpenClaw retirement status |

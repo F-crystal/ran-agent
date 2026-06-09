@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-05-28)
+Status: CURRENT (2026-06-09)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -20,6 +20,8 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/phase_status.md` | Historical phase closure status |
 | `docs/governance/constraints.md` | Runtime and implementation constraints |
+| `docs/governance/co-reading.md` | Co Reading storage, import, MCP, privacy, and API contract |
+| `docs/governance/co-reading-web-reader.md` | Tailscale-only Co Reading Web reader deployment and acceptance |
 | `docs/governance/skills.md` | On-demand skill map |
 | `docs/governance/sub_agents.md` | Sub-agent candidate policy |
 | `docs/governance/cleanup.md` | Retired/deleted component record |
@@ -68,3 +70,6 @@ deployment notes belong under ignored `local_archive/`, not under
 - Opt-in AI daily digest is the only scheduled outbound allowlist path; it uses
   the learned Feishu DM target and the normal Hermes/Feishu reply flow without
   reopening proactive check-ins or reminders.
+- `co_reading` Web reader is Tailscale-only, supports bilingual reading,
+  browser imports, scoped Hermes margin replies, and explicit shared annotation
+  deposit to `vault/inbox/co_reading/`.

@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-06-09)
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 
@@ -137,6 +137,7 @@ ran-agent uses repo-owned MCP services:
 | MCP | Purpose |
 |-----|---------|
 | `search_hub` | Unified online search entry for news, web facts, academic lookup, AI hot topics, and platform-search routing |
+| `co_reading` | Private shared reading room: chunk reading, progress, shared annotations, and Hermes co-reading margin replies |
 | `time` | `Asia/Shanghai` time queries |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares |
@@ -163,6 +164,10 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `MIMO_TOKEN_PLAN_API_KEY` | MiMo Power MCP |
 | `TAVILY_API_KEY` | Optional Tavily provider for Search Hub |
 | `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
+| `CO_READING_ROOT_DIR`, `CO_READING_OWNER_TOKEN` | co_reading local state directory and owner-only write auth |
+| `CO_READING_WEB_ENABLED`, `CO_READING_WEB_ACCESS_TOKEN` | Optional Tailscale Web reader switch and browser access token |
+| `CO_READING_ASK_CONTEXT_CHARS`, `CO_READING_ASK_THREAD_LIMIT` | Context window and recent-thread limits for Hermes co-reading replies |
+| `CO_READING_VAULT_DIR` | Target directory for explicit shared annotation deposits to Vault |
 | `OBSIDIAN_MEMORY_VAULT_DIR` | Obsidian vault path |
 | `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB path |
 | `OBSIDIAN_INDEX_DEVICE` | Default `cpu` on Linux servers |

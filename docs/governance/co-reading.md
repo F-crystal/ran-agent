@@ -1,6 +1,6 @@
 # Co-Reading Runtime
 
-Status: CURRENT (2026-06-08)
+Status: CURRENT (2026-06-09)
 
 `co_reading` is the private shared reading room for Hermes and the owner. It is
 book-first: EPUB, TXT, Markdown, pasted text, local HTML, and PDF
@@ -93,7 +93,9 @@ token cost matters more than interpretive nuance.
 
 Shared annotations can be explicitly deposited into the Obsidian vault inbox as
 Markdown notes under `vault/inbox/co_reading/`. Private annotations are never
-deposited by the Web route.
+deposited by the Web route. Repeated deposits for one annotation update the
+same stable Markdown note keyed by `annotation_id`, so the latest thread is
+consolidated instead of split across dated duplicate files.
 
 Annotation anchors:
 
@@ -144,6 +146,8 @@ paragraph.
 - Cache key is `chunk_id + target_lang + provider + source_hash`.
 - If the chunk text changes, `source_hash` changes and the old translation is
   not reused.
+- Translation calls are translation-only. Commentary, summaries, or source-text
+  copies are treated as bad translation output and retried before cache write.
 - Translations are not inserted into FTS and are not used as Hermes private
   context unless separately surfaced by a future explicit tool.
 - Users may annotate original or translated text. Shared translated annotations

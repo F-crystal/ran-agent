@@ -717,7 +717,7 @@ function captureSelection() {
   $('annotation-quote-preview').textContent = state.selectedQuote;
   $('annotation-quote-preview').dataset.anchorKind = state.selectedAnchorKind;
   $('annotation-composer').classList.remove('hidden');
-  setView(window.matchMedia('(max-width: 760px)').matches ? 'annotations' : state.currentView);
+  setComposerOpen(true);
 }
 
 function closestElement(node, className) {
@@ -738,6 +738,7 @@ function clearComposer() {
   $('annotation-quote-preview').textContent = '';
   $('annotation-quote-preview').dataset.anchorKind = 'original';
   $('annotation-composer').classList.add('hidden');
+  setComposerOpen(false);
 }
 
 function setView(view) {
@@ -747,6 +748,10 @@ function setView(view) {
   document.querySelectorAll('.mobile-tabs button').forEach((button) => {
     button.classList.toggle('is-active', button.dataset.view === view);
   });
+}
+
+function setComposerOpen(open) {
+  $('co-reading-reader').classList.toggle('composer-open', open);
 }
 
 function setShelfCollapsed(collapsed) {

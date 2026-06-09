@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-05-28)
+Status: CURRENT (2026-06-09)
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -81,7 +81,7 @@ MCP services
 | 服务 | 作用 | 默认入口 |
 |------|------|----------|
 | `search_hub` | 统一联网搜索入口：新闻、网页事实、学术检索、AI 热点、平台搜索路由 | lite/full |
-| `co_reading` | 私有共享读书室：EPUB/TXT/Markdown/粘贴正文/PDF 文本层导入、chunk 阅读、进度、共享批注、Hermes 边栏回复 | lite/full |
+| `co_reading` | 私有共享读书室：EPUB/TXT/Markdown/粘贴正文/HTML/URL/PDF 文本层导入、chunk 阅读、双语显示、进度、共享批注、Hermes 边栏回复、Vault 沉淀 | lite/full |
 | `time` | 时区感知时间查询，默认 `Asia/Shanghai` | lite/full |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | lite/full |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | lite/full |
@@ -99,8 +99,11 @@ DeepSeek V4 在本项目中按文本模型使用。原始图片、音频、视�
 `/api/co-reading/*`。浏览器只使用 `CO_READING_WEB_ACCESS_TOKEN`；
 `CO_READING_OWNER_TOKEN` 只留在服务器环境中。reader 支持原文 + 中文译文
 双语显示，译文通过服务器端 provider 生成并缓存到本地，不把 provider
-凭据交给浏览器。不要用公网 Funnel、WARP 全局模式或 B 站 SOCKS 代理暴露
-reader。
+凭据交给浏览器。shared annotation 会自动邀请 Hermes 留下一条共读回应，
+后续追问写入 `reading_threads`；用户可显式把 shared annotation 和 thread
+沉淀到 `vault/inbox/co_reading/`。Hermes 默认只接收 quote、note、最近
+thread 和批注附近上下文窗口，不接收整章正文。不要用公网 Funnel、WARP
+全局模式或 B 站 SOCKS 代理暴露 reader。
 
 ---
 
@@ -262,6 +265,8 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 | `docs/governance/current_runtime_status.md` | 当前真实运行时主线 |
 | `docs/governance/server_runtime_commands.md` | 脚本优先的服务器 runbook |
 | `docs/governance/doc_status.md` | 公开文档索引和冲突规则 |
+| `docs/governance/co-reading.md` | co_reading 存储、导入、MCP 和隐私边界 |
+| `docs/governance/co-reading-web-reader.md` | Tailscale 内网 Web reader 部署和验收 |
 | `docs/governance/multi_frontend_identity_strategy.md` | 多前端统一身份、timeline、session 策略 |
 | `docs/governance/media-pipeline.md` | 微信媒体上下文和 Context Policy v1 |
 | `docs/governance/phase_status.md` | Hermes 迁移和 OpenClaw 退休阶段状态 |

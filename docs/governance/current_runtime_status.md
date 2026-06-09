@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-06-07)
+Status: CURRENT (2026-06-09)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -87,7 +87,7 @@ state, vault, data, or XHS note debug output.
 | Server | Purpose |
 |--------|---------|
 | `search_hub` | Fresh web/news/academic/platform search entry |
-| `co_reading` | Private shared reading room with chunked books, synced progress, shared annotations, and Hermes-visible reading context |
+| `co_reading` | Private shared reading room with chunked books, synced progress, bilingual Web reading, shared annotations, scoped Hermes margin replies, and explicit Vault deposit |
 | `time` | Timezone-aware time queries (`Asia/Shanghai`) |
 | `media_reader` | OCR, ASR, VLM, video, batch media analysis |
 | `social_reader` | Social content reading (Bilibili, XHS, WeChat articles, music) |
@@ -105,7 +105,11 @@ state, vault, data, or XHS note debug output.
   FTS index rows, progress, annotations, threads, events, imports, and storage
   stats. Private annotations are not returned to Hermes-facing read/search
   tools. Optional Web reader `/reader` is controlled by
-  `CO_READING_WEB_ENABLED` and should be exposed only through Tailscale.
+  `CO_READING_WEB_ENABLED` and should be exposed only through Tailscale. It
+  supports browser imports, bilingual reading, scoped Hermes margin replies,
+  and explicit shared annotation deposit to `vault/inbox/co_reading/`. Details:
+  `docs/governance/co-reading.md` and
+  `docs/governance/co-reading-web-reader.md`.
 - Actual social links still use `social_reader` / `media_reader` first. Search
   Hub must not replace the XHS/Bilibili/Zhihu/WeChat link-read mainline.
 - XHS links must not first-read through browser navigation or terminal.

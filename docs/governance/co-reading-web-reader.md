@@ -1,6 +1,6 @@
 # Co-Reading Web Reader
 
-Status: CURRENT (2026-06-08)
+Status: CURRENT (2026-06-09)
 
 This document owns the private Tailscale-only Web reader for `co_reading`.
 It does not change the Bilibili yt-dlp proxy path.
@@ -125,7 +125,8 @@ Reference:
   more than reading nuance for that deployment.
 - Shared annotation cards can be explicitly deposited into
   `vault/inbox/co_reading/` as Markdown. Private annotations cannot be
-  deposited.
+  deposited. Repeated deposits for the same annotation update one stable
+  Markdown note instead of creating dated duplicates.
 - Chunk text remains in `.txt.gz` files. Do not store whole books in SQLite,
   `localStorage`, or browser caches.
 - Do not commit tokens, cookies, proxy passwords, or real access URLs.
@@ -172,12 +173,18 @@ Current UI:
   translation below it.
 - Manual translation refresh regenerates the current chunk with
   `force=true` and overwrites the translation cache.
+- Translation requests are strict translation-only calls. If Hermes returns a
+  co-reading comment, summary, or untranslated source copy, the server rejects
+  it and retries before writing the translation cache.
 - Previous and next chunk.
 - Read and write browser progress.
 - Book search.
 - Selection-based private or shared annotations.
 - Original and translated text can both be selected for annotations. Annotation
   cards show whether the quote is anchored to original text or translated text.
+- On mobile, selecting text keeps the reader tab active and opens the annotation
+  composer as a bottom sheet, so the selected text can still be used while the
+  user writes the note.
 - Inline annotation composer; no core `prompt()` / `alert()` flow.
 - Sidebar annotations with thread replies.
 - Annotation cards can be collapsed and expanded from the sidebar. Collapsed
@@ -201,8 +208,8 @@ Translation behavior:
 - Translation cache storage is counted in `asset_bytes`.
 - The UI may briefly show `翻译中...` while a cache miss is being translated.
 - For Chinese targets, cached or newly generated output that looks like
-  untranslated English source text is rejected and not treated as valid
-  translation.
+  untranslated English source text, commentary, or summary is rejected and not
+  treated as valid translation.
 - Desktop table-of-contents and margin panels are sticky within the viewport.
   The current chunk is scrolled into view automatically when the reader moves.
 

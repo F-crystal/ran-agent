@@ -445,11 +445,12 @@ async function translateText({ text, targetLang, provider, config, fetchImpl, re
       role: 'system',
       content: [
         'You are a literary translation engine inside a private co_reading reader.',
+        'This is a translation-only task. You are not Hermes the co-reader for this request.',
         `Translate the user source text into ${targetLang === 'zh-CN' ? 'natural Simplified Chinese' : targetLang}.`,
-        'Preserve paragraph breaks, names, titles, numbers, and Markdown-like structure when present.',
-        'Return only the translated text. Do not add explanations, summaries, headings, or notes.',
+        'Translate every source paragraph directly, preserving paragraph breaks, names, titles, numbers, and Markdown-like structure when present.',
+        'Return only the translated body text. Do not add explanations, summaries, headings, notes, reactions, literary commentary, or co-reading opinions.',
         'If the source text is already Chinese, return it unchanged.',
-        retry ? 'The previous attempt looked untranslated. Do not copy English sentences unchanged; produce Simplified Chinese prose.' : '',
+        retry ? 'The previous attempt was rejected because it looked like untranslated text or commentary. Return direct Simplified Chinese translation only.' : '',
       ].join('\n'),
     },
     {
@@ -488,10 +489,19 @@ function isLikelyBadTranslation({ sourceText, translatedText, targetLang }) {
   if (sourceLatin < 40) return false;
   const translatedCjk = countCjk(translated);
   if (translatedCjk < 4) return true;
+  if (looksLikeTranslationCommentary({ sourceText: source, translatedText: translated })) return true;
   const sourceNorm = normalizeForSimilarity(source);
   const translatedNorm = normalizeForSimilarity(translated);
   if (sourceNorm.length >= 80 && sourceNorm === translatedNorm) return true;
   return false;
+}
+
+function looksLikeTranslationCommentary({ sourceText, translatedText }) {
+  const source = String(sourceText || '');
+  const translated = String(translatedText || '');
+  const commentaryPattern = /(Hermes|共读|读后感|点评|总结|可以从中看出|体现了|这段(?:文字|内容|话|文本)|作者(?:在|通过|想))/i;
+  if (!commentaryPattern.test(translated)) return false;
+  return !commentaryPattern.test(source);
 }
 
 function countCjk(text) {
@@ -612,7 +622,7 @@ async function depositAnnotationToVault({ store, annotationId, config }) {
   const vaultDir = path.resolve(config.vaultDir || path.join(PROJECT_ROOT, 'vault'));
   const inboxDir = path.join(vaultDir, 'inbox', 'co_reading');
   await mkdir(inboxDir, { recursive: true });
-  const fileName = `${new Date().toISOString().slice(0, 10)}-${sanitizeVaultFileName(book.title || book.id)}-${sanitizeVaultFileName(annotation.id)}.md`;
+  const fileName = `${sanitizeVaultFileName(book.title || book.id)}-${sanitizeVaultFileName(annotation.id)}.md`;
   const filePath = path.join(inboxDir, fileName);
   const markdown = renderVaultDepositMarkdown({ book, chunk, annotation, thread });
   await writeFile(filePath, markdown, 'utf8');

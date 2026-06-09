@@ -338,6 +338,15 @@ test('MCP tool names and Web reader API contract expose permission layers', asyn
   assert.equal(contract.security.owner_only_writes, true);
 });
 
+test('co_reading Web static UI keeps mobile annotation composer in reader view', async () => {
+  const appJs = await readFile(path.resolve('node_bridge/public/co-reading/app.js'), 'utf8');
+  const css = await readFile(path.resolve('node_bridge/public/co-reading/style.css'), 'utf8');
+
+  assert.doesNotMatch(appJs, /setView\(window\.matchMedia\('\(max-width: 760px\)'\)\.matches \? 'annotations'/);
+  assert.match(appJs, /composer-open/);
+  assert.match(css, /\.layout\[data-view="reader"\]\.composer-open \.annotations-panel/);
+});
+
 test('co_reading Web API protects owner token and supports shelf import read progress search annotations', async () => {
   await withStore(async ({ root, store }) => {
     const translationCalls = [];
@@ -523,6 +532,48 @@ test('co_reading Web translation skips cached untranslated English output', asyn
     assert.equal(translated.body.cached, false);
     assert.match(translated.body.translation.text, /莱姆斯/);
     assert.equal(translationCalls.length, 1);
+  });
+});
+
+test('co_reading Web translation retries Hermes commentary and stores only translation text', async () => {
+  await withStore(async ({ root, store }) => {
+    const source = 'Remus looked at Sirius and lowered his voice. The corridor was quiet, but the old fear had not disappeared.';
+    const imported = await callTool(
+      'reading_import_pasted_text',
+      { owner_token: 'owner', title: 'Commentary Translation', text: source },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    const bookId = imported.structuredContent.book.id;
+    const chunkId = imported.structuredContent.chunks[0].id;
+    const calls = [];
+    const app = createCoReadingWebApp({
+      store,
+      config: {
+        accessToken: 'web-token',
+        ownerToken: 'owner',
+        rootDir: root,
+        hermesBaseUrl: 'http://hermes.test/v1',
+        hermesApiKey: 'api-key',
+      },
+      fetchImpl: async (url, options) => {
+        calls.push(JSON.parse(options.body));
+        const content = calls.length === 1
+          ? '这段文字体现了两个人之间压抑的关系，Hermes 可以从中看出旧日恐惧仍在影响他们。'
+          : '莱姆斯看着小天狼星，压低了声音。走廊很安静，但旧日的恐惧并没有消失。';
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ choices: [{ message: { content } }] }),
+        };
+      },
+    });
+
+    const translated = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
+
+    assert.equal(translated.status, 200);
+    assert.equal(calls.length, 2);
+    assert.match(translated.body.translation.text, /莱姆斯看着小天狼星/);
+    assert.doesNotMatch(translated.body.translation.text, /Hermes|体现了|可以从中看出/);
   });
 });
 
@@ -734,11 +785,22 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
     }));
     assert.equal(deposited.status, 200);
     assert.match(deposited.body.deposited.vault_relative_path, /^inbox\/co_reading\//);
+    assert.doesNotMatch(path.basename(deposited.body.deposited.vault_relative_path), /^\d{4}-\d{2}-\d{2}-/);
     assert.equal(deposited.body.deposited.path, undefined);
     const vaultText = await readFile(path.join(root, 'vault', deposited.body.deposited.vault_relative_path), 'utf8');
     assert.match(vaultText, /shared-question-context/);
     assert.match(vaultText, /Hermes reply saved/);
     assert.doesNotMatch(vaultText, /private-not-for-hermes/);
+
+    store.replyToAnnotation({ annotationId: sharedAnn.id, text: 'Second Hermes reply.', author: 'hermes', actor: 'hermes' });
+    const depositedAgain = await app.handleRequest(req('POST', `/api/co-reading/annotations/${encodeURIComponent(sharedAnn.id)}/deposit-vault`, {
+      token: 'web-token',
+      body: {},
+    }));
+    assert.equal(depositedAgain.status, 200);
+    assert.equal(depositedAgain.body.deposited.vault_relative_path, deposited.body.deposited.vault_relative_path);
+    const updatedVaultText = await readFile(path.join(root, 'vault', depositedAgain.body.deposited.vault_relative_path), 'utf8');
+    assert.match(updatedVaultText, /Second Hermes reply/);
   });
 });
 
