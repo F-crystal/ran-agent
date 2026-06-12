@@ -397,6 +397,40 @@ test('resolve_platform_media resolves XHS share text and warns when video asset 
   assert.ok(result.structuredContent.warnings.some((warning) => warning.code === 'XHS_VIDEO_ASSET_NOT_EXPOSED_BY_BACKEND'));
 });
 
+test('resolve_platform_media canonicalizes XHS discovery links before provider calls', async () => {
+  const shareText = '14 【置身钉内作者再发千字长文：云空未必空 - 大厂吃瓜前线 | 小红书 - 你的生活兴趣社区】 😆 dyYDHnM0OCNfOH9 😆 https://www.xiaohongshu.com/discovery/item/6a2b8f33000000001702ac99?source=webshare&xhsshare=pc_web&xsec_token=ABhlbvu1Hb6w6jyzeLPQTj67358eDrzbWm0hGNJRKVovY=&xsec_source=pc_share';
+  const providerCalls = [];
+
+  const result = await callResolve(
+    { url_or_text: shareText, platform: 'xhs' },
+    {
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      platformProviders: {
+        xhs: {
+          resolve: async (args) => {
+            providerCalls.push(args);
+            return {
+              metadata: { title: '云空未必空', note_id: args.note_id },
+              post_text: '正文',
+              media: [],
+            };
+          },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(providerCalls.length, 1);
+  assert.equal(
+    providerCalls[0].url,
+    'https://www.xiaohongshu.com/explore/6a2b8f33000000001702ac99?xsec_token=ABhlbvu1Hb6w6jyzeLPQTj67358eDrzbWm0hGNJRKVovY%3D&xsec_source=pc_share'
+  );
+  assert.equal(providerCalls[0].note_id, '6a2b8f33000000001702ac99');
+  assert.equal(result.structuredContent.resolved_url_redacted, 'https://www.xiaohongshu.com/explore/6a2b8f33000000001702ac99?[redacted]');
+  assert.equal(result.structuredContent.warnings.some((warning) => warning.code === 'XHS_MISSING_XSEC_TOKEN'), false);
+});
+
 test('resolve_platform_media returns structured XHS shortlink and auth errors', async () => {
   const shortlinkFailure = await callResolve(
     { url_or_text: 'https://xhslink.com/o/xxxx', platform: 'xhs' },

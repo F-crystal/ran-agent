@@ -129,6 +129,9 @@ state, vault, data, or XHS note debug output.
   `xsec_token` as recoverable: it tries the prepared generic parser fallback,
   preserves returned XHS image URLs as normalized media assets, and lets OCR/VLM
   continue instead of returning a hard backend error.
+- XHS platform media resolution canonicalizes PC-share
+  `/discovery/item/<note_id>` URLs to `/explore/<note_id>` while preserving
+  `xsec_token` and `xsec_source` before calling the backend provider.
 - Runtime marker:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
 - Token cache paths:

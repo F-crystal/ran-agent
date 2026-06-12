@@ -69,6 +69,9 @@ For platform links, call `media_reader.resolve_platform_media` before direct
 asset analysis when normalized resources are needed. XHS missing `xsec_token`
 is a recoverable resolver condition: generic parser metadata and image URLs
 must still be forwarded to `analyze_media_batch` for OCR/VLM.
+XHS PC-share long links under `/discovery/item/<note_id>` are canonicalized to
+`/explore/<note_id>` with `xsec_token` and `xsec_source` preserved before
+backend provider calls.
 
 Video analysis is subtitle-first when available, then audio ASR, then keyframe
 VLM, then metadata-only fallback.

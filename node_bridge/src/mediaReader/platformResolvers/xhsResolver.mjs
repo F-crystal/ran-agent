@@ -36,6 +36,22 @@ function hasXsecToken(url) {
   }
 }
 
+function canonicalXhsNoteUrl(url) {
+  try {
+    const parsed = new URL(String(url || '').trim());
+    const noteId = noteIdFromUrl(parsed.toString());
+    if (!noteId) return parsed.toString();
+    const canonical = new URL(`https://www.xiaohongshu.com/explore/${noteId}`);
+    const xsecToken = parsed.searchParams.get('xsec_token') || '';
+    const xsecSource = parsed.searchParams.get('xsec_source') || '';
+    if (xsecToken) canonical.searchParams.set('xsec_token', xsecToken);
+    if (xsecSource) canonical.searchParams.set('xsec_source', xsecSource);
+    return canonical.toString();
+  } catch {
+    return String(url || '');
+  }
+}
+
 function warning(code, extra = {}) {
   return { code, ...extra };
 }
@@ -274,6 +290,7 @@ export async function resolveXhsMedia(args = {}, options = {}) {
       errorCode: 'XHS_SHORTLINK_RESOLVE_FAILED',
     });
   }
+  resolvedUrl = canonicalXhsNoteUrl(resolvedUrl);
   await assertSafePlatformUrl(resolvedUrl, { platform: 'xhs', options });
   const noteId = noteIdFromUrl(resolvedUrl);
   const maxAssets = normalizeMaxAssets(args.max_assets);
