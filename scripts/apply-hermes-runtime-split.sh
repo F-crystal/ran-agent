@@ -453,6 +453,7 @@ platform_toolsets:
     - mcp-media_reader
     - mcp-mimo_power
     - mcp-search_hub
+    - mcp-co_reading
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
@@ -470,6 +471,7 @@ platform_toolsets:
     - mcp-media_reader
     - mcp-mimo_power
     - mcp-search_hub
+    - mcp-co_reading
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory

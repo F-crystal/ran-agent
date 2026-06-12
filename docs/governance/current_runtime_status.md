@@ -87,7 +87,7 @@ state, vault, data, or XHS note debug output.
 | Server | Purpose |
 |--------|---------|
 | `search_hub` | Fresh web/news/academic/platform search entry |
-| `co_reading` | Private shared reading room with chunked books, synced progress, bilingual Web reading, shared annotations, scoped Hermes margin replies, and explicit Vault deposit |
+| `co_reading` | Full-profile private shared reading room plus Web reader with chunked books, synced progress, bilingual reading, shared annotations, scoped Hermes margin replies, and explicit Vault deposit |
 | `time` | Timezone-aware time queries (`Asia/Shanghai`) |
 | `media_reader` | OCR, ASR, VLM, video, batch media analysis |
 | `social_reader` | Social content reading (Bilibili, XHS, WeChat articles, music) |
@@ -100,14 +100,16 @@ state, vault, data, or XHS note debug output.
 - Search Hub is registered in both lite and full. Lite uses lightweight public
   providers; full may use Playwright fallback. OpenCLI browser-backed remains
   disabled by default for the 2C4G/60G server.
-- Co Reading is registered in both lite and full. Chunk text lives under
+- Co Reading is not exposed in the lite daily conversation toolset to keep the
+  default prompt smaller. The MCP remains available in the full profile, while
+  the Web reader remains available independently. Chunk text lives under
   `.ran_agent_state/co_reading/library/**/*.txt.gz`; SQLite stores metadata,
   FTS index rows, progress, annotations, threads, events, imports, and storage
   stats. Private annotations are not returned to Hermes-facing read/search
-  tools. Optional Web reader `/reader` is controlled by
-  `CO_READING_WEB_ENABLED` and should be exposed only through Tailscale. It
-  supports browser imports, bilingual reading, scoped Hermes margin replies,
-  and explicit shared annotation deposit to `vault/inbox/co_reading/`. Details:
+  tools. Optional Web reader `/reader` is controlled by `CO_READING_WEB_ENABLED`
+  and should be exposed only through Tailscale. It supports browser imports,
+  bilingual reading, scoped Hermes margin replies, and explicit shared
+  annotation deposit to `vault/inbox/co_reading/`. Details:
   `docs/governance/co-reading.md` and
   `docs/governance/co-reading-web-reader.md`.
 - Actual social links still use `social_reader` / `media_reader` first. Search

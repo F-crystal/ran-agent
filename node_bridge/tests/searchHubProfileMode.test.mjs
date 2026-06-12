@@ -53,6 +53,18 @@ test('source Hermes configs register search_hub in lite and full profiles', () =
   assert.match(platformToolsets(full), /mcp-media_generation/);
 });
 
+test('lite profile keeps co_reading out of conversational toolset while full keeps it', () => {
+  const full = readFileSync(new URL('../../hermes/profile/config.yaml', import.meta.url), 'utf8');
+  const lite = readFileSync(new URL('../../hermes/profile/config.lite.yaml', import.meta.url), 'utf8');
+  const apply = readFileSync(new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url), 'utf8');
+
+  assert.doesNotMatch(platformToolsets(lite), /mcp-co_reading/);
+  assert.doesNotMatch(lite, /^\s{2}co_reading:/m);
+  assert.match(platformToolsets(full), /mcp-co_reading/);
+  assert.match(full, /^\s{2}co_reading:/m);
+  assert.match(apply, /mcp-co_reading/);
+});
+
 test('repo MCP config and apply script know search_hub', () => {
   const mcp = JSON.parse(readFileSync(new URL('../../.mcp.json', import.meta.url), 'utf8'));
   const apply = readFileSync(new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url), 'utf8');
