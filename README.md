@@ -35,7 +35,7 @@ Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
 
 MCP services
-  -> search_hub / media_reader / social_reader / mimo_power / media_generation
+  -> search_hub / media_reader / social_reader / mimo_power / sticker_catalog / media_generation
   -> personal_memory / obsidian_memory / time / playwright
 ```
 
@@ -74,6 +74,8 @@ MCP services
 
 **可发送媒体生成。** full gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
 
+**表情包目录。** `sticker_catalog` 在 lite/full 均注册，用于按标签选择并通过 `RAN_MEDIA` 的 `stickerId` 发送本地表情包；保存入库只在 owner 明确要求时发生，资产留在 `.ran_agent_state/stickers/`。
+
 ---
 
 ## MCP 服务
@@ -86,6 +88,7 @@ MCP services
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | lite/full |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | lite/full |
 | `mimo_power` | MiMo Token Plan 深度多模态分析 | lite/full |
+| `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | lite/full |
 | `personal_memory` | 个人记忆召回与 backend 健康检查 | lite/full |
 | `obsidian_memory` | Obsidian vault 语义检索 | lite/full |
 | `media_generation` | 图片和语音生成 | full |

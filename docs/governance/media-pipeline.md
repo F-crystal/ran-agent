@@ -46,6 +46,7 @@ Default trusted local directories:
 - `debug/wechat/inbound`
 - `debug/mimo_inbound`
 - `.ran_agent_state/wechat/inbound`
+- `.ran_agent_state/feishu/inbound`
 - `.ran_agent_state/ran-agent-weixin/media`
 
 Custom trusted dirs may be supplied through
@@ -58,6 +59,13 @@ Remote assets must be `http(s)` URLs and pass provider-level safety checks.
 The default remote media host allowlist includes common social/CDN hosts used
 by supported resolvers, including XHS image CDN hosts under `xiaohongshu.com`
 and `xhscdn.com`.
+
+Sticker saving is a separate owner-only boundary. Inbound media becomes a
+`sticker_save_from_inbox` candidate only after explicit user intent such as
+"保存这个为表情包"; ordinary screenshots, photos, document images, and work
+files are not saved automatically. Sticker assets live under
+`.ran_agent_state/stickers/`, and model-visible `RAN_MEDIA` markers carry only
+`stickerId`.
 
 ## Analysis Order
 

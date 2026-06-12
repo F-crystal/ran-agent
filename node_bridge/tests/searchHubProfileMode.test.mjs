@@ -75,3 +75,30 @@ test('repo MCP config and apply script know search_hub', () => {
   assert.match(apply, /mcp-search_hub/);
   assert.match(apply, /start_search_hub_mcp\.sh/);
 });
+
+test('lite and full profiles register sticker_catalog MCP with public usage boundary', () => {
+  const full = readFileSync(new URL('../../hermes/profile/config.yaml', import.meta.url), 'utf8');
+  const lite = readFileSync(new URL('../../hermes/profile/config.lite.yaml', import.meta.url), 'utf8');
+  const agents = readFileSync(new URL('../../hermes/profile/AGENTS.md', import.meta.url), 'utf8');
+
+  for (const text of [full, lite]) {
+    assert.match(platformToolsets(text), /mcp-sticker_catalog/);
+    assert.match(text, /^\s{2}sticker_catalog:/m);
+    assert.match(text, /start_sticker_catalog_mcp\.sh/);
+  }
+  assert.match(lite, /STICKER_CATALOG_PROFILE_MODE:\s+lite/);
+  assert.match(full, /STICKER_CATALOG_PROFILE_MODE:\s+full/);
+  assert.match(agents, /sticker_tags/);
+  assert.match(agents, /sticker_pick/);
+  assert.match(agents, /sticker_attach/);
+  assert.match(agents, /lite.*sticker_tags\/sticker_pick\/sticker_attach/s);
+});
+
+test('repo MCP config and apply script know sticker_catalog', () => {
+  const mcp = JSON.parse(readFileSync(new URL('../../.mcp.json', import.meta.url), 'utf8'));
+  const apply = readFileSync(new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url), 'utf8');
+
+  assert.deepEqual(mcp.mcpServers.sticker_catalog.args, ['scripts/start_sticker_catalog_mcp.sh']);
+  assert.match(apply, /mcp-sticker_catalog/);
+  assert.match(apply, /start_sticker_catalog_mcp\.sh/);
+});

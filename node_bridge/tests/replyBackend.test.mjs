@@ -202,6 +202,161 @@ test('createReplyBackend turns trusted MCP audio markers into WeChat audio media
   });
 });
 
+test('createReplyBackend resolves RAN_MEDIA sticker catalog markers by stickerId', async () => {
+  const calls = [];
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_text: '太可爱了\n\nRAN_MEDIA: {"source":"sticker_catalog","kind":"sticker","stickerId":"stk_001","caption":"喜欢"}',
+      follow_up_messages: [],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    resolveStickerAssetImpl: (stickerId) => {
+      calls.push(stickerId);
+      return {
+        stickerId,
+        tags: ['喜欢'],
+        desc: '心动贴纸',
+        mime: 'image/png',
+        fileName: 'stk_001.png',
+        filePath: '/private/server/stickers/assets/stk_001.png',
+      };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '发个贴纸',
+    sender_id: 'conv-sticker-marker',
+    channel: 'wechat',
+  });
+
+  assert.deepEqual(calls, ['stk_001']);
+  assert.equal(response.replyText, '太可爱了');
+  assert.deepEqual(response.media, {
+    source: 'sticker_catalog',
+    kind: 'sticker',
+    stickerId: 'stk_001',
+    mime: 'image/png',
+    fileName: 'stk_001.png',
+    filePath: '/private/server/stickers/assets/stk_001.png',
+    caption: '喜欢',
+  });
+});
+
+test('createReplyBackend uses RAN_MEDIA caption as visible text when marker is the only text', async () => {
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_text: 'RAN_MEDIA: {"source":"sticker_catalog","kind":"sticker","stickerId":"stk_001","caption":"给你一张"}',
+      follow_up_messages: [],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    resolveStickerAssetImpl: () => ({
+      stickerId: 'stk_001',
+      mime: 'image/gif',
+      fileName: 'stk_001.gif',
+      filePath: '/private/server/stickers/assets/stk_001.gif',
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '贴纸',
+    sender_id: 'conv-sticker-caption',
+    channel: 'wechat',
+  });
+
+  assert.equal(response.replyText, '给你一张');
+  assert.equal(response.media.filePath, '/private/server/stickers/assets/stk_001.gif');
+});
+
+test('createReplyBackend rejects RAN_MEDIA markers with unknown source', async () => {
+  let resolveCalled = false;
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_text: '别显示 marker\nRAN_MEDIA: {"source":"other","kind":"sticker","stickerId":"stk_001"}',
+      follow_up_messages: [],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    resolveStickerAssetImpl: () => {
+      resolveCalled = true;
+      throw new Error('should not resolve unknown source');
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '贴纸',
+    sender_id: 'conv-sticker-unknown-source',
+    channel: 'wechat',
+  });
+
+  assert.equal(resolveCalled, false);
+  assert.equal(response.replyText, '别显示 marker');
+  assert.equal(response.media, null);
+});
+
+test('createReplyBackend rejects RAN_MEDIA markers that include path-like fields', async () => {
+  let resolveCalled = false;
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_text: '安全起见不发\nRAN_MEDIA: {"source":"sticker_catalog","kind":"sticker","stickerId":"stk_001","filePath":"/private/server/stickers/assets/stk_001.png"}',
+      follow_up_messages: [],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    resolveStickerAssetImpl: () => {
+      resolveCalled = true;
+      throw new Error('should not resolve marker with filePath');
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '贴纸',
+    sender_id: 'conv-sticker-path-reject',
+    channel: 'wechat',
+  });
+
+  assert.equal(resolveCalled, false);
+  assert.equal(response.replyText, '安全起见不发');
+  assert.equal(response.media, null);
+});
+
+test('createReplyBackend rejects RAN_MEDIA markers with nested path-like fields', async () => {
+  let resolveCalled = false;
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_text: '还是只发文字\nRAN_MEDIA: {"source":"sticker_catalog","kind":"sticker","stickerId":"stk_001","asset":{"url":"https://example.com/sticker.gif"}}',
+      follow_up_messages: [],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    resolveStickerAssetImpl: () => {
+      resolveCalled = true;
+      throw new Error('should not resolve marker with nested url');
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '贴纸',
+    sender_id: 'conv-sticker-nested-path-reject',
+    channel: 'wechat',
+  });
+
+  assert.equal(resolveCalled, false);
+  assert.equal(response.replyText, '还是只发文字');
+  assert.equal(response.media, null);
+});
+
 test('createReplyBackend does not treat arbitrary markdown images as generated WeChat media', async () => {
   const backend = createReplyBackend({
     hermesImpl: async () => ({

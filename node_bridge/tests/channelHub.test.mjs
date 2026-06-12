@@ -94,3 +94,42 @@ test('channel hub provides cross-platform active topic to Feishu message', async
   assert.match(backendMessage.continuity_note, /内莉/);
   assert.equal(backendMessage.recent_global_history.some((item) => item.content.includes('内莉')), true);
 });
+
+test('channel hub does not persist sticker filePath in assistant media summary', async () => {
+  const env = tempEnv();
+  const secretPath = '/private/server/stickers/assets/stk_001.png';
+
+  await handleIncomingMessage({
+    id: 'wx-sticker-summary',
+    platform: 'wechat',
+    channel_type: 'dm',
+    conversation_id: 'wx-conv',
+    sender_id: 'wx-user',
+    text: '来张贴纸',
+    created_at: 1000,
+  }, {
+    env,
+    logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: {
+      async getReply() {
+        return {
+          replyText: '给你',
+          followUpMessages: [],
+          media: {
+            source: 'sticker_catalog',
+            kind: 'sticker',
+            stickerId: 'stk_001',
+            mime: 'image/png',
+            fileName: 'stk_001.png',
+            filePath: secretPath,
+          },
+        };
+      },
+    },
+  });
+
+  const records = readTimelineRecords({ timelinePath: env.RAN_AGENT_GLOBAL_TIMELINE_PATH });
+  const assistant = records.find((item) => item.role === 'assistant');
+  assert.equal(String(assistant.media_summary || '').includes(secretPath), false);
+  assert.match(assistant.media_summary, /"stickerId":"stk_001"/);
+});

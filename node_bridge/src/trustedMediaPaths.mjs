@@ -8,6 +8,7 @@ const DEFAULT_TRUSTED_MEDIA_DIRS = [
   'debug/wechat/inbound',
   'debug/mimo_inbound',
   '.ran_agent_state/wechat/inbound',
+  '.ran_agent_state/feishu/inbound',
   '.ran_agent_state/ran-agent-weixin/media',
 ];
 

@@ -8,6 +8,11 @@
 .openclaw_state/
 .ran_agent_state/
 node_bridge/.ran_agent_state/
+# Sticker/media runtime assets must never be committed.
+.ran_agent_state/stickers/
+.ran_agent_state/wechat/inbound/
+.ran_agent_state/feishu/inbound/
+.ran_agent_state/ran-agent-weixin/media/
 data/
 logs/
 debug/

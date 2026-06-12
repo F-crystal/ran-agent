@@ -246,6 +246,127 @@ test('buildAgent extracts trusted audio media marker at WeChat SDK boundary', as
   });
 });
 
+test('buildAgent resolves sticker catalog media to WeChat SDK image payload', async () => {
+  const stateDir = fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'wechat-sticker-send-'));
+  const assetsDir = path.join(stateDir, 'stickers', 'assets');
+  fs.mkdirSync(assetsDir, { recursive: true });
+  fs.writeFileSync(path.join(assetsDir, 'stk_001.png'), 'fake png bytes');
+  fs.writeFileSync(path.join(stateDir, 'stickers', 'index.json'), JSON.stringify({
+    stk_001: {
+      stickerId: 'stk_001',
+      fileName: 'stk_001.png',
+      mime: 'image/png',
+      tags: ['ok'],
+      source: 'manual',
+    },
+  }));
+  fs.writeFileSync(path.join(stateDir, 'stickers', 'tags.json'), '{}');
+  fs.writeFileSync(path.join(stateDir, 'stickers', 'hashes.json'), '{}');
+
+  const agent = buildAgent({
+    logger: { log() {}, warn() {}, error() {} },
+    env: {
+      RAN_AGENT_STATE_DIR: stateDir,
+      NODE_BRIDGE_MERGE_WINDOW_MS: '10',
+      async handleWeChatTextMessage() {
+        return {
+          replyText: '给你一张',
+          followUpMessages: [],
+          media: {
+            source: 'sticker_catalog',
+            kind: 'sticker',
+            stickerId: 'stk_001',
+            mime: 'image/png',
+            fileName: 'ignored.png',
+            filePath: '/untrusted/ignored.png',
+          },
+        };
+      },
+    },
+  });
+
+  const result = await agent.chat({
+    text: '发个贴纸',
+    conversationId: 'wx-sticker',
+  });
+
+  assert.deepEqual(result, {
+    text: '给你一张',
+    media: {
+      type: 'image',
+      url: path.join(assetsDir, 'stk_001.png'),
+      fileName: 'stk_001.png',
+    },
+  });
+});
+
+test('buildAgent safely drops unresolved sticker media without exposing local paths', async () => {
+  const logs = [];
+  const agent = buildAgent({
+    logger: {
+      log(...args) { logs.push(args.join(' ')); },
+      warn(...args) { logs.push(args.join(' ')); },
+      error(...args) { logs.push(args.join(' ')); },
+    },
+    env: {
+      RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'wechat-sticker-missing-')),
+      NODE_BRIDGE_MERGE_WINDOW_MS: '10',
+      async handleWeChatTextMessage() {
+        return {
+          replyText: '只发文字',
+          followUpMessages: [],
+          media: {
+            source: 'sticker_catalog',
+            kind: 'sticker',
+            stickerId: 'stk_missing',
+            mime: 'image/png',
+            fileName: 'secret.png',
+            filePath: '/private/secret/sticker.png',
+          },
+        };
+      },
+    },
+  });
+
+  const result = await agent.chat({
+    text: '发个不存在的贴纸',
+    conversationId: 'wx-sticker-missing',
+  });
+
+  assert.deepEqual(result, { text: '只发文字' });
+  assert.equal(logs.join('\n').includes('/private/secret/sticker.png'), false);
+});
+
+test('buildAgent keeps legacy WECHAT_MEDIA image marker compatible', async () => {
+  const agent = buildAgent({
+    logger: { log() {}, warn() {}, error() {} },
+    env: {
+      NODE_BRIDGE_MERGE_WINDOW_MS: '10',
+      async handleWeChatTextMessage() {
+        return {
+          replyText: '图给你了。\nWECHAT_MEDIA: {"source":"media_generation_mcp","type":"image","url":"https://example.com/legacy.png","fileName":"legacy.png"}',
+          followUpMessages: [],
+          media: null,
+        };
+      },
+    },
+  });
+
+  const result = await agent.chat({
+    text: '旧图',
+    conversationId: 'wx-legacy-image-marker',
+  });
+
+  assert.deepEqual(result, {
+    text: '图给你了。',
+    media: {
+      type: 'image',
+      url: 'https://example.com/legacy.png',
+      fileName: 'legacy.png',
+    },
+  });
+});
+
 test('buildAgent keeps paragraph-separated replies in the synchronous response', async () => {
   let followUps = null;
   const agent = buildAgent({

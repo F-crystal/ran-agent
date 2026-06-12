@@ -15,6 +15,8 @@ import { startDesktopProxyServer } from './desktopProxyServer.mjs';
 import { startCoReadingWebServer } from './coReading/webServer.mjs';
 import { startFeishuBridge } from './feishuBridge.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
+import { extractLegacyWechatMediaMarker } from './replyMediaMarkers.mjs';
+import { resolveStickerAsset } from './stickerCatalog.mjs';
 import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
@@ -268,7 +270,7 @@ function isProactiveDeliveryEnabled(env = process.env) {
   return ['1', 'true', 'yes', 'on'].includes(value);
 }
 
-function normalizeChatReplyResult(replyResult) {
+function normalizeChatReplyResult(replyResult, options = {}) {
   const explicitFollowUps = normalizeFollowUpTexts(replyResult?.followUpMessages);
   const mediaFromMarker = extractTrustedReplyMediaMarker(replyResult?.replyText);
   const primaryText = mediaFromMarker
@@ -277,45 +279,36 @@ function normalizeChatReplyResult(replyResult) {
   return {
     replyText: primaryText,
     followUpMessages: explicitFollowUps,
-    media: normalizeReplyMediaForWeixinSdk(replyResult?.media || mediaFromMarker?.media),
+    media: normalizeReplyMediaForWeixinSdk(replyResult?.media || mediaFromMarker?.media, options),
   };
 }
 
 function extractTrustedReplyMediaMarker(text) {
-  const raw = String(text || '');
-  const markerPattern = /^WECHAT_MEDIA:\s*(\{.*\})\s*$/im;
-  const match = raw.match(markerPattern);
-  if (!match?.[1]) {
-    return null;
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(match[1]);
-  } catch {
-    return null;
-  }
-  if (parsed?.source !== 'media_generation_mcp') {
-    return null;
-  }
-  const type = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : '';
-  const url = typeof parsed.url === 'string' ? parsed.url.trim() : '';
-  const fileName = typeof parsed.fileName === 'string' ? parsed.fileName.trim() : '';
-  if (!type || !url) {
-    return null;
-  }
-  return {
-    text: raw
-      .replace(markerPattern, '')
-      .replace(/[ \t]+\n/g, '\n')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim(),
-    media: fileName ? { type, url, fileName } : { type, url },
-  };
+  return extractLegacyWechatMediaMarker(text);
 }
 
-function normalizeReplyMediaForWeixinSdk(media) {
+function normalizeReplyMediaForWeixinSdk(media, { env = process.env, logger = console } = {}) {
   if (!media || typeof media !== 'object' || Array.isArray(media)) {
     return null;
+  }
+  if (media.source === 'sticker_catalog' && media.kind === 'sticker') {
+    const stickerId = typeof media.stickerId === 'string' ? media.stickerId.trim() : '';
+    if (!stickerId) {
+      return null;
+    }
+    try {
+      const asset = resolveStickerAsset(stickerId, { env });
+      const mime = String(asset.mime || '').trim().toLowerCase();
+      const type = mime.startsWith('image/') ? 'image' : 'file';
+      return {
+        type,
+        url: asset.filePath,
+        fileName: asset.fileName,
+      };
+    } catch {
+      logger.warn?.('[node-bridge] sticker media unavailable; sending text only');
+      return null;
+    }
   }
   const type = typeof media.type === 'string' ? media.type.trim().toLowerCase() : '';
   const url = typeof media.url === 'string' ? media.url.trim() : '';
@@ -401,7 +394,7 @@ export function buildAgent({ logger, env }) {
           logger,
           env,
           returnResult: true,
-        }));
+        }), { env, logger });
         const followUps = replyResult.followUpMessages;
         setTimeout(() => {
           flushPendingOutboundQueue().catch(() => {});
@@ -416,7 +409,7 @@ export function buildAgent({ logger, env }) {
           responsePayload.text = replyResult.replyText;
         }
         if (replyResult.media && typeof replyResult.media === 'object') {
-          logger.log?.(`[node-bridge] outgoing media type=${replyResult.media.type || ''} url=${replyResult.media.url || ''}`);
+          logger.log?.(`[node-bridge] outgoing media type=${replyResult.media.type || ''} fileName=${replyResult.media.fileName || ''}`);
           responsePayload.media = replyResult.media;
         }
         return responsePayload;

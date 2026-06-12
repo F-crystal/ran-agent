@@ -120,6 +120,22 @@ test('collectInboundMediaAssets rejects project files outside trusted media dire
   );
 });
 
+test('collectInboundMediaAssets accepts downloaded Feishu inbound media', () => {
+  const projectRoot = tempProjectRoot();
+  const imagePath = path.join(projectRoot, '.ran_agent_state', 'feishu', 'inbound', 'feishu-image.png');
+  fs.mkdirSync(path.dirname(imagePath), { recursive: true });
+  fs.writeFileSync(imagePath, Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+
+  const assets = collectInboundMediaAssets({
+    media: [{ filePath: imagePath, mimeType: 'image/png', type: 'image' }],
+  }, { env: { RAN_AGENT_ROOT: projectRoot } });
+
+  assert.equal(assets.length, 1);
+  assert.equal(assets[0].type, 'image');
+  assert.equal(assets[0].mime, 'image/png');
+  assert.equal(assets[0].path, imagePath);
+});
+
 test('collectInboundMediaAssets ignores local paths passed through image_urls', () => {
   const projectRoot = tempProjectRoot();
   const imagePath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'screen.png');

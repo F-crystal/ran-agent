@@ -454,6 +454,7 @@ platform_toolsets:
     - mcp-mimo_power
     - mcp-search_hub
     - mcp-co_reading
+    - mcp-sticker_catalog
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
@@ -472,6 +473,7 @@ platform_toolsets:
     - mcp-mimo_power
     - mcp-search_hub
     - mcp-co_reading
+    - mcp-sticker_catalog
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
@@ -787,12 +789,24 @@ verify_runtime() {
     echo "ERROR: .mcp.json does not register search_hub" >&2
     exit 1
   fi
+  if ! grep -q '"sticker_catalog"' "$REPO_ROOT/.mcp.json"; then
+    echo "ERROR: .mcp.json does not register sticker_catalog" >&2
+    exit 1
+  fi
   if ! grep -q 'mcp-search_hub' "$REPO_ROOT/hermes/profile/config.yaml"; then
     echo "ERROR: full source profile missing mcp-search_hub" >&2
     exit 1
   fi
+  if ! grep -q 'mcp-sticker_catalog' "$REPO_ROOT/hermes/profile/config.yaml"; then
+    echo "ERROR: full source profile missing mcp-sticker_catalog" >&2
+    exit 1
+  fi
   if ! grep -q 'mcp-search_hub' "$REPO_ROOT/hermes/profile/config.lite.yaml"; then
     echo "ERROR: lite source profile missing mcp-search_hub" >&2
+    exit 1
+  fi
+  if ! grep -q 'mcp-sticker_catalog' "$REPO_ROOT/hermes/profile/config.lite.yaml"; then
+    echo "ERROR: lite source profile missing mcp-sticker_catalog" >&2
     exit 1
   fi
   if ! grep -q '^  search_hub:' "$FULL_HOME/config.yaml"; then
@@ -803,8 +817,20 @@ verify_runtime() {
     echo "ERROR: lite runtime config missing search_hub MCP server" >&2
     exit 1
   fi
+  if ! grep -q '^  sticker_catalog:' "$FULL_HOME/config.yaml"; then
+    echo "ERROR: full runtime config missing sticker_catalog MCP server" >&2
+    exit 1
+  fi
+  if ! grep -q '^  sticker_catalog:' "$LITE_HOME/config.yaml"; then
+    echo "ERROR: lite runtime config missing sticker_catalog MCP server" >&2
+    exit 1
+  fi
   if ! config_has_toolset "$LITE_HOME/config.yaml" 'mcp-search_hub'; then
     echo "ERROR: lite runtime toolset missing mcp-search_hub" >&2
+    exit 1
+  fi
+  if ! config_has_toolset "$LITE_HOME/config.yaml" 'mcp-sticker_catalog'; then
+    echo "ERROR: lite runtime toolset missing mcp-sticker_catalog" >&2
     exit 1
   fi
   if config_has_toolset "$LITE_HOME/config.yaml" 'mcp-playwright'; then
@@ -819,12 +845,20 @@ verify_runtime() {
     echo "ERROR: full runtime toolset missing mcp-search_hub" >&2
     exit 1
   fi
+  if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-sticker_catalog'; then
+    echo "ERROR: full runtime toolset missing mcp-sticker_catalog" >&2
+    exit 1
+  fi
   if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-playwright'; then
     echo "ERROR: full runtime toolset missing mcp-playwright" >&2
     exit 1
   fi
   if ! test -x "$REPO_ROOT/scripts/start_search_hub_mcp.sh"; then
     echo "ERROR: scripts/start_search_hub_mcp.sh missing or not executable" >&2
+    exit 1
+  fi
+  if ! test -x "$REPO_ROOT/scripts/start_sticker_catalog_mcp.sh"; then
+    echo "ERROR: scripts/start_sticker_catalog_mcp.sh missing or not executable" >&2
     exit 1
   fi
 

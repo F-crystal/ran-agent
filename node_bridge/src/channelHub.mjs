@@ -105,7 +105,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     sender_id: 'assistant',
     role: 'assistant',
     text: response.replyText || '',
-    media_summary: response.media ? JSON.stringify(response.media) : '',
+    media_summary: summarizeReplyMedia(response.media),
     source_message_id: message.id,
     created_at: Date.now(),
     tags: inferTags(message),
@@ -185,6 +185,25 @@ function normalizePriorMessages(messages = []) {
 function summarizeMedia(media = []) {
   if (!Array.isArray(media) || media.length === 0) return '';
   return media.map((item) => [item.type, item.filename, item.mime_type].filter(Boolean).join(':')).join(', ');
+}
+
+function summarizeReplyMedia(media = null) {
+  if (!media || typeof media !== 'object' || Array.isArray(media)) return '';
+  if (media.source === 'sticker_catalog' && media.kind === 'sticker') {
+    return JSON.stringify({
+      source: 'sticker_catalog',
+      kind: 'sticker',
+      stickerId: String(media.stickerId || '').trim(),
+      mime: String(media.mime || '').trim(),
+      fileName: String(media.fileName || '').trim(),
+    });
+  }
+  return JSON.stringify({
+    type: String(media.type || '').trim(),
+    source: String(media.source || '').trim() || undefined,
+    kind: String(media.kind || '').trim() || undefined,
+    fileName: String(media.fileName || media.filename || '').trim() || undefined,
+  });
 }
 
 function inferTags(message = {}) {

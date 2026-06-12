@@ -53,6 +53,7 @@ Python backend
 - Multi-frontend diagnosis: `bash scripts/diagnose-multi-frontend.sh`.
 - Tool visibility diagnosis: `bash scripts/diagnose-hermes-tools.sh`.
 - Media/XHS diagnosis: `bash scripts/diagnose-media-xhs.sh`.
+- Sticker Catalog smoke: `bash scripts/diagnose-sticker-catalog.sh`.
 
 Do not hand-edit systemd or runtime env as the normal repair path.
 
@@ -92,6 +93,7 @@ state, vault, data, or XHS note debug output.
 | `media_reader` | OCR, ASR, VLM, video, batch media analysis |
 | `social_reader` | Social content reading (Bilibili, XHS, WeChat articles, music) |
 | `mimo_power` | Deep multimodal analysis through MiMo Token Plan |
+| `sticker_catalog` | Local sticker picker/attach/save catalog; lite uses public pick/attach, full may use owner-only management |
 | `personal_memory` | Personal memory recall and backend health check |
 | `obsidian_memory` | Optional Obsidian vault search, disabled by default |
 | `media_generation` | Image and speech generation |
@@ -100,6 +102,11 @@ state, vault, data, or XHS note debug output.
 - Search Hub is registered in both lite and full. Lite uses lightweight public
   providers; full may use Playwright fallback. OpenCLI browser-backed remains
   disabled by default for the 2C4G/60G server.
+- Sticker Catalog is registered in both lite and full. Lite should only use
+  `sticker_tags`, `sticker_pick`, and `sticker_attach`; owner-only
+  save/update/delete/list actions are for explicit full-profile owner requests.
+  Assets stay in `.ran_agent_state/stickers/`, and `RAN_MEDIA` carries only
+  `stickerId`. Details: `docs/governance/sticker-catalog.md`.
 - Co Reading is not exposed in the lite daily conversation toolset to keep the
   default prompt smaller. The MCP remains available in the full profile, while
   the Web reader remains available independently. Chunk text lives under
@@ -156,6 +163,7 @@ state, vault, data, or XHS note debug output.
 ## Media And Frontends
 
 - Media pipeline details: `docs/governance/media-pipeline.md`.
+- Sticker Catalog details and server smoke: `docs/governance/sticker-catalog.md`.
 - Multi-frontend identity/timeline details:
   `docs/governance/multi_frontend_identity_strategy.md`.
 - WeChat media buffer details:

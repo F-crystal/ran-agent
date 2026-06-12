@@ -31,6 +31,7 @@ platform_toolsets:
     - mcp-mimo_power
     - mcp-search_hub
     - mcp-co_reading
+    - mcp-sticker_catalog
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
@@ -49,6 +50,7 @@ platform_toolsets:
     - mcp-mimo_power
     - mcp-search_hub
     - mcp-co_reading
+    - mcp-sticker_catalog
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
@@ -71,6 +73,16 @@ mcp_servers:
       - -lc
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_generation_mcp.sh
     timeout: 300
+    connect_timeout: 60
+
+  sticker_catalog:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_sticker_catalog_mcp.sh
+    env:
+      STICKER_CATALOG_PROFILE_MODE: full
+    timeout: 120
     connect_timeout: 60
 
   media_reader:

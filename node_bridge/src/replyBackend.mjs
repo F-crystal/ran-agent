@@ -4,6 +4,8 @@
 
 import { getBackendIngestConfig, ingestExchangeToBackend } from './backendIngestClient.mjs';
 import { getHermesGatewayConfig, sendChatToHermesGateway } from './hermesGatewayClient.mjs';
+import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
+import { resolveStickerAsset } from './stickerCatalog.mjs';
 
 export function getReplyBackendConfig(env = process.env) {
   return {
@@ -71,7 +73,7 @@ export function createReplyBackend(options = {}) {
       const logger = options.logger || console;
       logger.log?.(`[ingest] sender_id_hash=${hashForLog(ingestPayload.sender_id)} text_length=${ingestPayload.user_text?.length || 0} image_urls_count=${ingestPayload.image_urls?.length || 0} media_count=${ingestPayload.media?.length || 0}`);
       if (ingestPayload.media?.length > 0) {
-        logger.log?.(`[ingest] media items: ${JSON.stringify(ingestPayload.media.map(m => ({ type: m.type, mimeType: m.mimeType, filePath: m.filePath?.substring(0, 50) })))}`);
+        logger.log?.(`[ingest] media items: ${JSON.stringify(ingestPayload.media.map(m => ({ type: m.type, mimeType: m.mimeType })))}`);
       }
       try {
         await ingest(ingestPayload, {
@@ -84,11 +86,15 @@ export function createReplyBackend(options = {}) {
         logger.warn?.(`backend ingest skipped: ${messageText}`);
       }
 
-      const mediaFromMarker = extractTrustedMediaMarker(response.reply_text);
+      const mediaFromMarker = extractTrustedMediaMarker(response.reply_text, {
+        resolveStickerAssetImpl: options.resolveStickerAssetImpl || resolveStickerAsset,
+        env,
+        logger: options.logger || console,
+      });
       const responseMedia = response.media && typeof response.media === 'object'
         ? response.media
         : mediaFromMarker?.media || null;
-      const responseText = responseMedia && mediaFromMarker?.media
+      const responseText = mediaFromMarker
         ? mediaFromMarker.text
         : response.reply_text;
 
@@ -103,37 +109,36 @@ export function createReplyBackend(options = {}) {
   };
 }
 
-function extractTrustedMediaMarker(text) {
-  const raw = String(text || '');
-  const markerPattern = /^WECHAT_MEDIA:\s*(\{.*\})\s*$/im;
-  const match = raw.match(markerPattern);
-  if (!match?.[1]) {
-    return null;
+function extractTrustedMediaMarker(text, options = {}) {
+  const ranMedia = extractRanMediaMarker(text);
+  if (ranMedia) {
+    if (!ranMedia.mediaIntent) {
+      if (ranMedia.errorCode) {
+        options.logger?.warn?.(`RAN_MEDIA marker rejected: ${ranMedia.errorCode}`);
+      }
+      return { text: ranMedia.text, media: null };
+    }
+    try {
+      const asset = options.resolveStickerAssetImpl(ranMedia.mediaIntent.stickerId, { env: options.env });
+      return {
+        text: ranMedia.text,
+        media: {
+          source: 'sticker_catalog',
+          kind: 'sticker',
+          stickerId: ranMedia.mediaIntent.stickerId,
+          mime: asset.mime,
+          fileName: asset.fileName,
+          filePath: asset.filePath,
+          caption: ranMedia.mediaIntent.caption,
+        },
+      };
+    } catch {
+      options.logger?.warn?.('RAN_MEDIA sticker resolve failed');
+      return { text: ranMedia.text, media: null };
+    }
   }
-  let parsed;
-  try {
-    parsed = JSON.parse(match[1]);
-  } catch {
-    return null;
-  }
-  if (parsed?.source !== 'media_generation_mcp') {
-    return null;
-  }
-  const type = typeof parsed.type === 'string' ? parsed.type.trim().toLowerCase() : '';
-  const url = typeof parsed.url === 'string' ? parsed.url.trim() : '';
-  const fileName = typeof parsed.fileName === 'string' ? parsed.fileName.trim() : '';
-  if (!type || !url || !['image', 'video', 'file', 'audio'].includes(type)) {
-    return null;
-  }
-  const cleanedText = raw
-    .replace(markerPattern, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
-  return {
-    text: cleanedText,
-    media: fileName ? { type, url, fileName } : { type, url },
-  };
+
+  return extractLegacyWechatMediaMarker(text);
 }
 
 function normalizeMediaItems(media) {
