@@ -55,6 +55,9 @@ Project-internal secrets, vault, data, and env files are never promoted as
 media inputs.
 
 Remote assets must be `http(s)` URLs and pass provider-level safety checks.
+The default remote media host allowlist includes common social/CDN hosts used
+by supported resolvers, including XHS image CDN hosts under `xiaohongshu.com`
+and `xhscdn.com`.
 
 ## Analysis Order
 

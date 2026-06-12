@@ -5,6 +5,7 @@ import { createCacheStore, sha256Bytes, sha256Hex } from './cacheStore.mjs';
 
 const DEFAULT_ALLOWED_HOSTS = [
   'xiaohongshu.com',
+  'xhscdn.com',
   'xhslink.com',
   'rednote.com',
   'douyin.com',

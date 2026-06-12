@@ -34,6 +34,7 @@ Run from the server checkout:
 
 ```bash
 cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
 git pull --ff-only
 bash scripts/apply-hermes-runtime-split.sh
 bash scripts/diagnose-lite-full.sh

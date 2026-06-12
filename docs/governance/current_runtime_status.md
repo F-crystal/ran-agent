@@ -119,6 +119,9 @@ state, vault, data, or XHS note debug output.
 - XHS content reading uses the prepared generic parser fallback
   (`wanyi-watermark`) as the primary read path. `jobson-xhs-mcp` remains a
   token-aware compatibility path when a fresh `xsec_token` exists.
+- Long XHS share URLs are read through URL candidates: resolved URL first,
+  canonical `/explore/<note_id>` URL second. This keeps `/discovery/item/...`
+  PC-share links with tracking params from failing on the first parser shape.
 - Runtime marker:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
 - Token cache paths:

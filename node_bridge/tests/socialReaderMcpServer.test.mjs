@@ -1101,6 +1101,43 @@ test('read_social_post uses generic parser before jobson for XHS share text', as
   );
 });
 
+test('read_social_post retries XHS generic parser with canonical URL for long discovery share links', async () => {
+  const calls = [];
+  const shareText = '10 【刚刚，OpenAI给用户发了额度复活卡！！ - 数字生命卡兹克 | 小红书 - 你的生活兴趣社区】 😆 eC4hUPSHplnTrOR 😆 https://www.xiaohongshu.com/discovery/item/6a2b810f000000003502f581?source=webshare&xhsshare=pc_web&xsec_token=ABhlbvu1Hb6w6jyzeLPQTj63fw0_DFYm4ddIuyWKZ4Xbo=&xsec_source=pc_share';
+
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: { url: shareText },
+      },
+    },
+    {
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        if (toolArgs.share_link.includes('/discovery/item/')) {
+          return { content: [{ type: 'text', text: '{"status":"error","message":"获取失败"}' }] };
+        }
+        return { content: [{ type: 'text', text: '{"status":"success","title":"额度复活卡","desc":"长链 canonical 解析正文"}' }] };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.primary, true);
+  assert.equal(result.structuredContent.post_text, '长链 canonical 解析正文');
+  assert.deepEqual(
+    calls.map((call) => call.arguments.share_link),
+    [
+      'https://www.xiaohongshu.com/discovery/item/6a2b810f000000003502f581?source=webshare&xhsshare=pc_web&xsec_token=ABhlbvu1Hb6w6jyzeLPQTj63fw0_DFYm4ddIuyWKZ4Xbo=&xsec_source=pc_share',
+      'https://www.xiaohongshu.com/explore/6a2b810f000000003502f581?xsec_token=ABhlbvu1Hb6w6jyzeLPQTj63fw0_DFYm4ddIuyWKZ4Xbo%3D&xsec_source=pc_share',
+    ]
+  );
+});
+
 test('read_social_post does not blindly choose ambiguous search results', async () => {
   const result = await handleSocialReaderMcpRequest(
     {

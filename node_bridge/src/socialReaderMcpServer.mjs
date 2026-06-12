@@ -816,6 +816,30 @@ export function parseXhsUrlInfo(url) {
   };
 }
 
+function buildXhsReadUrlCandidates({ rawText = '', resolved = {} } = {}) {
+  const candidates = [];
+  function push(value) {
+    const text = String(value || '').trim();
+    if (!text) return;
+    const extracted = extractFirstUrl(text);
+    const url = extracted.url || text;
+    if (!url || candidates.includes(url)) return;
+    try {
+      const parsed = new URL(url);
+      if (isXhsShortLinkHost(parsed.hostname) && candidates.length > 0) return;
+    } catch {
+      return;
+    }
+    candidates.push(url);
+  }
+
+  push(resolved.resolved_url);
+  push(resolved.canonical_url);
+  push(resolved.url);
+  push(rawText);
+  return candidates;
+}
+
 export async function resolveXhsShareUrl(input, options = {}) {
   const extracted = extractFirstUrl(input);
   if (!extracted.url) {
@@ -1774,7 +1798,7 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
   const resolvedXhs = await resolveXhsShareUrl(url, options);
   if (resolvedXhs.ok) {
     resolved.resolved_url = resolvedXhs.resolved_url || '';
-    resolved.canonical_url = resolvedXhs.resolved_url || '';
+    resolved.canonical_url = resolvedXhs.canonical_url || resolvedXhs.resolved_url || '';
     resolved.note_id = resolvedXhs.note_id || '';
     resolved.xsec_token = resolvedXhs.xsec_token || '';
     resolved.xsec_source = resolvedXhs.xsec_source || '';
@@ -2167,16 +2191,23 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
   const genericFallbackEnabled = String(env.SOCIAL_READER_GENERIC_FALLBACK_ENABLED || 'true') !== 'false';
   const xhsTimeoutMs = resolveXhsBackendTimeoutMs(env);
   if (genericFallbackEnabled) {
-    const generic = await readGenericSocialPost({
-      url: resolved.resolved_url || resolved.canonical_url || resolved.url || String(rawText),
-      platform: 'xhs',
-      includeComments,
-      maxComments,
-    }, { ...options, xhsTimeoutMs });
-    if (generic.structuredContent?.ok === true) {
-      generic.structuredContent.primary = true;
-      generic.content[0].text = JSON.stringify(generic.structuredContent, null, 2);
-      return generic;
+    const xhsFallbackConfig = getXhsFallbackServerConfig(env);
+    for (const candidateUrl of buildXhsReadUrlCandidates({ rawText, resolved })) {
+      const generic = await readGenericSocialPost({
+        url: candidateUrl,
+        platform: 'xhs',
+        includeComments,
+        maxComments,
+      }, {
+        ...options,
+        xhsTimeoutMs,
+        ...(xhsFallbackConfig ? { _xhsFallbackConfig: xhsFallbackConfig } : {}),
+      });
+      if (generic.structuredContent?.ok === true) {
+        generic.structuredContent.primary = true;
+        generic.content[0].text = JSON.stringify(generic.structuredContent, null, 2);
+        return generic;
+      }
     }
   }
   if (!hasCookie) {
