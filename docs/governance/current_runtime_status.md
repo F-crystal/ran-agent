@@ -125,6 +125,10 @@ state, vault, data, or XHS note debug output.
 - XHS deep read skips the token-aware `jobson-xhs-mcp` detail backend when no
   `xsec_token` or cached token is available, so image/OCR fallback does not wait
   for a predictable 90s detail timeout.
+- `media_reader.resolve_platform_media(platform="xhs")` treats missing
+  `xsec_token` as recoverable: it tries the prepared generic parser fallback,
+  preserves returned XHS image URLs as normalized media assets, and lets OCR/VLM
+  continue instead of returning a hard backend error.
 - Runtime marker:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
 - Token cache paths:

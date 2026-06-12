@@ -453,6 +453,60 @@ test('resolve_platform_media XHS timeout triggers generic fallback, not hard err
   assert.equal(result.structuredContent.resolver, 'xhsResolver');
 });
 
+test('resolve_platform_media XHS missing xsec token keeps generic parser image assets', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-generic-fallback-'));
+  const markerPath = path.join(tempDir, 'generic-fallback-ready.json');
+  fs.writeFileSync(markerPath, JSON.stringify({
+    ok: true,
+    command: 'unused-in-test',
+    args: [],
+    tool_name: 'parse_xhs_link',
+  }));
+  const genericPayload = {
+    title: '7.5W字挑落CEO的背后',
+    desc: '全新版本的钉钉应该快上线了',
+    image_urls: [
+      'https://ci.xiaohongshu.com/1040g008320bai7ruk5g5o79q0d0bn4dtppsn5g0',
+      'https://sns-webpic-qc.xhscdn.com/1040g008320bai7ruk5g5o79q0d0bn4dtppsn5g1',
+    ],
+  };
+
+  const result = await callResolve(
+    { url_or_text: 'https://www.xiaohongshu.com/explore/missing-token-test', platform: 'xhs' },
+    {
+      env: {
+        ...process.env,
+        XHS_GENERIC_FALLBACK_READY_PATH: markerPath,
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      platformProviders: {
+        xhs: {
+          resolve: async () => {
+            const error = new Error('获取失败: missing xsec_token');
+            error.error_code = 'XHS_MISSING_XSEC_TOKEN';
+            throw error;
+          },
+        },
+      },
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        assert.equal(toolArgs.share_link, 'https://www.xiaohongshu.com/explore/missing-token-test');
+        return { content: [{ type: 'text', text: JSON.stringify(genericPayload) }] };
+      },
+    }
+  );
+
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.platform, 'xhs');
+  assert.equal(result.structuredContent.post_text, '7.5W字挑落CEO的背后\n\n全新版本的钉钉应该快上线了');
+  assert.deepEqual(result.structuredContent.media.map((item) => item.type), ['image', 'image']);
+  assert.deepEqual(result.structuredContent.media.map((item) => item.url_redacted), genericPayload.image_urls);
+  assert.ok(result.structuredContent.warnings.some((warning) => warning.code === 'XHS_MISSING_XSEC_TOKEN'));
+  assert.ok(result.structuredContent.warnings.some((warning) => warning.code === 'GENERIC_PARSER_FALLBACK'));
+});
+
 test('resolve_platform_media XHS non-recoverable error still throws', async () => {
   const result = await callResolve(
     { url_or_text: 'https://www.xiaohongshu.com/explore/nonrecoverable?xsec_token=tok', platform: 'xhs' },
