@@ -99,6 +99,7 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_sticker_catalog_mcp.sh
     env:
       STICKER_CATALOG_PROFILE_MODE: lite
+      STICKER_CATALOG_ALLOW_RUNTIME_SAVE: "true"
     timeout: 120
     connect_timeout: 60
 

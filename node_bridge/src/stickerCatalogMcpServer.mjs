@@ -18,7 +18,9 @@ const SERVER_INFO = {
 };
 
 const PUBLIC_TOOLS = new Set(['sticker_tags', 'sticker_pick', 'sticker_attach']);
-const OWNER_TOOLS = new Set(['sticker_save_from_inbox', 'sticker_update', 'sticker_delete', 'sticker_list']);
+const SAVE_TOOL = 'sticker_save_from_inbox';
+const LITE_TOOLS = new Set([...PUBLIC_TOOLS, SAVE_TOOL]);
+const OWNER_TOOLS = new Set([SAVE_TOOL, 'sticker_update', 'sticker_delete', 'sticker_list']);
 
 export function buildStickerCatalogTools(options = {}) {
   const mode = stickerCatalogProfileMode(options);
@@ -54,8 +56,8 @@ export function buildStickerCatalogTools(options = {}) {
     {
       name: 'sticker_save_from_inbox',
       title: 'Sticker Save From Inbox',
-      description: 'Owner-only save of trusted inbound media files into the sticker catalog.',
-      inputSchema: ownerSchema({
+      description: 'Save explicitly requested trusted inbound media files into the sticker catalog.',
+      inputSchema: schema({
         items: arr({
           type: 'object',
           properties: {
@@ -116,7 +118,7 @@ export function buildStickerCatalogTools(options = {}) {
       annotations: { readOnlyHint: true, destructiveHint: false, idempotentHint: true },
     },
   ];
-  return mode === 'lite' ? tools.filter((tool) => PUBLIC_TOOLS.has(tool.name)) : tools;
+  return mode === 'lite' ? tools.filter((tool) => LITE_TOOLS.has(tool.name)) : tools;
 }
 
 export async function handleStickerCatalogMcpRequest(request, options = {}) {
@@ -141,7 +143,7 @@ export async function handleStickerCatalogMcpRequest(request, options = {}) {
     if (!PUBLIC_TOOLS.has(name) && !OWNER_TOOLS.has(name)) {
       return errorResult('unknown sticker catalog tool', 'STICKER_UNKNOWN_TOOL');
     }
-    if (OWNER_TOOLS.has(name) && !isOwnerAuthorized(args, options)) {
+    if (OWNER_TOOLS.has(name) && !isOwnerAuthorized(name, args, options)) {
       return errorResult('owner-only sticker catalog tool denied', 'STICKER_PERMISSION_DENIED');
     }
     try {
@@ -214,11 +216,16 @@ function publicCandidate(sticker) {
   };
 }
 
-function isOwnerAuthorized(args = {}, options = {}) {
+function isOwnerAuthorized(toolName, args = {}, options = {}) {
+  if (toolName === SAVE_TOOL && isRuntimeSaveAllowed(options)) return true;
   if (options.trustedOwner === true) return true;
   const expected = String(options.ownerToken || options.env?.STICKER_CATALOG_OWNER_TOKEN || process.env.STICKER_CATALOG_OWNER_TOKEN || '').trim();
   if (!expected) return false;
   return String(args.owner_token || '').trim() === expected;
+}
+
+function isRuntimeSaveAllowed(options = {}) {
+  return String(options.env?.STICKER_CATALOG_ALLOW_RUNTIME_SAVE || process.env.STICKER_CATALOG_ALLOW_RUNTIME_SAVE || '').trim().toLowerCase() === 'true';
 }
 
 function safeToolError(error) {
@@ -309,6 +316,9 @@ export function runStickerCatalogMcpServer(options = {}) {
     } catch (error) {
       writeJsonRpcError(request.id, error);
     }
+  });
+  rl.on('close', () => {
+    process.exit(0);
   });
 }
 

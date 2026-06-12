@@ -122,6 +122,8 @@ export async function sendFeishuMediaReply({
   const sendTarget = buildLarkCliSendTarget(target, env, { idempotencySuffix: 'media' });
   const timeout = Math.max(1000, Number(env.FEISHU_SEND_TIMEOUT_SECONDS || 30) * 1000);
   const isImage = String(asset.mime || '').trim().toLowerCase().startsWith('image/');
+  const mediaCwd = path.dirname(asset.filePath);
+  const mediaFileName = path.basename(asset.filePath);
   let mediaMethod = isImage ? 'image' : 'file';
 
   if (isImage) {
@@ -129,8 +131,8 @@ export async function sendFeishuMediaReply({
       await execFileImpl(bin, buildLarkCliSendArgs({
         sendTarget,
         contentFlag: '--image',
-        contentValue: asset.filePath,
-      }), { timeout });
+        contentValue: mediaFileName,
+      }), { timeout, cwd: mediaCwd });
       return buildFeishuMediaResult({ sendTarget, textResult, mediaMethod: 'image' });
     } catch {
       mediaMethod = 'file';
@@ -141,8 +143,8 @@ export async function sendFeishuMediaReply({
     await execFileImpl(bin, buildLarkCliSendArgs({
       sendTarget,
       contentFlag: '--file',
-      contentValue: asset.filePath,
-    }), { timeout });
+      contentValue: mediaFileName,
+    }), { timeout, cwd: mediaCwd });
   } catch {
     throw new Error('feishu media send failed');
   }

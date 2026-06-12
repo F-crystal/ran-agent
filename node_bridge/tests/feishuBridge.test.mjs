@@ -171,8 +171,8 @@ test('sendFeishuReply constructs lark-cli send command', async () => {
   await sendFeishuReply({
     target: { channel_type: 'dm', sender_id: 'ou-secret', source_message_id: 'om-source' },
     text: '回复文本',
-    execFileImpl: async (bin, args) => {
-      calls.push({ bin, args });
+    execFileImpl: async (bin, args, options) => {
+      calls.push({ bin, args, options });
       return { stdout: '{"ok":true}' };
     },
     env: { FEISHU_LARK_CLI_BIN: 'lark-cli', FEISHU_LARK_CLI_IDENTITY: 'bot' },
@@ -193,8 +193,8 @@ test('sendFeishuReply sends group replies by chat id with explicit idempotency k
   await sendFeishuReply({
     target: { channel_type: 'group', conversation_id: 'oc-group', idempotency_key: 'reply-once' },
     text: '群回复',
-    execFileImpl: async (bin, args) => {
-      calls.push({ bin, args });
+    execFileImpl: async (bin, args, options) => {
+      calls.push({ bin, args, options });
       return { stdout: '{"ok":true}' };
     },
     env: { FEISHU_LARK_CLI_BIN: 'lark-cli' },
@@ -238,8 +238,8 @@ test('sendFeishuMediaReply sends text first and image sticker with lark-cli imag
       stickerId: 'stk_001',
       filePath: '/untrusted/ignored.png',
     },
-    execFileImpl: async (bin, args) => {
-      calls.push({ bin, args });
+    execFileImpl: async (bin, args, options) => {
+      calls.push({ bin, args, options });
       return { stdout: '{"ok":true}' };
     },
     env: {
@@ -258,9 +258,11 @@ test('sendFeishuMediaReply sends text first and image sticker with lark-cli imag
   assert.equal(calls[1].bin, 'lark-cli');
   assert.deepEqual(calls[1].args.slice(0, 4), ['im', '+messages-send', '--as', 'bot']);
   assert.equal(calls[1].args.includes('--image'), true);
-  assert.equal(calls[1].args.at(calls[1].args.indexOf('--image') + 1), catalog.filePath);
+  assert.equal(calls[1].args.at(calls[1].args.indexOf('--image') + 1), catalog.fileName);
   assert.equal(calls[1].args.includes('--file'), false);
   assert.equal(calls[1].args.includes('/untrusted/ignored.png'), false);
+  assert.equal(calls[1].options.cwd, catalog.assetsDir);
+  assert.equal(path.isAbsolute(calls[1].args.at(calls[1].args.indexOf('--image') + 1)), false);
 });
 
 test('sendFeishuMediaReply falls back to file when image send fails', async () => {
@@ -274,8 +276,8 @@ test('sendFeishuMediaReply falls back to file when image send fails', async () =
       kind: 'sticker',
       stickerId: 'stk_001',
     },
-    execFileImpl: async (bin, args) => {
-      calls.push({ bin, args });
+    execFileImpl: async (bin, args, options) => {
+      calls.push({ bin, args, options });
       if (args.includes('--image')) {
         throw new Error(`upload failed for ${catalog.filePath}`);
       }
@@ -289,6 +291,10 @@ test('sendFeishuMediaReply falls back to file when image send fails', async () =
   assert.equal(calls.length, 2);
   assert.equal(calls[0].args.includes('--image'), true);
   assert.equal(calls[1].args.includes('--file'), true);
+  assert.equal(calls[0].args.at(calls[0].args.indexOf('--image') + 1), catalog.fileName);
+  assert.equal(calls[1].args.at(calls[1].args.indexOf('--file') + 1), catalog.fileName);
+  assert.equal(calls[0].options.cwd, catalog.assetsDir);
+  assert.equal(calls[1].options.cwd, catalog.assetsDir);
   assert.equal(JSON.stringify(result).includes(catalog.filePath), false);
 });
 

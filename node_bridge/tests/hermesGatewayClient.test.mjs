@@ -844,6 +844,37 @@ test('auto routing keeps normal chat, XHS, and media on lite gateway', async () 
   }
 });
 
+test('auto routing keeps explicit sticker-save intents on lite gateway', async () => {
+  const cases = [
+    { text: '保存这个为表情包', sender_id: 'conv-sticker-save', media: [{ filePath: '/tmp/sticker.png', mimeType: 'image/png', type: 'image' }] },
+    { text: '这个加入表情包', sender_id: 'conv-sticker-add', media: [{ filePath: '/tmp/sticker.gif', mimeType: 'image/gif', type: 'image' }] },
+    { text: '以后用这个表情', sender_id: 'conv-sticker-future', media: [{ filePath: '/tmp/sticker.webp', mimeType: 'image/webp', type: 'image' }] },
+  ];
+
+  for (const payload of cases) {
+    let capturedUrl = '';
+    await sendChatToHermesGateway(
+      { channel: 'wechat', ...payload },
+      {
+        config: getHermesGatewayConfig({
+          HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+          HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+          HERMES_API_KEY: 'token',
+          HERMES_REPLY_MODE: 'api',
+          RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+          RAN_AGENT_CAPABILITY_MODE: 'auto',
+        }),
+        fetchImpl: async (url, init) => {
+          if (init?.body) capturedUrl = url;
+          return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+        },
+        logger: { warn() {}, log() {} },
+      }
+    );
+    assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions', `${payload.text} should stay on lite`);
+  }
+});
+
 // --- Social Link Evidence Gate Tests ---
 
 test('buildSocialEvidenceReport: no social link returns empty report', () => {

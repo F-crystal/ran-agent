@@ -27,6 +27,9 @@ never server-side file paths.
 - `sticker_save_from_inbox` accepts at most 10 items and only trusted inbound
   temporary directories, currently including `.ran_agent_state/wechat/inbound`
   and `.ran_agent_state/feishu/inbound`.
+- Lite runtime may expose `sticker_save_from_inbox` for this explicit save
+  workflow so ordinary chat can turn a user-sent image/GIF into a reusable
+  sticker. Update/delete/list remain full/owner-only maintenance tools.
 - Tool results expose public sticker metadata only. They must not expose
   absolute paths, tokens, local cache paths, or raw platform resource keys.
 - Do not commit real sticker assets. For local testing, create temporary
@@ -76,6 +79,10 @@ lark-cli im +messages-send --help | grep -E -- '--image|--file'
 ```
 
 - Confirm `--image` and `--file` are present.
+- Server `lark-cli` expects file keys, URLs, or cwd-relative local paths for
+  `--image` / `--file`; absolute paths and `..` are rejected. The Feishu sender
+  therefore runs with `cwd` set to the sticker assets directory and passes only
+  the catalog file name.
 - Send a catalog sticker to Feishu and confirm image send or file fallback.
 - Send an inbound Feishu image/file, explicitly ask to save it, and confirm the
   saved result does not reveal absolute paths.

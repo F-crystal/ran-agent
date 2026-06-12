@@ -87,11 +87,13 @@ test('lite and full profiles register sticker_catalog MCP with public usage boun
     assert.match(text, /start_sticker_catalog_mcp\.sh/);
   }
   assert.match(lite, /STICKER_CATALOG_PROFILE_MODE:\s+lite/);
+  assert.match(lite, /STICKER_CATALOG_ALLOW_RUNTIME_SAVE:\s+"true"/);
   assert.match(full, /STICKER_CATALOG_PROFILE_MODE:\s+full/);
+  assert.match(full, /STICKER_CATALOG_ALLOW_RUNTIME_SAVE:\s+"true"/);
   assert.match(agents, /sticker_tags/);
   assert.match(agents, /sticker_pick/);
   assert.match(agents, /sticker_attach/);
-  assert.match(agents, /lite.*sticker_tags\/sticker_pick\/sticker_attach/s);
+  assert.match(agents, /lite.*sticker_tags\/sticker_pick\/sticker_attach\/sticker_save_from_inbox/s);
 });
 
 test('repo MCP config and apply script know sticker_catalog', () => {

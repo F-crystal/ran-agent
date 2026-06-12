@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
+import { execFile } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { promisify } from 'node:util';
 
 import { saveStickersFromInbox } from '../src/stickerCatalog.mjs';
 import {
   buildStickerCatalogTools,
   handleStickerCatalogMcpRequest,
 } from '../src/stickerCatalogMcpServer.mjs';
+
+const execFileAsync = promisify(execFile);
+const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
 function pngBytes() {
   return Buffer.from([
@@ -79,7 +84,18 @@ test('sticker catalog MCP exposes public and owner-only tool schemas', () => {
   ]);
 });
 
-test('lite profile exposes only public sticker tools', async (t) => {
+test('start_sticker_catalog_mcp.sh initialize exits after one response', async () => {
+  const { stdout } = await execFileAsync(
+    'bash',
+    ['scripts/start_sticker_catalog_mcp.sh', 'initialize'],
+    { cwd: PROJECT_ROOT, timeout: 1500 }
+  );
+
+  const response = JSON.parse(stdout.trim());
+  assert.equal(response.result.serverInfo.name, 'ran-agent-sticker-catalog');
+});
+
+test('lite profile exposes chat sticker tools and explicit inbound save only', async (t) => {
   const env = await seedCatalog(t);
   const listed = await handleStickerCatalogMcpRequest(
     { method: 'tools/list', params: {} },
@@ -90,16 +106,51 @@ test('lite profile exposes only public sticker tools', async (t) => {
     'sticker_tags',
     'sticker_pick',
     'sticker_attach',
+    'sticker_save_from_inbox',
   ]);
+
+  for (const name of ['sticker_update', 'sticker_delete', 'sticker_list']) {
+    const denied = await callTool(
+      { ...env, STICKER_CATALOG_PROFILE_MODE: 'lite' },
+      name,
+      { owner_token: 'secret', items: [] },
+      { ownerToken: 'secret' }
+    );
+    assert.equal(denied.isError, true, name);
+    assert.equal(denied.structuredContent.error_code, 'STICKER_UNKNOWN_TOOL', name);
+  }
+});
+
+test('lite profile can save explicitly requested trusted inbound stickers when runtime save is enabled', async (t) => {
+  const env = tempEnv(t);
+  const filePath = writeInboxFile(env, 'lite-save.png');
+
+  const result = await callTool(
+    {
+      ...env,
+      STICKER_CATALOG_PROFILE_MODE: 'lite',
+      STICKER_CATALOG_ALLOW_RUNTIME_SAVE: 'true',
+    },
+    'sticker_save_from_inbox',
+    { items: [{ filePath, tags: ['常用'], desc: 'lite save', source: 'wechat' }] }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.saved[0].stickerId, 'stk_001');
+  assert.doesNotMatch(JSON.stringify(result), /filePath|\/wechat\/inbound|\.ran_agent_state/);
+});
+
+test('lite profile refuses runtime save when runtime save is disabled', async (t) => {
+  const env = tempEnv(t);
+  const filePath = writeInboxFile(env, 'lite-denied.png');
 
   const denied = await callTool(
     { ...env, STICKER_CATALOG_PROFILE_MODE: 'lite' },
     'sticker_save_from_inbox',
-    { owner_token: 'secret', items: [] },
-    { ownerToken: 'secret' }
+    { items: [{ filePath, tags: ['常用'] }] }
   );
   assert.equal(denied.isError, true);
-  assert.equal(denied.structuredContent.error_code, 'STICKER_UNKNOWN_TOOL');
+  assert.equal(denied.structuredContent.error_code, 'STICKER_PERMISSION_DENIED');
 });
 
 test('sticker_tags returns tags and usage without exposing tag index internals', async (t) => {
