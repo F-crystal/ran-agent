@@ -122,6 +122,9 @@ state, vault, data, or XHS note debug output.
 - Long XHS share URLs are read through URL candidates: resolved URL first,
   canonical `/explore/<note_id>` URL second. This keeps `/discovery/item/...`
   PC-share links with tracking params from failing on the first parser shape.
+- XHS deep read skips the token-aware `jobson-xhs-mcp` detail backend when no
+  `xsec_token` or cached token is available, so image/OCR fallback does not wait
+  for a predictable 90s detail timeout.
 - Runtime marker:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
 - Token cache paths:

@@ -6,8 +6,68 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-echo "=== 1. Hermes runtime config check ==="
 HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
+ENV_FILES=(
+  "$HERMES_HOME/.env"
+  "$HERMES_HOME/profiles/ran-assistant/.env"
+  "$HERMES_HOME/lite/.env"
+  "$HERMES_HOME/lite/profiles/ran-assistant-lite/.env"
+  ".env.local"
+  "node_bridge/.env.local"
+)
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+
+effective_env_value() {
+  local key="$1"
+  local fallback="${2:-}"
+  local value="${!key:-}"
+  local f line
+  for f in "${ENV_FILES[@]}"; do
+    if [ -f "$f" ]; then
+      line=$(grep "^${key}=" "$f" 2>/dev/null | tail -n 1 || true)
+      if [ -n "$line" ]; then
+        value="${line#*=}"
+      fi
+    fi
+  done
+  if [ -n "$value" ]; then
+    printf '%s' "$value"
+  else
+    printf '%s' "$fallback"
+  fi
+}
+
+host_list_contains() {
+  local needle="$1"
+  local list="$2"
+  local item
+  IFS=',' read -ra items <<< "$list"
+  for item in "${items[@]}"; do
+    item="$(printf '%s' "$item" | xargs)"
+    if [ "$item" = "$needle" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+echo "=== 0. Deployed revision check ==="
+echo "repo: $(pwd)"
+echo "branch: $(git branch --show-current 2>/dev/null || echo unknown)"
+echo "head: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if git diff --quiet -- . 2>/dev/null; then
+  echo "worktree: clean"
+else
+  echo "worktree: dirty"
+fi
+if grep -q "'xhscdn.com'" node_bridge/src/mediaReader/assetResolver.mjs 2>/dev/null; then
+  echo "assetResolver default xhscdn.com: PRESENT"
+else
+  echo "assetResolver default xhscdn.com: MISSING"
+fi
+
+echo ""
+echo "=== 1. Hermes runtime config check ==="
 if [ -f "$HERMES_HOME/config.yaml" ]; then
   echo "config.yaml: EXISTS"
 
@@ -65,7 +125,7 @@ done
 
 echo ""
 echo "=== 4. Artifact age distribution ==="
-python3 -c "
+"$PYTHON_BIN" -c "
 import json, os, glob
 from datetime import datetime, timezone
 
@@ -100,7 +160,7 @@ XHS_CACHE_PATHS=(
 )
 for cache_path in "${XHS_CACHE_PATHS[@]}"; do
   if [ -f "$cache_path" ]; then
-    entry_count=$(python3 -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "parse_error")
+    entry_count=$("$PYTHON_BIN" -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "parse_error")
     echo "$cache_path: EXISTS ($entry_count entries)"
   else
     echo "$cache_path: NOT FOUND"
@@ -127,12 +187,14 @@ fi
 
 echo ""
 echo "--- Effective timeout resolution ---"
-# Compute effective XHS timeout: SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS || XHS_BACKEND_MCP_TIMEOUT_MS || 90000
-EFFECTIVE_XHS_TIMEOUT="${SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS:-${XHS_BACKEND_MCP_TIMEOUT_MS:-90000}}"
-# Compute effective generic timeout: SOCIAL_READER_MCP_TIMEOUT_MS || 90000
-EFFECTIVE_GENERIC_TIMEOUT="${SOCIAL_READER_MCP_TIMEOUT_MS:-90000}"
+# Compute effective timeout using the env files actually sourced by the MCP wrappers.
+EFFECTIVE_XHS_TIMEOUT="$(effective_env_value SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS "")"
+if [ -z "$EFFECTIVE_XHS_TIMEOUT" ]; then
+  EFFECTIVE_XHS_TIMEOUT="$(effective_env_value XHS_BACKEND_MCP_TIMEOUT_MS 90000)"
+fi
+EFFECTIVE_GENERIC_TIMEOUT="$(effective_env_value SOCIAL_READER_MCP_TIMEOUT_MS 90000)"
 echo "effective XHS backend timeout: ${EFFECTIVE_XHS_TIMEOUT}"
-echo "generic social reader timeout: ${EFFECTIVE_GENERIC_TIMEOUT}"
+echo "effective generic timeout: ${EFFECTIVE_GENERIC_TIMEOUT}"
 if [ "$EFFECTIVE_XHS_TIMEOUT" = "$EFFECTIVE_GENERIC_TIMEOUT" ] && [ "$EFFECTIVE_XHS_TIMEOUT" != "90000" ]; then
   echo "WARNING: XHS timeout equals generic timeout ($EFFECTIVE_XHS_TIMEOUT). XHS should use a longer timeout."
 elif [ "$EFFECTIVE_XHS_TIMEOUT" -lt "$EFFECTIVE_GENERIC_TIMEOUT" ] 2>/dev/null; then
@@ -142,33 +204,54 @@ else
 fi
 
 echo ""
+echo "--- Effective media host allowlist ---"
+DEFAULT_MEDIA_ALLOWED_HOSTS="xiaohongshu.com,xhscdn.com,xhslink.com,rednote.com,douyin.com,iesdouyin.com,bilibili.com,b23.tv,weibo.com,weibo.cn,kuaishou.com,gifshow.com,music.163.com,y.music.163.com,163cn.tv"
+MEDIA_ALLOWED_HOSTS="$(effective_env_value PERSONAL_AGENT_MEDIA_ALLOWED_HOSTS "")"
+if [ -n "$MEDIA_ALLOWED_HOSTS" ]; then
+  echo "PERSONAL_AGENT_MEDIA_ALLOWED_HOSTS: $MEDIA_ALLOWED_HOSTS"
+else
+  MEDIA_ALLOWED_HOSTS="$DEFAULT_MEDIA_ALLOWED_HOSTS"
+  echo "PERSONAL_AGENT_MEDIA_ALLOWED_HOSTS: DEFAULT"
+fi
+if host_list_contains "xiaohongshu.com" "$MEDIA_ALLOWED_HOSTS"; then
+  echo "ci.xiaohongshu.com: ALLOWED via xiaohongshu.com"
+else
+  echo "ci.xiaohongshu.com: BLOCKED (missing xiaohongshu.com)"
+fi
+if host_list_contains "xhscdn.com" "$MEDIA_ALLOWED_HOSTS"; then
+  echo "sns-webpic-qc.xhscdn.com: ALLOWED via xhscdn.com"
+else
+  echo "sns-webpic-qc.xhscdn.com: BLOCKED (missing xhscdn.com)"
+fi
+
+echo ""
 echo "--- Generic fallback readiness ---"
-MARKER_PATH="${XHS_GENERIC_FALLBACK_READY_PATH:-/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json}"
-echo "SOCIAL_READER_GENERIC_FALLBACK_ENABLED: ${SOCIAL_READER_GENERIC_FALLBACK_ENABLED:-true}"
+MARKER_PATH="$(effective_env_value XHS_GENERIC_FALLBACK_READY_PATH /opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json)"
+echo "SOCIAL_READER_GENERIC_FALLBACK_ENABLED: $(effective_env_value SOCIAL_READER_GENERIC_FALLBACK_ENABLED true)"
 echo "marker path: $MARKER_PATH"
 
 if [ -f "$MARKER_PATH" ]; then
   echo "marker: EXISTS"
   # Validate JSON first
-  if ! python3 -m json.tool "$MARKER_PATH" > /dev/null 2>&1; then
+  if ! "$PYTHON_BIN" -m json.tool "$MARKER_PATH" > /dev/null 2>&1; then
     echo "ERROR: marker CORRUPTED (not valid JSON)"
     echo "marker content (first 200 chars): $(head -c 200 "$MARKER_PATH" 2>/dev/null)"
     echo "hint: delete marker and re-prepare: rm '$MARKER_PATH' && bash scripts/prepare-xhs-generic-fallback.sh"
     echo "generic fallback: NOT READY (marker corrupted)"
   else
-    MARKER_OK=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('ok', False))" 2>/dev/null || echo "parse_error")
+    MARKER_OK=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('ok', False))" 2>/dev/null || echo "parse_error")
     echo "marker ok: $MARKER_OK"
-    MARKER_CMD=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('command', ''))" 2>/dev/null || echo "")
+    MARKER_CMD=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('command', ''))" 2>/dev/null || echo "")
     echo "marker command: ${MARKER_CMD:-NOT SET}"
-    MARKER_TOOL=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('tool_name', ''))" 2>/dev/null || echo "")
+    MARKER_TOOL=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('tool_name', ''))" 2>/dev/null || echo "")
     echo "marker tool_name: ${MARKER_TOOL:-NOT SET}"
-    MARKER_EXEC=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_executable', ''))" 2>/dev/null || echo "")
+    MARKER_EXEC=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_executable', ''))" 2>/dev/null || echo "")
     echo "marker backend_executable: ${MARKER_EXEC:-NOT SET}"
-    MARKER_PYTHON=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_python', ''))" 2>/dev/null || echo "")
+    MARKER_PYTHON=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_python', ''))" 2>/dev/null || echo "")
     echo "marker backend_python: ${MARKER_PYTHON:-NOT SET}"
-    MARKER_MODULE=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_module', ''))" 2>/dev/null || echo "")
+    MARKER_MODULE=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('backend_module', ''))" 2>/dev/null || echo "")
     echo "marker backend_module: ${MARKER_MODULE:-NOT SET}"
-    MARKER_VERSION=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('version', ''))" 2>/dev/null || echo "")
+    MARKER_VERSION=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('version', ''))" 2>/dev/null || echo "")
     echo "marker version: ${MARKER_VERSION:-NOT SET}"
     if [ "$MARKER_OK" = "True" ]; then
       echo "generic fallback: READY"
@@ -186,7 +269,7 @@ fi
 # Token cache (read-only, no side effects)
 for cache_path in ".ran_agent_state/social_reader/xhs-note-token-cache.json" "node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json"; do
   if [ -f "$cache_path" ]; then
-    count=$(python3 -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "?")
+    count=$("$PYTHON_BIN" -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "?")
     echo "token cache: $cache_path ($count entries)"
   else
     echo "token cache: $cache_path NOT FOUND"
@@ -202,11 +285,11 @@ if [ "${1:-}" = "--smoke-generic" ]; then
   if [ ! -f "$MARKER_PATH" ]; then
     echo "SKIPPED: marker not found. Run scripts/prepare-xhs-generic-fallback.sh first."
   else
-    MARKER_OK=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('ok', False))" 2>/dev/null || echo "False")
+    MARKER_OK=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('ok', False))" 2>/dev/null || echo "False")
     if [ "$MARKER_OK" != "True" ]; then
       echo "SKIPPED: marker ok=false. Run scripts/prepare-xhs-generic-fallback.sh first."
     else
-      SMOKE_CMD=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('command', ''))" 2>/dev/null)
+      SMOKE_CMD=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('command', ''))" 2>/dev/null)
       if [ -n "$SMOKE_CMD" ] && [ -x "$SMOKE_CMD" ]; then
         echo "smoke testing via $SMOKE_CMD (timeout 15s)..."
         SMOKE_RESULT=$(timeout 15 "$SMOKE_CMD" <<'MCP_EOF' 2>/dev/null || true

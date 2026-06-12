@@ -328,6 +328,18 @@ test('clean-uv-cache-safe.sh kills obsidian install processes and protects XHS c
   assert.match(script, /data/);
 });
 
+test('diagnose-media-xhs.sh reports deployed revision and effective media/XHS env', () => {
+  const scriptPath = new URL('../../scripts/diagnose-media-xhs.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+
+  assert.match(script, /git rev-parse --short HEAD/);
+  assert.match(script, /effective_env_value\(\)/);
+  assert.match(script, /effective generic timeout/);
+  assert.match(script, /PERSONAL_AGENT_MEDIA_ALLOWED_HOSTS/);
+  assert.match(script, /xiaohongshu\.com/);
+  assert.match(script, /xhscdn\.com/);
+});
+
 test('apply script systemd units include OBSIDIAN_MEMORY_MCP_ENABLED=false', () => {
   const dir = mkdtempSync(join(tmpdir(), 'obsidian-systemd-'));
   const systemdDir = join(dir, 'systemd');

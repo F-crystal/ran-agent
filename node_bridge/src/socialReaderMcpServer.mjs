@@ -1998,6 +1998,14 @@ async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, ar
   }
 
   // Try jobson get_note_content with canonical URL
+  if (!xsecToken) {
+    return {
+      ok: false,
+      error_code: 'XHS_DETAIL_TOKEN_MISSING',
+      message: 'Skipping token-aware XHS detail backend because no xsec_token is available',
+      source: 'jobson-xhs-mcp',
+    };
+  }
   if (canonicalUrl || url) {
     try {
       const postResult = await callBackendMcpTool('xhs', 'get_note_content', { url: canonicalUrl || url }, options);

@@ -253,3 +253,79 @@ test('read_social_post_deep normalizes XHS wanyi media and analyzes image fallba
   assert.equal(mediaCalls.length, 1);
   assert.ok(backendCalls.some((call) => call.server === 'generic'));
 });
+
+test('read_social_post_deep skips jobson detail path when XHS URL has no xsec token', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const markerDir = mkdtempSync(join(tmpdir(), 'xhs-deep-no-token-marker-'));
+  const markerPath = join(markerDir, 'generic-fallback-ready.json');
+  writeFileSync(markerPath, JSON.stringify({
+    ok: true, package: 'wanyi-watermark', tool_name: 'parse_xhs_link',
+    command: 'echo', args: [], backend_executable: '', backend_args: [],
+    backend_python: 'echo', backend_module: 'test',
+  }));
+
+  const backendCalls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: 'http://xhslink.com/o/noTokenDemo',
+          media_detail: 'standard',
+          include_media: true,
+        },
+      },
+    },
+    {
+      env: { XHS_GENERIC_FALLBACK_READY_PATH: markerPath },
+      fetchImpl: async () => ({
+        status: 302,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === 'location'
+              ? 'https://www.xiaohongshu.com/explore/no-token-note'
+              : null;
+          },
+        },
+      }),
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        backendCalls.push({ server, toolName, arguments: toolArgs });
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                status: 'success',
+                title: '无 token 图文',
+                desc: '描述来自 wanyi',
+                images: [{ url_png: 'https://ci.xiaohongshu.com/no-token.png' }],
+              }),
+            }],
+          };
+        }
+        throw new Error(`unexpected backend call ${server}.${toolName}`);
+      },
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        assert.equal(toolName, 'analyze_media_batch');
+        assert.equal(toolArgs.assets.length, 1);
+        return {
+          structuredContent: {
+            ok: true,
+            partial: false,
+            items: [{ asset_id: 'image-1', type: 'image', overall_summary: 'OCR 读到了图片正文' }],
+            merged_summary: 'OCR 读到了图片正文',
+            partial_failures: [],
+            warnings: [],
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.match(result.structuredContent.deep_summary, /OCR/);
+  assert.equal(backendCalls.some((call) => call.server === 'xhs' && call.toolName === 'get_note_content'), false);
+});
