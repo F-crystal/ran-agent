@@ -97,6 +97,14 @@ function buildXhsCanonicalUrl(noteId, xsecToken = '', xsecSource = '') {
   return canonical.toString();
 }
 
+function normalizeXhsCanonicalUrl(noteId, candidateUrl = '', xsecToken = '', xsecSource = '') {
+  if (!noteId) return '';
+  const info = candidateUrl ? parseXhsUrlInfo(candidateUrl) : null;
+  const token = xsecToken || info?.xsec_token || '';
+  const source = xsecSource || info?.xsec_source || '';
+  return buildXhsCanonicalUrl(noteId, token, source);
+}
+
 function cacheXhsNoteToken(noteId, xsecToken = '', metadata = {}, options = {}) {
   if (!noteId) return;
   const env = options.env || process.env;
@@ -107,10 +115,12 @@ function cacheXhsNoteToken(noteId, xsecToken = '', metadata = {}, options = {}) 
   }
   const existing = xhsNoteTokenCache.get(noteId) || {};
   const xsecSource = metadata.xsec_source || existing.xsec_source || '';
-  const canonicalUrl = metadata.canonical_url
-    || (xsecToken ? buildXhsCanonicalUrl(noteId, xsecToken, xsecSource) : '')
-    || existing.canonical_url
-    || buildXhsCanonicalUrl(noteId);
+  const canonicalUrl = normalizeXhsCanonicalUrl(
+    noteId,
+    metadata.canonical_url || existing.canonical_url || '',
+    xsecToken || existing.xsecToken || '',
+    xsecSource
+  );
   xhsNoteTokenCache.set(noteId, {
     ...existing,
     xsecToken: xsecToken || existing.xsecToken || '',
@@ -141,6 +151,17 @@ function getCachedXhsNoteToken(noteId, options = {}) {
   if (Date.now() - entry.createdAt > TTL_MS) {
     xhsNoteTokenCache.delete(noteId);
     return null;
+  }
+  const normalizedCanonicalUrl = normalizeXhsCanonicalUrl(
+    noteId,
+    entry.canonical_url || '',
+    entry.xsecToken || entry.xsec_token || '',
+    entry.xsec_source || ''
+  );
+  if (normalizedCanonicalUrl && normalizedCanonicalUrl !== entry.canonical_url) {
+    entry.canonical_url = normalizedCanonicalUrl;
+    xhsNoteTokenCache.set(noteId, entry);
+    persistXhsNoteTokenCache(options.env || process.env);
   }
   return entry;
 }
@@ -1197,7 +1218,7 @@ async function resolveSocialUrl(url, options = {}) {
       try {
         cacheXhsNoteToken(noteId, xsecToken, {
           xsec_source: resolved.xsec_source || '',
-          canonical_url: resolved.resolved_url || '',
+          canonical_url: resolved.canonical_url || resolved.resolved_url || '',
           url: extracted.url,
         }, options);
         cacheWritten = true;

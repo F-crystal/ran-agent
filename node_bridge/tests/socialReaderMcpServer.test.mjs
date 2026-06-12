@@ -994,6 +994,41 @@ test('resolve_social_url accepts share text and returns structured XHS metadata'
   assert.equal(noUrl.structuredContent.error_code, 'NO_URL_FOUND');
 });
 
+test('resolve_social_url stores canonical XHS explore URL for discovery share links', async () => {
+  const { mkdtempSync, readFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const cacheDir = mkdtempSync(join(tmpdir(), 'xhs-resolve-cache-'));
+  const cachePath = join(cacheDir, 'xhs-note-token-cache.json');
+  const shareText = '14 【置身钉内作者再发千字长文：云空未必空 - 大厂吃瓜前线 | 小红书 - 你的生活兴趣社区】 😆 dyYDHnM0OCNfOH9 😆 https://www.xiaohongshu.com/discovery/item/6a2b8f33000000001702ac99?source=webshare&xhsshare=pc_web&xsec_token=ABhlbvu1Hb6w6jyzeLPQTj67358eDrzbWm0hGNJRKVovY=&xsec_source=pc_share';
+
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'resolve_social_url',
+        arguments: { url: shareText },
+      },
+    },
+    {
+      env: {
+        ...process.env,
+        XHS_NOTE_TOKEN_CACHE_PATH: cachePath,
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.has_xsec_token, true);
+  assert.equal(result.structuredContent.cache_written, true);
+  const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
+  const entry = cache.entries['6a2b8f33000000001702ac99'];
+  assert.equal(
+    entry.canonical_url,
+    'https://www.xiaohongshu.com/explore/6a2b8f33000000001702ac99?xsec_token=ABhlbvu1Hb6w6jyzeLPQTj67358eDrzbWm0hGNJRKVovY%3D&xsec_source=pc_share'
+  );
+});
+
 test('read_social_post uses search fallback when shortlink resolves without token', async () => {
   const calls = [];
   const result = await handleSocialReaderMcpRequest(

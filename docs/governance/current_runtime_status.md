@@ -140,6 +140,9 @@ state, vault, data, or XHS note debug output.
 - Token cache supports `{ entries: {} }`, arrays, direct objects, http/https
   normalization, xhslink short-code matching, canonical note ids, and trailing
   punctuation stripping.
+- Token cache writes and repairs canonical URLs as `/explore/<note_id>` with
+  `xsec_token` and `xsec_source` preserved, so older cached `/discovery/item`
+  PC-share URLs do not keep poisoning token-aware backend calls.
 - `buildSocialEvidenceReport()` separates `link_resolution`,
   `metadata_read`, and `content_read`.
 - Canonical URLs and token cache hits are link-resolution evidence only.
