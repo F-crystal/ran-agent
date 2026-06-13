@@ -286,6 +286,13 @@ async function loadTranslation(chunkId, options = {}) {
     const forceParam = options.force === true ? '&force=true' : '';
     const body = await api(`/books/${encodeURIComponent(state.bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN${forceParam}`);
     if (state.translationRequestId !== requestId || state.chunkId !== chunkId) return;
+    if (body.source_is_target === true) {
+      state.translationText = '';
+      state.translationCached = true;
+      state.translationStatus = 'native';
+      renderReaderText();
+      return;
+    }
     state.translationText = body.translation?.text || '';
     state.translationCached = body.cached === true;
     state.translationStatus = state.translationText ? 'ready' : 'error';
@@ -325,10 +332,13 @@ function renderReaderText() {
     const originalNode = document.createElement('p');
     originalNode.className = 'original-text';
     renderTextWithAnnotation(originalNode, original, activeAnnotation, 'original');
-    const translationNode = document.createElement('p');
-    translationNode.className = `translation-text translation-${state.translationStatus}`;
-    renderTextWithAnnotation(translationNode, translationLineFor(index, translations), activeAnnotation, 'translation');
-    block.append(originalNode, translationNode);
+    block.append(originalNode);
+    if (state.translationStatus !== 'native') {
+      const translationNode = document.createElement('p');
+      translationNode.className = `translation-text translation-${state.translationStatus}`;
+      renderTextWithAnnotation(translationNode, translationLineFor(index, translations), activeAnnotation, 'translation');
+      block.append(translationNode);
+    }
     container.appendChild(block);
   });
   if (translations.length > originals.length) {
@@ -353,6 +363,7 @@ function renderReaderText() {
 function translationLineFor(index, translations) {
   if (state.translationStatus === 'loading') return { text: index === 0 ? '翻译中...' : '', offset: null };
   if (state.translationStatus === 'error') return { text: index === 0 ? '翻译暂不可用，原文仍可阅读。' : '', offset: null };
+  if (state.translationStatus === 'native') return { text: '', offset: null };
   return translations[index] || { text: '', offset: null };
 }
 

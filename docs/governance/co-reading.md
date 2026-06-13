@@ -144,6 +144,10 @@ paragraph.
 - Provider credentials stay on the server.
 - Default provider is `hermes`, using `CO_READING_HERMES_API_BASE_URL`.
 - Cache key is `chunk_id + target_lang + provider + source_hash`.
+- When the source text is already predominantly Chinese and the target language
+  is `zh-CN`, translation is skipped entirely: no LLM call, no judge, no cache
+  write. The Web reader hides the translation panel and shows only the original
+  text.
 - If the chunk text changes, `source_hash` changes and the old translation is
   not reused.
 - Translation calls are translation-only. Cached or newly generated candidates

@@ -383,6 +383,17 @@ async function translateChunkForWeb({ store, bookId, chunkId, targetLang, force 
   const sourceHash = hashText(text);
   const provider = normalizeTranslationProvider(config.translationProvider);
   const lang = normalizeTargetLang(targetLang || config.translationTargetLang);
+
+  // When the source is already in the target language, skip the LLM call
+  // entirely — no API cost, no judge, no cache write.
+  if (lang === 'zh-CN' && isPredominantlyChinese(text)) {
+    return jsonResponse(200, {
+      ok: true,
+      source_is_target: true,
+      translation: { id: '', book_id: bookId, chunk_id: chunkId, target_lang: lang, provider, source_hash: sourceHash, char_count: 0, created_at: '', updated_at: '', text: '' },
+    });
+  }
+
   if (!force) {
     const cached = await store.readTranslation({ chunkId, targetLang: lang, provider, sourceHash });
     if (cached) {
@@ -435,6 +446,39 @@ function normalizeTranslationProvider(provider) {
 function normalizeTargetLang(lang) {
   const value = String(lang || DEFAULT_TRANSLATION_TARGET_LANG).trim();
   return value || DEFAULT_TRANSLATION_TARGET_LANG;
+}
+
+// Heuristic: CJK Unified Ideographs (U+4E00–U+9FFF) character ratio.
+// Returns true when >60% of meaningful characters are Chinese, which is a
+// conservative threshold that avoids false positives on mixed-script texts.
+function isPredominantlyChinese(text) {
+  const source = String(text || '');
+  let cjk = 0;
+  let total = 0;
+  for (const char of source) {
+    const cp = char.codePointAt(0);
+    if (cp >= 0x4e00 && cp <= 0x9fff) {
+      cjk += 1;
+      total += 1;
+    } else if (cp >= 0x3400 && cp <= 0x4dbf) {
+      // CJK Extension A
+      cjk += 1;
+      total += 1;
+    } else if (cp === 0x3005 || cp === 0x3006 || cp === 0x3007) {
+      // Ideographic iteration mark / closing bracket / numeral zero
+      cjk += 1;
+      total += 1;
+    } else if ((cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0x2f800 && cp <= 0x2fa1f)) {
+      // CJK Compatibility Ideographs / Supplement
+      cjk += 1;
+      total += 1;
+    } else if (cp > 0x7f || (cp >= 0x41 && cp <= 0x5a) || (cp >= 0x61 && cp <= 0x7a) || (cp >= 0x30 && cp <= 0x39)) {
+      // Count letters, digits, and non-ASCII as meaningful characters
+      total += 1;
+    }
+    // Whitespace, punctuation, symbols are not counted as meaningful
+  }
+  return total > 0 && cjk / total > 0.6;
 }
 
 function translationPayload(row = {}) {
