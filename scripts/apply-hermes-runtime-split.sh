@@ -451,7 +451,6 @@ platform_toolsets:
     - mcp-time
     - mcp-social_reader
     - mcp-media_reader
-    - mcp-mimo_power
     - mcp-search_hub
     - mcp-co_reading
     - mcp-sticker_catalog
@@ -470,7 +469,6 @@ platform_toolsets:
     - mcp-time
     - mcp-social_reader
     - mcp-media_reader
-    - mcp-mimo_power
     - mcp-search_hub
     - mcp-co_reading
     - mcp-sticker_catalog

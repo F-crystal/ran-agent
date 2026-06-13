@@ -329,3 +329,76 @@ test('read_social_post_deep skips jobson detail path when XHS URL has no xsec to
   assert.match(result.structuredContent.deep_summary, /OCR/);
   assert.equal(backendCalls.some((call) => call.server === 'xhs' && call.toolName === 'get_note_content'), false);
 });
+
+test('read_social_post_deep reports XHS media truncation by max_media_assets', async () => {
+  const { mkdtempSync, writeFileSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const markerDir = mkdtempSync(join(tmpdir(), 'xhs-deep-truncated-marker-'));
+  const markerPath = join(markerDir, 'generic-fallback-ready.json');
+  writeFileSync(markerPath, JSON.stringify({
+    ok: true, package: 'wanyi-watermark', tool_name: 'parse_xhs_link',
+    command: 'echo', args: [], backend_executable: '', backend_args: [],
+    backend_python: 'echo', backend_module: 'test',
+  }));
+
+  const imageItems = Array.from({ length: 25 }, (_, index) => ({
+    url_png: `https://ci.xiaohongshu.com/page-${index}.png`,
+  }));
+  let analyzedAssets = null;
+
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/many-images',
+          media_detail: 'standard',
+          include_media: true,
+        },
+      },
+    },
+    {
+      env: { XHS_GENERIC_FALLBACK_READY_PATH: markerPath },
+      fetchImpl: async (url) => ({ url }),
+      mcpCallImpl: async ({ server, toolName }) => {
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                status: 'success',
+                title: '很多图',
+                desc: '需要说明默认只分析部分图片',
+                images: imageItems,
+              }),
+            }],
+          };
+        }
+        return { content: [{ type: 'text', text: 'cookie已失效' }] };
+      },
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        assert.equal(toolName, 'analyze_media_batch');
+        analyzedAssets = toolArgs.assets;
+        return {
+          structuredContent: {
+            ok: true,
+            partial: false,
+            items: [],
+            merged_summary: '分析了前 20 张',
+            partial_failures: [],
+            warnings: [],
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.total_media_count, 25);
+  assert.equal(result.structuredContent.analyzed_media_count, 20);
+  assert.equal(result.structuredContent.truncated_by_max_assets, true);
+  assert.deepEqual(result.structuredContent.warnings, ['XHS_MEDIA_ASSETS_TRUNCATED_BY_MAX_ASSETS']);
+  assert.equal(analyzedAssets.length, 20);
+});

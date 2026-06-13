@@ -33,11 +33,11 @@ test('ensureConversationMediaContext creates a reusable artifact for inbound loc
         analyzeCount += 1;
         return {
           ok: true,
-          analyzer: 'mimo_power',
+          analyzer: 'media_reader',
           summary: `截图里是登录错误。asset=${asset.id}`,
           ocr_text: '登录失败',
-          artifact_path: path.join(projectRoot, 'debug', 'mimo_tasks', 'fake.md'),
-          provider_ref: 'mimo-v2.5-pro',
+          artifact_path: path.join(projectRoot, 'debug', 'media_context', 'fake.json'),
+          provider_ref: 'qwen3-vl-flash',
         };
       },
     }
@@ -167,7 +167,7 @@ test('ensureConversationMediaContext rejects media context dirs outside the proj
   );
 });
 
-test('ensureConversationMediaContext keeps explicit MiMo unavailability visible instead of falling back', async () => {
+test('ensureConversationMediaContext uses media_reader even when user mentions retired MiMo', async () => {
   const projectRoot = tempProjectRoot();
   const imagePath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'screen.png');
   fs.mkdirSync(path.dirname(imagePath), { recursive: true });
@@ -176,32 +176,31 @@ test('ensureConversationMediaContext keeps explicit MiMo unavailability visible 
   const result = await ensureConversationMediaContext(
     {
       text: '用 MiMo 看这张截图',
-      sender_id: 'wechat-user-explicit-mimo',
+      sender_id: 'wechat-user-retired-media-tool',
       media: [{ filePath: imagePath, mimeType: 'image/png', type: 'image' }],
     },
     {
       env: { RAN_AGENT_ROOT: projectRoot },
-      mimoAnalyzeImpl: async () => ({
-        isError: true,
-        structuredContent: {
-          ok: false,
-          error_code: 'MIMO_TOKEN_PLAN_EXPIRED',
-          error: 'Token Plan expired',
-        },
-      }),
-      mediaReaderAnalyzeImpl: async () => {
-        throw new Error('should not fallback for explicit MiMo requests');
+      mediaReaderAnalyzeImpl: async ({ toolName, args }) => {
+        assert.equal(toolName, 'analyze_image');
+        assert.equal(args.file_path, imagePath);
+        return {
+          structuredContent: {
+            ok: true,
+            scene_summary: '截图里是登录框。',
+            ocr_text: '登录',
+          },
+        };
       },
     }
   );
 
-  assert.equal(result.artifacts[0].ok, false);
-  assert.equal(result.artifacts[0].analyzer, 'mimo_power');
-  assert.equal(result.artifacts[0].error_code, 'MIMO_TOKEN_PLAN_EXPIRED');
-  assert.match(result.contextText, /MiMo Token Plan 当前不可用/);
+  assert.equal(result.artifacts[0].ok, true);
+  assert.equal(result.artifacts[0].analyzer, 'media_reader');
+  assert.match(result.contextText, /截图里是登录框/);
 });
 
-test('ensureConversationMediaContext falls back through media_reader facade for non-explicit media', async () => {
+test('ensureConversationMediaContext analyzes image through media_reader facade', async () => {
   const projectRoot = tempProjectRoot();
   const imagePath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'screen.png');
   fs.mkdirSync(path.dirname(imagePath), { recursive: true });
@@ -216,14 +215,6 @@ test('ensureConversationMediaContext falls back through media_reader facade for 
     },
     {
       env: { RAN_AGENT_ROOT: projectRoot },
-      mimoAnalyzeImpl: async () => ({
-        isError: true,
-        structuredContent: {
-          ok: false,
-          error_code: 'MIMO_TOKEN_PLAN_KEY_MISSING',
-          error: 'missing key',
-        },
-      }),
       mediaReaderAnalyzeImpl: async ({ toolName, args }) => {
         mediaReaderCall = { toolName, args };
         return {
@@ -241,12 +232,10 @@ test('ensureConversationMediaContext falls back through media_reader facade for 
   assert.equal(mediaReaderCall.toolName, 'analyze_image');
   assert.equal(mediaReaderCall.args.file_path, imagePath);
   assert.equal(result.artifacts[0].analyzer, 'media_reader');
-  assert.equal(result.artifacts[0].fallback_from, 'MIMO_TOKEN_PLAN_KEY_MISSING');
-  assert.match(result.contextText, /fallback_from=MIMO_TOKEN_PLAN_KEY_MISSING/);
   assert.match(result.contextText, /截图里有登录框/);
 });
 
-test('ensureConversationMediaContext keeps video media_reader fallback subtitle/audio first', async () => {
+test('ensureConversationMediaContext keeps video media_reader subtitle/audio first', async () => {
   const projectRoot = tempProjectRoot();
   const videoPath = path.join(projectRoot, 'debug', 'wechat', 'inbound', 'clip.mp4');
   fs.mkdirSync(path.dirname(videoPath), { recursive: true });
@@ -261,13 +250,6 @@ test('ensureConversationMediaContext keeps video media_reader fallback subtitle/
     },
     {
       env: { RAN_AGENT_ROOT: projectRoot },
-      mimoAnalyzeImpl: async () => ({
-        isError: true,
-        structuredContent: {
-          ok: false,
-          error_code: 'MIMO_TOKEN_PLAN_KEY_MISSING',
-        },
-      }),
       mediaReaderAnalyzeImpl: async ({ toolName, args }) => {
         mediaReaderCall = { toolName, args };
         return {

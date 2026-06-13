@@ -15,6 +15,9 @@ const DEFAULT_STICKER_SOURCE_DIRS = [
   '.ran_agent_state/ran-agent-weixin/media',
   'debug/wechat/inbound',
 ];
+const DEFAULT_EXTERNAL_STICKER_SOURCE_DIRS = [
+  '/tmp/weixin-agent/media/inbound',
+];
 const MIME_EXTENSIONS = {
   'image/png': 'png',
   'image/jpeg': 'jpg',
@@ -148,11 +151,12 @@ function normalizeAllowedSourceDirs(env = process.env) {
     .split(/[\n,]+/)
     .map((item) => item.trim())
     .filter(Boolean);
-  const entries = configured.length > 0 ? configured : DEFAULT_STICKER_SOURCE_DIRS;
+  const entries = configured.length > 0
+    ? configured
+    : [...DEFAULT_STICKER_SOURCE_DIRS, ...DEFAULT_EXTERNAL_STICKER_SOURCE_DIRS];
   const seen = new Set();
   return entries
     .map((entry) => path.isAbsolute(entry) ? path.resolve(entry) : path.resolve(projectRoot, entry))
-    .filter((dir) => isPathInsideRoot(dir, projectRoot))
     .filter((dir) => {
       if (seen.has(dir)) {
         return false;

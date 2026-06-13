@@ -27,7 +27,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/cleanup.md` | Retired/deleted component record |
 | `docs/governance/media-pipeline.md` | Media pipeline and context policy |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |
-| `docs/governance/mimo-power-mcp.md` | MiMo Power MCP configuration |
+| `docs/governance/mimo-power-mcp.md` | Retired MiMo Power MCP record |
 | `docs/governance/multi_frontend_identity_strategy.md` | Multi-frontend identity and timeline |
 | `docs/governance/prompt-slimming-audit.md` | Prompt slimming ownership audit |
 

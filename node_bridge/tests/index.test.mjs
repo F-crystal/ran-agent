@@ -300,6 +300,53 @@ test('buildAgent resolves sticker catalog media to WeChat SDK image payload', as
   });
 });
 
+test('buildAgent extracts RAN_MEDIA sticker marker at WeChat SDK boundary', async () => {
+  const stateDir = fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'wechat-sticker-marker-'));
+  const assetsDir = path.join(stateDir, 'stickers', 'assets');
+  fs.mkdirSync(assetsDir, { recursive: true });
+  fs.writeFileSync(path.join(assetsDir, 'stk_001.jpg'), 'fake jpg bytes');
+  fs.writeFileSync(path.join(stateDir, 'stickers', 'index.json'), JSON.stringify({
+    stk_001: {
+      stickerId: 'stk_001',
+      fileName: 'stk_001.jpg',
+      mime: 'image/jpeg',
+      tags: ['ok'],
+      source: 'manual',
+    },
+  }));
+  fs.writeFileSync(path.join(stateDir, 'stickers', 'tags.json'), '{}');
+  fs.writeFileSync(path.join(stateDir, 'stickers', 'hashes.json'), '{}');
+
+  const agent = buildAgent({
+    logger: { log() {}, warn() {}, error() {} },
+    env: {
+      RAN_AGENT_STATE_DIR: stateDir,
+      NODE_BRIDGE_MERGE_WINDOW_MS: '10',
+      async handleWeChatTextMessage() {
+        return {
+          replyText: '太可爱了\nRAN_MEDIA: {"source":"sticker_catalog","kind":"sticker","stickerId":"stk_001","caption":"喜欢"}',
+          followUpMessages: [],
+          media: null,
+        };
+      },
+    },
+  });
+
+  const result = await agent.chat({
+    text: '发个贴纸',
+    conversationId: 'wx-sticker-marker',
+  });
+
+  assert.deepEqual(result, {
+    text: '太可爱了',
+    media: {
+      type: 'image',
+      url: path.join(assetsDir, 'stk_001.jpg'),
+      fileName: 'stk_001.jpg',
+    },
+  });
+});
+
 test('buildAgent safely drops unresolved sticker media without exposing local paths', async () => {
   const logs = [];
   const agent = buildAgent({

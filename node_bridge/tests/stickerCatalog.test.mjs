@@ -147,6 +147,29 @@ test('saves explicitly requested stickers from Feishu inbound media', async (t) 
   assert.equal(fs.existsSync(path.join(resolveStickerCatalogPaths(env).assetsDir, 'stk_001.gif')), true);
 });
 
+test('saves WeChat SDK inbound .bin images by sniffing content from tmp media dir', async (t) => {
+  const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'weixin-agent-media-'));
+  t.after(() => fs.rmSync(externalRoot, { recursive: true, force: true }));
+  const inboundDir = path.join(externalRoot, 'inbound');
+  fs.mkdirSync(inboundDir, { recursive: true });
+  const sourcePath = path.join(inboundDir, 'wechat-upload.bin');
+  fs.writeFileSync(sourcePath, jpegBytes());
+
+  const env = tempEnv(t, {
+    STICKER_INBOX_ALLOWED_DIRS: inboundDir,
+  });
+
+  const result = await saveStickersFromInbox({
+    items: [{ filePath: sourcePath, tags: ['微信'], desc: '微信入站图片', source: 'wechat' }],
+  }, { env });
+
+  assert.equal(result.saved.length, 1);
+  assert.equal(result.saved[0].stickerId, 'stk_001');
+  assert.equal(result.saved[0].mime, 'image/jpeg');
+  assert.equal(result.saved[0].fileName, 'stk_001.jpg');
+  assert.equal(fs.existsSync(path.join(resolveStickerCatalogPaths(env).assetsDir, 'stk_001.jpg')), true);
+});
+
 test('lists tags and picks stickers by tag or query without absolute paths', async (t) => {
   const env = tempEnv(t);
   const happy = writeInboxFile(env, 'happy.png', pngBytes());

@@ -104,3 +104,16 @@ test('repo MCP config and apply script know sticker_catalog', () => {
   assert.match(apply, /mcp-sticker_catalog/);
   assert.match(apply, /start_sticker_catalog_mcp\.sh/);
 });
+
+test('Hermes profiles no longer expose retired mimo_power MCP', () => {
+  const full = readFileSync(new URL('../../hermes/profile/config.yaml', import.meta.url), 'utf8');
+  const lite = readFileSync(new URL('../../hermes/profile/config.lite.yaml', import.meta.url), 'utf8');
+  const mcp = JSON.parse(readFileSync(new URL('../../.mcp.json', import.meta.url), 'utf8'));
+  const apply = readFileSync(new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url), 'utf8');
+
+  for (const text of [full, lite, apply]) {
+    assert.doesNotMatch(text, /mcp-mimo_power/);
+    assert.doesNotMatch(text, /^\s{2}mimo_power:/m);
+  }
+  assert.equal(Object.hasOwn(mcp.mcpServers, 'mimo_power'), false);
+});

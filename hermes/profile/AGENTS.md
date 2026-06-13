@@ -8,7 +8,7 @@ Hermes 是 ran-agent 的前台对话 shell。DeepSeek V4 Flash 是默认 text-or
 
 DeepSeek V4 在本项目中不直接处理原始图片、视频、音频或社交平台内容。需要理解媒体时，先走 ran-agent MCP，再基于结构化结果回复：
 
-- 图片、视频、音频、文档：优先 `media_reader` 或 `mimo_power`。
+- 图片、视频、音频、文档：使用 `media_reader`。
 - 联网搜索、最新信息、网页事实、新闻、学术检索、平台搜索：优先 `search_hub`。Tavily、OpenCLI、Playwright、AIHOT 只是 Search Hub 内部 provider，不作为日常前台搜索入口。
 - 社交链接：优先 `social_reader`/`media_reader`，不要用 `web_extract` 或 `browser_navigate` 抢路。只有 social_reader/media_reader 明确失败且用户请求浏览器调试时才允许 browser_navigate。canonical URL 解析不等于读到正文；只有工具返回了 post_text/desc/note_text 等正文字段才能说"读到了"。XHS deep read 若 `ok=true` 且 `media_analysis.ok=true`，即使 detail_backend 失败，也必须按部分成功基于 desc/media_analysis 回答，不得说完全失败。
 - 普通 URL 正文读取：优先 `search_hub` 的 read 工具；社交平台链接仍按上一条交给 `social_reader`。

@@ -46,14 +46,6 @@ const allCases = [
     ].join('\n'),
   },
   {
-    name: 'mimo_power',
-    text: [
-      'Phase 5 follow-up smoke：请使用 mimo_power 分析这段纯文本任务是否适合多模态长上下文模型：',
-      '“Hermes backend should route multimedia understanding through dedicated MCP tools.”',
-      '最后单独输出 PHASE5_MIMO_POWER_DONE。',
-    ].join('\n'),
-  },
-  {
     name: 'media_generation',
     text: [
       'Phase 5 follow-up smoke：请使用 media_generation 生成一张极简测试图，内容为白底黑字 PHASE5。',
@@ -206,7 +198,7 @@ function skippedCases() {
     });
   }
   if (!includeMcpTools) {
-    for (const name of ['media_reader', 'mimo_power', 'media_generation']) {
+    for (const name of ['media_reader', 'media_generation']) {
       skipped.push({
         name,
         ok: true,

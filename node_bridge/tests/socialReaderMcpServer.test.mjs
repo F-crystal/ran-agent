@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import {
   buildSocialReaderTools,
@@ -9,6 +12,24 @@ import {
   resolveFetchImpl,
   resolveXhsShareUrl,
 } from '../src/socialReaderMcpServer.mjs';
+
+const XHS_READY_MARKER_PATH = path.join(os.tmpdir(), `ran-agent-xhs-ready-${process.pid}.json`);
+fs.writeFileSync(XHS_READY_MARKER_PATH, JSON.stringify({
+  ok: true,
+  package: 'wanyi-watermark',
+  tool_name: 'parse_xhs_link',
+  command: 'echo',
+  args: [],
+  backend_python: 'echo',
+  backend_module: 'test',
+}));
+
+function xhsReadyEnv(extra = {}) {
+  return {
+    XHS_GENERIC_FALLBACK_READY_PATH: XHS_READY_MARKER_PATH,
+    ...extra,
+  };
+}
 
 test('social reader exposes only read-only tools with object schemas', () => {
   const tools = buildSocialReaderTools();
@@ -75,7 +96,7 @@ test('read_social_post uses generic XHS parser as primary content path', async (
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo; web_session=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo; web_session=demo' }),
       mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
         calls.push({ server, toolName, arguments: toolArgs });
         if (server === 'generic' && toolName === 'parse_xhs_link') {
@@ -98,6 +119,38 @@ test('read_social_post uses generic XHS parser as primary content path', async (
       ['generic', 'parse_xhs_link', 'https://www.xiaohongshu.com/explore/abc?xsec_token=tok'],
     ]
   );
+});
+
+test('read_social_post does not cold-start default XHS generic parser when marker is missing', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/abc',
+          include_comments: true,
+          max_comments: 5,
+        },
+      },
+    },
+    {
+      env: {
+        XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-marker.json',
+      },
+      mcpCallImpl: async ({ server, toolName }) => {
+        calls.push({ server, toolName });
+        throw new Error(`unexpected cold start: ${server}.${toolName}`);
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.content_available, false);
+  assert.equal(result.structuredContent.error_code, 'XHS_GENERIC_FALLBACK_NOT_READY');
+  assert.deepEqual(calls, []);
 });
 
 test('xhs_browse_search stores token context and xhs_browse_note reads by read_ref without exposing token', async () => {
@@ -341,7 +394,7 @@ test('read_social_post normalizes successful XHS generic parser JSON', async () 
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       mcpCallImpl: async ({ server, toolName }) => {
         if (server === 'generic' && toolName === 'parse_xhs_link') {
           return {
@@ -420,14 +473,14 @@ test('read_social_post treats XHS generic parser error JSON as failure', async (
 
 test('read_social_post can reuse token context cached by xhs_browse_search', async () => {
   const calls = [];
-  const env = {
+  const env = xhsReadyEnv({
     XHS_COOKIE: 'a1=demo',
     XHS_BROWSE_ENABLED: 'true',
     XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
     XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
     XHS_BROWSE_MIN_INTERVAL_MS: '0',
     XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-  };
+  });
   const options = {
     env,
     xhsBrowseCallImpl: async ({ toolName }) => {
@@ -565,6 +618,7 @@ test('read_social_post routes clean bilibili bvid URLs through bilibili MCP', as
       },
     },
     {
+      env: xhsReadyEnv(),
       mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
         calls.push({ server, toolName, arguments: toolArgs });
         return { content: [{ type: 'text', text: 'B站视频详情' }] };
@@ -920,7 +974,7 @@ test('read_social_post accepts share text and sends cleaned final XHS URL to gen
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       fetchImpl: async () => ({
         status: 302,
         headers: {
@@ -1042,7 +1096,7 @@ test('read_social_post uses search fallback when shortlink resolves without toke
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       fetchImpl: async () => ({
         status: 302,
         headers: {
@@ -1098,7 +1152,7 @@ test('read_social_post uses generic parser before jobson for XHS share text', as
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       fetchImpl: async () => ({
         status: 302,
         headers: {
@@ -1149,6 +1203,7 @@ test('read_social_post retries XHS generic parser with canonical URL for long di
       },
     },
     {
+      env: xhsReadyEnv(),
       mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
         calls.push({ server, toolName, arguments: toolArgs });
         assert.equal(server, 'generic');
@@ -1185,7 +1240,7 @@ test('read_social_post does not blindly choose ambiguous search results', async 
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       fetchImpl: async () => ({
         status: 302,
         headers: {
@@ -1254,7 +1309,7 @@ test('read_social_post caps max_comments to 1-100', async () => {
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       mcpCallImpl: async ({ toolName }) => {
         if (toolName === 'get_note_content') return { content: [{ type: 'text', text: '正文' }] };
         if (toolName === 'get_note_comments') return { content: [{ type: 'text', text: '0. A\n\n1. B' }] };
@@ -1276,7 +1331,7 @@ test('read_social_post caps max_comments to 1-100', async () => {
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       mcpCallImpl: async ({ toolName }) => {
         if (toolName === 'get_note_content') return { content: [{ type: 'text', text: '正文' }] };
         throw new Error(`unexpected ${toolName}`);
@@ -1300,7 +1355,7 @@ test('read_social_post returns XHS_BACKEND_TIMEOUT on backend timeout', async ()
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       mcpCallImpl: async () => {
         throw new Error('MCP backend timed out after 90000ms: uvx');
       },
@@ -1328,7 +1383,7 @@ test('read_social_post returns partial result on generic backend failure', async
       },
     },
     {
-      env: { XHS_COOKIE: 'a1=demo' },
+      env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
       mcpCallImpl: async () => {
         throw new Error('some unexpected backend error');
       },
@@ -1355,11 +1410,11 @@ test('XHS timeout error message shows XHS-specific timeout (90000ms) not generic
       },
     },
     {
-      env: {
+      env: xhsReadyEnv({
         XHS_COOKIE: 'a1=demo',
         SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS: '90000',
         SOCIAL_READER_MCP_TIMEOUT_MS: '45000',
-      },
+      }),
       mcpCallImpl: async ({ server }) => {
         if (server === 'generic') {
           throw new Error('MCP backend timed out after 90000ms: uvx');
@@ -1389,11 +1444,11 @@ test('readSocialPost XHS path passes XHS timeout to readGenericSocialPost', asyn
       },
     },
     {
-      env: {
+      env: xhsReadyEnv({
         XHS_COOKIE: 'a1=demo',
         SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS: '90000',
         SOCIAL_READER_MCP_TIMEOUT_MS: '45000',
-      },
+      }),
       mcpCallImpl: async ({ server, toolName }) => {
         calls.push({ server, toolName });
         if (server === 'generic' && toolName === 'parse_xhs_link') {

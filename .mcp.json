@@ -51,12 +51,6 @@
         "scripts/start_personal_memory_mcp.sh"
       ]
     },
-    "mimo_power": {
-      "command": "bash",
-      "args": [
-        "scripts/start_mimo_power_mcp.sh"
-      ]
-    },
     "search_hub": {
       "command": "bash",
       "args": [

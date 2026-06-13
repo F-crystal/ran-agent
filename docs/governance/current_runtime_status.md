@@ -92,7 +92,6 @@ state, vault, data, or XHS note debug output.
 | `time` | Timezone-aware time queries (`Asia/Shanghai`) |
 | `media_reader` | OCR, ASR, VLM, video, batch media analysis |
 | `social_reader` | Social content reading (Bilibili, XHS, WeChat articles, music) |
-| `mimo_power` | Deep multimodal analysis through MiMo Token Plan |
 | `sticker_catalog` | Local sticker picker/attach/save catalog; lite uses public pick/attach, full may use owner-only management |
 | `personal_memory` | Personal memory recall and backend health check |
 | `obsidian_memory` | Optional Obsidian vault search, disabled by default |
@@ -168,7 +167,7 @@ state, vault, data, or XHS note debug output.
   `docs/governance/multi_frontend_identity_strategy.md`.
 - WeChat media buffer details:
   `docs/governance/wechat-bridge-media-buffer.md`.
-- MiMo Power config details: `docs/governance/mimo-power-mcp.md`.
+- MiMo Power is retired and no longer exposed in Hermes runtime profiles.
 
 ## Scheduled AI Daily Digest
 

@@ -28,7 +28,6 @@ platform_toolsets:
     - mcp-time
     - mcp-social_reader
     - mcp-media_reader
-    - mcp-mimo_power
     - mcp-search_hub
     - mcp-co_reading
     - mcp-sticker_catalog
@@ -47,7 +46,6 @@ platform_toolsets:
     - mcp-time
     - mcp-social_reader
     - mcp-media_reader
-    - mcp-mimo_power
     - mcp-search_hub
     - mcp-co_reading
     - mcp-sticker_catalog
@@ -117,14 +115,6 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh
     timeout: 120
     connect_timeout: 60
-
-  mimo_power:
-    command: bash
-    args:
-      - -lc
-      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_mimo_power_mcp.sh
-    timeout: 600
-    connect_timeout: 90
 
   search_hub:
     command: bash

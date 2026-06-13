@@ -56,7 +56,7 @@ fi
 echo ""
 echo "=== 5. Check MCP tools in toolsets ==="
 if [ -f "$CONFIG" ]; then
-  for mcp in mcp-search_hub mcp-social_reader mcp-media_reader mcp-mimo_power mcp-media_generation mcp-personal_memory mcp-obsidian_memory mcp-time; do
+  for mcp in mcp-search_hub mcp-social_reader mcp-media_reader mcp-media_generation mcp-personal_memory mcp-obsidian_memory mcp-time; do
     if grep -A30 'platform_toolsets' "$CONFIG" | grep -q "$mcp"; then
       echo "$mcp: PRESENT (OK)"
     else

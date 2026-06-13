@@ -3,8 +3,8 @@
 Status: CURRENT (2026-05-22)
 
 This document owns the current media pipeline contract. Detailed WeChat buffer
-semantics live in `docs/governance/wechat-bridge-media-buffer.md`; MiMo Power
-configuration lives in `docs/governance/mimo-power-mcp.md`.
+semantics live in `docs/governance/wechat-bridge-media-buffer.md`; retired
+MiMo Power notes live in `docs/governance/mimo-power-mcp.md`.
 
 ## Mainline
 
@@ -24,7 +24,6 @@ frontend media
 | WeChat turn aggregation | `node_bridge/src/inboundMessageBuffer.mjs` |
 | Trusted file policy | `node_bridge/src/trustedMediaPaths.mjs` |
 | Media artifacts | `node_bridge/src/mediaContextStore.mjs` |
-| MiMo Power analyzer | `node_bridge/src/mimoPowerMcpServer.mjs` |
 | Media reader facade | `node_bridge/src/mediaReaderMcpServer.mjs` |
 | Media generation | `node_bridge/src/mediaGenerationMcpServer.mjs` |
 | Compact prompt policy | `node_bridge/src/contextPolicy.mjs` |
@@ -69,9 +68,8 @@ files are not saved automatically. Sticker assets live under
 
 ## Analysis Order
 
-1. `mimo_power` for deep multimodal analysis when configured.
-2. `media_reader` fallback for OCR, ASR, VLM, video, and batch analysis.
-3. Partial results are preserved when only one analyzer succeeds.
+1. `media_reader` for OCR, ASR, VLM, video, and batch analysis.
+2. Partial results are preserved when individual media assets fail.
 
 For platform links, call `media_reader.resolve_platform_media` before direct
 asset analysis when normalized resources are needed. XHS missing `xsec_token`

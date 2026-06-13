@@ -15,7 +15,7 @@ import { startDesktopProxyServer } from './desktopProxyServer.mjs';
 import { startCoReadingWebServer } from './coReading/webServer.mjs';
 import { startFeishuBridge } from './feishuBridge.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
-import { extractLegacyWechatMediaMarker } from './replyMediaMarkers.mjs';
+import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
 import {
   appendPendingOutboundMessage,
@@ -272,7 +272,7 @@ function isProactiveDeliveryEnabled(env = process.env) {
 
 function normalizeChatReplyResult(replyResult, options = {}) {
   const explicitFollowUps = normalizeFollowUpTexts(replyResult?.followUpMessages);
-  const mediaFromMarker = extractTrustedReplyMediaMarker(replyResult?.replyText);
+  const mediaFromMarker = extractTrustedReplyMediaMarker(replyResult?.replyText, options);
   const primaryText = mediaFromMarker
     ? mediaFromMarker.text
     : String(replyResult?.replyText || '').trim();
@@ -284,6 +284,13 @@ function normalizeChatReplyResult(replyResult, options = {}) {
 }
 
 function extractTrustedReplyMediaMarker(text) {
+  const ranMedia = extractRanMediaMarker(text);
+  if (ranMedia) {
+    if (!ranMedia.mediaIntent) {
+      return { text: ranMedia.text, media: null };
+    }
+    return { text: ranMedia.text, media: ranMedia.mediaIntent };
+  }
   return extractLegacyWechatMediaMarker(text);
 }
 

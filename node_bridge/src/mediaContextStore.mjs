@@ -3,7 +3,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { handleMediaReaderMcpRequest } from './mediaReaderMcpServer.mjs';
-import { handleMimoPowerMcpRequest } from './mimoPowerMcpServer.mjs';
 import {
   isPathInsideRoot,
   isTrustedLocalMediaPath,
@@ -206,21 +205,6 @@ function saveConversationState(state, env) {
   });
 }
 
-function assetToMimoAsset(asset) {
-  const type = ['image', 'audio', 'video'].includes(asset.type) ? asset.type : 'document';
-  const result = { type };
-  if (asset.url) {
-    result.url = asset.url;
-  }
-  if (asset.path) {
-    result.file_path = asset.path;
-  }
-  if (asset.mime) {
-    result.mime = asset.mime;
-  }
-  return result;
-}
-
 function summaryFromMediaReaderPayload(payload = {}) {
   return String(
     payload.overall_summary
@@ -278,78 +262,17 @@ async function analyzeWithMediaReader(asset, options = {}) {
 }
 
 async function defaultAnalyzeMediaAsset({ asset, payload }, options = {}) {
-  const task = [
-    '分析这份微信入站媒体，提取对后续对话有用的事实。',
-    payload?.text ? `用户当前问题：${payload.text}` : '',
-    '请输出简洁摘要、可见文字/OCR、音频转写或视频关键内容；不要代替 Hermes 回复用户。',
-  ].filter(Boolean).join('\n');
-  const mimoAnalyze = options.mimoAnalyzeImpl || ((request, requestOptions) => handleMimoPowerMcpRequest(request, requestOptions));
-  const mimoResult = await mimoAnalyze(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'analyze',
-        arguments: {
-          task,
-          mode: asset.type === 'image' ? 'vision' : asset.type === 'audio' ? 'audio' : asset.type === 'video' ? 'video' : 'deep',
-          assets: [assetToMimoAsset(asset)],
-        },
-      },
-    },
-    options
-  );
-  const mimoPayload = mimoResult.structuredContent || {};
-  if (mimoPayload.ok === true && !mimoResult.isError) {
-    return {
-      ok: true,
-      analyzer: 'mimo_power',
-      summary: String(mimoPayload.summary || ''),
-      artifact_path: mimoPayload.artifact_path || '',
-      expires_at: mimoPayload.expires_at || '',
-      provider_ref: mimoPayload.model || '',
-      raw: mimoPayload,
-    };
-  }
-
-  const explicitMimo = isExplicitMimoRequest(payload?.text);
-  if (explicitMimo && isMimoUnavailableCode(mimoPayload.error_code)) {
-    return {
-      ok: false,
-      analyzer: 'mimo_power',
-      summary: 'MiMo Token Plan 当前不可用，不能用其他模型冒充 MiMo 分析结果。',
-      error_code: mimoPayload.error_code || 'MIMO_POWER_UNAVAILABLE',
-      error: mimoPayload.error || '',
-    };
-  }
-
   const fallback = await analyzeWithMediaReader(asset, options);
   if (fallback) {
-    return {
-      ...fallback,
-      fallback_from: mimoPayload.error_code || 'MIMO_POWER_UNAVAILABLE',
-    };
+    return fallback;
   }
   return {
     ok: false,
     analyzer: 'media_reader',
     summary: '',
-    error_code: mimoPayload.error_code || 'MEDIA_ANALYSIS_UNAVAILABLE',
-    error: mimoPayload.error || 'no available media analyzer',
+    error_code: 'MEDIA_ANALYSIS_UNAVAILABLE',
+    error: 'no available media analyzer',
   };
-}
-
-function isExplicitMimoRequest(text) {
-  return /(?:mimo|MiMo|米模|用\s*MiMo|让\s*MiMo)/i.test(String(text || ''));
-}
-
-function isMimoUnavailableCode(code) {
-  return [
-    'MIMO_TOKEN_PLAN_KEY_MISSING',
-    'MIMO_TOKEN_PLAN_EXPIRED',
-    'MIMO_REQUEST_FAILED',
-    'MIMO_REQUEST_TIMEOUT',
-    'MIMO_POWER_FAILED',
-  ].includes(String(code || '').trim());
 }
 
 function normalizeArtifact({ asset, analysis }) {

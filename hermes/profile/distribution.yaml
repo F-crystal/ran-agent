@@ -25,10 +25,6 @@ env_requires:
     description: "Qwen-compatible key used by media_reader/Python backend when enabled"
     required: false
     default: ""
-  - name: MIMO_TOKEN_PLAN_API_KEY
-    description: "MiMo Token Plan key for mimo_power multimodal understanding"
-    required: false
-    default: ""
   - name: OBSIDIAN_INDEX_DEVICE
     description: "Device for obsidian-index sentence-transformers backend; use cpu on Linux servers"
     required: false

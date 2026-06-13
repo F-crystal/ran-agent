@@ -1744,6 +1744,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
   const social = socialResult.structuredContent || {};
   const mediaDetail = normalizeMediaDetail(args.media_detail);
   const includeMedia = args.include_media !== false && mediaDetail !== 'none';
+  const maxMediaAssets = Number(args.max_media_assets || 20);
   let mediaAnalysis = {
     ok: true,
     partial: false,
@@ -1881,6 +1882,7 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
   const mediaCount = normalizedMediaItems.length;
   const mediaDetail = normalizeMediaDetail(args.media_detail);
   const includeMedia = args.include_media !== false && mediaDetail !== 'none';
+  const maxMediaAssets = Number(args.max_media_assets || 20);
   let mediaAnalysis = {
     ok: true,
     partial: false,
@@ -1891,18 +1893,21 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     warnings: [],
   };
   const mediaUrls = includeMedia ? normalizedMediaItems.map((item) => item.url).filter(Boolean) : [];
+  const totalMediaCount = mediaUrls.length;
   const mediaAssets = includeMedia
     ? buildMediaAssets({
       mediaUrls,
       platform: 'xhs',
-      maxAssets: Number(args.max_media_assets || 20),
+      maxAssets: maxMediaAssets,
     })
     : [];
+  const analyzedMediaCount = mediaAssets.length;
+  const truncatedByMaxAssets = includeMedia && totalMediaCount > analyzedMediaCount;
   if (includeMedia && mediaAssets.length > 0) {
     const mediaResult = await callMediaReaderTool('analyze_media_batch', {
       assets: mediaAssets,
       media_detail: mediaDetail,
-      max_assets: Number(args.max_media_assets || 20),
+      max_assets: maxMediaAssets,
       task: 'summarize_social_post_media',
     }, options);
     mediaAnalysis = mediaResult.structuredContent || mediaResult;
@@ -1977,6 +1982,10 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     comments_text: detail?.comments_text || '',
     message: !detailOk && mediaOk ? '正文未完整获取，但媒体资源已获取' : undefined,
     media_count: mediaCount,
+    total_media_count: totalMediaCount,
+    analyzed_media_count: analyzedMediaCount,
+    truncated_by_max_assets: truncatedByMaxAssets,
+    warnings: truncatedByMaxAssets ? ['XHS_MEDIA_ASSETS_TRUNCATED_BY_MAX_ASSETS'] : [],
     deep_summary: [
       detailOk ? (detail?.post_text || desc) : '',
       mediaAnalysis?.merged_summary ? `媒体: ${mediaAnalysis.merged_summary}` : '',
@@ -2221,22 +2230,45 @@ async function readXhsPost({ rawText, resolved, includeComments, maxComments }, 
   const xhsTimeoutMs = resolveXhsBackendTimeoutMs(env);
   if (genericFallbackEnabled) {
     const xhsFallbackConfig = getXhsFallbackServerConfig(env);
-    for (const candidateUrl of buildXhsReadUrlCandidates({ rawText, resolved })) {
-      const generic = await readGenericSocialPost({
-        url: candidateUrl,
-        platform: 'xhs',
-        includeComments,
-        maxComments,
-      }, {
-        ...options,
-        xhsTimeoutMs,
-        ...(xhsFallbackConfig ? { _xhsFallbackConfig: xhsFallbackConfig } : {}),
-      });
-      if (generic.structuredContent?.ok === true) {
-        generic.structuredContent.primary = true;
-        generic.content[0].text = JSON.stringify(generic.structuredContent, null, 2);
-        return generic;
+    if (xhsFallbackConfig) {
+      for (const candidateUrl of buildXhsReadUrlCandidates({ rawText, resolved })) {
+        const generic = await readGenericSocialPost({
+          url: candidateUrl,
+          platform: 'xhs',
+          includeComments,
+          maxComments,
+        }, {
+          ...options,
+          xhsTimeoutMs,
+          _xhsFallbackConfig: xhsFallbackConfig,
+        });
+        if (generic.structuredContent?.ok === true) {
+          generic.structuredContent.primary = true;
+          generic.content[0].text = JSON.stringify(generic.structuredContent, null, 2);
+          return generic;
+        }
       }
+    } else {
+      return buildTextResult({
+        ok: true,
+        partial: true,
+        content_available: false,
+        full_text_available: false,
+        evidence_level: 'metadata_only',
+        should_answer_from_content: false,
+        platform: 'xhs',
+        url: resolved.resolved_url || resolved.canonical_url || resolved.original_url || String(rawText || ''),
+        note_id: resolved.note_id || '',
+        source: 'partial_fallback',
+        post_text: '',
+        comments_text: '',
+        error_code: 'XHS_GENERIC_FALLBACK_NOT_READY',
+        warnings: [
+          { code: 'XHS_GENERIC_FALLBACK_NOT_READY', message: 'Generic fallback tool not prepared; run scripts/prepare-xhs-generic-fallback.sh' },
+          { code: 'PARTIAL_RESULT', message: 'Returning URL and metadata only; full content unavailable' },
+        ],
+        fallback_chain: ['generic_marker', 'partial'],
+      });
     }
   }
   if (!hasCookie) {
