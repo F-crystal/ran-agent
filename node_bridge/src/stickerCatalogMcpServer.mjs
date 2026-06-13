@@ -184,12 +184,13 @@ async function dispatchTool(name, args, options) {
   }
   if (name === 'sticker_attach') {
     const stickerId = normalizeText(args.stickerId);
+    let asset;
     try {
-      resolveStickerAsset(stickerId, { env });
+      asset = resolveStickerAsset(stickerId, { env });
     } catch {
       return errorResult('sticker not found', 'STICKER_NOT_FOUND');
     }
-    const marker = buildRanMediaStickerMarker({ stickerId, caption: args.caption });
+    const marker = buildRanMediaStickerMarker({ stickerId: asset.stickerId, caption: args.caption });
     return result({ ok: true, marker }, marker);
   }
   if (name === 'sticker_save_from_inbox') {

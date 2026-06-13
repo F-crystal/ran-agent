@@ -1,6 +1,6 @@
 # Sticker Catalog
 
-Status: CURRENT (2026-06-13)
+Status: CURRENT (2026-06-14)
 
 `sticker_catalog` is a platform-neutral local sticker asset catalog. WeChat and
 Feishu are delivery exits only; the model-facing protocol carries `stickerId`,
@@ -35,6 +35,19 @@ never server-side file paths.
 - Do not commit real sticker assets. For local testing, create temporary
   throwaway image files under trusted inbound state directories.
 
+## Index Repair
+
+- `index.json`, `tags.json`, and `hashes.json` are runtime state. They may be
+  missing on older servers or after manual sticker file copies.
+- When the catalog index is empty, startup/resolve scans existing valid image
+  files in `.ran_agent_state/stickers/` and `.ran_agent_state/stickers/assets/`,
+  sniffs PNG/JPEG/GIF/WebP by magic bytes, copies them into canonical
+  `assets/stk_NNN.ext` files, and rebuilds the JSON indexes.
+- Repair runs only for an empty catalog index. It does not rewrite an active
+  catalog with existing entries.
+- Legacy IDs such as `stk001` resolve to canonical `stk_001`; MCP
+  `sticker_attach` emits the canonical ID in new `RAN_MEDIA` markers.
+
 ## Platform Notes
 
 - WeChat inbound media is already normalized as `{ filePath, mimeType, type }`
@@ -67,6 +80,9 @@ WeChat checks:
 - Send a plain text message and confirm no sticker is attached.
 - Send a sticker reply through `RAN_MEDIA` and confirm the bridge resolves by
   `stickerId`.
+- If the server has loose sticker images but no `index.json`, confirm the first
+  `sticker_attach` or bridge send rebuilds `index.json`, `tags.json`, and
+  `hashes.json`, then sends the sticker instead of exposing `RAN_MEDIA` text.
 - Send a legacy `WECHAT_MEDIA` marker and confirm compatibility still works.
 - Send an inbound media message, then explicitly ask to save it; ordinary
   screenshots must not auto-save.

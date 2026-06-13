@@ -170,6 +170,28 @@ test('saves WeChat SDK inbound .bin images by sniffing content from tmp media di
   assert.equal(fs.existsSync(path.join(resolveStickerCatalogPaths(env).assetsDir, 'stk_001.jpg')), true);
 });
 
+test('repairs missing sticker index from loose catalog images', (t) => {
+  const env = tempEnv(t);
+  const paths = ensureStickerCatalog(env);
+  fs.rmSync(paths.indexFile, { force: true });
+  fs.rmSync(paths.tagsFile, { force: true });
+  fs.rmSync(paths.hashesFile, { force: true });
+  fs.writeFileSync(path.join(paths.root, '1781372641799-1ba603c8.jpg'), jpegBytes());
+  fs.writeFileSync(path.join(paths.assetsDir, '何物表情包.jpg'), pngBytes());
+
+  const asset = resolveStickerAsset('stk001', { env });
+
+  assert.equal(asset.stickerId, 'stk_001');
+  assert.equal(asset.fileName, 'stk_001.jpg');
+  assert.equal(asset.mime, 'image/jpeg');
+  assert.equal(asset.desc, '1781372641799-1ba603c8');
+  assert.equal(asset.filePath, path.join(paths.assetsDir, 'stk_001.jpg'));
+  assert.equal(fs.existsSync(path.join(paths.assetsDir, 'stk_002.png')), true);
+  assert.deepEqual(Object.keys(readStickerIndex(env)), ['stk_001', 'stk_002']);
+  assert.deepEqual(readStickerTags(env), {});
+  assert.equal(readStickerHashes(env)[asset.sha256], 'stk_001');
+});
+
 test('lists tags and picks stickers by tag or query without absolute paths', async (t) => {
   const env = tempEnv(t);
   const happy = writeInboxFile(env, 'happy.png', pngBytes());

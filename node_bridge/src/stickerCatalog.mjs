@@ -63,6 +63,15 @@ function normalizeText(value) {
   return String(value || '').trim();
 }
 
+function normalizeStickerId(value) {
+  const raw = normalizeText(value);
+  const match = /^stk_?(\d+)$/i.exec(raw);
+  if (!match) {
+    return raw;
+  }
+  return `stk_${String(Number(match[1])).padStart(3, '0')}`;
+}
+
 function isActiveSticker(entry) {
   return entry && entry.status !== 'deleted';
 }
@@ -121,7 +130,7 @@ function writeCatalogJson(paths, index) {
 function nextStickerId(index) {
   let max = 0;
   for (const stickerId of Object.keys(index)) {
-    const match = /^stk_(\d+)$/.exec(stickerId);
+    const match = /^stk_?(\d+)$/i.exec(stickerId);
     if (match) {
       max = Math.max(max, Number(match[1]));
     }
@@ -142,6 +151,125 @@ function assertInsideDirectory(childPath, parentDir, message) {
 function writeEmptyJsonIfMissing(filePath) {
   if (!fs.existsSync(filePath)) {
     atomicWriteJson(filePath, {});
+  }
+}
+
+function collectLooseStickerFiles(paths, env = process.env) {
+  const maxBytes = parsePositiveInteger(env.STICKER_MAX_BYTES, DEFAULT_MAX_BYTES);
+  const roots = [
+    { dir: paths.root, rank: 0 },
+    { dir: paths.assetsDir, rank: 1 },
+  ];
+  const candidates = [];
+  const seenRealPaths = new Set();
+
+  for (const root of roots) {
+    if (!fs.existsSync(root.dir)) {
+      continue;
+    }
+    for (const name of fs.readdirSync(root.dir)) {
+      const filePath = path.join(root.dir, name);
+      let stat;
+      try {
+        stat = fs.statSync(filePath);
+      } catch {
+        continue;
+      }
+      if (!stat.isFile() || stat.size > maxBytes) {
+        continue;
+      }
+
+      let realPath;
+      try {
+        realPath = assertInsideDirectory(
+          filePath,
+          root.dir,
+          'catalog repair candidate resolved outside sticker catalog directory'
+        );
+      } catch {
+        continue;
+      }
+      if (seenRealPaths.has(realPath)) {
+        continue;
+      }
+      seenRealPaths.add(realPath);
+
+      let buffer;
+      let mime;
+      try {
+        buffer = fs.readFileSync(realPath);
+        mime = sniffStickerMime(buffer);
+      } catch {
+        continue;
+      }
+      if (!ALLOWED_MIMES.has(mime)) {
+        continue;
+      }
+
+      candidates.push({
+        rank: root.rank,
+        name,
+        realPath,
+        mime,
+        bytes: stat.size,
+        buffer,
+      });
+    }
+  }
+
+  return candidates.sort((left, right) => {
+    if (left.rank !== right.rank) {
+      return left.rank - right.rank;
+    }
+    return left.name.localeCompare(right.name, 'en');
+  });
+}
+
+function repairEmptyStickerCatalog(paths, env = process.env) {
+  const existingIndex = readJsonFile(paths.indexFile, {});
+  if (existingIndex && Object.keys(existingIndex).length > 0) {
+    return;
+  }
+
+  const candidates = collectLooseStickerFiles(paths, env);
+  if (candidates.length === 0) {
+    return;
+  }
+
+  const index = {};
+  const hashes = {};
+  const now = new Date().toISOString();
+  for (const candidate of candidates) {
+    const sha256 = crypto.createHash('sha256').update(candidate.buffer).digest('hex');
+    if (hashes[sha256]) {
+      continue;
+    }
+    const stickerId = nextStickerId(index);
+    const extension = MIME_EXTENSIONS[candidate.mime];
+    const fileName = `${stickerId}.${extension}`;
+    const assetPath = path.join(paths.assetsDir, fileName);
+    if (path.resolve(candidate.realPath) !== path.resolve(assetPath)) {
+      fs.copyFileSync(candidate.realPath, assetPath);
+    }
+    assertInsideDirectory(assetPath, paths.assetsDir, 'catalog asset resolved outside sticker assets directory');
+
+    index[stickerId] = {
+      stickerId,
+      tags: [],
+      desc: path.parse(candidate.name).name,
+      fileName,
+      mime: candidate.mime,
+      sha256,
+      bytes: candidate.bytes,
+      createdAt: now,
+      updatedAt: now,
+      source: 'import',
+    };
+    hashes[sha256] = stickerId;
+  }
+
+  if (Object.keys(index).length > 0) {
+    writeCatalogJson(paths, index);
   }
 }
 
@@ -196,6 +324,7 @@ export function ensureStickerCatalog(env = process.env) {
   writeEmptyJsonIfMissing(paths.indexFile);
   writeEmptyJsonIfMissing(paths.tagsFile);
   writeEmptyJsonIfMissing(paths.hashesFile);
+  repairEmptyStickerCatalog(paths, env);
   return paths;
 }
 
@@ -339,7 +468,7 @@ export function updateStickers({ items } = {}, options = {}) {
   const index = readStickerIndex(env);
   const updated = [];
   for (const item of Array.isArray(items) ? items : []) {
-    const stickerId = normalizeText(item?.stickerId);
+    const stickerId = normalizeStickerId(item?.stickerId);
     const entry = index[stickerId];
     if (!isActiveSticker(entry)) {
       continue;
@@ -368,7 +497,7 @@ export function deleteStickers({ items, hardDelete = false } = {}, options = {})
   const deleted = [];
 
   for (const item of requestedItems) {
-    const stickerId = normalizeText(item?.stickerId || item);
+    const stickerId = normalizeStickerId(item?.stickerId || item);
     const entry = index[stickerId];
     if (!isActiveSticker(entry)) {
       continue;
@@ -446,7 +575,7 @@ export function listStickers({ tag = '', query = '', status = 'active', limit = 
 export function resolveStickerAsset(stickerId, options = {}) {
   const env = options.env || process.env;
   const paths = ensureStickerCatalog(env);
-  const entry = readStickerIndex(env)[normalizeText(stickerId)];
+  const entry = readStickerIndex(env)[normalizeStickerId(stickerId)];
   if (!isActiveSticker(entry)) {
     throw new Error('sticker not found');
   }

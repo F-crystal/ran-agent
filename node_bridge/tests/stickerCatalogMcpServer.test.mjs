@@ -194,6 +194,15 @@ test('sticker_attach returns a RAN_MEDIA stickerId marker without paths', async 
   assert.doesNotMatch(JSON.stringify(result), /filePath|assets|\.ran_agent_state/);
 });
 
+test('sticker_attach canonicalizes legacy sticker ids in RAN_MEDIA markers', async (t) => {
+  const env = await seedCatalog(t);
+
+  const result = await callTool(env, 'sticker_attach', { stickerId: 'stk001' });
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.marker, 'RAN_MEDIA: {"source":"sticker_catalog","kind":"sticker","stickerId":"stk_001","caption":""}');
+});
+
 test('sticker_attach returns structured not-found errors without leaking paths', async (t) => {
   const env = await seedCatalog(t);
 
