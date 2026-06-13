@@ -163,8 +163,7 @@ state, vault, data, or XHS note debug output.
   claims, and `repair` enables low-risk repair plus high-risk pending
   confirmation. Pending state lives under
   `.ran_agent_state/action_contract/`; details:
-  `docs/governance/hermes-action-contract-gate.md` and
-  `docs/governance/hermes-action-contract-gate-deployment.md`.
+  `docs/governance/hermes-action-contract-gate.md`.
 
 ## Media And Frontends
 
