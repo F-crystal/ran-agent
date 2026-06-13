@@ -153,8 +153,8 @@ test('apply script writes Hermes context optimization defaults to Node env', () 
   assert.match(script, /HERMES_GLOBAL_RECENT_TURNS_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_GLOBAL_RECENT_TURNS:-2\}"/);
   assert.match(script, /HERMES_GLOBAL_RECENT_CHAR_BUDGET_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_GLOBAL_RECENT_CHAR_BUDGET:-800\}"/);
   assert.match(script, /HERMES_ACTIVE_TOPIC_CHAR_BUDGET_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTIVE_TOPIC_CHAR_BUDGET:-400\}"/);
-  assert.match(script, /HERMES_LITE_SOFT_RESET_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_LITE_SOFT_RESET_ENABLED:-false\}"/);
-  assert.match(script, /HERMES_LITE_SOFT_RESET_DRY_RUN_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_LITE_SOFT_RESET_DRY_RUN:-true\}"/);
+  assert.match(script, /HERMES_LITE_SOFT_RESET_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_LITE_SOFT_RESET_ENABLED:-true\}"/);
+  assert.match(script, /HERMES_LITE_SOFT_RESET_DRY_RUN_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_LITE_SOFT_RESET_DRY_RUN:-false\}"/);
   assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_TURNS=10"/);
   assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_CHAR_BUDGET=6000"/);
   assert.doesNotMatch(script, /"HERMES_GLOBAL_RECENT_TURNS=6"/);
@@ -210,6 +210,50 @@ test('apply script context defaults do not inherit stale HERMES env values', () 
   assert.doesNotMatch(text, /HERMES_GLOBAL_RECENT_TURNS=6/);
   assert.doesNotMatch(text, /HERMES_GLOBAL_RECENT_CHAR_BUDGET=2500/);
   assert.doesNotMatch(text, /HERMES_ACTIVE_TOPIC_CHAR_BUDGET=1200/);
+});
+
+test('soft reset timer installer writes 05:00 apply timer and enables Node runtime env', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-soft-reset-timer-'));
+  const systemdDir = join(dir, 'systemd');
+  const nodeEnvFile = join(dir, '.env.local');
+  const nodeBridgeEnvFile = join(dir, 'node_bridge.env.local');
+  writeFileSync(nodeEnvFile, [
+    'HERMES_LITE_SOFT_RESET_ENABLED=false',
+    'HERMES_LITE_SOFT_RESET_DRY_RUN=true',
+    'KEEP_ME=yes',
+  ].join('\n'));
+  writeFileSync(nodeBridgeEnvFile, 'KEEP_BRIDGE=yes\n');
+
+  execFileSync('bash', ['scripts/install-hermes-lite-soft-reset-timer.sh', '--install', '--time', '05:00'], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env: {
+      ...process.env,
+      RAN_AGENT_NO_SUDO: '1',
+      RAN_AGENT_NO_SYSTEMCTL: '1',
+      SYSTEMD_DIR: systemdDir,
+      RAN_AGENT_NODE_ENV_FILE: nodeEnvFile,
+      RAN_AGENT_NODE_BRIDGE_ENV_FILE: nodeBridgeEnvFile,
+      RAN_AGENT_RUNTIME_USER: 'ran-agent-test-user-does-not-exist',
+    },
+    stdio: 'pipe',
+  });
+
+  const service = readFileSync(join(systemdDir, 'ran-agent-hermes-lite-soft-reset.service'), 'utf8');
+  const timer = readFileSync(join(systemdDir, 'ran-agent-hermes-lite-soft-reset.timer'), 'utf8');
+  const nodeEnv = readFileSync(nodeEnvFile, 'utf8');
+  const bridgeEnv = readFileSync(nodeBridgeEnvFile, 'utf8');
+
+  assert.match(service, /ExecStart=\/bin\/bash \/opt\/ran_agent\/scripts\/hermes-lite-soft-reset\.sh --apply/);
+  assert.match(service, /Environment=HERMES_LITE_SOFT_RESET_ENABLED=true/);
+  assert.match(service, /Environment=HERMES_LITE_SOFT_RESET_DRY_RUN=false/);
+  assert.match(timer, /OnCalendar=\*-\*-\* 05:00:00/);
+  assert.match(timer, /Persistent=true/);
+  assert.match(nodeEnv, /KEEP_ME=yes/);
+  assert.match(nodeEnv, /HERMES_LITE_SOFT_RESET_ENABLED=true/);
+  assert.match(nodeEnv, /HERMES_LITE_SOFT_RESET_DRY_RUN=false/);
+  assert.match(bridgeEnv, /KEEP_BRIDGE=yes/);
+  assert.match(bridgeEnv, /HERMES_LITE_SOFT_RESET_ENABLED=true/);
+  assert.match(bridgeEnv, /HERMES_LITE_SOFT_RESET_DRY_RUN=false/);
 });
 
 test('apply script wraps XHS generic fallback prepare with timeout and keeps failure non-blocking', () => {

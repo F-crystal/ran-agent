@@ -42,11 +42,13 @@ Provider usage telemetry should be observed with component telemetry:
 
 ## Lite Soft Reset
 
-Soft reset is disabled by default:
+Production lite soft reset is enabled for the deployed personal runtime. The
+scheduled reset runs after the 04:00 knowledge/night-cycle window so vault and
+memory maintenance have time to settle before the lite session key rotates.
 
 ```env
-HERMES_LITE_SOFT_RESET_ENABLED=false
-HERMES_LITE_SOFT_RESET_DRY_RUN=true
+HERMES_LITE_SOFT_RESET_ENABLED=true
+HERMES_LITE_SOFT_RESET_DRY_RUN=false
 HERMES_LITE_SOFT_RESET_MAX_DIGEST_CHARS=1200
 HERMES_LITE_SOFT_RESET_KEEP_LAST_N=4
 HERMES_LITE_SOFT_RESET_STATE_FILE=.ran_agent_state/hermes/session_maintenance.json
@@ -57,7 +59,7 @@ All paths are resolved under `resolveStateDir()`. Do not point these variables o
 
 ## Commands
 
-No command restarts services, edits systemd, or installs cron.
+Manual maintenance commands do not restart services:
 
 ```bash
 bash scripts/hermes-lite-soft-reset.sh --status
@@ -67,6 +69,20 @@ bash scripts/hermes-lite-soft-reset.sh --rollback-last
 ```
 
 `--dry-run` reports the planned digest and session hash change without writing the session pointer. `--apply` writes the digest and rotates the lite session pointer only when `HERMES_LITE_SOFT_RESET_ENABLED=true` and dry-run is disabled. `--rollback-last` restores the previous lite session pointer without deleting digest files.
+
+Install or update the daily systemd timer:
+
+```bash
+bash scripts/install-hermes-lite-soft-reset-timer.sh --install --time 05:00
+bash scripts/install-hermes-lite-soft-reset-timer.sh --status
+bash scripts/install-hermes-lite-soft-reset-timer.sh --disable
+```
+
+The installer writes `ran-agent-hermes-lite-soft-reset.service` and
+`ran-agent-hermes-lite-soft-reset.timer`, enables the timer, and upserts
+`HERMES_LITE_SOFT_RESET_ENABLED=true` plus
+`HERMES_LITE_SOFT_RESET_DRY_RUN=false` into the Node env files. The service runs
+`bash /opt/ran_agent/scripts/hermes-lite-soft-reset.sh --apply` at 05:00.
 
 ## Digest Format
 
@@ -106,8 +122,6 @@ HERMES_LITE_SOFT_RESET_ENABLED=false
 
 ## Deployment Notes
 
-Start with `--dry-run` and telemetry review. Enable apply only after confirming that `daily_digest.chars` is small, `input_tokens` trends down, prompt cache hit tokens do not regress materially, and daily chat still feels continuous.
-
 The production runtime split script writes the conservative B-package Node defaults into `.env.local`:
 
 ```env
@@ -117,6 +131,8 @@ HERMES_RECENT_TEXT_CHAR_BUDGET=2400
 HERMES_GLOBAL_RECENT_TURNS=2
 HERMES_GLOBAL_RECENT_CHAR_BUDGET=800
 HERMES_ACTIVE_TOPIC_CHAR_BUDGET=400
+HERMES_LITE_SOFT_RESET_ENABLED=true
+HERMES_LITE_SOFT_RESET_DRY_RUN=false
 ```
 
 The script intentionally does not inherit existing `HERMES_*` values from the shell or an older `.env.local`, because that can preserve legacy rich budgets by accident. Operators who need to override deployment defaults should use the explicit deploy-time override namespace, for example:
@@ -124,5 +140,13 @@ The script intentionally does not inherit existing `HERMES_*` values from the sh
 ```bash
 RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_TURNS=6 \
 RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_CHAR_BUDGET=3200 \
+bash scripts/apply-hermes-runtime-split.sh
+```
+
+To disable soft reset through deployment defaults:
+
+```bash
+RAN_AGENT_DEPLOY_HERMES_LITE_SOFT_RESET_ENABLED=false \
+RAN_AGENT_DEPLOY_HERMES_LITE_SOFT_RESET_DRY_RUN=true \
 bash scripts/apply-hermes-runtime-split.sh
 ```
