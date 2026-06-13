@@ -301,6 +301,41 @@ test('createReplyBackend rejects RAN_MEDIA markers with unknown source', async (
   assert.equal(response.media, null);
 });
 
+test('createReplyBackend logs sanitized RAN_MEDIA marker metadata for unsupported kind', async () => {
+  let resolveCalled = false;
+  const warnings = [];
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_text: '先发文字\nRAN_MEDIA: {"source":"sticker_catalog","kind":"image","stickerId":"stk_001","caption":"测试","note":"用户原文不应进入日志"}',
+      follow_up_messages: [],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    resolveStickerAssetImpl: () => {
+      resolveCalled = true;
+      throw new Error('should not resolve unsupported kind');
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn(message) { warnings.push(String(message)); } },
+  });
+
+  const response = await backend.getReply({
+    text: '贴纸',
+    sender_id: 'conv-sticker-unsupported-kind',
+    channel: 'wechat',
+  });
+
+  assert.equal(resolveCalled, false);
+  assert.equal(response.replyText, '先发文字');
+  assert.equal(response.media, null);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /RAN_MEDIA_UNSUPPORTED_KIND/);
+  assert.match(warnings[0], /"source":"sticker_catalog"/);
+  assert.match(warnings[0], /"kind":"image"/);
+  assert.match(warnings[0], /"hasStickerId":true/);
+  assert.doesNotMatch(warnings[0], /用户原文不应进入日志/);
+});
+
 test('createReplyBackend rejects RAN_MEDIA markers that include path-like fields', async () => {
   let resolveCalled = false;
   const backend = createReplyBackend({

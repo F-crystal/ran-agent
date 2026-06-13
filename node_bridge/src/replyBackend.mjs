@@ -114,7 +114,7 @@ function extractTrustedMediaMarker(text, options = {}) {
   if (ranMedia) {
     if (!ranMedia.mediaIntent) {
       if (ranMedia.errorCode) {
-        options.logger?.warn?.(`RAN_MEDIA marker rejected: ${ranMedia.errorCode}`);
+        options.logger?.warn?.(`RAN_MEDIA marker rejected: ${ranMedia.errorCode} ${formatRanMediaMarkerMeta(ranMedia.markerMeta)}`);
       }
       return { text: ranMedia.text, media: null };
     }
@@ -139,6 +139,19 @@ function extractTrustedMediaMarker(text, options = {}) {
   }
 
   return extractLegacyWechatMediaMarker(text);
+}
+
+function formatRanMediaMarkerMeta(markerMeta) {
+  if (!markerMeta || typeof markerMeta !== 'object' || Array.isArray(markerMeta)) {
+    return '{}';
+  }
+  return JSON.stringify({
+    source: String(markerMeta.source || ''),
+    kind: String(markerMeta.kind || ''),
+    hasStickerId: Boolean(markerMeta.hasStickerId),
+    hasCaption: Boolean(markerMeta.hasCaption),
+    keys: Array.isArray(markerMeta.keys) ? markerMeta.keys.map((key) => String(key).slice(0, 40)) : [],
+  });
 }
 
 function normalizeMediaItems(media) {

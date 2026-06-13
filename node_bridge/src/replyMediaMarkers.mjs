@@ -32,6 +32,7 @@ export function extractRanMediaMarker(text) {
       text: cleanedText,
       mediaIntent: null,
       errorCode: 'RAN_MEDIA_INVALID_JSON',
+      markerMeta: null,
     };
   }
 
@@ -40,13 +41,16 @@ export function extractRanMediaMarker(text) {
       text: cleanedText,
       mediaIntent: null,
       errorCode: 'RAN_MEDIA_INVALID_PAYLOAD',
+      markerMeta: null,
     };
   }
+  const markerMeta = summarizeRanMediaMarkerPayload(parsed);
   if (hasForbiddenMarkerKey(parsed)) {
     return {
       text: cleanedText,
       mediaIntent: null,
       errorCode: 'RAN_MEDIA_FORBIDDEN_LOCATION_FIELD',
+      markerMeta,
     };
   }
   if (parsed.source !== RAN_MEDIA_SOURCE) {
@@ -54,6 +58,7 @@ export function extractRanMediaMarker(text) {
       text: cleanedText,
       mediaIntent: null,
       errorCode: 'RAN_MEDIA_UNKNOWN_SOURCE',
+      markerMeta,
     };
   }
   if (parsed.kind !== RAN_MEDIA_KIND) {
@@ -61,6 +66,7 @@ export function extractRanMediaMarker(text) {
       text: cleanedText,
       mediaIntent: null,
       errorCode: 'RAN_MEDIA_UNSUPPORTED_KIND',
+      markerMeta,
     };
   }
 
@@ -71,6 +77,7 @@ export function extractRanMediaMarker(text) {
       text: cleanedText,
       mediaIntent: null,
       errorCode: 'RAN_MEDIA_MISSING_STICKER_ID',
+      markerMeta,
     };
   }
 
@@ -83,6 +90,7 @@ export function extractRanMediaMarker(text) {
       caption,
     },
     errorCode: '',
+    markerMeta,
   };
 }
 
@@ -132,6 +140,23 @@ function cleanMarkerText(raw, markerPattern) {
     .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+function summarizeRanMediaMarkerPayload(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return null;
+  }
+  const keys = Object.keys(payload)
+    .filter((key) => typeof key === 'string')
+    .map((key) => key.slice(0, 40))
+    .sort();
+  return {
+    source: normalizeText(payload.source).slice(0, 80),
+    kind: normalizeText(payload.kind).slice(0, 80),
+    hasStickerId: Boolean(normalizeText(payload.stickerId)),
+    hasCaption: Boolean(normalizeText(payload.caption)),
+    keys,
+  };
 }
 
 function normalizeText(value) {
