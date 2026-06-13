@@ -147,19 +147,69 @@ test('apply script writes Hermes context optimization defaults to Node env', () 
   const scriptPath = new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url).pathname;
   const script = readFileSync(scriptPath, 'utf8');
 
-  assert.match(script, /HERMES_CONTEXT_INJECTION_MODE_DEFAULT="\$\{HERMES_CONTEXT_INJECTION_MODE:-auto\}"/);
-  assert.match(script, /HERMES_RECENT_TEXT_TURNS_DEFAULT="\$\{HERMES_RECENT_TEXT_TURNS:-4\}"/);
-  assert.match(script, /HERMES_RECENT_TEXT_CHAR_BUDGET_DEFAULT="\$\{HERMES_RECENT_TEXT_CHAR_BUDGET:-2400\}"/);
-  assert.match(script, /HERMES_GLOBAL_RECENT_TURNS_DEFAULT="\$\{HERMES_GLOBAL_RECENT_TURNS:-2\}"/);
-  assert.match(script, /HERMES_GLOBAL_RECENT_CHAR_BUDGET_DEFAULT="\$\{HERMES_GLOBAL_RECENT_CHAR_BUDGET:-800\}"/);
-  assert.match(script, /HERMES_ACTIVE_TOPIC_CHAR_BUDGET_DEFAULT="\$\{HERMES_ACTIVE_TOPIC_CHAR_BUDGET:-400\}"/);
-  assert.match(script, /HERMES_LITE_SOFT_RESET_ENABLED_DEFAULT="\$\{HERMES_LITE_SOFT_RESET_ENABLED:-false\}"/);
-  assert.match(script, /HERMES_LITE_SOFT_RESET_DRY_RUN_DEFAULT="\$\{HERMES_LITE_SOFT_RESET_DRY_RUN:-true\}"/);
+  assert.match(script, /HERMES_CONTEXT_INJECTION_MODE_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_CONTEXT_INJECTION_MODE:-auto\}"/);
+  assert.match(script, /HERMES_RECENT_TEXT_TURNS_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_TURNS:-4\}"/);
+  assert.match(script, /HERMES_RECENT_TEXT_CHAR_BUDGET_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_CHAR_BUDGET:-2400\}"/);
+  assert.match(script, /HERMES_GLOBAL_RECENT_TURNS_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_GLOBAL_RECENT_TURNS:-2\}"/);
+  assert.match(script, /HERMES_GLOBAL_RECENT_CHAR_BUDGET_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_GLOBAL_RECENT_CHAR_BUDGET:-800\}"/);
+  assert.match(script, /HERMES_ACTIVE_TOPIC_CHAR_BUDGET_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTIVE_TOPIC_CHAR_BUDGET:-400\}"/);
+  assert.match(script, /HERMES_LITE_SOFT_RESET_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_LITE_SOFT_RESET_ENABLED:-false\}"/);
+  assert.match(script, /HERMES_LITE_SOFT_RESET_DRY_RUN_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_LITE_SOFT_RESET_DRY_RUN:-true\}"/);
   assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_TURNS=10"/);
   assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_CHAR_BUDGET=6000"/);
   assert.doesNotMatch(script, /"HERMES_GLOBAL_RECENT_TURNS=6"/);
   assert.doesNotMatch(script, /"HERMES_GLOBAL_RECENT_CHAR_BUDGET=2500"/);
   assert.doesNotMatch(script, /"HERMES_ACTIVE_TOPIC_CHAR_BUDGET=1200"/);
+});
+
+test('apply script context defaults do not inherit stale HERMES env values', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-stale-context-env-'));
+  const envFile = join(dir, '.env');
+  writeFileSync(envFile, [
+    'HERMES_CONTEXT_INJECTION_MODE=auto',
+    'HERMES_RECENT_TEXT_TURNS=10',
+    'HERMES_RECENT_TEXT_CHAR_BUDGET=6000',
+    'HERMES_GLOBAL_RECENT_TURNS=6',
+    'HERMES_GLOBAL_RECENT_CHAR_BUDGET=2500',
+    'HERMES_ACTIVE_TOPIC_CHAR_BUDGET=1200',
+  ].join('\n'));
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    'export HERMES_RECENT_TEXT_TURNS=10',
+    'export HERMES_RECENT_TEXT_CHAR_BUDGET=6000',
+    'export HERMES_GLOBAL_RECENT_TURNS=6',
+    'export HERMES_GLOBAL_RECENT_CHAR_BUDGET=2500',
+    'export HERMES_ACTIVE_TOPIC_CHAR_BUDGET=1200',
+    'source scripts/apply-hermes-runtime-split.sh',
+    [
+      'upsert_env_file',
+      JSON.stringify(envFile),
+      '"HERMES_CONTEXT_INJECTION_MODE=$HERMES_CONTEXT_INJECTION_MODE_DEFAULT"',
+      '"HERMES_RECENT_TEXT_TURNS=$HERMES_RECENT_TEXT_TURNS_DEFAULT"',
+      '"HERMES_RECENT_TEXT_CHAR_BUDGET=$HERMES_RECENT_TEXT_CHAR_BUDGET_DEFAULT"',
+      '"HERMES_GLOBAL_RECENT_TURNS=$HERMES_GLOBAL_RECENT_TURNS_DEFAULT"',
+      '"HERMES_GLOBAL_RECENT_CHAR_BUDGET=$HERMES_GLOBAL_RECENT_CHAR_BUDGET_DEFAULT"',
+      '"HERMES_ACTIVE_TOPIC_CHAR_BUDGET=$HERMES_ACTIVE_TOPIC_CHAR_BUDGET_DEFAULT"',
+    ].join(' '),
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const text = readFileSync(envFile, 'utf8');
+  assert.match(text, /HERMES_CONTEXT_INJECTION_MODE=auto/);
+  assert.match(text, /HERMES_RECENT_TEXT_TURNS=4/);
+  assert.match(text, /HERMES_RECENT_TEXT_CHAR_BUDGET=2400/);
+  assert.match(text, /HERMES_GLOBAL_RECENT_TURNS=2/);
+  assert.match(text, /HERMES_GLOBAL_RECENT_CHAR_BUDGET=800/);
+  assert.match(text, /HERMES_ACTIVE_TOPIC_CHAR_BUDGET=400/);
+  assert.doesNotMatch(text, /HERMES_RECENT_TEXT_TURNS=10/);
+  assert.doesNotMatch(text, /HERMES_RECENT_TEXT_CHAR_BUDGET=6000/);
+  assert.doesNotMatch(text, /HERMES_GLOBAL_RECENT_TURNS=6/);
+  assert.doesNotMatch(text, /HERMES_GLOBAL_RECENT_CHAR_BUDGET=2500/);
+  assert.doesNotMatch(text, /HERMES_ACTIVE_TOPIC_CHAR_BUDGET=1200/);
 });
 
 test('apply script wraps XHS generic fallback prepare with timeout and keeps failure non-blocking', () => {

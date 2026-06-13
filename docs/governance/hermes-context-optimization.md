@@ -12,9 +12,12 @@ Long-term memory remains external and on demand through `personal_memory`, `obsi
 
 - Hermes session history: provider-side short-term continuity for the selected profile.
 - Node continuity: `recent_local_history`, `global_recent_history`, `active_topic`, `continuity_note`, media compact, and current user message.
+- Vault and long-term memory: `vault/`, `personal_memory`, and `obsidian_memory` are storage/recall sources. They must not be injected wholesale into lite prompts.
 - Long-term memory: explicit tool recall only, not injected wholesale.
 
 The optimization goal is to avoid stacking all layers on every lite request.
+
+`vault/` may feed maintenance summaries or explicit recall, but only as short, sanitized excerpts. Follow the runtime budget: at most one vault recall hit and a small snippet, not raw daily chat logs. Soft reset digest generation may use already-summarized vault/wiki signals for `open_threads`, `pending_commitments`, `active_preferences`, and `recent_artifacts`; it must not copy `vault/inbox`, `vault/raw`, or `vault/wiki` content verbatim into `daily_digest`.
 
 ## Context Modes
 
@@ -104,3 +107,22 @@ HERMES_LITE_SOFT_RESET_ENABLED=false
 ## Deployment Notes
 
 Start with `--dry-run` and telemetry review. Enable apply only after confirming that `daily_digest.chars` is small, `input_tokens` trends down, prompt cache hit tokens do not regress materially, and daily chat still feels continuous.
+
+The production runtime split script writes the conservative B-package Node defaults into `.env.local`:
+
+```env
+HERMES_CONTEXT_INJECTION_MODE=auto
+HERMES_RECENT_TEXT_TURNS=4
+HERMES_RECENT_TEXT_CHAR_BUDGET=2400
+HERMES_GLOBAL_RECENT_TURNS=2
+HERMES_GLOBAL_RECENT_CHAR_BUDGET=800
+HERMES_ACTIVE_TOPIC_CHAR_BUDGET=400
+```
+
+The script intentionally does not inherit existing `HERMES_*` values from the shell or an older `.env.local`, because that can preserve legacy rich budgets by accident. Operators who need to override deployment defaults should use the explicit deploy-time override namespace, for example:
+
+```bash
+RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_TURNS=6 \
+RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_CHAR_BUDGET=3200 \
+bash scripts/apply-hermes-runtime-split.sh
+```
