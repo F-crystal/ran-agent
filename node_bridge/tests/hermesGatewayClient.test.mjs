@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { writeFileSync, unlinkSync } from 'node:fs';
+import fs, { writeFileSync, unlinkSync } from 'node:fs';
+import path from 'node:path';
 
 import {
   getHermesGatewayConfig,
@@ -11,6 +12,13 @@ import {
   buildSocialEvidenceReport,
   applySocialLinkEvidenceGate,
 } from '../src/hermesGatewayClient.mjs';
+import {
+  getHermesLiteSoftResetConfig,
+  readHermesLiteMaintenanceState,
+  runHermesLiteSoftReset,
+} from '../src/hermesSessionMaintenance.mjs';
+
+const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
 function makeJsonResponse(body, ok = true, status = 200) {
   return {
@@ -23,6 +31,62 @@ function makeJsonResponse(body, ok = true, status = 200) {
       return JSON.stringify(body);
     },
   };
+}
+
+function historyTurns(prefix, count, filler = '') {
+  const messages = [];
+  for (let index = 1; index <= count; index += 1) {
+    messages.push({ role: 'user', content: `${prefix} user ${index} ${filler}`.trim() });
+    messages.push({ role: 'assistant', content: `${prefix} assistant ${index} ${filler}`.trim() });
+  }
+  return messages;
+}
+
+async function captureHermesRequest({ payload = {}, env = {}, responseBody = null } = {}) {
+  const logs = [];
+  const warns = [];
+  let capturedBody = null;
+  let capturedHeaders = null;
+  await sendChatToHermesGateway(
+    {
+      text: '当前用户消息',
+      sender_id: 'capture-sender',
+      conversation_id: 'capture-conversation',
+      channel: 'wechat',
+      ...payload,
+    },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+        ...env,
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        capturedHeaders = options.headers;
+        return makeJsonResponse(responseBody || { choices: [{ message: { content: 'ok' } }] });
+      },
+      logger: {
+        log(msg) { logs.push(msg); },
+        warn(msg) { warns.push(msg); },
+      },
+    }
+  );
+  return { capturedBody, capturedHeaders, logs, warns };
+}
+
+function parseContextComponentsLog(logs) {
+  const line = logs.find((item) => item.startsWith('[hermes-context-components]'));
+  assert.ok(line, 'expected hermes context component log');
+  return JSON.parse(line.slice(line.indexOf('{')));
+}
+
+function tempGatewayStateDir(prefix = 'hermes-gateway-soft-reset-') {
+  const base = path.join(PROJECT_ROOT, '.ran_agent_state');
+  fs.mkdirSync(base, { recursive: true });
+  return fs.mkdtempSync(path.join(base, prefix));
 }
 
 test('getHermesGatewayConfig reads Hermes defaults and normalizes base URL', () => {
@@ -1172,6 +1236,443 @@ test('same Hermes request reuses request_id for context, routing, evidence, and 
     .filter(Boolean);
   assert.ok(requestIds.length >= 4);
   assert.equal(new Set(requestIds).size, 1);
+});
+
+test('context component telemetry logs sizes and hashes without user text', async () => {
+  const logs = [];
+  await sendChatToHermesGateway(
+    {
+      text: '秘密用户原文 包含 cookie=abc123456789',
+      sender_id: 'sender-secret',
+      conversation_id: 'conv-secret',
+      channel: 'wechat',
+      recent_local_history: [
+        { role: 'user', content: '本地历史原文' },
+        { role: 'assistant', content: '本地回复原文' },
+      ],
+      recent_global_history: [
+        { role: 'user', content: '跨平台历史原文' },
+      ],
+      active_topic: '活跃话题原文',
+      continuity_note: '连续性备注原文',
+    },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+      }),
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+      logger: { warn() {}, log(msg) { logs.push(msg); } },
+    }
+  );
+
+  const line = logs.find((item) => item.startsWith('[hermes-context-components]'));
+  assert.ok(line, 'should log context component telemetry');
+  const payload = JSON.parse(line.slice(line.indexOf('{')));
+
+  assert.equal(payload.profile, 'ran-assistant-lite');
+  assert.equal(payload.channel, 'wechat');
+  assert.match(payload.conversation_id_hash, /^[a-f0-9]{16}$/);
+  assert.match(payload.session_id_hash, /^[a-f0-9]{16}$/);
+  assert.equal(payload.context_mode, 'auto');
+  assert.equal(typeof payload.context_decision_reason, 'string');
+  assert.equal(typeof payload.budgets.recentLocalTurns, 'number');
+  for (const key of [
+    'recent_local_history',
+    'global_recent_history',
+    'active_topic',
+    'continuity_note',
+    'media_context',
+    'daily_digest',
+    'current_user_message',
+  ]) {
+    assert.equal(typeof payload.components[key].chars, 'number', key);
+    assert.equal(typeof payload.components[key].bytes, 'number', key);
+    assert.equal(typeof payload.components[key].estimated_tokens, 'number', key);
+    assert.equal(typeof payload.components[key].omitted, 'boolean', key);
+  }
+  assert.equal(payload.components.daily_digest.chars, 0);
+
+  const serialized = JSON.stringify(payload);
+  for (const forbidden of ['秘密用户原文', '本地历史原文', '跨平台历史原文', '活跃话题原文', '连续性备注原文', 'abc123456789', '/opt/']) {
+    assert.ok(!serialized.includes(forbidden), `telemetry should not include ${forbidden}`);
+  }
+});
+
+test('provider usage telemetry tolerates missing usage fields', async () => {
+  const logs = [];
+  const response = await sendChatToHermesGateway(
+    { text: 'hello', sender_id: 'usage-missing', conversation_id: 'usage-missing', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+      }),
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+      logger: { warn() {}, log(msg) { logs.push(msg); } },
+    }
+  );
+
+  assert.equal(response.reply_text, 'ok');
+  const line = logs.find((item) => item.startsWith('[hermes-provider-usage]'));
+  assert.ok(line, 'should log provider usage telemetry');
+  const payload = JSON.parse(line.slice(line.indexOf('{')));
+  assert.equal(payload.input_tokens, null);
+  assert.equal(payload.output_tokens, null);
+  assert.equal(payload.total_tokens, null);
+  assert.equal(payload.prompt_cache_hit_tokens, null);
+  assert.equal(payload.prompt_cache_miss_tokens, null);
+});
+
+test('provider usage telemetry records token and cache counters when present', async () => {
+  const logs = [];
+  await sendChatToHermesGateway(
+    { text: 'hello', sender_id: 'usage-present', conversation_id: 'usage-present', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+      }),
+      fetchImpl: async () => makeJsonResponse({
+        choices: [{ message: { content: 'ok' } }],
+        usage: {
+          prompt_tokens: 123,
+          completion_tokens: 45,
+          total_tokens: 168,
+          prompt_cache_hit_tokens: 100,
+          prompt_cache_miss_tokens: 23,
+        },
+      }),
+      logger: { warn() {}, log(msg) { logs.push(msg); } },
+    }
+  );
+
+  const line = logs.find((item) => item.startsWith('[hermes-provider-usage]'));
+  assert.ok(line, 'should log provider usage telemetry');
+  const payload = JSON.parse(line.slice(line.indexOf('{')));
+  assert.equal(payload.input_tokens, 123);
+  assert.equal(payload.output_tokens, 45);
+  assert.equal(payload.total_tokens, 168);
+  assert.equal(payload.prompt_cache_hit_tokens, 100);
+  assert.equal(payload.prompt_cache_miss_tokens, 23);
+});
+
+test('context injection rich mode preserves legacy-sized local history budget', async () => {
+  const { capturedBody, logs } = await captureHermesRequest({
+    env: { HERMES_CONTEXT_INJECTION_MODE: 'rich' },
+    payload: {
+      recent_local_history: historyTurns('rich-local', 5),
+      recent_global_history: historyTurns('rich-global', 3),
+      active_topic: 'rich-active-topic',
+    },
+  });
+
+  assert.deepEqual(capturedBody.messages.slice(1, 11).map((message) => message.content), historyTurns('rich-local', 5).map((message) => message.content));
+  assert.match(capturedBody.messages.at(-1).content, /rich-global user 1/);
+  assert.match(capturedBody.messages.at(-1).content, /rich-active-topic/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_mode, 'rich');
+  assert.equal(telemetry.context_decision_reason, 'explicit_rich');
+  assert.equal(telemetry.budgets.recentLocalTurns, 10);
+  assert.equal(telemetry.budgets.globalRecentTurns, 6);
+});
+
+test('context injection slim mode uses smaller local global and active topic budgets', async () => {
+  const { capturedBody, logs } = await captureHermesRequest({
+    env: { HERMES_CONTEXT_INJECTION_MODE: 'slim' },
+    payload: {
+      recent_local_history: historyTurns('slim-local', 6),
+      recent_global_history: historyTurns('slim-global', 4),
+      active_topic: `slim-active ${'长话题'.repeat(300)}`,
+    },
+  });
+
+  const roles = capturedBody.messages.map((message) => message.role);
+  assert.equal(roles.filter((role) => role === 'user' || role === 'assistant').length, 9);
+  const serialized = JSON.stringify(capturedBody.messages);
+  assert.doesNotMatch(serialized, /slim-local user 1/);
+  assert.match(serialized, /slim-local user 3/);
+  assert.doesNotMatch(serialized, /slim-global user 1/);
+  assert.match(serialized, /slim-global user 3/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_mode, 'slim');
+  assert.equal(telemetry.budgets.recentLocalTurns, 4);
+  assert.equal(telemetry.budgets.globalRecentChars, 800);
+  assert.ok(telemetry.components.active_topic.chars <= 400);
+});
+
+test('context injection resume mode keeps session and uses short recovery budgets without digest', async () => {
+  const { capturedBody, capturedHeaders, logs } = await captureHermesRequest({
+    env: { HERMES_CONTEXT_INJECTION_MODE: 'resume' },
+    payload: {
+      sender_id: 'resume-sender',
+      conversation_id: 'resume-conversation',
+      recent_local_history: historyTurns('resume-local', 4),
+      recent_global_history: historyTurns('resume-global', 3),
+      active_topic: 'resume-active-topic',
+    },
+  });
+
+  assert.match(capturedHeaders['X-Hermes-Session-Id'], /^ran-agent-wechat-[a-f0-9]{16}$/);
+  assert.match(capturedHeaders['X-Hermes-Session-Key'], /^ran-agent-memory-[a-f0-9]{16}$/);
+  const serialized = JSON.stringify(capturedBody.messages);
+  assert.doesNotMatch(serialized, /resume-local user 1/);
+  assert.match(serialized, /resume-local user 3/);
+  assert.doesNotMatch(serialized, /daily_digest|continuity digest|open_threads/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_mode, 'resume');
+  assert.equal(telemetry.context_decision_reason, 'explicit_resume');
+  assert.equal(telemetry.components.daily_digest.chars, 0);
+  assert.equal(telemetry.budgets.recentLocalTurns, 2);
+});
+
+test('context injection auto same conversation omits global recent history', async () => {
+  const { capturedBody, logs } = await captureHermesRequest({
+    env: { HERMES_CONTEXT_INJECTION_MODE: 'auto' },
+    payload: {
+      recent_local_history: historyTurns('auto-local', 2),
+      recent_global_history: historyTurns('auto-global-sensitive', 3),
+      active_topic: 'auto-active-topic',
+    },
+  });
+
+  const serialized = JSON.stringify(capturedBody.messages);
+  assert.match(serialized, /auto-local user 1/);
+  assert.doesNotMatch(serialized, /auto-global-sensitive/);
+  assert.doesNotMatch(capturedBody.messages.at(-1).content, /global active topic/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_mode, 'auto');
+  assert.equal(telemetry.context_decision_reason, 'auto_same_conversation_slim');
+  assert.equal(telemetry.budgets.globalRecentTurns, 0);
+  assert.equal(telemetry.components.global_recent_history.omitted, true);
+});
+
+test('context injection auto cross channel keeps continuity and brief global recent', async () => {
+  const { capturedBody, logs } = await captureHermesRequest({
+    env: { HERMES_CONTEXT_INJECTION_MODE: 'auto' },
+    payload: {
+      channel: 'feishu',
+      platform: 'feishu',
+      recent_local_history: [],
+      recent_global_history: historyTurns('cross-global', 3),
+      continuity_note: 'current_topic: cross-channel handoff',
+      active_topic: 'cross-active-topic',
+    },
+  });
+
+  const userPrompt = capturedBody.messages.at(-1).content;
+  assert.match(userPrompt, /current_topic: cross-channel handoff/);
+  assert.match(userPrompt, /cross-global user 2/);
+  assert.doesNotMatch(userPrompt, /cross-global user 1/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_decision_reason, 'auto_cross_channel_brief');
+  assert.equal(telemetry.budgets.globalRecentTurns, 2);
+});
+
+test('context injection env budgets override mode defaults', async () => {
+  const { capturedBody, logs } = await captureHermesRequest({
+    env: {
+      HERMES_CONTEXT_INJECTION_MODE: 'slim',
+      HERMES_GLOBAL_RECENT_TURNS: '3',
+      HERMES_GLOBAL_RECENT_CHAR_BUDGET: '5000',
+    },
+    payload: {
+      recent_local_history: [],
+      recent_global_history: historyTurns('override-global', 3),
+    },
+  });
+
+  const userPrompt = capturedBody.messages.at(-1).content;
+  assert.match(userPrompt, /override-global user 1/);
+  assert.match(userPrompt, /override-global assistant 3/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_mode, 'slim');
+  assert.equal(telemetry.budgets.globalRecentTurns, 3);
+  assert.equal(telemetry.budgets.globalRecentChars, 5000);
+});
+
+test('context injection invalid mode falls back to auto and warns', async () => {
+  const { logs, warns } = await captureHermesRequest({
+    env: { HERMES_CONTEXT_INJECTION_MODE: 'mystery' },
+    payload: { recent_local_history: [] },
+  });
+
+  assert.ok(warns.some((line) => /invalid HERMES_CONTEXT_INJECTION_MODE/i.test(line)));
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_mode, 'auto');
+  assert.equal(telemetry.context_decision_reason, 'auto_resume_new_session');
+});
+
+test('context injection keeps media compact independent from text budgets', async () => {
+  const { capturedBody, logs } = await captureHermesRequest({
+    env: {
+      HERMES_CONTEXT_INJECTION_MODE: 'slim',
+      RAN_AGENT_MAX_MEDIA_ARTIFACTS: '1',
+    },
+    payload: {
+      media: [{ filePath: '/tmp/test.png', mimeType: 'image/png', type: 'image' }],
+      recent_local_history: historyTurns('media-local', 6),
+      recent_global_history: historyTurns('media-global', 4),
+    },
+    responseBody: { choices: [{ message: { content: 'ok' } }] },
+  });
+
+  const userPrompt = capturedBody.messages.at(-1).content;
+  assert.match(userPrompt, /媒体工具指令|微信入站媒体资产/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_mode, 'slim');
+  assert.equal(telemetry.budgets.recentLocalTurns, 4);
+  assert.equal(typeof telemetry.components.media_context.chars, 'number');
+});
+
+test('context injection does not truncate current user message', async () => {
+  const longUserText = `CURRENT-USER-START ${'用户正文'.repeat(900)} CURRENT-USER-END`;
+  const { capturedBody, logs } = await captureHermesRequest({
+    env: {
+      HERMES_CONTEXT_INJECTION_MODE: 'slim',
+      HERMES_RECENT_TEXT_CHAR_BUDGET: '20',
+    },
+    payload: {
+      text: longUserText,
+      recent_local_history: historyTurns('tiny-local', 2, 'old text'),
+    },
+  });
+
+  const userPrompt = capturedBody.messages.at(-1).content;
+  assert.match(userPrompt, /CURRENT-USER-START/);
+  assert.match(userPrompt, /CURRENT-USER-END/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.components.current_user_message.chars, longUserText.length);
+  assert.ok(!JSON.stringify(telemetry).includes('CURRENT-USER-START'));
+});
+
+test('soft reset pending digest is injected once into lite resume request and then consumed', async () => {
+  const stateDir = tempGatewayStateDir();
+  const env = {
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  };
+  runHermesLiteSoftReset({
+    action: 'apply',
+    env,
+    timelineRecords: [
+      { role: 'assistant', text_summary: 'pending: 观察 input_tokens 和 prompt_cache_hit_tokens', created_at: 1 },
+      { role: 'user', text: '偏好：日常聊天保持 slim，不要解释 session/token 机制', created_at: 2 },
+    ],
+    now: new Date('2026-06-14T00:00:00Z'),
+  });
+
+  const logs = [];
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '早', sender_id: 'soft-reset-user', conversation_id: 'soft-reset-conv', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig(env),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+      },
+      logger: { warn() {}, log(msg) { logs.push(msg); } },
+    }
+  );
+
+  const userPrompt = capturedBody.messages.at(-1).content;
+  assert.match(userPrompt, /daily_digest/);
+  assert.match(userPrompt, /pending_commitments|active_preferences/);
+  const telemetry = parseContextComponentsLog(logs);
+  assert.equal(telemetry.context_mode, 'resume');
+  assert.equal(telemetry.context_decision_reason, 'soft_reset_pending_digest');
+  assert.ok(telemetry.components.daily_digest.chars > 0);
+  const state = readHermesLiteMaintenanceState(getHermesLiteSoftResetConfig(env));
+  assert.equal(state.digests[0].consumed, true);
+  assert.equal(state.pendingDigestId, '');
+});
+
+test('soft reset pending digest is not consumed when provider request fails', async () => {
+  const stateDir = tempGatewayStateDir();
+  const env = {
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  };
+  const applied = runHermesLiteSoftReset({
+    action: 'apply',
+    env,
+    timelineRecords: [{ role: 'assistant', text_summary: 'pending: provider failure should keep digest pending', created_at: 1 }],
+    now: new Date('2026-06-14T00:00:00Z'),
+  });
+
+  await assert.rejects(
+    () => sendChatToHermesGateway(
+      { text: '早', sender_id: 'soft-reset-fail-user', conversation_id: 'soft-reset-fail-conv', channel: 'wechat' },
+      {
+        config: getHermesGatewayConfig(env),
+        fetchImpl: async () => makeJsonResponse({ error: 'boom' }, false, 500),
+        logger: { warn() {}, log() {} },
+      }
+    ),
+    /HTTP 500/
+  );
+
+  const state = readHermesLiteMaintenanceState(getHermesLiteSoftResetConfig(env));
+  assert.equal(state.pendingDigestId, applied.digest.digestId);
+  assert.equal(state.digests[0].consumed, false);
+});
+
+test('soft reset pending digest does not affect full profile requests', async () => {
+  const stateDir = tempGatewayStateDir();
+  const env = {
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CAPABILITY_MODE: 'full',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  };
+  const applied = runHermesLiteSoftReset({
+    action: 'apply',
+    env,
+    timelineRecords: [{ role: 'assistant', text_summary: 'pending: lite only digest', created_at: 1 }],
+    now: new Date('2026-06-14T00:00:00Z'),
+  });
+
+  let capturedBody = null;
+  await sendChatToHermesGateway(
+    { text: '调试一下服务端', sender_id: 'full-user', conversation_id: 'full-conv', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig(env),
+      fetchImpl: async (url, options) => {
+        if (!options?.body) return makeJsonResponse({ data: [] });
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+      },
+      logger: { warn() {}, log() {} },
+    }
+  );
+
+  assert.equal(capturedBody.model, 'ran-assistant');
+  assert.doesNotMatch(capturedBody.messages.at(-1).content, /daily_digest|lite only digest/);
+  const state = readHermesLiteMaintenanceState(getHermesLiteSoftResetConfig(env));
+  assert.equal(state.pendingDigestId, applied.digest.digestId);
+  assert.equal(state.digests[0].consumed, false);
 });
 
 // --- Robust Token Cache Matching Tests ---

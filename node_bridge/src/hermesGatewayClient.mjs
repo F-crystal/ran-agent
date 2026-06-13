@@ -17,10 +17,44 @@ import {
   buildContextSizeLog,
 } from './contextPolicy.mjs';
 import { resolveProjectRoot } from './trustedMediaPaths.mjs';
+import {
+  getHermesLiteSoftResetConfig,
+  getLiteSessionNonce,
+  getPendingLiteResumeDigest,
+  markLiteResumeDigestConsumed,
+} from './hermesSessionMaintenance.mjs';
 
 const execFile = promisify(execFileCallback);
 const recentConversationStore = new Map();
 const MAX_RECENT_CONVERSATION_SESSIONS = 200;
+const VALID_CONTEXT_INJECTION_MODES = new Set(['auto', 'rich', 'slim', 'resume']);
+
+const HERMES_CONTEXT_BUDGET_DEFAULTS = {
+  rich: {
+    recentLocalTurns: 10,
+    recentLocalChars: 6000,
+    globalRecentTurns: 6,
+    globalRecentChars: 2500,
+    activeTopicChars: 1200,
+    continuityChars: 1200,
+  },
+  slim: {
+    recentLocalTurns: 4,
+    recentLocalChars: 2400,
+    globalRecentTurns: 2,
+    globalRecentChars: 800,
+    activeTopicChars: 400,
+    continuityChars: 600,
+  },
+  resume: {
+    recentLocalTurns: 2,
+    recentLocalChars: 1200,
+    globalRecentTurns: 2,
+    globalRecentChars: 600,
+    activeTopicChars: 300,
+    continuityChars: 500,
+  },
+};
 
 export function getHermesGatewayConfig(env = process.env) {
   const baseUrl = String(env.HERMES_API_BASE_URL || 'http://127.0.0.1:8642/v1').trim().replace(/\/$/, '');
@@ -52,6 +86,19 @@ export function getHermesGatewayConfig(env = process.env) {
   const globalRecentTurns = Math.max(0, Number.parseInt(String(env.HERMES_GLOBAL_RECENT_TURNS || '6'), 10) || 6);
   const globalRecentCharBudget = Math.max(0, Number.parseInt(String(env.HERMES_GLOBAL_RECENT_CHAR_BUDGET || '2500'), 10) || 2500);
   const activeTopicCharBudget = Math.max(0, Number.parseInt(String(env.HERMES_ACTIVE_TOPIC_CHAR_BUDGET || '1200'), 10) || 1200);
+  const contextInjectionMode = String(env.HERMES_CONTEXT_INJECTION_MODE || 'auto').trim().toLowerCase() || 'auto';
+  const softResetConfig = getHermesLiteSoftResetConfig(env);
+  const contextBudgetOverrides = {
+    recentLocalTurns: parseExplicitNonNegativeInteger(env.HERMES_RECENT_TEXT_TURNS),
+    recentLocalChars: parseExplicitNonNegativeInteger(env.HERMES_RECENT_TEXT_CHAR_BUDGET),
+    globalRecentTurns: parseExplicitNonNegativeInteger(env.HERMES_GLOBAL_RECENT_TURNS),
+    globalRecentChars: parseExplicitNonNegativeInteger(env.HERMES_GLOBAL_RECENT_CHAR_BUDGET),
+    activeTopicChars: parseExplicitNonNegativeInteger(env.HERMES_ACTIVE_TOPIC_CHAR_BUDGET),
+    continuityChars: firstProvided(
+      parseExplicitNonNegativeInteger(env.HERMES_CONTINUITY_NOTE_CHAR_BUDGET),
+      parseExplicitNonNegativeInteger(env.HERMES_CONTINUITY_CHAR_BUDGET)
+    ),
+  };
 
   return {
     baseUrl,
@@ -78,11 +125,127 @@ export function getHermesGatewayConfig(env = process.env) {
     timeoutSeconds,
     projectRoot,
     contextPolicyMode,
+    contextInjectionMode,
+    contextBudgetOverrides,
+    softResetEnabled: softResetConfig.enabled,
+    softResetDryRun: softResetConfig.dryRun,
+    softResetMaxDigestChars: softResetConfig.maxDigestChars,
+    softResetKeepLastN: softResetConfig.keepLastN,
+    softResetStateFile: softResetConfig.stateFile,
+    softResetDigestDir: softResetConfig.digestDir,
     maxMediaArtifacts,
     enableContextSizeLog,
     capabilityMode,
     fallbackText: env.NODE_BRIDGE_FALLBACK_TEXT || '暂时无法连接到 Hermes，请稍后再试。',
   };
+}
+
+export function resolveHermesContextBudget({
+  mode = 'auto',
+  config = {},
+  continuityState = {},
+  hasMedia = false,
+} = {}) {
+  const requestedMode = String(mode || 'auto').trim().toLowerCase() || 'auto';
+  const invalidMode = !VALID_CONTEXT_INJECTION_MODES.has(requestedMode);
+  const finalMode = invalidMode ? 'auto' : requestedMode;
+  let defaults;
+  let decisionReason;
+
+  if (finalMode === 'rich') {
+    defaults = HERMES_CONTEXT_BUDGET_DEFAULTS.rich;
+    decisionReason = 'explicit_rich';
+  } else if (finalMode === 'slim') {
+    defaults = HERMES_CONTEXT_BUDGET_DEFAULTS.slim;
+    decisionReason = 'explicit_slim';
+  } else if (finalMode === 'resume') {
+    defaults = HERMES_CONTEXT_BUDGET_DEFAULTS.resume;
+    decisionReason = 'explicit_resume';
+  } else {
+    const hasLocalRecent = continuityState.hasLocalRecent === true;
+    const hasGlobalRecent = continuityState.hasGlobalRecent === true;
+    const hasContinuityNote = continuityState.hasContinuityNote === true;
+    if (hasMedia) {
+      defaults = HERMES_CONTEXT_BUDGET_DEFAULTS.slim;
+      decisionReason = 'auto_media_slim';
+    } else if (hasGlobalRecent && hasContinuityNote) {
+      defaults = {
+        ...HERMES_CONTEXT_BUDGET_DEFAULTS.slim,
+        recentLocalTurns: 2,
+        recentLocalChars: 1200,
+      };
+      decisionReason = 'auto_cross_channel_brief';
+    } else if (hasLocalRecent) {
+      defaults = {
+        ...HERMES_CONTEXT_BUDGET_DEFAULTS.slim,
+        globalRecentTurns: 0,
+        globalRecentChars: 0,
+        activeTopicChars: 0,
+      };
+      decisionReason = 'auto_same_conversation_slim';
+    } else if (hasGlobalRecent) {
+      defaults = HERMES_CONTEXT_BUDGET_DEFAULTS.slim;
+      decisionReason = 'auto_cross_channel_brief';
+    } else {
+      defaults = HERMES_CONTEXT_BUDGET_DEFAULTS.resume;
+      decisionReason = 'auto_resume_new_session';
+    }
+  }
+
+  return {
+    mode: finalMode,
+    budgets: normalizeContextBudget(applyBudgetOverrides(defaults, config.contextBudgetOverrides)),
+    decisionReason,
+    invalidMode,
+  };
+}
+
+function applyBudgetOverrides(defaults = {}, overrides = {}) {
+  const merged = { ...defaults };
+  for (const [key, value] of Object.entries(overrides || {})) {
+    if (value !== undefined && value !== null) {
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+function normalizeContextBudget(budget = {}) {
+  return {
+    recentLocalTurns: normalizeBudgetNumber(budget.recentLocalTurns),
+    recentLocalChars: normalizeBudgetNumber(budget.recentLocalChars),
+    globalRecentTurns: normalizeBudgetNumber(budget.globalRecentTurns),
+    globalRecentChars: normalizeBudgetNumber(budget.globalRecentChars),
+    activeTopicChars: normalizeBudgetNumber(budget.activeTopicChars),
+    continuityChars: normalizeBudgetNumber(budget.continuityChars),
+  };
+}
+
+function normalizeBudgetNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? Math.floor(number) : 0;
+}
+
+function applyContextBudgetToConfig(config = {}, budgets = {}, mode = 'auto') {
+  const normalized = normalizeContextBudget(budgets);
+  return {
+    ...config,
+    contextInjectionMode: mode || config.contextInjectionMode || 'auto',
+    recentTextTurns: normalized.recentLocalTurns,
+    recentTextCharBudget: normalized.recentLocalChars,
+    globalRecentTurns: normalized.globalRecentTurns,
+    globalRecentCharBudget: normalized.globalRecentChars,
+    activeTopicCharBudget: normalized.activeTopicChars,
+    continuityCharBudget: normalized.continuityChars,
+  };
+}
+
+function parseExplicitNonNegativeInteger(value) {
+  if (value === undefined || value === null || String(value).trim() === '') {
+    return undefined;
+  }
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : undefined;
 }
 
 const GENERATION_INTENT_PATTERN = /画|生成|头像|壁纸|海报|语音|朗读|读出来|tts|画图|生图|配图/;
@@ -161,53 +324,93 @@ export async function sendChatToHermesGateway(payload, options = {}) {
 
   const selectedConfig = { ...config, baseUrl: selectedBaseUrl, profile: selectedProfile };
   const sessionContext = buildHermesSessionContext(payload, selectedConfig);
-  const externalRecentMessages = normalizeHistoryMessages(payload.recent_local_history, selectedConfig);
+  const isLiteProfile = selectedConfig.profile === selectedConfig.liteProfile;
+  const pendingResumeDigest = isLiteProfile ? getPendingLiteResumeDigest(selectedConfig) : null;
+  const effectivePayload = pendingResumeDigest
+    ? { ...payload, daily_digest_context: pendingResumeDigest.text }
+    : payload;
+  const hasExternalLocalRecent = Array.isArray(payload.recent_local_history) && payload.recent_local_history.length > 0;
+  const hasStoredLocalRecent = sessionContext.enabled === true
+    && Boolean(sessionContext.stableKey)
+    && (recentConversationStore.get(sessionContext.stableKey) || []).length > 0;
+  const hasGlobalRecent = Array.isArray(payload.recent_global_history) && payload.recent_global_history.length > 0;
+  const contextBudget = resolveHermesContextBudget({
+    mode: pendingResumeDigest ? 'resume' : selectedConfig.contextInjectionMode,
+    config: selectedConfig,
+    continuityState: {
+      hasLocalRecent: hasExternalLocalRecent || (!Array.isArray(payload.recent_local_history) && hasStoredLocalRecent),
+      hasGlobalRecent,
+      hasContinuityNote: Boolean(String(payload.continuity_note || '').trim()),
+    },
+    channel: payload.platform || payload.channel,
+    conversationId: firstNonEmptyString(payload.conversation_id, payload.conversationId, payload.sender_id, payload.senderId),
+    sessionId: sessionContext.sessionId,
+    hasMedia: capResult.hasMedia,
+  });
+  if (pendingResumeDigest) {
+    contextBudget.decisionReason = 'soft_reset_pending_digest';
+  }
+  if (contextBudget.invalidMode) {
+    logger.warn?.('invalid HERMES_CONTEXT_INJECTION_MODE; falling back to auto');
+  }
+  const budgetedConfig = applyContextBudgetToConfig(selectedConfig, contextBudget.budgets, contextBudget.mode);
+  const externalRecentMessages = limitHistoryMessages(
+    normalizeHistoryMessages(payload.recent_local_history, budgetedConfig),
+    contextBudget.budgets.recentLocalTurns,
+    contextBudget.budgets.recentLocalChars
+  );
   const recentMessages = externalRecentMessages.length > 0
     ? externalRecentMessages
-    : buildRecentHistoryMessages(sessionContext, selectedConfig);
-  const globalRecentMessages = normalizeHistoryMessages(payload.recent_global_history, {
-    ...selectedConfig,
+    : buildRecentHistoryMessages(sessionContext, budgetedConfig);
+  const globalRecentMessages = limitHistoryMessages(normalizeHistoryMessages(payload.recent_global_history, {
+    ...budgetedConfig,
     recentTextMaxUserChars: 900,
     recentTextMaxAssistantChars: 900,
-  }).slice(-(selectedConfig.globalRecentTurns || 6) * 2);
+  }), contextBudget.budgets.globalRecentTurns, contextBudget.budgets.globalRecentChars);
 
-  const preparedMessage = await buildHermesUserMessage(payload, {
+  const preparedMessage = await buildHermesUserMessage(effectivePayload, {
     env,
-    config: selectedConfig,
+    config: budgetedConfig,
     logger,
     mediaContextOptions: options.mediaContextOptions,
+    sessionContext,
     recentHistoryMessages: recentMessages,
     globalHistoryMessages: globalRecentMessages,
+    contextBudget,
     requestId,
   });
   logHermesSessionContinuity({
     logger,
-    config: selectedConfig,
+    config: budgetedConfig,
     sessionContext,
     recentMessages,
     globalRecentMessages,
     preparedMessage,
-    continuityNoteChars: buildEffectiveContinuityNote(payload, recentMessages).length,
-    payload,
+    continuityNoteChars: buildBudgetedContinuityNote(effectivePayload, recentMessages, contextBudget.budgets).length,
+    payload: effectivePayload,
   });
 
   if (config.mode === 'oneshot') {
     const response = await sendChatToHermesOneShot(preparedMessage, {
-      config: selectedConfig,
+      config: budgetedConfig,
       execFileImpl: options.execFileImpl,
     });
-    recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
+    if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
+    recordRecentConversationTurn(sessionContext, payload, response, budgetedConfig);
     return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
   }
 
   try {
     const response = await sendChatToHermesApi(preparedMessage, {
-      config: selectedConfig,
+      config: budgetedConfig,
       fetchImpl: options.fetchImpl,
       sessionContext,
       recentMessages,
+      logger,
+      requestId,
     });
-    recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
+    if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
+    recordRecentConversationTurn(sessionContext, payload, response, budgetedConfig);
     return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
   } catch (error) {
     if (config.mode !== 'auto') {
@@ -215,10 +418,11 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     }
     logger.warn?.(`hermes api request failed, retrying with one-shot: ${formatErrorMessage(error)}`);
     const response = await sendChatToHermesOneShot(preparedMessage, {
-      config: selectedConfig,
+      config: budgetedConfig,
       execFileImpl: options.execFileImpl,
     });
-    recordRecentConversationTurn(sessionContext, payload, response, selectedConfig);
+    if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
+    recordRecentConversationTurn(sessionContext, payload, response, budgetedConfig);
     return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
   }
 }
@@ -255,6 +459,14 @@ async function sendChatToHermesApi(message, options = {}) {
   }
 
   const body = await parseHermesJson(response);
+  if (config.enableContextSizeLog) {
+    logProviderUsageTelemetry(body, {
+      config,
+      sessionContext: options.sessionContext,
+      logger: options.logger,
+      requestId: options.requestId,
+    });
+  }
   return buildHermesReply(body, config);
 }
 
@@ -296,17 +508,36 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
   const socialRoutingHint = buildSocialLinkRoutingHint(payload);
   const recentHistoryMessages = Array.isArray(options.recentHistoryMessages) ? options.recentHistoryMessages : [];
   const globalHistoryMessages = Array.isArray(options.globalHistoryMessages) ? options.globalHistoryMessages : [];
+  const contextBudget = options.contextBudget || {
+    mode: config.contextInjectionMode || 'auto',
+    budgets: {
+      recentLocalTurns: config.recentTextTurns || 0,
+      recentLocalChars: config.recentTextCharBudget || 0,
+      globalRecentTurns: config.globalRecentTurns || 0,
+      globalRecentChars: config.globalRecentCharBudget || 0,
+      activeTopicChars: config.activeTopicCharBudget || 0,
+      continuityChars: config.continuityCharBudget || 0,
+    },
+    decisionReason: '',
+  };
+  const continuityNote = buildBudgetedContinuityNote(payload, recentHistoryMessages, contextBudget.budgets);
+  const activeTopic = contextBudget.budgets.activeTopicChars > 0
+    ? clipText(String(payload.active_topic || '').trim(), contextBudget.budgets.activeTopicChars)
+    : '';
+  const dailyDigestText = buildDailyDigestContextText(payload);
+  const currentUserMessage = buildHermesUserText(payload);
   const message = [
     buildBridgeTemporalUserContext(payload),
-    buildEffectiveContinuityNote(payload, recentHistoryMessages),
-    buildGlobalActiveTopicNote(payload, globalHistoryMessages, config),
+    dailyDigestText,
+    continuityNote,
+    buildGlobalActiveTopicNote({ ...payload, active_topic: activeTopic }, globalHistoryMessages, config),
     courtlyAnchor,
     socialRoutingHint,
     buildSocialMediaRetryHint(payload, recentHistoryMessages),
     hasMedia ? buildHermesMediaGenerationInstruction() : '',
     buildHermesInboundMediaInstruction(payload),
     mediaContextText,
-    buildHermesUserText(payload),
+    currentUserMessage,
   ].filter(Boolean).join('\n\n');
 
   if (config.enableContextSizeLog) {
@@ -321,9 +552,147 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
       request_id: options.requestId || createRequestId(),
       context_policy_mode: config.contextPolicyMode,
     }));
+    logContextComponentTelemetry({
+      payload,
+      config,
+      recentHistoryMessages,
+      globalHistoryMessages,
+      activeTopic,
+      continuityNote,
+      dailyDigestText,
+      mediaContextText,
+      currentUserMessage,
+      contextBudget,
+      sessionContext: options.sessionContext,
+      requestId: options.requestId || createRequestId(),
+      logger: options.logger,
+    });
   }
 
   return message;
+}
+
+function logContextComponentTelemetry({
+  payload = {},
+  config = {},
+  recentHistoryMessages = [],
+  globalHistoryMessages = [],
+  activeTopic = '',
+  continuityNote = '',
+  dailyDigestText = '',
+  mediaContextText = '',
+  currentUserMessage = '',
+  contextBudget = {},
+  sessionContext = {},
+  requestId = createRequestId(),
+  logger = console,
+} = {}) {
+  const budgets = normalizeContextBudget(contextBudget.budgets || {
+    recentLocalTurns: config.recentTextTurns,
+    recentLocalChars: config.recentTextCharBudget,
+    globalRecentTurns: config.globalRecentTurns,
+    globalRecentChars: config.globalRecentCharBudget,
+    activeTopicChars: config.activeTopicCharBudget,
+    continuityChars: config.continuityCharBudget,
+  });
+  logger?.log?.(`[hermes-context-components] ${JSON.stringify({
+    request_id: requestId,
+    profile: config.profile || '',
+    channel: String(payload.platform || payload.channel || '').trim().toLowerCase() || '',
+    conversation_id_hash: sha256Hex(firstNonEmptyString(payload.conversation_id, payload.conversationId, payload.sender_id, payload.senderId)).slice(0, 16),
+    session_id_hash: sessionContext.sessionId
+      ? sha256Hex(sessionContext.sessionId).slice(0, 16)
+      : '',
+    context_mode: contextBudget.mode || config.contextInjectionMode || 'auto',
+    context_decision_reason: contextBudget.decisionReason || '',
+    budgets,
+    components: {
+      recent_local_history: measureContextComponent(
+        historyMessagesText(recentHistoryMessages),
+        budgets.recentLocalTurns <= 0 || budgets.recentLocalChars <= 0 || recentHistoryMessages.length === 0
+      ),
+      global_recent_history: measureContextComponent(
+        historyMessagesText(globalHistoryMessages),
+        budgets.globalRecentTurns <= 0 || budgets.globalRecentChars <= 0 || globalHistoryMessages.length === 0
+      ),
+      active_topic: measureContextComponent(activeTopic, budgets.activeTopicChars <= 0 || !activeTopic),
+      continuity_note: measureContextComponent(continuityNote, budgets.continuityChars <= 0 || !continuityNote),
+      media_context: measureContextComponent(mediaContextText, !mediaContextText),
+      daily_digest: measureContextComponent(dailyDigestText, !dailyDigestText),
+      current_user_message: measureContextComponent(currentUserMessage, false),
+    },
+  })}`);
+}
+
+function historyMessagesText(messages = []) {
+  return Array.isArray(messages)
+    ? messages.map((message) => String(message?.content || '')).join('\n')
+    : '';
+}
+
+function measureContextComponent(text = '', omitted = false) {
+  const value = String(text || '');
+  return {
+    chars: value.length,
+    bytes: utf8ByteLength(value),
+    estimated_tokens: estimateTokens(value),
+    omitted: Boolean(omitted),
+  };
+}
+
+function estimateTokens(text = '') {
+  const value = String(text || '');
+  let chineseChars = 0;
+  for (const char of value) {
+    if (char >= '\u4e00' && char <= '\u9fff') {
+      chineseChars += 1;
+    }
+  }
+  const otherChars = value.length - chineseChars;
+  return Math.max(0, Math.ceil(chineseChars * 1.5 + otherChars * 0.25));
+}
+
+function logProviderUsageTelemetry(body = {}, options = {}) {
+  const usage = body && typeof body.usage === 'object' && !Array.isArray(body.usage) ? body.usage : {};
+  options.logger?.log?.(`[hermes-provider-usage] ${JSON.stringify({
+    request_id: options.requestId || createRequestId(),
+    profile: options.config?.profile || '',
+    session_id_hash: options.sessionContext?.sessionId ? sha256Hex(options.sessionContext.sessionId).slice(0, 16) : '',
+    input_tokens: nullableNumber(firstProvided(usage.input_tokens, usage.prompt_tokens)),
+    output_tokens: nullableNumber(firstProvided(usage.output_tokens, usage.completion_tokens)),
+    total_tokens: nullableNumber(usage.total_tokens),
+    prompt_cache_hit_tokens: nullableNumber(usage.prompt_cache_hit_tokens),
+    prompt_cache_miss_tokens: nullableNumber(usage.prompt_cache_miss_tokens),
+  })}`);
+}
+
+function nullableNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function firstProvided(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function utf8ByteLength(str) {
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(String(str || '')).byteLength;
+  }
+  let bytes = 0;
+  const text = String(str || '');
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    if (code <= 0x7f) bytes += 1;
+    else if (code <= 0x7ff) bytes += 2;
+    else bytes += 3;
+  }
+  return bytes;
 }
 
 function buildHermesSystemInstruction() {
@@ -673,6 +1042,22 @@ function buildEffectiveContinuityNote(payload = {}, recentMessages = []) {
   return buildConversationContinuityNote(payload, recentMessages);
 }
 
+function buildBudgetedContinuityNote(payload = {}, recentMessages = [], budgets = {}) {
+  const limit = normalizeBudgetNumber(budgets.continuityChars);
+  if (limit <= 0) return '';
+  return clipText(buildEffectiveContinuityNote(payload, recentMessages), limit);
+}
+
+function buildDailyDigestContextText(payload = {}) {
+  const digest = firstNonEmptyString(payload.daily_digest, payload.daily_digest_context);
+  if (!digest) return '';
+  return [
+    '【daily_digest（soft reset resume；非用户原话，不要复述）】',
+    digest,
+    '只用于恢复未完成线索和偏好；不要把它当作长期记忆库，也不要解释 session reset。',
+  ].join('\n');
+}
+
 function buildGlobalActiveTopicNote(payload = {}, globalHistoryMessages = [], config = {}) {
   const activeTopic = clipText(String(payload.active_topic || '').trim(), config.activeTopicCharBudget || 1200);
   const history = globalHistoryMessages
@@ -778,14 +1163,14 @@ function buildHermesSessionContext(payload = {}, config = {}) {
     return { enabled: false, stableKey: '', sessionId: '', sessionKey: '' };
   }
   if (payload.hermes_session_id && payload.hermes_session_key) {
-    return {
+    return applyLiteSessionNonce({
       enabled: true,
       stableKey: String(payload.stable_conversation_key || `${payload.platform || payload.channel || 'wechat'}:${payload.conversation_id || payload.sender_id || 'unknown'}`),
       sessionId: String(payload.hermes_session_id),
       sessionKey: String(payload.hermes_session_key),
       globalUserId: String(payload.global_user_id || ''),
       platform: String(payload.platform || payload.channel || ''),
-    };
+    }, config);
   }
   const channel = String(payload.channel || 'wechat').trim().toLowerCase() || 'wechat';
   const conversationId = firstNonEmptyString(
@@ -799,13 +1184,27 @@ function buildHermesSessionContext(payload = {}, config = {}) {
   ) || 'unknown';
   const stableKey = `${channel}:${conversationId}`;
   const digest = sha256Hex(stableKey).slice(0, 16);
-  return {
+  return applyLiteSessionNonce({
     enabled: true,
     stableKey,
     sessionId: `${config.sessionIdPrefix || 'ran-agent-wechat'}-${digest}`,
     sessionKey: `${config.sessionKeyPrefix || 'ran-agent-memory'}-${digest}`,
     globalUserId: String(payload.global_user_id || ''),
     platform: channel,
+  }, config);
+}
+
+function applyLiteSessionNonce(sessionContext = {}, config = {}) {
+  if (config.profile !== config.liteProfile || config.softResetEnabled !== true) {
+    return sessionContext;
+  }
+  const nonce = getLiteSessionNonce(config);
+  if (!nonce) return sessionContext;
+  const nonceHash = sha256Hex(nonce).slice(0, 8);
+  return {
+    ...sessionContext,
+    sessionId: `${sessionContext.sessionId}-${nonceHash}`,
+    sessionKey: `${sessionContext.sessionKey}-${nonceHash}`,
   };
 }
 
@@ -851,6 +1250,32 @@ function normalizeHistoryMessages(messages = [], config = {}) {
   return messages.map((message) => normalizeRecentMessage(message, config)).filter(Boolean);
 }
 
+function limitHistoryMessages(messages = [], turns = 0, charBudget = 0) {
+  if (!Array.isArray(messages) || turns <= 0 || charBudget <= 0) return [];
+  const maxMessages = Math.max(0, Number(turns || 0) * 2);
+  const candidates = messages.slice(-maxMessages);
+  const selected = [];
+  let usedChars = 0;
+  for (let index = candidates.length - 1; index >= 0; index -= 1) {
+    const message = candidates[index];
+    const content = String(message?.content || '');
+    if (!content) continue;
+    if (usedChars + content.length > charBudget && selected.length > 0) {
+      continue;
+    }
+    if (usedChars + content.length > charBudget) {
+      selected.unshift({
+        ...message,
+        content: clipText(content, Math.max(1, charBudget - usedChars)),
+      });
+      break;
+    }
+    selected.unshift(message);
+    usedChars += content.length;
+  }
+  return selected;
+}
+
 function sanitizeRecentHistoryText(value, maxChars) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -869,7 +1294,8 @@ function sanitizeRecentHistoryText(value, maxChars) {
 function clipText(text, maxChars) {
   const limit = Math.max(1, Number(maxChars) || 1);
   const normalized = String(text || '');
-  return normalized.length <= limit ? normalized : `${normalized.slice(0, limit)}…`;
+  if (normalized.length <= limit) return normalized;
+  return limit === 1 ? '…' : `${normalized.slice(0, limit - 1)}…`;
 }
 
 function recordRecentConversationTurn(sessionContext = {}, payload = {}, response = {}, config = {}) {
