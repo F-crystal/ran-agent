@@ -126,7 +126,7 @@ class _ConversationAgentFacade:
 class PersonalAgentService:
     """Provides project-local backend capabilities for tool calls."""
 
-    _knowledge_actions = {"auto", "plan", "apply"}
+    _knowledge_actions = {"auto", "plan", "apply", "cleanup", "daily_carryover"}
 
     def __init__(
         self,
@@ -573,7 +573,7 @@ class PersonalAgentService:
         normalized_action = str(action).strip() or "auto"
         normalized_trigger = str(trigger).strip() or "manual"
         if normalized_action not in self._knowledge_actions:
-            raise ValueError("action must be one of: auto, plan, apply")
+            raise ValueError("action must be one of: auto, plan, apply, cleanup, daily_carryover")
         if normalized_action == "auto":
             result = self._knowledge_agent.auto_run(trigger=normalized_trigger)
         else:

@@ -135,6 +135,23 @@ def knowledge_agent_job(
     )
 
 
+def daily_carryover_job(
+    config: AppConfig,
+    logger: logging.Logger,
+) -> None:
+    """Ensure the previous day's night-cycle carry-over is archived before soft reset."""
+
+    logger.info("daily carryover job started")
+    result = KnowledgeAgent(config=config, logger=logger).run(action="daily_carryover", trigger="daily_carryover")
+    logger.info(
+        "daily carryover job finished status=%s inbox_before=%s inbox_after=%s error=%s",
+        result.status,
+        result.inbox_count_before,
+        result.inbox_count_after,
+        result.error,
+    )
+
+
 def night_cycle_job(
     config: AppConfig,
     database: Database,

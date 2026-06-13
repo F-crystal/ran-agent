@@ -16,7 +16,7 @@ from personal_agent.todo_manager import TodoManager
 class BackendHttpController:
     """Validates and dispatches backend capability requests."""
 
-    _knowledge_actions = {"auto", "plan", "apply"}
+    _knowledge_actions = {"auto", "plan", "apply", "cleanup", "daily_carryover"}
 
     def __init__(self, message_service: PersonalAgentService, logger: logging.Logger, config: AppConfig) -> None:
         self._message_service = message_service
@@ -107,7 +107,9 @@ class BackendHttpController:
                 return HTTPStatus.BAD_REQUEST, {"error": "field 'action' must be a string"}
             action = action_raw.strip() or "auto"
             if action not in self._knowledge_actions:
-                return HTTPStatus.BAD_REQUEST, {"error": "field 'action' must be one of: auto, plan, apply"}
+                return HTTPStatus.BAD_REQUEST, {
+                    "error": "field 'action' must be one of: auto, plan, apply, cleanup, daily_carryover"
+                }
 
             trigger_raw = body.get("trigger", "manual")
             if not isinstance(trigger_raw, str):

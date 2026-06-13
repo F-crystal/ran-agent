@@ -60,6 +60,11 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(config.self_reflection_sample_limit, 200)
         self.assertTrue(config.knowledge_agent_enabled)
         self.assertEqual(config.knowledge_check_interval_minutes, 360)
+        self.assertEqual(config.knowledge_cron_hours, "6,12,18,23")
+        self.assertEqual(config.knowledge_cron_minute, 0)
+        self.assertTrue(config.daily_carryover_enabled)
+        self.assertEqual(config.daily_carryover_hour, 4)
+        self.assertEqual(config.daily_carryover_minute, 0)
         self.assertTrue(config.night_cycle_enabled)
         self.assertEqual(config.night_cycle_hour, 0)
         self.assertEqual(config.night_cycle_minute, 0)
@@ -103,6 +108,11 @@ class ConfigLoadingTest(unittest.TestCase):
                 "PERSONAL_AGENT_SELF_REFLECTION_SAMPLE_LIMIT": "80",
                 "PERSONAL_AGENT_KNOWLEDGE_AGENT_ENABLED": "false",
                 "PERSONAL_AGENT_KNOWLEDGE_CHECK_INTERVAL_MINUTES": "60",
+                "PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS": "7,13",
+                "PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE": "30",
+                "PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED": "false",
+                "PERSONAL_AGENT_DAILY_CARRYOVER_HOUR": "3",
+                "PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE": "45",
                 "PERSONAL_AGENT_BRAIN_LOOP_INTERVAL_MINUTES": "240",
                 "PERSONAL_AGENT_REMINDER_CHECK_INTERVAL_MINUTES": "12",
                 "PERSONAL_AGENT_NIGHT_CYCLE_ENABLED": "false",
@@ -138,6 +148,11 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(config.self_reflection_sample_limit, 80)
         self.assertFalse(config.knowledge_agent_enabled)
         self.assertEqual(config.knowledge_check_interval_minutes, 60)
+        self.assertEqual(config.knowledge_cron_hours, "7,13")
+        self.assertEqual(config.knowledge_cron_minute, 30)
+        self.assertFalse(config.daily_carryover_enabled)
+        self.assertEqual(config.daily_carryover_hour, 3)
+        self.assertEqual(config.daily_carryover_minute, 45)
         self.assertEqual(config.brain_loop_interval_minutes, 240)
         self.assertEqual(config.reminder_check_interval_minutes, 12)
         self.assertFalse(config.night_cycle_enabled)
@@ -250,7 +265,14 @@ class ConfigLoadingTest(unittest.TestCase):
         job_map = {job["id"]: job for job in fake_scheduler.jobs}
         self.assertEqual(job_map["brain_loop"]["trigger"].interval, timedelta(minutes=120))
         self.assertEqual(job_map["life_loop"]["trigger"].interval, timedelta(minutes=90))
-        self.assertEqual(job_map["knowledge_agent"]["trigger"].interval, timedelta(minutes=360))
+        self.assertEqual(job_map["knowledge_agent"]["trigger"].fields[5].expressions[0].first, 6)
+        self.assertEqual(job_map["knowledge_agent"]["trigger"].fields[5].expressions[1].first, 12)
+        self.assertEqual(job_map["knowledge_agent"]["trigger"].fields[5].expressions[2].first, 18)
+        self.assertEqual(job_map["knowledge_agent"]["trigger"].fields[5].expressions[3].first, 23)
+        self.assertEqual(job_map["knowledge_agent"]["trigger"].fields[6].expressions[0].first, 0)
+        self.assertEqual(job_map["daily_carryover"]["func"], "daily_carryover_job")
+        self.assertEqual(job_map["daily_carryover"]["trigger"].fields[5].expressions[0].first, 4)
+        self.assertEqual(job_map["daily_carryover"]["trigger"].fields[6].expressions[0].first, 0)
         self.assertEqual(job_map["self_reflection"]["trigger"].interval, timedelta(minutes=720))
         self.assertEqual(job_map["hermes_bounded_context"]["trigger"].interval, timedelta(minutes=720))
         self.assertEqual(job_map["reminder_check"]["trigger"].interval, timedelta(minutes=5))

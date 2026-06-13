@@ -51,6 +51,32 @@ class KnowledgeAgentTest(unittest.TestCase):
     def test_auto_run_executes_plan_apply_cleanup_chain(self) -> None:
         """Test that auto_run executes the full plan→apply→cleanup chain."""
         inbox_dir = self.config.vault_dir / "inbox"
+        item_1 = inbox_dir / "item-1.md"
+        item_2 = inbox_dir / "item-2.md"
+        item_1.write_text("hello\n", encoding="utf-8")
+        item_2.write_text("hello again\n", encoding="utf-8")
+
+        call_order = []
+
+        def runner(action: str) -> subprocess.CompletedProcess[str]:
+            call_order.append(action)
+            if action == "apply" and item_1.exists():
+                item_1.unlink()
+            if action == "cleanup" and item_2.exists():
+                item_2.unlink()
+            return subprocess.CompletedProcess(args=[action], returncode=0, stdout=f"{action} done", stderr="")
+
+        agent = KnowledgeAgent(config=self.config, logger=self.logger, command_runner=runner)
+        result = agent.auto_run(trigger="scheduler", now_local=datetime(2026, 4, 11, 12, 0, 0))
+
+        self.assertEqual(call_order, ["plan", "apply", "cleanup"])
+        self.assertEqual(result.action, "cleanup")
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.returncode, 0)
+        self.assertFalse(result.timed_out)
+
+    def test_auto_run_stops_when_apply_returns_ok_without_inbox_progress(self) -> None:
+        inbox_dir = self.config.vault_dir / "inbox"
         (inbox_dir / "item-1.md").write_text("hello\n", encoding="utf-8")
 
         call_order = []
@@ -62,13 +88,26 @@ class KnowledgeAgentTest(unittest.TestCase):
         agent = KnowledgeAgent(config=self.config, logger=self.logger, command_runner=runner)
         result = agent.auto_run(trigger="scheduler", now_local=datetime(2026, 4, 11, 12, 0, 0))
 
-        # Should execute plan, then apply, then cleanup
-        self.assertEqual(call_order, ["plan", "apply", "cleanup"])
-        # Result should be from the first action (plan)
-        self.assertEqual(result.action, "plan")
-        self.assertEqual(result.status, "ok")
-        self.assertEqual(result.returncode, 0)
-        self.assertFalse(result.timed_out)
+        self.assertEqual(call_order, ["plan", "apply"])
+        self.assertEqual(result.action, "apply")
+        self.assertEqual(result.status, "no_progress")
+        self.assertIn("did not reduce inbox", result.error)
+
+    def test_daily_carryover_requires_target_note_progress(self) -> None:
+        inbox_dir = self.config.vault_dir / "inbox"
+        note_path = inbox_dir / "night_cycle_2026-04-11.md"
+        note_path.write_text("carry-over\n", encoding="utf-8")
+
+        def runner(action: str) -> subprocess.CompletedProcess[str]:
+            return subprocess.CompletedProcess(args=[action], returncode=0, stdout="daily done", stderr="")
+
+        agent = KnowledgeAgent(config=self.config, logger=self.logger, command_runner=runner)
+        result = agent.run(action="daily_carryover", trigger="test", now_local=datetime(2026, 4, 12, 4, 0, 0))
+
+        self.assertEqual(result.status, "no_progress")
+        self.assertEqual(result.inbox_count_before, 1)
+        self.assertEqual(result.inbox_count_after, 1)
+        self.assertIn("night_cycle_2026-04-11.md", result.error)
 
     def test_auto_run_stops_chain_on_failure(self) -> None:
         """Test that chain stops when a step fails."""

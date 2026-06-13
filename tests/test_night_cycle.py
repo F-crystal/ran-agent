@@ -99,6 +99,12 @@ class NightCycleTest(unittest.TestCase):
             conn.commit()
 
         def runner(action: str):
+            if action == "daily_carryover":
+                inbox_note = self.config.vault_dir / "inbox" / "night_cycle_2026-04-11.md"
+                raw_dir = self.config.vault_dir / "raw" / "night_cycle"
+                raw_dir.mkdir(parents=True, exist_ok=True)
+                if inbox_note.exists():
+                    inbox_note.rename(raw_dir / inbox_note.name)
             return __import__("subprocess").CompletedProcess(args=[action], returncode=0, stdout=action, stderr="")
 
         result = NightCycle(
@@ -117,7 +123,7 @@ class NightCycleTest(unittest.TestCase):
         self.assertTrue(Path(result.summary_output_path).exists())
         self.assertTrue(Path(result.knowledge_inbox_path).exists())
         self.assertGreaterEqual(result.cleared_session_count, 1)
-        self.assertEqual(result.knowledge_action, "plan")
+        self.assertEqual(result.knowledge_action, "daily_carryover")
         self.assertEqual(result.knowledge_status, "ok")
         self.assertTrue(Path(result.persona_proposal_path).exists())
         self.assertTrue((self.config.base_dir / "IDENTITY.md").exists())

@@ -150,6 +150,7 @@ WorkingDirectory=/opt/ran_agent
 EnvironmentFile=-$NODE_ENV_FILE
 Environment=HERMES_LITE_SOFT_RESET_ENABLED=true
 Environment=HERMES_LITE_SOFT_RESET_DRY_RUN=false
+ExecStartPre=/bin/bash /opt/ran_agent/scripts/ensure-daily-carryover-before-soft-reset.sh
 ExecStart=/bin/bash /opt/ran_agent/scripts/hermes-lite-soft-reset.sh --apply
 EOF
 

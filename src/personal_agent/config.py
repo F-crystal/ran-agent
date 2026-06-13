@@ -127,6 +127,11 @@ class AppConfig:
     brain_loop_interval_minutes: int = 120
     proactive_check_interval_minutes: int = 90
     knowledge_check_interval_minutes: int = 360
+    knowledge_cron_hours: str = "6,12,18,23"
+    knowledge_cron_minute: int = 0
+    daily_carryover_enabled: bool = True
+    daily_carryover_hour: int = 4
+    daily_carryover_minute: int = 0
     reminder_check_interval_minutes: int = 5
     proactive_enabled: bool = False
     reminder_delivery_enabled: bool = False
@@ -194,7 +199,7 @@ class AppConfig:
     qwen_chat_model: str = "qwen3.5-plus"
     qwen_tools_model: str = "qwen3.5-plus"
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/responses"
-    qwen_timeout_seconds: int = 60
+    qwen_timeout_seconds: int = 300
     persona_evolution_enabled: bool = True
     persona_proposals_dir: Path = Path("debug/persona_proposals")
     identity_path: Path = Path("IDENTITY.md")
@@ -263,6 +268,14 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         knowledge_check_interval_minutes=int(
             os.getenv("PERSONAL_AGENT_KNOWLEDGE_CHECK_INTERVAL_MINUTES", "360").strip()
         ),
+        knowledge_cron_hours=os.getenv("PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS", "6,12,18,23").strip(),
+        knowledge_cron_minute=int(os.getenv("PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE", "0").strip()),
+        daily_carryover_enabled=os.getenv(
+            "PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED",
+            "true",
+        ).strip().lower() not in {"0", "false", "no", "off"},
+        daily_carryover_hour=int(os.getenv("PERSONAL_AGENT_DAILY_CARRYOVER_HOUR", "4").strip()),
+        daily_carryover_minute=int(os.getenv("PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE", "0").strip()),
         reminder_check_interval_minutes=int(
             os.getenv("PERSONAL_AGENT_REMINDER_CHECK_INTERVAL_MINUTES", "5").strip()
         ),
@@ -439,7 +452,7 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
             "https://dashscope.aliyuncs.com/compatible-mode/v1/responses",
         ).strip(),
         qwen_timeout_seconds=int(
-            os.getenv("PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS", "45").strip()
+            os.getenv("PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS", "300").strip()
         ),
         persona_evolution_enabled=os.getenv(
             "PERSONAL_AGENT_PERSONA_EVOLUTION_ENABLED",

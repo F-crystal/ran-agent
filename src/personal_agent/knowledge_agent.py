@@ -150,12 +150,11 @@ class KnowledgeAgent:
         chain = ["plan", "apply", "cleanup"]
         self._logger.info("knowledge agent auto_run starting chain=%s trigger=%s inbox_count=%s", chain, trigger, inbox_count)
 
-        first_result: KnowledgeRunResult | None = None
+        last_result: KnowledgeRunResult | None = None
         stopped_result: KnowledgeRunResult | None = None
         for action in chain:
             result = self.run(action=action, trigger=trigger, now_local=local_now)
-            if first_result is None:
-                first_result = result
+            last_result = result
             local_now = datetime.now()
             self._logger.info(
                 "knowledge agent chain step completed action=%s status=%s inbox_before=%s inbox_after=%s",
@@ -176,7 +175,7 @@ class KnowledgeAgent:
                 self._logger.info("knowledge agent chain: inbox empty after action=%s, stopping chain", action)
                 break
 
-        return stopped_result or first_result or self._build_noop_result(
+        return stopped_result or last_result or self._build_noop_result(
             trigger=trigger,
             now_local=datetime.now(),
             inbox_count=inbox_count,
@@ -195,6 +194,18 @@ class KnowledgeAgent:
 
         local_now = now_local or datetime.now()
         inbox_before = self.count_inbox_items()
+        daily_carryover_target = self._daily_carryover_note_path(local_now) if action == "daily_carryover" else None
+        if daily_carryover_target is not None and not daily_carryover_target.exists():
+            result = self._build_noop_result(
+                trigger=trigger,
+                now_local=local_now,
+                inbox_count=inbox_before,
+                status="skipped",
+                error="daily carry-over note already absent from inbox",
+                action=action,
+            )
+            save_knowledge_state(self._config, self._result_to_state(result))
+            return result
         started_at = local_now.strftime("%Y-%m-%d %H:%M:%S")
         started_monotonic = time.monotonic()
         try:
@@ -266,6 +277,16 @@ class KnowledgeAgent:
 
         inbox_after = self.count_inbox_items()
         processed_count = max(0, inbox_before - inbox_after)
+        if completed.returncode == 0 and action == "apply" and inbox_before > 0 and processed_count <= 0:
+            status = "no_progress"
+            error = "knowledge action apply returned ok but did not reduce inbox"
+        if (
+            completed.returncode == 0
+            and daily_carryover_target is not None
+            and daily_carryover_target.exists()
+        ):
+            status = "no_progress"
+            error = f"daily carry-over note remained in inbox: {daily_carryover_target.name}"
         recent_curated_topics = tuple(self._recent_modified_stems(self._config.vault_dir / "wiki", minutes=20))
         recent_source_additions = tuple(
             self._recent_modified_stems(self._config.vault_dir / "wiki" / "sources", minutes=20)
@@ -300,10 +321,11 @@ class KnowledgeAgent:
         inbox_count: int,
         status: str,
         error: str,
+        action: str = "noop",
     ) -> KnowledgeRunResult:
         timestamp = now_local.strftime("%Y-%m-%d %H:%M:%S")
         return KnowledgeRunResult(
-            action="noop",
+            action=action,
             trigger=trigger,
             status=status,
             started_at=timestamp,
@@ -320,6 +342,10 @@ class KnowledgeAgent:
             timed_out=False,
             duration_seconds=0.0,
         )
+
+    def _daily_carryover_note_path(self, now_local: datetime) -> Path:
+        summary_date = (now_local - timedelta(days=1)).strftime("%Y-%m-%d")
+        return self._config.vault_dir / "inbox" / f"night_cycle_{summary_date}.md"
 
     def _result_to_state(self, result: KnowledgeRunResult) -> KnowledgeState:
         return KnowledgeState(

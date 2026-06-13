@@ -16,12 +16,14 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: ./vault_runner.sh <plan|apply|cleanup>
+Usage: ./vault_runner.sh <plan|apply|cleanup|daily_carryover>
 
 Commands:
   plan     Run one planning prompt over inbox; read-only is prompt-enforced, not a Qwen CLI approval mode
   apply    Run one small-step inbox ingest/apply pass
   cleanup  Run one cleanup-only pass for safe_to_cleanup inbox items
+  daily_carryover
+           Archive the latest night_cycle_YYYY-MM-DD.md carry-over note only
 EOF
 }
 
@@ -65,6 +67,49 @@ run_task() {
   qwen -p "$(cat "$prompt_file")" -y
 }
 
+run_daily_carryover() {
+  local target_note
+  target_note="$(find "$VAULT_DIR/inbox" -maxdepth 1 -type f -name 'night_cycle_*.md' | sort | tail -n 1 || true)"
+  if [ -z "$target_note" ]; then
+    echo "No night_cycle carry-over note found in inbox."
+    return 0
+  fi
+
+  local target_name
+  target_name="$(basename "$target_note")"
+  local prompt_file
+  prompt_file="$(mktemp)"
+  trap 'rm -f "$prompt_file"' RETURN
+  cat > "$prompt_file" <<EOF
+你是这个 vault 的知识网络整理者。严格遵守当前目录下的 AGENTS.md。
+
+本次任务类型：daily_carryover
+
+硬性范围：
+- 只处理 inbox/$target_name。
+- 不递归处理 inbox/ 下其它文件或目录。
+- 不处理 chat/、images/、audio/、docs/、files/、co_reading/、schedule/ 等 backlog。
+
+必须完成：
+- 读取 inbox/$target_name。
+- 将这份 daily carry-over 写入或更新合适的 wiki/source/daily 入口。
+- 更新 wiki/log.md，使 5:00 session soft reset 前能从 wiki/log.md 找到前一天整理结果。
+- 将原件归档到 raw/night_cycle/$target_name。
+- 如果 raw/night_cycle/ 不存在，先创建它。
+- 完成后 inbox/$target_name 必须不存在。
+
+不得执行：
+- 全量 apply。
+- cleanup。
+- knowledge-grow。
+- 大范围重构。
+
+输出保持简洁、结构化，并列出实际改动文件。
+EOF
+
+  run_task "$prompt_file"
+}
+
 case "$COMMAND" in
   plan)
     run_task "$TASK_DIR/plan_prompt.md"
@@ -74,6 +119,9 @@ case "$COMMAND" in
     ;;
   cleanup)
     run_task "$TASK_DIR/cleanup_prompt.md"
+    ;;
+  daily_carryover)
+    run_daily_carryover
     ;;
   *)
     usage

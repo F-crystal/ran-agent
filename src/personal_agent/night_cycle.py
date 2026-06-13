@@ -86,7 +86,8 @@ class NightCycle:
             daily_summary=daily_summary,
             rows=rows,
         )
-        knowledge_result = self._knowledge_agent.auto_run(
+        knowledge_result = self._knowledge_agent.run(
+            action="daily_carryover",
             trigger="night_cycle",
             now_local=current_local,
         )
