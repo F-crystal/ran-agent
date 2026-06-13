@@ -1,0 +1,482 @@
+import { createHash } from 'node:crypto';
+
+const VALID_GATE_MODES = new Set(['observe', 'enforce', 'repair']);
+
+export function getActionGateConfig(env = process.env) {
+  const mode = String(env.HERMES_ACTION_GATE_MODE || 'observe').trim().toLowerCase();
+  return {
+    enabled: String(env.HERMES_ACTION_GATE_ENABLED || 'true').trim().toLowerCase() !== 'false',
+    mode: VALID_GATE_MODES.has(mode) ? mode : 'observe',
+    maxRepairAttempts: normalizeNonNegativeInt(env.HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS, 1),
+  };
+}
+
+export function evaluateActionContract({
+  requestId = '',
+  channel = '',
+  conversationId = '',
+  profile = '',
+  message = {},
+  response = {},
+  toolResults = [],
+  config = getActionGateConfig(),
+} = {}) {
+  const intent = detectActionIntent(message, response);
+  const requiredEvidence = requiredEvidenceForIntent(intent);
+  const observedEvidence = collectObservedEvidence({ response, toolResults });
+  const finalClaims = detectFinalClaims(response?.reply_text || response?.replyText || '');
+  const hasRequiredEvidence = requiredEvidence.length === 0 || hasEvidenceForIntent(intent, observedEvidence);
+  const missingEvidence = hasRequiredEvidence ? [] : missingEvidenceForIntent(intent, observedEvidence);
+  const partialSuccessDetected = hasPartialSuccessEvidence(observedEvidence);
+  const gateDecision = hasRequiredEvidence ? 'pass' : (finalClaims.length > 0 ? 'missing_evidence' : 'no_claim');
+
+  return {
+    request_id: sanitizeId(requestId),
+    channel: sanitizeShortString(channel || message.channel || message.platform || ''),
+    conversation_id_hash: hashShort(conversationId || message.conversation_id || message.conversationId || message.sender_id || ''),
+    profile: sanitizeShortString(profile || response.profile || response.model || ''),
+    gate_mode: config?.enabled === false ? 'disabled' : sanitizeShortString(config?.mode || 'observe'),
+    intent,
+    required_evidence: requiredEvidence,
+    observed_evidence: observedEvidence,
+    final_claims: finalClaims,
+    original_claim_types: finalClaims,
+    gate_decision: gateDecision,
+    rewrite_reason: '',
+    evidence_satisfied: hasRequiredEvidence,
+    missing_evidence: missingEvidence,
+    partial_success_detected: partialSuccessDetected,
+    repair_attempted: false,
+    final_action: config?.enabled === false ? 'disabled' : 'observe_only',
+  };
+}
+
+export function evaluateActionGate({
+  contract = {},
+  finalReply = '',
+  mode = contract.gate_mode || 'observe',
+} = {}) {
+  const normalizedMode = VALID_GATE_MODES.has(String(mode || '').trim().toLowerCase())
+    ? String(mode || '').trim().toLowerCase()
+    : 'observe';
+  const text = String(finalReply || '');
+  const intent = contract.intent || 'none';
+  const claims = Array.isArray(contract.final_claims) ? contract.final_claims : [];
+  const evidence = Array.isArray(contract.observed_evidence) ? contract.observed_evidence : [];
+  const evidenceSatisfied = hasEvidenceForIntent(intent, evidence);
+  const missingEvidence = evidenceSatisfied ? [] : missingEvidenceForIntent(intent, evidence);
+  const partialSuccessDetected = hasPartialSuccessEvidence(evidence);
+  const reasons = [];
+  let shouldRewrite = false;
+  let rewrittenText = text;
+
+  if (contract.gate_mode === 'disabled') {
+    return buildGateResult({
+      shouldRewrite: false,
+      rewrittenText: text,
+      gateDecision: 'disabled',
+      finalAction: 'disabled',
+      evidenceSatisfied,
+      missingEvidence,
+      partialSuccessDetected,
+      reasons,
+      contract,
+    });
+  }
+
+  if (normalizedMode === 'observe') {
+    return buildGateResult({
+      shouldRewrite: false,
+      rewrittenText: text,
+      gateDecision: 'observe_only',
+      finalAction: 'observe_only',
+      evidenceSatisfied,
+      missingEvidence,
+      partialSuccessDetected,
+      reasons,
+      contract,
+    });
+  }
+
+  const actionClaimed = hasActionClaimForIntent(intent, claims);
+  const partialClaimMismatch = partialSuccessDetected && hasPartialMismatchClaim(claims);
+  const failedOutboundSuccessClaim = intent === 'external_send' && hasFailedOutboundEvidence(evidence) && claims.includes('external_sent');
+
+  if (partialClaimMismatch) {
+    shouldRewrite = true;
+    reasons.push('partial_success_claim_mismatch');
+    rewrittenText = partialRewriteForIntent(intent);
+  } else if (failedOutboundSuccessClaim) {
+    shouldRewrite = true;
+    reasons.push('outbound_failed_success_claim');
+    rewrittenText = '发送没有成功，我现在不能说已经发出去了。';
+  } else if (!evidenceSatisfied && actionClaimed) {
+    shouldRewrite = true;
+    reasons.push('missing_required_evidence');
+    rewrittenText = missingEvidenceRewriteForIntent(intent);
+  }
+
+  let finalAction = shouldRewrite ? 'safe_rewrite' : 'pass_through';
+  if (normalizedMode === 'repair') {
+    if (shouldRewrite) {
+      reasons.push('repair_deferred');
+      finalAction = 'deferred_repair';
+    } else {
+      finalAction = 'pass_through';
+    }
+  }
+
+  return buildGateResult({
+    shouldRewrite,
+    rewrittenText,
+    gateDecision: shouldRewrite ? 'rewrite' : 'pass',
+    finalAction,
+    evidenceSatisfied,
+    missingEvidence,
+    partialSuccessDetected,
+    reasons,
+    contract,
+  });
+}
+
+export function applyActionGateTelemetry(contract = {}, gate = {}, repair = {}) {
+  return {
+    ...contract,
+    gate_decision: gate.gateDecision || contract.gate_decision || '',
+    rewrite_reason: Array.isArray(gate.reasons) ? gate.reasons.join(',') : '',
+    original_claim_types: Array.isArray(contract.final_claims) ? contract.final_claims : [],
+    final_claims: Array.isArray(contract.final_claims) ? contract.final_claims : [],
+    final_action: gate.finalAction || contract.final_action || '',
+    evidence_satisfied: Boolean(gate.evidenceSatisfied),
+    missing_evidence: Array.isArray(gate.missingEvidence) ? gate.missingEvidence : [],
+    partial_success_detected: Boolean(gate.partialSuccessDetected),
+    repair_attempted: Boolean(repair.repairAttempted),
+    repair_type: sanitizeShortString(repair.repairType || ''),
+    repair_status: sanitizeShortString(repair.repairStatus || (repair.repairAttempted ? 'failed' : 'skipped')),
+    repair_evidence_added: Array.isArray(repair.repairEvidenceAdded) ? repair.repairEvidenceAdded.map((item) => sanitizeShortString(item)) : [],
+    repair_error_code: sanitizeShortString(repair.repairErrorCode || ''),
+    pending_action_id: sanitizeShortString(contract.pending_action_id || ''),
+    pending_action_type: sanitizeShortString(contract.pending_action_type || ''),
+    pending_action_status: sanitizeShortString(contract.pending_action_status || ''),
+    confirmation_detected: Boolean(contract.confirmation_detected),
+    confirmation_result: sanitizeShortString(contract.confirmation_result || ''),
+    execution_status: sanitizeShortString(contract.execution_status || ''),
+    execution_evidence_added: Array.isArray(contract.execution_evidence_added)
+      ? contract.execution_evidence_added.map((item) => sanitizeShortString(item))
+      : [],
+  };
+}
+
+export function logActionContract(result = {}, logger = console) {
+  logger?.log?.(`[hermes-action-contract] ${JSON.stringify(result)}`);
+}
+
+function detectActionIntent(message = {}, response = {}) {
+  const text = `${message.text || ''}\n${response.reply_text || response.replyText || ''}`;
+  const hasMedia = normalizeMediaItems(message.media).length > 0 || normalizeStringArray(message.image_urls).length > 0;
+
+  if (/(发邮件|发送邮件|转发|批量外发|发给|发送给|外发)|send email/i.test(text)) {
+    return 'external_send';
+  }
+  if (/记住|保存.*(?:记忆|偏好)|长期记忆|保存这个为表情包|加入表情包|批注|写入/.test(text)) {
+    return 'memory_write';
+  }
+  if (/表情包|贴纸|\bsticker\b|RAN_MEDIA/i.test(text)) {
+    return 'sticker_send';
+  }
+  if (/(?:生成|做|画).*(?:图片|图|语音|视频)|朗读|发(?:图|语音)|WECHAT_MEDIA/.test(text)) {
+    return 'media_generate';
+  }
+  if (hasMedia || /看(?:下|看)?.*(?:图|图片|视频|文件)|听.*(?:音频|语音)|分析.*(?:视频|图片|截图)|读.*文件|图片里|图里/.test(text)) {
+    return 'media_read';
+  }
+  if (hasUrl(text) || /读(?:一下|这个|链接)|看(?:一下|这个链接)|总结(?:一下|这个)|小红书|公众号|B站|bilibili|xhslink|xiaohongshu/i.test(text)) {
+    return 'social_read';
+  }
+  return 'none';
+}
+
+function requiredEvidenceForIntent(intent) {
+  switch (intent) {
+    case 'social_read':
+      return ['tool_result'];
+    case 'media_read':
+      return ['artifact'];
+    case 'sticker_send':
+      return ['RAN_MEDIA'];
+    case 'media_generate':
+      return ['WECHAT_MEDIA', 'RAN_MEDIA', 'artifact'];
+    case 'memory_write':
+      return ['save_result'];
+    case 'external_send':
+      return ['authorization', 'outbound_result'];
+    default:
+      return [];
+  }
+}
+
+function collectObservedEvidence({ response = {}, toolResults = [] } = {}) {
+  const evidence = [];
+  const replyText = String(response.reply_text || response.replyText || '');
+  evidence.push(...extractMarkerEvidence(replyText));
+  if (response.media && typeof response.media === 'object' && !Array.isArray(response.media)) {
+    evidence.push(summarizeMediaEvidence(response.media));
+  }
+  if (response.save_result && typeof response.save_result === 'object' && !Array.isArray(response.save_result)) {
+    evidence.push(summarizeStateResult('save_result', response.save_result));
+  }
+  if (response.outbound_result && typeof response.outbound_result === 'object' && !Array.isArray(response.outbound_result)) {
+    evidence.push(summarizeStateResult('outbound_result', response.outbound_result));
+  }
+  for (const toolResult of Array.isArray(toolResults) ? toolResults : []) {
+    const summary = summarizeToolResult(toolResult);
+    if (summary) evidence.push(summary);
+  }
+  return evidence.filter(Boolean);
+}
+
+function hasEvidenceForIntent(intent, evidence = []) {
+  if (intent === 'none') return true;
+  if (intent === 'social_read') {
+    return evidence.some((item) => item.type === 'tool_result' && ['success', 'partial_success'].includes(item.status));
+  }
+  if (intent === 'media_read') {
+    return evidence.some((item) => item.type === 'artifact' || (item.type === 'tool_result' && ['success', 'partial_success'].includes(item.status)));
+  }
+  if (intent === 'sticker_send') {
+    return evidence.some((item) => item.type === 'marker' && item.marker === 'RAN_MEDIA' && item.summary?.source === 'sticker_catalog' && item.summary?.kind === 'sticker' && item.summary?.stickerId);
+  }
+  if (intent === 'media_generate') {
+    return evidence.some((item) => item.type === 'marker' && item.status === 'present' && ['WECHAT_MEDIA', 'RAN_MEDIA'].includes(item.marker))
+      || evidence.some((item) => item.type === 'artifact');
+  }
+  if (intent === 'memory_write') {
+    return evidence.some((item) => item.type === 'save_result' || (item.type === 'tool_result' && item.status === 'success'));
+  }
+  if (intent === 'external_send') {
+    return evidence.some((item) => (item.type === 'outbound_result' && item.status === 'success') || (item.type === 'tool_result' && item.status === 'success'));
+  }
+  return false;
+}
+
+function detectFinalClaims(replyText = '') {
+  const text = String(replyText || '');
+  const claims = [];
+  if (/读到了|读到.*(?:全文|正文|原文|内容)|(?:看完|读完|读过|读取了)|(?:全文|原文|正文|内容)\s*(?:是|如下)|帖子说|笔记说|文章说|核心观点是/.test(text)) {
+    claims.push('read_complete');
+  }
+  if (/图片里|图里|视频里|音频里|截图里|画面里|我看到/.test(text)) {
+    claims.push('media_described');
+  }
+  if (/发.*(?:表情包|贴纸)|给你.*(?:表情包|贴纸)|表情包.*(?:来了|给你)/.test(text)) {
+    claims.push('sticker_sent');
+  }
+  if (/(?:生成|画|语音).*(?:好了|完成|发你|给你)|已经.*(?:生成|发出)/.test(text)) {
+    claims.push('media_generated');
+  }
+  if (/已保存|已经保存|保存好了|记住了|已更新|已经更新|已删除|删除好了/.test(text)) {
+    claims.push('state_changed');
+  }
+  if (/已发送|已经发送|发送成功|已经发出|转发好了/.test(text)) {
+    claims.push('external_sent');
+  }
+  if (/完全失败|所有.*失败|所有路.*堵住|完全没读到/.test(text)) {
+    claims.push('full_failure');
+  }
+  return [...new Set(claims)];
+}
+
+function buildGateResult({
+  shouldRewrite,
+  rewrittenText,
+  gateDecision,
+  finalAction,
+  evidenceSatisfied,
+  missingEvidence,
+  partialSuccessDetected,
+  reasons,
+  contract,
+}) {
+  return {
+    shouldRewrite: Boolean(shouldRewrite),
+    rewrittenText: String(rewrittenText || ''),
+    gateDecision,
+    finalAction,
+    reasons: Array.isArray(reasons) ? reasons : [],
+    sanitizedEvidenceSummary: Array.isArray(contract.observed_evidence) ? contract.observed_evidence : [],
+    evidenceSatisfied: Boolean(evidenceSatisfied),
+    missingEvidence: Array.isArray(missingEvidence) ? missingEvidence : [],
+    partialSuccessDetected: Boolean(partialSuccessDetected),
+  };
+}
+
+function hasActionClaimForIntent(intent, claims = []) {
+  if (intent === 'social_read') return claims.includes('read_complete');
+  if (intent === 'media_read') return claims.includes('media_described');
+  if (intent === 'sticker_send') return claims.includes('sticker_sent');
+  if (intent === 'media_generate') return claims.includes('media_generated');
+  if (intent === 'memory_write') return claims.includes('state_changed');
+  if (intent === 'external_send') return claims.includes('external_sent');
+  return false;
+}
+
+function hasPartialMismatchClaim(claims = []) {
+  return claims.includes('read_complete') || claims.includes('media_described') || claims.includes('full_failure');
+}
+
+function hasPartialSuccessEvidence(evidence = []) {
+  return evidence.some((item) => item?.status === 'partial_success');
+}
+
+function hasFailedOutboundEvidence(evidence = []) {
+  return evidence.some((item) => item?.type === 'outbound_result' && item?.status === 'failure');
+}
+
+function missingEvidenceForIntent(intent, evidence = []) {
+  if (hasEvidenceForIntent(intent, evidence)) return [];
+  return requiredEvidenceForIntent(intent);
+}
+
+function missingEvidenceRewriteForIntent(intent) {
+  switch (intent) {
+    case 'social_read':
+      return '我现在还没有成功读取到这个链接的内容，所以不能直接判断里面写了什么。可以再试一次，或者你把截图/正文发我。';
+    case 'media_read':
+      return '我这边没有成功读取到这个媒体内容，不能直接描述里面是什么。';
+    case 'sticker_send':
+      return '哈哈我懂你意思～';
+    case 'media_generate':
+      return '这次没有拿到可发送的生成结果，所以我不能说已经生成好了。';
+    case 'memory_write':
+      return '我现在还没有完成保存，所以不能说已经保存好了。';
+    case 'external_send':
+      return '我现在还没有确认发送成功，所以不能说已经发出去了。';
+    default:
+      return '';
+  }
+}
+
+function partialRewriteForIntent(intent) {
+  if (intent === 'media_read') {
+    return '我读到了一部分媒体内容，但还有些细节没有成功获取。';
+  }
+  return '我读到了一部分内容，但有些媒体或细节没有成功获取。';
+}
+
+function extractMarkerEvidence(text = '') {
+  const evidence = [];
+  const markerPattern = /^(RAN_MEDIA|WECHAT_MEDIA):\s*(\{.*\})\s*$/gim;
+  let match;
+  while ((match = markerPattern.exec(String(text || ''))) !== null) {
+    const marker = match[1];
+    const parsed = parseJsonObject(match[2]);
+    evidence.push({
+      type: 'marker',
+      marker,
+      status: parsed ? 'present' : 'invalid_json',
+      summary: marker === 'RAN_MEDIA' ? summarizeRanMedia(parsed) : summarizeWechatMedia(parsed),
+    });
+  }
+  return evidence;
+}
+
+function summarizeRanMedia(payload) {
+  if (!payload) return {};
+  return {
+    source: sanitizeShortString(payload.source),
+    kind: sanitizeShortString(payload.kind),
+    stickerId: sanitizeShortString(payload.stickerId),
+  };
+}
+
+function summarizeWechatMedia(payload) {
+  if (!payload) return {};
+  return {
+    source: sanitizeShortString(payload.source),
+    kind: sanitizeShortString(payload.kind),
+    type: sanitizeShortString(payload.type),
+    fileName: sanitizeFileName(payload.fileName || payload.filename),
+  };
+}
+
+function summarizeMediaEvidence(media = {}) {
+  return {
+    type: 'artifact',
+    status: 'present',
+    source: sanitizeShortString(media.source),
+    kind: sanitizeShortString(media.kind),
+    media_type: sanitizeShortString(media.type || media.media_type),
+    artifact_id_hash: hashOptional(media.artifact_id || media.artifactId || media.id || media.url || media.filePath),
+    fileName: sanitizeFileName(media.fileName || media.filename),
+  };
+}
+
+function summarizeToolResult(result = {}) {
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  const ok = result.ok === true || result.status === 'success';
+  const partial = result.partial_success === true || result.partialSuccess === true || result.status === 'partial_success';
+  return {
+    type: 'tool_result',
+    tool: sanitizeShortString(result.toolName || result.tool_name || result.name),
+    status: partial ? 'partial_success' : ok ? 'success' : 'failure',
+    artifact_id_hash: hashOptional(result.artifact_id || result.artifactId || result.id),
+    error_code: sanitizeShortString(result.error_code || result.errorCode || result.code),
+  };
+}
+
+function summarizeStateResult(type, result = {}) {
+  return {
+    type,
+    status: result.ok === true || result.status === 'success' ? 'success' : 'failure',
+    result_id_hash: hashOptional(result.action_id || result.actionId || result.id || result.message_id || result.messageId),
+    error_code: sanitizeShortString(result.error_code || result.errorCode || result.code),
+  };
+}
+
+function parseJsonObject(text) {
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeMediaItems(media) {
+  if (!media) return [];
+  return Array.isArray(media) ? media.filter((item) => item && typeof item === 'object') : [media].filter(Boolean);
+}
+
+function normalizeStringArray(items) {
+  return Array.isArray(items) ? items.filter((item) => typeof item === 'string' && item.trim()) : [];
+}
+
+function hasUrl(text) {
+  return /https?:\/\/[^\s"'<>【】「」《》，。！？、；：]+/i.test(String(text || ''));
+}
+
+function sanitizeId(value) {
+  return sanitizeShortString(value || '').replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 80);
+}
+
+function sanitizeShortString(value) {
+  return String(value || '').trim().replace(/[\r\n\t]/g, ' ').slice(0, 120);
+}
+
+function sanitizeFileName(value) {
+  return String(value || '').trim().split(/[\\/]/).pop().replace(/[\r\n\t]/g, ' ').slice(0, 120);
+}
+
+function hashOptional(value) {
+  const text = String(value || '').trim();
+  return text ? hashShort(text) : '';
+}
+
+function hashShort(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest('hex').slice(0, 16);
+}
+
+function normalizeNonNegativeInt(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}

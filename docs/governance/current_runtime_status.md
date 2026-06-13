@@ -158,6 +158,13 @@ state, vault, data, or XHS note debug output.
   `note_text`, `content`, `ocr_text`, `image_text`, or `full_text`.
 - `sendChatToHermesGateway()` creates one request id per request and reuses it
   across context-size, routing, evidence, and gate logs.
+- `replyBackend` runs Hermes Action Contract Gate before replies leave Node.
+  `observe` logs evidence contracts, `enforce` rewrites unsupported success
+  claims, and `repair` enables low-risk repair plus high-risk pending
+  confirmation. Pending state lives under
+  `.ran_agent_state/action_contract/`; details:
+  `docs/governance/hermes-action-contract-gate.md` and
+  `docs/governance/hermes-action-contract-gate-deployment.md`.
 
 ## Media And Frontends
 

@@ -77,6 +77,8 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     ingestImpl: options.ingestImpl,
     tempDir: options.tempDir,
     chatImpl: options.chatImpl,
+    actionRepairImpl: options.actionRepairImpl,
+    pendingActionExecutorImpl: options.pendingActionExecutorImpl,
   });
   const backendMessage = {
     ...message,
