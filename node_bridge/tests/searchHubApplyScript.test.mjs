@@ -143,6 +143,25 @@ test('apply script keeps Node and Hermes marker path env consistent', () => {
   assert.match(script, new RegExp(`upsert_env_file "\\$NODE_BRIDGE_ENV_FILE"[\\s\\S]*"${escaped}"`));
 });
 
+test('apply script writes Hermes context optimization defaults to Node env', () => {
+  const scriptPath = new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+
+  assert.match(script, /HERMES_CONTEXT_INJECTION_MODE_DEFAULT="\$\{HERMES_CONTEXT_INJECTION_MODE:-auto\}"/);
+  assert.match(script, /HERMES_RECENT_TEXT_TURNS_DEFAULT="\$\{HERMES_RECENT_TEXT_TURNS:-4\}"/);
+  assert.match(script, /HERMES_RECENT_TEXT_CHAR_BUDGET_DEFAULT="\$\{HERMES_RECENT_TEXT_CHAR_BUDGET:-2400\}"/);
+  assert.match(script, /HERMES_GLOBAL_RECENT_TURNS_DEFAULT="\$\{HERMES_GLOBAL_RECENT_TURNS:-2\}"/);
+  assert.match(script, /HERMES_GLOBAL_RECENT_CHAR_BUDGET_DEFAULT="\$\{HERMES_GLOBAL_RECENT_CHAR_BUDGET:-800\}"/);
+  assert.match(script, /HERMES_ACTIVE_TOPIC_CHAR_BUDGET_DEFAULT="\$\{HERMES_ACTIVE_TOPIC_CHAR_BUDGET:-400\}"/);
+  assert.match(script, /HERMES_LITE_SOFT_RESET_ENABLED_DEFAULT="\$\{HERMES_LITE_SOFT_RESET_ENABLED:-false\}"/);
+  assert.match(script, /HERMES_LITE_SOFT_RESET_DRY_RUN_DEFAULT="\$\{HERMES_LITE_SOFT_RESET_DRY_RUN:-true\}"/);
+  assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_TURNS=10"/);
+  assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_CHAR_BUDGET=6000"/);
+  assert.doesNotMatch(script, /"HERMES_GLOBAL_RECENT_TURNS=6"/);
+  assert.doesNotMatch(script, /"HERMES_GLOBAL_RECENT_CHAR_BUDGET=2500"/);
+  assert.doesNotMatch(script, /"HERMES_ACTIVE_TOPIC_CHAR_BUDGET=1200"/);
+});
+
 test('apply script wraps XHS generic fallback prepare with timeout and keeps failure non-blocking', () => {
   const scriptPath = new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url).pathname;
   const script = readFileSync(scriptPath, 'utf8');
