@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 import {
   createInboundMessageBuffer,
@@ -8,6 +11,21 @@ import {
   sanitizeReplyText,
   summarizeWeChatRequestShape,
 } from '../src/wechatBridge.mjs';
+
+const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
+
+function tempProjectStateDir(prefix = 'test-wechat-inbound-') {
+  const base = path.join(PROJECT_ROOT, '.ran_agent_state');
+  fs.mkdirSync(base, { recursive: true });
+  return fs.mkdtempSync(path.join(base, prefix));
+}
+
+function pngBytes() {
+  return Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a,
+    0x00, 0x00, 0x00, 0x0d,
+  ]);
+}
 
 test('mapWeChatMessageToBridgeRequest extracts text and conversation id', () => {
   const payload = mapWeChatMessageToBridgeRequest({
@@ -126,6 +144,48 @@ test('mapWeChatMessageToBridgeRequest treats video media as vision input', () =>
     },
   ]);
   assert.equal(payload.route_hint, 'vision_understand');
+});
+
+test('handleWeChatTextMessage copies Weixin SDK temp inbound media into trusted state dir', async () => {
+  const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'weixin-agent-media-inbound-'));
+  const sourcePath = path.join(sourceDir, '1781414034446-9e518805.bin');
+  fs.writeFileSync(sourcePath, pngBytes());
+  const stateDir = tempProjectStateDir();
+  let receivedPayload = null;
+
+  const reply = await handleWeChatTextMessage(
+    {
+      text: '看一下这张图',
+      conversationId: 'wx-user-sdk-media',
+      media: {
+        filePath: sourcePath,
+        mimeType: 'image/png',
+        type: 'image',
+      },
+    },
+    {
+      env: {
+        RAN_AGENT_STATE_DIR: stateDir,
+        WEIXIN_SDK_INBOUND_MEDIA_DIRS: sourceDir,
+      },
+      logger: { info() {}, warn() {}, error() {}, log() {} },
+      backend: {
+        async getReply(payload) {
+          receivedPayload = payload;
+          return { replyText: '已处理。' };
+        },
+      },
+    }
+  );
+
+  assert.equal(reply, '已处理。');
+  assert.equal(receivedPayload.media.length, 1);
+  const copiedPath = receivedPayload.media[0].filePath;
+  assert.notEqual(copiedPath, sourcePath);
+  assert.equal(path.dirname(copiedPath), path.join(stateDir, 'wechat', 'inbound'));
+  assert.deepEqual(fs.readFileSync(copiedPath), pngBytes());
+  assert.equal(receivedPayload.media[0].mimeType, 'image/png');
+  assert.equal(receivedPayload.media[0].type, 'image');
 });
 
 test('summarizeWeChatRequestShape reports nested candidate paths without content', () => {

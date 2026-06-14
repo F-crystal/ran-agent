@@ -113,7 +113,7 @@ test('apply script env upsert includes UV cache and XHS timeout vars', () => {
     'set -euo pipefail',
     'export RAN_AGENT_NO_SUDO=1',
     'source scripts/apply-hermes-runtime-split.sh',
-    `upsert_env_file ${JSON.stringify(envFile)} UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000 XHS_BACKEND_MCP_TIMEOUT_MS=90000 XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false`,
+    `upsert_env_file ${JSON.stringify(envFile)} UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000 XHS_BACKEND_MCP_TIMEOUT_MS=90000 XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json WEIXIN_SDK_INBOUND_MEDIA_DIRS=/tmp/weixin-agent/media/inbound SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false`,
   ].join('\n')], {
     cwd: new URL('../..', import.meta.url).pathname,
     stdio: 'pipe',
@@ -129,7 +129,38 @@ test('apply script env upsert includes UV cache and XHS timeout vars', () => {
   assert.match(text, /SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000/);
   assert.match(text, /XHS_BACKEND_MCP_TIMEOUT_MS=90000/);
   assert.match(text, /XHS_GENERIC_FALLBACK_READY_PATH=\/opt\/ran_agent\/\.ran_agent_state\/social_reader\/generic-fallback-ready\.json/);
+  assert.match(text, /WEIXIN_SDK_INBOUND_MEDIA_DIRS=\/tmp\/weixin-agent\/media\/inbound/);
   assert.match(text, /SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false/);
+});
+
+test('apply script creates runtime trusted media directories', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'trusted-media-runtime-dirs-'));
+  const stateDir = join(dir, '.ran_agent_state');
+  const debugDir = join(dir, 'debug');
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    `export RAN_AGENT_DEPLOY_STATE_DIR=${JSON.stringify(stateDir)}`,
+    `export RAN_AGENT_DEPLOY_DEBUG_DIR=${JSON.stringify(debugDir)}`,
+    'source scripts/apply-hermes-runtime-split.sh',
+    'ensure_runtime_dirs',
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  for (const relativePath of [
+    'uv-cache',
+    'uv-tools',
+    'wechat/inbound',
+    'feishu/inbound',
+    'ran-agent-weixin/media',
+  ]) {
+    assert.equal(existsSync(join(stateDir, relativePath)), true, `${relativePath} should exist`);
+  }
+  assert.equal(existsSync(join(debugDir, 'wechat', 'inbound')), true);
+  assert.equal(existsSync(join(debugDir, 'mimo_inbound')), true);
 });
 
 test('apply script keeps Node and Hermes marker path env consistent', () => {

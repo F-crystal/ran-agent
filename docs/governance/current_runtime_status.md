@@ -87,10 +87,16 @@ Current shared non-secret keys include:
 - `UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools`
 - `UV_LINK_MODE=copy`
 - `UV_PYTHON_DOWNLOADS=never`
+- `WEIXIN_SDK_INBOUND_MEDIA_DIRS=/tmp/weixin-agent/media/inbound`
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
 `scripts/clean-uv-cache-safe.sh` for cleanup and do not delete social-reader
 state, vault, data, or XHS note debug output.
+
+WeChat SDK inbound media is copied into
+`/opt/ran_agent/.ran_agent_state/wechat/inbound` before Hermes/media_reader
+analysis. `scripts/apply-hermes-runtime-split.sh` owns creation of the trusted
+media directories so redeploys do not depend on manual `mkdir`.
 
 ## MCP And Routing
 

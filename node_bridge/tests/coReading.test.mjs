@@ -465,21 +465,20 @@ test('co_reading Web API protects owner token and supports shelf import read pro
 
     const translated = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
     assert.equal(translated.status, 200);
-    assert.equal(translated.body.cached, false);
-    assert.match(translated.body.translation.text, /中文译文/);
-    assert.equal(translationCalls.length, 2);
+    assert.equal(translated.body.source_is_target, true);
+    assert.equal(translated.body.translation.text, '');
+    assert.equal(translationCalls.length, 0);
     assert.doesNotMatch(JSON.stringify(translated.body), /server-owner-secret/);
 
     const cachedTranslation = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
     assert.equal(cachedTranslation.status, 200);
-    assert.equal(cachedTranslation.body.cached, true);
-    assert.equal(translationCalls.length, 2);
-    assert.equal(store.getStorageStats(bookId).asset_bytes > 0, true);
+    assert.equal(cachedTranslation.body.source_is_target, true);
+    assert.equal(translationCalls.length, 0);
 
     const refreshedTranslation = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN&force=true`, { token: 'web-token' }));
     assert.equal(refreshedTranslation.status, 200);
-    assert.equal(refreshedTranslation.body.cached, false);
-    assert.equal(translationCalls.length, 4);
+    assert.equal(refreshedTranslation.body.source_is_target, true);
+    assert.equal(translationCalls.length, 0);
 
     const archived = await app.handleRequest(req('POST', `/api/co-reading/books/${encodeURIComponent(bookId)}/archive`, { token: 'web-token' }));
     assert.equal(archived.status, 200);

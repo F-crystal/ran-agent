@@ -48,6 +48,9 @@ bash scripts/diagnose-lite-full.sh
 - Runtime env upsert for Hermes homes, root Node env, and
   `/opt/ran_agent/node_bridge/.env.local`.
 - UV cache/tool directories under `/opt/ran_agent/.ran_agent_state/`.
+- Trusted runtime media directories, including
+  `/opt/ran_agent/.ran_agent_state/wechat/inbound` and
+  `/opt/ran_agent/debug/wechat/inbound`.
 - XHS generic fallback marker path:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
 - Non-blocking XHS generic fallback preparation before service restart.

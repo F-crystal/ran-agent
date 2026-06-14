@@ -2,9 +2,14 @@
  * Thin bridge layer that maps WeChat text messages into internal bridge requests.
  */
 
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
 import { createReplyBackend } from './replyBackend.mjs';
 import { handleIncomingMessage } from './channelHub.mjs';
 import { createInboundMessageBuffer } from './inboundMessageBuffer.mjs';
+import { resolveStateDir } from './runtimeState.mjs';
 
 export { createInboundMessageBuffer } from './inboundMessageBuffer.mjs';
 
@@ -23,9 +28,13 @@ function getDefaultBuffer(env, logger) {
   return _defaultBuffer;
 }
 
-export function mapWeChatMessageToBridgeRequest(message) {
+const DEFAULT_WEIXIN_SDK_INBOUND_MEDIA_DIR = '/tmp/weixin-agent/media/inbound';
+
+export function mapWeChatMessageToBridgeRequest(message, options = {}) {
+  const env = options.env || process.env;
+  const logger = options.logger || console;
   const imageUrls = extractImageUrlsFromWeChatRequest(message);
-  const media = extractMediaAttachmentsFromWeChatRequest(message);
+  const media = extractMediaAttachmentsFromWeChatRequest(message, { env, logger });
 
   const payload = {
     text: extractTextFromWeChatRequest(message),
@@ -58,7 +67,10 @@ export async function handleWeChatTextMessage(message, options = {}) {
     tempDir: options.tempDir,
     chatImpl: options.chatImpl,
   });
-  const payload = mapWeChatMessageToBridgeRequest(message);
+  const payload = mapWeChatMessageToBridgeRequest(message, {
+    env: options.env,
+    logger,
+  });
 
   const mediaCount = Array.isArray(payload.media) ? payload.media.length : 0;
   if (!payload.text.trim() && payload.image_urls.length === 0 && mediaCount === 0) {
@@ -222,7 +234,9 @@ export function extractImageUrlsFromWeChatRequest(request) {
   return normalized;
 }
 
-export function extractMediaAttachmentsFromWeChatRequest(request) {
+export function extractMediaAttachmentsFromWeChatRequest(request, options = {}) {
+  const env = options.env || process.env;
+  const logger = options.logger || console;
   const candidates = [
     getValueByPath(request, ['media']),
     getValueByPath(request, ['message', 'media']),
@@ -238,7 +252,7 @@ export function extractMediaAttachmentsFromWeChatRequest(request) {
   const normalized = [];
   for (const candidate of candidates) {
     const items = Array.isArray(candidate) ? candidate : (candidate ? [candidate] : []);
-    for (const item of normalizeMediaCandidate(items)) {
+    for (const item of normalizeMediaCandidate(items, { env, logger })) {
       if (!normalized.some((existing) => areSameMediaAttachment(existing, item))) {
         normalized.push(item);
       }
@@ -247,12 +261,12 @@ export function extractMediaAttachmentsFromWeChatRequest(request) {
   return normalized;
 }
 
-function normalizeMediaCandidate(candidate) {
+function normalizeMediaCandidate(candidate, options = {}) {
   if (!candidate) {
     return [];
   }
   if (Array.isArray(candidate)) {
-    return candidate.flatMap((item) => normalizeMediaCandidate(item));
+    return candidate.flatMap((item) => normalizeMediaCandidate(item, options));
   }
   if (typeof candidate !== 'object') {
     return [];
@@ -292,12 +306,89 @@ function normalizeMediaCandidate(candidate) {
   }
 
   return [
-    {
+    materializeWeixinSdkInboundMedia({
       filePath,
       mimeType,
       type,
-    },
+    }, options),
   ];
+}
+
+function materializeWeixinSdkInboundMedia(media, options = {}) {
+  const env = options.env || process.env;
+  const sourcePath = String(media.filePath || '').trim();
+  if (!sourcePath || !path.isAbsolute(sourcePath) || isRemoteMediaPath(sourcePath)) {
+    return media;
+  }
+  const resolvedSource = path.resolve(sourcePath);
+  if (!weixinSdkInboundSourceDirs(env).some((dir) => isPathInsideDirectory(resolvedSource, dir))) {
+    return media;
+  }
+
+  try {
+    const stat = fs.statSync(resolvedSource);
+    if (!stat.isFile()) {
+      return media;
+    }
+    const targetDir = path.join(resolveStateDir(env), 'wechat', 'inbound');
+    fs.mkdirSync(targetDir, { recursive: true });
+    const targetPath = path.join(targetDir, safeInboundMediaFilename(resolvedSource, media.mimeType));
+    fs.copyFileSync(resolvedSource, targetPath);
+    return {
+      ...media,
+      filePath: targetPath,
+    };
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'copy_failed';
+    options.logger?.warn?.(`[wechat-bridge] inbound media materialize skipped reason=${code}`);
+    return media;
+  }
+}
+
+function weixinSdkInboundSourceDirs(env = process.env) {
+  const configured = String(env.WEIXIN_SDK_INBOUND_MEDIA_DIRS || env.WECHAT_SDK_INBOUND_MEDIA_DIRS || '')
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const entries = configured.length > 0 ? configured : [DEFAULT_WEIXIN_SDK_INBOUND_MEDIA_DIR];
+  return entries.map((entry) => path.resolve(entry));
+}
+
+function isPathInsideDirectory(filePath, directory) {
+  const resolvedFile = path.resolve(filePath);
+  const resolvedDirectory = path.resolve(directory);
+  const prefix = resolvedDirectory.endsWith(path.sep) ? resolvedDirectory : `${resolvedDirectory}${path.sep}`;
+  return resolvedFile === resolvedDirectory || resolvedFile.startsWith(prefix);
+}
+
+function isRemoteMediaPath(value) {
+  return /^https?:\/\//i.test(String(value || '').trim());
+}
+
+function safeInboundMediaFilename(sourcePath, mimeType = '') {
+  const ext = safeMediaExtension(sourcePath, mimeType);
+  const basename = path.basename(sourcePath, path.extname(sourcePath))
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[._-]+|[._-]+$/g, '')
+    .slice(0, 64) || 'media';
+  const nonce = crypto.randomBytes(4).toString('hex');
+  return `${Date.now()}-${nonce}-${basename}${ext}`;
+}
+
+function safeMediaExtension(sourcePath, mimeType = '') {
+  const sourceExt = path.extname(sourcePath).toLowerCase().replace(/[^a-z0-9.]/g, '');
+  if (sourceExt && sourceExt.length <= 12) {
+    return sourceExt;
+  }
+  const normalizedMime = String(mimeType || '').trim().toLowerCase();
+  if (normalizedMime.includes('png')) return '.png';
+  if (normalizedMime.includes('jpeg') || normalizedMime.includes('jpg')) return '.jpg';
+  if (normalizedMime.includes('webp')) return '.webp';
+  if (normalizedMime.includes('gif')) return '.gif';
+  if (normalizedMime.includes('mp4')) return '.mp4';
+  if (normalizedMime.includes('wav')) return '.wav';
+  if (normalizedMime.includes('mpeg')) return '.mp3';
+  return '.bin';
 }
 
 function areSameMediaAttachment(left, right) {

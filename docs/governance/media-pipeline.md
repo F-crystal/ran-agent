@@ -54,6 +54,15 @@ paths must stay inside the project root and inside a trusted media directory.
 Project-internal secrets, vault, data, and env files are never promoted as
 media inputs.
 
+The vendored WeChat SDK writes downloaded inbound media to
+`/tmp/weixin-agent/media/inbound` by default. The Node bridge treats that as a
+source-only staging directory and copies those files into
+`.ran_agent_state/wechat/inbound` before passing media to Hermes or
+`media_reader`. Override the source staging roots with
+`WEIXIN_SDK_INBOUND_MEDIA_DIRS` only when the SDK location changes. Deployment
+via `scripts/apply-hermes-runtime-split.sh` creates the default trusted media
+directories idempotently.
+
 Remote assets must be `http(s)` URLs and pass provider-level safety checks.
 The default remote media host allowlist includes common social/CDN hosts used
 by supported resolvers, including XHS image CDN hosts under `xiaohongshu.com`
