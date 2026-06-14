@@ -83,10 +83,34 @@ function parseContextComponentsLog(logs) {
   return JSON.parse(line.slice(line.indexOf('{')));
 }
 
+function parseProviderUsageLog(logs) {
+  const line = logs.find((item) => item.startsWith('[hermes-provider-usage]'));
+  assert.ok(line, 'expected hermes provider usage log');
+  return JSON.parse(line.slice(line.indexOf('{')));
+}
+
 function tempGatewayStateDir(prefix = 'hermes-gateway-soft-reset-') {
   const base = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(base, { recursive: true });
   return fs.mkdtempSync(path.join(base, prefix));
+}
+
+function readProviderVisibleHistoryFiles(stateDir) {
+  const dir = path.join(stateDir, 'hermes', 'provider_visible_history');
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
+    .filter((name) => name.endsWith('.jsonl'))
+    .map((name) => path.join(dir, name));
+}
+
+function readProviderVisibleHistoryRecords(stateDir) {
+  const files = readProviderVisibleHistoryFiles(stateDir);
+  assert.equal(files.length, 1, 'expected one provider-visible history file');
+  return fs.readFileSync(files[0], 'utf8')
+    .split(/\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
 }
 
 test('getHermesGatewayConfig reads Hermes defaults and normalizes base URL', () => {
@@ -293,6 +317,650 @@ test('Hermes API requests include recent conversation history before current use
   assert.equal(secondBody.messages[1].content, '我们聊内莉·布莱');
   assert.equal(secondBody.messages[2].content, '她是1887年卧底疯人院的记者。');
   assert.match(secondBody.messages[3].content, /我觉得她的故事特别令人感动/);
+});
+
+test('cache-friendly history is disabled by default and preserves legacy recent text behavior', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-cache-friendly-default-off';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+  });
+
+  await sendChatToHermesGateway(
+    { text: '第一轮用户原文', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '第一轮回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+  await sendChatToHermesGateway(
+    { text: '第二轮', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '第二轮回复' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.equal(secondBody.messages[1].content, '第一轮用户原文');
+  assert.deepEqual(readProviderVisibleHistoryFiles(stateDir), []);
+});
+
+test('cache-friendly history writes provider-visible prompts and reuses them as append history', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-cache-friendly-append';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    { text: '第一轮用户原文', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '第一轮 provider 回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+  const historyFiles = readProviderVisibleHistoryFiles(stateDir);
+  assert.equal(historyFiles.length, 1);
+  const stored = fs.readFileSync(historyFiles[0], 'utf8');
+  assert.match(stored, /第一轮用户原文/);
+  assert.match(stored, /provider-visible/);
+
+  await sendChatToHermesGateway(
+    { text: '第二轮', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '第二轮 provider 回复' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.deepEqual(secondBody.messages.map((message) => message.role), ['system', 'user', 'assistant', 'user']);
+  assert.match(secondBody.messages[1].content, /第一轮用户原文/);
+  assert.match(secondBody.messages[1].content, /时间/);
+  assert.equal(secondBody.messages[2].content, '第一轮 provider 回复');
+  assert.match(secondBody.messages[3].content, /第二轮/);
+});
+
+test('cache-friendly append records clean provider-visible content as cache exact', async () => {
+  const conversationId = 'wx-cache-exact-clean';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    { text: '干净历史内容', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '干净 provider 回复' } }] }),
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  const [record] = readProviderVisibleHistoryRecords(stateDir);
+  assert.equal(record.cache_exact, true);
+  assert.equal(record.sanitized_changed, false);
+  assert.equal(record.sanitized_reason, 'none');
+  assert.match(record.provider_content_hash, /^[a-f0-9]{64}$/);
+  assert.equal(record.provider_content_hash, record.stored_content_hash);
+});
+
+test('cache-friendly append records sanitized content as cache inexact without storing secrets', async () => {
+  const conversationId = 'wx-cache-exact-sanitized';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    {
+      text: '请看 token=abc123 和 /Users/fengran/private.txt',
+      sender_id: conversationId,
+      conversation_id: conversationId,
+      channel: 'wechat',
+    },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '回复里也有 cookie=secret456 和 /opt/ran_agent/.env.local' } }] }),
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  const serialized = fs.readFileSync(readProviderVisibleHistoryFiles(stateDir)[0], 'utf8');
+  const [record] = readProviderVisibleHistoryRecords(stateDir);
+  assert.equal(record.cache_exact, false);
+  assert.equal(record.sanitized_changed, true);
+  assert.equal(record.sanitized_reason, 'multiple');
+  assert.match(record.provider_content_hash, /^[a-f0-9]{64}$/);
+  assert.match(record.stored_content_hash, /^[a-f0-9]{64}$/);
+  assert.notEqual(record.provider_content_hash, record.stored_content_hash);
+  assert.doesNotMatch(serialized, /abc123|secret456|\/Users\/fengran|\/opt\/ran_agent/);
+});
+
+test('cache-friendly telemetry reports exactness ratio and prefix break for sanitized history', async () => {
+  const conversationId = 'wx-cache-exact-telemetry';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    { text: '第一轮 clean', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '第一轮 clean 回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+  await sendChatToHermesGateway(
+    { text: '第二轮 token=broken /Users/fengran/secret.txt', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '第二轮回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+
+  const logs = [];
+  await sendChatToHermesGateway(
+    { text: '第三轮观察 telemetry', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({
+        choices: [{ message: { content: '第三轮回复' } }],
+        usage: { prompt_cache_hit_tokens: 10, prompt_cache_miss_tokens: 5 },
+      }),
+      logger: { log(msg) { logs.push(msg); }, warn() {} },
+    }
+  );
+
+  const usage = parseProviderUsageLog(logs);
+  assert.equal(usage.cache_strategy, 'balanced');
+  assert.equal(usage.cache_exact_history_turns, 1);
+  assert.equal(usage.cache_inexact_history_turns, 1);
+  assert.equal(usage.cache_prefix_broken_at_turn, 2);
+  assert.equal(usage.sanitized_changed, true);
+  assert.equal(usage.cache_exact_ratio, 0.5);
+});
+
+test('cache-friendly history does not write assistant append records when provider fails', async () => {
+  const conversationId = 'wx-cache-friendly-failure';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await assert.rejects(
+    () => sendChatToHermesGateway(
+      { text: '这轮会失败', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+      { config, fetchImpl: async () => makeJsonResponse({ error: 'down' }, false, 503), logger: { log() {}, warn() {} } }
+    ),
+    /HTTP 503/
+  );
+
+  assert.deepEqual(readProviderVisibleHistoryFiles(stateDir), []);
+});
+
+test('cache-friendly history trims old turns by max turn budget', async () => {
+  let thirdBody = null;
+  const conversationId = 'wx-cache-friendly-turn-budget';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+    HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS: '1',
+  });
+
+  await sendChatToHermesGateway(
+    { text: '第一轮应该被裁剪', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '第一轮回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+  await sendChatToHermesGateway(
+    { text: '第二轮应该保留', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '第二轮回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+  await sendChatToHermesGateway(
+    { text: '第三轮当前用户消息不能被裁剪', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        thirdBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '第三轮回复' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  const serialized = JSON.stringify(thirdBody.messages);
+  assert.doesNotMatch(serialized, /第一轮应该被裁剪/);
+  assert.match(serialized, /第二轮应该保留/);
+  assert.match(thirdBody.messages.at(-1).content, /第三轮当前用户消息不能被裁剪/);
+});
+
+test('cache-friendly history trims old turns by char budget without trimming current user', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-cache-friendly-char-budget';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+    HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET: '20',
+  });
+
+  await sendChatToHermesGateway(
+    { text: `第一轮超长 ${'长内容'.repeat(80)}`, sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: `第一轮超长回复 ${'回复'.repeat(80)}` } }] }), logger: { log() {}, warn() {} } }
+  );
+  await sendChatToHermesGateway(
+    { text: '第二轮当前用户消息不能被裁剪', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '第二轮回复' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  const serialized = JSON.stringify(secondBody.messages);
+  assert.doesNotMatch(serialized, /第一轮超长/);
+  assert.match(secondBody.messages.at(-1).content, /第二轮当前用户消息不能被裁剪/);
+});
+
+test('cache-friendly history falls back to legacy recent history when append log is corrupt', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-cache-friendly-corrupt';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    { text: '第一轮原文用于旧内存回退', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '第一轮回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+  for (const file of readProviderVisibleHistoryFiles(stateDir)) {
+    writeFileSync(file, '{not valid jsonl}\n');
+  }
+
+  await sendChatToHermesGateway(
+    { text: '第二轮', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '第二轮回复' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.equal(secondBody.messages[1].content, '第一轮原文用于旧内存回退');
+});
+
+test('cache telemetry calculates cache hit ratio and tolerates missing usage fields', async () => {
+  const logs = [];
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_TELEMETRY_ENABLED: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    { text: ' telemetry ', sender_id: 'wx-cache-telemetry', conversation_id: 'wx-cache-telemetry', channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({
+        choices: [{ message: { content: 'ok' } }],
+        usage: {
+          input_tokens: 100,
+          output_tokens: 20,
+          total_tokens: 120,
+          prompt_cache_hit_tokens: 75,
+          prompt_cache_miss_tokens: 25,
+        },
+      }),
+      logger: { log(msg) { logs.push(msg); }, warn() {} },
+    }
+  );
+  const usage = parseProviderUsageLog(logs);
+  assert.equal(usage.cache_hit_ratio, 0.75);
+  assert.equal(usage.cache_friendly_history_enabled, false);
+  assert.equal(usage.cache_friendly_history_turns, 0);
+  assert.equal(usage.soft_reset_resume, false);
+  assert.equal(typeof usage.daily_digest_chars, 'number');
+
+  const missingLogs = [];
+  await sendChatToHermesGateway(
+    { text: 'missing usage', sender_id: 'wx-cache-telemetry-missing', conversation_id: 'wx-cache-telemetry-missing', channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+      logger: { log(msg) { missingLogs.push(msg); }, warn() {} },
+    }
+  );
+  const missing = parseProviderUsageLog(missingLogs);
+  assert.equal(missing.prompt_cache_hit_tokens, null);
+  assert.equal(missing.prompt_cache_miss_tokens, null);
+  assert.equal(missing.cache_hit_ratio, null);
+});
+
+test('cache-friendly append log redacts tokens cookies and absolute paths', async () => {
+  const conversationId = 'wx-cache-friendly-redact';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    {
+      text: '请记一下 token=abc123 cookie=session456 文件 /Users/fengran/secret.txt 和 /opt/ran_agent/.env.local',
+      sender_id: conversationId,
+      conversation_id: conversationId,
+      channel: 'wechat',
+    },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'raw token=reply-secret /private/tmp/file' } }] }), logger: { log() {}, warn() {} } }
+  );
+
+  const text = fs.readFileSync(readProviderVisibleHistoryFiles(stateDir)[0], 'utf8');
+  assert.doesNotMatch(text, /abc123|session456|reply-secret|\/Users\/fengran|\/opt\/ran_agent|\/private\/tmp/);
+  assert.match(text, /token=\[redacted\]/);
+  assert.match(text, /\[path\]/);
+});
+
+test('cache-friendly append log keeps raw provider response and final gate summary separately', async () => {
+  const conversationId = 'wx-cache-friendly-gate-summary';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  const response = await sendChatToHermesGateway(
+    {
+      text: '读一下 http://xhslink.com/o/no-cache-evidence',
+      sender_id: conversationId,
+      conversation_id: conversationId,
+      channel: 'wechat',
+    },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '我已经读到了全文，内容很完整。' } }] }),
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.notEqual(response.reply_text, '我已经读到了全文，内容很完整。');
+  const record = JSON.parse(fs.readFileSync(readProviderVisibleHistoryFiles(stateDir)[0], 'utf8').trim());
+  assert.equal(record.messages[1].content, '我已经读到了全文，内容很完整。');
+  assert.match(record.final_delivered_summary, /没有成功解析|没有拿到正文|不能说已经读到了全文/);
+});
+
+test('cache-friendly history does not break current media compact injection', async () => {
+  let capturedBody = null;
+  const stateDir = tempGatewayStateDir();
+  await sendChatToHermesGateway(
+    {
+      text: '看看这张图',
+      sender_id: 'wx-cache-friendly-media',
+      conversation_id: 'wx-cache-friendly-media',
+      channel: 'wechat',
+      media: [{ filePath: '/tmp/test.png', mimeType: 'image/png', type: 'image' }],
+    },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+        RAN_AGENT_STATE_DIR: stateDir,
+        HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+      }),
+      fetchImpl: async (url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.match(capturedBody.messages.at(-1).content, /入站媒体/);
+  assert.match(capturedBody.messages.at(-1).content, /媒体工具指令/);
+});
+
+test('cache-friendly history is not enabled for full profile by default', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-cache-friendly-full-default';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    RAN_AGENT_CAPABILITY_MODE: 'full',
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    { text: '第一轮 full 原文', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: '第一轮 full 回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+  await sendChatToHermesGateway(
+    { text: '第二轮 full', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        if (options?.body) secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: '第二轮 full 回复' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.equal(secondBody.messages[1].content, '第一轮 full 原文');
+  assert.deepEqual(readProviderVisibleHistoryFiles(stateDir), []);
+});
+
+test('context cache strategy defaults to balanced with cache telemetry only', async () => {
+  const logs = [];
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+  });
+  assert.equal(config.contextCacheStrategy, 'balanced');
+  assert.equal(config.cacheFriendlyHistoryEnabled, false);
+  assert.equal(config.cacheTelemetryEnabled, true);
+
+  await sendChatToHermesGateway(
+    { text: '默认策略', sender_id: 'wx-cache-strategy-default', conversation_id: 'wx-cache-strategy-default', channel: 'wechat' },
+    {
+      config,
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }),
+      logger: { log(msg) { logs.push(msg); }, warn() {} },
+    }
+  );
+
+  const usage = parseProviderUsageLog(logs);
+  assert.equal(usage.cache_strategy, 'balanced');
+  assert.equal(usage.cache_friendly_history_enabled, false);
+});
+
+test('cache-first strategy opts into provider-visible append history even when boolean flag is not set', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-cache-strategy-cache-first';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CONTEXT_CACHE_STRATEGY: 'cache_first',
+  });
+
+  await sendChatToHermesGateway(
+    { text: 'cache first 第一轮', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'cache first 回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+
+  await sendChatToHermesGateway(
+    {
+      text: 'cache first 第二轮',
+      sender_id: conversationId,
+      conversation_id: conversationId,
+      channel: 'wechat',
+      recent_local_history: [{ role: 'user', content: 'legacy recent should not win' }],
+    },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.equal(config.contextCacheStrategy, 'cache_first');
+  assert.equal(readProviderVisibleHistoryFiles(stateDir).length, 1);
+  assert.match(JSON.stringify(secondBody.messages), /cache first 第一轮/);
+  assert.doesNotMatch(JSON.stringify(secondBody.messages), /legacy recent should not win/);
+});
+
+test('token-first strategy avoids provider-visible append history and keeps legacy trimming path', async () => {
+  let secondBody = null;
+  const conversationId = 'wx-cache-strategy-token-first';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CONTEXT_CACHE_STRATEGY: 'token_first',
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+    HERMES_RECENT_TEXT_TURNS: '1',
+  });
+
+  await sendChatToHermesGateway(
+    { text: 'token first 第一轮', sender_id: conversationId, conversation_id: conversationId, channel: 'wechat' },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'token first 回复' } }] }), logger: { log() {}, warn() {} } }
+  );
+
+  await sendChatToHermesGateway(
+    {
+      text: 'token first 第二轮',
+      sender_id: conversationId,
+      conversation_id: conversationId,
+      channel: 'wechat',
+      recent_local_history: [
+        { role: 'user', content: 'legacy old should trim' },
+        { role: 'assistant', content: 'legacy old reply should trim' },
+        { role: 'user', content: 'legacy newest should remain' },
+        { role: 'assistant', content: 'legacy newest reply should remain' },
+      ],
+    },
+    {
+      config,
+      fetchImpl: async (url, options) => {
+        secondBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  const serialized = JSON.stringify(secondBody.messages);
+  assert.equal(config.contextCacheStrategy, 'token_first');
+  assert.deepEqual(readProviderVisibleHistoryFiles(stateDir), []);
+  assert.doesNotMatch(serialized, /token first 第一轮/);
+  assert.doesNotMatch(serialized, /legacy old should trim/);
+  assert.match(serialized, /legacy newest should remain/);
+});
+
+test('Hermes user prompt keeps stable routing before digest time media context and current text', async () => {
+  const { capturedBody } = await captureHermesRequest({
+    payload: {
+      text: '今天帮我看看这张图',
+      daily_digest: { open_threads: ['digest item'] },
+      continuity_note: 'current_topic: stable continuity',
+      active_topic: 'active topic block',
+      media: [{ filePath: '/tmp/test.png', mimeType: 'image/png', type: 'image' }],
+    },
+  });
+
+  const userPrompt = capturedBody.messages.at(-1).content;
+  const routeIndex = userPrompt.indexOf('当前对话风格');
+  const mediaInstructionIndex = userPrompt.indexOf('媒体工具指令');
+  const continuityIndex = userPrompt.indexOf('current_topic: stable continuity');
+  const digestIndex = userPrompt.indexOf('daily_digest');
+  const timeIndex = Math.max(userPrompt.indexOf('【时间'), userPrompt.indexOf('当前本地时间'));
+  const inboundMediaIndex = userPrompt.indexOf('入站媒体');
+  const currentTextIndex = userPrompt.lastIndexOf('今天帮我看看这张图');
+
+  assert.ok(routeIndex >= 0);
+  assert.ok(mediaInstructionIndex > routeIndex);
+  assert.ok(continuityIndex > mediaInstructionIndex);
+  assert.ok(digestIndex > continuityIndex);
+  assert.ok(timeIndex > digestIndex);
+  assert.ok(inboundMediaIndex > timeIndex);
+  assert.ok(currentTextIndex > inboundMediaIndex);
+  assert.equal(userPrompt.startsWith('【时间'), false);
+  assert.equal(userPrompt.startsWith('【微信桥接实时上下文'), false);
 });
 
 test('recent history budget trims old text but preserves recent referent', async () => {

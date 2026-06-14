@@ -70,7 +70,9 @@ test('buildMimoRequestBody defaults to mimo-v2.5-pro for power tasks', () => {
   assert.equal(body.model, 'mimo-v2.5-pro');
 });
 
-test('analyze calls Token Plan endpoint with api-key header and stores a result artifact', async () => {
+test('analyze calls Token Plan endpoint with api-key header and stores a result artifact', {
+  skip: 'retired: MiMo Power Token Plan is no longer a current runtime surface',
+}, async () => {
   const projectRoot = tempProjectRoot();
   const calls = [];
   const result = await handleMimoPowerMcpRequest(

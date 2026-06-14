@@ -28,17 +28,66 @@ The optimization goal is to avoid stacking all layers on every lite request.
 - `resume`: short recovery mode for the first lite request after soft reset.
 - `auto`: picks a budget using continuity signals and logs `context_decision_reason`.
 
+`HERMES_CONTEXT_CACHE_STRATEGY=balanced|cache_first|token_first`
+
+- `balanced`: default. Keeps A/B-package behavior conservative: cache telemetry is on, provider-visible append history is off unless explicitly enabled.
+- `cache_first`: opts into provider-visible append history for lite daily continuity. This is the mode to test when DeepSeek prefix cache hit rate is the priority.
+- `token_first`: disables provider-visible append history reads/writes and stays close to the legacy slim/auto trimming path when prompt cost and context size are the priority.
+
 Provider usage telemetry should be observed with component telemetry:
 
 - `input_tokens`
 - `prompt_cache_hit_tokens`
 - `prompt_cache_miss_tokens`
+- `cache_strategy`
+- `cache_hit_ratio`
+- `cache_friendly_history_turns`
+- `cache_exact_history_turns`
+- `cache_inexact_history_turns`
+- `cache_prefix_broken_at_turn`
+- `sanitized_changed`
+- `cache_exact_ratio`
 - `recent_local_history.chars`
 - `global_recent_history.chars`
 - `active_topic.chars`
 - `continuity_note.chars`
 - `daily_digest.chars`
 - user perceived continuity
+
+## Cache-Friendly Append History
+
+DeepSeek prefix cache works best when the provider sees the same byte-identical prompt prefix across requests. The lite profile can use a bounded provider-visible append log so the next request can replay the previous user and assistant messages before the current user text:
+
+```env
+HERMES_CACHE_FRIENDLY_HISTORY=false
+HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS=6
+HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET=12000
+HERMES_CACHE_FRIENDLY_HISTORY_PROFILE=lite
+HERMES_CACHE_TELEMETRY_ENABLED=true
+```
+
+The default remains safe: telemetry only, append history off. `cache_first` is an explicit opt-in and enables append history even when `HERMES_CACHE_FRIENDLY_HISTORY` is unset. `token_first` disables append history even if the boolean flag is true.
+
+Append records are written only after a successful provider response. The stored content is sanitized before disk write and never keeps token-like values, cookies, or absolute paths. Every record stores exactness metadata instead of raw unsanitized text:
+
+- `cache_exact`: true only when stored content exactly matches the provider-visible content.
+- `sanitized_changed`: true when safety sanitization changed stored content.
+- `sanitized_reason`: `token_like`, `absolute_path`, `multiple`, or `none`.
+- `provider_content_hash` and `stored_content_hash`: SHA-256 hashes for comparison without logging raw content.
+
+If sanitization changes a turn, the next request may still use the sanitized text for continuity, but telemetry marks the prefix as inexact. `cache_prefix_broken_at_turn` is 1-based within the selected append history and shows the first turn where exact prefix replay can no longer be assumed. Do not preserve tokens, cookies, session IDs, API keys, or absolute paths just to improve cache hit rate.
+
+The prompt section order is cache-friendly but still correctness-first:
+
+1. Stable routing and response-style constraints.
+2. Stable tool and media instructions.
+3. Reusable active topic and continuity.
+4. One-shot soft-reset daily digest, when pending.
+5. Dynamic time context.
+6. Media context.
+7. Current user text.
+
+After a 05:00 lite soft reset, the digest is injected once near the back of the prompt and marked consumed only after provider success. The second successful turn can then recover the provider-visible prefix through append history when `cache_first` or `HERMES_CACHE_FRIENDLY_HISTORY=true` is active.
 
 ## Lite Soft Reset
 
@@ -126,11 +175,17 @@ The production runtime split script writes the conservative B-package Node defau
 
 ```env
 HERMES_CONTEXT_INJECTION_MODE=auto
+HERMES_CONTEXT_CACHE_STRATEGY=balanced
 HERMES_RECENT_TEXT_TURNS=4
 HERMES_RECENT_TEXT_CHAR_BUDGET=2400
 HERMES_GLOBAL_RECENT_TURNS=2
 HERMES_GLOBAL_RECENT_CHAR_BUDGET=800
 HERMES_ACTIVE_TOPIC_CHAR_BUDGET=400
+HERMES_CACHE_FRIENDLY_HISTORY=false
+HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS=6
+HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET=12000
+HERMES_CACHE_FRIENDLY_HISTORY_PROFILE=lite
+HERMES_CACHE_TELEMETRY_ENABLED=true
 HERMES_LITE_SOFT_RESET_ENABLED=true
 HERMES_LITE_SOFT_RESET_DRY_RUN=false
 ```
@@ -141,6 +196,29 @@ The script intentionally does not inherit existing `HERMES_*` values from the sh
 RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_TURNS=6 \
 RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_CHAR_BUDGET=3200 \
 bash scripts/apply-hermes-runtime-split.sh
+```
+
+To test cache-first behavior during deployment:
+
+```bash
+RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY=cache_first \
+bash scripts/apply-hermes-runtime-split.sh
+```
+
+To roll back cache-friendly append usage while keeping telemetry:
+
+```bash
+RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY=balanced \
+RAN_AGENT_DEPLOY_HERMES_CACHE_FRIENDLY_HISTORY=false \
+RAN_AGENT_DEPLOY_HERMES_CACHE_TELEMETRY_ENABLED=true \
+bash scripts/apply-hermes-runtime-split.sh
+```
+
+Useful production observation command:
+
+```bash
+journalctl -u ran-agent-node.service --since 'today' --no-pager \
+  | grep -E 'hermes-provider-usage|hermes-context-components'
 ```
 
 To disable soft reset through deployment defaults:

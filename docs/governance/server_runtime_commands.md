@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-05-28)
+Status: CURRENT (2026-06-14)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -53,6 +53,36 @@ bash scripts/diagnose-lite-full.sh
 - Non-blocking XHS generic fallback preparation before service restart.
 - Restart and verification.
 
+For the Hermes cache-friendly context package, the same deploy command writes
+the conservative defaults and restarts the Node bridge. No manual env edits are
+required for the default rollout.
+
+After deploy, observe cache and context telemetry:
+
+```bash
+journalctl -u ran-agent-node.service --since '30 minutes ago' --no-pager \
+  | grep -E 'hermes-provider-usage|hermes-context-components'
+```
+
+The default should show `cache_strategy=balanced`,
+`cache_friendly_history_enabled=false`, and DeepSeek cache telemetry fields when
+the provider returns them. To explicitly test provider-visible append history,
+deploy with:
+
+```bash
+RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY=cache_first \
+bash scripts/apply-hermes-runtime-split.sh
+```
+
+Rollback to telemetry-only behavior:
+
+```bash
+RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY=balanced \
+RAN_AGENT_DEPLOY_HERMES_CACHE_FRIENDLY_HISTORY=false \
+RAN_AGENT_DEPLOY_HERMES_CACHE_TELEMETRY_ENABLED=true \
+bash scripts/apply-hermes-runtime-split.sh
+```
+
 ## Runtime Services
 
 | Service | Port | Profile | Home | Purpose |
@@ -82,6 +112,13 @@ Important non-secret keys:
 HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
 HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
 RAN_AGENT_CAPABILITY_MODE=auto
+HERMES_CONTEXT_INJECTION_MODE=auto
+HERMES_CONTEXT_CACHE_STRATEGY=balanced
+HERMES_CACHE_FRIENDLY_HISTORY=false
+HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS=6
+HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET=12000
+HERMES_CACHE_FRIENDLY_HISTORY_PROFILE=lite
+HERMES_CACHE_TELEMETRY_ENABLED=true
 SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true
 SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
 XHS_BACKEND_MCP_TIMEOUT_MS=90000

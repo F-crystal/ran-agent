@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-06-14)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -54,6 +54,8 @@ Python backend
 - Tool visibility diagnosis: `bash scripts/diagnose-hermes-tools.sh`.
 - Media/XHS diagnosis: `bash scripts/diagnose-media-xhs.sh`.
 - Sticker Catalog smoke: `bash scripts/diagnose-sticker-catalog.sh`.
+- Hermes context/cache observation:
+  `journalctl -u ran-agent-node.service --since '30 minutes ago' --no-pager | grep -E 'hermes-provider-usage|hermes-context-components'`.
 
 Do not hand-edit systemd or runtime env as the normal repair path.
 
@@ -72,6 +74,13 @@ Current shared non-secret keys include:
 
 - `HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1`
 - `HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1`
+- `HERMES_CONTEXT_INJECTION_MODE=auto`
+- `HERMES_CONTEXT_CACHE_STRATEGY=balanced`
+- `HERMES_CACHE_FRIENDLY_HISTORY=false`
+- `HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS=6`
+- `HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET=12000`
+- `HERMES_CACHE_FRIENDLY_HISTORY_PROFILE=lite`
+- `HERMES_CACHE_TELEMETRY_ENABLED=true`
 - `SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true`
 - `XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`
 - `UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache`

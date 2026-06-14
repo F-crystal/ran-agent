@@ -141,7 +141,7 @@ ran-agent 使用仓库内 MCP 服务：
 | `time` | `Asia/Shanghai` 时间查询 |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享 |
-| `mimo_power` | MiMo Token Plan 深度多模态分析 |
+| `mimo_power` | 已退役：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles |
 | `personal_memory` | Python backend 个人记忆召回 |
 | `obsidian_memory` | Obsidian vault 语义检索 |
 | `media_generation` | 图片和语音生成，full 默认可用 |
@@ -161,7 +161,7 @@ ran-agent 使用仓库内 MCP 服务：
 | `API_SERVER_KEY`, `HERMES_API_KEY` | Hermes gateway 与 Node bridge API 鉴权 |
 | `PYTHON_BACKEND_BASE_URL` | Python backend，默认 `http://127.0.0.1:8787` |
 | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen 视觉、ASR、媒体生成 |
-| `MIMO_TOKEN_PLAN_API_KEY` | MiMo Power MCP |
+| `MIMO_TOKEN_PLAN_API_KEY` | 已退役 MiMo Power MCP，当前 runtime 不需要配置 |
 | `TAVILY_API_KEY` | Search Hub 的可选 Tavily provider |
 | `XHS_COOKIE`, `SESSDATA` | 小红书、B 站平台认证 |
 | `CO_READING_ROOT_DIR`, `CO_READING_OWNER_TOKEN` | co_reading 本地状态目录和 owner-only 写入鉴权 |

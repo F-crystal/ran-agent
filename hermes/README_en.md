@@ -141,7 +141,7 @@ ran-agent uses repo-owned MCP services:
 | `time` | `Asia/Shanghai` time queries |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares |
-| `mimo_power` | Deep multimodal analysis through MiMo Token Plan |
+| `mimo_power` | Retired: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles |
 | `personal_memory` | Personal memory recall through the Python backend |
 | `obsidian_memory` | Obsidian vault semantic search |
 | `media_generation` | Image and speech generation, available on full by default |
@@ -161,7 +161,7 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `API_SERVER_KEY`, `HERMES_API_KEY` | Hermes gateway and Node bridge API auth |
 | `PYTHON_BACKEND_BASE_URL` | Python backend, default `http://127.0.0.1:8787` |
 | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen vision, ASR, media generation |
-| `MIMO_TOKEN_PLAN_API_KEY` | MiMo Power MCP |
+| `MIMO_TOKEN_PLAN_API_KEY` | Retired MiMo Power MCP; not required by the current runtime |
 | `TAVILY_API_KEY` | Optional Tavily provider for Search Hub |
 | `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
 | `CO_READING_ROOT_DIR`, `CO_READING_OWNER_TOKEN` | co_reading local state directory and owner-only write auth |

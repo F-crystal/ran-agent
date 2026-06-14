@@ -7,7 +7,8 @@
 
 import { execFile as execFileCallback } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import fs, { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import { ensureConversationMediaContext } from './mediaContextStore.mjs';
 import {
@@ -23,6 +24,7 @@ import {
   getPendingLiteResumeDigest,
   markLiteResumeDigestConsumed,
 } from './hermesSessionMaintenance.mjs';
+import { resolveStateDir } from './runtimeState.mjs';
 
 const execFile = promisify(execFileCallback);
 const recentConversationStore = new Map();
@@ -87,7 +89,14 @@ export function getHermesGatewayConfig(env = process.env) {
   const globalRecentCharBudget = Math.max(0, Number.parseInt(String(env.HERMES_GLOBAL_RECENT_CHAR_BUDGET || '2500'), 10) || 2500);
   const activeTopicCharBudget = Math.max(0, Number.parseInt(String(env.HERMES_ACTIVE_TOPIC_CHAR_BUDGET || '1200'), 10) || 1200);
   const contextInjectionMode = String(env.HERMES_CONTEXT_INJECTION_MODE || 'auto').trim().toLowerCase() || 'auto';
+  const contextCacheStrategy = normalizeContextCacheStrategy(env.HERMES_CONTEXT_CACHE_STRATEGY);
   const softResetConfig = getHermesLiteSoftResetConfig(env);
+  const stateDir = resolveStateDir(env);
+  const cacheFriendlyHistoryEnabled = parseEnvBoolean(env.HERMES_CACHE_FRIENDLY_HISTORY, false);
+  const cacheFriendlyHistoryMaxTurns = normalizePositiveInteger(env.HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS, 6);
+  const cacheFriendlyHistoryCharBudget = normalizePositiveInteger(env.HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET, 12000);
+  const cacheFriendlyHistoryProfile = String(env.HERMES_CACHE_FRIENDLY_HISTORY_PROFILE || 'lite').trim().toLowerCase() || 'lite';
+  const cacheTelemetryEnabled = parseEnvBoolean(env.HERMES_CACHE_TELEMETRY_ENABLED, true);
   const contextBudgetOverrides = {
     recentLocalTurns: parseExplicitNonNegativeInteger(env.HERMES_RECENT_TEXT_TURNS),
     recentLocalChars: parseExplicitNonNegativeInteger(env.HERMES_RECENT_TEXT_CHAR_BUDGET),
@@ -126,6 +135,7 @@ export function getHermesGatewayConfig(env = process.env) {
     projectRoot,
     contextPolicyMode,
     contextInjectionMode,
+    contextCacheStrategy,
     contextBudgetOverrides,
     softResetEnabled: softResetConfig.enabled,
     softResetDryRun: softResetConfig.dryRun,
@@ -133,6 +143,12 @@ export function getHermesGatewayConfig(env = process.env) {
     softResetKeepLastN: softResetConfig.keepLastN,
     softResetStateFile: softResetConfig.stateFile,
     softResetDigestDir: softResetConfig.digestDir,
+    cacheFriendlyHistoryEnabled,
+    cacheFriendlyHistoryMaxTurns,
+    cacheFriendlyHistoryCharBudget,
+    cacheFriendlyHistoryProfile,
+    cacheTelemetryEnabled,
+    providerVisibleHistoryDir: path.join(stateDir, 'hermes', 'provider_visible_history'),
     maxMediaArtifacts,
     enableContextSizeLog,
     capabilityMode,
@@ -248,6 +264,25 @@ function parseExplicitNonNegativeInteger(value) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : undefined;
 }
 
+function parseEnvBoolean(value, fallback = false) {
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (!normalized) return Boolean(fallback);
+  if (['1', 'true', 'yes', 'on'].includes(normalized)) return true;
+  if (['0', 'false', 'no', 'off'].includes(normalized)) return false;
+  return Boolean(fallback);
+}
+
+function normalizeContextCacheStrategy(value) {
+  const normalized = String(value || 'balanced').trim().toLowerCase();
+  if (['balanced', 'cache_first', 'token_first'].includes(normalized)) return normalized;
+  return 'balanced';
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 const GENERATION_INTENT_PATTERN = /画|生成|头像|壁纸|海报|语音|朗读|读出来|tts|画图|生图|配图/;
 const DEBUG_INTENT_PATTERN = /调试|debug|执行命令|运行命令|看文件|查看文件|查看日志|看日志|服务端|systemd|systemctl|journalctl|lark-cli|playwright|重启服务|部署|git\s+(push|pull|commit|log|diff|status)|npm\s+(install|run|test|exec)|pip\s+install|curl\s+/;
 const FULL_OVERRIDE_PATTERN = /开\s*full|全能力|调试模式|full\s*mode/;
@@ -359,9 +394,12 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     contextBudget.budgets.recentLocalTurns,
     contextBudget.budgets.recentLocalChars
   );
-  const recentMessages = externalRecentMessages.length > 0
-    ? externalRecentMessages
-    : buildRecentHistoryMessages(sessionContext, budgetedConfig);
+  const cacheFriendlyHistory = loadCacheFriendlyHistory(sessionContext, budgetedConfig, logger);
+  const recentMessages = cacheFriendlyHistory.available === true && cacheFriendlyHistory.corrupt !== true
+    ? cacheFriendlyHistory.messages
+    : externalRecentMessages.length > 0
+      ? externalRecentMessages
+      : buildRecentHistoryMessages(sessionContext, budgetedConfig);
   const globalRecentMessages = limitHistoryMessages(normalizeHistoryMessages(payload.recent_global_history, {
     ...budgetedConfig,
     recentTextMaxUserChars: 900,
@@ -408,10 +446,25 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       recentMessages,
       logger,
       requestId,
+      contextBudget,
+      cacheFriendlyHistory,
+      payload: effectivePayload,
+      softResetResume: Boolean(pendingResumeDigest),
+      dailyDigestChars: buildDailyDigestContextText(effectivePayload).length,
     });
     if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
     recordRecentConversationTurn(sessionContext, payload, response, budgetedConfig);
-    return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
+    const finalResponse = applyEvidenceGateToResponse(payload, response, env, logger, requestId);
+    appendCacheFriendlyHistoryTurn({
+      config: budgetedConfig,
+      sessionContext,
+      payload: effectivePayload,
+      preparedMessage,
+      response,
+      finalResponse,
+      requestId,
+    }, logger);
+    return finalResponse;
   } catch (error) {
     if (config.mode !== 'auto') {
       throw error;
@@ -459,12 +512,17 @@ async function sendChatToHermesApi(message, options = {}) {
   }
 
   const body = await parseHermesJson(response);
-  if (config.enableContextSizeLog) {
+  if (config.enableContextSizeLog || config.cacheTelemetryEnabled) {
     logProviderUsageTelemetry(body, {
       config,
       sessionContext: options.sessionContext,
       logger: options.logger,
       requestId: options.requestId,
+      contextBudget: options.contextBudget,
+      cacheFriendlyHistory: options.cacheFriendlyHistory,
+      payload: options.payload,
+      softResetResume: options.softResetResume,
+      dailyDigestChars: options.dailyDigestChars,
     });
   }
   return buildHermesReply(body, config);
@@ -527,16 +585,16 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
   const dailyDigestText = buildDailyDigestContextText(payload);
   const currentUserMessage = buildHermesUserText(payload);
   const message = [
-    buildBridgeTemporalUserContext(payload),
-    dailyDigestText,
-    continuityNote,
-    buildGlobalActiveTopicNote({ ...payload, active_topic: activeTopic }, globalHistoryMessages, config),
     courtlyAnchor,
     socialRoutingHint,
     buildSocialMediaRetryHint(payload, recentHistoryMessages),
     hasMedia ? buildHermesMediaGenerationInstruction() : '',
-    buildHermesInboundMediaInstruction(payload),
+    buildGlobalActiveTopicNote({ ...payload, active_topic: activeTopic }, globalHistoryMessages, config),
+    continuityNote,
+    dailyDigestText,
+    buildBridgeTemporalUserContext(payload),
     mediaContextText,
+    buildHermesInboundMediaInstruction(payload),
     currentUserMessage,
   ].filter(Boolean).join('\n\n');
 
@@ -654,19 +712,43 @@ function estimateTokens(text = '') {
 
 function logProviderUsageTelemetry(body = {}, options = {}) {
   const usage = body && typeof body.usage === 'object' && !Array.isArray(body.usage) ? body.usage : {};
+  const hitTokens = nullableNumber(usage.prompt_cache_hit_tokens);
+  const missTokens = nullableNumber(usage.prompt_cache_miss_tokens);
+  const cacheDenominator = Number(hitTokens) + Number(missTokens);
+  const cacheFriendlyHistory = options.cacheFriendlyHistory || {};
   options.logger?.log?.(`[hermes-provider-usage] ${JSON.stringify({
     request_id: options.requestId || createRequestId(),
     profile: options.config?.profile || '',
+    channel: String(options.payload?.platform || options.payload?.channel || '').trim().toLowerCase() || '',
     session_id_hash: options.sessionContext?.sessionId ? sha256Hex(options.sessionContext.sessionId).slice(0, 16) : '',
+    context_mode: options.contextBudget?.mode || options.config?.contextInjectionMode || 'auto',
+    cache_strategy: options.config?.contextCacheStrategy || 'balanced',
+    context_decision_reason: options.contextBudget?.decisionReason || '',
     input_tokens: nullableNumber(firstProvided(usage.input_tokens, usage.prompt_tokens)),
     output_tokens: nullableNumber(firstProvided(usage.output_tokens, usage.completion_tokens)),
     total_tokens: nullableNumber(usage.total_tokens),
-    prompt_cache_hit_tokens: nullableNumber(usage.prompt_cache_hit_tokens),
-    prompt_cache_miss_tokens: nullableNumber(usage.prompt_cache_miss_tokens),
+    prompt_cache_hit_tokens: hitTokens,
+    prompt_cache_miss_tokens: missTokens,
+    cache_hit_ratio: Number.isFinite(cacheDenominator) && cacheDenominator > 0
+      ? Number((Number(hitTokens) / cacheDenominator).toFixed(6))
+      : null,
+    cache_friendly_history_enabled: cacheFriendlyHistory.enabled === true,
+    cache_friendly_history_turns: nullableNumber(cacheFriendlyHistory.turns) ?? 0,
+    cache_friendly_history_chars: nullableNumber(cacheFriendlyHistory.chars) ?? 0,
+    cache_friendly_history_truncated: cacheFriendlyHistory.truncated === true,
+    truncated_turns: nullableNumber(cacheFriendlyHistory.truncatedTurns) ?? 0,
+    cache_exact_history_turns: nullableNumber(cacheFriendlyHistory.cacheExactTurns) ?? 0,
+    cache_inexact_history_turns: nullableNumber(cacheFriendlyHistory.cacheInexactTurns) ?? 0,
+    cache_prefix_broken_at_turn: nullableNumber(cacheFriendlyHistory.cachePrefixBrokenAtTurn),
+    sanitized_changed: cacheFriendlyHistory.sanitizedChanged === true,
+    cache_exact_ratio: nullableNumber(cacheFriendlyHistory.cacheExactRatio),
+    soft_reset_resume: options.softResetResume === true,
+    daily_digest_chars: nullableNumber(options.dailyDigestChars) ?? 0,
   })}`);
 }
 
 function nullableNumber(value) {
+  if (value === undefined || value === null) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
@@ -1206,6 +1288,287 @@ function applyLiteSessionNonce(sessionContext = {}, config = {}) {
     sessionId: `${sessionContext.sessionId}-${nonceHash}`,
     sessionKey: `${sessionContext.sessionKey}-${nonceHash}`,
   };
+}
+
+function isCacheFriendlyHistoryActive(config = {}) {
+  const strategy = normalizeContextCacheStrategy(config.contextCacheStrategy);
+  if (strategy === 'token_first') return false;
+  if (config.cacheFriendlyHistoryEnabled !== true && strategy !== 'cache_first') return false;
+  const profile = String(config.profile || '').trim();
+  const profileMode = String(config.cacheFriendlyHistoryProfile || 'lite').trim().toLowerCase();
+  const allowed = new Set(profileMode.split(',').map((item) => item.trim()).filter(Boolean));
+  if (allowed.has('*') || allowed.has('all')) return true;
+  const normalizedProfile = profile === config.liteProfile ? 'lite' : profile === config.fullProfile ? 'full' : profile.toLowerCase();
+  return allowed.has(normalizedProfile) || allowed.has(profile.toLowerCase());
+}
+
+function emptyCacheFriendlyHistoryStats(config = {}) {
+  return {
+    enabled: isCacheFriendlyHistoryActive(config),
+    messages: [],
+    turns: 0,
+    chars: 0,
+    truncated: false,
+    truncatedTurns: 0,
+    cacheExactTurns: 0,
+    cacheInexactTurns: 0,
+    cachePrefixBrokenAtTurn: null,
+    sanitizedChanged: false,
+    cacheExactRatio: null,
+    corrupt: false,
+    available: false,
+  };
+}
+
+function loadCacheFriendlyHistory(sessionContext = {}, config = {}, logger = console) {
+  const stats = emptyCacheFriendlyHistoryStats(config);
+  if (!stats.enabled || !sessionContext.enabled || !sessionContext.stableKey) {
+    return stats;
+  }
+  const filePath = providerVisibleHistoryPath(sessionContext, config);
+  if (!filePath || !fs.existsSync(filePath)) {
+    return stats;
+  }
+  const records = readProviderVisibleHistoryRecords(filePath);
+  if (records.corrupt) {
+    logger?.warn?.(`provider-visible history corrupt; falling back to legacy recent history path=${safePathForLog(filePath)}`);
+    return { ...stats, corrupt: true };
+  }
+  const bounded = boundProviderVisibleHistoryRecords(records.items, config);
+  const exactness = summarizeProviderVisibleHistoryExactness(bounded.records);
+  return {
+    ...stats,
+    available: true,
+    messages: bounded.records.flatMap((record) => normalizeProviderVisibleMessages(record.messages)),
+    turns: bounded.records.length,
+    chars: bounded.chars,
+    truncated: bounded.truncated,
+    truncatedTurns: bounded.truncatedTurns,
+    ...exactness,
+  };
+}
+
+function appendCacheFriendlyHistoryTurn({
+  config = {},
+  sessionContext = {},
+  payload = {},
+  preparedMessage = '',
+  response = {},
+  finalResponse = {},
+  requestId = '',
+} = {}, logger = console) {
+  if (!isCacheFriendlyHistoryActive(config) || !sessionContext.enabled || !sessionContext.stableKey) {
+    return false;
+  }
+  const filePath = providerVisibleHistoryPath(sessionContext, config);
+  if (!filePath) return false;
+  try {
+    const existing = readProviderVisibleHistoryRecords(filePath);
+    const records = existing.corrupt ? [] : existing.items;
+    const rawAssistant = String(response.reply_text || response.replyText || '').trim();
+    const finalDelivered = String(finalResponse.reply_text || finalResponse.replyText || '').trim();
+    const userSanitized = sanitizeProviderVisibleHistoryTextWithMeta(preparedMessage);
+    const assistantSanitized = sanitizeProviderVisibleHistoryTextWithMeta(rawAssistant);
+    const userContent = userSanitized.text;
+    const assistantContent = assistantSanitized.text;
+    if (!userContent && !assistantContent) return false;
+    const providerContentHash = hashProviderVisibleTurnContent(preparedMessage, rawAssistant);
+    const storedContentHash = hashProviderVisibleTurnContent(userContent, assistantContent);
+    const sanitizedReasons = combineSanitizedReasons(userSanitized.reasons, assistantSanitized.reasons);
+    const conversationId = firstNonEmptyString(
+      payload.conversation_id,
+      payload.conversationId,
+      payload.room_id,
+      payload.roomId,
+      payload.sender_id,
+      payload.senderId,
+      payload.user,
+    );
+    const record = {
+      schema: 'provider-visible-history.v1',
+      request_id: String(requestId || ''),
+      profile: String(config.profile || ''),
+      channel: String(payload.platform || payload.channel || '').trim().toLowerCase(),
+      conversation_id_hash: conversationId ? sha256Hex(conversationId).slice(0, 16) : '',
+      session_id_hash: sessionContext.sessionId ? sha256Hex(sessionContext.sessionId).slice(0, 16) : '',
+      created_at: new Date().toISOString(),
+      cache_exact: providerContentHash === storedContentHash,
+      sanitized_changed: providerContentHash !== storedContentHash,
+      sanitized_reason: sanitizedReasons,
+      provider_content_hash: providerContentHash,
+      stored_content_hash: storedContentHash,
+      messages: [
+        buildProviderVisibleMessageRecord('user', userContent),
+        buildProviderVisibleMessageRecord('assistant', assistantContent),
+      ].filter((message) => message.content),
+    };
+    if (finalDelivered && finalDelivered !== rawAssistant) {
+      record.final_delivered_summary = clipText(sanitizeProviderVisibleHistoryText(finalDelivered), 500);
+    }
+    const retentionTurns = Math.max(20, normalizePositiveInteger(config.cacheFriendlyHistoryMaxTurns, 6) * 4);
+    const nextRecords = [...records, record].slice(-retentionTurns);
+    fs.mkdirSync(path.dirname(filePath), { recursive: true });
+    fs.writeFileSync(filePath, `${nextRecords.map((item) => JSON.stringify(item)).join('\n')}\n`, 'utf8');
+    return true;
+  } catch (error) {
+    logger?.warn?.(`failed to write provider-visible history: ${formatErrorMessage(error)}`);
+    return false;
+  }
+}
+
+function providerVisibleHistoryPath(sessionContext = {}, config = {}) {
+  const dir = String(config.providerVisibleHistoryDir || '').trim();
+  if (!dir) return '';
+  const key = [
+    String(config.profile || ''),
+    String(sessionContext.stableKey || ''),
+    String(sessionContext.sessionId || ''),
+  ].join('|');
+  return path.join(dir, `${sha256Hex(key).slice(0, 32)}.jsonl`);
+}
+
+function readProviderVisibleHistoryRecords(filePath) {
+  if (!filePath || !fs.existsSync(filePath)) {
+    return { items: [], corrupt: false };
+  }
+  const text = fs.readFileSync(filePath, 'utf8');
+  const lines = text.split(/\n/).map((line) => line.trim()).filter(Boolean);
+  const items = [];
+  for (const line of lines) {
+    try {
+      const record = JSON.parse(line);
+      if (!record || typeof record !== 'object' || !Array.isArray(record.messages)) {
+        return { items: [], corrupt: true };
+      }
+      items.push(record);
+    } catch {
+      return { items: [], corrupt: true };
+    }
+  }
+  return { items, corrupt: false };
+}
+
+function boundProviderVisibleHistoryRecords(records = [], config = {}) {
+  const maxTurns = normalizePositiveInteger(config.cacheFriendlyHistoryMaxTurns, 6);
+  const charBudget = normalizePositiveInteger(config.cacheFriendlyHistoryCharBudget, 12000);
+  const selected = [];
+  let chars = 0;
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    if (selected.length >= maxTurns) break;
+    const record = records[index];
+    const recordChars = providerVisibleRecordChars(record);
+    if (chars + recordChars > charBudget && selected.length > 0) {
+      continue;
+    }
+    if (chars + recordChars > charBudget) {
+      break;
+    }
+    selected.unshift(record);
+    chars += recordChars;
+  }
+  const truncatedTurns = Math.max(0, records.length - selected.length);
+  return {
+    records: selected,
+    chars,
+    truncated: truncatedTurns > 0,
+    truncatedTurns,
+  };
+}
+
+function summarizeProviderVisibleHistoryExactness(records = []) {
+  let cacheExactTurns = 0;
+  let cacheInexactTurns = 0;
+  let cachePrefixBrokenAtTurn = null;
+  let sanitizedChanged = false;
+  records.forEach((record, index) => {
+    if (record?.cache_exact === true) {
+      cacheExactTurns += 1;
+    } else {
+      cacheInexactTurns += 1;
+      if (cachePrefixBrokenAtTurn === null) {
+        cachePrefixBrokenAtTurn = index + 1;
+      }
+    }
+    if (record?.sanitized_changed === true) {
+      sanitizedChanged = true;
+    }
+  });
+  const total = cacheExactTurns + cacheInexactTurns;
+  return {
+    cacheExactTurns,
+    cacheInexactTurns,
+    cachePrefixBrokenAtTurn,
+    sanitizedChanged,
+    cacheExactRatio: total > 0 ? Number((cacheExactTurns / total).toFixed(6)) : null,
+  };
+}
+
+function normalizeProviderVisibleMessages(messages = []) {
+  return Array.isArray(messages)
+    ? messages.map((message) => {
+        const role = message?.role === 'assistant' ? 'assistant' : message?.role === 'user' ? 'user' : '';
+        const content = String(message?.content || '').trim();
+        return role && content ? { role, content } : null;
+      }).filter(Boolean)
+    : [];
+}
+
+function providerVisibleRecordChars(record = {}) {
+  return normalizeProviderVisibleMessages(record.messages)
+    .reduce((sum, message) => sum + String(message.content || '').length, 0);
+}
+
+function buildProviderVisibleMessageRecord(role, content) {
+  const text = String(content || '');
+  return {
+    role,
+    content: text,
+    chars: text.length,
+    bytes: utf8ByteLength(text),
+    estimated_tokens: estimateTokens(text),
+  };
+}
+
+function sanitizeProviderVisibleHistoryText(value) {
+  return sanitizeProviderVisibleHistoryTextWithMeta(value).text;
+}
+
+function sanitizeProviderVisibleHistoryTextWithMeta(value) {
+  let text = String(value || '');
+  const reasons = new Set();
+  const replaceWithReason = (pattern, replacement, reason) => {
+    text = text.replace(pattern, (...args) => {
+      reasons.add(reason);
+      return typeof replacement === 'function' ? replacement(...args) : replacement;
+    });
+  };
+  replaceWithReason(/data:[a-z0-9/+.-]+;base64,[a-z0-9+/=\s]+/ig, '[media data redacted]', 'token_like');
+  replaceWithReason(/\b(token|cookie|authorization|xsec_token|api_key|apikey|key|signature|session)=([^\s&]+)/ig, (match, key) => `${key}=[redacted]`, 'token_like');
+  replaceWithReason(/\/(?:Users|opt|private|var|tmp)\/[^\s"'，。；,）)]+/g, '[path]', 'absolute_path');
+  const sanitized = text.trim();
+  return {
+    text: sanitized,
+    changed: sanitized !== String(value || ''),
+    reasons: [...reasons],
+  };
+}
+
+function combineSanitizedReasons(...reasonLists) {
+  const reasons = new Set(reasonLists.flat().filter(Boolean));
+  if (reasons.size === 0) return 'none';
+  if (reasons.size > 1) return 'multiple';
+  return [...reasons][0];
+}
+
+function hashProviderVisibleTurnContent(userContent = '', assistantContent = '') {
+  return sha256Hex(JSON.stringify([
+    { role: 'user', content: String(userContent || '') },
+    { role: 'assistant', content: String(assistantContent || '') },
+  ]));
+}
+
+function safePathForLog(filePath) {
+  return String(filePath || '').replace(/\/(?:Users|opt|private|var|tmp)\/[^\s]+/g, '[path]');
 }
 
 function buildRecentHistoryMessages(sessionContext = {}, config = {}) {
