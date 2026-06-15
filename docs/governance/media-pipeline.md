@@ -1,6 +1,6 @@
 # Media Pipeline
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-06-14)
 
 This document owns the current media pipeline contract. Detailed WeChat buffer
 semantics live in `docs/governance/wechat-bridge-media-buffer.md`; retired
@@ -43,7 +43,7 @@ frontend media
 Default trusted local directories:
 
 - `debug/wechat/inbound`
-- `debug/mimo_inbound`
+- `debug/mimo_inbound` (legacy directory name; not a current MiMo runtime)
 - `.ran_agent_state/wechat/inbound`
 - `.ran_agent_state/feishu/inbound`
 - `.ran_agent_state/ran-agent-weixin/media`

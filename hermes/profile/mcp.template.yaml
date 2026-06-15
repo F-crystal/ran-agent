@@ -14,6 +14,9 @@ mcp_servers:
   media_generation:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_generation_mcp.sh']
+  sticker_catalog:
+    command: bash
+    args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_sticker_catalog_mcp.sh']
   media_reader:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_reader_mcp.sh']
@@ -29,6 +32,9 @@ mcp_servers:
   co_reading:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_co_reading_mcp.sh']
+  search_hub:
+    command: bash
+    args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_search_hub_mcp.sh']
 
 # Optional remote MCP. Add after install when TAVILY_API_KEY exists in the
 # machine-local env:

@@ -921,6 +921,23 @@ function normalizeComparableUrl(u) {
   return s.toLowerCase();
 }
 
+function redactUrlForEvidenceLog(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  try {
+    const parsed = new URL(text);
+    parsed.username = '';
+    parsed.password = '';
+    parsed.hash = '';
+    const base = `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+    return parsed.search ? `${base}?[redacted]` : base;
+  } catch {
+    return text
+      .replace(/\b(token|cookie|authorization|xsec_token|api_key|apikey|key|signature|session)=([^\s&]+)/ig, '$1=[redacted]')
+      .slice(0, 240);
+  }
+}
+
 // Extract short code from xhslink URLs: /o/<code> or /a/<code>, lowercase for comparison
 function extractShortCode(u) {
   const m = u.match(/xhslink\.com\/[oa]\/([A-Za-z0-9_-]+)/i);
@@ -1017,7 +1034,7 @@ export function buildSocialEvidenceReport(payload, toolTraceOrResults = null, en
 
   // 4. Log evidence stages
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} has_social_link=true`);
-  logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=link_resolution ok=${report.link_resolution.ok} source=${report.link_resolution.source || 'null'} canonical_url=${report.link_resolution.canonical_url || 'null'}`);
+  logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=link_resolution ok=${report.link_resolution.ok} source=${report.link_resolution.source || 'null'} canonical_url=${redactUrlForEvidenceLog(report.link_resolution.canonical_url) || 'null'}`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=metadata_read ok=${report.metadata_read.ok} fields=${JSON.stringify(report.metadata_read.fields)}`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=content_read ok=${report.content_read.ok} source=${report.content_read.source || 'null'} fields=${JSON.stringify(report.content_read.fields)}`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} allow_claim_read=${report.allow_claim_read} evidence_source=${report.evidence_source}`);

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-06-14)
 
 ## Scope
 
@@ -74,3 +74,8 @@ Only heavy background tasks are sub-agent candidates: reflection, knowledge main
 - Cleanup scope: `docs/governance/cleanup.md`
 - Doc status: `docs/governance/doc_status.md`
 - Runtime status: `docs/governance/current_runtime_status.md`
+- Server runbook: `docs/governance/server_runtime_commands.md`
+- Sticker catalog: `docs/governance/sticker-catalog.md`
+- Co Reading: `docs/governance/co-reading.md`
+- Hermes action gate: `docs/governance/hermes-action-contract-gate.md`
+- Hermes context optimization: `docs/governance/hermes-context-optimization.md`

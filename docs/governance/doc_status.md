@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-06-14)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -26,6 +26,9 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/sub_agents.md` | Sub-agent candidate policy |
 | `docs/governance/cleanup.md` | Retired/deleted component record |
 | `docs/governance/media-pipeline.md` | Media pipeline and context policy |
+| `docs/governance/sticker-catalog.md` | Cross-channel sticker catalog and safe `RAN_MEDIA` contract |
+| `docs/governance/hermes-action-contract-gate.md` | Hermes action contract validation, repair, and pending-action rules |
+| `docs/governance/hermes-context-optimization.md` | Hermes context optimization, cache-friendly history, and soft reset |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |
 | `docs/governance/mimo-power-mcp.md` | Retired MiMo Power MCP record |
 | `docs/governance/multi_frontend_identity_strategy.md` | Multi-frontend identity and timeline |
@@ -73,3 +76,11 @@ deployment notes belong under ignored `local_archive/`, not under
 - `co_reading` Web reader is Tailscale-only, supports bilingual reading,
   browser imports, scoped Hermes margin replies, and explicit shared annotation
   deposit to `vault/inbox/co_reading/`.
+- `sticker_catalog` is the current cross-channel sticker surface. Hermes may
+  emit only safe `RAN_MEDIA` markers with `stickerId`; assets stay in ignored
+  runtime state.
+- Hermes Action Contract Gate is the current guard for tool-backed actions:
+  high-risk writes require explicit confirmation or pending-action state.
+- Hermes context optimization is closed as a conservative package: local recent
+  history, bounded global active topic, optional cache-friendly append history,
+  and opt-in lite soft reset all write only under ignored runtime state.

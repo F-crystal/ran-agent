@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: D-package pending action / confirmation current as of 2026-06-14.
+Status: CURRENT (2026-06-14)
 
 ## Why Not Prompt Only
 

@@ -218,15 +218,14 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(social_reader["args"], ["scripts/start_social_reader_mcp.sh"])
         self.assertNotIn("~", json.dumps(social_reader, ensure_ascii=False))
 
-    def test_repo_mcp_config_registers_mimo_power_wrapper_without_home_shortcuts(self) -> None:
+    def test_repo_mcp_config_does_not_register_retired_mimo_power(self) -> None:
         mcp_path = Path(__file__).resolve().parents[1] / ".mcp.json"
         mcp_data = json.loads(mcp_path.read_text(encoding="utf-8"))
 
-        mimo_power = mcp_data["mcpServers"]["mimo_power"]
-
-        self.assertEqual(mimo_power["command"], "bash")
-        self.assertEqual(mimo_power["args"], ["scripts/start_mimo_power_mcp.sh"])
-        self.assertNotIn("~", json.dumps(mimo_power, ensure_ascii=False))
+        self.assertNotIn("mimo_power", mcp_data["mcpServers"])
+        historical_wrapper = Path(__file__).resolve().parents[1] / "scripts" / "start_mimo_power_mcp.sh"
+        self.assertTrue(historical_wrapper.exists())
+        self.assertNotIn("~", historical_wrapper.read_text(encoding="utf-8"))
 
     def test_scheduler_uses_configured_job_intervals(self) -> None:
         class FakeScheduler:

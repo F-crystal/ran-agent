@@ -10,6 +10,7 @@ import {
   mergeRequests,
   parseCheckinCommand,
   buildAgent,
+  redactProxyUrlForLog,
   shouldRetryWeixinStartAttempt,
 } from '../src/index.mjs';
 import {
@@ -36,6 +37,18 @@ test('isTransientWeixinStartError matches common TLS/network fetch failure signa
   assert.equal(isTransientWeixinStartError(new Error('ECONNRESET by peer')), true);
   assert.equal(isTransientWeixinStartError(new Error('SSL handshake failed')), true);
   assert.equal(isTransientWeixinStartError(new Error('invalid token')), false);
+});
+
+test('redactProxyUrlForLog removes credentials and query parameters', () => {
+  assert.equal(
+    redactProxyUrlForLog('http://user:pass@example.com:8080/proxy?token=secret'),
+    'http://example.com:8080/proxy?redacted'
+  );
+  assert.equal(
+    redactProxyUrlForLog('socks5://user:pass@127.0.0.1:1080'),
+    'socks5://127.0.0.1:1080'
+  );
+  assert.equal(redactProxyUrlForLog('not a url with secret'), '[configured]');
 });
 
 test('parseCheckinCommand validates command shape', () => {

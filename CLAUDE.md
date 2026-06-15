@@ -1,12 +1,13 @@
 # CLAUDE.md
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-06-14)
 
 ## Execution Scope
 
 - This repo is local-first and project-scoped.
 - Keep runtime simple: backend services, state layer, WeChat bridge, MCP/knowledge interfaces.
 - Do not expand custom front conversation runtime.
+- OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths.
 
 ## Live Lookup Rule
 
@@ -42,8 +43,8 @@ Only heavy background tasks are sub-agent candidates: reflection, knowledge main
 
 ## Media Pipeline
 
-- MCP servers (`media_reader`, `social_reader`, `media_generation`, `mimo_power`) are the stable facade; do not expose internal tools to Hermes directly.
-- MiMo Power MCP configuration and model routing details in `docs/governance/mimo-power-mcp.md`.
+- MCP servers (`media_reader`, `social_reader`, `sticker_catalog`, `co_reading`, `search_hub`, `media_generation`) are the stable facade; do not expose internal tools to Hermes directly.
+- MiMo Power MCP details in `docs/governance/mimo-power-mcp.md` are RETIRED/historical and must not be treated as current runtime authority.
 - Full pipeline: raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply. Details in `docs/governance/media-pipeline.md`.
 - External media files (e.g. WeChat SDK /tmp files) are auto-copied to trusted dirs before processing.
 - Platform resolver credentials must never appear in tool output, logs, docs, or git.

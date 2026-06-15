@@ -16,6 +16,13 @@ mcp_servers:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_generation_mcp.sh']
     timeout: 300
+  sticker_catalog:
+    command: bash
+    args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_sticker_catalog_mcp.sh']
+    env:
+      STICKER_CATALOG_PROFILE_MODE: full
+      STICKER_CATALOG_ALLOW_RUNTIME_SAVE: "true"
+    timeout: 120
   media_reader:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_reader_mcp.sh']
@@ -33,6 +40,15 @@ mcp_servers:
   co_reading:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_co_reading_mcp.sh']
+  search_hub:
+    command: bash
+    args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_search_hub_mcp.sh']
+    env:
+      SEARCH_HUB_PROFILE_MODE: full
+      SEARCH_HUB_ENABLE_OPENCLI_BROWSER: "false"
+      SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK: "true"
+      SEARCH_HUB_PUBLIC_ONLY_DEFAULT: "false"
+    timeout: 120
   playwright:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_playwright_mcp.sh']

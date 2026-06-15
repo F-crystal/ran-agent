@@ -1856,6 +1856,34 @@ test('audit logs include evidence stage and allow_claim_read', async () => {
   }
 });
 
+test('buildSocialEvidenceReport redacts token-bearing canonical URL in evidence logs', () => {
+  const logs = [];
+  const cachePath = '/tmp/test-xhs-redacted-log-' + Date.now() + '.json';
+  writeFileSync(cachePath, JSON.stringify({
+    'key1': {
+      url: 'https://xhslink.com/o/audit123',
+      canonical_url: 'https://www.xiaohongshu.com/explore/audit?xsec_token=secret-token&xsec_source=pc_share',
+    },
+  }));
+  try {
+    buildSocialEvidenceReport(
+      { text: '看看 https://xhslink.com/o/audit123' },
+      null,
+      { XHS_TOKEN_CACHE_PATH: cachePath },
+      { log(message) { logs.push(message); } },
+      'req-redacted-1'
+    );
+    const evidenceLogs = logs.filter((line) => line.includes('[xhs-evidence]'));
+    assert.ok(
+      evidenceLogs.some((line) => line.includes('canonical_url=https://www.xiaohongshu.com/explore/audit?[redacted]')),
+      'should redact canonical URL query'
+    );
+    assert.ok(evidenceLogs.every((line) => !line.includes('secret-token')), 'should not log xsec_token values');
+  } finally {
+    unlinkSync(cachePath);
+  }
+});
+
 test('buildSocialEvidenceReport and applySocialLinkEvidenceGate use provided request_id', () => {
   const logs = [];
   const logger = { log(msg) { logs.push(msg); } };

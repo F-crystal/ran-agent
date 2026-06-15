@@ -1,6 +1,6 @@
 # Hermes Context Optimization
 
-Status: current as of 2026-06-14.
+Status: CURRENT (2026-06-14)
 
 ## Why Not Hard Reset
 

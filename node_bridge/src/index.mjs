@@ -429,6 +429,23 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+export function redactProxyUrlForLog(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  try {
+    const parsed = new URL(raw);
+    parsed.username = '';
+    parsed.password = '';
+    parsed.hash = '';
+    if (parsed.search) {
+      parsed.search = '?redacted';
+    }
+    return parsed.toString();
+  } catch {
+    return '[configured]';
+  }
+}
+
 async function configureProxyIfPresent() {
   const proxyUrl = String(
     process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY || ''
@@ -439,7 +456,7 @@ async function configureProxyIfPresent() {
   try {
     const { ProxyAgent, setGlobalDispatcher } = await import('undici');
     setGlobalDispatcher(new ProxyAgent(proxyUrl));
-    console.log(`[node-bridge] using outbound proxy ${proxyUrl}`);
+    console.log(`[node-bridge] using outbound proxy ${redactProxyUrlForLog(proxyUrl)}`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.warn(`[node-bridge] failed to enable proxy dispatcher: ${message}`);

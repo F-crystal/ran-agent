@@ -86,9 +86,10 @@ test('latest pending action is scoped to channel and conversation hash', () => {
     summary: '记忆',
   }, { env, now: new Date('2026-06-14T04:01:00.000Z') });
 
-  assert.equal(findLatestPendingAction({ channel: 'wechat', conversationId: 'conv-a' }, { env })?.requestId, 'req-a');
-  assert.equal(findLatestPendingAction({ channel: 'feishu', conversationId: 'conv-b' }, { env })?.actionId, b.actionId);
-  assert.equal(findLatestPendingAction({ channel: 'wechat', conversationId: 'conv-b' }, { env }), null);
+  const now = new Date('2026-06-14T04:02:00.000Z');
+  assert.equal(findLatestPendingAction({ channel: 'wechat', conversationId: 'conv-a' }, { env, now })?.requestId, 'req-a');
+  assert.equal(findLatestPendingAction({ channel: 'feishu', conversationId: 'conv-b' }, { env, now })?.actionId, b.actionId);
+  assert.equal(findLatestPendingAction({ channel: 'wechat', conversationId: 'conv-b' }, { env, now }), null);
 });
 
 test('confirm cancel and expiry update pending action status', () => {

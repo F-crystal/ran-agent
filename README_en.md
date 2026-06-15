@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-06-14)
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -10,9 +10,9 @@ Status: CURRENT (2026-06-09)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub, replies through Hermes Gateway with DeepSeek V4 Flash, and uses MCP tools such as `media_reader`, `social_reader`, `mimo_power`, `personal_memory`, and `obsidian_memory` for media, social content, personal memory, and vault retrieval. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
+Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub, replies through Hermes Gateway with DeepSeek V4 Flash, and uses MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, `personal_memory`, and `obsidian_memory` for fresh facts, media, social content, sticker lookup, personal memory, and vault retrieval. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
 
-OpenClaw, Kimi, and GLM are retired as frontend paths. The current frontend mainline is Hermes + DeepSeek V4 Flash.
+OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. The current frontend mainline is Hermes + DeepSeek V4 Flash.
 
 ---
 
@@ -35,7 +35,7 @@ Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
 
 MCP services
-  -> search_hub / media_reader / social_reader / mimo_power / media_generation
+  -> search_hub / media_reader / social_reader / sticker_catalog / co_reading / media_generation
   -> personal_memory / obsidian_memory / time / playwright
 ```
 
@@ -64,11 +64,11 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 **Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. It is registered in both lite and full; lite uses lightweight providers such as Tavily, AIHOT, OpenCLI public-only, OpenAlex/arxiv/pubmed, while full may use Playwright fallback. OpenCLI browser-backed mode is disabled by default for the 2C4G/60G server and remains an optional Phase 11.2 enhancement. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.
 
-**Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. Xiaohongshu uses the generic parser fallback as the primary read path, while search context stores `read_ref` handles without exposing platform tokens to the model or logs.
+**Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. Xiaohongshu uses the generic parser fallback as the primary read path, while search context stores `read_ref` handles; token-aware compatibility URLs are controlled resolver evidence, and logs must use redacted URLs or boolean evidence.
 
-**Multimodal understanding.** WeChat images, audio, video, and documents first pass trusted-path validation. MiMo Power analyzes them first; `media_reader` is the fallback. Video analysis is subtitle-first: subtitles, audio ASR, keyframe VLM, then metadata fallback.
+**Multimodal understanding.** WeChat images, audio, video, and documents first pass trusted-path validation, then go through `media_reader` for OCR, ASR, VLM, or video analysis. Video analysis is subtitle-first: subtitles, audio ASR, keyframe VLM, then metadata fallback.
 
-**Media follow-up context.** Inbound media becomes conversation-scoped artifacts. When the user says “that image from earlier” or “use MiMo to look at it,” the inbound message buffer binds the text to recent media explicitly or as a soft candidate. Context Policy v1 injects at most 3 compact artifacts per turn by default.
+**Media follow-up context.** Inbound media becomes conversation-scoped artifacts. When the user says “that image from earlier” or “analyze the image from before,” the inbound message buffer binds the text to recent media explicitly or as a soft candidate. Context Policy v1 injects at most 3 compact artifacts per turn by default.
 
 **Memory and knowledge.** `personal_memory` recalls personal memory through the Python backend. `obsidian_memory` searches the Obsidian vault through a semantic index. Long-term writes, reflection, night-cycle work, and knowledge maintenance stay in the Python backend and on-demand skills instead of always living in the main prompt.
 
@@ -81,11 +81,12 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 | Service | Purpose | Default Entry |
 |---------|---------|---------------|
 | `search_hub` | Unified fresh web search entry: news, web facts, academic lookup, AI hot topics, platform-search routing | lite/full |
-| `co_reading` | Private shared reading room: EPUB/TXT/Markdown/pasted text/HTML/URL/PDF text-layer import, chunk reading, bilingual display, progress, shared annotations, Hermes margin replies, Vault deposit | lite/full |
+| `co_reading` | Private shared reading room: EPUB/TXT/Markdown/pasted text/HTML/URL/PDF text-layer import, chunk reading, bilingual display, progress, shared annotations, Hermes margin replies, Vault deposit | full/Web |
 | `time` | Timezone-aware time queries, default `Asia/Shanghai` | lite/full |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis | lite/full |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | lite/full |
-| `mimo_power` | Deep multimodal analysis through MiMo Token Plan | lite/full |
+| `mimo_power` | RETIRED: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles | historical |
+| `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | lite/full |
 | `personal_memory` | Personal memory recall and backend health check | lite/full |
 | `obsidian_memory` | Obsidian vault semantic search | lite/full |
 | `media_generation` | Image and speech generation | full |
@@ -177,10 +178,10 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Node bridge lite/full auto-selection |
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | Unified identity and cross-platform timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | Timeline retention and compaction |
-| Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT` | Optional multi-frontend entries |
+| Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | Optional multi-frontend entries; keep Desktop Proxy local or on a controlled private network when enabled |
 | AI daily digest | `AI_DAILY_DIGEST_ENABLED`, `AI_DAILY_DIGEST_HOUR`, `AI_DAILY_DIGEST_MINUTE` | Optional Feishu DM digest, disabled by default |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest and memory recall |
-| MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | Deep multimodal analysis |
+| Retired MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | Historical variables; not required by the current runtime |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR and media generation |
 | Social platforms | `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
 | Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault retrieval and indexing |
@@ -211,7 +212,9 @@ ran_agent/
 │       ├── mediaContextStore.mjs
 │       ├── mediaReaderMcpServer.mjs
 │       ├── socialReaderMcpServer.mjs
-│       ├── mimoPowerMcpServer.mjs
+│       ├── stickerCatalogMcpServer.mjs
+│       ├── coReading/
+│       ├── mimoPowerMcpServer.mjs   # retired historical facade
 │       ├── mediaGenerationMcpServer.mjs
 │       └── personalMemoryMcpServer.mjs
 ├── src/personal_agent/             # Python backend
@@ -277,7 +280,7 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 | Bilibili | `social_reader` + `media_reader`, subtitle-first with ASR/keyframe fallback | optional `SESSDATA` |
 | Xiaohongshu | `social_reader`, generic parser fallback + token-aware compatibility path | optional but common `XHS_COOKIE` |
 | WeChat articles | HTML fetch, body parsing, captcha detection, structured degradation | usually login-free |
-| Images/audio/video/documents | `mimo_power` first, `media_reader` fallback | trusted local path or remote URL |
+| Images/audio/video/documents | `media_reader` | trusted local path or remote URL |
 
 ---
 

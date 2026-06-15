@@ -25,6 +25,9 @@ Python backend
 - OpenClaw, Kimi, and GLM are retired frontend paths.
 - WeChat, Feishu/Lark, and Desktop proxy share `ChannelHub`, `IdentityMap`,
   `GlobalTimeline`, and the same `replyBackend` path.
+- Desktop Proxy is disabled by default and should stay bound to localhost or a
+  controlled private network when enabled. Set `DESKTOP_PROXY_API_KEY` before
+  exposing it beyond the local machine.
 - The only scheduled outbound message is the opt-in AI daily digest. It runs
   through the Feishu/Hermes mainline and does not reopen old proactive
   check-ins, reminders, or life-loop outbound behavior.
@@ -171,6 +174,8 @@ media directories so redeploys do not depend on manual `mkdir`.
 - Canonical URLs and token cache hits are link-resolution evidence only.
   `allow_claim_read=true` requires content fields such as `post_text`, `desc`,
   `note_text`, `content`, `ocr_text`, `image_text`, or `full_text`.
+- Evidence logs must not print raw `xsec_token`; canonical URLs are logged with
+  redacted query strings.
 - `sendChatToHermesGateway()` creates one request id per request and reuses it
   across context-size, routing, evidence, and gate logs.
 - `replyBackend` runs Hermes Action Contract Gate before replies leave Node.
@@ -213,6 +218,14 @@ Never commit or force-add:
 
 - `.env.local`, `node_bridge/.env.local`, credentials, cookies, proxy URLs.
 - `.ran_agent_state/`, `data/`, `logs/`, `debug/`, `state/`.
+- `.ran_agent_state/stickers/`,
+  `.ran_agent_state/wechat/inbound/`,
+  `.ran_agent_state/feishu/inbound/`,
+  `.ran_agent_state/action_contract/`,
+  `.ran_agent_state/hermes/`,
+  `.ran_agent_state/co_reading/`.
+- Provider-visible history, pending action state, sticker assets, inbound media,
+  co-reading chunks, and social-reader token cache are runtime state only.
 - `local_archive/`.
 - private `vault/` content.
 - generated caches such as `.venv/`, `.pytest_cache/`, `node_modules/`.

@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-06-14)
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -10,9 +10,9 @@ Status: CURRENT (2026-06-09)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 用 DeepSeek V4 Flash 生成回复；同时通过 `media_reader`、`social_reader`、`mimo_power`、`personal_memory`、`obsidian_memory` 等 MCP 工具读取媒体、社交内容、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
+Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 用 DeepSeek V4 Flash 生成回复；同时通过 `search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory`、`obsidian_memory` 等 MCP 工具读取联网事实、媒体、社交内容、表情包目录、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
 
-OpenClaw、Kimi 和 GLM 前台路线已经退休；当前前台主线只有 Hermes + DeepSeek V4 Flash。
+OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；当前前台主线只有 Hermes + DeepSeek V4 Flash。
 
 ---
 
@@ -35,7 +35,7 @@ Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
 
 MCP services
-  -> search_hub / media_reader / social_reader / mimo_power / sticker_catalog / media_generation
+  -> search_hub / media_reader / social_reader / sticker_catalog / co_reading / media_generation
   -> personal_memory / obsidian_memory / time / playwright
 ```
 
@@ -64,11 +64,11 @@ MCP services
 
 **联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。它同时注册到 lite/full；lite 使用 Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed 等轻量 provider，full 使用 Playwright fallback。OpenCLI browser-backed 默认关闭（2C4G/60G 服务器约束），后续 Phase 11.2 可选增强。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
 
-**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书优先使用通用解析 fallback，搜索上下文会缓存 `read_ref`，避免把平台 token 暴露给模型或日志。
+**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书优先使用通用解析 fallback，搜索上下文会缓存 `read_ref`；token-aware 兼容 URL 只作为受控解析线索，日志必须记录 redacted URL 或布尔 evidence。
 
-**多模态理解。** 微信图片、音频、视频和文档先经过可信路径校验，再由 MiMo Power 优先分析，失败时回退到 `media_reader`。视频采用字幕优先策略：字幕、音频 ASR、关键帧 VLM、元数据逐级降级。
+**多模态理解。** 微信图片、音频、视频和文档先经过可信路径校验，再交给 `media_reader` 做 OCR、ASR、VLM 或视频分析。视频采用字幕优先策略：字幕、音频 ASR、关键帧 VLM、元数据逐级降级。
 
-**媒体上下文追问。** 入站媒体会生成会话级 artifact。用户说“刚才那张图”“用 mimo 看一下”时，入站消息缓冲会把文本与最近媒体显式或软绑定。默认 Context Policy v1 每轮最多注入 3 个紧凑 artifact。
+**媒体上下文追问。** 入站媒体会生成会话级 artifact。用户说“刚才那张图”“分析一下刚才那张图”时，入站消息缓冲会把文本与最近媒体显式或软绑定。默认 Context Policy v1 每轮最多注入 3 个紧凑 artifact。
 
 **记忆和知识。** `personal_memory` 通过 Python backend 召回个人记忆；`obsidian_memory` 通过 Obsidian vault 语义索引检索知识。长期写入、反思、夜间循环和知识维护留在 Python 后端和按需 skill 中，不常驻主 prompt。
 
@@ -83,11 +83,11 @@ MCP services
 | 服务 | 作用 | 默认入口 |
 |------|------|----------|
 | `search_hub` | 统一联网搜索入口：新闻、网页事实、学术检索、AI 热点、平台搜索路由 | lite/full |
-| `co_reading` | 私有共享读书室：EPUB/TXT/Markdown/粘贴正文/HTML/URL/PDF 文本层导入、chunk 阅读、双语显示、进度、共享批注、Hermes 边栏回复、Vault 沉淀 | lite/full |
+| `co_reading` | 私有共享读书室：EPUB/TXT/Markdown/粘贴正文/HTML/URL/PDF 文本层导入、chunk 阅读、双语显示、进度、共享批注、Hermes 边栏回复、Vault 沉淀 | full/Web |
 | `time` | 时区感知时间查询，默认 `Asia/Shanghai` | lite/full |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | lite/full |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | lite/full |
-| `mimo_power` | MiMo Token Plan 深度多模态分析 | lite/full |
+| `mimo_power` | RETIRED：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles | historical |
 | `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | lite/full |
 | `personal_memory` | 个人记忆召回与 backend 健康检查 | lite/full |
 | `obsidian_memory` | Obsidian vault 语义检索 | lite/full |
@@ -185,10 +185,10 @@ runtime 配置变更必须从 repo 源配置进入，再通过
 | Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Node bridge 自动选择 lite/full |
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | 统一身份、跨平台 timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | timeline 保留和压缩 |
-| Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT` | 多前端可选入口 |
+| Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | 多前端可选入口；开启 Desktop Proxy 时必须保持本机或内网受控 |
 | AI 日报 | `AI_DAILY_DIGEST_ENABLED`, `AI_DAILY_DIGEST_HOUR`, `AI_DAILY_DIGEST_MINUTE` | 可选飞书私聊日报，默认关闭 |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest 和记忆召回 |
-| MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | 深度多模态分析 |
+| Retired MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | 历史变量，当前 runtime 不需要配置 |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR 和媒体生成 |
 | 社交平台 | `XHS_COOKIE`, `SESSDATA` | 小红书、B 站等平台认证 |
 | Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault 检索与索引 |
@@ -219,7 +219,9 @@ ran_agent/
 │       ├── mediaContextStore.mjs
 │       ├── mediaReaderMcpServer.mjs
 │       ├── socialReaderMcpServer.mjs
-│       ├── mimoPowerMcpServer.mjs
+│       ├── stickerCatalogMcpServer.mjs
+│       ├── coReading/
+│       ├── mimoPowerMcpServer.mjs   # retired historical facade
 │       ├── mediaGenerationMcpServer.mjs
 │       └── personalMemoryMcpServer.mjs
 ├── src/personal_agent/             # Python backend
@@ -285,7 +287,7 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 | B 站 | `social_reader` + `media_reader`，字幕优先、ASR/关键帧兜底 | `SESSDATA` 可选 |
 | 小红书 | `social_reader`，generic parser fallback + token-aware compatibility path | `XHS_COOKIE` 可选但常用 |
 | 微信公众号 | HTML 抓取、正文解析、验证码识别和结构化降级 | 通常无需登录 |
-| 图片/音频/视频/文档 | `mimo_power` 优先，`media_reader` 兜底 | 本地可信路径或远程 URL |
+| 图片/音频/视频/文档 | `media_reader` | 本地可信路径或远程 URL |
 
 ---
 
