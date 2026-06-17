@@ -127,6 +127,8 @@ class AppConfig:
     brain_loop_interval_minutes: int = 120
     proactive_check_interval_minutes: int = 90
     knowledge_check_interval_minutes: int = 360
+    knowledge_backlog_trigger_count: int = 10
+    knowledge_backlog_trigger_age_minutes: int = 120
     knowledge_cron_hours: str = "6,12,18,23"
     knowledge_cron_minute: int = 0
     daily_carryover_enabled: bool = True
@@ -180,6 +182,10 @@ class AppConfig:
     self_reflection_interval_minutes: int = 720
     self_reflection_sample_limit: int = 200
     knowledge_agent_enabled: bool = True
+    knowledge_agent_runner_name: str = "qwen"
+    knowledge_agent_command: str = ""
+    knowledge_agent_api_key_env_var: str = "DASHSCOPE_API_KEY"
+    knowledge_agent_timeout_seconds: int = 300
     night_cycle_enabled: bool = True
     night_cycle_hour: int = 0
     night_cycle_minute: int = 0
@@ -267,6 +273,12 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         ),
         knowledge_check_interval_minutes=int(
             os.getenv("PERSONAL_AGENT_KNOWLEDGE_CHECK_INTERVAL_MINUTES", "360").strip()
+        ),
+        knowledge_backlog_trigger_count=int(
+            os.getenv("PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT", "10").strip()
+        ),
+        knowledge_backlog_trigger_age_minutes=int(
+            os.getenv("PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES", "120").strip()
         ),
         knowledge_cron_hours=os.getenv("PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS", "6,12,18,23").strip(),
         knowledge_cron_minute=int(os.getenv("PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE", "0").strip()),
@@ -431,6 +443,24 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
             "PERSONAL_AGENT_KNOWLEDGE_AGENT_ENABLED",
             "true",
         ).strip().lower() not in {"0", "false", "no", "off"},
+        knowledge_agent_runner_name=os.getenv(
+            "PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER",
+            "qwen",
+        ).strip() or "qwen",
+        knowledge_agent_command=os.getenv(
+            "PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND",
+            f"/bin/bash {resolved_base_dir / 'vault_runner.sh'}",
+        ).strip(),
+        knowledge_agent_api_key_env_var=os.getenv(
+            "PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV",
+            os.getenv("PERSONAL_AGENT_QWEN_API_KEY_ENV", "DASHSCOPE_API_KEY"),
+        ).strip(),
+        knowledge_agent_timeout_seconds=int(
+            os.getenv(
+                "PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS",
+                os.getenv("PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS", "300"),
+            ).strip()
+        ),
         night_cycle_enabled=os.getenv(
             "PERSONAL_AGENT_NIGHT_CYCLE_ENABLED",
             "true",

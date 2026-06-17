@@ -1,4 +1,4 @@
-"""Background knowledge-agent wrapper around Qwen Code and the local vault manager shell."""
+"""Background knowledge-agent wrapper around a configurable local vault manager."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import signal
+import shlex
 import subprocess
 import time
 from dataclasses import asdict, dataclass
@@ -67,7 +68,7 @@ CommandRunner = Callable[[str], subprocess.CompletedProcess]
 
 
 class KnowledgeAgent:
-    """Owns background Qwen Code knowledge maintenance without entering the chat path."""
+    """Owns background knowledge maintenance without entering the chat path."""
 
     def __init__(
         self,
@@ -105,23 +106,27 @@ class KnowledgeAgent:
     def count_inbox_items(self) -> int:
         """Return the number of current inbox items awaiting knowledge maintenance."""
 
-        inbox_dir = self._config.vault_dir / "inbox"
-        if not inbox_dir.exists():
-            return 0
-        return sum(
-            1
-            for path in inbox_dir.rglob("*")
-            if path.is_file()
-            and not path.name.startswith(".")
-            and all(not part.startswith(".") for part in path.parts)
-        )
+        return sum(1 for _path in self._iter_inbox_items())
 
     def should_surface_maintenance(self, *, now_local: datetime) -> bool:
         """Return whether the life loop should surface a knowledge-maintenance opportunity."""
 
         state = load_knowledge_state(self._config)
-        if self.count_inbox_items() <= 0:
+        inbox_count = self.count_inbox_items()
+        if inbox_count <= 0:
             return False
+        if (
+            self._config.knowledge_backlog_trigger_count > 0
+            and inbox_count > self._config.knowledge_backlog_trigger_count
+        ):
+            return True
+        oldest_age_minutes = self._oldest_inbox_item_age_minutes(now_local=now_local)
+        if (
+            self._config.knowledge_backlog_trigger_age_minutes > 0
+            and oldest_age_minutes is not None
+            and oldest_age_minutes >= self._config.knowledge_backlog_trigger_age_minutes
+        ):
+            return True
         if not state.last_checked_at:
             return True
         try:
@@ -129,6 +134,31 @@ class KnowledgeAgent:
         except ValueError:
             return True
         return (now_local - last_checked) >= timedelta(minutes=self._config.knowledge_check_interval_minutes)
+
+    def _iter_inbox_items(self):
+        inbox_dir = self._config.vault_dir / "inbox"
+        if not inbox_dir.exists():
+            return []
+        return (
+            path
+            for path in inbox_dir.rglob("*")
+            if path.is_file()
+            and not path.name.startswith(".")
+            and all(not part.startswith(".") for part in path.parts)
+        )
+
+    def _oldest_inbox_item_age_minutes(self, *, now_local: datetime) -> float | None:
+        oldest_modified_at: datetime | None = None
+        for path in self._iter_inbox_items():
+            try:
+                modified_at = datetime.fromtimestamp(path.stat().st_mtime)
+            except OSError:
+                continue
+            if oldest_modified_at is None or modified_at < oldest_modified_at:
+                oldest_modified_at = modified_at
+        if oldest_modified_at is None:
+            return None
+        return max(0.0, (now_local - oldest_modified_at).total_seconds() / 60)
 
     def auto_run(self, *, trigger: str, now_local: datetime | None = None) -> KnowledgeRunResult:
         """Run plan → apply → cleanup chain for knowledge management."""
@@ -368,10 +398,17 @@ class KnowledgeAgent:
         )
 
     def _default_command_runner(self, action: str) -> subprocess.CompletedProcess[str]:
-        command = ["/bin/bash", str(self._config.base_dir / "vault_runner.sh"), action]
-        self._logger.info("knowledge agent running action=%s command=%s", action, command)
+        command = self._build_command(action)
+        self._logger.info(
+            "knowledge agent running runner=%s action=%s command=%s",
+            self._config.knowledge_agent_runner_name,
+            action,
+            command,
+        )
         env = os.environ.copy()
-        env["DASHSCOPE_API_KEY"] = os.getenv(self._config.qwen_api_key_env_var, "")
+        api_key_env_var = self._config.knowledge_agent_api_key_env_var.strip()
+        if api_key_env_var:
+            env[api_key_env_var] = os.getenv(api_key_env_var, "")
         process = subprocess.Popen(
             command,
             cwd=self._config.base_dir,
@@ -382,7 +419,7 @@ class KnowledgeAgent:
             start_new_session=True,
         )
         try:
-            stdout, stderr = process.communicate(timeout=self._config.qwen_timeout_seconds)
+            stdout, stderr = process.communicate(timeout=self._config.knowledge_agent_timeout_seconds)
         except subprocess.TimeoutExpired as exc:
             try:
                 os.killpg(process.pid, signal.SIGKILL)
@@ -398,6 +435,15 @@ class KnowledgeAgent:
             stdout=stdout,
             stderr=stderr,
         )
+
+    def _build_command(self, action: str) -> list[str]:
+        template = self._config.knowledge_agent_command.strip()
+        if not template:
+            template = f"/bin/bash {self._config.base_dir / 'vault_runner.sh'}"
+        if "{action}" in template:
+            rendered = template.replace("{action}", action)
+            return shlex.split(rendered)
+        return [*shlex.split(template), action]
 
     def _recent_modified_stems(self, directory: Path, *, minutes: int) -> list[str]:
         if not directory.exists():

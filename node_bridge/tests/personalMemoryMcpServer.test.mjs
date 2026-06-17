@@ -19,6 +19,7 @@ test('personal memory exposes backend check and read-only recall tools', () => {
   assert.deepEqual(tools.map((tool) => tool.name), [
     'check_personal_memory_backend',
     'recall_personal_memory',
+    'surface_relevant_context',
   ]);
   assert.equal(tools[0].inputSchema.type, 'object');
   assert.equal(tools[0].inputSchema.additionalProperties, false);
@@ -27,6 +28,9 @@ test('personal memory exposes backend check and read-only recall tools', () => {
   assert.equal(tools[1].inputSchema.type, 'object');
   assert.equal(tools[1].inputSchema.additionalProperties, false);
   assert.deepEqual(tools[1].inputSchema.required, ['query']);
+  assert.match(tools[2].description, /familiar/);
+  assert.match(tools[2].description, /prior conversations/);
+  assert.deepEqual(tools[2].inputSchema.required, ['query']);
 });
 
 test('personal memory initialize and tools list follow MCP shape', async () => {
@@ -36,7 +40,7 @@ test('personal memory initialize and tools list follow MCP shape', async () => {
   assert.equal(initialized.protocolVersion, '2025-06-18');
   assert.deepEqual(initialized.capabilities, { tools: {} });
   assert.equal(initialized.serverInfo.name, 'ran-agent-personal-memory');
-  assert.equal(listed.tools.length, 2);
+  assert.equal(listed.tools.length, 3);
 });
 
 test('check_personal_memory_backend reports backend health', async () => {
@@ -101,6 +105,43 @@ test('recall_personal_memory forwards to backend memory recall endpoint', async 
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.rendered_context, '【你对用户的了解】\n- 用户最近被一个问题卡住过');
   assert.match(result.content[0].text, /ombre_long_memory/);
+});
+
+test('surface_relevant_context reuses bounded backend memory recall endpoint', async () => {
+  const calls = [];
+  const result = await handlePersonalMemoryMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'surface_relevant_context',
+        arguments: {
+          query: '拼豆',
+          response_mode: 'casual_chat',
+        },
+      },
+    },
+    {
+      env: { PYTHON_BACKEND_BASE_URL: 'http://backend.test' },
+      fetchImpl: async (url, options) => {
+        calls.push({ url, options });
+        return jsonResponse({
+          should_inject: true,
+          rendered_context: '【你对用户的了解】\n- 用户之前聊过拼豆作品',
+          used_sources: ['local_profile_memory', 'vault_knowledge'],
+        });
+      },
+    }
+  );
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].url, 'http://backend.test/tools/memory/recall');
+  assert.deepEqual(JSON.parse(calls[0].options.body), {
+    user_text: '拼豆',
+    route: 'text_chat',
+    response_mode: 'casual_chat',
+  });
+  assert.equal(result.structuredContent.should_inject, true);
+  assert.match(result.structuredContent.rendered_context, /拼豆作品/);
 });
 
 test('recall_personal_memory returns structured error on backend failure', async () => {
