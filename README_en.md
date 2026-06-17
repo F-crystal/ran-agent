@@ -70,7 +70,7 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 **Media follow-up context.** Inbound media becomes conversation-scoped artifacts. When the user says “that image from earlier” or “analyze the image from before,” the inbound message buffer binds the text to recent media explicitly or as a soft candidate. Context Policy v1 injects at most 3 compact artifacts per turn by default.
 
-**Memory and knowledge.** `personal_memory` recalls personal memory through the Python backend. `obsidian_memory` searches the Obsidian vault through a semantic index. Long-term writes, reflection, night-cycle work, and knowledge maintenance stay in the Python backend and on-demand skills instead of always living in the main prompt.
+**Memory and knowledge.** `personal_memory` recalls personal memory through the Python backend and exposes lightweight `surface_relevant_context` so Hermes can naturally pick up familiar hobbies, projects, people, or historical themes without waiting for an explicit “search memory” request. `obsidian_memory` searches the Obsidian vault through a semantic index. Long-term writes, reflection, night-cycle work, and knowledge maintenance stay in the Python backend and on-demand skills instead of always living in the main prompt. The knowledge-maintenance agent is a provider-neutral local runner: it remains Qwen-compatible by default and can later be switched to Reasonix or another agent through config.
 
 **Sendable media generation.** The full gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.
 
@@ -183,6 +183,7 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest and memory recall |
 | Retired MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | Historical variables; not required by the current runtime |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR and media generation |
+| Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | Provider-neutral vault maintenance runner; Qwen-compatible by default, processes inbox in small steps, and triggers maintenance above 10 pending items or oldest item age of 120 minutes by default |
 | Social platforms | `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
 | Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault retrieval and indexing |
 | Media context | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | compact by default, legacy fallback available |

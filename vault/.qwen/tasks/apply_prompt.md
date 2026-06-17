@@ -8,6 +8,8 @@
 - 将原件归档到 raw/。
 - 为新资料建立或更新 source 页面。
 - 尽量把 source 织入已有 concept / idea / project / person 页面。
+- 每个高价值 source 都必须做一次织入判断：写入已有 concept / idea / project / person，或在本次输出中说明暂不织入的理由。
+- 如果连续出现同一主题（例如同一爱好、项目、人物、长期问题）且已有 2 个以上 source 支撑，优先创建或更新一个小型 concept / project / person 页面，而不是只堆 source。
 - 必要时新建页面，但优先更新已有页面。
 - 更新 wiki/index.md 和 wiki/log.md，使其成为真正入口，而不只是目录。
 - 优先更新已有页面，避免重复建页。

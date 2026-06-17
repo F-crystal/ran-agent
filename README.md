@@ -70,7 +70,7 @@ MCP services
 
 **媒体上下文追问。** 入站媒体会生成会话级 artifact。用户说“刚才那张图”“分析一下刚才那张图”时，入站消息缓冲会把文本与最近媒体显式或软绑定。默认 Context Policy v1 每轮最多注入 3 个紧凑 artifact。
 
-**记忆和知识。** `personal_memory` 通过 Python backend 召回个人记忆；`obsidian_memory` 通过 Obsidian vault 语义索引检索知识。长期写入、反思、夜间循环和知识维护留在 Python 后端和按需 skill 中，不常驻主 prompt。
+**记忆和知识。** `personal_memory` 通过 Python backend 召回个人记忆，并提供 `surface_relevant_context` 这类低成本浮现入口，让 Hermes 在遇到熟悉爱好、项目、人物或历史主题时自然接上上下文；`obsidian_memory` 通过 Obsidian vault 语义索引检索知识。长期写入、反思、夜间循环和知识维护留在 Python 后端和按需 skill 中，不常驻主 prompt。知识维护 agent 是 provider-neutral 的本地 runner，当前默认兼容 Qwen CLI，后续可通过配置切到 Reasonix 或其他 agent。
 
 **可发送媒体生成。** full gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
 
@@ -190,6 +190,7 @@ runtime 配置变更必须从 repo 源配置进入，再通过
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest 和记忆召回 |
 | Retired MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | 历史变量，当前 runtime 不需要配置 |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR 和媒体生成 |
+| Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | provider-neutral vault 维护 runner；默认 Qwen-compatible，小步处理 inbox，默认超过 10 条或最老 120 分钟触发维护 |
 | 社交平台 | `XHS_COOKIE`, `SESSDATA` | 小红书、B 站等平台认证 |
 | Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault 检索与索引 |
 | 媒体上下文 | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | 默认 compact，可回退 legacy |

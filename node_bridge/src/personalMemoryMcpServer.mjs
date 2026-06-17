@@ -91,6 +91,31 @@ export function buildPersonalMemoryTools() {
         additionalProperties: false,
       },
     },
+    {
+      name: 'surface_relevant_context',
+      title: 'Surface Relevant Context',
+      description: [
+        'Read-only lightweight context surfacing for Hermes.',
+        'Use when the current topic, hobby, project, person, artifact, or recurring theme seems familiar from prior conversations, even if the user did not explicitly ask to search memory.',
+        'Return only bounded personal-memory and vault-knowledge clues; weave them naturally into the reply without saying you searched or exposing internal sources.',
+        'If recall is weak or empty, continue from the current conversation and do not invent continuity.',
+      ].join(' '),
+      inputSchema: {
+        type: 'object',
+        properties: {
+          query: {
+            type: 'string',
+            description: 'The natural-language topic or clue that may connect to prior memory or vault knowledge.',
+          },
+          response_mode: {
+            type: 'string',
+            description: 'Optional response mode hint such as chat or casual_chat.',
+          },
+        },
+        required: ['query'],
+        additionalProperties: false,
+      },
+    },
   ];
 }
 
@@ -193,6 +218,9 @@ export async function handlePersonalMemoryMcpRequest(request, options = {}) {
       return await checkPersonalMemoryBackend(options);
     }
     if (name === 'recall_personal_memory') {
+      return await recallPersonalMemory(params.arguments || {}, options);
+    }
+    if (name === 'surface_relevant_context') {
       return await recallPersonalMemory(params.arguments || {}, options);
     }
     return buildErrorResult(`unknown tool: ${name}`);
