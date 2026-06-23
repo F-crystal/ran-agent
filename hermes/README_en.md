@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-06-23)
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 
@@ -144,6 +144,7 @@ ran-agent uses repo-owned MCP services:
 | `mimo_power` | Retired: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles |
 | `personal_memory` | Personal memory recall through the Python backend |
 | `obsidian_memory` | Obsidian vault semantic search |
+| `ombre_memory`, `ombre_memory_extra` | Upstream Ombre Brain direct MCP, full-profile memory/debug surface |
 | `media_generation` | Image and speech generation, available on full by default |
 | `playwright` | Browser automation, available on full by default |
 | `tavily` | Optional lower-level web search provider for Search Hub compatibility |
@@ -172,6 +173,10 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB path |
 | `OBSIDIAN_INDEX_DEVICE` | Default `cpu` on Linux servers |
 | `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | Set to `1` only during explicit maintenance |
+| `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Ombre Brain service and full-profile direct MCP switches |
+| `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream, default `https://github.com/P0luz/Ombre-Brain` |
+| `OMBRE_BRAIN_HOME`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime and private buckets paths |
+| `OMBRE_BRAIN_MCP_URL`, `OMBRE_BRAIN_MCP_EXTRA_URL` | Ombre MCP endpoints connected by the full profile |
 
 Secrets must live in machine-local `.env` files, for example:
 
@@ -230,6 +235,7 @@ Diagnostics:
 bash scripts/diagnose-hermes-tools.sh
 bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-search-hub.sh
+bash scripts/diagnose-ombre-memory.sh
 ```
 
 The complete server runbook is `docs/governance/server_runtime_commands.md`.

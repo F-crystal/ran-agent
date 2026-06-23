@@ -19,6 +19,7 @@ RUNTIME_STATE_DIR="${RAN_AGENT_DEPLOY_STATE_DIR:-/opt/ran_agent/.ran_agent_state
 RUNTIME_DEBUG_DIR="${RAN_AGENT_DEPLOY_DEBUG_DIR:-/opt/ran_agent/debug}"
 LITE_SERVICE="$SYSTEMD_DIR/ran-agent-hermes.service"
 FULL_SERVICE="$SYSTEMD_DIR/ran-agent-hermes-full.service"
+OMBRE_SERVICE="$SYSTEMD_DIR/ran-agent-ombre-brain.service"
 LITE_DROPIN_DIR="$SYSTEMD_DIR/ran-agent-hermes.service.d"
 STALE_LITE_DROPINS=(
   "$LITE_DROPIN_DIR/30-hermes-env.conf"
@@ -63,6 +64,27 @@ PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGEN
 PERSONAL_AGENT_DAILY_CARRYOVER_HOUR_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_DAILY_CARRYOVER_HOUR:-4}"
 PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE:-0}"
 PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS:-300}"
+OMBRE_BRAIN_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_ENABLED:-true}"
+OMBRE_BRAIN_MCP_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_MCP_ENABLED:-true}"
+OMBRE_BRAIN_REPO_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Brain}"
+OMBRE_BRAIN_HOME_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME:-/opt/ran_agent/.ran_agent_state/ombre-brain}"
+OMBRE_BUCKETS_DIR_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BUCKETS_DIR:-/opt/ran_agent/vault/ombre}"
+OMBRE_BRAIN_IMAGE_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_IMAGE:-p0luz/ombre-brain:latest}"
+OMBRE_BRAIN_BIND_HOST_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_BIND_HOST:-127.0.0.1}"
+OMBRE_BRAIN_PORT_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_PORT:-18001}"
+OMBRE_BRAIN_COMPOSE_FILE_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME_DEFAULT/docker-compose.yml}"
+OMBRE_BRAIN_CONFIG_FILE_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME_DEFAULT/config.yaml}"
+OMBRE_BRAIN_MCP_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_MCP_URL:-http://$OMBRE_BRAIN_BIND_HOST_DEFAULT:$OMBRE_BRAIN_PORT_DEFAULT/mcp}"
+OMBRE_BRAIN_MCP_EXTRA_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_MCP_EXTRA_URL:-http://$OMBRE_BRAIN_BIND_HOST_DEFAULT:$OMBRE_BRAIN_PORT_DEFAULT/mcp-extra}"
+OMBRE_BRAIN_HEALTH_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_HEALTH_URL:-http://$OMBRE_BRAIN_BIND_HOST_DEFAULT:$OMBRE_BRAIN_PORT_DEFAULT/health}"
+PERSONAL_AGENT_OMBRE_READ_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_READ_ENABLED:-true}"
+PERSONAL_AGENT_OMBRE_WRITE_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_WRITE_ENABLED:-false}"
+PERSONAL_AGENT_OMBRE_TIMEOUT_MS_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_TIMEOUT_MS:-1500}"
+PERSONAL_AGENT_OMBRE_MAX_RESULTS_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_MAX_RESULTS:-3}"
+PERSONAL_AGENT_OMBRE_MAX_CHARS_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_MAX_CHARS:-900}"
+PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED:-true}"
+PERSONAL_AGENT_OMBRE_I_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_I_ENABLED:-true}"
+PERSONAL_AGENT_OMBRE_WRITE_MODE_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_WRITE_MODE:-guarded}"
 
 if [ "${RAN_AGENT_NO_SUDO:-}" = "1" ] || [ "$EUID" -eq 0 ]; then
   SUDO=(env)
@@ -101,6 +123,44 @@ runtime_debug_path() {
   printf '%s/%s\n' "$RUNTIME_DEBUG_DIR" "$1"
 }
 
+env_file_value() {
+  local file="$1"
+  local key="$2"
+  if "${SUDO[@]}" test -f "$file"; then
+    "${SUDO[@]}" awk -F= -v key="$key" '$1 == key { value=substr($0, length(key) + 2) } END { if (value != "") print value }' "$file"
+  fi
+}
+
+effective_env_value() {
+  local key="$1"
+  local default="$2"
+  local value="${!key:-}"
+  if [ -n "$value" ]; then
+    printf '%s\n' "$value"
+    return 0
+  fi
+  local file
+  for file in "$NODE_ENV_FILE" "$NODE_BRIDGE_ENV_FILE" "$FULL_HOME/.env" "$LITE_HOME/.env" "$FULL_HOME/profiles/$FULL_PROFILE/.env" "$LITE_HOME/profiles/$LITE_PROFILE/.env"; do
+    value="$(env_file_value "$file" "$key" | tail -n 1 || true)"
+    if [ -n "$value" ]; then
+      printf '%s\n' "$value"
+      return 0
+    fi
+  done
+  printf '%s\n' "$default"
+}
+
+bool_is_true() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 trusted_runtime_media_dirs() {
   runtime_debug_path "wechat/inbound"
   runtime_debug_path "mimo_inbound"
@@ -114,6 +174,8 @@ ensure_runtime_dirs() {
   local dirs=(
     "$(runtime_state_path "uv-cache")"
     "$(runtime_state_path "uv-tools")"
+    "$OMBRE_BRAIN_HOME_DEFAULT"
+    "$OMBRE_BUCKETS_DIR_DEFAULT"
   )
   local media_dir
   while IFS= read -r media_dir; do
@@ -170,11 +232,20 @@ upsert_env_file() {
   shift
   local tmp
   tmp="$(mktemp)"
+  local optional_key_blob=" "
+  local assignment
+
+  for assignment in "$@"; do
+    if [[ "$assignment" == \?*=* ]]; then
+      local optional_assignment="${assignment#\?}"
+      optional_key_blob+="${optional_assignment%%=*} "
+    fi
+  done
 
   if "${SUDO[@]}" test -f "$file"; then
     while IFS= read -r line; do
       local key="${line%%=*}"
-      if [[ "$line" != *=* ]] || ! is_managed_env_key "$key"; then
+      if [[ "$line" != *=* ]] || ! is_managed_env_key "$key" || [[ "$optional_key_blob" == *" $key "* ]]; then
         printf '%s\n' "$line" >> "$tmp"
       fi
     done < <("${SUDO[@]}" cat "$file")
@@ -197,7 +268,7 @@ upsert_env_file() {
 
 is_managed_env_key() {
   case "$1" in
-    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_CONTEXT_INJECTION_MODE|HERMES_CONTEXT_CACHE_STRATEGY|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|HERMES_CACHE_FRIENDLY_HISTORY|HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS|HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET|HERMES_CACHE_FRIENDLY_HISTORY_PROFILE|HERMES_CACHE_TELEMETRY_ENABLED|HERMES_LITE_SOFT_RESET_ENABLED|HERMES_LITE_SOFT_RESET_DRY_RUN|HERMES_LITE_SOFT_RESET_MAX_DIGEST_CHARS|HERMES_LITE_SOFT_RESET_KEEP_LAST_N|HERMES_LITE_SOFT_RESET_STATE_FILE|HERMES_LITE_SOFT_RESET_DIGEST_DIR|HERMES_ACTION_GATE_ENABLED|HERMES_ACTION_GATE_MODE|HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS|HERMES_ACTION_PENDING_ENABLED|HERMES_ACTION_PENDING_TTL_MINUTES|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS|PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS|PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE|PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED|PERSONAL_AGENT_DAILY_CARRYOVER_HOUR|PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_GENERIC_FALLBACK_ENABLED|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS|OBSIDIAN_MEMORY_MCP_ENABLED|XHS_GENERIC_FALLBACK_READY_PATH|WEIXIN_SDK_INBOUND_MEDIA_DIRS)
+    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_CONTEXT_INJECTION_MODE|HERMES_CONTEXT_CACHE_STRATEGY|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|HERMES_CACHE_FRIENDLY_HISTORY|HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS|HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET|HERMES_CACHE_FRIENDLY_HISTORY_PROFILE|HERMES_CACHE_TELEMETRY_ENABLED|HERMES_LITE_SOFT_RESET_ENABLED|HERMES_LITE_SOFT_RESET_DRY_RUN|HERMES_LITE_SOFT_RESET_MAX_DIGEST_CHARS|HERMES_LITE_SOFT_RESET_KEEP_LAST_N|HERMES_LITE_SOFT_RESET_STATE_FILE|HERMES_LITE_SOFT_RESET_DIGEST_DIR|HERMES_ACTION_GATE_ENABLED|HERMES_ACTION_GATE_MODE|HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS|HERMES_ACTION_PENDING_ENABLED|HERMES_ACTION_PENDING_TTL_MINUTES|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS|PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS|PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE|PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED|PERSONAL_AGENT_DAILY_CARRYOVER_HOUR|PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_GENERIC_FALLBACK_ENABLED|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS|OBSIDIAN_MEMORY_MCP_ENABLED|XHS_GENERIC_FALLBACK_READY_PATH|WEIXIN_SDK_INBOUND_MEDIA_DIRS|OMBRE_BRAIN_ENABLED|OMBRE_BRAIN_MCP_ENABLED|OMBRE_BRAIN_REPO_URL|OMBRE_BRAIN_HOME|OMBRE_BUCKETS_DIR|OMBRE_BRAIN_IMAGE|OMBRE_BRAIN_BIND_HOST|OMBRE_BRAIN_PORT|OMBRE_BRAIN_COMPOSE_FILE|OMBRE_BRAIN_CONFIG_FILE|OMBRE_BRAIN_MCP_URL|OMBRE_BRAIN_MCP_EXTRA_URL|OMBRE_BRAIN_HEALTH_URL|PERSONAL_AGENT_OMBRE_READ_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_ENABLED|PERSONAL_AGENT_OMBRE_TIMEOUT_MS|PERSONAL_AGENT_OMBRE_MAX_RESULTS|PERSONAL_AGENT_OMBRE_MAX_CHARS|PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED|PERSONAL_AGENT_OMBRE_I_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_MODE)
       return 0
       ;;
     *)
@@ -217,6 +288,29 @@ install_profiles() {
 
 write_runtime_env() {
   log "refreshing runtime env files without touching secrets"
+  local ombre_env=(
+    "?OMBRE_BRAIN_ENABLED=$OMBRE_BRAIN_ENABLED_DEFAULT"
+    "?OMBRE_BRAIN_MCP_ENABLED=$OMBRE_BRAIN_MCP_ENABLED_DEFAULT"
+    "?OMBRE_BRAIN_REPO_URL=$OMBRE_BRAIN_REPO_URL_DEFAULT"
+    "?OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME_DEFAULT"
+    "?OMBRE_BUCKETS_DIR=$OMBRE_BUCKETS_DIR_DEFAULT"
+    "?OMBRE_BRAIN_IMAGE=$OMBRE_BRAIN_IMAGE_DEFAULT"
+    "?OMBRE_BRAIN_BIND_HOST=$OMBRE_BRAIN_BIND_HOST_DEFAULT"
+    "?OMBRE_BRAIN_PORT=$OMBRE_BRAIN_PORT_DEFAULT"
+    "?OMBRE_BRAIN_COMPOSE_FILE=$OMBRE_BRAIN_COMPOSE_FILE_DEFAULT"
+    "?OMBRE_BRAIN_CONFIG_FILE=$OMBRE_BRAIN_CONFIG_FILE_DEFAULT"
+    "?OMBRE_BRAIN_MCP_URL=$OMBRE_BRAIN_MCP_URL_DEFAULT"
+    "?OMBRE_BRAIN_MCP_EXTRA_URL=$OMBRE_BRAIN_MCP_EXTRA_URL_DEFAULT"
+    "?OMBRE_BRAIN_HEALTH_URL=$OMBRE_BRAIN_HEALTH_URL_DEFAULT"
+    "?PERSONAL_AGENT_OMBRE_READ_ENABLED=$PERSONAL_AGENT_OMBRE_READ_ENABLED_DEFAULT"
+    "?PERSONAL_AGENT_OMBRE_WRITE_ENABLED=$PERSONAL_AGENT_OMBRE_WRITE_ENABLED_DEFAULT"
+    "?PERSONAL_AGENT_OMBRE_TIMEOUT_MS=$PERSONAL_AGENT_OMBRE_TIMEOUT_MS_DEFAULT"
+    "?PERSONAL_AGENT_OMBRE_MAX_RESULTS=$PERSONAL_AGENT_OMBRE_MAX_RESULTS_DEFAULT"
+    "?PERSONAL_AGENT_OMBRE_MAX_CHARS=$PERSONAL_AGENT_OMBRE_MAX_CHARS_DEFAULT"
+    "?PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED=$PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED_DEFAULT"
+    "?PERSONAL_AGENT_OMBRE_I_ENABLED=$PERSONAL_AGENT_OMBRE_I_ENABLED_DEFAULT"
+    "?PERSONAL_AGENT_OMBRE_WRITE_MODE=$PERSONAL_AGENT_OMBRE_WRITE_MODE_DEFAULT"
+  )
   upsert_env_file "$FULL_HOME/.env" \
     "HERMES_HOME=$FULL_HOME" \
     "HERMES_PROFILE=$FULL_PROFILE" \
@@ -257,6 +351,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${ombre_env[@]}" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$FULL_HOME/profiles/$FULL_PROFILE/.env" \
@@ -293,6 +388,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${ombre_env[@]}" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$LITE_HOME/.env" \
@@ -329,6 +425,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${ombre_env[@]}" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$LITE_HOME/profiles/$LITE_PROFILE/.env" \
@@ -365,6 +462,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${ombre_env[@]}" \
     "?OPENALEX_MAILTO="
 
   upsert_env_file "$NODE_ENV_FILE" \
@@ -441,7 +539,8 @@ write_runtime_env() {
     "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
-    "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT"
+    "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${ombre_env[@]}"
 
   upsert_env_file "$NODE_BRIDGE_ENV_FILE" \
     "HERMES_CONTEXT_CACHE_STRATEGY=$HERMES_CONTEXT_CACHE_STRATEGY_DEFAULT" \
@@ -459,7 +558,8 @@ write_runtime_env() {
     "SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000" \
     "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
-    "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT"
+    "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${ombre_env[@]}"
 }
 
 filter_obsidian_memory_from_config() {
@@ -479,10 +579,31 @@ filter_obsidian_memory_from_config() {
   rm -f "$tmp_filter"
 }
 
+filter_ombre_memory_from_config() {
+  local file="$1"
+  local tmp_filter
+  tmp_filter="$(mktemp)"
+  awk '
+    /^mcp_servers:/ { in_mcp=1 }
+    in_mcp && /^  ombre_memory:/ { skip=1; next }
+    in_mcp && /^  ombre_memory_extra:/ { skip=1; next }
+    in_mcp && skip && /^  [^ ]/ { skip=0 }
+    in_mcp && skip { next }
+    /^platform_toolsets:/ { in_pt=1 }
+    in_pt && /mcp-ombre_memory/ { next }
+    in_pt && /mcp-ombre_memory_extra/ { next }
+    { print }
+  ' "$file" >| "$tmp_filter"
+  "${SUDO[@]}" cp "$tmp_filter" "$file"
+  rm -f "$tmp_filter"
+}
+
 write_lite_runtime_config() {
   log "refreshing lite runtime config"
   "${SUDO[@]}" install -D -m 644 "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/config.yaml"
   "${SUDO[@]}" install -D -m 644 "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
+  filter_ombre_memory_from_config "$LITE_HOME/config.yaml"
+  filter_ombre_memory_from_config "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
   if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
     filter_obsidian_memory_from_config "$LITE_HOME/config.yaml"
     filter_obsidian_memory_from_config "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
@@ -569,6 +690,8 @@ platform_toolsets:
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
+    - mcp-ombre_memory
+    - mcp-ombre_memory_extra
     - mcp-playwright
   gateway:
     - web
@@ -587,6 +710,8 @@ platform_toolsets:
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
+    - mcp-ombre_memory
+    - mcp-ombre_memory_extra
     - mcp-playwright
 
 EOF
@@ -604,6 +729,9 @@ EOF
 
   if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
     filter_obsidian_memory_from_config "$tmp"
+  fi
+  if ! bool_is_true "$(effective_env_value OMBRE_BRAIN_MCP_ENABLED "$OMBRE_BRAIN_MCP_ENABLED_DEFAULT")"; then
+    filter_ombre_memory_from_config "$tmp"
   fi
 
   "${SUDO[@]}" install -D -m 644 "$tmp" "$runtime_config"
@@ -709,6 +837,31 @@ TimeoutStopSec=240
 WantedBy=multi-user.target
 EOF
 
+  write_file 0644 "$OMBRE_SERVICE" <<EOF
+[Unit]
+Description=Ran Agent Ombre Brain Memory Service (port $OMBRE_BRAIN_PORT_DEFAULT)
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=$RUNTIME_USER
+WorkingDirectory=/opt/ran_agent
+EnvironmentFile=-$NODE_ENV_FILE
+EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
+EnvironmentFile=-$HERMES_GLOBAL_ENV_FILE
+EnvironmentFile=-$FULL_HOME/.env
+EnvironmentFile=-$FULL_HOME/profiles/$FULL_PROFILE/.env
+Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
+ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec bash scripts/start_ombre_brain_service.sh'
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
   cleanup_stale_lite_dropins
 }
 
@@ -723,7 +876,17 @@ restart_services() {
   log "reloading systemd and restarting services"
   "${SUDO[@]}" systemctl daemon-reload
   sleep 1
-  "${SUDO[@]}" systemctl reset-failed ran-agent-hermes.service ran-agent-hermes-full.service || true
+  "${SUDO[@]}" systemctl reset-failed ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service || true
+  if bool_is_true "$(effective_env_value OMBRE_BRAIN_ENABLED "$OMBRE_BRAIN_ENABLED_DEFAULT")"; then
+    "${SUDO[@]}" systemctl enable ran-agent-ombre-brain.service >/dev/null 2>&1 || true
+    if "${SUDO[@]}" systemctl restart ran-agent-ombre-brain.service; then
+      log "Ombre Brain service restart requested"
+    else
+      log "WARNING: Ombre Brain service restart failed (non-blocking)"
+    fi
+  else
+    "${SUDO[@]}" systemctl disable --now ran-agent-ombre-brain.service >/dev/null 2>&1 || true
+  fi
   "${SUDO[@]}" systemctl restart ran-agent-hermes.service
   wait_for_gateway_port "$LITE_PORT" ran-agent-hermes.service || true
   "${SUDO[@]}" systemctl restart ran-agent-hermes-full.service
@@ -941,8 +1104,16 @@ verify_runtime() {
     echo "ERROR: .mcp.json does not register sticker_catalog" >&2
     exit 1
   fi
+  if ! grep -q '"ombre_memory"' "$REPO_ROOT/.mcp.json"; then
+    echo "ERROR: .mcp.json does not register ombre_memory" >&2
+    exit 1
+  fi
   if ! grep -q 'mcp-search_hub' "$REPO_ROOT/hermes/profile/config.yaml"; then
     echo "ERROR: full source profile missing mcp-search_hub" >&2
+    exit 1
+  fi
+  if ! grep -q 'mcp-ombre_memory' "$REPO_ROOT/hermes/profile/config.yaml"; then
+    echo "ERROR: full source profile missing mcp-ombre_memory" >&2
     exit 1
   fi
   if ! grep -q 'mcp-sticker_catalog' "$REPO_ROOT/hermes/profile/config.yaml"; then
@@ -989,6 +1160,10 @@ verify_runtime() {
     echo "ERROR: lite runtime toolset exposes mcp-media_generation" >&2
     exit 1
   fi
+  if config_has_toolset "$LITE_HOME/config.yaml" 'mcp-ombre_memory'; then
+    echo "ERROR: lite runtime toolset exposes mcp-ombre_memory" >&2
+    exit 1
+  fi
   if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-search_hub'; then
     echo "ERROR: full runtime toolset missing mcp-search_hub" >&2
     exit 1
@@ -1008,6 +1183,16 @@ verify_runtime() {
   if ! test -x "$REPO_ROOT/scripts/start_sticker_catalog_mcp.sh"; then
     echo "ERROR: scripts/start_sticker_catalog_mcp.sh missing or not executable" >&2
     exit 1
+  fi
+  if bool_is_true "$(effective_env_value OMBRE_BRAIN_MCP_ENABLED "$OMBRE_BRAIN_MCP_ENABLED_DEFAULT")"; then
+    if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-ombre_memory'; then
+      echo "ERROR: full runtime toolset missing mcp-ombre_memory while OMBRE_BRAIN_MCP_ENABLED=true" >&2
+      exit 1
+    fi
+    if ! grep -q '^  ombre_memory:' "$FULL_HOME/config.yaml"; then
+      echo "ERROR: full runtime config missing ombre_memory MCP server while OMBRE_BRAIN_MCP_ENABLED=true" >&2
+      exit 1
+    fi
   fi
 
   log "verifying obsidian_memory MCP config"
@@ -1063,6 +1248,15 @@ main() {
   write_full_runtime_config
   write_runtime_env
   write_systemd_units
+
+  if bool_is_true "$(effective_env_value OMBRE_BRAIN_ENABLED "$OMBRE_BRAIN_ENABLED_DEFAULT")"; then
+    log "preparing Ombre Brain runtime"
+    if bash "$REPO_ROOT/scripts/prepare-ombre-brain.sh" 2>&1; then
+      log "Ombre Brain runtime prepared"
+    else
+      log "WARNING: Ombre Brain preparation failed (non-blocking)"
+    fi
+  fi
 
   # Prepare XHS generic fallback tool (non-blocking, before restart)
   if [ "${SOCIAL_READER_GENERIC_FALLBACK_ENABLED:-true}" != "false" ]; then

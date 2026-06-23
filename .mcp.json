@@ -51,6 +51,12 @@
         "scripts/start_personal_memory_mcp.sh"
       ]
     },
+    "ombre_memory": {
+      "url": "${OMBRE_BRAIN_MCP_URL}"
+    },
+    "ombre_memory_extra": {
+      "url": "${OMBRE_BRAIN_MCP_EXTRA_URL}"
+    },
     "search_hub": {
       "command": "bash",
       "args": [

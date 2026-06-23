@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-06-23)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -52,6 +52,7 @@ Python backend
 - Standard deploy/drift repair: `bash scripts/apply-hermes-runtime-split.sh`.
 - Standard lite/full diagnosis: `bash scripts/diagnose-lite-full.sh`.
 - Search Hub diagnosis: `bash scripts/diagnose-search-hub.sh`.
+- Ombre Brain diagnosis: `bash scripts/diagnose-ombre-memory.sh`.
 - Continuity diagnosis: `bash scripts/diagnose-hermes-continuity.sh`.
 - Multi-frontend diagnosis: `bash scripts/diagnose-multi-frontend.sh`.
 - Tool visibility diagnosis: `bash scripts/diagnose-hermes-tools.sh`.
@@ -91,6 +92,13 @@ Current shared non-secret keys include:
 - `UV_LINK_MODE=copy`
 - `UV_PYTHON_DOWNLOADS=never`
 - `WEIXIN_SDK_INBOUND_MEDIA_DIRS=/tmp/weixin-agent/media/inbound`
+- `OMBRE_BRAIN_ENABLED=true`
+- `OMBRE_BRAIN_MCP_ENABLED=true`
+- `OMBRE_BRAIN_REPO_URL=https://github.com/P0luz/Ombre-Brain`
+- `OMBRE_BRAIN_HOME=/opt/ran_agent/.ran_agent_state/ombre-brain`
+- `OMBRE_BUCKETS_DIR=/opt/ran_agent/vault/ombre`
+- `OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp`
+- `OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra`
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
 `scripts/clean-uv-cache-safe.sh` for cleanup and do not delete social-reader
@@ -113,6 +121,7 @@ media directories so redeploys do not depend on manual `mkdir`.
 | `sticker_catalog` | Local sticker picker/attach/save catalog; lite uses public pick/attach, full may use owner-only management |
 | `personal_memory` | Personal memory recall and backend health check |
 | `obsidian_memory` | Optional Obsidian vault search, disabled by default |
+| `ombre_memory` / `ombre_memory_extra` | Optional upstream Ombre Brain direct MCP, full-profile memory/debug surface |
 | `media_generation` | Image and speech generation |
 | `playwright` | Dynamic/visual web pages, full/debug use |
 
@@ -124,6 +133,12 @@ media directories so redeploys do not depend on manual `mkdir`.
   save/update/delete/list actions are for explicit full-profile owner requests.
   Assets stay in `.ran_agent_state/stickers/`, and `RAN_MEDIA` carries only
   `stickerId`. Details: `docs/governance/sticker-catalog.md`.
+- Ombre Brain uses the canonical upstream
+  `https://github.com/P0luz/Ombre-Brain`. The deploy script prepares its local
+  Docker runtime under `.ran_agent_state/ombre-brain/`, keeps buckets in private
+  `vault/ombre/`, and exposes direct `/mcp` plus `/mcp-extra` tools to full when
+  `OMBRE_BRAIN_MCP_ENABLED=true`. Lite keeps using `personal_memory` as the
+  small memory surface and must not directly expose `mcp-ombre_memory`.
 - Co Reading is not exposed in the lite daily conversation toolset to keep the
   default prompt smaller. The MCP remains available in the full profile, while
   the Web reader remains available independently. Chunk text lives under

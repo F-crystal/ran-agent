@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-06-23)
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 
@@ -144,6 +144,7 @@ ran-agent 使用仓库内 MCP 服务：
 | `mimo_power` | 已退役：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles |
 | `personal_memory` | Python backend 个人记忆召回 |
 | `obsidian_memory` | Obsidian vault 语义检索 |
+| `ombre_memory`, `ombre_memory_extra` | 上游 Ombre Brain 直接 MCP，full profile 调试/记忆维护用 |
 | `media_generation` | 图片和语音生成，full 默认可用 |
 | `playwright` | 浏览器自动化，full 默认可用 |
 | `tavily` | 可选底层网页搜索 provider，仅供 Search Hub 兼容使用 |
@@ -172,6 +173,10 @@ ran-agent 使用仓库内 MCP 服务：
 | `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB 路径 |
 | `OBSIDIAN_INDEX_DEVICE` | Linux 服务器默认 `cpu` |
 | `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | 只在显式维护时设为 `1` |
+| `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Ombre Brain 服务和 full-profile direct MCP 开关 |
+| `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream，默认 `https://github.com/P0luz/Ombre-Brain` |
+| `OMBRE_BRAIN_HOME`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime 和私有 buckets 路径 |
+| `OMBRE_BRAIN_MCP_URL`, `OMBRE_BRAIN_MCP_EXTRA_URL` | full profile 直接连接的 Ombre MCP 端点 |
 
 Secrets 必须放在机器本地 `.env`，例如：
 
@@ -230,6 +235,7 @@ hermes -p ran-assistant gateway run --replace --accept-hooks
 bash scripts/diagnose-hermes-tools.sh
 bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-search-hub.sh
+bash scripts/diagnose-ombre-memory.sh
 ```
 
 服务器完整 runbook 见 `docs/governance/server_runtime_commands.md`。

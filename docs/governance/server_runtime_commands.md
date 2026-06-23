@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-06-23)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -14,6 +14,8 @@ manual systemd or env edits.
   `bash scripts/diagnose-lite-full.sh`
 - Diagnose Search Hub:
   `bash scripts/diagnose-search-hub.sh`
+- Diagnose Ombre Brain:
+  `bash scripts/diagnose-ombre-memory.sh`
 - Diagnose Hermes continuity:
   `bash scripts/diagnose-hermes-continuity.sh`
 - Diagnose multi-frontend routing:
@@ -28,7 +30,18 @@ manual systemd or env edits.
 Do not publish one-off pasteable repair blocks in this file. If a repeated
 operation is needed, turn it into a script and reference it here.
 
+Agents changing or operating server runtime should first load
+`skills/server-runtime/SKILL.md`. That skill owns the virtualenv activation
+reminder and the env-preserving deploy rules.
+
 ## Standard Deploy
+
+Hermes configuration prerequisites:
+
+- Run from the server checkout at `/opt/ran_agent`.
+- Activate `/opt/ran_agent/.venv` before deploy or diagnostic commands.
+- Use `scripts/apply-hermes-runtime-split.sh` as the unified Hermes runtime
+  configuration script; do not hand-edit systemd or env as the normal path.
 
 Run from the server checkout:
 
@@ -38,6 +51,7 @@ source /opt/ran_agent/.venv/bin/activate
 git pull --ff-only
 bash scripts/apply-hermes-runtime-split.sh
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-ombre-memory.sh
 ```
 
 `apply-hermes-runtime-split.sh` owns:
@@ -54,6 +68,9 @@ bash scripts/diagnose-lite-full.sh
 - XHS generic fallback marker path:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
 - Non-blocking XHS generic fallback preparation before service restart.
+- Ombre Brain runtime preparation under
+  `/opt/ran_agent/.ran_agent_state/ombre-brain` and private buckets under
+  `/opt/ran_agent/vault/ombre`.
 - Restart and verification.
 
 For the Hermes cache-friendly context package, the same deploy command writes
@@ -92,6 +109,7 @@ bash scripts/apply-hermes-runtime-split.sh
 |---------|------|---------|------|---------|
 | `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | Daily lite-context entry |
 | `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | Full debug/heavy-tool entry |
+| `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Optional upstream Ombre Brain memory service |
 
 `8642` is a lite-context entry, not a security sandbox. Node bridge routes
 normal chat, XHS, media, and memory requests to lite by default, and routes
@@ -131,6 +149,13 @@ UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
 UV_LINK_MODE=copy
 UV_PYTHON_DOWNLOADS=never
 OBSIDIAN_MEMORY_MCP_ENABLED=false
+OMBRE_BRAIN_ENABLED=true
+OMBRE_BRAIN_MCP_ENABLED=true
+OMBRE_BRAIN_REPO_URL=https://github.com/P0luz/Ombre-Brain
+OMBRE_BRAIN_HOME=/opt/ran_agent/.ran_agent_state/ombre-brain
+OMBRE_BUCKETS_DIR=/opt/ran_agent/vault/ombre
+OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
+OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra
 AI_DAILY_DIGEST_ENABLED=false
 AI_DAILY_DIGEST_HOUR=10
 AI_DAILY_DIGEST_MINUTE=0
@@ -151,6 +176,7 @@ docs, logs, tool output, or Git.
 cd /opt/ran_agent
 bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-search-hub.sh
+bash scripts/diagnose-ombre-memory.sh
 bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-multi-frontend.sh
 bash scripts/diagnose-hermes-tools.sh

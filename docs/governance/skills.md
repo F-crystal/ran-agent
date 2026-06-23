@@ -1,6 +1,6 @@
 # Skills Map
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-06-23)
 
 ## Active Skills (On-Demand)
 
@@ -17,6 +17,7 @@ Status: CURRENT (2026-05-22)
 - `context-compact`
 - `aihot`
 - `doc-governance`
+- `server-runtime`
 
 ## Loading Rule
 
@@ -25,6 +26,8 @@ Status: CURRENT (2026-05-22)
 - Heavy/background operations should be delegated via sub-agent candidates only.
 - GitHub commit/push/archive requests must use `archive-and-push` so staging,
   commit, and push stay consistent and runtime/private files remain excluded.
+- Server deployment, runtime drift, lite/full, systemd/env, MCP exposure, and
+  one-command rollout requests must use `server-runtime`.
 
 ## Skill Sources
 
@@ -41,3 +44,4 @@ Status: CURRENT (2026-05-22)
 - `skills/context-compact/SKILL.md`
 - `skills/aihot/SKILL.md`
 - `skills/doc-governance/SKILL.md`
+- `skills/server-runtime/SKILL.md`

@@ -34,6 +34,8 @@ platform_toolsets:
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
+    - mcp-ombre_memory
+    - mcp-ombre_memory_extra
     - mcp-playwright
   gateway:
     - web
@@ -52,6 +54,8 @@ platform_toolsets:
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
+    - mcp-ombre_memory
+    - mcp-ombre_memory_extra
     - mcp-playwright
 
 mcp_servers:
@@ -115,6 +119,16 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh
     timeout: 120
     connect_timeout: 60
+
+  ombre_memory:
+    url: "${OMBRE_BRAIN_MCP_URL}"
+    timeout: 120
+    connect_timeout: 30
+
+  ombre_memory_extra:
+    url: "${OMBRE_BRAIN_MCP_EXTRA_URL}"
+    timeout: 120
+    connect_timeout: 30
 
   search_hub:
     command: bash

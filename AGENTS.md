@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-06-23)
 
 ## Scope
 
@@ -41,6 +41,7 @@ Specialist capabilities must stay skillized and loaded on demand:
 - `skills/aihot/SKILL.md`
 - `skills/code-simplifier/SKILL.md`
 - `skills/doc-governance/SKILL.md`
+- `skills/server-runtime/SKILL.md`
 
 Do not keep all specialist context always loaded in every turn.
 

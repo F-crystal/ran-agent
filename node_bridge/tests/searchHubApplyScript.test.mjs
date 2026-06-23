@@ -143,6 +143,8 @@ test('apply script creates runtime trusted media directories', () => {
     'export RAN_AGENT_NO_SUDO=1',
     `export RAN_AGENT_DEPLOY_STATE_DIR=${JSON.stringify(stateDir)}`,
     `export RAN_AGENT_DEPLOY_DEBUG_DIR=${JSON.stringify(debugDir)}`,
+    `export RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME=${JSON.stringify(join(stateDir, 'ombre-brain'))}`,
+    `export RAN_AGENT_DEPLOY_OMBRE_BUCKETS_DIR=${JSON.stringify(join(stateDir, 'ombre-buckets'))}`,
     'source scripts/apply-hermes-runtime-split.sh',
     'ensure_runtime_dirs',
   ].join('\n')], {
@@ -465,6 +467,142 @@ test('apply script filter_obsidian_memory_from_config preserves other MCP server
   assert.match(text, /mcp-media_generation/);
   assert.match(text, /mcp-personal_memory/);
   assert.match(text, /  personal_memory:/);
+});
+
+test('apply script preserves existing Ombre env values when using optional upsert', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-env-upsert-'));
+  const envFile = join(dir, '.env');
+  writeFileSync(envFile, [
+    'OMBRE_BRAIN_ENABLED=false',
+    'OMBRE_BRAIN_PORT=19999',
+    'OMBRE_BRAIN_REPO_URL=https://github.com/P0luz/Ombre-Brain',
+  ].join('\n'));
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    'source scripts/apply-hermes-runtime-split.sh',
+    [
+      'upsert_env_file',
+      JSON.stringify(envFile),
+      '"?OMBRE_BRAIN_ENABLED=$OMBRE_BRAIN_ENABLED_DEFAULT"',
+      '"?OMBRE_BRAIN_PORT=$OMBRE_BRAIN_PORT_DEFAULT"',
+      '"?OMBRE_BRAIN_MCP_URL=$OMBRE_BRAIN_MCP_URL_DEFAULT"',
+      '"?PERSONAL_AGENT_OMBRE_MAX_CHARS=$PERSONAL_AGENT_OMBRE_MAX_CHARS_DEFAULT"',
+    ].join(' '),
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const text = readFileSync(envFile, 'utf8');
+  assert.match(text, /OMBRE_BRAIN_ENABLED=false/);
+  assert.match(text, /OMBRE_BRAIN_PORT=19999/);
+  assert.match(text, /OMBRE_BRAIN_MCP_URL=http:\/\/127\.0\.0\.1:18001\/mcp/);
+  assert.match(text, /PERSONAL_AGENT_OMBRE_MAX_CHARS=900/);
+  assert.doesNotMatch(text, /OMBRE_BRAIN_PORT=18001/);
+});
+
+test('apply script filter_ombre_memory_from_config removes direct Ombre MCP from toolsets and servers', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-filter-'));
+  const configFile = join(dir, 'config.yaml');
+  writeFileSync(configFile, [
+    'platform_toolsets:',
+    '  cli:',
+    '    - mcp-search_hub',
+    '    - mcp-ombre_memory',
+    '    - mcp-ombre_memory_extra',
+    '    - mcp-playwright',
+    '',
+    'mcp_servers:',
+    '  search_hub:',
+    '    command: bash',
+    '  ombre_memory:',
+    '    url: "${OMBRE_BRAIN_MCP_URL}"',
+    '    timeout: 120',
+    '  ombre_memory_extra:',
+    '    url: "${OMBRE_BRAIN_MCP_EXTRA_URL}"',
+    '    timeout: 120',
+    '  playwright:',
+    '    command: bash',
+  ].join('\n'));
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    'source scripts/apply-hermes-runtime-split.sh',
+    `filter_ombre_memory_from_config ${JSON.stringify(configFile)}`,
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const text = readFileSync(configFile, 'utf8');
+  assert.doesNotMatch(text, /mcp-ombre_memory/);
+  assert.doesNotMatch(text, /ombre_memory:/);
+  assert.doesNotMatch(text, /ombre_memory_extra:/);
+  assert.match(text, /mcp-search_hub/);
+  assert.match(text, /mcp-playwright/);
+  assert.match(text, /search_hub:/);
+  assert.match(text, /playwright:/);
+});
+
+test('apply script writes Ombre systemd unit without hard-coded Ombre env overrides', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-systemd-'));
+  const systemdDir = join(dir, 'systemd');
+  mkdirSync(systemdDir, { recursive: true });
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    `export SYSTEMD_DIR=${JSON.stringify(systemdDir)}`,
+    'source scripts/apply-hermes-runtime-split.sh',
+    'write_systemd_units',
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const unit = readFileSync(join(systemdDir, 'ran-agent-ombre-brain.service'), 'utf8');
+  assert.match(unit, /Description=Ran Agent Ombre Brain Memory Service/);
+  assert.match(unit, /EnvironmentFile=-\/opt\/ran_agent\/\.env\.local/);
+  assert.match(unit, /source \/opt\/ran_agent\/\.venv\/bin\/activate/);
+  assert.match(unit, /scripts\/start_ombre_brain_service\.sh/);
+  assert.doesNotMatch(unit, /^Environment=OMBRE_BRAIN_PORT=/m);
+  assert.doesNotMatch(unit, /^Environment=OMBRE_BUCKETS_DIR=/m);
+});
+
+test('prepare-ombre-brain.sh creates compose and config without secrets', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-prepare-'));
+  const rootDir = join(dir, 'repo');
+  const homeDir = join(dir, 'ombre-home');
+  const bucketsDir = join(dir, 'vault', 'ombre');
+  mkdirSync(rootDir, { recursive: true });
+
+  execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env: {
+      ...process.env,
+      RAN_AGENT_REPO_ROOT: rootDir,
+      OMBRE_BRAIN_HOME: homeDir,
+      OMBRE_BUCKETS_DIR: bucketsDir,
+      OMBRE_COMPRESS_API_KEY: 'must-not-be-written',
+      OMBRE_DASHBOARD_PASSWORD: 'must-not-be-written',
+    },
+    stdio: 'pipe',
+  });
+
+  const compose = readFileSync(join(homeDir, 'docker-compose.yml'), 'utf8');
+  const config = readFileSync(join(homeDir, 'config.yaml'), 'utf8');
+  const upstream = readFileSync(join(homeDir, 'upstream_url.txt'), 'utf8');
+
+  assert.match(compose, /p0luz\/ombre-brain:latest/);
+  assert.match(compose, /127\.0\.0\.1/);
+  assert.match(compose, /\$\{OMBRE_COMPRESS_API_KEY:-\}/);
+  assert.doesNotMatch(compose, /must-not-be-written/);
+  assert.match(config, /transport: "streamable-http"/);
+  assert.match(config, /buckets_dir: "\/app\/buckets"/);
+  assert.match(upstream, /https:\/\/github\.com\/P0luz\/Ombre-Brain/);
 });
 
 test('start_obsidian_memory_mcp.sh does not contain uv tool install --force', () => {

@@ -29,6 +29,10 @@ mcp_servers:
   personal_memory:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh']
+  ombre_memory:
+    url: "${OMBRE_BRAIN_MCP_URL}"
+  ombre_memory_extra:
+    url: "${OMBRE_BRAIN_MCP_EXTRA_URL}"
   co_reading:
     command: bash
     args: [-lc, 'cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_co_reading_mcp.sh']

@@ -1,6 +1,6 @@
 # Ombre Memory Skill
 
-Status: ACTIVE (2026-04-14)
+Status: ACTIVE (2026-06-23)
 
 ## Overview
 
@@ -10,6 +10,8 @@ Ombre Brain is an emotional memory system that gives the agent persistent, emoti
 - Applying a modified Ebbinghaus forgetting curve
 - Actively surfacing unresolved or emotionally intense memories
 - Storing memories as Obsidian-compatible Markdown files
+
+Canonical upstream for live feature checks: [P0luz/Ombre-Brain](https://github.com/P0luz/Ombre-Brain). Do not substitute similarly named forks or older links when assessing current Ombre Brain features. This repo's local `ombre_brain_mcp.py` is a lightweight project adapter and may expose only a subset of upstream tools.
 
 ## Architecture
 
@@ -132,6 +134,12 @@ echo '{"candidate": {"content": "...", "weight": 0.8}, "layer": "long"}' | pytho
 | `OMBRE_VAULT_LEGACY_PATH` | `.ran_agent_state/ombre_vault` | Legacy vault path kept as read fallback during migration |
 | `OMBRE_VAULT_FALLBACK_PATHS` | `.ran_agent_state/ombre_vault` | Extra fallback vault paths, separated by `:` |
 
+When wiring upstream Ombre Brain into server deployment, also load
+`skills/server-runtime/SKILL.md`. New Ombre env defaults should reuse existing
+server values by default (`?KEY=value` in `apply-hermes-runtime-split.sh`) and
+only overwrite through explicit `RAN_AGENT_DEPLOY_*` overrides or canonical
+safety/routing contracts.
+
 ### Memory Storage Format
 
 Each memory is stored as an Obsidian-compatible Markdown file:
@@ -198,6 +206,7 @@ When storing without explicit emotions:
 
 ## References
 
+- [Ombre Brain canonical GitHub repository](https://github.com/P0luz/Ombre-Brain)
 - [Ombre Brain on MCP Market](https://mcpmarket.com/zh/server/ombre-brain)
 - Russell, J.A. (1980). A circumplex model of affect
 - Ebbinghaus forgetting curve
