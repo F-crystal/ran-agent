@@ -174,9 +174,11 @@ ran-agent 使用仓库内 MCP 服务：
 | `OBSIDIAN_INDEX_DEVICE` | Linux 服务器默认 `cpu` |
 | `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | 只在显式维护时设为 `1` |
 | `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Ombre Brain 服务和 full-profile direct MCP 开关 |
+| `OMBRE_BRAIN_RUNNER` | Ombre Brain runner，默认 `source`；`docker` 只是可选 |
 | `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream，默认 `https://github.com/P0luz/Ombre-Brain` |
-| `OMBRE_BRAIN_HOME`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime 和私有 buckets 路径 |
+| `OMBRE_BRAIN_HOME`, `OMBRE_BRAIN_SOURCE_DIR`, `OMBRE_BRAIN_VENV`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime、source checkout、venv 和私有 buckets 路径 |
 | `OMBRE_BRAIN_MCP_URL`, `OMBRE_BRAIN_MCP_EXTRA_URL` | full profile 直接连接的 Ombre MCP 端点 |
+| `PERSONAL_AGENT_OMBRE_BACKEND` | Python `personal_memory` 底层 Ombre 后端，默认 `official_with_legacy_fallback` |
 
 Secrets 必须放在机器本地 `.env`，例如：
 

@@ -9,6 +9,8 @@ import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
 from personal_agent.config import AppConfig
 from personal_agent.memory_types import MemoryStoreDecision, OmbreMemoryBackend
@@ -102,18 +104,182 @@ class OmbreMCPClient:
         return OmbreCallResult(ok=True, payload=response_payload)
 
 
+class OfficialOmbreHTTPClient:
+    """Small JSON-RPC over streamable-HTTP client for upstream Ombre Brain."""
+
+    def __init__(self, config: AppConfig, logger: logging.Logger) -> None:
+        self._mcp_url = config.ombre_mcp_url.strip()
+        self._mcp_extra_url = config.ombre_mcp_extra_url.strip()
+        self._timeout_seconds = config.ombre_mcp_timeout_seconds
+        self._logger = logger
+
+    @property
+    def available(self) -> bool:
+        return bool(self._mcp_url)
+
+    def _endpoint_for_action(self, action: str) -> str:
+        if action in {"anchor", "release", "pulse", "plan", "letter_write", "letter_read"}:
+            return self._mcp_extra_url or self._mcp_url
+        return self._mcp_url
+
+    def call(self, action: str, payload: dict[str, object]) -> OmbreCallResult:
+        endpoint = self._endpoint_for_action(action)
+        if not endpoint:
+            return OmbreCallResult(ok=False, payload={})
+        request_payload = {
+            "jsonrpc": "2.0",
+            "id": f"ran-agent-{action}",
+            "method": "tools/call",
+            "params": {
+                "name": action,
+                "arguments": payload,
+            },
+        }
+        request = Request(
+            endpoint,
+            data=json.dumps(request_payload, ensure_ascii=False).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/event-stream",
+            },
+            method="POST",
+        )
+        try:
+            with urlopen(request, timeout=self._timeout_seconds) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+        except (OSError, URLError):
+            self._logger.info("official ombre http call failed action=%s endpoint=%s", action, endpoint)
+            return OmbreCallResult(ok=False, payload={})
+
+        payloads = self._parse_response_payloads(raw)
+        if not payloads:
+            self._logger.info("official ombre http returned empty response action=%s", action)
+            return OmbreCallResult(ok=False, payload={})
+        return OmbreCallResult(ok=True, payload=self._merge_payloads(payloads))
+
+    @staticmethod
+    def _parse_response_payloads(raw: str) -> list[dict[str, object]]:
+        raw = raw.strip()
+        if not raw:
+            return []
+        chunks: list[str] = []
+        if raw.startswith("data:") or "\ndata:" in raw:
+            for line in raw.splitlines():
+                line = line.strip()
+                if line.startswith("data:"):
+                    data = line[5:].strip()
+                    if data and data != "[DONE]":
+                        chunks.append(data)
+        else:
+            chunks.append(raw)
+
+        parsed: list[dict[str, object]] = []
+        for chunk in chunks:
+            try:
+                value = json.loads(chunk)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(value, dict):
+                parsed.append(value)
+        return parsed
+
+    @classmethod
+    def _merge_payloads(cls, payloads: list[dict[str, object]]) -> dict[str, object]:
+        merged_items: list[object] = []
+        last_payload: dict[str, object] = payloads[-1]
+        for payload in payloads:
+            extracted = cls._extract_items_from_json_rpc(payload)
+            merged_items.extend(extracted)
+        if merged_items:
+            return {"items": merged_items}
+        return last_payload
+
+    @staticmethod
+    def _extract_items_from_json_rpc(payload: dict[str, object]) -> list[object]:
+        result = payload.get("result", payload)
+        if not isinstance(result, dict):
+            return []
+        for key in ("items", "memories", "results"):
+            value = result.get(key)
+            if isinstance(value, list):
+                return value
+        structured = result.get("structuredContent")
+        if isinstance(structured, dict):
+            for key in ("items", "memories", "results"):
+                value = structured.get(key)
+                if isinstance(value, list):
+                    return value
+        content = result.get("content")
+        if not isinstance(content, list):
+            return []
+        items: list[object] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            text = part.get("text")
+            if not isinstance(text, str) or not text.strip():
+                continue
+            try:
+                inner = json.loads(text)
+            except json.JSONDecodeError:
+                items.append(text.strip())
+                continue
+            if isinstance(inner, dict):
+                for key in ("items", "memories", "results"):
+                    value = inner.get(key)
+                    if isinstance(value, list):
+                        items.extend(value)
+                        break
+                else:
+                    items.append(inner)
+            elif isinstance(inner, list):
+                items.extend(inner)
+            else:
+                items.append(str(inner).strip())
+        return items
+
+
 class OmbreMCPMemoryBackend(OmbreMemoryBackend):
     """Memory-specialist backend that talks to Ombre Brain over MCP."""
 
     def __init__(self, config: AppConfig, logger: logging.Logger) -> None:
+        self._backend_mode = config.ombre_backend.strip().lower()
         self._client = OmbreMCPClient(config, logger)
+        self._official_client = OfficialOmbreHTTPClient(config, logger)
         self._logger = logger
 
     def recall(self, *, user_text: str, response_mode: str) -> tuple[str, ...]:
+        if self._backend_mode in {"official", "official_with_legacy_fallback", "auto"}:
+            official = self._recall_with_client(
+                self._official_client,
+                user_text=user_text,
+                response_mode=response_mode,
+                actions=("breath", "trace", "pulse", "anchor"),
+                source="official_ombre",
+            )
+            if official or self._backend_mode == "official":
+                return official
+        return self._recall_with_client(
+            self._client,
+            user_text=user_text,
+            response_mode=response_mode,
+            actions=("breath", "trace", "pulse"),
+            source="legacy_ombre",
+        )
+
+    def _recall_with_client(
+        self,
+        client,
+        *,
+        user_text: str,
+        response_mode: str,
+        actions: tuple[str, ...],
+        source: str,
+    ) -> tuple[str, ...]:
         snippets: list[str] = []
-        for action in ("breath", "trace", "pulse"):
+        for action in actions:
             started_monotonic = time.monotonic()
-            result = self._client.call(
+            result = client.call(
                 action,
                 {
                     "user_text": user_text,
@@ -123,9 +289,10 @@ class OmbreMCPMemoryBackend(OmbreMemoryBackend):
             duration_seconds = time.monotonic() - started_monotonic
             if not result.ok:
                 self._logger.info(
-                    "ombre recall action=%s ok=%s items=%d duration_seconds=%.3f error=%s",
+                    "ombre recall action=%s ok=%s source=%s items=%d duration_seconds=%.3f error=%s",
                     action,
                     result.ok,
+                    source,
                     0,
                     duration_seconds,
                     "call_not_ok",
@@ -140,13 +307,14 @@ class OmbreMCPMemoryBackend(OmbreMemoryBackend):
                 raw_items = []
             if isinstance(raw_items, list):
                 for item in raw_items:
-                    text = self._client._render_item(item)
+                    text = OmbreMCPClient._render_item(item)
                     if text:
                         snippets.append(text)
             self._logger.info(
-                "ombre recall action=%s ok=%s items=%d duration_seconds=%.3f error=%s",
+                "ombre recall action=%s ok=%s source=%s items=%d duration_seconds=%.3f error=%s",
                 action,
                 result.ok,
+                source,
                 len(raw_items) if isinstance(raw_items, list) else 0,
                 duration_seconds,
                 "",
@@ -161,7 +329,7 @@ class OmbreMCPMemoryBackend(OmbreMemoryBackend):
         return tuple(deduped[:5])
 
     def store_long_term(self, candidate: dict[str, object]) -> MemoryStoreDecision:
-        result = self._client.call("hold", {"candidate": candidate, "layer": "long"})
+        result = self._store_with_preferred_client("hold", {"candidate": candidate, "layer": "long"})
         if result.ok and result.payload.get("stored") is True:
             return MemoryStoreDecision(
                 action="stored_ombre_long",
@@ -171,7 +339,7 @@ class OmbreMCPMemoryBackend(OmbreMemoryBackend):
         return MemoryStoreDecision(action="skip", candidate=candidate, source="ombre_mcp")
 
     def store_core(self, candidate: dict[str, object]) -> MemoryStoreDecision:
-        result = self._client.call("grow", {"candidate": candidate, "layer": "core"})
+        result = self._store_with_preferred_client("grow", {"candidate": candidate, "layer": "core"})
         if result.ok and result.payload.get("stored") is True:
             return MemoryStoreDecision(
                 action="stored_ombre_core",
@@ -179,3 +347,10 @@ class OmbreMCPMemoryBackend(OmbreMemoryBackend):
                 source="ombre_mcp",
             )
         return MemoryStoreDecision(action="skip", candidate=candidate, source="ombre_mcp")
+
+    def _store_with_preferred_client(self, action: str, payload: dict[str, object]) -> OmbreCallResult:
+        if self._backend_mode in {"official", "official_with_legacy_fallback", "auto"}:
+            result = self._official_client.call(action, payload)
+            if result.ok or self._backend_mode == "official":
+                return result
+        return self._client.call(action, payload)

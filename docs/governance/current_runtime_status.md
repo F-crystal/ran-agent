@@ -94,11 +94,15 @@ Current shared non-secret keys include:
 - `WEIXIN_SDK_INBOUND_MEDIA_DIRS=/tmp/weixin-agent/media/inbound`
 - `OMBRE_BRAIN_ENABLED=true`
 - `OMBRE_BRAIN_MCP_ENABLED=true`
+- `OMBRE_BRAIN_RUNNER=source`
 - `OMBRE_BRAIN_REPO_URL=https://github.com/P0luz/Ombre-Brain`
 - `OMBRE_BRAIN_HOME=/opt/ran_agent/.ran_agent_state/ombre-brain`
+- `OMBRE_BRAIN_SOURCE_DIR=/opt/ran_agent/.ran_agent_state/ombre-brain/upstream`
+- `OMBRE_BRAIN_VENV=/opt/ran_agent/.ran_agent_state/ombre-brain/.venv`
 - `OMBRE_BUCKETS_DIR=/opt/ran_agent/vault/ombre`
 - `OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp`
 - `OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra`
+- `PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback`
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
 `scripts/clean-uv-cache-safe.sh` for cleanup and do not delete social-reader
@@ -135,10 +139,13 @@ media directories so redeploys do not depend on manual `mkdir`.
   `stickerId`. Details: `docs/governance/sticker-catalog.md`.
 - Ombre Brain uses the canonical upstream
   `https://github.com/P0luz/Ombre-Brain`. The deploy script prepares its local
-  Docker runtime under `.ran_agent_state/ombre-brain/`, keeps buckets in private
-  `vault/ombre/`, and exposes direct `/mcp` plus `/mcp-extra` tools to full when
-  `OMBRE_BRAIN_MCP_ENABLED=true`. Lite keeps using `personal_memory` as the
-  small memory surface and must not directly expose `mcp-ombre_memory`.
+  source runner under `.ran_agent_state/ombre-brain/upstream`, keeps buckets in
+  private `vault/ombre/`, and makes Python `personal_memory` use upstream Ombre
+  first with the repo-local shim as fallback. Direct `/mcp` plus `/mcp-extra`
+  tools are exposed to full only when the runner is available and
+  `OMBRE_BRAIN_MCP_ENABLED=true`. Lite keeps using `personal_memory` as the small
+  memory surface and must not directly expose `mcp-ombre_memory`. Docker is an
+  optional runner, not a Hermes prerequisite.
 - Co Reading is not exposed in the lite daily conversation toolset to keep the
   default prompt smaller. The MCP remains available in the full profile, while
   the Web reader remains available independently. Chunk text lives under

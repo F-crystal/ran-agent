@@ -6,8 +6,10 @@ set -euo pipefail
 ROOT_DIR="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="${HERMES_LITE_HOME:-$HERMES_HOME/lite}"
+FULL_HOME="$HERMES_HOME"
+LITE_HOME="$LITE_HOME"
 
-for env_file in "$ROOT_DIR/.env.local" "$ROOT_DIR/node_bridge/.env.local" "$HERMES_HOME/.env" "$LITE_HOME/.env"; do
+for env_file in "$ROOT_DIR/.env.local" "$ROOT_DIR/node_bridge/.env.local" "$FULL_HOME/.env" "$LITE_HOME/.env"; do
   if [ -f "$env_file" ]; then
     set -a
     # shellcheck disable=SC1090
@@ -15,11 +17,16 @@ for env_file in "$ROOT_DIR/.env.local" "$ROOT_DIR/node_bridge/.env.local" "$HERM
     set +a
   fi
 done
+HERMES_HOME="$FULL_HOME"
+HERMES_LITE_HOME="$LITE_HOME"
 
 OMBRE_BRAIN_REPO_URL="${OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Brain}"
 OMBRE_BRAIN_ENABLED="${OMBRE_BRAIN_ENABLED:-true}"
 OMBRE_BRAIN_MCP_ENABLED="${OMBRE_BRAIN_MCP_ENABLED:-true}"
+OMBRE_BRAIN_RUNNER="${OMBRE_BRAIN_RUNNER:-source}"
 OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$ROOT_DIR/.ran_agent_state/ombre-brain}"
+OMBRE_BRAIN_SOURCE_DIR="${OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME/upstream}"
+OMBRE_BRAIN_VENV="${OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME/.venv}"
 OMBRE_BUCKETS_DIR="${OMBRE_BUCKETS_DIR:-$ROOT_DIR/vault/ombre}"
 OMBRE_BRAIN_BIND_HOST="${OMBRE_BRAIN_BIND_HOST:-127.0.0.1}"
 OMBRE_BRAIN_PORT="${OMBRE_BRAIN_PORT:-18001}"
@@ -51,7 +58,10 @@ echo "=== Ombre Brain runtime ==="
 echo "repo_url: $OMBRE_BRAIN_REPO_URL"
 echo "enabled: $OMBRE_BRAIN_ENABLED"
 echo "mcp_enabled: $OMBRE_BRAIN_MCP_ENABLED"
+echo "runner: $OMBRE_BRAIN_RUNNER"
 echo "home: $OMBRE_BRAIN_HOME"
+echo "source: $OMBRE_BRAIN_SOURCE_DIR"
+echo "venv: $OMBRE_BRAIN_VENV"
 echo "buckets: $OMBRE_BUCKETS_DIR"
 echo "health_url: $OMBRE_BRAIN_HEALTH_URL"
 echo "mcp_url: $OMBRE_BRAIN_MCP_URL"
@@ -63,7 +73,7 @@ fi
 
 echo ""
 echo "=== Files ==="
-for path in "$OMBRE_BRAIN_HOME" "$OMBRE_BUCKETS_DIR" "$OMBRE_BRAIN_COMPOSE_FILE" "$OMBRE_BRAIN_CONFIG_FILE"; do
+for path in "$OMBRE_BRAIN_HOME" "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" "$OMBRE_BRAIN_VENV/bin/python" "$OMBRE_BUCKETS_DIR" "$OMBRE_BRAIN_COMPOSE_FILE" "$OMBRE_BRAIN_CONFIG_FILE"; do
   if [ -e "$path" ]; then
     echo "$path: PRESENT"
   else
@@ -105,7 +115,7 @@ rm -f /tmp/ombre-brain-health.$$ /tmp/ombre-brain-health.err.$$
 echo ""
 echo "=== Hermes MCP config ==="
 LITE_CONFIG="$LITE_HOME/config.yaml"
-FULL_CONFIG="$HERMES_HOME/config.yaml"
+FULL_CONFIG="$FULL_HOME/config.yaml"
 for label in lite full; do
   if [ "$label" = "lite" ]; then
     cfg="$LITE_CONFIG"

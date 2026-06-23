@@ -101,8 +101,17 @@ Default posture:
 
 - Deploy through the common runtime script, not manual server edits.
 - Keep lite using `personal_memory` as the small public memory surface.
+- Treat upstream Ombre Brain as source-runner first:
+  `OMBRE_BRAIN_RUNNER=source`, source checkout under
+  `.ran_agent_state/ombre-brain/upstream`, venv under
+  `.ran_agent_state/ombre-brain/.venv`.
+- Docker is optional. Do not install Docker silently from the Hermes runtime
+  split script; only use `OMBRE_BRAIN_RUNNER=docker` when the operator has made
+  Docker available intentionally.
+- Python `personal_memory` should use upstream Ombre first with the repo-local
+  shim only as rollback fallback (`PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback`).
 - Expose direct Ombre MCP tools in full only unless there is a specific reason
-  to expand lite.
+  to expand lite, and only when the upstream runner is actually available.
 - Store runtime data under ignored state or private `vault/ombre`; never commit
   memory buckets.
 - Reuse existing Ombre env values by default. Operator changes should survive

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import json
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 from personal_agent.config import AppConfig
 from personal_agent.ombre_mcp import OmbreCallResult, OmbreMCPClient, OmbreMCPMemoryBackend
@@ -113,6 +115,65 @@ class OmbreMCPTest(unittest.TestCase):
         self.assertIn("ombre recall action=breath ok=False", log_text)
         self.assertIn("error=call_not_ok", log_text)
         self.assertIn("duration_seconds=", log_text)
+
+    def test_official_http_backend_is_used_before_legacy_subprocess(self) -> None:
+        calls: list[tuple[str, str]] = []
+
+        def fake_urlopen(request, timeout):
+            del timeout
+            payload = json.loads(request.data.decode("utf-8"))
+            name = payload["params"]["name"]
+            calls.append((request.full_url, name))
+            response = MagicMock()
+            response.__enter__.return_value.read.return_value = json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": payload.get("id"),
+                    "result": {
+                        "content": [
+                            {
+                                "type": "text",
+                                "text": json.dumps(
+                                    {"items": [{"content": f"official {name}"}]},
+                                    ensure_ascii=False,
+                                ),
+                            }
+                        ]
+                    },
+                }
+            ).encode("utf-8")
+            return response
+
+        config = AppConfig(
+            base_dir=Path(self.temp_dir.name),
+            data_dir=Path(self.temp_dir.name) / "data",
+            logs_dir=Path(self.temp_dir.name) / "logs",
+            vault_dir=Path(self.temp_dir.name) / "vault",
+            database_path=Path(self.temp_dir.name) / "data" / "personal_agent.db",
+            log_file_path=Path(self.temp_dir.name) / "logs" / "personal_agent.log",
+            ombre_backend="official",
+            ombre_mcp_command="/no/such/legacy.py",
+            ombre_mcp_url="http://127.0.0.1:18001/mcp",
+            ombre_mcp_extra_url="http://127.0.0.1:18001/mcp-extra",
+        )
+        backend = OmbreMCPMemoryBackend(config=config, logger=self.logger)
+
+        with patch("personal_agent.ombre_mcp.urlopen", side_effect=fake_urlopen):
+            recalled = backend.recall(user_text="测试", response_mode="chat")
+
+        self.assertEqual(
+            recalled,
+            ("official breath", "official trace", "official pulse", "official anchor"),
+        )
+        self.assertEqual(
+            calls,
+            [
+                ("http://127.0.0.1:18001/mcp", "breath"),
+                ("http://127.0.0.1:18001/mcp", "trace"),
+                ("http://127.0.0.1:18001/mcp-extra", "pulse"),
+                ("http://127.0.0.1:18001/mcp-extra", "anchor"),
+            ],
+        )
 
 
 if __name__ == "__main__":

@@ -94,6 +94,9 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(config.proactive_memory_context_max_chars, 300)
         self.assertTrue(config.hermes_bounded_context_enabled)
         self.assertEqual(config.hermes_bounded_context_interval_minutes, 720)
+        self.assertEqual(config.ombre_backend, "official_with_legacy_fallback")
+        self.assertEqual(config.ombre_mcp_url, "http://127.0.0.1:18001/mcp")
+        self.assertEqual(config.ombre_mcp_extra_url, "http://127.0.0.1:18001/mcp-extra")
 
     def test_reviewer_flags_can_be_overridden_from_environment(self) -> None:
         with patch.dict(

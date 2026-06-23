@@ -174,9 +174,11 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `OBSIDIAN_INDEX_DEVICE` | Default `cpu` on Linux servers |
 | `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | Set to `1` only during explicit maintenance |
 | `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Ombre Brain service and full-profile direct MCP switches |
+| `OMBRE_BRAIN_RUNNER` | Ombre Brain runner, default `source`; `docker` is optional |
 | `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream, default `https://github.com/P0luz/Ombre-Brain` |
-| `OMBRE_BRAIN_HOME`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime and private buckets paths |
+| `OMBRE_BRAIN_HOME`, `OMBRE_BRAIN_SOURCE_DIR`, `OMBRE_BRAIN_VENV`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime, source checkout, venv, and private buckets paths |
 | `OMBRE_BRAIN_MCP_URL`, `OMBRE_BRAIN_MCP_EXTRA_URL` | Ombre MCP endpoints connected by the full profile |
+| `PERSONAL_AGENT_OMBRE_BACKEND` | Python `personal_memory` Ombre backend, default `official_with_legacy_fallback` |
 
 Secrets must live in machine-local `.env` files, for example:
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -547,6 +547,54 @@ test('apply script filter_ombre_memory_from_config removes direct Ombre MCP from
   assert.match(text, /playwright:/);
 });
 
+test('apply script keeps full direct Ombre MCP when source runner is prepared', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-full-source-ready-'));
+  const fullHome = join(dir, 'full');
+  const liteHome = join(dir, 'lite');
+  const sourceDir = join(dir, 'upstream');
+  const venvDir = join(dir, 'venv');
+  mkdirSync(join(fullHome, 'profiles', 'ran-assistant'), { recursive: true });
+  mkdirSync(join(liteHome, 'profiles', 'ran-assistant-lite'), { recursive: true });
+  mkdirSync(join(sourceDir, 'src'), { recursive: true });
+  mkdirSync(join(venvDir, 'bin'), { recursive: true });
+  writeFileSync(join(fullHome, 'config.yaml'), '');
+  writeFileSync(join(sourceDir, 'src', 'server.py'), '');
+  writeFileSync(join(venvDir, 'bin', 'python'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(venvDir, 'bin', 'python'), 0o755);
+  writeFileSync(join(fullHome, 'profiles', 'ran-assistant', 'config.yaml'), [
+    'mcp_servers:',
+    '  ombre_memory:',
+    '    url: "${OMBRE_BRAIN_MCP_URL}"',
+    '  ombre_memory_extra:',
+    '    url: "${OMBRE_BRAIN_MCP_EXTRA_URL}"',
+    '  search_hub:',
+    '    command: bash',
+    '  sticker_catalog:',
+    '    command: bash',
+    '  playwright:',
+    '    command: bash',
+  ].join('\n'));
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    `export HERMES_HOME=${JSON.stringify(fullHome)}`,
+    `export HERMES_LITE_HOME=${JSON.stringify(liteHome)}`,
+    `export RAN_AGENT_DEPLOY_OMBRE_BRAIN_SOURCE_DIR=${JSON.stringify(sourceDir)}`,
+    `export RAN_AGENT_DEPLOY_OMBRE_BRAIN_VENV=${JSON.stringify(venvDir)}`,
+    'source scripts/apply-hermes-runtime-split.sh',
+    'write_full_runtime_config',
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const text = readFileSync(join(fullHome, 'config.yaml'), 'utf8');
+  assert.match(text, /mcp-ombre_memory/);
+  assert.match(text, /^  ombre_memory:/m);
+  assert.match(text, /^  ombre_memory_extra:/m);
+});
+
 test('apply script writes Ombre systemd unit without hard-coded Ombre env overrides', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-systemd-'));
   const systemdDir = join(dir, 'systemd');
@@ -572,6 +620,126 @@ test('apply script writes Ombre systemd unit without hard-coded Ombre env overri
   assert.doesNotMatch(unit, /^Environment=OMBRE_BUCKETS_DIR=/m);
 });
 
+test('apply script skips reset-failed for systemd units that are not loaded yet', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-reset-failed-'));
+  const binDir = join(dir, 'bin');
+  const logFile = join(dir, 'systemctl.log');
+  mkdirSync(binDir, { recursive: true });
+  const fakeSystemctl = join(binDir, 'systemctl');
+  writeFileSync(fakeSystemctl, [
+    '#!/bin/sh',
+    'printf "%s\\n" "$*" >> "$SYSTEMCTL_LOG"',
+    'if [ "$1" = "show" ]; then',
+    '  case "$2" in',
+    '    ran-agent-ombre-brain.service)',
+    '      printf "%s\\n" "not-found"',
+    '      exit 0',
+    '      ;;',
+    '    *)',
+    '      printf "%s\\n" "loaded"',
+    '      exit 0',
+    '      ;;',
+    '  esac',
+    'fi',
+    'if [ "$1" = "reset-failed" ] && [ "$2" = "ran-agent-ombre-brain.service" ]; then',
+    '  printf "%s\\n" "Failed to reset failed state of unit ran-agent-ombre-brain.service: Unit ran-agent-ombre-brain.service not loaded." >&2',
+    '  exit 1',
+    'fi',
+    'exit 0',
+    '',
+  ].join('\n'));
+  chmodSync(fakeSystemctl, 0o755);
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    'source scripts/apply-hermes-runtime-split.sh',
+    'reset_failed_if_loaded ran-agent-hermes.service ran-agent-ombre-brain.service',
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      SYSTEMCTL_LOG: logFile,
+    },
+    stdio: 'pipe',
+  });
+
+  const log = readFileSync(logFile, 'utf8');
+  assert.match(log, /show ran-agent-hermes\.service --property=LoadState --value/);
+  assert.match(log, /reset-failed ran-agent-hermes\.service/);
+  assert.match(log, /show ran-agent-ombre-brain\.service --property=LoadState --value/);
+  assert.doesNotMatch(log, /reset-failed ran-agent-ombre-brain\.service/);
+});
+
+test('start_ombre_brain_service.sh supports source runner without docker', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-source-runner-'));
+  const rootDir = join(dir, 'repo');
+  const sourceDir = join(dir, 'upstream');
+  const venvDir = join(dir, 'venv');
+  const logFile = join(dir, 'python.log');
+  mkdirSync(join(rootDir, 'scripts'), { recursive: true });
+  mkdirSync(join(sourceDir, 'src'), { recursive: true });
+  mkdirSync(join(venvDir, 'bin'), { recursive: true });
+  writeFileSync(join(sourceDir, 'src', 'server.py'), 'print("server placeholder")\n');
+  writeFileSync(join(venvDir, 'bin', 'python'), [
+    '#!/bin/sh',
+    'printf "%s\\n" "$PWD|$*" > "$OMBRE_TEST_LOG"',
+    'exit 0',
+    '',
+  ].join('\n'));
+  chmodSync(join(venvDir, 'bin', 'python'), 0o755);
+  writeFileSync(join(rootDir, 'scripts', 'prepare-ombre-brain.sh'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(rootDir, 'scripts', 'prepare-ombre-brain.sh'), 0o755);
+
+  execFileSync('bash', ['scripts/start_ombre_brain_service.sh'], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env: {
+      ...process.env,
+      RAN_AGENT_REPO_ROOT: rootDir,
+      OMBRE_BRAIN_RUNNER: 'source',
+      OMBRE_BRAIN_SOURCE_DIR: sourceDir,
+      OMBRE_BRAIN_VENV: venvDir,
+      OMBRE_TEST_LOG: logFile,
+      PATH: `/no-docker-here:${process.env.PATH}`,
+    },
+    stdio: 'pipe',
+  });
+
+  const log = readFileSync(logFile, 'utf8');
+  assert.match(log, new RegExp(`${sourceDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\|src/server\\.py`));
+});
+
+test('diagnose-ombre-memory.sh keeps full config path separate from lite env HERMES_HOME', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-diagnose-paths-'));
+  const rootDir = join(dir, 'repo');
+  const fullHome = join(dir, 'full-home');
+  const liteHome = join(dir, 'lite-home');
+  mkdirSync(rootDir, { recursive: true });
+  mkdirSync(fullHome, { recursive: true });
+  mkdirSync(liteHome, { recursive: true });
+  writeFileSync(join(fullHome, '.env'), `HERMES_HOME=${fullHome}\n`);
+  writeFileSync(join(liteHome, '.env'), `HERMES_HOME=${liteHome}\n`);
+  writeFileSync(join(fullHome, 'config.yaml'), 'platform_toolsets:\n  cli: []\nmcp_servers: {}\n');
+  writeFileSync(join(liteHome, 'config.yaml'), 'platform_toolsets:\n  cli: []\nmcp_servers: {}\n');
+
+  const output = execFileSync('bash', ['scripts/diagnose-ombre-memory.sh'], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env: {
+      ...process.env,
+      RAN_AGENT_REPO_ROOT: rootDir,
+      HERMES_HOME: fullHome,
+      HERMES_LITE_HOME: liteHome,
+      OMBRE_BRAIN_ENABLED: 'false',
+    },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  assert.match(output, new RegExp(`--- lite: ${liteHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/config\\.yaml ---`));
+  assert.match(output, new RegExp(`--- full: ${fullHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/config\\.yaml ---`));
+});
+
 test('prepare-ombre-brain.sh creates compose and config without secrets', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-prepare-'));
   const rootDir = join(dir, 'repo');
@@ -584,6 +752,7 @@ test('prepare-ombre-brain.sh creates compose and config without secrets', () => 
     env: {
       ...process.env,
       RAN_AGENT_REPO_ROOT: rootDir,
+      OMBRE_BRAIN_RUNNER: 'docker',
       OMBRE_BRAIN_HOME: homeDir,
       OMBRE_BUCKETS_DIR: bucketsDir,
       OMBRE_COMPRESS_API_KEY: 'must-not-be-written',
@@ -601,7 +770,7 @@ test('prepare-ombre-brain.sh creates compose and config without secrets', () => 
   assert.match(compose, /\$\{OMBRE_COMPRESS_API_KEY:-\}/);
   assert.doesNotMatch(compose, /must-not-be-written/);
   assert.match(config, /transport: "streamable-http"/);
-  assert.match(config, /buckets_dir: "\/app\/buckets"/);
+  assert.match(config, new RegExp(`buckets_dir: "${bucketsDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
   assert.match(upstream, /https:\/\/github\.com\/P0luz\/Ombre-Brain/);
 });
 

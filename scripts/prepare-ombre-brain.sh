@@ -8,6 +8,9 @@ ROOT_DIR="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 OMBRE_BRAIN_REPO_URL="${OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Brain}"
 OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$ROOT_DIR/.ran_agent_state/ombre-brain}"
+OMBRE_BRAIN_RUNNER="${OMBRE_BRAIN_RUNNER:-source}"
+OMBRE_BRAIN_SOURCE_DIR="${OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME/upstream}"
+OMBRE_BRAIN_VENV="${OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME/.venv}"
 OMBRE_BUCKETS_DIR="${OMBRE_BUCKETS_DIR:-$ROOT_DIR/vault/ombre}"
 OMBRE_BRAIN_IMAGE="${OMBRE_BRAIN_IMAGE:-p0luz/ombre-brain:latest}"
 OMBRE_BRAIN_BIND_HOST="${OMBRE_BRAIN_BIND_HOST:-127.0.0.1}"
@@ -16,6 +19,7 @@ OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-c
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
 OMBRE_BRAIN_ENV_EXAMPLE_FILE="${OMBRE_BRAIN_ENV_EXAMPLE_FILE:-$OMBRE_BRAIN_HOME/.env.example}"
 OMBRE_BRAIN_PULL_IMAGE="${OMBRE_BRAIN_PULL_IMAGE:-false}"
+OMBRE_BRAIN_UPDATE_SOURCE="${OMBRE_BRAIN_UPDATE_SOURCE:-true}"
 
 FORCE_CONFIG=0
 FORCE_COMPOSE=0
@@ -55,14 +59,59 @@ write_if_missing() {
   log "wrote $path"
 }
 
+prepare_source_runner() {
+  case "$OMBRE_BRAIN_RUNNER" in
+    source|auto)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+
+  if [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ]; then
+    log "preserving existing source checkout $OMBRE_BRAIN_SOURCE_DIR"
+    if [ -d "$OMBRE_BRAIN_SOURCE_DIR/.git" ] && [ "$OMBRE_BRAIN_UPDATE_SOURCE" != "false" ] && [ "$OMBRE_BRAIN_UPDATE_SOURCE" != "0" ]; then
+      git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only || log "WARNING: source update failed; preserving current checkout"
+    fi
+  else
+    if ! command -v git >/dev/null 2>&1; then
+      echo "ERROR: git is required to prepare Ombre Brain source runner" >&2
+      exit 1
+    fi
+    mkdir -p "$(dirname "$OMBRE_BRAIN_SOURCE_DIR")"
+    log "cloning $OMBRE_BRAIN_REPO_URL to $OMBRE_BRAIN_SOURCE_DIR"
+    git clone --depth 1 "$OMBRE_BRAIN_REPO_URL" "$OMBRE_BRAIN_SOURCE_DIR"
+  fi
+
+  if [ ! -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ]; then
+    echo "ERROR: missing Ombre Brain source server.py: $OMBRE_BRAIN_SOURCE_DIR/src/server.py" >&2
+    exit 1
+  fi
+
+  if [ ! -e "$OMBRE_BRAIN_SOURCE_DIR/config.yaml" ]; then
+    ln -s "$OMBRE_BRAIN_CONFIG_FILE" "$OMBRE_BRAIN_SOURCE_DIR/config.yaml" 2>/dev/null || cp "$OMBRE_BRAIN_CONFIG_FILE" "$OMBRE_BRAIN_SOURCE_DIR/config.yaml"
+    log "linked source config $OMBRE_BRAIN_SOURCE_DIR/config.yaml"
+  fi
+
+  if [ ! -x "$OMBRE_BRAIN_VENV/bin/python" ]; then
+    log "creating source venv $OMBRE_BRAIN_VENV"
+    python3 -m venv "$OMBRE_BRAIN_VENV"
+  fi
+
+  if [ -f "$OMBRE_BRAIN_SOURCE_DIR/requirements.txt" ]; then
+    log "installing source requirements"
+    "$OMBRE_BRAIN_VENV/bin/python" -m pip install -r "$OMBRE_BRAIN_SOURCE_DIR/requirements.txt"
+  fi
+}
+
 mkdir -p "$OMBRE_BRAIN_HOME" "$OMBRE_BUCKETS_DIR"
 
 printf '%s\n' "$OMBRE_BRAIN_REPO_URL" > "$OMBRE_BRAIN_HOME/upstream_url.txt"
 
-write_if_missing "$OMBRE_BRAIN_CONFIG_FILE" "$FORCE_CONFIG" <<'YAML'
+write_if_missing "$OMBRE_BRAIN_CONFIG_FILE" "$FORCE_CONFIG" <<YAML
 transport: "streamable-http"
 log_level: "INFO"
-buckets_dir: "/app/buckets"
+buckets_dir: "$OMBRE_BUCKETS_DIR"
 
 dehydration:
   model: "deepseek-chat"
@@ -133,4 +182,6 @@ if [ "$OMBRE_BRAIN_PULL_IMAGE" = "1" ] || [ "$OMBRE_BRAIN_PULL_IMAGE" = "true" ]
   docker pull "$OMBRE_BRAIN_IMAGE"
 fi
 
-log "ready home=$OMBRE_BRAIN_HOME buckets=$OMBRE_BUCKETS_DIR compose=$OMBRE_BRAIN_COMPOSE_FILE"
+prepare_source_runner
+
+log "ready runner=$OMBRE_BRAIN_RUNNER home=$OMBRE_BRAIN_HOME source=$OMBRE_BRAIN_SOURCE_DIR buckets=$OMBRE_BUCKETS_DIR compose=$OMBRE_BRAIN_COMPOSE_FILE"

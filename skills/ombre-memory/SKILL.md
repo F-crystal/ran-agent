@@ -128,6 +128,9 @@ echo '{"candidate": {"content": "...", "weight": 0.8}, "layer": "long"}' | pytho
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `PERSONAL_AGENT_OMBRE_BACKEND` | `official_with_legacy_fallback` | Prefer upstream Ombre Brain HTTP MCP, fallback to the repo-local shim only when unavailable |
+| `PERSONAL_AGENT_OMBRE_MCP_URL` | `http://127.0.0.1:18001/mcp` | Upstream Ombre Brain primary MCP endpoint |
+| `PERSONAL_AGENT_OMBRE_MCP_EXTRA_URL` | `http://127.0.0.1:18001/mcp-extra` | Upstream Ombre Brain extra endpoint for `anchor`, `pulse`, `plan`, and letters |
 | `PERSONAL_AGENT_OMBRE_MCP_COMMAND` | `src/personal_agent/ombre_brain_mcp.py` | MCP server path |
 | `PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS` | 10 | Request timeout |
 | `OMBRE_VAULT_PATH` | `vault/ombre` | Primary memory storage path |
@@ -139,6 +142,12 @@ When wiring upstream Ombre Brain into server deployment, also load
 server values by default (`?KEY=value` in `apply-hermes-runtime-split.sh`) and
 only overwrite through explicit `RAN_AGENT_DEPLOY_*` overrides or canonical
 safety/routing contracts.
+
+Hermes server deployments should use the upstream source runner by default
+(`OMBRE_BRAIN_RUNNER=source`). Docker is not required for Hermes and must not be
+installed silently by the deploy script; use Docker only as an explicit operator
+choice. Direct `ombre_memory` / `ombre_memory_extra` exposure belongs in full
+only after the upstream runner is available.
 
 ### Memory Storage Format
 
