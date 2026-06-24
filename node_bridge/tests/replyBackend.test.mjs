@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { createReplyBackend, getReplyBackendConfig } from '../src/replyBackend.mjs';
+import { getEnvironmentPrivacyMode } from '../src/environmentSense.mjs';
 import { createPendingAction, listPendingActions } from '../src/pendingActionState.mjs';
 import { listStickers, saveStickersFromInbox } from '../src/stickerCatalog.mjs';
 
@@ -77,6 +78,41 @@ test('createReplyBackend defaults to Hermes reply backend', async () => {
   assert.equal(ingestPayload?.source, 'hermes');
   assert.equal(response.replyText, 'hermes reply');
   assert.equal(response.source, 'hermes');
+});
+
+test('createReplyBackend handles explicit environment privacy mode toggles before Hermes', async () => {
+  const env = tempStateEnv({ HERMES_ENVIRONMENT_CONTEXT_ENABLED: 'true' });
+  let hermesCalled = false;
+  const backend = createReplyBackend({
+    env,
+    hermesImpl: async () => {
+      hermesCalled = true;
+      return { reply_text: 'should not call hermes', follow_up_messages: [], media: null };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const enabled = await backend.getReply({
+    text: '打开隐私模式',
+    sender_id: 'conv-env-privacy',
+    conversation_id: 'conv-env-privacy',
+    channel: 'wechat',
+  });
+
+  assert.equal(hermesCalled, false);
+  assert.match(enabled.replyText, /隐私模式已打开/);
+  assert.equal(getEnvironmentPrivacyMode(env).enabled, true);
+
+  const disabled = await backend.getReply({
+    text: '恢复环境感知',
+    sender_id: 'conv-env-privacy',
+    conversation_id: 'conv-env-privacy',
+    channel: 'wechat',
+  });
+
+  assert.match(disabled.replyText, /环境感知已恢复/);
+  assert.equal(getEnvironmentPrivacyMode(env).enabled, false);
 });
 
 test('createReplyBackend logs action contract telemetry in observe mode without changing reply', async () => {

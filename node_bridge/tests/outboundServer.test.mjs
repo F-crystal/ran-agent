@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import {
   getOutboundServerConfig,
+  handleEnvironmentSensorRequest,
   handleOutboundRequest,
   handleScheduledAiDigestRequest,
   resolveStateDir,
@@ -41,6 +42,54 @@ test('getOutboundServerConfig reads host and port from environment', () => {
   assert.equal(config.host, '127.0.0.2');
   assert.equal(config.port, 9901);
   assert.equal(config.accountId, 'personal_agent');
+});
+
+test('handleEnvironmentSensorRequest accepts Sensor Logger payload with path token', async () => {
+  const env = {
+    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'test-env-ingest-')),
+    ENVIRONMENT_SENSOR_INGEST_TOKEN: 'secret-token',
+  };
+  const result = await handleEnvironmentSensorRequest({
+    env,
+    method: 'POST',
+    url: '/environment/sensorlogger/secret-token',
+    bodyText: JSON.stringify({
+      messageId: 1,
+      sessionId: 'session-a',
+      deviceId: 'phone-a',
+      payload: [
+        {
+          name: 'battery',
+          time: 1710000001000000000,
+          values: { batteryLevel: 0.42, batteryState: 'charging', lowPowerMode: false },
+        },
+      ],
+    }),
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.readings, 1);
+  const latestPath = path.join(env.RAN_AGENT_STATE_DIR, 'environment', 'latest.json');
+  const latest = JSON.parse(fs.readFileSync(latestPath, 'utf8'));
+  assert.equal(latest.battery.percent, 42);
+  assert.equal(latest.battery.state, 'charging');
+});
+
+test('handleEnvironmentSensorRequest rejects missing or wrong token', async () => {
+  const env = {
+    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'test-env-ingest-')),
+    ENVIRONMENT_SENSOR_INGEST_TOKEN: 'secret-token',
+  };
+  const result = await handleEnvironmentSensorRequest({
+    env,
+    method: 'POST',
+    url: '/environment/sensorlogger/wrong',
+    bodyText: '{}',
+  });
+
+  assert.equal(result.status, 403);
+  assert.equal(result.payload.error, 'forbidden');
 });
 
 test('handleOutboundRequest sends proactive message through bot', async () => {

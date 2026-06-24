@@ -12,6 +12,7 @@ import {
 } from './actionContract.mjs';
 import { repairActionContract } from './actionRepair.mjs';
 import { getHermesGatewayConfig, sendChatToHermesGateway } from './hermesGatewayClient.mjs';
+import { detectEnvironmentPrivacyCommand, privacyConfirmation } from './environmentSense.mjs';
 import {
   cancelPendingAction,
   confirmPendingAction,
@@ -47,6 +48,15 @@ export function createReplyBackend(options = {}) {
       const gatewayConfig = backendOptions.hermesConfig || getHermesGatewayConfig(env);
       const chatImpl = options.hermesImpl || options.chatImpl || sendChatToHermesGateway;
       const requestId = sanitizeRequestId(backendOptions.requestId || message.request_id || createRequestId());
+      const environmentPrivacyCommand = detectEnvironmentPrivacyCommand(message.text);
+      if (environmentPrivacyCommand) {
+        return {
+          replyText: privacyConfirmation(environmentPrivacyCommand, { env }),
+          followUpMessages: [],
+          media: null,
+          source: 'hermes',
+        };
+      }
       const actionGateConfig = getActionGateConfig(env);
       const pendingConfig = getPendingActionConfig(env);
       const pendingOutcome = pendingConfig.enabled

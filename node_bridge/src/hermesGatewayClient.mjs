@@ -11,6 +11,7 @@ import fs, { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { ensureConversationMediaContext } from './mediaContextStore.mjs';
+import { buildEnvironmentContext } from './environmentSense.mjs';
 import {
   getContextPolicyConfig,
   buildCompactMediaContext,
@@ -411,6 +412,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     config: budgetedConfig,
     logger,
     mediaContextOptions: options.mediaContextOptions,
+    fetchImpl: options.fetchImpl,
     sessionContext,
     recentHistoryMessages: recentMessages,
     globalHistoryMessages: globalRecentMessages,
@@ -583,6 +585,10 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     ? clipText(String(payload.active_topic || '').trim(), contextBudget.budgets.activeTopicChars)
     : '';
   const dailyDigestText = buildDailyDigestContextText(payload);
+  const environmentContextText = await buildEnvironmentContext({
+    env: options.env,
+    fetchImpl: options.fetchImpl || globalThis.fetch,
+  });
   const currentUserMessage = buildHermesUserText(payload);
   const message = [
     courtlyAnchor,
@@ -593,6 +599,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     continuityNote,
     dailyDigestText,
     buildBridgeTemporalUserContext(payload),
+    environmentContextText,
     mediaContextText,
     buildHermesInboundMediaInstruction(payload),
     currentUserMessage,
@@ -618,6 +625,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
       activeTopic,
       continuityNote,
       dailyDigestText,
+      environmentContextText,
       mediaContextText,
       currentUserMessage,
       contextBudget,
@@ -638,6 +646,7 @@ function logContextComponentTelemetry({
   activeTopic = '',
   continuityNote = '',
   dailyDigestText = '',
+  environmentContextText = '',
   mediaContextText = '',
   currentUserMessage = '',
   contextBudget = {},
@@ -677,6 +686,7 @@ function logContextComponentTelemetry({
       continuity_note: measureContextComponent(continuityNote, budgets.continuityChars <= 0 || !continuityNote),
       media_context: measureContextComponent(mediaContextText, !mediaContextText),
       daily_digest: measureContextComponent(dailyDigestText, !dailyDigestText),
+      environment_context: measureContextComponent(environmentContextText, !environmentContextText),
       current_user_message: measureContextComponent(currentUserMessage, false),
     },
   })}`);

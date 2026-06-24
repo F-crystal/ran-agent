@@ -17,6 +17,7 @@ import {
   readHermesLiteMaintenanceState,
   runHermesLiteSoftReset,
 } from '../src/hermesSessionMaintenance.mjs';
+import { saveSensorLoggerMessage } from '../src/environmentSense.mjs';
 
 const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
@@ -187,6 +188,79 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.match(capturedBody.messages[1].content, /你好\n补一句/);
   assert.equal(response.reply_text, 'Hermes reply');
   assert.equal(response.model, 'ran-assistant');
+});
+
+test('sendChatToHermesGateway injects lightweight environment context when state is fresh', async () => {
+  const stateDir = tempGatewayStateDir('hermes-env-context-');
+  const env = {
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_ENVIRONMENT_CONTEXT_ENABLED: 'true',
+    HERMES_ENVIRONMENT_HOME_LAT: '31.2304',
+    HERMES_ENVIRONMENT_HOME_LON: '121.4737',
+    HERMES_ENVIRONMENT_HOME_RADIUS_M: '250',
+    HERMES_ENVIRONMENT_CITY_LABEL: '上海',
+  };
+  saveSensorLoggerMessage({
+    messageId: 1,
+    sessionId: 'session-a',
+    deviceId: 'phone-a',
+    payload: [
+      { name: 'location', time: 1710000000000000000, values: { latitude: 31.2304, longitude: 121.4737, horizontalAccuracy: 8 } },
+      { name: 'battery', time: 1710000001000000000, values: { batteryLevel: 0.19, batteryState: 'unplugged', lowPowerMode: true } },
+    ],
+  }, {
+    env,
+    now: new Date(),
+  });
+
+  let capturedBody = null;
+  const response = await sendChatToHermesGateway(
+    {
+      text: '我现在出门要带伞吗',
+      sender_id: 'conv-hermes-env',
+      conversation_id: 'conv-hermes-env',
+      channel: 'wechat',
+    },
+    {
+      env,
+      config: getHermesGatewayConfig({
+        ...env,
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (url, init) => {
+        const text = String(url);
+        if (text.includes('air-quality-api.open-meteo.com')) {
+          return makeJsonResponse({ current: { pm2_5: 10, us_aqi: 42, uv_index: 4 } });
+        }
+        if (text.includes('api.open-meteo.com')) {
+          return makeJsonResponse({
+            current: {
+              temperature_2m: 28,
+              apparent_temperature: 31,
+              relative_humidity_2m: 72,
+              precipitation: 0,
+              weather_code: 2,
+              cloud_cover: 45,
+              wind_speed_10m: 8,
+              surface_pressure: 1007,
+            },
+          });
+        }
+        capturedBody = JSON.parse(init.body);
+        return makeJsonResponse({ choices: [{ message: { content: 'env ok' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    }
+  );
+
+  assert.equal(response.reply_text, 'env ok');
+  assert.match(capturedBody.messages[1].content, /环境感知/);
+  assert.match(capturedBody.messages[1].content, /上海/);
+  assert.match(capturedBody.messages[1].content, /在家/);
+  assert.match(capturedBody.messages[1].content, /电量19%/);
 });
 
 test('Hermes API requests include stable session headers per WeChat conversation', async () => {

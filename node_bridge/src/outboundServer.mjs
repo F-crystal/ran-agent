@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { handleIncomingMessage } from './channelHub.mjs';
+import { saveSensorLoggerMessage } from './environmentSense.mjs';
 import { sendFeishuReply } from './feishuBridge.mjs';
 import {
   appendPendingOutboundMessage,
@@ -362,6 +363,64 @@ export async function handleOutboundRequest({ bot, logger = console, method, url
   }
 }
 
+export async function handleEnvironmentSensorRequest({
+  env = process.env,
+  method,
+  url,
+  bodyText,
+} = {}) {
+  const configuredToken = String(env.ENVIRONMENT_SENSOR_INGEST_TOKEN || '').trim();
+  if (!configuredToken) {
+    return {
+      status: 403,
+      payload: { error: 'forbidden' },
+    };
+  }
+  let parsed;
+  try {
+    parsed = new URL(String(url || ''), 'http://127.0.0.1');
+  } catch {
+    return {
+      status: 404,
+      payload: { error: 'route not found' },
+    };
+  }
+  const match = parsed.pathname.match(/^\/environment\/sensorlogger\/([^/]+)$/);
+  if (method !== 'POST' || !match) {
+    return {
+      status: 404,
+      payload: { error: 'route not found' },
+    };
+  }
+  const suppliedToken = decodeURIComponent(match[1] || '') || parsed.searchParams.get('token') || '';
+  if (suppliedToken !== configuredToken) {
+    return {
+      status: 403,
+      payload: { error: 'forbidden' },
+    };
+  }
+  let payload;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    return {
+      status: 400,
+      payload: { error: 'request body must be valid JSON' },
+    };
+  }
+  const result = saveSensorLoggerMessage(payload, { env });
+  if (result.ok !== true) {
+    return {
+      status: 400,
+      payload: { error: result.error || 'invalid sensor payload' },
+    };
+  }
+  return {
+    status: 200,
+    payload: { ok: true, readings: result.readings },
+  };
+}
+
 export async function handleScheduledAiDigestRequest({
   logger = console,
   env = process.env,
@@ -496,15 +555,25 @@ export function createOutboundServer({ bot, logger = console } = {}) {
     });
 
     request.on('end', async () => {
-      const result = request.method === 'POST' && request.url === '/scheduled/ai-daily-digest'
-        ? await handleScheduledAiDigestRequest({ logger, env: process.env, bodyText: rawBody })
-        : await handleOutboundRequest({
+      let result;
+      if (request.method === 'POST' && request.url === '/scheduled/ai-daily-digest') {
+        result = await handleScheduledAiDigestRequest({ logger, env: process.env, bodyText: rawBody });
+      } else if (String(request.url || '').startsWith('/environment/sensorlogger/')) {
+        result = await handleEnvironmentSensorRequest({
+          env: process.env,
+          method: request.method,
+          url: request.url,
+          bodyText: rawBody,
+        });
+      } else {
+        result = await handleOutboundRequest({
           bot,
           logger,
           method: request.method,
           url: request.url,
           bodyText: rawBody,
         });
+      }
       response.writeHead(result.status, { 'Content-Type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify(result.payload));
     });
