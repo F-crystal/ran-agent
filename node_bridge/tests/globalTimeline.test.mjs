@@ -9,6 +9,7 @@ import {
   buildContinuityNote,
   compactTimeline,
   getActiveTopic,
+  getActiveTopicContext,
   getGlobalRecentHistory,
   getLocalRecentHistory,
   readTimelineRecords,
@@ -81,6 +82,106 @@ test('active topic and continuity note include cross-platform referents', () => 
   assert.match(activeTopic, /内莉/);
   assert.match(note, /current_topic/);
   assert.match(note, /不要问/);
+});
+
+test('freshness gate downgrades old active topic to stale context', () => {
+  const timelinePath = tempTimelinePath();
+  const friday = Date.UTC(2026, 5, 26, 10, 0, 0);
+  const sunday = Date.UTC(2026, 5, 28, 10, 0, 0);
+  appendTurn({
+    timelinePath,
+    global_user_id: 'user:ran',
+    platform: 'wechat',
+    channel_type: 'dm',
+    conversation_id: 'wx-migration',
+    sender_id: 'u',
+    role: 'user',
+    text: '我换了新电脑，正在迁移资料',
+    created_at: friday,
+  });
+
+  const context = getActiveTopicContext({
+    timelinePath,
+    global_user_id: 'user:ran',
+    charBudget: 500,
+    staleCharBudget: 500,
+    now: sunday,
+    freshnessHours: 24,
+  });
+  const note = buildContinuityNote({
+    message: { text: '今天天气不错' },
+    activeTopic: context.activeTopic,
+    staleContext: context.staleContext,
+  });
+
+  assert.equal(context.activeTopic.includes('迁移'), false);
+  assert.match(context.staleContext, /迁移资料/);
+  assert.equal(note.includes('current_topic'), false);
+});
+
+test('referential message can use stale context without open loop', () => {
+  const timelinePath = tempTimelinePath();
+  const friday = Date.UTC(2026, 5, 26, 10, 0, 0);
+  const sunday = Date.UTC(2026, 5, 28, 10, 0, 0);
+  appendTurn({
+    timelinePath,
+    global_user_id: 'user:ran',
+    platform: 'wechat',
+    channel_type: 'dm',
+    conversation_id: 'wx-migration',
+    sender_id: 'u',
+    role: 'user',
+    text: '我换了新电脑，正在迁移资料',
+    created_at: friday,
+  });
+
+  const context = getActiveTopicContext({
+    timelinePath,
+    global_user_id: 'user:ran',
+    charBudget: 500,
+    staleCharBudget: 500,
+    now: sunday,
+    freshnessHours: 24,
+  });
+  const note = buildContinuityNote({
+    message: { text: '上次那个迁移的事，继续说' },
+    activeTopic: context.activeTopic,
+    staleContext: context.staleContext,
+  });
+
+  assert.match(note, /stale_context/);
+  assert.match(note, /do_not_assume_current: true/);
+  assert.doesNotMatch(note, /current_topic/);
+  assert.doesNotMatch(note, /open_loop/);
+});
+
+test('freshness gate can be disabled for legacy active topic behavior', () => {
+  const timelinePath = tempTimelinePath();
+  const friday = Date.UTC(2026, 5, 26, 10, 0, 0);
+  const sunday = Date.UTC(2026, 5, 28, 10, 0, 0);
+  appendTurn({
+    timelinePath,
+    global_user_id: 'user:ran',
+    platform: 'wechat',
+    channel_type: 'dm',
+    conversation_id: 'wx-migration',
+    sender_id: 'u',
+    role: 'user',
+    text: '我换了新电脑，正在迁移资料',
+    created_at: friday,
+  });
+
+  const context = getActiveTopicContext({
+    timelinePath,
+    global_user_id: 'user:ran',
+    charBudget: 500,
+    staleCharBudget: 500,
+    now: sunday,
+    freshnessHours: 0,
+  });
+
+  assert.match(context.activeTopic, /迁移资料/);
+  assert.equal(context.staleContext, '');
 });
 
 test('timeline sanitizes long JSON logs and base64 blobs', () => {

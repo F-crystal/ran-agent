@@ -93,6 +93,7 @@ export function createReplyBackend(options = {}) {
           recent_local_history: Array.isArray(message.recent_local_history) ? message.recent_local_history : [],
           recent_global_history: Array.isArray(message.recent_global_history) ? message.recent_global_history : [],
           active_topic: message.active_topic || '',
+          stale_context: message.stale_context || '',
           continuity_note: message.continuity_note || '',
           route_hint: message.route_hint || '',
           message_batch: Array.isArray(message.message_batch) ? message.message_batch : [],

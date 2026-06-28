@@ -9,7 +9,7 @@ import {
 import {
   appendTurn,
   buildContinuityNote,
-  getActiveTopic,
+  getActiveTopicContext,
   getGlobalRecentHistory,
   getGlobalTimelineConfig,
   getLocalRecentHistory,
@@ -21,6 +21,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
   const message = normalizeIncomingMessage(normalizedMessage);
   const globalUserId = getGlobalUserId(message, { env });
   const timelineConfig = getGlobalTimelineConfig(env);
+  const timelineNow = Number(message.created_at || Date.now());
   const localRecent = getLocalRecentHistory({
     timelinePath: timelineConfig.timelinePath,
     platform: message.platform,
@@ -28,6 +29,8 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     global_user_id: globalUserId,
     limit: Number(env.HERMES_RECENT_TEXT_TURNS || 10) * 2,
     charBudget: Number(env.HERMES_RECENT_TEXT_CHAR_BUDGET || 6000),
+    now: timelineNow,
+    maxAgeHours: timelineConfig.continuityFreshnessHours,
   });
   const requestPriorMessages = normalizePriorMessages(message.prior_messages);
   const localRecentForHermes = [...localRecent, ...requestPriorMessages]
@@ -37,13 +40,19 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     global_user_id: globalUserId,
     limit: Number(env.HERMES_GLOBAL_RECENT_TURNS || timelineConfig.globalRecentTurns) * 2,
     charBudget: Number(env.HERMES_GLOBAL_RECENT_CHAR_BUDGET || timelineConfig.globalRecentCharBudget),
+    now: timelineNow,
+    maxAgeHours: timelineConfig.continuityFreshnessHours,
   });
-  const activeTopic = getActiveTopic({
+  const activeTopicContext = getActiveTopicContext({
     timelinePath: timelineConfig.timelinePath,
     global_user_id: globalUserId,
     charBudget: Number(env.HERMES_ACTIVE_TOPIC_CHAR_BUDGET || timelineConfig.activeTopicCharBudget),
+    now: timelineNow,
+    freshnessHours: timelineConfig.continuityFreshnessHours,
   });
-  const continuityNote = buildContinuityNote({ message, localRecent: localRecentForHermes, globalRecent, activeTopic });
+  const activeTopic = activeTopicContext.activeTopic;
+  const staleContext = activeTopicContext.staleContext;
+  const continuityNote = buildContinuityNote({ message, localRecent: localRecentForHermes, globalRecent, activeTopic, staleContext });
 
   safeAppendTurn({
     timelinePath: timelineConfig.timelinePath,
@@ -89,6 +98,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     recent_local_history: localRecentForHermes,
     recent_global_history: globalRecent,
     active_topic: activeTopic,
+    stale_context: staleContext,
     continuity_note: continuityNote,
   };
   const response = await backend.getReply(backendMessage, {

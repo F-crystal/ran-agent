@@ -197,7 +197,7 @@ export function resolveHermesContextBudget({
         ...HERMES_CONTEXT_BUDGET_DEFAULTS.slim,
         globalRecentTurns: 0,
         globalRecentChars: 0,
-        activeTopicChars: 0,
+        activeTopicChars: hasContinuityNote ? HERMES_CONTEXT_BUDGET_DEFAULTS.slim.activeTopicChars : 0,
       };
       decisionReason = 'auto_same_conversation_slim';
     } else if (hasGlobalRecent) {
@@ -370,13 +370,14 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     && Boolean(sessionContext.stableKey)
     && (recentConversationStore.get(sessionContext.stableKey) || []).length > 0;
   const hasGlobalRecent = Array.isArray(payload.recent_global_history) && payload.recent_global_history.length > 0;
+  const hasStaleContext = Boolean(String(payload.stale_context || '').trim());
   const contextBudget = resolveHermesContextBudget({
     mode: pendingResumeDigest ? 'resume' : selectedConfig.contextInjectionMode,
     config: selectedConfig,
     continuityState: {
       hasLocalRecent: hasExternalLocalRecent || (!Array.isArray(payload.recent_local_history) && hasStoredLocalRecent),
       hasGlobalRecent,
-      hasContinuityNote: Boolean(String(payload.continuity_note || '').trim()),
+      hasContinuityNote: Boolean(String(payload.continuity_note || '').trim()) || hasStaleContext,
     },
     channel: payload.platform || payload.channel,
     conversationId: firstNonEmptyString(payload.conversation_id, payload.conversationId, payload.sender_id, payload.senderId),
@@ -584,6 +585,9 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
   const activeTopic = contextBudget.budgets.activeTopicChars > 0
     ? clipText(String(payload.active_topic || '').trim(), contextBudget.budgets.activeTopicChars)
     : '';
+  const staleContext = contextBudget.budgets.activeTopicChars > 0
+    ? clipText(String(payload.stale_context || '').trim(), contextBudget.budgets.activeTopicChars)
+    : '';
   const dailyDigestText = buildDailyDigestContextText(payload);
   const environmentContextText = await buildEnvironmentContext({
     env: options.env,
@@ -595,7 +599,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     socialRoutingHint,
     buildSocialMediaRetryHint(payload, recentHistoryMessages),
     hasMedia ? buildHermesMediaGenerationInstruction() : '',
-    buildGlobalActiveTopicNote({ ...payload, active_topic: activeTopic }, globalHistoryMessages, config),
+    buildGlobalActiveTopicNote({ ...payload, active_topic: activeTopic, stale_context: staleContext }, globalHistoryMessages, config),
     continuityNote,
     dailyDigestText,
     buildBridgeTemporalUserContext(payload),
@@ -1169,15 +1173,18 @@ function buildDailyDigestContextText(payload = {}) {
 
 function buildGlobalActiveTopicNote(payload = {}, globalHistoryMessages = [], config = {}) {
   const activeTopic = clipText(String(payload.active_topic || '').trim(), config.activeTopicCharBudget || 1200);
+  const staleContext = clipText(String(payload.stale_context || '').trim(), config.activeTopicCharBudget || 1200);
   const history = globalHistoryMessages
     .map((message) => `${message.role}: ${message.content}`)
     .join('\n');
-  if (!activeTopic && !history) return '';
+  if (!activeTopic && !staleContext && !history) return '';
   return [
     '【global active topic（非用户原话，不要复述）】',
     activeTopic ? `active_topic: ${activeTopic}` : '',
+    staleContext ? `stale_context: ${staleContext}` : '',
+    staleContext ? 'do_not_assume_current: true' : '',
     history ? `recent_global:\n${clipText(history, config.globalRecentCharBudget || 2500)}` : '',
-    '跨平台承接只用于理解指代；普通回复不要解释 global timeline、session、上下文窗口或 token。',
+    '跨平台承接只用于理解指代；stale_context 是旧线索，除非用户本轮确认，不要当作当前仍成立的状态；普通回复不要解释 global timeline、session、上下文窗口或 token。',
   ].filter(Boolean).join('\n');
 }
 

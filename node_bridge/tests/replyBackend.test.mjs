@@ -80,6 +80,32 @@ test('createReplyBackend defaults to Hermes reply backend', async () => {
   assert.equal(response.source, 'hermes');
 });
 
+test('createReplyBackend forwards stale continuity context to Hermes', async () => {
+  let hermesPayload = null;
+  const backend = createReplyBackend({
+    hermesImpl: async (payload) => {
+      hermesPayload = payload;
+      return {
+        reply_text: 'ok',
+        follow_up_messages: [],
+        media: null,
+      };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  await backend.getReply({
+    text: '今天天气不错',
+    sender_id: 'conv-stale-context',
+    conversation_id: 'conv-stale-context',
+    channel: 'wechat',
+    stale_context: '我换了新电脑，正在迁移资料',
+  });
+
+  assert.equal(hermesPayload?.stale_context, '我换了新电脑，正在迁移资料');
+});
+
 test('createReplyBackend handles explicit environment privacy mode toggles before Hermes', async () => {
   const env = tempStateEnv({ HERMES_ENVIRONMENT_CONTEXT_ENABLED: 'true' });
   let hermesCalled = false;

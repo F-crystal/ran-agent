@@ -99,6 +99,50 @@ test('channel hub provides cross-platform active topic to Feishu message', async
   assert.equal(backendMessage.recent_global_history.some((item) => item.content.includes('内莉')), true);
 });
 
+test('channel hub marks old cross-day topic as stale context', async () => {
+  const env = {
+    ...tempEnv(),
+    HERMES_CONTINUITY_FRESHNESS_HOURS: '24',
+  };
+  await handleIncomingMessage({
+    id: 'wx-migration-friday',
+    platform: 'wechat',
+    channel_type: 'dm',
+    conversation_id: 'wx-migration',
+    sender_id: 'wx-user',
+    text: '我换了新电脑，正在迁移资料',
+    created_at: Date.UTC(2026, 5, 26, 10, 0, 0),
+  }, {
+    env,
+    logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: { async getReply() { return { replyText: '收到', followUpMessages: [], media: null }; } },
+  });
+
+  let backendMessage = null;
+  await handleIncomingMessage({
+    id: 'wx-migration-sunday',
+    platform: 'wechat',
+    channel_type: 'dm',
+    conversation_id: 'wx-migration',
+    sender_id: 'wx-user',
+    text: '今天天气不错',
+    created_at: Date.UTC(2026, 5, 28, 10, 0, 0),
+  }, {
+    env,
+    logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: {
+      async getReply(message) {
+        backendMessage = message;
+        return { replyText: '是不错', followUpMessages: [], media: null };
+      },
+    },
+  });
+
+  assert.equal(String(backendMessage.active_topic || '').includes('迁移'), false);
+  assert.match(backendMessage.stale_context, /迁移资料/);
+  assert.doesNotMatch(backendMessage.continuity_note, /current_topic/);
+});
+
 test('channel hub does not persist sticker filePath in assistant media summary', async () => {
   const env = tempEnv();
   const secretPath = '/private/server/stickers/assets/stk_001.png';

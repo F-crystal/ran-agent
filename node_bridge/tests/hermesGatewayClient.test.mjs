@@ -1037,6 +1037,21 @@ test('Hermes user prompt keeps stable routing before digest time media context a
   assert.equal(userPrompt.startsWith('【微信桥接实时上下文'), false);
 });
 
+test('Hermes prompt labels stale continuity without treating it as current topic', async () => {
+  const { capturedBody } = await captureHermesRequest({
+    payload: {
+      text: '今天天气不错',
+      active_topic: '',
+      stale_context: '我换了新电脑，正在迁移资料',
+    },
+  });
+
+  const userPrompt = capturedBody.messages.at(-1).content;
+  assert.match(userPrompt, /stale_context: 我换了新电脑，正在迁移资料/);
+  assert.match(userPrompt, /do_not_assume_current: true/);
+  assert.doesNotMatch(userPrompt, /current_topic: 我换了新电脑/);
+});
+
 test('recent history budget trims old text but preserves recent referent', async () => {
   let finalBody = null;
   const conversationId = 'wx-budget-nellie';

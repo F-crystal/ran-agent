@@ -6,6 +6,7 @@ import { shortHash } from './identityMap.mjs';
 const DEFAULT_TIMELINE_PATH = '/opt/ran_agent/.ran_agent_state/global-timeline.jsonl';
 const DEFAULT_ARCHIVE_DIR = '/opt/ran_agent/.ran_agent_state/timeline_archive';
 const DEFAULT_MAX_TEXT_CHARS = 2000;
+const DEFAULT_CONTINUITY_FRESHNESS_HOURS = 24;
 
 export function getGlobalTimelineConfig(env = process.env) {
   return {
@@ -18,6 +19,7 @@ export function getGlobalTimelineConfig(env = process.env) {
     globalRecentTurns: Math.max(0, Number.parseInt(String(env.HERMES_GLOBAL_RECENT_TURNS || '6'), 10) || 6),
     globalRecentCharBudget: Math.max(0, Number.parseInt(String(env.HERMES_GLOBAL_RECENT_CHAR_BUDGET || '2500'), 10) || 2500),
     activeTopicCharBudget: Math.max(0, Number.parseInt(String(env.HERMES_ACTIVE_TOPIC_CHAR_BUDGET || '1200'), 10) || 1200),
+    continuityFreshnessHours: Math.max(0, parseIntegerEnv(env.HERMES_CONTINUITY_FRESHNESS_HOURS, DEFAULT_CONTINUITY_FRESHNESS_HOURS)),
   };
 }
 
@@ -148,12 +150,15 @@ export function getLocalRecentHistory({
   global_user_id = 'user:ran',
   limit = 10,
   charBudget = 6000,
+  now,
+  maxAgeHours,
 } = {}) {
   const conversationHash = shortHash(conversation_id || '');
   const records = readTimelineRecords({ timelinePath })
     .filter((record) => record.global_user_id === global_user_id)
     .filter((record) => !platform || record.platform === platform)
-    .filter((record) => !conversation_id || record.conversation_id_hash === conversationHash);
+    .filter((record) => !conversation_id || record.conversation_id_hash === conversationHash)
+    .filter((record) => isRecordFresh(record, { now, freshnessHours: maxAgeHours }));
   return recordsToMessages(records, limit, charBudget);
 }
 
@@ -162,9 +167,12 @@ export function getGlobalRecentHistory({
   global_user_id = 'user:ran',
   limit = 6,
   charBudget = 2500,
+  now,
+  maxAgeHours,
 } = {}) {
   const records = readTimelineRecords({ timelinePath })
-    .filter((record) => record.global_user_id === global_user_id);
+    .filter((record) => record.global_user_id === global_user_id)
+    .filter((record) => isRecordFresh(record, { now, freshnessHours: maxAgeHours }));
   return recordsToMessages(records, limit, charBudget);
 }
 
@@ -172,15 +180,35 @@ export function getActiveTopic({
   timelinePath = getGlobalTimelineConfig().timelinePath,
   global_user_id = 'user:ran',
   charBudget = 1200,
+  now,
+  freshnessHours,
+} = {}) {
+  return getActiveTopicContext({
+    timelinePath,
+    global_user_id,
+    charBudget,
+    now,
+    freshnessHours,
+  }).activeTopic;
+}
+
+export function getActiveTopicContext({
+  timelinePath = getGlobalTimelineConfig().timelinePath,
+  global_user_id = 'user:ran',
+  charBudget = 1200,
+  staleCharBudget = charBudget,
+  now,
+  freshnessHours,
 } = {}) {
   const records = readTimelineRecords({ timelinePath, limit: 80 })
     .filter((record) => record.global_user_id === global_user_id)
+    .filter((record) => record.role === 'user' || record.compacted === true || record.platform === 'summary')
     .slice(-12);
-  const text = records
-    .map((record) => record.text_summary || record.media_summary || record.text || '')
-    .filter(Boolean)
-    .join(' / ');
-  return clipText(text, charBudget);
+  const { freshRecords, staleRecords } = splitRecordsByFreshness(records, { now, freshnessHours });
+  return {
+    activeTopic: clipText(recordsTopicText(freshRecords), charBudget),
+    staleContext: clipText(recordsTopicText(staleRecords), staleCharBudget),
+  };
 }
 
 export function buildContinuityNote({
@@ -188,10 +216,21 @@ export function buildContinuityNote({
   localRecent = [],
   globalRecent = [],
   activeTopic = '',
+  staleContext = '',
 } = {}) {
   const text = String(message.text || '').trim();
-  const isReferential = /她|他|它|这篇|这个故事|刚才那个|那张图|上面那篇|那个链接|这件事|图片呢|没看到图/.test(text);
+  const isReferential = /她|他|它|这篇|这个故事|刚才那个|那张图|上面那篇|那个链接|这件事|图片呢|没看到图|上次|之前|以前|前面|前几天|周五|昨天|那个/.test(text);
   const topic = inferTopic([...localRecent, ...globalRecent], activeTopic);
+  const stale = clipText(String(staleContext || '').trim(), 240);
+  if (!topic && isReferential && stale) {
+    return [
+      '【conversation continuity note（非用户原话，不要复述）】',
+      `stale_context: ${stale}`,
+      'do_not_assume_current: true',
+      'reply_style: 如需承接，写成“上次你提到……”；不要假设旧状态仍然成立',
+      'do_not_repeat: 不要解释内部连续性实现',
+    ].join('\n');
+  }
   if (!isReferential && !topic) return '';
   return [
     '【conversation continuity note（非用户原话，不要复述）】',
@@ -202,6 +241,43 @@ export function buildContinuityNote({
     'open_loop: 优先用本会话最近内容解析指代；不足时参考 global active topic',
     'do_not_repeat: 不要问“是谁/哪篇”；不要解释内部连续性实现',
   ].join('\n');
+}
+
+function recordsTopicText(records = []) {
+  return records
+    .map((record) => record.text_summary || record.media_summary || record.text || '')
+    .filter(Boolean)
+    .join(' / ');
+}
+
+function splitRecordsByFreshness(records = [], { now, freshnessHours } = {}) {
+  if (!shouldApplyFreshnessGate({ now, freshnessHours })) {
+    return { freshRecords: records, staleRecords: [] };
+  }
+  const cutoff = Number(now) - Number(freshnessHours) * 60 * 60 * 1000;
+  const freshRecords = [];
+  const staleRecords = [];
+  for (const record of records) {
+    const createdAt = Number(record.created_at || 0);
+    if (Number.isFinite(createdAt) && createdAt > 0 && createdAt < cutoff) {
+      staleRecords.push(record);
+    } else {
+      freshRecords.push(record);
+    }
+  }
+  return { freshRecords, staleRecords };
+}
+
+function isRecordFresh(record = {}, { now, freshnessHours } = {}) {
+  if (!shouldApplyFreshnessGate({ now, freshnessHours })) return true;
+  const createdAt = Number(record.created_at || 0);
+  return !Number.isFinite(createdAt) || createdAt <= 0 || createdAt >= Number(now) - Number(freshnessHours) * 60 * 60 * 1000;
+}
+
+function shouldApplyFreshnessGate({ now, freshnessHours } = {}) {
+  const current = Number(now);
+  const hours = Number(freshnessHours);
+  return Number.isFinite(current) && current > 0 && Number.isFinite(hours) && hours > 0;
 }
 
 function recordsToMessages(records, limit, charBudget) {

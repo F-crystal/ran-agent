@@ -19,6 +19,18 @@ The optimization goal is to avoid stacking all layers on every lite request.
 
 `vault/` may feed maintenance summaries or explicit recall, but only as short, sanitized excerpts. Follow the runtime budget: at most one vault recall hit and a small snippet, not raw daily chat logs. Soft reset digest generation may use already-summarized vault/wiki signals for `open_threads`, `pending_commitments`, `active_preferences`, and `recent_artifacts`; it must not copy `vault/inbox`, `vault/raw`, or `vault/wiki` content verbatim into `daily_digest`.
 
+## Continuity Freshness Gate
+
+`HERMES_CONTINUITY_FRESHNESS_HOURS=24` keeps cross-day continuity while
+preventing old temporary states from being treated as current facts. Records
+inside the freshness window may contribute to `active_topic` and
+`current_topic/open_loop`. Older timeline clues may still be surfaced as
+`stale_context`, but Hermes must treat them as historical clues only: say
+"上次你提到..." when relevant, and do not assume the state still holds unless
+the current user message confirms it.
+
+Set `HERMES_CONTINUITY_FRESHNESS_HOURS=0` only for legacy behavior debugging.
+
 ## Context Modes
 
 `HERMES_CONTEXT_INJECTION_MODE=auto|rich|slim|resume`
