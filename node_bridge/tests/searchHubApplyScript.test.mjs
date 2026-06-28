@@ -774,6 +774,85 @@ test('prepare-ombre-brain.sh creates compose and config without secrets', () => 
   assert.match(upstream, /https:\/\/github\.com\/P0luz\/Ombre-Brain/);
 });
 
+test('prepare-ombre-brain.sh wraps existing source update in 5 minute timeout', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-update-timeout-'));
+  const rootDir = join(dir, 'repo');
+  const homeDir = join(dir, 'ombre-home');
+  const sourceDir = join(homeDir, 'upstream');
+  const binDir = join(dir, 'bin');
+  const timeoutLog = join(dir, 'timeout.log');
+  mkdirSync(join(sourceDir, 'src'), { recursive: true });
+  mkdirSync(join(sourceDir, '.git'), { recursive: true });
+  mkdirSync(binDir, { recursive: true });
+  writeFileSync(join(sourceDir, 'src', 'server.py'), '');
+  writeFileSync(join(binDir, 'timeout'), [
+    '#!/usr/bin/env bash',
+    `printf '%s\\n' "$*" >> ${JSON.stringify(timeoutLog)}`,
+    'exit 124',
+  ].join('\n'));
+  chmodSync(join(binDir, 'timeout'), 0o755);
+
+  const output = execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env: {
+      ...process.env,
+      PATH: `${binDir}:${process.env.PATH}`,
+      RAN_AGENT_REPO_ROOT: rootDir,
+      OMBRE_BRAIN_HOME: homeDir,
+      OMBRE_BRAIN_SOURCE_DIR: sourceDir,
+      OMBRE_BRAIN_VENV: join(homeDir, '.venv'),
+    },
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  assert.match(readFileSync(timeoutLog, 'utf8'), /300 git -C .* pull --ff-only/);
+  assert.match(output, /WARNING: source update timed out or failed; preserving current checkout/);
+});
+
+test('prepare-ombre-brain.sh skips pip install when requirements are unchanged', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-requirements-cache-'));
+  const rootDir = join(dir, 'repo');
+  const homeDir = join(dir, 'ombre-home');
+  const sourceDir = join(homeDir, 'upstream');
+  const venvDir = join(homeDir, '.venv');
+  const pipLog = join(dir, 'pip.log');
+  mkdirSync(join(sourceDir, 'src'), { recursive: true });
+  mkdirSync(join(venvDir, 'bin'), { recursive: true });
+  writeFileSync(join(sourceDir, 'src', 'server.py'), '');
+  writeFileSync(join(sourceDir, 'requirements.txt'), 'fastapi==0.1\n');
+  writeFileSync(join(venvDir, 'bin', 'python'), [
+    '#!/usr/bin/env bash',
+    `printf '%s\\n' "$*" >> ${JSON.stringify(pipLog)}`,
+    'exit 0',
+  ].join('\n'));
+  chmodSync(join(venvDir, 'bin', 'python'), 0o755);
+
+  const env = {
+    ...process.env,
+    RAN_AGENT_REPO_ROOT: rootDir,
+    OMBRE_BRAIN_UPDATE_SOURCE: 'false',
+    OMBRE_BRAIN_HOME: homeDir,
+    OMBRE_BRAIN_SOURCE_DIR: sourceDir,
+    OMBRE_BRAIN_VENV: venvDir,
+  };
+  execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env,
+    stdio: 'pipe',
+  });
+  execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env,
+    stdio: 'pipe',
+  });
+
+  const pipCalls = readFileSync(pipLog, 'utf8')
+    .split('\n')
+    .filter((line) => line.includes('-m pip install'));
+  assert.equal(pipCalls.length, 1);
+});
+
 test('start_obsidian_memory_mcp.sh does not contain uv tool install --force', () => {
   const scriptPath = new URL('../../scripts/start_obsidian_memory_mcp.sh', import.meta.url).pathname;
   const script = readFileSync(scriptPath, 'utf8');

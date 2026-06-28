@@ -20,6 +20,7 @@ OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yam
 OMBRE_BRAIN_ENV_EXAMPLE_FILE="${OMBRE_BRAIN_ENV_EXAMPLE_FILE:-$OMBRE_BRAIN_HOME/.env.example}"
 OMBRE_BRAIN_PULL_IMAGE="${OMBRE_BRAIN_PULL_IMAGE:-false}"
 OMBRE_BRAIN_UPDATE_SOURCE="${OMBRE_BRAIN_UPDATE_SOURCE:-true}"
+OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS="${OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS:-300}"
 
 FORCE_CONFIG=0
 FORCE_COMPOSE=0
@@ -59,6 +60,32 @@ write_if_missing() {
   log "wrote $path"
 }
 
+requirements_fingerprint() {
+  local path="$1"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$path" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$path" | awk '{print $1}'
+  else
+    cksum "$path" | awk '{print $1 ":" $2}'
+  fi
+}
+
+install_source_requirements_if_changed() {
+  local requirements="$OMBRE_BRAIN_SOURCE_DIR/requirements.txt"
+  [ -f "$requirements" ] || return 0
+  local stamp="$OMBRE_BRAIN_VENV/.requirements.fingerprint"
+  local current
+  current="$(requirements_fingerprint "$requirements")"
+  if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$current" ]; then
+    log "source requirements unchanged; skipping pip install"
+    return 0
+  fi
+  log "installing source requirements"
+  "$OMBRE_BRAIN_VENV/bin/python" -m pip install -r "$requirements"
+  printf '%s\n' "$current" > "$stamp"
+}
+
 prepare_source_runner() {
   case "$OMBRE_BRAIN_RUNNER" in
     source|auto)
@@ -71,7 +98,11 @@ prepare_source_runner() {
   if [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ]; then
     log "preserving existing source checkout $OMBRE_BRAIN_SOURCE_DIR"
     if [ -d "$OMBRE_BRAIN_SOURCE_DIR/.git" ] && [ "$OMBRE_BRAIN_UPDATE_SOURCE" != "false" ] && [ "$OMBRE_BRAIN_UPDATE_SOURCE" != "0" ]; then
-      git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only || log "WARNING: source update failed; preserving current checkout"
+      if command -v timeout >/dev/null 2>&1; then
+        timeout "$OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS" git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only || log "WARNING: source update timed out or failed; preserving current checkout"
+      else
+        git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only || log "WARNING: source update failed; preserving current checkout"
+      fi
     fi
   else
     if ! command -v git >/dev/null 2>&1; then
@@ -98,10 +129,7 @@ prepare_source_runner() {
     python3 -m venv "$OMBRE_BRAIN_VENV"
   fi
 
-  if [ -f "$OMBRE_BRAIN_SOURCE_DIR/requirements.txt" ]; then
-    log "installing source requirements"
-    "$OMBRE_BRAIN_VENV/bin/python" -m pip install -r "$OMBRE_BRAIN_SOURCE_DIR/requirements.txt"
-  fi
+  install_source_requirements_if_changed
 }
 
 mkdir -p "$OMBRE_BRAIN_HOME" "$OMBRE_BUCKETS_DIR"
