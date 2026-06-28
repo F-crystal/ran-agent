@@ -398,6 +398,7 @@ test('read_social_post_deep reports XHS media truncation by max_media_assets', a
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.total_media_count, 25);
   assert.equal(result.structuredContent.analyzed_media_count, 20);
+  assert.equal(result.structuredContent.successful_media_count, 0);
   assert.equal(result.structuredContent.truncated_by_max_assets, true);
   assert.deepEqual(result.structuredContent.warnings, ['XHS_MEDIA_ASSETS_TRUNCATED_BY_MAX_ASSETS']);
   assert.equal(analyzedAssets.length, 20);

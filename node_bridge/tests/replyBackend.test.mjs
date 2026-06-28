@@ -322,6 +322,45 @@ test('createReplyBackend repair mode keeps partial social repair honest', async 
   assert.equal(response.replyText, '我读到了一部分内容，但有些媒体或细节没有成功获取。');
 });
 
+test('createReplyBackend repair mode downgrades complete reply when repaired XHS media coverage is partial', async () => {
+  const backend = createReplyBackend({
+    env: {
+      HERMES_ACTION_GATE_ENABLED: 'true',
+      HERMES_ACTION_GATE_MODE: 'repair',
+      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
+    },
+    hermesImpl: async () => ({
+      reply_text: '我已经完整读完了，这篇小红书主要说旅行。',
+      follow_up_messages: [],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    actionRepairImpl: async () => ({
+      ok: true,
+      status: 'success',
+      repairedReply: '我已经完整读完了，五张图都看完了。',
+      toolResult: {
+        toolName: 'mcp_social_reader_read_social_post_deep',
+        ok: true,
+        total_media_count: 5,
+        analyzed_media_count: 5,
+        successful_media_count: 1,
+        media_analysis: { partial: true, items: [{}], partial_failures: [{ asset_id: 'xhs-2', error_code: 'DOWNLOAD_TIMEOUT' }] },
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '帮我读一下 http://xhslink.com/o/abc123',
+    sender_id: 'conv-action-repair-social-partial-coverage',
+    channel: 'wechat',
+  });
+
+  assert.equal(response.replyText, '我读到了一部分内容，但有些媒体或细节没有成功获取。');
+});
+
 test('createReplyBackend repair mode repairs media read through artifact evidence', async () => {
   const repairCalls = [];
   const backend = createReplyBackend({

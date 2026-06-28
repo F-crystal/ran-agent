@@ -414,13 +414,79 @@ function summarizeMediaEvidence(media = {}) {
 function summarizeToolResult(result = {}) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
   const ok = result.ok === true || result.status === 'success';
-  const partial = result.partial_success === true || result.partialSuccess === true || result.status === 'partial_success';
-  return {
+  const coverage = summarizeMediaCoverage(result);
+  const partial = result.partial_success === true
+    || result.partialSuccess === true
+    || result.status === 'partial_success'
+    || coverage.partial === true;
+  const summary = {
     type: 'tool_result',
     tool: sanitizeShortString(result.toolName || result.tool_name || result.name),
     status: partial ? 'partial_success' : ok ? 'success' : 'failure',
     artifact_id_hash: hashOptional(result.artifact_id || result.artifactId || result.id),
     error_code: sanitizeShortString(result.error_code || result.errorCode || result.code),
+  };
+  if (coverage.totalMediaCount !== null) summary.total_media_count = coverage.totalMediaCount;
+  if (coverage.analyzedMediaCount !== null) summary.analyzed_media_count = coverage.analyzedMediaCount;
+  if (coverage.successfulMediaCount !== null) summary.successful_media_count = coverage.successfulMediaCount;
+  if (coverage.partialFailuresCount > 0) summary.partial_failures_count = coverage.partialFailuresCount;
+  if (coverage.truncatedByMaxAssets) summary.truncated_by_max_assets = true;
+  if (coverage.warnings.length > 0) summary.warnings = coverage.warnings;
+  return summary;
+}
+
+function summarizeMediaCoverage(result = {}) {
+  const mediaAnalysis = result.media_analysis && typeof result.media_analysis === 'object' && !Array.isArray(result.media_analysis)
+    ? result.media_analysis
+    : result.mediaAnalysis && typeof result.mediaAnalysis === 'object' && !Array.isArray(result.mediaAnalysis)
+      ? result.mediaAnalysis
+      : {};
+  const totalMediaCount = normalizeOptionalNonNegativeInt(
+    firstDefined(result.total_media_count, result.totalMediaCount, result.media_count, result.mediaCount)
+  );
+  const analyzedMediaCount = normalizeOptionalNonNegativeInt(
+    firstDefined(
+      result.analyzed_media_count,
+      result.analyzedMediaCount,
+      result.successful_media_count,
+      result.successfulMediaCount
+    )
+  );
+  const successfulMediaCount = normalizeOptionalNonNegativeInt(
+    firstDefined(
+      result.successful_media_count,
+      result.successfulMediaCount,
+      Array.isArray(mediaAnalysis.items) ? mediaAnalysis.items.length : undefined,
+      result.analyzed_media_count,
+      result.analyzedMediaCount
+    )
+  );
+  const partialFailuresCount = normalizeOptionalNonNegativeInt(
+    firstDefined(
+      result.partial_failures_count,
+      result.partialFailuresCount,
+      Array.isArray(result.partial_failures) ? result.partial_failures.length : undefined,
+      Array.isArray(mediaAnalysis.partial_failures) ? mediaAnalysis.partial_failures.length : undefined
+    )
+  ) || 0;
+  const warnings = [
+    ...normalizeWarningCodes(result.warnings),
+    ...normalizeWarningCodes(mediaAnalysis.warnings),
+  ];
+  const truncatedByMaxAssets = result.truncated_by_max_assets === true || result.truncatedByMaxAssets === true;
+  const effectiveMediaCount = successfulMediaCount ?? analyzedMediaCount;
+  const coverageShortfall = totalMediaCount !== null && effectiveMediaCount !== null && totalMediaCount > effectiveMediaCount;
+  const submittedShortfall = analyzedMediaCount !== null && successfulMediaCount !== null && analyzedMediaCount > successfulMediaCount;
+  const analysisPartial = mediaAnalysis.partial === true || mediaAnalysis.partial_success === true || mediaAnalysis.partialSuccess === true;
+  const timeoutWarning = warnings.some((item) => /TIMEOUT|TRUNCATED|PARTIAL/i.test(item));
+  return {
+    totalMediaCount,
+    analyzedMediaCount,
+    successfulMediaCount,
+    partialFailuresCount,
+    warnings,
+    truncatedByMaxAssets,
+    partial: coverageShortfall || submittedShortfall || analysisPartial || partialFailuresCount > 0 || truncatedByMaxAssets || timeoutWarning,
   };
 }
 
@@ -449,6 +515,26 @@ function normalizeMediaItems(media) {
 
 function normalizeStringArray(items) {
   return Array.isArray(items) ? items.filter((item) => typeof item === 'string' && item.trim()) : [];
+}
+
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function normalizeOptionalNonNegativeInt(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function normalizeWarningCodes(items) {
+  return Array.isArray(items)
+    ? items.map((item) => {
+      if (typeof item === 'string') return sanitizeShortString(item);
+      if (item && typeof item === 'object') return sanitizeShortString(item.code || item.error_code || item.errorCode);
+      return '';
+    }).filter(Boolean).slice(0, 8)
+    : [];
 }
 
 function hasUrl(text) {

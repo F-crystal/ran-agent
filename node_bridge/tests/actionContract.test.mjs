@@ -253,6 +253,37 @@ test('enforce mode rewrites partial social reads without claiming total failure'
   assert.deepEqual(gate.reasons, ['partial_success_claim_mismatch']);
 });
 
+test('enforce mode rewrites complete social read claims when media coverage is partial', () => {
+  const contract = evaluateActionContract({
+    requestId: 'req-social-partial-coverage',
+    message: { text: '总结一下 http://xhslink.com/o/abc123', channel: 'wechat', conversation_id: 'conv-social-partial-coverage' },
+    response: { reply_text: '我已经完整读完了，五张图都看完了。' },
+    toolResults: [{
+      toolName: 'mcp_social_reader_read_social_post_deep',
+      ok: true,
+      total_media_count: 5,
+      analyzed_media_count: 5,
+      successful_media_count: 1,
+      media_analysis: { partial: true, items: [{}], partial_failures: [{ asset_id: 'xhs-2', error_code: 'DOWNLOAD_TIMEOUT' }] },
+    }],
+    config: { enabled: true, mode: 'enforce', maxRepairAttempts: 1 },
+  });
+
+  const gate = evaluateActionGate({
+    contract,
+    finalReply: '我已经完整读完了，五张图都看完了。',
+    mode: 'enforce',
+  });
+
+  assert.equal(contract.observed_evidence[0].status, 'partial_success');
+  assert.equal(contract.observed_evidence[0].total_media_count, 5);
+  assert.equal(contract.observed_evidence[0].analyzed_media_count, 5);
+  assert.equal(contract.observed_evidence[0].successful_media_count, 1);
+  assert.equal(gate.shouldRewrite, true);
+  assert.equal(gate.rewrittenText, '我读到了一部分内容，但有些媒体或细节没有成功获取。');
+  assert.deepEqual(gate.reasons, ['partial_success_claim_mismatch']);
+});
+
 test('enforce mode rewrites media read claims without artifact evidence', () => {
   const contract = evaluateActionContract({
     requestId: 'req-media-enforce',

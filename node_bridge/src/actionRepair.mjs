@@ -113,7 +113,11 @@ async function repairSocialRead({ message, env, logger }) {
     { env, logger }
   );
   const payload = result?.structuredContent || {};
-  const partial = payload.partial_success === true || payload.partialSuccess === true || payload.status === 'partial_success';
+  const coverage = summarizeSocialMediaCoverage(payload);
+  const partial = payload.partial_success === true
+    || payload.partialSuccess === true
+    || payload.status === 'partial_success'
+    || coverage.partial === true;
   const ok = result?.isError !== true && payload.ok !== false;
   if (!ok && !partial) {
     return {
@@ -137,6 +141,12 @@ async function repairSocialRead({ message, env, logger }) {
       partial_success: partial,
       artifact_id: payload.artifact_id || payload.artifactId || payload.note_id || payload.id || '',
       error_code: payload.error_code || payload.errorCode || '',
+      total_media_count: coverage.totalMediaCount,
+      analyzed_media_count: coverage.analyzedMediaCount,
+      successful_media_count: coverage.successfulMediaCount,
+      partial_failures_count: coverage.partialFailuresCount,
+      truncated_by_max_assets: coverage.truncatedByMaxAssets,
+      warnings: coverage.warnings,
     },
   };
 }
@@ -326,6 +336,59 @@ function buildSocialRepairReply(payload = {}, partial = false) {
   return summary ? `我现在读取到了这个链接内容：${summary}` : '我现在读取到了这个链接内容，可以基于读取结果继续整理。';
 }
 
+function summarizeSocialMediaCoverage(payload = {}) {
+  const mediaAnalysis = payload.media_analysis && typeof payload.media_analysis === 'object' && !Array.isArray(payload.media_analysis)
+    ? payload.media_analysis
+    : {};
+  const totalMediaCount = normalizeOptionalNonNegativeInt(
+    firstDefined(payload.total_media_count, payload.totalMediaCount, payload.media_count, payload.mediaCount)
+  );
+  const analyzedMediaCount = normalizeOptionalNonNegativeInt(
+    firstDefined(
+      payload.analyzed_media_count,
+      payload.analyzedMediaCount,
+      payload.successful_media_count,
+      payload.successfulMediaCount
+    )
+  );
+  const successfulMediaCount = normalizeOptionalNonNegativeInt(
+    firstDefined(
+      payload.successful_media_count,
+      payload.successfulMediaCount,
+      Array.isArray(mediaAnalysis.items) ? mediaAnalysis.items.length : undefined,
+      payload.analyzed_media_count,
+      payload.analyzedMediaCount
+    )
+  );
+  const partialFailuresCount = normalizeOptionalNonNegativeInt(
+    firstDefined(
+      payload.partial_failures_count,
+      payload.partialFailuresCount,
+      Array.isArray(mediaAnalysis.partial_failures) ? mediaAnalysis.partial_failures.length : undefined
+    )
+  ) || 0;
+  const warnings = [
+    ...normalizeWarningCodes(payload.warnings),
+    ...normalizeWarningCodes(mediaAnalysis.warnings),
+  ];
+  const truncatedByMaxAssets = payload.truncated_by_max_assets === true || payload.truncatedByMaxAssets === true;
+  const effectiveMediaCount = successfulMediaCount ?? analyzedMediaCount;
+  return {
+    totalMediaCount,
+    analyzedMediaCount,
+    successfulMediaCount,
+    partialFailuresCount,
+    truncatedByMaxAssets,
+    warnings,
+    partial: mediaAnalysis.partial === true
+      || truncatedByMaxAssets
+      || partialFailuresCount > 0
+      || (totalMediaCount !== null && effectiveMediaCount !== null && totalMediaCount > effectiveMediaCount)
+      || (analyzedMediaCount !== null && successfulMediaCount !== null && analyzedMediaCount > successfulMediaCount)
+      || warnings.some((item) => /TIMEOUT|TRUNCATED|PARTIAL/i.test(item)),
+  };
+}
+
 function findGeneratedMediaCandidate(response = {}) {
   const candidates = [
     response.generated_media,
@@ -341,6 +404,26 @@ function compactUserText(value) {
     .replace(/\s+/g, ' ')
     .trim()
     .slice(0, 220);
+}
+
+function firstDefined(...values) {
+  return values.find((value) => value !== undefined && value !== null);
+}
+
+function normalizeOptionalNonNegativeInt(value) {
+  if (value === undefined || value === null || value === '') return null;
+  const parsed = Number.parseInt(String(value), 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+function normalizeWarningCodes(items) {
+  return Array.isArray(items)
+    ? items.map((item) => {
+      if (typeof item === 'string') return sanitizeCode(item);
+      if (item && typeof item === 'object') return sanitizeCode(item.code || item.error_code || item.errorCode);
+      return '';
+    }).filter(Boolean).slice(0, 8)
+    : [];
 }
 
 function sanitizeCode(value) {

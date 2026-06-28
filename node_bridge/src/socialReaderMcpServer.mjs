@@ -1902,6 +1902,7 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     })
     : [];
   const analyzedMediaCount = mediaAssets.length;
+  let successfulMediaCount = 0;
   const truncatedByMaxAssets = includeMedia && totalMediaCount > analyzedMediaCount;
   if (includeMedia && mediaAssets.length > 0) {
     const mediaResult = await callMediaReaderTool('analyze_media_batch', {
@@ -1911,7 +1912,12 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
       task: 'summarize_social_post_media',
     }, options);
     mediaAnalysis = mediaResult.structuredContent || mediaResult;
+    successfulMediaCount = Array.isArray(mediaAnalysis?.items) ? mediaAnalysis.items.length : 0;
   }
+  const mediaAnalysisPartial = mediaAnalysis?.partial === true;
+  const partialMediaRead = truncatedByMaxAssets
+    || mediaAnalysisPartial
+    || (includeMedia && analyzedMediaCount > successfulMediaCount);
 
   // Both failed
   if (!detailOk && !mediaOk) {
@@ -1965,7 +1971,7 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
 
   return buildTextResult({
     ok: true,
-    partial_success: !detailOk && mediaOk,
+    partial_success: (!detailOk && mediaOk) || partialMediaRead,
     platform: 'xhs',
     note_id: noteId,
     url,
@@ -1984,8 +1990,13 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     media_count: mediaCount,
     total_media_count: totalMediaCount,
     analyzed_media_count: analyzedMediaCount,
+    successful_media_count: successfulMediaCount,
     truncated_by_max_assets: truncatedByMaxAssets,
-    warnings: truncatedByMaxAssets ? ['XHS_MEDIA_ASSETS_TRUNCATED_BY_MAX_ASSETS'] : [],
+    warnings: [
+      ...(Array.isArray(mediaAnalysis?.warnings) ? mediaAnalysis.warnings : []),
+      ...(truncatedByMaxAssets ? ['XHS_MEDIA_ASSETS_TRUNCATED_BY_MAX_ASSETS'] : []),
+      ...(mediaAnalysisPartial ? ['MEDIA_ANALYSIS_PARTIAL'] : []),
+    ],
     deep_summary: [
       detailOk ? (detail?.post_text || desc) : '',
       mediaAnalysis?.merged_summary ? `媒体: ${mediaAnalysis.merged_summary}` : '',

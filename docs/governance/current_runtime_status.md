@@ -196,6 +196,10 @@ media directories so redeploys do not depend on manual `mkdir`.
 - Canonical URLs and token cache hits are link-resolution evidence only.
   `allow_claim_read=true` requires content fields such as `post_text`, `desc`,
   `note_text`, `content`, `ocr_text`, `image_text`, or `full_text`.
+- XHS deep-read media evidence keeps both `analyzed_media_count` (assets sent to
+  media analysis) and `successful_media_count` (assets that produced analysis
+  items). Complete-read claims must not pass when successful media coverage is
+  partial.
 - Evidence logs must not print raw `xsec_token`; canonical URLs are logged with
   redacted query strings.
 - `sendChatToHermesGateway()` creates one request id per request and reuses it
