@@ -76,7 +76,7 @@ id hash, and error code.
 
 ```env
 HERMES_ACTION_GATE_ENABLED=true
-HERMES_ACTION_GATE_MODE=observe
+HERMES_ACTION_GATE_MODE=repair
 HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS=1
 HERMES_ACTION_PENDING_ENABLED=true
 HERMES_ACTION_PENDING_TTL_MINUTES=30
@@ -271,26 +271,26 @@ uses explicit authorization and pending confirmations.
 
 ## Rollout
 
-Gradual rollout is controlled only by environment:
+Production deploy defaults to repair mode:
 
 ```env
 HERMES_ACTION_GATE_ENABLED=true
-HERMES_ACTION_GATE_MODE=observe
+HERMES_ACTION_GATE_MODE=repair
 HERMES_ACTION_PENDING_ENABLED=true
+HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS=1
 HERMES_ACTION_PENDING_TTL_MINUTES=30
 ```
 
-Then:
+For temporary diagnosis-only mode:
+
+```env
+HERMES_ACTION_GATE_MODE=observe
+```
+
+For rewrite-only mode without repair attempts:
 
 ```env
 HERMES_ACTION_GATE_MODE=enforce
-```
-
-Then:
-
-```env
-HERMES_ACTION_GATE_MODE=repair
-HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS=1
 ```
 
 Temporary disable:
