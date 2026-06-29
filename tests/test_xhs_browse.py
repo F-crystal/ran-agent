@@ -9,9 +9,12 @@ import subprocess
 import json
 import sys
 import os
+import tempfile
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MJS_FILE = os.path.join(ROOT_DIR, 'node_bridge/src/socialReaderMcpServer.mjs')
+PREPARE_SCRIPT = os.path.join(ROOT_DIR, 'scripts/prepare-xhs-browse-backend.sh')
+DIAGNOSE_SCRIPT = os.path.join(ROOT_DIR, 'scripts/diagnose-media-xhs.sh')
 
 def test_syntax_check():
     """测试 1: JavaScript 语法检查"""
@@ -196,7 +199,7 @@ def test_search_notes_uses_keywords():
     
     # 检查 xhsBrowseSearch 中是否有 keywords 参数映射
     assert "backendArgs.keywords = query" in content, "search_notes should use keywords parameter"
-    assert "if (backendToolName === 'search_notes')" in content, "Should check for search_notes tool name"
+    assert "xhsBrowseToolMatches(backendToolName, 'search_notes')" in content, "Should match namespaced search_notes tool names"
     print("✅ test_search_notes_uses_keywords: PASSED")
 
 def test_adapter_normalization():
@@ -236,6 +239,65 @@ def test_probe_callable_verified_flag():
     assert 'declared_tools' in content, "Should return declared_tools"
     print("✅ test_probe_callable_verified_flag: PASSED")
 
+def test_prepare_writes_mcporter_keep_alive_lifecycle():
+    """测试 18: prepare 脚本必须把 xiaohongshu mcporter entry 标记为 keep-alive"""
+    with open(PREPARE_SCRIPT, 'r') as f:
+        content = f.read()
+
+    assert 'entry["lifecycle"] = "keep-alive"' in content, (
+        "mcporter serve only exposes servers whose normalized lifecycle is keep-alive"
+    )
+    print("✅ test_prepare_writes_mcporter_keep_alive_lifecycle: PASSED")
+
+def test_diagnose_reports_xhs_browse_bridge_stderr():
+    """测试 19: diagnose bridge smoke 不能吞掉 mcporter serve 的启动错误"""
+    with open(DIAGNOSE_SCRIPT, 'r') as f:
+        content = f.read()
+
+    assert 'BROWSE_SMOKE_STDERR' in content
+    assert 'xhs browse bridge error:' in content
+    print("✅ test_diagnose_reports_xhs_browse_bridge_stderr: PASSED")
+
+def test_wrapper_forces_mcporter_keep_alive_server():
+    """测试 20: wrapper 对旧 mcporter config 也必须强制启用当前 server 的 keep-alive"""
+    wrapper = os.path.join(ROOT_DIR, 'scripts/run_xhs_browse_mcp.sh')
+    with tempfile.TemporaryDirectory() as tmpdir:
+        mcporter_path = os.path.join(tmpdir, 'fake-mcporter.js')
+        config_path = os.path.join(tmpdir, 'mcporter.json')
+        marker_path = os.path.join(tmpdir, 'xhs-browse-ready.json')
+        output_path = os.path.join(tmpdir, 'keepalive.txt')
+        with open(mcporter_path, 'w') as f:
+            f.write("import fs from 'node:fs';\nfs.writeFileSync(process.env.OUT, process.env.MCPORTER_KEEPALIVE || '');\n")
+        with open(config_path, 'w') as f:
+            json.dump({"mcpServers": {"xiaohongshu": {"baseUrl": "http://127.0.0.1:18060/mcp"}}}, f)
+        with open(marker_path, 'w') as f:
+            json.dump({
+                "ok": True,
+                "mcporter_cli": mcporter_path,
+                "mcporter_config_path": config_path,
+                "server_name": "xiaohongshu",
+            }, f)
+
+        env = os.environ.copy()
+        env.update({
+            "XHS_BROWSE_MARKER_PATH": marker_path,
+            "MCPORTER_KEEPALIVE": "other",
+            "OUT": output_path,
+        })
+        result = subprocess.run(
+            ['bash', wrapper],
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+
+        assert result.returncode == 0, result.stderr
+        with open(output_path, 'r') as f:
+            keepalive = f.read()
+        assert keepalive == 'other,xiaohongshu'
+    print("✅ test_wrapper_forces_mcporter_keep_alive_server: PASSED")
+
 if __name__ == '__main__':
     tests = [
         test_syntax_check,
@@ -255,6 +317,9 @@ if __name__ == '__main__':
         test_adapter_normalization,
         test_backend_eof_without_response,
         test_probe_callable_verified_flag,
+        test_prepare_writes_mcporter_keep_alive_lifecycle,
+        test_diagnose_reports_xhs_browse_bridge_stderr,
+        test_wrapper_forces_mcporter_keep_alive_server,
     ]
     
     failed = []

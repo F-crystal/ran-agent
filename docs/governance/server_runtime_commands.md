@@ -269,6 +269,78 @@ If XHS content reads fail:
    (`XHS_BACKEND_TIMEOUT`).
 3. Do not delete social-reader state while cleaning cache.
 
+## XHS Browse MCP Repair
+
+The XHS browse path has two layers:
+
+- `ran-agent-xhs-browse.service` runs `xiaohongshu-mcp` as a local HTTP MCP
+  backend on `127.0.0.1:18060`.
+- `scripts/run_xhs_browse_mcp.sh` exposes that HTTP backend to Hermes
+  `social_reader` through `mcporter serve --stdio`.
+
+If direct `mcporter list xiaohongshu --schema` works but
+`scripts/run_xhs_browse_mcp.sh` exits with:
+
+```text
+Server 'xiaohongshu' is not configured for keep-alive and cannot be served by the daemon bridge.
+```
+
+then the backend is installed, but the mcporter bridge entry is missing
+`lifecycle: keep-alive`. Pull the latest repo and let prepare repair the
+project-scoped mcporter config; no binary re-download is needed when the marker
+and archive are already valid:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+git pull --ff-only
+bash scripts/prepare-xhs-browse-backend.sh --write-env
+sudo systemctl daemon-reload
+sudo systemctl restart ran-agent-xhs-browse.service
+sudo systemctl restart ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-node.service
+bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-browse
+```
+
+Expected browse smoke:
+
+```text
+xhs browse search tool: CONFIRMED
+xhs browse detail tool: CONFIRMED
+```
+
+If either line is not confirmed, the diagnostic now prints
+`xhs browse bridge error:` with the first bridge startup error. Fix that error
+before treating the issue as an XHS auth or note-visibility problem.
+
+Check login only after the bridge smoke confirms the search/detail tools:
+
+```bash
+MARKER=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
+MCPORTER=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_cli'])")
+CONF=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_config_path'])")
+node "$MCPORTER" --config "$CONF" call 'xiaohongshu.check_login_status()' --timeout 120000
+```
+
+Only scan a new QR code if the login check reports not logged in, expired
+cookies, or an auth failure:
+
+```bash
+bash scripts/login_xhs_browse_backend.sh --qrcode
+node "$MCPORTER" --config "$CONF" call 'xiaohongshu.check_login_status()' --timeout 120000
+```
+
+When browse smoke and login both pass, a specific note can still fail if the
+note was deleted, made private, hidden by author settings, or blocked by XHS
+risk control. In that case, compare:
+
+- `read_social_post_deep` diagnostics from `social_reader`.
+- `xiaohongshu.search_feeds(keyword=...)` returning the target `feed_id`.
+- `xiaohongshu.get_feed_detail(feed_id=..., xsec_token=...)` for the matched
+  search item.
+
+Do not paste `xsec_token`, cookies, QR payloads, or session files into public
+logs or docs.
+
 ## UV Cache Recovery
 
 Use the safe cleaner only:

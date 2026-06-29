@@ -198,6 +198,38 @@ PYEOF
   mv -f "$tmp_marker" "$MARKER_PATH"
 }
 
+ensure_mcporter_keep_alive_config() {
+  local config_path="$1"
+  local server_name="$2"
+  python3 - "$config_path" "$server_name" <<'PYEOF'
+import json
+import os
+import sys
+import tempfile
+
+config_path, server_name = sys.argv[1:]
+with open(config_path, "r", encoding="utf-8") as fh:
+    config = json.load(fh)
+servers = config.setdefault("mcpServers", {})
+entry = servers.get(server_name)
+if not isinstance(entry, dict):
+    raise SystemExit(f"missing mcporter server entry: {server_name}")
+if entry.get("lifecycle") == "keep-alive":
+    raise SystemExit(0)
+entry["lifecycle"] = "keep-alive"
+directory = os.path.dirname(config_path) or "."
+fd, tmp_path = tempfile.mkstemp(prefix=".mcporter.", suffix=".json", dir=directory)
+try:
+    with os.fdopen(fd, "w", encoding="utf-8") as out:
+        json.dump(config, out, ensure_ascii=False, indent=2)
+        out.write("\n")
+    os.replace(tmp_path, config_path)
+finally:
+    if os.path.exists(tmp_path):
+        os.unlink(tmp_path)
+PYEOF
+}
+
 marker_is_ready() {
   python3 - "$MARKER_PATH" <<'PYEOF'
 import json, os, sys
@@ -235,40 +267,48 @@ find_release_executable() {
   flock -n 200 || { echo "ERROR: another XHS browse prepare is running; aborting." >&2; exit 1; }
 
   if [ "$FORCE" = false ] && [ -f "$MARKER_PATH" ] && marker_is_ready 2>/dev/null; then
-    echo "Already prepared. Use --force to reinstall." >&2
-    if [ "$WRITE_ENV" = true ]; then
-      BROWSE_ARGS_JSON="$(json_string_array_for_wrapper)"
-      upsert_env_file "$ROOT_DIR/.env.local" \
-        "XHS_BROWSE_ENABLED=true" \
-        "SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false" \
-        "XHS_BROWSE_MARKER_PATH=$MARKER_PATH" \
-        "XHS_BROWSE_ROOT_DIR=$STATE_ROOT" \
-        "XHS_BROWSE_MCP_URL=$MCP_URL" \
-        "XHS_BROWSE_MCP_COMMAND=bash" \
-        "XHS_BROWSE_MCP_ARGS_JSON=$BROWSE_ARGS_JSON" \
-        "XHS_BROWSE_MCP_COOKIE_ENV=XHS_COOKIE" \
-        "XHS_BROWSE_SEARCH_ENABLED=true" \
-        "XHS_BROWSE_NOTE_ENABLED=true" \
-        "XHS_BROWSE_USER_ENABLED=false" \
-        "XHS_BROWSE_FEED_ENABLED=false"
-      upsert_env_file "$ROOT_DIR/node_bridge/.env.local" \
-        "XHS_BROWSE_ENABLED=true" \
-        "SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false" \
-        "XHS_BROWSE_MARKER_PATH=$MARKER_PATH" \
-        "XHS_BROWSE_ROOT_DIR=$STATE_ROOT" \
-        "XHS_BROWSE_MCP_URL=$MCP_URL" \
-        "XHS_BROWSE_MCP_COMMAND=bash" \
-        "XHS_BROWSE_MCP_ARGS_JSON=$BROWSE_ARGS_JSON" \
-        "XHS_BROWSE_MCP_COOKIE_ENV=XHS_COOKIE" \
-        "XHS_BROWSE_SEARCH_ENABLED=true" \
-        "XHS_BROWSE_NOTE_ENABLED=true" \
-        "XHS_BROWSE_USER_ENABLED=false" \
-        "XHS_BROWSE_FEED_ENABLED=false"
-      echo "Env files updated for XHS browse backend." >&2
+    MARKER_CONFIG_PATH=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('mcporter_config_path', '$MCPORTER_CONFIG_PATH'))" 2>/dev/null || printf '%s' "$MCPORTER_CONFIG_PATH")
+    MARKER_SERVER_NAME=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('server_name', '$SERVER_NAME'))" 2>/dev/null || printf '%s' "$SERVER_NAME")
+    if ! ensure_mcporter_keep_alive_config "$MARKER_CONFIG_PATH" "$MARKER_SERVER_NAME"; then
+      echo "WARNING: existing XHS browse mcporter config could not be repaired; reinstalling." >&2
+    else
+      MCPORTER_CONFIG_PATH="$MARKER_CONFIG_PATH"
+      SERVER_NAME="$MARKER_SERVER_NAME"
+      echo "Already prepared. Use --force to reinstall." >&2
+      if [ "$WRITE_ENV" = true ]; then
+        BROWSE_ARGS_JSON="$(json_string_array_for_wrapper)"
+        upsert_env_file "$ROOT_DIR/.env.local" \
+          "XHS_BROWSE_ENABLED=true" \
+          "SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false" \
+          "XHS_BROWSE_MARKER_PATH=$MARKER_PATH" \
+          "XHS_BROWSE_ROOT_DIR=$STATE_ROOT" \
+          "XHS_BROWSE_MCP_URL=$MCP_URL" \
+          "XHS_BROWSE_MCP_COMMAND=bash" \
+          "XHS_BROWSE_MCP_ARGS_JSON=$BROWSE_ARGS_JSON" \
+          "XHS_BROWSE_MCP_COOKIE_ENV=XHS_COOKIE" \
+          "XHS_BROWSE_SEARCH_ENABLED=true" \
+          "XHS_BROWSE_NOTE_ENABLED=true" \
+          "XHS_BROWSE_USER_ENABLED=false" \
+          "XHS_BROWSE_FEED_ENABLED=false"
+        upsert_env_file "$ROOT_DIR/node_bridge/.env.local" \
+          "XHS_BROWSE_ENABLED=true" \
+          "SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false" \
+          "XHS_BROWSE_MARKER_PATH=$MARKER_PATH" \
+          "XHS_BROWSE_ROOT_DIR=$STATE_ROOT" \
+          "XHS_BROWSE_MCP_URL=$MCP_URL" \
+          "XHS_BROWSE_MCP_COMMAND=bash" \
+          "XHS_BROWSE_MCP_ARGS_JSON=$BROWSE_ARGS_JSON" \
+          "XHS_BROWSE_MCP_COOKIE_ENV=XHS_COOKIE" \
+          "XHS_BROWSE_SEARCH_ENABLED=true" \
+          "XHS_BROWSE_NOTE_ENABLED=true" \
+          "XHS_BROWSE_USER_ENABLED=false" \
+          "XHS_BROWSE_FEED_ENABLED=false"
+        echo "Env files updated for XHS browse backend." >&2
+      fi
+      chown_runtime_paths_if_root
+      cat "$MARKER_PATH" >&2
+      exit 0
     fi
-    chown_runtime_paths_if_root
-    cat "$MARKER_PATH" >&2
-    exit 0
   fi
 
   if ! command -v node >/dev/null 2>&1; then
@@ -343,6 +383,7 @@ find_release_executable() {
   echo "Writing project-scoped mcporter config at $MCPORTER_CONFIG_PATH..." >&2
   node "$MCPORTER_CLI" --config "$MCPORTER_CONFIG_PATH" \
     config add "$SERVER_NAME" "$MCP_URL" --persist "$MCPORTER_CONFIG_PATH" >&2
+  ensure_mcporter_keep_alive_config "$MCPORTER_CONFIG_PATH" "$SERVER_NAME"
   node "$MCPORTER_CLI" --config "$MCPORTER_CONFIG_PATH" config get "$SERVER_NAME" --json >/dev/null
 
   write_marker "true" "$ASSET_NAME" "$EXPECTED_SHA" "$MCP_EXECUTABLE" "$LOGIN_EXECUTABLE" "$MCPORTER_CLI"

@@ -35,4 +35,13 @@ if [ -z "$MCPORTER_CONFIG" ] || [ ! -f "$MCPORTER_CONFIG" ]; then
   exit 1
 fi
 
+if [ -n "${MCPORTER_KEEPALIVE:-}" ]; then
+  case ",${MCPORTER_KEEPALIVE}," in
+    *,\*,*|*,"$SERVER_NAME",*) ;;
+    *) export MCPORTER_KEEPALIVE="${MCPORTER_KEEPALIVE},${SERVER_NAME}" ;;
+  esac
+else
+  export MCPORTER_KEEPALIVE="$SERVER_NAME"
+fi
+
 exec node "$MCPORTER_CLI" --config "$MCPORTER_CONFIG" serve --servers "$SERVER_NAME" --stdio
