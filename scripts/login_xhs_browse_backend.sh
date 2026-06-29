@@ -38,7 +38,10 @@ if [ "${1:-}" = "--qrcode" ]; then
     echo "XHS_BROWSE_NOT_READY: mcporter config missing from marker" >&2
     exit 1
   fi
-  exec node "$MCPORTER_CLI" --config "$MCPORTER_CONFIG" call 'xiaohongshu.get_login_qrcode()' --timeout 120000
+  QR_DIR="${XHS_BROWSE_QRCODE_DIR:-/tmp/xhs-browse-login-qrcode}"
+  mkdir -p "$QR_DIR"
+  echo "Saving XHS login QR image to $QR_DIR" >&2
+  exec node "$MCPORTER_CLI" --config "$MCPORTER_CONFIG" call 'xiaohongshu.get_login_qrcode()' --timeout 120000 --save-images "$QR_DIR"
 fi
 
 LOGIN_EXECUTABLE=$(python3 -c "import json; print(json.load(open('$MARKER_PATH')).get('login_executable', ''))" 2>/dev/null)

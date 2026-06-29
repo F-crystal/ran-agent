@@ -298,6 +298,16 @@ def test_wrapper_forces_mcporter_keep_alive_server():
         assert keepalive == 'other,xiaohongshu'
     print("✅ test_wrapper_forces_mcporter_keep_alive_server: PASSED")
 
+def test_login_qrcode_saves_mcporter_image_content():
+    """测试 21: login --qrcode 必须保存 MCP image content，SSH 终端不会自动渲染二维码"""
+    login_script = os.path.join(ROOT_DIR, 'scripts/login_xhs_browse_backend.sh')
+    with open(login_script, 'r') as f:
+        content = f.read()
+
+    assert '--save-images "$QR_DIR"' in content
+    assert 'XHS_BROWSE_QRCODE_DIR' in content
+    print("✅ test_login_qrcode_saves_mcporter_image_content: PASSED")
+
 if __name__ == '__main__':
     tests = [
         test_syntax_check,
@@ -320,6 +330,7 @@ if __name__ == '__main__':
         test_prepare_writes_mcporter_keep_alive_lifecycle,
         test_diagnose_reports_xhs_browse_bridge_stderr,
         test_wrapper_forces_mcporter_keep_alive_server,
+        test_login_qrcode_saves_mcporter_image_content,
     ]
     
     failed = []

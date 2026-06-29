@@ -329,6 +329,10 @@ bash scripts/login_xhs_browse_backend.sh --qrcode
 node "$MCPORTER" --config "$CONF" call 'xiaohongshu.check_login_status()' --timeout 120000
 ```
 
+`--qrcode` saves MCP image content under
+`/tmp/xhs-browse-login-qrcode` by default; override with
+`XHS_BROWSE_QRCODE_DIR=/path/to/dir` when needed.
+
 When browse smoke and login both pass, a specific note can still fail if the
 note was deleted, made private, hidden by author settings, or blocked by XHS
 risk control. In that case, compare:
