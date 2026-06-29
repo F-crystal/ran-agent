@@ -572,27 +572,37 @@ function sanitizeRawPreview(text, maxLen = 1000) {
 
 function extractRawFieldsSeen(data) {
   if (!data || typeof data !== 'object') return {};
-  const hasImages = Array.isArray(data.images) && data.images.length > 0;
-  const hasUrlPng = hasImages && data.images.some((i) => i && typeof i === 'object' && i.url_png);
-  const hasUrlWebp = hasImages && data.images.some((i) => i && typeof i === 'object' && i.url_webp);
+  const noteData = pickXhsNoteData(data);
+  const noteCard = xhsObject(noteData.noteCard) || xhsObject(noteData.note_card) || {};
+  const sources = [data, xhsObject(data.data), xhsObject(data.result), noteData, noteCard].filter(Boolean);
+  const has = (predicate) => sources.some(predicate);
+  const imageArrays = [];
+  for (const source of sources) {
+    for (const key of ['images', 'image_list', 'imageList']) {
+      if (Array.isArray(source[key])) imageArrays.push(source[key]);
+    }
+  }
+  const hasImages = imageArrays.some((items) => items.length > 0);
+  const hasUrlPng = imageArrays.some((items) => items.some((i) => i && typeof i === 'object' && i.url_png));
+  const hasUrlWebp = imageArrays.some((items) => items.some((i) => i && typeof i === 'object' && i.url_webp));
   return {
-    status: Boolean(data.status),
-    type: Boolean(data.type),
-    platform: Boolean(data.platform),
-    title: Boolean(data.title || data.note_title || data.display_title),
-    desc: Boolean(data.desc || data.description || data.note_desc || data.content),
-    caption: Boolean(data.caption),
-    url: Boolean(data.url),
-    source_url: Boolean(data.source_url),
-    image_count: Boolean(data.image_count),
+    status: has((source) => Boolean(source.status)),
+    type: has((source) => Boolean(source.type)),
+    platform: has((source) => Boolean(source.platform)),
+    title: has((source) => Boolean(source.title || source.note_title || source.display_title || source.displayTitle)),
+    desc: has((source) => Boolean(source.desc || source.description || source.note_desc || source.content || source.post_text)),
+    caption: has((source) => Boolean(source.caption)),
+    url: has((source) => Boolean(source.url)),
+    source_url: has((source) => Boolean(source.source_url)),
+    image_count: has((source) => Boolean(source.image_count)) || hasImages,
     images: hasImages,
     images_url_png: hasUrlPng,
     images_url_webp: hasUrlWebp,
-    format_info: Boolean(data.format_info),
-    video: Boolean(data.video || data.video_url || data.note_video),
-    media: Boolean(data.media?.length || data.media_list?.length),
-    comments: Boolean(data.comments?.length || data.comment_list?.length),
-    tags: Boolean(data.tags?.length || data.tag_list?.length),
+    format_info: has((source) => Boolean(source.format_info)),
+    video: has((source) => Boolean(source.video || source.video_url || source.note_video)),
+    media: has((source) => Boolean(source.media?.length || source.media_list?.length)),
+    comments: has((source) => Boolean(source.comments?.length || source.comment_list?.length)),
+    tags: has((source) => Boolean(source.tags?.length || source.tag_list?.length)),
   };
 }
 
@@ -3252,6 +3262,40 @@ function xhsBrowseBackendArgsForNote(toolName, noteId, entry = {}, includeImages
   return { feedId: noteId, xsecToken, include_images: includeImages };
 }
 
+function xhsObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function hasXhsNoteFields(value) {
+  const item = xhsObject(value);
+  if (!item) return false;
+  const noteCard = xhsObject(item.noteCard) || xhsObject(item.note_card) || {};
+  return Boolean(
+    item.id || item.note_id || item.title || item.displayTitle || item.display_title
+    || item.content || item.desc || item.description || item.post_text
+    || item.images || item.image_list || item.imageList
+    || noteCard.id || noteCard.note_id || noteCard.title || noteCard.displayTitle || noteCard.display_title
+    || noteCard.content || noteCard.desc || noteCard.description || noteCard.post_text
+    || noteCard.images || noteCard.image_list || noteCard.imageList
+  );
+}
+
+function pickXhsNoteData(rawData) {
+  const roots = [rawData, rawData?.data, rawData?.result].map(xhsObject).filter(Boolean);
+  const candidates = [];
+  for (const root of roots) {
+    candidates.push(root.feed, root.note, root.noteCard, root.note_card, root);
+  }
+  return candidates.map(xhsObject).find(hasXhsNoteFields) || candidates.map(xhsObject).find(Boolean) || {};
+}
+
+function xhsBrowseNoteHasReadableContent(note) {
+  return Boolean(
+    String(note?.title || note?.content || note?.desc || note?.post_text || '').trim()
+    || (Array.isArray(note?.images) && note.images.length > 0)
+  );
+}
+
 function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = {}) {
   const debugShape = {
     category,
@@ -3331,14 +3375,15 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = 
   }
 
   if (category === 'note') {
-    const noteData = rawData.data || rawData.feed || rawData.note || rawData;
-    const noteCard = noteData.noteCard || noteData.note_card || noteData;
+    const noteData = pickXhsNoteData(rawData);
+    const noteCard = xhsObject(noteData.noteCard) || xhsObject(noteData.note_card) || noteData;
+    const images = noteData.images || noteData.image_list || noteData.imageList || noteCard.images || noteCard.image_list || noteCard.imageList || [];
     return {
       ok: true,
       note_id: noteData.note_id || noteData.id || noteCard.note_id || noteCard.id || '',
-      title: noteData.title || noteCard.displayTitle || noteCard.display_title || '',
-      content: noteData.content || noteData.desc || noteData.description || noteData.post_text || noteCard.desc || '',
-      images: noteData.images || noteData.image_list || noteCard.images || noteCard.imageList || [],
+      title: noteData.title || noteData.displayTitle || noteData.display_title || noteCard.title || noteCard.displayTitle || noteCard.display_title || '',
+      content: noteData.content || noteData.desc || noteData.description || noteData.post_text || noteCard.content || noteCard.desc || noteCard.description || noteCard.post_text || '',
+      images,
       user: noteData.user || noteCard.user || { id: noteData.user_id || '', name: noteData.username || '' },
       create_time: noteData.create_time || noteData.created_at || noteCard.time || '',
       debug_shape: debugShape,
@@ -3738,6 +3783,40 @@ async function xhsBrowseNote(args, options = {}) {
   }
 
   const normalized = normalizeXhsBrowseResponse('note', rawData, '', options);
+  if (!xhsBrowseNoteHasReadableContent(normalized)) {
+    const fallbackResult = await fallbackXhsBrowseNote({
+      noteId,
+      lookup,
+      cachedEntry,
+      fallbackFrom: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
+    }, options);
+    if (fallbackResult) {
+      fallbackResult.diagnostics = buildXhsDiagnostic({
+        platform: 'xhs', noteId, whichBackend: 'generic_parser', backendToolName,
+        errorCode: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED, backendError: 'XHS browse detail returned no readable fields',
+        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
+        rawFieldsSeen: extractRawFieldsSeen(rawData),
+        rawPreview: debug ? sanitizeRawPreview(JSON.stringify(rawData)) : '',
+        env,
+      });
+      return fallbackResult;
+    }
+    return {
+      ok: false,
+      error_code: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
+      message: 'XHS browse detail returned no readable fields',
+      note_id: noteId,
+      read_ref: `xhs:note:${noteId}`,
+      diagnostics: buildXhsDiagnostic({
+        platform: 'xhs', noteId, whichBackend: 'xhs_browse', backendToolName,
+        errorCode: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED, backendError: 'empty normalized note',
+        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
+        rawFieldsSeen: extractRawFieldsSeen(rawData),
+        rawPreview: debug ? sanitizeRawPreview(JSON.stringify(rawData)) : '',
+        env,
+      }),
+    };
+  }
   // Add diagnostics to successful response
   normalized.raw_fields_seen = extractRawFieldsSeen(rawData);
   if (debug) {

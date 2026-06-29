@@ -572,6 +572,181 @@ test('xhs_browse supports xiaohongshu-mcp search_feeds and get_feed_detail tools
   );
 });
 
+test('xhs_browse_note parses nested xiaohongshu-mcp detail payloads', async () => {
+  const env = {
+    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+    XHS_BROWSE_ENABLED: 'true',
+    XHS_BROWSE_MCP_COMMAND: 'mcporter',
+    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
+    XHS_BROWSE_MIN_INTERVAL_MS: '0',
+    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+  };
+  const options = {
+    env,
+    xhsBrowseCallImpl: async ({ toolName }) => {
+      if (toolName === 'probe') {
+        return {
+          ok: true,
+          available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
+        };
+      }
+      if (toolName === 'xiaohongshu_search_feeds') {
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                feeds: [{
+                  id: 'nested-note',
+                  xsecToken: 'nested-token',
+                  noteCard: { displayTitle: '嵌套笔记' },
+                }],
+              }),
+            }],
+          },
+        };
+      }
+      if (toolName === 'xiaohongshu_get_feed_detail') {
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                data: {
+                  feed: {
+                    id: 'nested-note',
+                    noteCard: {
+                      displayTitle: '嵌套笔记',
+                      desc: '嵌套详情正文',
+                      imageList: [{ url: 'https://example.com/nested.jpg' }],
+                    },
+                  },
+                },
+              }),
+            }],
+          },
+        };
+      }
+      throw new Error(`unexpected tool: ${toolName}`);
+    },
+  };
+
+  await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_search',
+        arguments: { query: '嵌套笔记', max_results: 1 },
+      },
+    },
+    options
+  );
+
+  const noteResult = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_note',
+        arguments: { read_ref: 'xhs:note:nested-note' },
+      },
+    },
+    options
+  );
+  const note = noteResult.structuredContent || noteResult;
+
+  assert.equal(note.ok, true);
+  assert.equal(note.title, '嵌套笔记');
+  assert.equal(note.content, '嵌套详情正文');
+  assert.deepEqual(note.images, [{ url: 'https://example.com/nested.jpg' }]);
+  assert.equal(note.raw_fields_seen.title, true);
+  assert.equal(note.raw_fields_seen.desc, true);
+  assert.equal(note.raw_fields_seen.images, true);
+});
+
+test('xhs_browse_note rejects empty detail payloads instead of reporting success', async () => {
+  const env = {
+    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+    XHS_BROWSE_ENABLED: 'true',
+    XHS_BROWSE_MCP_COMMAND: 'mcporter',
+    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
+    XHS_BROWSE_MIN_INTERVAL_MS: '0',
+    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+    XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-marker.json',
+  };
+  const options = {
+    env,
+    xhsBrowseCallImpl: async ({ toolName }) => {
+      if (toolName === 'probe') {
+        return {
+          ok: true,
+          available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
+        };
+      }
+      if (toolName === 'xiaohongshu_search_feeds') {
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                feeds: [{
+                  id: 'empty-note',
+                  xsecToken: 'empty-token',
+                  noteCard: { displayTitle: '空笔记' },
+                }],
+              }),
+            }],
+          },
+        };
+      }
+      if (toolName === 'xiaohongshu_get_feed_detail') {
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({ success: true, data: {} }),
+            }],
+          },
+        };
+      }
+      throw new Error(`unexpected tool: ${toolName}`);
+    },
+  };
+
+  await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_search',
+        arguments: { query: '空笔记', max_results: 1 },
+      },
+    },
+    options
+  );
+
+  const noteResult = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_note',
+        arguments: { read_ref: 'xhs:note:empty-note' },
+      },
+    },
+    options
+  );
+  const note = noteResult.structuredContent || noteResult;
+
+  assert.equal(note.ok, false);
+  assert.equal(note.error_code, 'XHS_NOTE_READ_FAILED');
+  assert.match(note.message, /no readable fields/);
+});
+
 test('xhs_browse_note falls back when browse backend returns a failure payload', async () => {
   // Set up a temporary marker for the XHS generic fallback
   const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs');
