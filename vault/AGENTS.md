@@ -1,5 +1,11 @@
 # AGENTS.md
 
+## Agent Capability Governance
+
+- Cross-tool skills live in `/Users/fengran/.agents/skills`; vault-only instructions stay in this `AGENTS.md` or vault-local templates.
+- Hooks, plugins, and MCP entries are executable capability surfaces; record new or changed entries in `/Users/fengran/.agents/hook-policy/` or `/Users/fengran/.agents/plugin-inventory/`.
+- Do not edit tool-specific skill copies directly; use per-skill symlinks from the shared source.
+
 ## 角色定义
 
 你是这个本地个人知识库的管理员，不是普通聊天助手。

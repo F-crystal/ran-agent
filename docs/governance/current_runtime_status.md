@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-06-23)
+Status: CURRENT (2026-06-30)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -22,7 +22,7 @@ Python backend
 
 - Provider: `hermes`; model: `deepseek-v4-flash`; fallback provider: none.
 - Python frontend `/chat` returns 410.
-- OpenClaw, Kimi, and GLM are retired frontend paths.
+- OpenClaw, Kimi, GLM, and MiMo Power are retired frontend paths.
 - WeChat, Feishu/Lark, and Desktop proxy share `ChannelHub`, `IdentityMap`,
   `GlobalTimeline`, and the same `replyBackend` path.
 - Desktop Proxy is disabled by default and should stay bound to localhost or a
@@ -122,7 +122,7 @@ media directories so redeploys do not depend on manual `mkdir`.
 | `time` | Timezone-aware time queries (`Asia/Shanghai`) |
 | `media_reader` | OCR, ASR, VLM, video, batch media analysis |
 | `social_reader` | Social content reading (Bilibili, XHS, WeChat articles, music) |
-| `sticker_catalog` | Local sticker picker/attach/save catalog; lite uses public pick/attach, full may use owner-only management |
+| `sticker_catalog` | Local sticker picker/attach/save catalog; lite uses public pick/attach plus explicit inbound save, full may use owner-only management |
 | `personal_memory` | Personal memory recall and backend health check |
 | `obsidian_memory` | Optional Obsidian vault search, disabled by default |
 | `ombre_memory` / `ombre_memory_extra` | Optional upstream Ombre Brain direct MCP, full-profile memory/debug surface |
@@ -132,9 +132,11 @@ media directories so redeploys do not depend on manual `mkdir`.
 - Search Hub is registered in both lite and full. Lite uses lightweight public
   providers; full may use Playwright fallback. OpenCLI browser-backed remains
   disabled by default for the 2C4G/60G server.
-- Sticker Catalog is registered in both lite and full. Lite should only use
-  `sticker_tags`, `sticker_pick`, and `sticker_attach`; owner-only
-  save/update/delete/list actions are for explicit full-profile owner requests.
+- Sticker Catalog is registered in both lite and full. Lite may use
+  `sticker_tags`, `sticker_pick`, `sticker_attach`, and
+  `sticker_save_from_inbox` only when the user explicitly asks to save trusted
+  inbound media as a sticker. `sticker_update`, `sticker_delete`, and
+  `sticker_list` remain explicit full-profile owner actions.
   Assets stay in `.ran_agent_state/stickers/`, and `RAN_MEDIA` carries only
   `stickerId`. Details: `docs/governance/sticker-catalog.md`.
 - Ombre Brain uses the canonical upstream

@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-06-30)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -13,7 +13,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `README.md` / `README_en.md` | User-facing project overview |
 | `hermes/README.md` / `hermes/README_en.md` | Hermes profile distribution overview |
 | `AGENTS.md` | Repo-root operating rules |
-| `CLAUDE.md` | Claude-compatible repo-root operating rules |
+| `CLAUDE.md` | Claude shim that points to canonical `AGENTS.md` |
 | `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
@@ -23,6 +23,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/co-reading.md` | Co Reading storage, import, MCP, privacy, and API contract |
 | `docs/governance/co-reading-web-reader.md` | Tailscale-only Co Reading Web reader deployment and acceptance |
 | `docs/governance/skills.md` | On-demand skill map |
+| `docs/governance/agent-capability-governance.md` | Shared agent skill, hook, plugin, and MCP governance |
 | `docs/governance/sub_agents.md` | Sub-agent candidate policy |
 | `docs/governance/cleanup.md` | Retired/deleted component record |
 | `docs/governance/media-pipeline.md` | Media pipeline and context policy |
@@ -43,8 +44,8 @@ deployment notes belong under ignored `local_archive/`, not under
 
 ## Governance Rules
 
-- Keep `AGENTS.md` / `CLAUDE.md` light. Detailed runtime facts belong in
-  `docs/governance/` or skills.
+- Keep `AGENTS.md` light and self-contained. Keep `CLAUDE.md` as a shim to
+  `AGENTS.md`. Detailed runtime facts belong in `docs/governance/` or skills.
 - Keep `docs/governance/current_runtime_status.md` compact; move commands to
   `server_runtime_commands.md` and historical detail to `phase_status.md`.
 - Keep `server_runtime_commands.md` script-first. Do not add one-off pasteable

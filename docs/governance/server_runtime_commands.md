@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-06-23)
+Status: CURRENT (2026-06-30)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -175,6 +175,11 @@ HERMES_ACTION_PENDING_TTL_MINUTES=30
 Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform
 login state must stay in local env files only and must never be printed into
 docs, logs, tool output, or Git.
+
+For WeChat bridge or login-state debugging, verify the exact CLI package,
+runtime SDK package, version, import path, and state directory contract before
+proposing token or state migration commands. Treat platform resolver state as
+local runtime data, not portable documentation.
 
 ## Health Checks
 

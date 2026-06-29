@@ -1,82 +1,47 @@
 # AGENTS.md
 
-Status: CURRENT (2026-06-23)
+Status: CURRENT (2026-06-30)
 
 ## Scope
 
-This is the repo-root workspace bootstrap file. It must be self-contained — do not reference `CLAUDE.md` or `hermes/profile/AGENTS.md` as required reading for rules defined here. Hermes-specific runtime constraints live in `hermes/profile/AGENTS.md`.
+This is the canonical repo-root rule file for agents in this checkout. It must stay self-contained for repo-wide rules. Tool-specific mirrors, including `CLAUDE.md`, must point here instead of duplicating these rules. Hermes runtime constraints live in `hermes/profile/AGENTS.md`.
 
-## Execution Scope
+## Operating Rules
 
-- This repo is local-first and project-scoped.
-- Keep runtime simple: backend services, state layer, WeChat bridge, MCP/knowledge interfaces.
-- Do not expand custom front conversation runtime.
-- OpenClaw is retired and must not be used as a current runtime, deployment target, or debugging authority. Treat `openclaw-*` names and `.openclaw_state` references as legacy compatibility artifacts only.
+- Keep work local-first and project-scoped unless the user explicitly asks for global agent configuration.
+- Keep runtime simple: backend services, state layer, WeChat bridge, MCP/knowledge interfaces. Do not expand a custom front conversation runtime.
+- OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime, deployment, or debugging authorities. Treat `openclaw-*` names and `.openclaw_state` only as legacy compatibility artifacts.
+- For time-sensitive facts, perform live lookup before answering. Weather uses `skills/weather/SKILL.md`; other online lookup uses `skills/web-search-live/SKILL.md`.
+- For unfamiliar integration/debugging work, check official docs and mature prior art before designing or coding.
+- Use absolute paths or workspace-relative paths, not `~`-prefixed paths.
 
-## Live Lookup Rule
+## Skills And Delegation
 
-- For time-sensitive facts (news, prices, schedules, policy updates, product changes), perform web lookup first, then answer.
-- Weather queries use `skills/weather/SKILL.md`.
-- Non-weather online lookup uses `skills/web-search-live/SKILL.md`.
-- For complex or unfamiliar problems, first search official documentation and mature prior art before designing or coding.
-- For integration/debugging work, first check official docs plus at least one mature GitHub reference before designing a solution.
-- Do not use retired OpenClaw documentation, old OpenClaw deployment notes, or OpenClaw-era repository code as current guidance. If external material still points through OpenClaw, extract only the dependency-specific fact and verify it against the current Hermes/Node bridge implementation before acting.
-- For WeChat bridge/login debugging, verify the exact CLI package, runtime SDK package, version, import path, and state directory contract before proposing token or state migration commands.
-- Do not use `~`-prefixed filesystem paths; use absolute paths or workspace-relative paths only.
+- Load specialist skills on demand; do not preload all specialist context.
+- Skill map: `docs/governance/skills.md`.
+- Archive, commit, push, or GitHub sync requests must use `skills/archive-and-push/SKILL.md`.
+- Server deployment, lite/full runtime, systemd/env, or MCP exposure work must use `skills/server-runtime/SKILL.md`.
+- Documentation governance work must use `skills/doc-governance/SKILL.md`.
+- Use sub-agents only for heavy background tasks, exploration, or maintenance. Do not sub-agentize frontline chat, memory main flow, life loop, or todo/reminder main flow.
 
-## Skills-First Rule
+## Agent Capability Governance
 
-Specialist capabilities must stay skillized and loaded on demand:
+- Cross-tool desktop skills live in `/Users/fengran/.agents/skills`; project-only skills stay in this repo's `skills/`.
+- Hooks, plugins, and MCP entries are executable capability surfaces; record changes in `/Users/fengran/.agents/hook-policy/` or `/Users/fengran/.agents/plugin-inventory/`.
+- Do not edit tool-specific skill copies directly; use per-skill symlinks from the shared source.
+- These `/Users/fengran` paths govern the local desktop agent setup only. Server runtime under `/opt/ran_agent` is governed by `skills/server-runtime/SKILL.md` and `docs/governance/server_runtime_commands.md`.
 
-- `skills/memory-specialist/SKILL.md`
-- `skills/reflection-specialist/SKILL.md`
-- `skills/knowledge-state/SKILL.md`
-- `skills/life-loop/SKILL.md`
-- `skills/night-cycle/SKILL.md`
-- `skills/ombre-memory/SKILL.md`
-- `skills/weather/SKILL.md`
-- `skills/web-search-live/SKILL.md`
-- `skills/context-compact/SKILL.md`
-- `skills/archive-and-push/SKILL.md`
-- `skills/aihot/SKILL.md`
-- `skills/code-simplifier/SKILL.md`
-- `skills/doc-governance/SKILL.md`
-- `skills/server-runtime/SKILL.md`
+## Security And Git
 
-Do not keep all specialist context always loaded in every turn.
-
-## GitHub Sync Rule
-
-- Any request to commit, push, archive, or sync completed repository changes to GitHub must use `skills/archive-and-push/SKILL.md`.
-- Before committing, stage only intentional source, test, script, and public documentation files. Keep runtime state, local cache, env files, logs, archives, and credentials out of Git.
-
-## Sub-Agent Rule
-
-Only heavy background tasks are sub-agent candidates: reflection, knowledge maintenance, exploration, heavy `inspect_more`. Do not sub-agentize: frontline chat, memory main flow, life loop, todo capture/reminder main flow.
-
-## Reflection And Persona Direction
-
-- Reflection/persona evolution is not a purely manual skill flow: `self_reflection_job` and `night_cycle_job` run in Python backend; persona evolution may refresh managed `Auto Evolution` blocks in `IDENTITY.md`/`SOUL.md`.
-- If asked whether reflection results are checked or docs updated, do not answer from memory; check scheduler/config/artifacts or state the known pipeline plus uncertainty.
-
-## Security
-
-- Keep reads and writes inside the current repository checkout.
 - Keep owner-only posture for high-permission actions.
+- Never expose or commit credentials, cookies, tokens, session dumps, local caches, SQLite state, env files, raw private archives, or logs that contain secrets.
 - Never commit: `.env.local`, `.ran_agent_state/`, `data/`, `logs/`, `debug/`, `state/`, `local_archive/`, `vault/inbox/`, `vault/raw/`, `vault/wiki/`, or credential files.
-- Platform resolver credentials (SESSDATA, XHS_COOKIE, proxy URLs) must never appear in tool output, logs, docs, or git.
+- Before committing, stage only intentional source, tests, scripts, and public docs.
+- Platform resolver credentials such as SESSDATA, XHS_COOKIE, or proxy URLs must never appear in tool output, logs, docs, or git.
 
-## Governance Docs
+## Governance References
 
-- Media pipeline: `docs/governance/media-pipeline.md`
-- Constraints: `docs/governance/constraints.md`
-- Skills map: `docs/governance/skills.md`
-- Sub-agent candidates: `docs/governance/sub_agents.md`
-- Cleanup scope: `docs/governance/cleanup.md`
-- Doc status: `docs/governance/doc_status.md`
-- Runtime status: `docs/governance/current_runtime_status.md`
-- Server runbook: `docs/governance/server_runtime_commands.md`
-- Sticker catalog: `docs/governance/sticker-catalog.md`
-- Co Reading: `docs/governance/co-reading.md`
-- Hermes action gate: `docs/governance/hermes-action-contract-gate.md`
-- Hermes context optimization: `docs/governance/hermes-context-optimization.md`
+- Documentation index and conflict rule: `docs/governance/doc_status.md`.
+- Current runtime status: `docs/governance/current_runtime_status.md`.
+- Server runbook: `docs/governance/server_runtime_commands.md`.
+- Agent capability governance: `docs/governance/agent-capability-governance.md`.

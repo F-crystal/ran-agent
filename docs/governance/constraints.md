@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-06-30)
 
 ## Split Of Responsibility
 
@@ -18,7 +18,7 @@ Status: CURRENT (2026-06-09)
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Scheduled digest mainline: `scheduler -> AIHOT facts -> synthetic Feishu turn -> Hermes -> Feishu reply`
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
-- Kimi, GLM, and OpenClaw are retired. Hermes (DeepSeek V4) is the sole frontend.
+- OpenClaw, Kimi, GLM, and MiMo Power are retired. Hermes (DeepSeek V4) is the sole frontend.
 - Life-loop, reminders, and reflection remain backend/support layers. They are
   not an open-ended proactive outbound mainline; only the allowlisted scheduled
   AI daily digest may send scheduled outbound content.
