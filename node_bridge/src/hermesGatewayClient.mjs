@@ -1106,11 +1106,8 @@ export function applySocialLinkEvidenceGate(payload, replyText, evidenceReport, 
 // --- End Social Link Evidence Gate ---
 
 function applyEvidenceGateToResponse(payload, response, env, logger, requestId) {
-  const evidenceReport = buildSocialEvidenceReport(payload, null, env, logger, requestId);
-  const gateResult = applySocialLinkEvidenceGate(payload, response.reply_text, evidenceReport, logger, requestId);
-  if (gateResult.evidenceGateTriggered) {
-    return { ...response, reply_text: gateResult.replyText };
-  }
+  // Gateway observes only; replyBackend action contract owns repair/rewrite.
+  buildSocialEvidenceReport(payload, null, env, logger, requestId);
   return response;
 }
 

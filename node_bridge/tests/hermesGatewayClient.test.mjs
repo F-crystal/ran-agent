@@ -789,7 +789,7 @@ test('cache-friendly append log redacts tokens cookies and absolute paths', asyn
   assert.match(text, /\[path\]/);
 });
 
-test('cache-friendly append log keeps raw provider response and final gate summary separately', async () => {
+test('cache-friendly append log leaves social claim for replyBackend action gate', async () => {
   const conversationId = 'wx-cache-friendly-gate-summary';
   const stateDir = tempGatewayStateDir();
   const config = getHermesGatewayConfig({
@@ -815,10 +815,10 @@ test('cache-friendly append log keeps raw provider response and final gate summa
     }
   );
 
-  assert.notEqual(response.reply_text, '我已经读到了全文，内容很完整。');
+  assert.equal(response.reply_text, '我已经读到了全文，内容很完整。');
   const record = JSON.parse(fs.readFileSync(readProviderVisibleHistoryFiles(stateDir)[0], 'utf8').trim());
   assert.equal(record.messages[1].content, '我已经读到了全文，内容很完整。');
-  assert.match(record.final_delivered_summary, /没有成功解析|没有拿到正文|不能说已经读到了全文/);
+  assert.equal(record.final_delivered_summary, undefined);
 });
 
 test('cache-friendly history does not break current media compact injection', async () => {

@@ -279,6 +279,60 @@ test('createReplyBackend repair mode repairs social read evidence once and keeps
   assert.equal(line.includes('social-artifact-private'), false);
 });
 
+test('createReplyBackend repair mode can repair social claims returned through Hermes gateway client', async () => {
+  const repairCalls = [];
+  const backend = createReplyBackend({
+    env: {
+      HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+      HERMES_API_KEY: 'token',
+      HERMES_REPLY_MODE: 'api',
+      HERMES_ACTION_GATE_ENABLED: 'true',
+      HERMES_ACTION_GATE_MODE: 'repair',
+      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
+      XHS_TOKEN_CACHE_PATH: '/tmp/missing-xhs-cache-for-repair-gateway.json',
+      RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    },
+    actionRepairImpl: async (plan) => {
+      repairCalls.push(plan);
+      return {
+        ok: true,
+        status: 'success',
+        repairedReply: '我现在读取到了这个链接内容：它在讲旅行规划。',
+        toolResult: {
+          toolName: 'mcp_social_reader_read_social_post_deep',
+          ok: true,
+          artifact_id: 'social-artifact-private',
+        },
+      };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '帮我读一下 http://xhslink.com/o/abc123',
+    sender_id: 'conv-action-repair-social-gateway',
+    conversation_id: 'conv-action-repair-social-gateway',
+    channel: 'wechat',
+  }, {
+    requestId: 'req-action-repair-social-gateway',
+    fetchImpl: async () => ({
+      ok: true,
+      status: 200,
+      async json() {
+        return { choices: [{ message: { content: '我已经完整读完了，这篇小红书主要说旅行。' } }] };
+      },
+      async text() {
+        return '';
+      },
+    }),
+  });
+
+  assert.equal(repairCalls.length, 1);
+  assert.equal(repairCalls[0].repairType, 'social_read');
+  assert.equal(response.replyText, '我现在读取到了这个链接内容：它在讲旅行规划。');
+});
+
 test('createReplyBackend repair mode safe rewrites when social repair fails', async () => {
   const logs = [];
   const backend = createReplyBackend({
