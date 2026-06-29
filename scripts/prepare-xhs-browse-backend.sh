@@ -22,6 +22,7 @@ MCPORTER_VERSION="${MCPORTER_VERSION:-0.12.2}"
 SERVER_NAME="${XHS_BROWSE_MCP_SERVER_NAME:-xiaohongshu}"
 MCP_URL="${XHS_BROWSE_MCP_URL:-http://127.0.0.1:18060/mcp}"
 RELEASE_TAG="${XHS_BROWSE_RELEASE_TAG:-v2026.06.12.1403-5c43e3d}"
+DOWNLOAD_MAX_TIME_SECONDS="${XHS_BROWSE_DOWNLOAD_MAX_TIME_SECONDS:-600}"
 WRAPPER="$ROOT_DIR/scripts/run_xhs_browse_mcp.sh"
 
 FORCE=false
@@ -67,6 +68,66 @@ default_sha256_for_asset() {
       printf '%s' ""
       ;;
   esac
+}
+
+archive_sha_ok() {
+  local file="$1"
+  if [ -z "$EXPECTED_SHA" ]; then
+    return 0
+  fi
+  [ -f "$file" ] || return 1
+  echo "$EXPECTED_SHA  $file" | sha256sum -c - >/dev/null 2>&1
+}
+
+download_release_archive() {
+  local local_archive="${XHS_BROWSE_ARCHIVE_PATH:-}"
+  local partial_path="${ARCHIVE_PATH}.part"
+  local urls url retry_all_errors resume_args
+
+  if [ -n "$local_archive" ]; then
+    if [ ! -f "$local_archive" ]; then
+      echo "ERROR: XHS_BROWSE_ARCHIVE_PATH not found: $local_archive" >&2
+      return 1
+    fi
+    echo "Using local archive from XHS_BROWSE_ARCHIVE_PATH..." >&2
+    cp "$local_archive" "$ARCHIVE_PATH"
+    return 0
+  fi
+
+  urls="${XHS_BROWSE_DOWNLOAD_URLS:-${XHS_BROWSE_DOWNLOAD_URL:-$DOWNLOAD_URL}}"
+  retry_all_errors=()
+  if curl --help all 2>/dev/null | grep -q -- '--retry-all-errors'; then
+    retry_all_errors=(--retry-all-errors)
+  fi
+
+  while IFS= read -r url; do
+    url="$(printf '%s' "$url" | xargs)"
+    [ -n "$url" ] || continue
+    echo "Downloading $ASSET_NAME from $url..." >&2
+    resume_args=()
+    if [ -s "$partial_path" ]; then
+      resume_args=(-C -)
+      echo "Resuming partial download: $partial_path" >&2
+    fi
+    if curl -fL \
+      --retry 5 \
+      "${retry_all_errors[@]}" \
+      --retry-delay 5 \
+      --connect-timeout 30 \
+      --max-time "$DOWNLOAD_MAX_TIME_SECONDS" \
+      "${resume_args[@]}" \
+      -o "$partial_path" \
+      "$url"; then
+      if archive_sha_ok "$partial_path"; then
+        mv -f "$partial_path" "$ARCHIVE_PATH"
+        return 0
+      fi
+      echo "WARNING: downloaded archive checksum mismatch; discarding partial file" >&2
+      rm -f "$partial_path"
+    fi
+  done < <(printf '%s\n' "$urls" | tr ',' '\n')
+
+  return 1
 }
 
 json_string_array_for_wrapper() {
@@ -237,9 +298,16 @@ find_release_executable() {
     exit 1
   fi
 
-  if [ "$FORCE" = true ] || [ ! -f "$ARCHIVE_PATH" ]; then
-    echo "Downloading $ASSET_NAME from GitHub release $RELEASE_TAG..." >&2
-    curl -fL --retry 3 --retry-delay 2 -o "$ARCHIVE_PATH" "$DOWNLOAD_URL"
+  if [ "$FORCE" = true ] || ! archive_sha_ok "$ARCHIVE_PATH"; then
+    if ! download_release_archive; then
+      echo "ERROR: failed to download $ASSET_NAME" >&2
+      echo "hint: copy the release tarball to the server and rerun with XHS_BROWSE_ARCHIVE_PATH=/path/to/$ASSET_NAME" >&2
+      write_marker "false" "$ASSET_NAME" "$EXPECTED_SHA" "" "" "$MCPORTER_CLI"
+      chown_runtime_paths_if_root
+      exit 1
+    fi
+  else
+    echo "Using existing verified archive: $ARCHIVE_PATH" >&2
   fi
 
   if [ -n "$EXPECTED_SHA" ]; then

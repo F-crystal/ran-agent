@@ -26,6 +26,8 @@ manual systemd or env edits.
   `bash scripts/diagnose-media-xhs.sh`
 - Prepare XHS browse MCP backend:
   `bash scripts/prepare-xhs-browse-backend.sh --write-env`
+  If GitHub release downloads are flaky on the server, pre-copy the tarball and
+  run with `XHS_BROWSE_ARCHIVE_PATH=/path/to/xiaohongshu-mcp-linux-amd64.tar.gz`.
 - Start/login XHS browse MCP backend:
   `bash scripts/start_xhs_browse_backend.sh`,
   `bash scripts/login_xhs_browse_backend.sh`
