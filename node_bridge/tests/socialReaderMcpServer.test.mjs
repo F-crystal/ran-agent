@@ -32,7 +32,7 @@ function xhsReadyEnv(extra = {}) {
 }
 
 test('social reader exposes only read-only tools with object schemas', () => {
-  const tools = buildSocialReaderTools();
+  const tools = buildSocialReaderTools({});
 
   assert.deepEqual(
     tools.map((tool) => tool.name),
@@ -42,11 +42,6 @@ test('social reader exposes only read-only tools with object schemas', () => {
       'read_social_post_deep',
       'read_music_share',
       'check_social_login',
-      'xhs_browse_probe',
-      'xhs_browse_search',
-      'xhs_browse_note',
-      'xhs_browse_user',
-      'xhs_browse_feed',
     ]
   );
   for (const tool of tools) {
@@ -66,6 +61,40 @@ test('social reader exposes only read-only tools with object schemas', () => {
     tools[2].inputSchema.properties.url.description,
     'URL or share text containing URL.'
   );
+});
+
+test('social reader MCP tools/list hides XHS browse tools by default', async () => {
+  const listed = await handleSocialReaderMcpRequest(
+    { method: 'tools/list', params: {} },
+    { env: {} }
+  );
+
+  assert.equal(listed.tools.some((tool) => tool.name === 'xhs_browse_note'), false);
+});
+
+test('social reader rejects direct XHS browse calls unless explicitly enabled', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_note',
+        arguments: { read_ref: 'xhs:note:note123' },
+      },
+    },
+    { env: {} }
+  );
+
+  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.error_code, 'XHS_BROWSE_TOOL_HIDDEN');
+});
+
+test('social reader exposes XHS browse tools only when explicitly enabled', async () => {
+  const listed = await handleSocialReaderMcpRequest(
+    { method: 'tools/list', params: {} },
+    { env: { SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true' } }
+  );
+
+  assert.ok(listed.tools.some((tool) => tool.name === 'xhs_browse_note'));
 });
 
 test('detectSocialPlatform recognizes common Chinese social share hosts', () => {
@@ -156,6 +185,7 @@ test('read_social_post does not cold-start default XHS generic parser when marke
 test('xhs_browse_search stores token context and xhs_browse_note reads by read_ref without exposing token', async () => {
   const calls = [];
   const env = {
+    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
     XHS_BROWSE_ENABLED: 'true',
     XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
     XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
@@ -275,6 +305,7 @@ test('xhs_browse_note falls back when browse backend returns a failure payload',
   const calls = [];
   const env = {
     XHS_GENERIC_FALLBACK_READY_PATH: markerPath,
+    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
     XHS_BROWSE_ENABLED: 'true',
     XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
     XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
@@ -475,6 +506,7 @@ test('read_social_post can reuse token context cached by xhs_browse_search', asy
   const calls = [];
   const env = xhsReadyEnv({
     XHS_COOKIE: 'a1=demo',
+    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
     XHS_BROWSE_ENABLED: 'true',
     XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
     XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',

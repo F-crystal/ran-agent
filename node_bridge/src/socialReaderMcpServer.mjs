@@ -47,6 +47,10 @@ const xhsNoteTokenCache = new Map();
 const XHS_NOTE_TOKEN_CACHE_MAX_SIZE = 1000;
 let xhsNoteTokenCacheLoaded = false;
 
+function shouldExposeXhsBrowseTools(env = process.env) {
+  return String(env.SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS || '').trim().toLowerCase() === 'true';
+}
+
 function resolveXhsNoteTokenCachePath(env = process.env) {
   const configured = String(env.XHS_NOTE_TOKEN_CACHE_PATH || '').trim();
   if (configured) {
@@ -168,8 +172,8 @@ function getCachedXhsNoteToken(noteId, options = {}) {
 
 
 
-export function buildSocialReaderTools() {
-  return [
+export function buildSocialReaderTools(env = process.env) {
+  const tools = [
     {
       name: 'resolve_social_url',
       title: 'Resolve Social URL',
@@ -293,6 +297,12 @@ export function buildSocialReaderTools() {
         additionalProperties: false,
       },
     },
+  ];
+  if (!shouldExposeXhsBrowseTools(env)) {
+    return tools;
+  }
+  return [
+    ...tools,
     {
       name: 'xhs_browse_probe',
       title: 'XHS Browse Probe',
@@ -2637,6 +2647,11 @@ export async function callMcpToolViaStdio({
 }
 
 async function callTool(name, args = {}, options = {}) {
+  if (String(name || '').startsWith('xhs_browse_') && !shouldExposeXhsBrowseTools(options.env || process.env)) {
+    return buildErrorResult('XHS browse tools are hidden. Set SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=true to enable diagnostics.', {
+      error_code: 'XHS_BROWSE_TOOL_HIDDEN',
+    });
+  }
   if (name === 'resolve_social_url') {
     return await resolveSocialUrl(args.url, options);
   }
@@ -2686,7 +2701,7 @@ export async function handleSocialReaderMcpRequest(request, options = {}) {
     };
   }
   if (method === 'tools/list') {
-    return { tools: buildSocialReaderTools() };
+    return { tools: buildSocialReaderTools(options.env || process.env) };
   }
   if (method === 'tools/call') {
     const params = request?.params || {};
