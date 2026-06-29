@@ -4,13 +4,16 @@ set -euo pipefail
 ROOT_DIR="${ARCHIVE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DRY_RUN=1
 RUN_TESTS=1
+SELF_TEST=0
 REMOTE_NAME="origin"
 REMOTE_URL="${ARCHIVE_REMOTE_URL:-}"
 BRANCH_NAME="main"
 COMMIT_MESSAGE="${ARCHIVE_COMMIT_MESSAGE:-archive: $(date +%F)}"
 ARCHIVE_RECORD="${ARCHIVE_RECORD:-$ROOT_DIR/local_archive/docs/governance/archive/$(date +%F)-archive-and-push.md}"
+STAGE_PATHS=()
 SENSITIVE_PRESENT=()
 STAGED_FILES=()
+PUSH_STATE="skipped"
 
 # Detect Python binary: prefer .venv if available, fallback to python3
 PYTHON_BIN=""
@@ -22,7 +25,7 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: scripts/archive_and_push.sh [--push] [--dry-run] [--skip-tests] [--remote-url URL] [--commit-message MSG] [--record PATH]
+Usage: scripts/archive_and_push.sh [--push] [--dry-run] [--skip-tests] [--remote-url URL] [--commit-message MSG] [--record PATH] [--path PATH] [--self-test]
 
 Options:
   --push             Run the full archive path, including git commit and push when a remote exists.
@@ -31,6 +34,8 @@ Options:
   --remote-url URL   Add origin with this URL if it is missing.
   --commit-message   Override the commit message.
   --record PATH      Override the archive record output path. Defaults to local_archive/docs/governance/archive/.
+  --path PATH        Stage only this path. Repeat for multiple paths.
+  --self-test        Run local URL-conversion checks and exit.
 EOF
 }
 
@@ -46,6 +51,30 @@ log() {
 run_cmd() {
   log "+ $*"
   "$@"
+}
+
+redact_remote_url() {
+  local url="${1%%\?*}"
+  case "$url" in
+    http://*@*|https://*@*)
+      printf '%s://***@%s\n' "${url%%://*}" "${url#*@}"
+      ;;
+    *)
+      printf '%s\n' "$url"
+      ;;
+  esac
+}
+
+remote_add() {
+  local url="$1"
+  log "+ git -C $ROOT_DIR remote add $REMOTE_NAME $(redact_remote_url "$url")"
+  git -C "$ROOT_DIR" remote add "$REMOTE_NAME" "$url"
+}
+
+remote_set_url() {
+  local url="$1"
+  log "+ git -C $ROOT_DIR remote set-url $REMOTE_NAME $(redact_remote_url "$url")"
+  git -C "$ROOT_DIR" remote set-url "$REMOTE_NAME" "$url"
 }
 
 parse_args() {
@@ -74,6 +103,14 @@ parse_args() {
         shift
         [ "$#" -gt 0 ] || die "--record requires a value"
         ARCHIVE_RECORD="$1"
+        ;;
+      --path)
+        shift
+        [ "$#" -gt 0 ] || die "--path requires a value"
+        STAGE_PATHS+=("$1")
+        ;;
+      --self-test)
+        SELF_TEST=1
         ;;
       -h|--help)
         usage
@@ -173,8 +210,20 @@ format_paths() {
   done
 }
 
+format_sensitive_paths() {
+  if [ "${#SENSITIVE_PRESENT[@]}" -eq 0 ]; then
+    printf 'none'
+  else
+    format_paths "${SENSITIVE_PRESENT[@]}"
+  fi
+}
+
 collect_stage_candidates() {
   STAGED_FILES=()
+  if [ "${#STAGE_PATHS[@]}" -gt 0 ]; then
+    STAGED_FILES=("${STAGE_PATHS[@]}")
+    return 0
+  fi
   while IFS= read -r -d '' file; do
     STAGED_FILES+=("${file#./}")
   done < <(
@@ -229,7 +278,12 @@ EOF
 
 stage_allowed_files() {
   repo_has_git || return 1
-  run_cmd git -C "$ROOT_DIR" add -A -- .
+  run_cmd git -C "$ROOT_DIR" reset -q
+  if [ "${#STAGE_PATHS[@]}" -gt 0 ]; then
+    run_cmd git -C "$ROOT_DIR" add -- "${STAGE_PATHS[@]}"
+  else
+    run_cmd git -C "$ROOT_DIR" add -A -- .
+  fi
   run_cmd git -C "$ROOT_DIR" reset -q -- \
     .env.local \
     .ran_agent_state \
@@ -248,6 +302,15 @@ stage_allowed_files() {
     node_bridge/.ran_agent_state \
     node_modules \
     __pycache__
+}
+
+collect_staged_files() {
+  STAGED_FILES=()
+  local file
+  while IFS= read -r file; do
+    [ -n "$file" ] || continue
+    STAGED_FILES+=("$file")
+  done < <(git -C "$ROOT_DIR" diff --cached --name-only)
 }
 
 ensure_no_forbidden_staged() {
@@ -286,10 +349,91 @@ commit_changes() {
 ensure_origin_remote() {
   repo_has_git || return 1
   if git -C "$ROOT_DIR" remote get-url "$REMOTE_NAME" >/dev/null 2>&1; then
+    if [ -n "$REMOTE_URL" ]; then
+      local current_url
+      current_url="$(git -C "$ROOT_DIR" remote get-url "$REMOTE_NAME")"
+      if [ "$current_url" != "$REMOTE_URL" ]; then
+        remote_set_url "$REMOTE_URL"
+      fi
+    fi
     return 0
   fi
   [ -n "$REMOTE_URL" ] || die "missing remote '$REMOTE_NAME'; set it with --remote-url or add it manually"
-  run_cmd git -C "$ROOT_DIR" remote add "$REMOTE_NAME" "$REMOTE_URL"
+  remote_add "$REMOTE_URL"
+}
+
+github_https_to_ssh() {
+  local url="$1"
+  case "$url" in
+    https://github.com/*/*.git)
+      printf 'git@github.com:%s\n' "${url#https://github.com/}"
+      ;;
+    https://github.com/*/*)
+      printf 'git@github.com:%s.git\n' "${url#https://github.com/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+github_ssh_to_https() {
+  local url="$1"
+  case "$url" in
+    git@github.com:*.git)
+      printf 'https://github.com/%s\n' "${url#git@github.com:}"
+      ;;
+    git@github.com:*)
+      printf 'https://github.com/%s.git\n' "${url#git@github.com:}"
+      ;;
+    ssh://git@github.com/*.git)
+      printf 'https://github.com/%s\n' "${url#ssh://git@github.com/}"
+      ;;
+    ssh://git@github.com/*)
+      printf 'https://github.com/%s.git\n' "${url#ssh://git@github.com/}"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+alternate_remote_url() {
+  github_https_to_ssh "$1" || github_ssh_to_https "$1"
+}
+
+push_changes() {
+  local current_url alt_url
+  current_url="$(git -C "$ROOT_DIR" remote get-url "$REMOTE_NAME")"
+
+  if run_cmd git -C "$ROOT_DIR" push "$REMOTE_NAME" "$BRANCH_NAME"; then
+    PUSH_STATE="pushed"
+    return 0
+  fi
+
+  alt_url="$(alternate_remote_url "$current_url" || true)"
+  [ -n "$alt_url" ] || return 1
+
+  log "push failed with $(redact_remote_url "$current_url"); retrying with $(redact_remote_url "$alt_url")"
+  remote_set_url "$alt_url"
+  if run_cmd git -C "$ROOT_DIR" push "$REMOTE_NAME" "$BRANCH_NAME"; then
+    PUSH_STATE="pushed via alternate remote"
+    return 0
+  fi
+
+  remote_set_url "$current_url"
+  return 1
+}
+
+self_test() {
+  local credential_url="https://user:"
+  credential_url="${credential_url}masked@github.com/F-crystal/ran-agent.git?token=masked"
+  [ "$(redact_remote_url "$credential_url")" = "https://***@github.com/F-crystal/ran-agent.git" ]
+  [ "$(github_https_to_ssh "https://github.com/F-crystal/ran-agent.git")" = "git@github.com:F-crystal/ran-agent.git" ]
+  [ "$(github_https_to_ssh "https://github.com/F-crystal/ran-agent")" = "git@github.com:F-crystal/ran-agent.git" ]
+  [ "$(github_ssh_to_https "git@github.com:F-crystal/ran-agent.git")" = "https://github.com/F-crystal/ran-agent.git" ]
+  [ "$(github_ssh_to_https "ssh://git@github.com/F-crystal/ran-agent")" = "https://github.com/F-crystal/ran-agent.git" ]
+  printf 'self-test: ok\n'
 }
 
 write_archive_record() {
@@ -377,7 +521,7 @@ print_summary() {
   printf 'root: %s\n' "$ROOT_DIR"
   printf 'mode: %s\n' "$mode"
   printf 'tests: %s\n' "$([ "$RUN_TESTS" -eq 1 ] && printf 'ran' || printf 'skipped')"
-  printf 'sensitive_present: %s\n' "$(format_paths "${SENSITIVE_PRESENT[@]}")"
+  printf 'sensitive_present: %s\n' "$(format_sensitive_paths)"
   printf 'stage_candidates: %s\n' "${#STAGED_FILES[@]}"
   printf 'commit: %s\n' "$commit_sha"
   printf 'push: %s\n' "$push_state"
@@ -386,11 +530,16 @@ print_summary() {
 
 main() {
   parse_args "$@"
+  if [ "$SELF_TEST" -eq 1 ]; then
+    self_test
+    exit 0
+  fi
+
   collect_sensitive_paths
   collect_stage_candidates
 
   log "workspace: $ROOT_DIR"
-  log "sensitive paths present: $(format_paths "${SENSITIVE_PRESENT[@]}")"
+  log "sensitive paths present: $(format_sensitive_paths)"
   log "stage candidates: ${#STAGED_FILES[@]}"
 
   run_baseline_tests
@@ -406,6 +555,7 @@ main() {
   ensure_origin_remote
   stage_allowed_files
   ensure_no_forbidden_staged
+  collect_staged_files
   commit_changes || {
     print_summary "no-op" "none" "skipped"
     exit 0
@@ -416,9 +566,9 @@ main() {
   commit_sha="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
   staged_list="$(printf '%s\n' "${STAGED_FILES[@]}")"
 
-  run_cmd git -C "$ROOT_DIR" push "$REMOTE_NAME" "$BRANCH_NAME"
-  write_archive_record "$commit_sha" "pushed" "$staged_list"
-  print_summary "push" "$commit_sha" "pushed"
+  push_changes
+  write_archive_record "$commit_sha" "$PUSH_STATE" "$staged_list"
+  print_summary "push" "$commit_sha" "$PUSH_STATE"
 }
 
 main "$@"

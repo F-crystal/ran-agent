@@ -23,8 +23,10 @@ description: "当用户说“归档”时使用：运行基线测试、检查敏
 - [ ] 如果仓库还没有初始化，允许脚本执行 `git init` 并切到 `main`
 - [ ] 准备正式归档时执行 push 路径
   - `./scripts/archive_and_push.sh --push`
-- [ ] 如需指定远程，补上 remote URL
+- [ ] 如需指定或修正远程，补上 SSH 或 HTTPS remote URL；脚本会对齐本地 `origin`
   - `./scripts/archive_and_push.sh --push --remote-url <git-url>`
+- [ ] 如果工作区有其他人的并发改动，用 `--path` 精确归档本轮文件
+  - `./scripts/archive_and_push.sh --push --path <file> --path <file>`
 
 ## Rules
 
@@ -33,6 +35,9 @@ description: "当用户说“归档”时使用：运行基线测试、检查敏
 - 不要把 `local_archive/` 纳入提交。
 - 不要在 public tree 新增 `docs/deployment/` 或 `docs/governance/archive/`；部署文档写到 `local_archive/docs/deployment/`，归档记录写到 `local_archive/docs/governance/archive/`。
 - 如果 `origin` 不存在且没有提供 remote URL，停止并提示用户先配置远程。
+- `--remote-url` 可用 SSH 或 HTTPS；如果 `origin` 已存在但不同，脚本会先 `remote set-url` 对齐。
+- GitHub HTTPS/SSH 任一路径 push 失败时，脚本会推导另一种 URL、更新本地 `origin`、重试；重试成功后保留可工作的 URL。
+- 脚本正式归档前会清空 index 并重新 stage。未传 `--path` 时 stage 允许范围内的全量工作区；传 `--path` 时只 stage 指定路径。
 - 如果没有变更可提交，保留 dry-run 结果并报告 `nothing to commit`。
 - 实际 push 只在用户准备好发布时执行；dry-run 只做预检。
 
