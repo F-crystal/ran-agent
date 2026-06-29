@@ -182,6 +182,188 @@ test('read_social_post does not cold-start default XHS generic parser when marke
   assert.deepEqual(calls, []);
 });
 
+test('read_social_post_deep uses XHS browse backend to refresh missing token', async () => {
+  const calls = [];
+  const noteId = 'test-refresh-missing-token-001';
+  const cachePath = path.join(os.tmpdir(), `xhs-refresh-token-${process.pid}-${Date.now()}.json`);
+  const env = {
+    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+    XHS_BROWSE_ENABLED: 'true',
+    XHS_BROWSE_MCP_COMMAND: 'mcporter',
+    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
+    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+    XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-marker.json',
+    XHS_NOTE_TOKEN_CACHE_PATH: cachePath,
+  };
+  const options = {
+    env,
+    xhsBrowseCallImpl: async ({ toolName, arguments: toolArgs }) => {
+      calls.push({ toolName, arguments: toolArgs });
+      if (toolName === 'probe') {
+        return {
+          ok: true,
+          available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
+        };
+      }
+      if (toolName === 'xiaohongshu_search_feeds') {
+        assert.equal(toolArgs.keyword, 'AI小游戏·已开源 让你的AI当一回造物主');
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                feeds: [{
+                  id: noteId,
+                  xsec_token: 'fresh-token',
+                  noteCard: {
+                    displayTitle: 'AI小游戏 已开源',
+                    user: { nickname: '作者D', userId: 'user999' },
+                  },
+                }],
+              }),
+            }],
+          },
+        };
+      }
+      if (toolName === 'xiaohongshu_get_feed_detail') {
+        assert.deepEqual(toolArgs, {
+          feed_id: noteId,
+          xsec_token: 'fresh-token',
+        });
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                data: {
+                  id: noteId,
+                  title: 'AI小游戏 已开源',
+                  desc: '让你的 AI 当一回造物主的正文',
+                },
+              }),
+            }],
+          },
+        };
+      }
+      throw new Error(`unexpected tool: ${toolName}`);
+    },
+    mcpCallImpl: async ({ server, toolName }) => {
+      calls.push({ server, toolName });
+      throw new Error(`unexpected MCP call: ${server}.${toolName}`);
+    },
+  };
+
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: '【AI小游戏·已开源】让你的AI当一回造物主 http://xhslink.com/o/8GL4ed8HNRt',
+          include_media: false,
+        },
+      },
+    },
+    {
+      ...options,
+      fetchImpl: async () => ({
+        ok: true,
+        url: `https://www.xiaohongshu.com/explore/${noteId}`,
+      }),
+    }
+  );
+  const data = result.structuredContent || result;
+
+  assert.equal(data.ok, true);
+  assert.equal(data.post_text, '让你的 AI 当一回造物主的正文');
+  assert.equal(data.diagnostics.detail_backend.name, 'xhs_browse');
+  assert.deepEqual(
+    calls.map((call) => call.toolName || `${call.server}.${call.toolName}`),
+    ['probe', 'xiaohongshu_search_feeds', 'probe', 'xiaohongshu_get_feed_detail']
+  );
+  assert.equal(JSON.stringify(data).includes('fresh-token'), false);
+});
+
+test('read_social_post_deep falls back to jobson search when XHS browse backend throws', async () => {
+  const browseCalls = [];
+  const mcpCalls = [];
+  const env = {
+    XHS_COOKIE: 'a1=demo',
+    XHS_BROWSE_ENABLED: 'true',
+    XHS_BROWSE_MCP_COMMAND: 'missing-mcporter',
+    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
+    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+    XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-marker.json',
+  };
+
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/no-token 复制打开',
+          include_media: false,
+        },
+      },
+    },
+    {
+      env,
+      fetchImpl: async () => ({
+        status: 302,
+        headers: {
+          get(name) {
+            return name.toLowerCase() === 'location'
+              ? 'https://www.xiaohongshu.com/explore/note-browse-down'
+              : null;
+          },
+        },
+      }),
+      xhsBrowseCallImpl: async ({ toolName }) => {
+        browseCalls.push(toolName);
+        throw new Error('mcporter missing');
+      },
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        mcpCalls.push({ server, toolName, arguments: toolArgs });
+        if (server === 'xhs' && toolName === 'search_notes') {
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify([
+                {
+                  title: 'FIFA回应中国区天价世界杯版权',
+                  url: 'https://www.xiaohongshu.com/explore/note-browse-down?xsec_token=jobson-token',
+                },
+              ]),
+            }],
+          };
+        }
+        if (server === 'xhs' && toolName === 'get_note_content') {
+          return { content: [{ type: 'text', text: 'jobson fallback 正文' }] };
+        }
+        throw new Error(`unexpected tool: ${server}.${toolName}`);
+      },
+    }
+  );
+
+  const data = result.structuredContent || result;
+  assert.equal(data.ok, true);
+  assert.equal(data.post_text, 'jobson fallback 正文');
+  assert.equal(data.diagnostics.detail_backend.name, 'jobson-xhs-mcp');
+  assert.deepEqual(browseCalls, ['probe', 'probe']);
+  assert.deepEqual(
+    mcpCalls.map((call) => [call.server, call.toolName, call.arguments]),
+    [
+      ['xhs', 'search_notes', { keywords: 'FIFA回应中国区天价世界杯版权' }],
+      ['xhs', 'get_note_content', { url: 'https://www.xiaohongshu.com/explore/note-browse-down?xsec_token=jobson-token' }],
+    ]
+  );
+});
+
 test('xhs_browse_search stores token context and xhs_browse_note reads by read_ref without exposing token', async () => {
   const calls = [];
   const env = {

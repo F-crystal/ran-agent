@@ -51,6 +51,38 @@ host_list_contains() {
   return 1
 }
 
+has_arg() {
+  local needle="$1"
+  local arg
+  shift || true
+  for arg in "$@"; do
+    if [ "$arg" = "$needle" ]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+json_field() {
+  local file="$1"
+  local field="$2"
+  "$PYTHON_BIN" - "$file" "$field" <<'PYEOF' 2>/dev/null || true
+import json
+import sys
+path, field = sys.argv[1:]
+with open(path, "r", encoding="utf-8") as fh:
+    data = json.load(fh)
+value = data
+for part in field.split("."):
+    if isinstance(value, dict):
+        value = value.get(part, "")
+    else:
+        value = ""
+        break
+print(value if value is not None else "")
+PYEOF
+}
+
 echo "=== 0. Deployed revision check ==="
 echo "repo: $(pwd)"
 echo "branch: $(git branch --show-current 2>/dev/null || echo unknown)"
@@ -266,6 +298,115 @@ else
   echo "hint: run scripts/prepare-xhs-generic-fallback.sh"
 fi
 
+echo ""
+echo "--- XHS browse backend readiness ---"
+BROWSE_MARKER_PATH="$(effective_env_value XHS_BROWSE_MARKER_PATH /opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json)"
+echo "XHS_BROWSE_ENABLED: $(effective_env_value XHS_BROWSE_ENABLED false)"
+echo "SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: $(effective_env_value SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS false)"
+echo "XHS_BROWSE_MCP_COMMAND: $(effective_env_value XHS_BROWSE_MCP_COMMAND NOT_SET)"
+echo "XHS_BROWSE_MCP_ARGS_JSON: $(effective_env_value XHS_BROWSE_MCP_ARGS_JSON NOT_SET)"
+echo "XHS_BROWSE_MCP_COOKIE_ENV: $(effective_env_value XHS_BROWSE_MCP_COOKIE_ENV XHS_COOKIE)"
+echo "XHS_BROWSE_MCP_URL: $(effective_env_value XHS_BROWSE_MCP_URL http://127.0.0.1:18060/mcp)"
+echo "marker path: $BROWSE_MARKER_PATH"
+
+if [ -f "$BROWSE_MARKER_PATH" ]; then
+  echo "marker: EXISTS"
+  if ! "$PYTHON_BIN" -m json.tool "$BROWSE_MARKER_PATH" > /dev/null 2>&1; then
+    echo "ERROR: marker CORRUPTED (not valid JSON)"
+    echo "marker content (first 200 chars): $(head -c 200 "$BROWSE_MARKER_PATH" 2>/dev/null)"
+    echo "xhs browse: NOT READY (marker corrupted)"
+  else
+    BROWSE_MARKER_OK="$(json_field "$BROWSE_MARKER_PATH" ok)"
+    BROWSE_BACKEND="$(json_field "$BROWSE_MARKER_PATH" backend)"
+    BROWSE_RELEASE="$(json_field "$BROWSE_MARKER_PATH" release_tag)"
+    BROWSE_SERVER="$(json_field "$BROWSE_MARKER_PATH" server_name)"
+    BROWSE_MCP_URL="$(json_field "$BROWSE_MARKER_PATH" mcp_url)"
+    BROWSE_MCP_EXEC="$(json_field "$BROWSE_MARKER_PATH" mcp_executable)"
+    BROWSE_LOGIN_EXEC="$(json_field "$BROWSE_MARKER_PATH" login_executable)"
+    BROWSE_MCPORTER="$(json_field "$BROWSE_MARKER_PATH" mcporter_cli)"
+    BROWSE_MCPORTER_CONFIG="$(json_field "$BROWSE_MARKER_PATH" mcporter_config_path)"
+    BROWSE_COMMAND="$(json_field "$BROWSE_MARKER_PATH" command)"
+    echo "marker ok: ${BROWSE_MARKER_OK:-NOT SET}"
+    echo "marker backend: ${BROWSE_BACKEND:-NOT SET}"
+    echo "marker release_tag: ${BROWSE_RELEASE:-NOT SET}"
+    echo "marker server_name: ${BROWSE_SERVER:-NOT SET}"
+    echo "marker mcp_url: ${BROWSE_MCP_URL:-NOT SET}"
+    echo "marker mcp_executable: ${BROWSE_MCP_EXEC:-NOT SET}"
+    echo "marker login_executable: ${BROWSE_LOGIN_EXEC:-NOT SET}"
+    echo "marker mcporter_cli: ${BROWSE_MCPORTER:-NOT SET}"
+    echo "marker mcporter_config_path: ${BROWSE_MCPORTER_CONFIG:-NOT SET}"
+    echo "marker command: ${BROWSE_COMMAND:-NOT SET}"
+    if [ -n "$BROWSE_MCP_EXEC" ] && [ -x "$BROWSE_MCP_EXEC" ]; then
+      echo "mcp_executable: EXECUTABLE"
+    else
+      echo "mcp_executable: NOT EXECUTABLE"
+    fi
+    if [ -n "$BROWSE_MCPORTER" ] && [ -f "$BROWSE_MCPORTER" ]; then
+      echo "mcporter_cli: FOUND"
+    else
+      echo "mcporter_cli: NOT FOUND"
+    fi
+    if [ -n "$BROWSE_MCPORTER_CONFIG" ] && [ -f "$BROWSE_MCPORTER_CONFIG" ]; then
+      echo "mcporter_config: FOUND"
+    else
+      echo "mcporter_config: NOT FOUND"
+    fi
+    if [ "$BROWSE_MARKER_OK" = "True" ] && [ -n "$BROWSE_MCP_EXEC" ] && [ -x "$BROWSE_MCP_EXEC" ] && [ -n "$BROWSE_MCPORTER" ] && [ -f "$BROWSE_MCPORTER" ]; then
+      echo "xhs browse install: READY"
+    else
+      echo "xhs browse install: NOT READY"
+      echo "hint: run scripts/prepare-xhs-browse-backend.sh --write-env"
+    fi
+  fi
+else
+  echo "marker: NOT FOUND"
+  echo "xhs browse install: NOT READY"
+  echo "hint: run scripts/prepare-xhs-browse-backend.sh --write-env"
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+  if systemctl list-unit-files ran-agent-xhs-browse.service >/dev/null 2>&1; then
+    if systemctl is-active --quiet ran-agent-xhs-browse.service 2>/dev/null; then
+      echo "ran-agent-xhs-browse.service: ACTIVE"
+    else
+      echo "ran-agent-xhs-browse.service: NOT ACTIVE"
+    fi
+  else
+    echo "ran-agent-xhs-browse.service: NOT INSTALLED"
+  fi
+fi
+
+if has_arg "--smoke-browse" "$@"; then
+  echo ""
+  echo "--- XHS browse bridge smoke test ---"
+  if [ ! -f "$BROWSE_MARKER_PATH" ]; then
+    echo "SKIPPED: marker not found. Run scripts/prepare-xhs-browse-backend.sh --write-env first."
+  else
+    BROWSE_COMMAND="$(json_field "$BROWSE_MARKER_PATH" command)"
+    if [ -n "$BROWSE_COMMAND" ] && [ -x "$BROWSE_COMMAND" ]; then
+      echo "smoke testing via $BROWSE_COMMAND (timeout 30s)..."
+      BROWSE_SMOKE_RESULT=$(timeout 30 "$BROWSE_COMMAND" <<'MCP_EOF' 2>/dev/null || true
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"diag-xhs-browse","version":"0.1.0"}}}
+{"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
+MCP_EOF
+)
+      if echo "$BROWSE_SMOKE_RESULT" | grep -Eq 'search_feeds|search_notes'; then
+        echo "xhs browse search tool: CONFIRMED"
+      else
+        echo "xhs browse search tool: NOT CONFIRMED"
+      fi
+      if echo "$BROWSE_SMOKE_RESULT" | grep -Eq 'get_feed_detail|get_note_info|get_note_content'; then
+        echo "xhs browse detail tool: CONFIRMED"
+      else
+        echo "xhs browse detail tool: NOT CONFIRMED"
+      fi
+    else
+      echo "SKIPPED: marker command not executable: $BROWSE_COMMAND"
+    fi
+  fi
+fi
+
 # Token cache (read-only, no side effects)
 for cache_path in ".ran_agent_state/social_reader/xhs-note-token-cache.json" "node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json"; do
   if [ -f "$cache_path" ]; then
@@ -279,7 +420,7 @@ done
 echo "browser fallback: DISABLED (lite default)"
 
 # Optional: real smoke test (only if marker ok=true, uses marker command)
-if [ "${1:-}" = "--smoke-generic" ]; then
+if has_arg "--smoke-generic" "$@"; then
   echo ""
   echo "--- Generic parser smoke test ---"
   if [ ! -f "$MARKER_PATH" ]; then

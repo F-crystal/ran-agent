@@ -1022,6 +1022,12 @@ async function resolveFreshXhsTokenFromSearch({ rawText, resolved }, options = {
       note_id: resolved.note_id || '',
     };
   }
+
+  const browsePrepared = await resolveFreshXhsTokenFromBrowseSearch({ resolved, keywords }, options);
+  if (browsePrepared?.ok === true) {
+    return browsePrepared;
+  }
+
   let searchResult;
   try {
     searchResult = await callBackendMcpTool('xhs', 'search_notes', { keywords }, options);
@@ -1087,6 +1093,45 @@ async function resolveFreshXhsTokenFromSearch({ rawText, resolved }, options = {
     error_code: 'MISSING_XSEC_TOKEN',
     error: 'MISSING_XSEC_TOKEN: search did not return a fresh token for this note',
     note_id: resolved.note_id || '',
+    keywords,
+  };
+}
+
+async function resolveFreshXhsTokenFromBrowseSearch({ resolved, keywords }, options = {}) {
+  const env = options.env || process.env;
+  const config = getXhsBrowseConfig(env);
+  if (!config.enabled || !config.isConfigured || !config.searchEnabled) {
+    return null;
+  }
+
+  let searchResult;
+  try {
+    searchResult = await xhsBrowseSearch({
+      query: keywords,
+      max_results: config.maxResults,
+    }, { ...options, xhsBrowseSkipMinInterval: true });
+  } catch {
+    return null;
+  }
+  if (searchResult?.ok !== true || !Array.isArray(searchResult.results)) {
+    return null;
+  }
+
+  const noteId = resolved.note_id || '';
+  const matches = searchResult.results.filter((candidate) => candidate.note_id === noteId);
+  if (matches.length !== 1) {
+    return null;
+  }
+
+  const cachedEntry = getCachedXhsNoteToken(noteId, options);
+  if (!cachedEntry?.xsecToken || !cachedEntry?.canonical_url) {
+    return null;
+  }
+
+  return {
+    ok: true,
+    backend_url: cachedEntry.canonical_url,
+    source: 'xhs_browse_search',
     keywords,
   };
 }
@@ -2018,8 +2063,18 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
 // Detail path: try xhs_browse_note or jobson get_note_content
 async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, args }, options = {}) {
   const noteId = resolved.note_id || '';
-  const xsecToken = cachedEntry?.xsecToken || resolved.xsec_token || '';
-  const canonicalUrl = cachedEntry?.canonical_url || resolved.canonical_url || '';
+  let detailCachedEntry = cachedEntry;
+  let xsecToken = detailCachedEntry?.xsecToken || resolved.xsec_token || '';
+  let canonicalUrl = detailCachedEntry?.canonical_url || resolved.canonical_url || '';
+
+  if (!xsecToken && noteId) {
+    const prepared = await prepareXhsBackendUrl({ rawText: args.url || url, resolved }, options);
+    if (prepared?.ok === true) {
+      detailCachedEntry = getCachedXhsNoteToken(noteId, options) || detailCachedEntry;
+      xsecToken = detailCachedEntry?.xsecToken || parseXhsUrlInfo(prepared.backend_url || '').xsec_token || '';
+      canonicalUrl = detailCachedEntry?.canonical_url || prepared.backend_url || canonicalUrl;
+    }
+  }
 
   // Try xhs_browse_note first (uses cache)
   if (noteId && xsecToken) {
@@ -2027,7 +2082,7 @@ async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, ar
       const browseResult = await xhsBrowseNote({
         note_id: noteId,
         include_images: false,
-      }, options);
+      }, { ...options, xhsBrowseSkipMinInterval: true });
       if (browseResult?.ok === true || browseResult?.structuredContent?.ok === true) {
         const data = browseResult.structuredContent || browseResult;
         return {
@@ -2038,8 +2093,8 @@ async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, ar
           post_text: data.content || data.desc || '',
           tags: data.tags || [],
           comments_text: data.comments_text || '',
-          used_cached_token: Boolean(cachedEntry?.xsecToken),
-          used_canonical_url: Boolean(cachedEntry?.canonical_url),
+          used_cached_token: Boolean(detailCachedEntry?.xsecToken),
+          used_canonical_url: Boolean(detailCachedEntry?.canonical_url || canonicalUrl),
           raw_fields_seen: extractRawFieldsSeen(data),
         };
       }
@@ -2068,7 +2123,7 @@ async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, ar
           source: 'jobson-xhs-mcp',
           post_text: postText,
           desc: postText,
-          used_cached_token: Boolean(cachedEntry?.xsecToken),
+          used_cached_token: Boolean(detailCachedEntry?.xsecToken),
           used_canonical_url: Boolean(canonicalUrl),
           raw_fields_seen: { desc: Boolean(postText) },
         };
@@ -2871,11 +2926,11 @@ function xhsBrowseServerConfig(env = process.env) {
 // XHS Browse Rate Limiting
 // ============================================================================
 
-function checkXhsBrowseRateLimit(config) {
+function checkXhsBrowseRateLimit(config, options = {}) {
   const now = Date.now();
   
   // 检查调用间隔
-  if (xhsBrowseLastCallTime > 0) {
+  if (!options.skipMinInterval && xhsBrowseLastCallTime > 0) {
     const interval = now - xhsBrowseLastCallTime;
     if (interval < config.minIntervalMs) {
       return {
@@ -3416,7 +3471,7 @@ async function xhsBrowseSearch(args, options = {}) {
   }
 
   // 限流检查
-  const rateLimitError = checkXhsBrowseRateLimit(config);
+  const rateLimitError = checkXhsBrowseRateLimit(config, { skipMinInterval: options.xhsBrowseSkipMinInterval === true });
   if (rateLimitError) {
     return rateLimitError;
   }
@@ -3552,7 +3607,7 @@ async function xhsBrowseNote(args, options = {}) {
   }
 
   // 限流检查
-  const rateLimitError = checkXhsBrowseRateLimit(config);
+  const rateLimitError = checkXhsBrowseRateLimit(config, { skipMinInterval: options.xhsBrowseSkipMinInterval === true });
   if (rateLimitError) {
     return rateLimitError;
   }

@@ -20,6 +20,7 @@ RUNTIME_DEBUG_DIR="${RAN_AGENT_DEPLOY_DEBUG_DIR:-/opt/ran_agent/debug}"
 LITE_SERVICE="$SYSTEMD_DIR/ran-agent-hermes.service"
 FULL_SERVICE="$SYSTEMD_DIR/ran-agent-hermes-full.service"
 OMBRE_SERVICE="$SYSTEMD_DIR/ran-agent-ombre-brain.service"
+XHS_BROWSE_SERVICE="$SYSTEMD_DIR/ran-agent-xhs-browse.service"
 LITE_DROPIN_DIR="$SYSTEMD_DIR/ran-agent-hermes.service.d"
 STALE_LITE_DROPINS=(
   "$LITE_DROPIN_DIR/30-hermes-env.conf"
@@ -34,6 +35,8 @@ FULL_PROFILE="ran-assistant"
 MODEL_NAME="deepseek-v4-flash"
 BACKUP_DIR="$(mktemp -d)"
 XHS_GENERIC_FALLBACK_PREPARE_TIMEOUT_SECONDS="${XHS_GENERIC_FALLBACK_PREPARE_TIMEOUT_SECONDS:-120}"
+XHS_BROWSE_PREPARE_TIMEOUT_SECONDS="${XHS_BROWSE_PREPARE_TIMEOUT_SECONDS:-300}"
+XHS_BROWSE_AUTO_PREPARE="${RAN_AGENT_DEPLOY_XHS_BROWSE_AUTO_PREPARE:-true}"
 HERMES_CONTEXT_INJECTION_MODE_DEFAULT="${RAN_AGENT_DEPLOY_HERMES_CONTEXT_INJECTION_MODE:-auto}"
 HERMES_CONTEXT_CACHE_STRATEGY_DEFAULT="${RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY:-balanced}"
 HERMES_RECENT_TEXT_TURNS_DEFAULT="${RAN_AGENT_DEPLOY_HERMES_RECENT_TEXT_TURNS:-4}"
@@ -232,6 +235,8 @@ ensure_runtime_dirs() {
   local dirs=(
     "$(runtime_state_path "uv-cache")"
     "$(runtime_state_path "uv-tools")"
+    "$(runtime_state_path "social_reader")"
+    "$(runtime_state_path "xhs-browse")"
     "$(runtime_state_path "environment")"
     "$OMBRE_BRAIN_HOME_DEFAULT"
     "$OMBRE_BRAIN_SOURCE_DIR_DEFAULT"
@@ -332,6 +337,9 @@ is_managed_env_key() {
     HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|HERMES_CONTEXT_INJECTION_MODE|HERMES_CONTEXT_CACHE_STRATEGY|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|HERMES_CONTINUITY_FRESHNESS_HOURS|HERMES_CACHE_FRIENDLY_HISTORY|HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS|HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET|HERMES_CACHE_FRIENDLY_HISTORY_PROFILE|HERMES_CACHE_TELEMETRY_ENABLED|HERMES_LITE_SOFT_RESET_ENABLED|HERMES_LITE_SOFT_RESET_DRY_RUN|HERMES_LITE_SOFT_RESET_MAX_DIGEST_CHARS|HERMES_LITE_SOFT_RESET_KEEP_LAST_N|HERMES_LITE_SOFT_RESET_STATE_FILE|HERMES_LITE_SOFT_RESET_DIGEST_DIR|HERMES_ACTION_GATE_ENABLED|HERMES_ACTION_GATE_MODE|HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS|HERMES_ACTION_PENDING_ENABLED|HERMES_ACTION_PENDING_TTL_MINUTES|HERMES_ENVIRONMENT_CONTEXT_ENABLED|HERMES_ENVIRONMENT_WEATHER_ENABLED|HERMES_ENVIRONMENT_MAX_AGE_MS|HERMES_ENVIRONMENT_WEATHER_CACHE_MS|HERMES_ENVIRONMENT_TIMEZONE|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS|PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS|PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE|PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED|PERSONAL_AGENT_DAILY_CARRYOVER_HOUR|PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_GENERIC_FALLBACK_ENABLED|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS|OBSIDIAN_MEMORY_MCP_ENABLED|XHS_GENERIC_FALLBACK_READY_PATH|WEIXIN_SDK_INBOUND_MEDIA_DIRS|OMBRE_BRAIN_ENABLED|OMBRE_BRAIN_MCP_ENABLED|OMBRE_BRAIN_RUNNER|OMBRE_BRAIN_REPO_URL|OMBRE_BRAIN_HOME|OMBRE_BRAIN_SOURCE_DIR|OMBRE_BRAIN_VENV|OMBRE_BUCKETS_DIR|OMBRE_BRAIN_IMAGE|OMBRE_BRAIN_BIND_HOST|OMBRE_BRAIN_PORT|OMBRE_BRAIN_COMPOSE_FILE|OMBRE_BRAIN_CONFIG_FILE|OMBRE_BRAIN_MCP_URL|OMBRE_BRAIN_MCP_EXTRA_URL|OMBRE_BRAIN_HEALTH_URL|PERSONAL_AGENT_OMBRE_BACKEND|PERSONAL_AGENT_OMBRE_MCP_URL|PERSONAL_AGENT_OMBRE_MCP_EXTRA_URL|PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS|PERSONAL_AGENT_OMBRE_READ_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_ENABLED|PERSONAL_AGENT_OMBRE_TIMEOUT_MS|PERSONAL_AGENT_OMBRE_MAX_RESULTS|PERSONAL_AGENT_OMBRE_MAX_CHARS|PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED|PERSONAL_AGENT_OMBRE_I_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_MODE)
       return 0
       ;;
+    XHS_BROWSE_ENABLED|SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS|XHS_BROWSE_MARKER_PATH|XHS_BROWSE_ROOT_DIR|XHS_BROWSE_MCP_URL|XHS_BROWSE_MCP_COMMAND|XHS_BROWSE_MCP_ARGS_JSON|XHS_BROWSE_MCP_COOKIE_ENV|XHS_BROWSE_MCP_TIMEOUT_MS|XHS_BROWSE_MAX_RESULTS|XHS_BROWSE_MAX_ITEMS|XHS_BROWSE_MIN_INTERVAL_MS|XHS_BROWSE_MAX_CALLS_PER_SESSION|XHS_BROWSE_SEARCH_ENABLED|XHS_BROWSE_NOTE_ENABLED|XHS_BROWSE_USER_ENABLED|XHS_BROWSE_FEED_ENABLED|XHS_NOTE_TOKEN_CACHE_PATH|XHS_NOTE_TOKEN_CACHE_DEBUG)
+      return 0
+      ;;
     *)
       return 1
       ;;
@@ -379,6 +387,27 @@ write_runtime_env() {
     "?PERSONAL_AGENT_OMBRE_I_ENABLED=$PERSONAL_AGENT_OMBRE_I_ENABLED_DEFAULT"
     "?PERSONAL_AGENT_OMBRE_WRITE_MODE=$PERSONAL_AGENT_OMBRE_WRITE_MODE_DEFAULT"
   )
+  local xhs_browse_env=(
+    "?XHS_BROWSE_ENABLED=false"
+    "?SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false"
+    "?XHS_BROWSE_MARKER_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json"
+    "?XHS_BROWSE_ROOT_DIR=/opt/ran_agent/.ran_agent_state/xhs-browse"
+    "?XHS_BROWSE_MCP_URL=http://127.0.0.1:18060/mcp"
+    '?XHS_BROWSE_MCP_COMMAND=bash'
+    "?XHS_BROWSE_MCP_ARGS_JSON='[\"/opt/ran_agent/scripts/run_xhs_browse_mcp.sh\"]'"
+    "?XHS_BROWSE_MCP_COOKIE_ENV=XHS_COOKIE"
+    "?XHS_BROWSE_MCP_TIMEOUT_MS=60000"
+    "?XHS_BROWSE_MAX_RESULTS=5"
+    "?XHS_BROWSE_MAX_ITEMS=5"
+    "?XHS_BROWSE_MIN_INTERVAL_MS=30000"
+    "?XHS_BROWSE_MAX_CALLS_PER_SESSION=10"
+    "?XHS_BROWSE_SEARCH_ENABLED=true"
+    "?XHS_BROWSE_NOTE_ENABLED=true"
+    "?XHS_BROWSE_USER_ENABLED=false"
+    "?XHS_BROWSE_FEED_ENABLED=false"
+    "?XHS_NOTE_TOKEN_CACHE_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json"
+    "?XHS_NOTE_TOKEN_CACHE_DEBUG=0"
+  )
   upsert_env_file "$FULL_HOME/.env" \
     "HERMES_HOME=$FULL_HOME" \
     "HERMES_PROFILE=$FULL_PROFILE" \
@@ -419,6 +448,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${xhs_browse_env[@]}" \
     "${ombre_env[@]}" \
     "?OPENALEX_MAILTO="
 
@@ -456,6 +486,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${xhs_browse_env[@]}" \
     "${ombre_env[@]}" \
     "?OPENALEX_MAILTO="
 
@@ -493,6 +524,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${xhs_browse_env[@]}" \
     "${ombre_env[@]}" \
     "?OPENALEX_MAILTO="
 
@@ -530,6 +562,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${xhs_browse_env[@]}" \
     "${ombre_env[@]}" \
     "?OPENALEX_MAILTO="
 
@@ -615,6 +648,7 @@ write_runtime_env() {
     "OBSIDIAN_MEMORY_MCP_ENABLED=false" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${xhs_browse_env[@]}" \
     "${ombre_env[@]}"
 
   upsert_env_file "$NODE_BRIDGE_ENV_FILE" \
@@ -639,6 +673,7 @@ write_runtime_env() {
     "XHS_BACKEND_MCP_TIMEOUT_MS=90000" \
     "XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json" \
     "WEIXIN_SDK_INBOUND_MEDIA_DIRS=$WEIXIN_SDK_INBOUND_MEDIA_DIRS_DEFAULT" \
+    "${xhs_browse_env[@]}" \
     "${ombre_env[@]}"
 }
 
@@ -945,6 +980,28 @@ TimeoutStopSec=120
 WantedBy=multi-user.target
 EOF
 
+  write_file 0644 "$XHS_BROWSE_SERVICE" <<EOF
+[Unit]
+Description=Ran Agent XHS Browse MCP Backend (port 18060)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$RUNTIME_USER
+WorkingDirectory=/opt/ran_agent
+EnvironmentFile=-$NODE_ENV_FILE
+EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
+Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
+ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec bash scripts/start_xhs_browse_backend.sh'
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
   cleanup_stale_lite_dropins
 }
 
@@ -969,6 +1026,31 @@ reset_failed_if_loaded() {
       "${SUDO[@]}" systemctl reset-failed "$service" >/dev/null 2>&1 || true
     fi
   done
+}
+
+xhs_browse_marker_ready() {
+  local marker_path
+  marker_path="$(effective_env_value XHS_BROWSE_MARKER_PATH /opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json)"
+  [ -f "$marker_path" ] || return 1
+  python3 - "$marker_path" <<'PYEOF'
+import json, os, sys
+try:
+    with open(sys.argv[1], "r", encoding="utf-8") as fh:
+        marker = json.load(fh)
+except Exception:
+    sys.exit(1)
+required = [
+    marker.get("mcp_executable", ""),
+    marker.get("mcporter_cli", ""),
+    marker.get("mcporter_config_path", ""),
+]
+ok = (
+    marker.get("ok") is True
+    and all(path and os.path.exists(path) for path in required)
+    and os.access(marker.get("mcp_executable", ""), os.X_OK)
+)
+sys.exit(0 if ok else 1)
+PYEOF
 }
 
 prepare_ombre_runtime() {
@@ -1001,7 +1083,7 @@ restart_services() {
   log "reloading systemd and restarting services"
   "${SUDO[@]}" systemctl daemon-reload
   sleep 1
-  reset_failed_if_loaded ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service
+  reset_failed_if_loaded ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service ran-agent-xhs-browse.service
   if ombre_brain_enabled; then
     if ombre_runner_available; then
       "${SUDO[@]}" systemctl enable ran-agent-ombre-brain.service >/dev/null 2>&1 || true
@@ -1017,6 +1099,17 @@ restart_services() {
   else
     "${SUDO[@]}" systemctl disable --now ran-agent-ombre-brain.service >/dev/null 2>&1 || true
   fi
+  if xhs_browse_marker_ready; then
+    "${SUDO[@]}" systemctl enable ran-agent-xhs-browse.service >/dev/null 2>&1 || true
+    if "${SUDO[@]}" systemctl restart ran-agent-xhs-browse.service; then
+      log "XHS browse backend service restart requested"
+    else
+      log "WARNING: XHS browse backend service restart failed (non-blocking)"
+    fi
+  else
+    log "XHS browse backend marker not ready; service disabled until prepare succeeds"
+    "${SUDO[@]}" systemctl disable --now ran-agent-xhs-browse.service >/dev/null 2>&1 || true
+  fi
   "${SUDO[@]}" systemctl restart ran-agent-hermes.service
   wait_for_gateway_port "$LITE_PORT" ran-agent-hermes.service || true
   "${SUDO[@]}" systemctl restart ran-agent-hermes-full.service
@@ -1028,11 +1121,11 @@ print_failure_context() {
   echo ""
   echo "ERROR: Hermes runtime split verification failed." >&2
   echo "--- effective systemd units (systemctl cat) ---" >&2
-  "${SUDO[@]}" systemctl cat ran-agent-hermes.service ran-agent-hermes-full.service >&2 || true
+  "${SUDO[@]}" systemctl cat ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-xhs-browse.service >&2 || true
   echo "--- service status ---" >&2
-  "${SUDO[@]}" systemctl --no-pager --full status ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-node.service >&2 || true
+  "${SUDO[@]}" systemctl --no-pager --full status ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-xhs-browse.service ran-agent-node.service >&2 || true
   echo "--- recent Hermes logs ---" >&2
-  "${SUDO[@]}" journalctl -u ran-agent-hermes.service -u ran-agent-hermes-full.service -n 120 --no-pager >&2 || true
+  "${SUDO[@]}" journalctl -u ran-agent-hermes.service -u ran-agent-hermes-full.service -u ran-agent-xhs-browse.service -n 120 --no-pager >&2 || true
   echo "--- listening sockets ---" >&2
   ss -ltnp >&2 || true
 }
@@ -1354,6 +1447,16 @@ verify_runtime() {
     fi
   fi
 
+  if xhs_browse_marker_ready; then
+    if "${SUDO[@]}" systemctl is-active --quiet ran-agent-xhs-browse.service; then
+      log "OK: XHS browse backend service active"
+    else
+      log "WARNING: XHS browse backend marker is ready, but ran-agent-xhs-browse.service is not active"
+    fi
+  else
+    log "XHS browse backend marker not ready; mainline XHS browse path remains disabled until prepare succeeds"
+  fi
+
   log "OK: $LITE_PROFILE pid=$lite_pid port=$LITE_PORT"
   log "OK: $FULL_PROFILE pid=$full_pid port=$FULL_PORT"
 }
@@ -1397,6 +1500,18 @@ main() {
     else
       log "WARNING: XHS generic fallback preparation failed or timed out (non-blocking)"
     fi
+  fi
+
+  # Prepare XHS browse backend (mainline token refresh/detail path, non-blocking)
+  if [ "$XHS_BROWSE_AUTO_PREPARE" != "false" ]; then
+    log "preparing XHS browse backend"
+    if timeout "$XHS_BROWSE_PREPARE_TIMEOUT_SECONDS" bash "$REPO_ROOT/scripts/prepare-xhs-browse-backend.sh" --write-env 2>&1; then
+      log "XHS browse backend prepared"
+    else
+      log "WARNING: XHS browse backend preparation failed or timed out (non-blocking)"
+    fi
+  else
+    log "XHS browse backend auto-prepare disabled"
   fi
 
   restart_services

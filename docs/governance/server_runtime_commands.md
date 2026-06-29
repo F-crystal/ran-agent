@@ -24,6 +24,11 @@ manual systemd or env edits.
   `bash scripts/diagnose-hermes-tools.sh`
 - Diagnose media/XHS routing:
   `bash scripts/diagnose-media-xhs.sh`
+- Prepare XHS browse MCP backend:
+  `bash scripts/prepare-xhs-browse-backend.sh --write-env`
+- Start/login XHS browse MCP backend:
+  `bash scripts/start_xhs_browse_backend.sh`,
+  `bash scripts/login_xhs_browse_backend.sh`
 - Clean UV cache safely:
   `bash scripts/clean-uv-cache-safe.sh`
 
@@ -68,6 +73,9 @@ bash scripts/diagnose-ombre-memory.sh
 - XHS generic fallback marker path:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
 - Non-blocking XHS generic fallback preparation before service restart.
+- Non-blocking XHS browse MCP backend preparation before service restart.
+- `ran-agent-xhs-browse.service` for the xiaohongshu-mcp HTTP backend on
+  `127.0.0.1:18060`; `social_reader` bridges to it through mcporter stdio.
 - Ombre Brain runtime preparation under
   `/opt/ran_agent/.ran_agent_state/ombre-brain` and private buckets under
   `/opt/ran_agent/vault/ombre`.
@@ -109,6 +117,7 @@ bash scripts/apply-hermes-runtime-split.sh
 |---------|------|---------|------|---------|
 | `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | Daily lite-context entry |
 | `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | Full debug/heavy-tool entry |
+| `ran-agent-xhs-browse.service` | `18060` | n/a | `/opt/ran_agent/.ran_agent_state/xhs-browse` | Xiaohongshu browse MCP HTTP backend for `social_reader` |
 | `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Optional upstream Ombre Brain memory service |
 
 `8642` is a lite-context entry, not a security sandbox. Node bridge routes
@@ -144,6 +153,15 @@ SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true
 SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
 XHS_BACKEND_MCP_TIMEOUT_MS=90000
 XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
+XHS_BROWSE_ENABLED=false
+SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false
+XHS_BROWSE_MARKER_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
+XHS_BROWSE_ROOT_DIR=/opt/ran_agent/.ran_agent_state/xhs-browse
+XHS_BROWSE_MCP_URL=http://127.0.0.1:18060/mcp
+XHS_BROWSE_MCP_COMMAND=bash
+XHS_BROWSE_MCP_ARGS_JSON='["/opt/ran_agent/scripts/run_xhs_browse_mcp.sh"]'
+XHS_BROWSE_MCP_COOKIE_ENV=XHS_COOKIE
+XHS_NOTE_TOKEN_CACHE_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json
 UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache
 UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
 UV_LINK_MODE=copy
@@ -191,6 +209,7 @@ bash scripts/diagnose-ombre-memory.sh
 bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-multi-frontend.sh
 bash scripts/diagnose-hermes-tools.sh
+bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-browse
 ```
 
 For direct API checks, use the local Hermes API key from the server env. Do not
@@ -205,6 +224,10 @@ paste key-bearing curl commands into public docs.
   be first-read through `browser_navigate` or terminal.
 - Token-cache hits are link resolution evidence only; they do not mean content
   was read.
+- XHS browse tools stay hidden from normal Hermes tool lists by default
+  (`SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false`). `read_social_post` and
+  `read_social_post_deep` may still use the backend internally to refresh
+  `xsec_token` and read details before falling back to generic parsing.
 
 ## Scheduled AI Daily Digest
 
