@@ -2777,8 +2777,8 @@ const XHS_BROWSE_DEFAULTS = {
 };
 
 const XHS_BROWSE_TOOL_CANDIDATES = {
-  search: ['search_notes', 'search', 'query_notes', 'search_note', 'xhs_search_note'],
-  note: ['get_note_info', 'get_note', 'note_detail', 'get_note_content', 'xhs_get_note_detail'],
+  search: ['search_notes', 'search_feeds', 'search', 'query_notes', 'search_note', 'xhs_search_note'],
+  note: ['get_note_info', 'get_feed_detail', 'get_note', 'note_detail', 'get_note_content', 'xhs_get_note_detail'],
   user: ['get_user_notes', 'user_profile', 'user_homepage'],
   feed: ['get_feed', 'explore', 'recommendation_feed'],
 };
@@ -2801,6 +2801,11 @@ const XHS_BROWSE_ERROR_CODES = {
   TIMEOUT: 'XHS_TIMEOUT',
   BACKEND_MCP_ERROR: 'XHS_BACKEND_MCP_ERROR',
 };
+
+function xhsBrowseToolMatches(toolName, candidate) {
+  const name = String(toolName || '');
+  return name === candidate || name.endsWith(`.${candidate}`) || name.endsWith(`_${candidate}`) || name.endsWith(`-${candidate}`);
+}
 
 // Session 调用计数（内存中，重启后重置）
 let xhsBrowseSessionCallCount = 0;
@@ -3110,8 +3115,9 @@ async function probeXhsBrowseBackend(config, options = {}) {
 
   for (const [category, candidates] of Object.entries(XHS_BROWSE_TOOL_CANDIDATES)) {
     for (const candidate of candidates) {
-      if (availableTools.includes(candidate)) {
-        matchedTools[category] = candidate;
+      const matched = availableTools.find((tool) => xhsBrowseToolMatches(tool, candidate));
+      if (matched) {
+        matchedTools[category] = matched;
         break;
       }
     }
@@ -3171,13 +3177,16 @@ function xhsBrowseBackendArgsForNote(toolName, noteId, entry = {}, includeImages
   const xsecToken = entry.xsecToken || entry.xsec_token || '';
   const xsecSource = entry.xsec_source || '';
   const canonicalUrl = entry.canonical_url || buildXhsCanonicalUrl(noteId, xsecToken, xsecSource);
-  if (toolName === 'get_note_content') {
+  if (xhsBrowseToolMatches(toolName, 'get_note_content')) {
     return { url: canonicalUrl };
   }
-  if (toolName === 'xhs_get_note_detail') {
+  if (xhsBrowseToolMatches(toolName, 'get_feed_detail')) {
+    return { feed_id: noteId, xsec_token: xsecToken };
+  }
+  if (xhsBrowseToolMatches(toolName, 'xhs_get_note_detail')) {
     return { feedId: noteId, xsecToken, include_images: includeImages };
   }
-  if (toolName === 'get_note_info' || toolName === 'get_note' || toolName === 'note_detail') {
+  if (xhsBrowseToolMatches(toolName, 'get_note_info') || xhsBrowseToolMatches(toolName, 'get_note') || xhsBrowseToolMatches(toolName, 'note_detail')) {
     return {
       note_id: noteId,
       xsec_token: xsecToken,
@@ -3197,7 +3206,8 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = 
   // 根据类别归一化响应结构
   if (category === 'search') {
     // xhs-mcp returns items[] or feeds[] with nested noteCard structure
-    const rawItems = rawData.items || rawData.feeds || rawData.results || [];
+    const searchData = rawData.data || rawData;
+    const rawItems = searchData.items || searchData.feeds || searchData.results || [];
     
     // Parse and normalize each item
     const normalizedItems = rawItems.map(item => {
@@ -3255,9 +3265,9 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = 
     
     return {
       ok: true,
-      query: originalQuery || rawData.query || '',
+      query: originalQuery || searchData.query || '',
       results: results,
-      total_count: rawData.total_count || rawData.total || rawItems.length,
+      total_count: searchData.total_count || searchData.total || searchData.count || rawItems.length,
       debug_shape: {
         ...debugShape,
         item_count: rawItems.length,
@@ -3266,14 +3276,16 @@ function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = 
   }
 
   if (category === 'note') {
+    const noteData = rawData.data || rawData.feed || rawData.note || rawData;
+    const noteCard = noteData.noteCard || noteData.note_card || noteData;
     return {
       ok: true,
-      note_id: rawData.note_id || rawData.id || '',
-      title: rawData.title || '',
-      content: rawData.content || rawData.desc || rawData.description || rawData.post_text || '',
-      images: rawData.images || rawData.image_list || [],
-      user: rawData.user || { id: rawData.user_id || '', name: rawData.username || '' },
-      create_time: rawData.create_time || rawData.created_at || '',
+      note_id: noteData.note_id || noteData.id || noteCard.note_id || noteCard.id || '',
+      title: noteData.title || noteCard.displayTitle || noteCard.display_title || '',
+      content: noteData.content || noteData.desc || noteData.description || noteData.post_text || noteCard.desc || '',
+      images: noteData.images || noteData.image_list || noteCard.images || noteCard.imageList || [],
+      user: noteData.user || noteCard.user || { id: noteData.user_id || '', name: noteData.username || '' },
+      create_time: noteData.create_time || noteData.created_at || noteCard.time || '',
       debug_shape: debugShape,
     };
   }
@@ -3443,15 +3455,19 @@ async function xhsBrowseSearch(args, options = {}) {
   const backendToolName = probeResult.matched_tools.search;
   // 根据后端工具名称映射参数
   const backendArgs = {};
-  if (backendToolName === 'search_notes') {
+  if (xhsBrowseToolMatches(backendToolName, 'search_notes')) {
     backendArgs.keywords = query;
-  } else if (backendToolName === 'xhs_search_note' || backendToolName.includes('search')) {
+  } else if (xhsBrowseToolMatches(backendToolName, 'search_feeds')) {
+    backendArgs.keyword = query;
+  } else if (xhsBrowseToolMatches(backendToolName, 'xhs_search_note') || backendToolName.includes('search')) {
     backendArgs.keyword = query;
   } else {
     backendArgs.query = query;
   }
-  backendArgs.max_results = maxResults;
-  backendArgs.sort = sort;
+  if (!xhsBrowseToolMatches(backendToolName, 'search_feeds')) {
+    backendArgs.max_results = maxResults;
+    backendArgs.sort = sort;
+  }
 
   const result = await callXhsBrowseBackend(backendToolName, backendArgs, config, options);
 
@@ -3480,8 +3496,8 @@ async function xhsBrowseSearch(args, options = {}) {
       }
       // Map xhs-mcp fields to expected format
       rawData = {
-        items: parsed.items || parsed.feeds || [],
-        total_count: parsed.count || parsed.total || 0,
+        items: parsed.items || parsed.feeds || parsed.data?.items || parsed.data?.feeds || [],
+        total_count: parsed.count || parsed.total || parsed.data?.count || parsed.data?.total || 0,
         query: parsed.keyword || parsed.query || query || '',
       };
     }

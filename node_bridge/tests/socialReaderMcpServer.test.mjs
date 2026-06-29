@@ -285,6 +285,111 @@ test('xhs_browse_search stores token context and xhs_browse_note reads by read_r
   );
 });
 
+test('xhs_browse supports xiaohongshu-mcp search_feeds and get_feed_detail tools', async () => {
+  const calls = [];
+  const env = {
+    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+    XHS_BROWSE_ENABLED: 'true',
+    XHS_BROWSE_MCP_COMMAND: 'mcporter',
+    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
+    XHS_BROWSE_MIN_INTERVAL_MS: '0',
+    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+  };
+  const options = {
+    env,
+    xhsBrowseCallImpl: async ({ toolName, arguments: toolArgs }) => {
+      calls.push({ toolName, arguments: toolArgs });
+      if (toolName === 'probe') {
+        return {
+          ok: true,
+          available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
+        };
+      }
+      if (toolName === 'xiaohongshu_search_feeds') {
+        assert.deepEqual(toolArgs, { keyword: '造物主 AI小游戏' });
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                feeds: [{
+                  id: 'note-mcp',
+                  xsec_token: 'token-mcp',
+                  noteCard: {
+                    displayTitle: '服务器笔记',
+                    user: { nickname: '作者C', userId: 'user789' },
+                  },
+                }],
+              }),
+            }],
+          },
+        };
+      }
+      if (toolName === 'xiaohongshu_get_feed_detail') {
+        assert.deepEqual(toolArgs, { feed_id: 'note-mcp', xsec_token: 'token-mcp' });
+        return {
+          ok: true,
+          data: {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                success: true,
+                data: {
+                  id: 'note-mcp',
+                  title: '服务器笔记',
+                  desc: 'xiaohongshu-mcp 详情正文',
+                  image_list: [{ url: 'https://example.com/a.jpg' }],
+                },
+              }),
+            }],
+          },
+        };
+      }
+      throw new Error(`unexpected tool: ${toolName}`);
+    },
+  };
+
+  const searchResult = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_search',
+        arguments: { query: '造物主 AI小游戏', max_results: 1 },
+      },
+    },
+    options
+  );
+  const search = searchResult.structuredContent || searchResult;
+
+  assert.equal(search.ok, true);
+  assert.equal(search.results[0].note_id, 'note-mcp');
+  assert.equal(JSON.stringify(search).includes('token-mcp'), false);
+
+  const noteResult = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'xhs_browse_note',
+        arguments: { read_ref: 'xhs:note:note-mcp' },
+      },
+    },
+    options
+  );
+  const note = noteResult.structuredContent || noteResult;
+
+  assert.equal(note.ok, true);
+  assert.equal(note.note_id, 'note-mcp');
+  assert.equal(note.content, 'xiaohongshu-mcp 详情正文');
+  assert.deepEqual(note.images, [{ url: 'https://example.com/a.jpg' }]);
+  assert.equal(JSON.stringify(note).includes('token-mcp'), false);
+  assert.deepEqual(
+    calls.map((call) => call.toolName),
+    ['probe', 'xiaohongshu_search_feeds', 'probe', 'xiaohongshu_get_feed_detail']
+  );
+});
+
 test('xhs_browse_note falls back when browse backend returns a failure payload', async () => {
   // Set up a temporary marker for the XHS generic fallback
   const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs');
