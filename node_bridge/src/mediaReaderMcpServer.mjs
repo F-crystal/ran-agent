@@ -396,7 +396,7 @@ async function analyzeImage(args = {}, options = {}) {
   if (!visionResult.ok && (!ocrResult.ok || !ocrEnabled)) {
     throw errorForSettledResult(visionResult);
   }
-  const ocr = ocrResult.ok ? ocrResult.value : { text: '', blocks: [], model: ocrResult.code === 'OCR_TIMEOUT' ? 'paddleocr_timeout' : 'paddleocr_failed' };
+  const ocr = ocrResult.ok ? ocrResult.value : { text: '', blocks: [], model: ocrResult.code === 'OCR_TIMEOUT' ? 'ocr_timeout' : 'ocr_failed' };
   const vision = visionResult.ok ? visionResult.value : { summary: '', objects: [], model: 'vlm_failed' };
   const warnings = [];
   if (!ocrResult.ok) warnings.push(warningFor(ocrResult.code));

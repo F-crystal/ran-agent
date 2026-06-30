@@ -133,6 +133,16 @@ test('apply script env upsert includes UV cache and XHS timeout vars', () => {
   assert.match(text, /SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false/);
 });
 
+test('media reader startup defaults to DashScope OCR full-read budget', () => {
+  const scriptPath = new URL('../../scripts/start_media_reader_mcp.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+
+  assert.match(script, /PERSONAL_AGENT_OCR_PROVIDER="\$\{PERSONAL_AGENT_OCR_PROVIDER:-dashscope-qwen-vl-ocr\}"/);
+  assert.match(script, /PERSONAL_AGENT_OCR_MODEL="\$\{PERSONAL_AGENT_OCR_MODEL:-qwen-vl-ocr-2025-11-20\}"/);
+  assert.match(script, /PERSONAL_AGENT_OCR_TIMEOUT_MS="\$\{PERSONAL_AGENT_OCR_TIMEOUT_MS:-120000\}"/);
+  assert.doesNotMatch(script, /PERSONAL_AGENT_OCR_PROVIDER="\$\{PERSONAL_AGENT_OCR_PROVIDER:-paddleocr\}"/);
+});
+
 test('apply script creates runtime trusted media directories', () => {
   const dir = mkdtempSync(join(tmpdir(), 'trusted-media-runtime-dirs-'));
   const stateDir = join(dir, '.ran_agent_state');

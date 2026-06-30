@@ -1,6 +1,6 @@
 # Media Pipeline
 
-Status: CURRENT (2026-06-30)
+Status: CURRENT (2026-07-01)
 
 This document owns the current media pipeline contract. Detailed WeChat buffer
 semantics live in `docs/governance/wechat-bridge-media-buffer.md`; retired
@@ -121,5 +121,6 @@ Rollback: set `RAN_AGENT_CONTEXT_POLICY=legacy`.
 - Runtime artifacts under `debug/`, `.ran_agent_state/`, and media task dirs
   are local state and must not be committed.
 - Production OCR uses DashScope Qwen-VL OCR. PaddleOCR is a best-effort local
-  override; on low-CPU servers its timeout or partial success should remain
-  typed.
+  override; the media reader startup script uses the same DashScope/120s
+  fallback defaults when env files are absent. OCR timeout or partial success
+  should remain typed.

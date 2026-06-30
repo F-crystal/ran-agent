@@ -126,7 +126,7 @@ export async function analyzeVideoWithFfmpeg(asset, options = {}) {
       } catch (error) {
         const code = error instanceof MediaReaderError ? error.error_code : 'OCR_FAILED';
         warnings.push(code);
-        ocr.model = code === 'OCR_TIMEOUT' ? 'paddleocr_timeout' : code;
+        ocr.model = code === 'OCR_TIMEOUT' ? 'ocr_timeout' : code;
       }
     }
     let vision = { summary: '', objects: [], model: '' };

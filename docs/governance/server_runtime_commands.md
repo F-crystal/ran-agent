@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-06-30)
+Status: CURRENT (2026-07-01)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -287,6 +287,9 @@ should fail only as explicit per-asset partial failures rather than silent
 Production OCR defaults to DashScope Qwen-VL OCR. PaddleOCR remains a local
 override, but low-CPU servers commonly report `OCR_TIMEOUT` on text-heavy XHS
 cards even when VLM summaries succeed.
+`scripts/start_media_reader_mcp.sh` carries the same DashScope/120s fallback
+defaults; use `PERSONAL_AGENT_OCR_PROVIDER=paddleocr` only as an explicit local
+override.
 
 Expected state:
 

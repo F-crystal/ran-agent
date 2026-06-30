@@ -80,7 +80,7 @@ test('media reader schemas expose trusted local media file_path inputs', () => {
   }
 });
 
-test('analyze_image returns structured OCR failure when default PaddleOCR is missing and VLM is unavailable', async () => {
+test('analyze_image returns structured OCR failure when OCR provider is unavailable and VLM is unavailable', async () => {
   const result = await handleMediaReaderMcpRequest(
     {
       method: 'tools/call',
@@ -325,7 +325,7 @@ test('analyze_image uses DashScope OCR and vision adapters when an API key is co
   assert.match(requests[1].messages[0].content[0].image_url.url, /^data:image\/png;base64,/);
 });
 
-test('analyze_image uses PaddleOCR as the default OCR provider alongside DashScope vision', async () => {
+test('analyze_image uses PaddleOCR when explicitly configured alongside DashScope vision', async () => {
   const requests = [];
   const paddleCalls = [];
   const paddleExecOptions = [];
@@ -443,7 +443,7 @@ test('analyze_image returns VLM result as partial success when OCR times out', a
   assert.equal(result.structuredContent.ocr_text, '');
   assert.equal(result.structuredContent.scene_summary, 'VLM scene survives');
   assert.deepEqual(result.structuredContent.warnings, [{ code: 'OCR_TIMEOUT' }]);
-  assert.deepEqual(result.structuredContent.model, { ocr: 'paddleocr_timeout', vlm: 'mock-vlm' });
+  assert.deepEqual(result.structuredContent.model, { ocr: 'ocr_timeout', vlm: 'mock-vlm' });
 });
 
 test('analyze_image maps unavailable OCR provider to OCR_FAILED partial warning', async () => {
@@ -486,7 +486,7 @@ test('analyze_image maps unavailable OCR provider to OCR_FAILED partial warning'
   assert.equal(result.structuredContent.ocr_text, '');
   assert.equal(result.structuredContent.scene_summary, 'VLM scene survives');
   assert.deepEqual(result.structuredContent.warnings, [{ code: 'OCR_FAILED' }]);
-  assert.deepEqual(result.structuredContent.model, { ocr: 'paddleocr_failed', vlm: 'mock-vlm' });
+  assert.deepEqual(result.structuredContent.model, { ocr: 'ocr_failed', vlm: 'mock-vlm' });
 });
 
 test('analyze_image returns OCR result as partial success when VLM fails', async () => {

@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-06-30)
+Status: CURRENT (2026-07-01)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -181,6 +181,9 @@ media directories so redeploys do not depend on manual `mkdir`.
   `media_reader.analyze_media_batch`. The default full-read cap is 100 media
   assets, with 20-minute MCP/batch budgets so normal multi-image notes are not
   silently truncated by legacy 20-asset or 120s defaults.
+  `scripts/start_media_reader_mcp.sh` defaults to DashScope Qwen-VL OCR with a
+  120s OCR budget when env files are absent; PaddleOCR is explicit override
+  only.
 - `jobson-xhs-mcp` remains a compatibility text path when a fresh `xsec_token`
   exists but browse is unavailable.
 - Long XHS share URLs are read through URL candidates: resolved URL first,
