@@ -169,7 +169,9 @@ media directories so redeploys do not depend on manual `mkdir`.
 - XHS content reading uses the prepared browse backend (`xiaohongshu-mcp`
   through `mcporter`) as the token-aware main path when `XHS_BROWSE_ENABLED=true`.
   It reads text and detail `imageList` payloads; `wanyi-watermark` remains the
-  generic fallback when browse has no usable token/detail response.
+  generic fallback when browse has no usable token/detail response. The fallback
+  marker is considered stale below `XHS_GENERIC_FALLBACK_MIN_VERSION` (default
+  `1.2.0`) because older `v1.0.1` installs miss recent XHS parsing fixes.
 - `read_social_post_deep` merges media found by the browse detail path with
   media found by the generic parser, preserving known `image`/`video` types
   before sending assets to `media_reader`. It must not rely on XHS CDN URL

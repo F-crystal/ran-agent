@@ -13,6 +13,8 @@ PACKAGE="wanyi-watermark"
 TOOL_NAME="parse_xhs_link"
 WRAPPER="$ROOT_DIR/scripts/run_xhs_generic_fallback_mcp.sh"
 PYTHON_SOURCE="/opt/ran_agent/.venv/bin/python"
+MIN_VERSION="${XHS_GENERIC_FALLBACK_MIN_VERSION:-1.2.0}"
+INSTALL_SPEC="${XHS_GENERIC_FALLBACK_PACKAGE_SPEC:-$PACKAGE>=$MIN_VERSION}"
 
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/opt/ran_agent/.ran_agent_state/uv-cache}"
 export UV_TOOL_DIR="${UV_TOOL_DIR:-/opt/ran_agent/.ran_agent_state/uv-tools}"
@@ -64,18 +66,34 @@ PYEOF
 }
 
 marker_is_ready() {
-  python3 - "$MARKER_PATH" "$WRAPPER" "$TOOL_NAME" <<'PYEOF'
+  python3 - "$MARKER_PATH" "$WRAPPER" "$TOOL_NAME" "$MIN_VERSION" <<'PYEOF'
 import json
 import os
+import re
 import sys
 
-marker_path, wrapper, tool_name = sys.argv[1:]
+marker_path, wrapper, tool_name, min_version = sys.argv[1:]
 with open(marker_path, "r", encoding="utf-8") as fh:
     d = json.load(fh)
 
 backend_executable = str(d.get('backend_executable') or '')
 backend_python = str(d.get('backend_python') or '')
 backend_module = str(d.get('backend_module') or '')
+version = str(d.get('version') or '')
+
+def version_tuple(value):
+    parts = re.findall(r'\d+', value)
+    return tuple(int(part) for part in parts[:3])
+
+def version_gte(value, minimum):
+    current = version_tuple(value)
+    required = version_tuple(minimum)
+    if not required:
+        return True
+    if not current:
+        return False
+    width = max(len(current), len(required))
+    return current + (0,) * (width - len(current)) >= required + (0,) * (width - len(required))
 
 has_executable_backend = (
     bool(backend_executable)
@@ -89,6 +107,7 @@ has_python_backend = (
     and os.path.isfile(backend_python)
     and os.access(backend_python, os.X_OK)
 )
+version_ok = version_gte(version, min_version)
 
 ok = (
     d.get('ok') is True
@@ -96,6 +115,7 @@ ok = (
     and d.get('args') == []
     and d.get('tool_name') == tool_name
     and isinstance(d.get('backend_args'), list)
+    and version_ok
     and (has_executable_backend or has_python_backend)
 )
 sys.exit(0 if ok else 1)
@@ -112,13 +132,14 @@ PYEOF
       cat "$MARKER_PATH" >&2
       exit 0
     else
-      echo "Existing marker is missing required schema/backend readiness; preparing again." >&2
+      echo "Existing marker is missing required schema/backend readiness or has stale version; preparing again." >&2
+      FORCE_FLAG="${FORCE_FLAG:---force}"
     fi
   fi
 
-  echo "Installing $PACKAGE into $UV_TOOL_DIR..." >&2
+  echo "Installing $INSTALL_SPEC into $UV_TOOL_DIR..." >&2
   # shellcheck disable=SC2086
-  uv tool install "$PACKAGE" --python "$PYTHON_SOURCE" $FORCE_FLAG
+  uv tool install "$INSTALL_SPEC" --python "$PYTHON_SOURCE" $FORCE_FLAG
 
   TOOL_VENV="$UV_TOOL_DIR/$PACKAGE"
   VERSION=$(uv tool list 2>/dev/null | grep "$PACKAGE" | awk '{print $2}' || echo "unknown")

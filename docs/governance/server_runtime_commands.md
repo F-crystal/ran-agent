@@ -153,8 +153,10 @@ HERMES_CACHE_FRIENDLY_HISTORY_PROFILE=lite
 HERMES_CACHE_TELEMETRY_ENABLED=true
 SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true
 SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
+SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS=90000
 XHS_BACKEND_MCP_TIMEOUT_MS=90000
 XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
+XHS_GENERIC_FALLBACK_MIN_VERSION=1.2.0
 XHS_BROWSE_ENABLED=false
 SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false
 XHS_BROWSE_MARKER_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
@@ -262,6 +264,9 @@ XHS reads have two independent branches inside `social_reader`:
   as the compatibility text path when browse is unavailable.
 - Media branch: generic parser fallback (`wanyi-watermark`) runs independently
   for missing-token, backend-failure, or media-only recovery cases.
+  The prepared version must be at least `XHS_GENERIC_FALLBACK_MIN_VERSION`
+  (default `1.2.0`) so old `v1.0.1` markers do not silently keep stale XHS
+  parsing behavior.
 
 `read_social_post_deep` merges browse detail images with generic parser media
 before calling `media_reader`. The deploy script prepares wrappers/markers

@@ -203,7 +203,7 @@ echo ""
 echo "=== 6. UV cache and timeout env ==="
 for f in .env.local node_bridge/.env.local "$HERMES_HOME/.env" "$HERMES_HOME/profiles/ran-assistant/.env"; do
   if [ -f "$f" ]; then
-    for key in UV_CACHE_DIR UV_TOOL_DIR SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS XHS_BACKEND_MCP_TIMEOUT_MS SOCIAL_READER_MCP_TIMEOUT_MS; do
+    for key in UV_CACHE_DIR UV_TOOL_DIR SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS XHS_BACKEND_MCP_TIMEOUT_MS SOCIAL_READER_MCP_TIMEOUT_MS XHS_GENERIC_FALLBACK_MIN_VERSION; do
       val=$(grep "^${key}=" "$f" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
       if [ -n "$val" ]; then
         echo "$f: $key=$val"
@@ -224,10 +224,16 @@ EFFECTIVE_XHS_TIMEOUT="$(effective_env_value SOCIAL_READER_XHS_BACKEND_TIMEOUT_M
 if [ -z "$EFFECTIVE_XHS_TIMEOUT" ]; then
   EFFECTIVE_XHS_TIMEOUT="$(effective_env_value XHS_BACKEND_MCP_TIMEOUT_MS 90000)"
 fi
+EFFECTIVE_XHS_GENERIC_FALLBACK_TIMEOUT="$(effective_env_value SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS "$EFFECTIVE_XHS_TIMEOUT")"
 EFFECTIVE_GENERIC_TIMEOUT="$(effective_env_value SOCIAL_READER_MCP_TIMEOUT_MS 90000)"
 echo "effective XHS backend timeout: ${EFFECTIVE_XHS_TIMEOUT}"
+echo "effective XHS generic fallback timeout: ${EFFECTIVE_XHS_GENERIC_FALLBACK_TIMEOUT}"
 echo "effective generic timeout: ${EFFECTIVE_GENERIC_TIMEOUT}"
-if [ "$EFFECTIVE_XHS_TIMEOUT" = "$EFFECTIVE_GENERIC_TIMEOUT" ] && [ "$EFFECTIVE_XHS_TIMEOUT" != "90000" ]; then
+if [ "$EFFECTIVE_XHS_GENERIC_FALLBACK_TIMEOUT" = "$EFFECTIVE_GENERIC_TIMEOUT" ] && [ "$EFFECTIVE_XHS_GENERIC_FALLBACK_TIMEOUT" != "90000" ]; then
+  echo "WARNING: XHS generic fallback timeout equals generic timeout ($EFFECTIVE_XHS_GENERIC_FALLBACK_TIMEOUT). XHS fallback should use a longer timeout."
+elif [ "$EFFECTIVE_XHS_GENERIC_FALLBACK_TIMEOUT" -lt "$EFFECTIVE_GENERIC_TIMEOUT" ] 2>/dev/null; then
+  echo "WARNING: XHS generic fallback timeout ($EFFECTIVE_XHS_GENERIC_FALLBACK_TIMEOUT) is shorter than generic timeout ($EFFECTIVE_GENERIC_TIMEOUT). XHS fallback should use a longer timeout."
+elif [ "$EFFECTIVE_XHS_TIMEOUT" = "$EFFECTIVE_GENERIC_TIMEOUT" ] && [ "$EFFECTIVE_XHS_TIMEOUT" != "90000" ]; then
   echo "WARNING: XHS timeout equals generic timeout ($EFFECTIVE_XHS_TIMEOUT). XHS should use a longer timeout."
 elif [ "$EFFECTIVE_XHS_TIMEOUT" -lt "$EFFECTIVE_GENERIC_TIMEOUT" ] 2>/dev/null; then
   echo "WARNING: XHS timeout ($EFFECTIVE_XHS_TIMEOUT) is shorter than generic timeout ($EFFECTIVE_GENERIC_TIMEOUT). XHS should use a longer timeout."
@@ -285,6 +291,25 @@ if [ -f "$MARKER_PATH" ]; then
     echo "marker backend_module: ${MARKER_MODULE:-NOT SET}"
     MARKER_VERSION=$("$PYTHON_BIN" -c "import json; print(json.load(open('$MARKER_PATH')).get('version', ''))" 2>/dev/null || echo "")
     echo "marker version: ${MARKER_VERSION:-NOT SET}"
+    MIN_GENERIC_FALLBACK_VERSION="$(effective_env_value XHS_GENERIC_FALLBACK_MIN_VERSION 1.2.0)"
+    echo "marker min_version: $MIN_GENERIC_FALLBACK_VERSION"
+    VERSION_OK=$("$PYTHON_BIN" - "$MARKER_VERSION" "$MIN_GENERIC_FALLBACK_VERSION" <<'PY' 2>/dev/null || echo "False"
+import re
+import sys
+
+def parts(value):
+    return tuple(int(item) for item in re.findall(r"\d+", value)[:3])
+
+current = parts(sys.argv[1])
+minimum = parts(sys.argv[2])
+width = max(len(current), len(minimum), 1)
+print(bool(current) and current + (0,) * (width - len(current)) >= minimum + (0,) * (width - len(minimum)))
+PY
+)
+    if [ "$VERSION_OK" != "True" ]; then
+      echo "WARNING: generic fallback version (${MARKER_VERSION:-unknown}) is older than required ($MIN_GENERIC_FALLBACK_VERSION)"
+      echo "hint: run scripts/prepare-xhs-generic-fallback.sh --force"
+    fi
     if [ "$MARKER_OK" = "True" ]; then
       echo "generic fallback: READY"
     else

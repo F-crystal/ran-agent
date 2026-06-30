@@ -541,6 +541,47 @@ test('resolve_platform_media XHS missing xsec token keeps generic parser image a
   assert.ok(result.structuredContent.warnings.some((warning) => warning.code === 'GENERIC_PARSER_FALLBACK'));
 });
 
+test('resolve_platform_media XHS generic fallback uses XHS-specific timeout budget', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-generic-timeout-'));
+  const markerPath = path.join(tempDir, 'generic-fallback-ready.json');
+  fs.writeFileSync(markerPath, JSON.stringify({
+    ok: true,
+    command: 'unused-in-test',
+    args: [],
+    tool_name: 'parse_xhs_link',
+  }));
+  const calls = [];
+
+  const result = await callResolve(
+    { url_or_text: 'https://www.xiaohongshu.com/explore/generic-timeout-test', platform: 'xhs' },
+    {
+      env: {
+        ...process.env,
+        XHS_GENERIC_FALLBACK_READY_PATH: markerPath,
+        SOCIAL_READER_MCP_TIMEOUT_MS: '45000',
+        SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS: '90000',
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      platformProviders: {
+        xhs: {
+          resolve: async () => {
+            const error = new Error('获取失败: missing xsec_token');
+            error.error_code = 'XHS_MISSING_XSEC_TOKEN';
+            throw error;
+          },
+        },
+      },
+      mcpCallImpl: async ({ server, toolName, timeoutMs }) => {
+        calls.push({ server, toolName, timeoutMs });
+        return { content: [{ type: 'text', text: JSON.stringify({ desc: 'fallback text' }) }] };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.deepEqual(calls, [{ server: 'generic', toolName: 'parse_xhs_link', timeoutMs: 90000 }]);
+});
+
 test('resolve_platform_media XHS non-recoverable error still throws', async () => {
   const result = await callResolve(
     { url_or_text: 'https://www.xiaohongshu.com/explore/nonrecoverable?xsec_token=tok', platform: 'xhs' },

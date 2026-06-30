@@ -879,6 +879,17 @@ test('prepare-xhs-generic-fallback.sh validates ready marker schema before skipp
   assert.match(script, /backend_executable/);
 });
 
+test('prepare-xhs-generic-fallback.sh refreshes stale wanyi versions', () => {
+  const scriptPath = new URL('../../scripts/prepare-xhs-generic-fallback.sh', import.meta.url).pathname;
+  const script = readFileSync(scriptPath, 'utf8');
+  assert.match(script, /XHS_GENERIC_FALLBACK_MIN_VERSION:-1\.2\.0/);
+  assert.match(script, /version_gte/);
+  assert.match(script, /version_ok = version_gte/);
+  assert.match(script, /INSTALL_SPEC=/);
+  assert.match(script, /uv tool install "\$INSTALL_SPEC"/);
+  assert.match(script, /Existing marker is missing required schema\/backend readiness or has stale version/);
+});
+
 test('clean-uv-cache-safe.sh kills obsidian install processes and protects XHS cache', () => {
   const scriptPath = new URL('../../scripts/clean-uv-cache-safe.sh', import.meta.url).pathname;
   const script = readFileSync(scriptPath, 'utf8');

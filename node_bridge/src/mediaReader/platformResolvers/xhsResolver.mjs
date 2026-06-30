@@ -17,6 +17,24 @@ function normalizeMaxAssets(value) {
   return Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), 100) : 20;
 }
 
+function positiveTimeoutMs(...values) {
+  for (const value of values) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed);
+  }
+  return 45000;
+}
+
+function resolveXhsGenericFallbackTimeoutMs(env = process.env) {
+  return positiveTimeoutMs(
+    env.SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS,
+    env.SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS,
+    env.XHS_BACKEND_MCP_TIMEOUT_MS,
+    env.SOCIAL_READER_MCP_TIMEOUT_MS,
+    90000
+  );
+}
+
 function noteIdFromUrl(url) {
   try {
     const parsed = new URL(url);
@@ -352,11 +370,13 @@ export async function resolveXhsMedia(args = {}, options = {}) {
 
     try {
       const toolName = marker.tool_name || 'parse_xhs_link';
+      const timeoutMs = resolveXhsGenericFallbackTimeoutMs(env);
       const genericResult = typeof options.mcpCallImpl === 'function'
         ? await options.mcpCallImpl({
           server: 'generic',
           toolName,
           arguments: { share_link: resolvedUrl },
+          timeoutMs,
         })
         : await callMcpToolViaStdio({
           command: marker.command,
@@ -364,7 +384,7 @@ export async function resolveXhsMedia(args = {}, options = {}) {
           env: process.env,
           toolName,
           arguments: { share_link: resolvedUrl },
-          timeoutMs: Number(env.SOCIAL_READER_MCP_TIMEOUT_MS || 45000),
+          timeoutMs,
         });
       const text = textFromMcpResult(genericResult);
       if (text) {
