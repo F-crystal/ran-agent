@@ -6,6 +6,8 @@ import {
 } from './index.mjs';
 import { callMcpToolViaStdio, parseJsonArrayEnv, textFromMcpResult } from './mcpClient.mjs';
 
+const DEFAULT_MAX_XHS_ASSETS = 100;
+
 function boolFromEnv(env, key, fallback) {
   const value = env?.[key];
   if (value === undefined || value === null || value === '') return fallback;
@@ -14,7 +16,7 @@ function boolFromEnv(env, key, fallback) {
 
 function normalizeMaxAssets(value) {
   const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), 100) : 20;
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), DEFAULT_MAX_XHS_ASSETS) : DEFAULT_MAX_XHS_ASSETS;
 }
 
 function positiveTimeoutMs(...values) {
@@ -110,7 +112,7 @@ function mapXhsError(error) {
   return 'XHS_BACKEND_MCP_ERROR';
 }
 
-function normalizeMedia(media = [], maxAssets = 20) {
+function normalizeMedia(media = [], maxAssets = DEFAULT_MAX_XHS_ASSETS) {
   return media
     .filter(Boolean)
     .slice(0, maxAssets)
@@ -185,7 +187,7 @@ function collectGenericMediaFromValue(output, value, fallbackType, maxAssets) {
   if (imageUrl) pushUrlMedia(output, fallbackType, imageUrl, maxAssets);
 }
 
-function normalizeGenericFallbackResult(text = '', { noteId = '', sourceHost = '', maxAssets = 20 } = {}) {
+function normalizeGenericFallbackResult(text = '', { noteId = '', sourceHost = '', maxAssets = DEFAULT_MAX_XHS_ASSETS } = {}) {
   const parsed = parseMaybeJson(text);
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
     return {

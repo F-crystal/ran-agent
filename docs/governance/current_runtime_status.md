@@ -176,6 +176,11 @@ media directories so redeploys do not depend on manual `mkdir`.
   media found by the generic parser, preserving known `image`/`video` types
   before sending assets to `media_reader`. It must not rely on XHS CDN URL
   suffixes to infer image type.
+- XHS browse and `wanyi-watermark` are resource resolvers, not OCR/VLM readers.
+  Complete image understanding happens only after merged assets enter
+  `media_reader.analyze_media_batch`. The default full-read cap is 100 media
+  assets, with 20-minute MCP/batch budgets so normal multi-image notes are not
+  silently truncated by legacy 20-asset or 120s defaults.
 - `jobson-xhs-mcp` remains a compatibility text path when a fresh `xsec_token`
   exists but browse is unavailable.
 - Long XHS share URLs are read through URL candidates: resolved URL first,

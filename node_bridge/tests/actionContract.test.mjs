@@ -48,6 +48,32 @@ test('action contract classifies social links and records read claims without us
   assert.match(result.conversation_id_hash, /^[a-f0-9]{16}$/);
 });
 
+test('action contract does not classify partial social read wording as complete', () => {
+  const result = evaluateActionContract({
+    requestId: 'req-social-partial',
+    channel: 'wechat',
+    message: {
+      text: '帮我读一下 http://xhslink.com/o/abc123',
+      channel: 'wechat',
+      conversation_id: 'conv-social-partial',
+    },
+    response: { reply_text: '我读到了一部分内容：前三张图已经读到。但有些媒体或细节没有成功获取。' },
+    toolResults: [
+      {
+        toolName: 'mcp_social_reader_read_social_post_deep',
+        partial_success: true,
+        media_analysis: { merged_summary: '前三张图已经读到。' },
+      },
+    ],
+    config: { enabled: true, mode: 'repair', maxRepairAttempts: 1 },
+  });
+
+  assert.equal(result.intent, 'social_read');
+  assert.equal(result.partial_success_detected, true);
+  assert.equal(result.final_claims.includes('read_complete'), false);
+  assert.equal(result.gate_decision, 'pass');
+});
+
 test('action contract classifies inbound media as media_read and records media artifact evidence', () => {
   const result = evaluateActionContract({
     requestId: 'req-media',

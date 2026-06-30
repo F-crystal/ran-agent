@@ -74,7 +74,7 @@ mcp_servers:
     args:
       - -lc
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_generation_mcp.sh
-    timeout: 300
+    timeout: 1200
     connect_timeout: 60
 
   sticker_catalog:
@@ -93,7 +93,7 @@ mcp_servers:
     args:
       - -lc
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_reader_mcp.sh
-    timeout: 300
+    timeout: 1200
     connect_timeout: 90
 
   social_reader:
@@ -101,7 +101,7 @@ mcp_servers:
     args:
       - -lc
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_social_reader_mcp.sh
-    timeout: 300
+    timeout: 1200
     connect_timeout: 90
 
   obsidian_memory:

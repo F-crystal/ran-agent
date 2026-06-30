@@ -745,6 +745,47 @@ test('analyze_media_batch returns partial results when one item fails', async ()
   assert.equal(result.structuredContent.partial_failures[0].error_code, 'URL_BLOCKED');
 });
 
+test('analyze_media_batch keeps all default assets up to full-read cap', async () => {
+  const assets = Array.from({ length: 25 }, (_, index) => ({
+    asset_id: `img-${index + 1}`,
+    type: 'image',
+    url: `https://cdn.example.com/${index + 1}.png`,
+  }));
+
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_media_batch',
+        arguments: {
+          media_detail: 'standard',
+          assets,
+        },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY: '25',
+        PERSONAL_AGENT_VISION_PROVIDER: 'mock',
+        PERSONAL_AGENT_OCR_PROVIDER: 'mock',
+      },
+      fetchImpl: async (url) => responseFromBytes({
+        url,
+        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+        bytes: pngBytes(),
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      ocrProvider: { analyzeImage: async () => ({ text: 'ok', blocks: [], model: 'mock-ocr' }) },
+      visionProvider: { analyzeImage: async () => ({ summary: 'ok', objects: [], model: 'mock-vlm' }) },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.items.length, 25);
+  assert.equal(result.structuredContent.partial, false);
+});
+
 test('analyze_media_batch keeps image item when OCR times out', async () => {
   let ocrCalls = 0;
   let visionCalls = 0;

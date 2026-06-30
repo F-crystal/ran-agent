@@ -30,6 +30,12 @@ const SERVER_INFO = {
   name: 'ran-agent-media-reader',
   version: '0.1.0',
 };
+const DEFAULT_MAX_MEDIA_ASSETS = 100;
+
+function normalizeMaxAssets(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.min(Math.floor(parsed), DEFAULT_MAX_MEDIA_ASSETS) : DEFAULT_MAX_MEDIA_ASSETS;
+}
 
 function buildTextResult(payload) {
   return {
@@ -59,7 +65,7 @@ export function buildMediaReaderTools() {
           url_or_text: { type: 'string', description: 'Text or URL that may contain media links.' },
           platform: { type: 'string', description: 'Optional source platform.' },
           media_urls: { type: 'array', items: { type: 'string' }, default: [] },
-          max_assets: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          max_assets: { type: 'integer', minimum: 1, maximum: 100, default: DEFAULT_MAX_MEDIA_ASSETS },
         },
         additionalProperties: false,
       },
@@ -96,7 +102,7 @@ export function buildMediaReaderTools() {
           media_detail: { type: 'string', enum: ['basic', 'standard', 'full'], default: 'standard' },
           include_comments: { type: 'boolean', default: false },
           max_comments: { type: 'integer', minimum: 0, maximum: 200, default: 30 },
-          max_assets: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          max_assets: { type: 'integer', minimum: 1, maximum: 100, default: DEFAULT_MAX_MEDIA_ASSETS },
         },
         additionalProperties: false,
       },
@@ -151,7 +157,7 @@ export function buildMediaReaderTools() {
         properties: {
           assets: { type: 'array', items: { type: 'object' }, default: [] },
           media_detail: { type: 'string', enum: ['basic', 'standard', 'full'], default: 'standard' },
-          max_assets: { type: 'integer', minimum: 1, maximum: 100, default: 20 },
+          max_assets: { type: 'integer', minimum: 1, maximum: 100, default: DEFAULT_MAX_MEDIA_ASSETS },
           max_frames_per_video: { type: 'integer', minimum: 1, default: 12 },
           task: { type: 'string', default: 'summarize_social_post_media' },
         },
@@ -445,7 +451,7 @@ async function analyzeVideo(args = {}, options = {}) {
       media_detail: args.media_detail || 'standard',
       include_comments: args.include_comments === true,
       max_comments: args.max_comments || 30,
-      max_assets: args.max_assets || 20,
+      max_assets: normalizeMaxAssets(args.max_assets),
     }, options);
     const sanitized = sanitizePlatformResult(resolved);
     const subtitle = sanitized.subtitle;
@@ -785,7 +791,7 @@ async function callTool(name, args = {}, options = {}) {
       urlOrText: args.url_or_text || '',
       mediaUrls: Array.isArray(args.media_urls) ? args.media_urls : [],
       platform: args.platform || '',
-      maxAssets: Number(args.max_assets || 20),
+      maxAssets: normalizeMaxAssets(args.max_assets),
     });
     return buildTextResult({ ok: true, assets, warnings: assets.length ? [] : ['NO_MEDIA_FOUND'] });
   }
@@ -796,7 +802,7 @@ async function callTool(name, args = {}, options = {}) {
       media_detail: args.media_detail || 'standard',
       include_comments: args.include_comments === true,
       max_comments: Number(args.max_comments || 30),
-      max_assets: Number(args.max_assets || 20),
+      max_assets: normalizeMaxAssets(args.max_assets),
     }, options);
     return buildTextResult(sanitizePlatformResult(result));
   }
@@ -810,7 +816,8 @@ async function callTool(name, args = {}, options = {}) {
     return buildTextResult(await analyzeVideo(args, options));
   }
   if (name === 'analyze_media_batch') {
-    const assets = Array.isArray(args.assets) ? args.assets.slice(0, Number(args.max_assets || 20)) : [];
+    const maxAssets = normalizeMaxAssets(args.max_assets);
+    const assets = Array.isArray(args.assets) ? args.assets.slice(0, maxAssets) : [];
     const result = await analyzeMediaBatch({
       assets,
       mediaDetail: args.media_detail || 'standard',
@@ -823,7 +830,7 @@ async function callTool(name, args = {}, options = {}) {
             media_detail: args.media_detail || 'standard',
             include_comments: args.include_comments === true,
             max_comments: args.max_comments || 30,
-            max_assets: args.max_assets || 20,
+            max_assets: maxAssets,
           }, options);
           const sanitized = sanitizePlatformResult(resolved);
           const childItems = [];
@@ -843,7 +850,7 @@ async function callTool(name, args = {}, options = {}) {
               childWarnings.push({ code: errorCodeFor(error, 'MEDIA_ANALYSIS_FAILED'), asset_id: asset.asset_id || '' });
             }
           } else {
-            for (const media of (resolved.media || []).slice(0, Number(args.max_assets || 20))) {
+            for (const media of (resolved.media || []).slice(0, maxAssets)) {
               try {
                 if ((media.type === 'image' || media.type === 'cover') && media.url) {
                   childItems.push(await analyzeImage({ url: media.url, ocr: true, vlm: args.media_detail !== 'basic', media_detail: args.media_detail || 'standard' }, {

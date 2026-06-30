@@ -387,6 +387,7 @@ test('createReplyBackend repair mode keeps partial social repair honest', async 
         toolName: 'mcp_social_reader_read_social_post_deep',
         partial_success: true,
         error_code: 'XHS_PARTIAL',
+        media_analysis: { merged_summary: '前三张图已经读到：图中展示了路线、预算和注意事项。' },
       },
     }),
     ingestImpl: async () => ({ ok: true }),
@@ -399,7 +400,7 @@ test('createReplyBackend repair mode keeps partial social repair honest', async 
     channel: 'wechat',
   });
 
-  assert.equal(response.replyText, '我读到了一部分内容，但有些媒体或细节没有成功获取。');
+  assert.equal(response.replyText, '我读到了一部分内容：前三张图已经读到：图中展示了路线、预算和注意事项。但有些媒体或细节没有成功获取。');
 });
 
 test('createReplyBackend repair mode downgrades complete reply when repaired XHS media coverage is partial', async () => {

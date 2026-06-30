@@ -23,6 +23,7 @@ const SERVER_INFO = {
 const DEFAULT_TIMEOUT_MS = 90000;
 const DEFAULT_MAX_COMMENTS = 30;
 const MAX_COMMENTS_CAP = 100;
+const DEFAULT_MAX_MEDIA_ASSETS = 100;
 const XHS_MAX_REDIRECTS = 5;
 const BROWSER_USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36';
 const XHS_ALLOWED_HOSTS = new Set([
@@ -257,7 +258,7 @@ export function buildSocialReaderTools(env = process.env) {
             description: 'Maximum media assets to analyze.',
             minimum: 1,
             maximum: 100,
-            default: 20,
+            default: DEFAULT_MAX_MEDIA_ASSETS,
           },
         },
         required: ['url'],
@@ -696,6 +697,28 @@ function normalizeMaxComments(value) {
 function resolveTimeoutMs(env = process.env) {
   const parsed = Number(env.SOCIAL_READER_MCP_TIMEOUT_MS || DEFAULT_TIMEOUT_MS);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
+}
+
+function positiveInt(value, fallback = 0) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+}
+
+function normalizeMaxMediaAssets(value) {
+  return positiveInt(value, DEFAULT_MAX_MEDIA_ASSETS);
+}
+
+function resolveMediaReaderTimeoutMs(env = process.env, toolArguments = {}) {
+  const explicit = positiveInt(env.MEDIA_READER_MCP_TIMEOUT_MS, 0);
+  if (explicit) return explicit;
+  const assets = Array.isArray(toolArguments.assets) ? toolArguments.assets.length : 0;
+  const concurrency = positiveInt(env.PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY, 2);
+  const perItemTimeoutMs = positiveInt(env.PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS, 60000);
+  const batchTimeoutMs = positiveInt(env.PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS, 0);
+  const computedBatchMs = assets > 0
+    ? Math.ceil(assets / Math.max(concurrency, 1)) * perItemTimeoutMs + 30000
+    : 0;
+  return Math.max(batchTimeoutMs, computedBatchMs, 120000);
 }
 
 function resolveXhsBackendTimeoutMs(env = process.env) {
@@ -1555,7 +1578,7 @@ async function readWechatArticlePost(args = {}, options = {}) {
     media_detail: 'standard',
     include_comments: false,
     max_comments: 0,
-    max_assets: 20,
+    max_assets: DEFAULT_MAX_MEDIA_ASSETS,
   }, options);
   const structured = mediaResult.structuredContent || {};
   if (structured.ok === false || mediaResult.isError) {
@@ -1736,17 +1759,18 @@ function extractMediaUrlsFromSocialPayload(social) {
 }
 
 async function callMediaReaderTool(toolName, toolArguments = {}, options = {}) {
-  if (typeof options.mediaReaderCallImpl === 'function') {
-    return await options.mediaReaderCallImpl({ toolName, arguments: toolArguments });
-  }
   const env = options.env || process.env;
+  const timeoutMs = resolveMediaReaderTimeoutMs(env, toolArguments);
+  if (typeof options.mediaReaderCallImpl === 'function') {
+    return await options.mediaReaderCallImpl({ toolName, arguments: toolArguments, timeoutMs });
+  }
   return await callMcpToolViaStdio({
     command: env.MEDIA_READER_MCP_COMMAND || 'bash',
     args: parseJsonArrayEnv(env.MEDIA_READER_MCP_ARGS_JSON, ['scripts/start_media_reader_mcp.sh']),
     env: process.env,
     toolName,
     arguments: toolArguments,
-    timeoutMs: resolveTimeoutMs(env),
+    timeoutMs,
   });
 }
 
@@ -1779,7 +1803,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
         media_detail: normalizeMediaDetail(args.media_detail),
         include_comments: args.include_comments === true,
         max_comments: normalizeMaxComments(args.max_comments),
-        max_assets: Number(args.max_media_assets || 20),
+        max_assets: normalizeMaxMediaAssets(args.max_media_assets),
       }, options);
       if (platformResult.structuredContent?.ok === true) {
         const platformMedia = platformResult.structuredContent;
@@ -1809,7 +1833,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
   const social = socialResult.structuredContent || {};
   const mediaDetail = normalizeMediaDetail(args.media_detail);
   const includeMedia = args.include_media !== false && mediaDetail !== 'none';
-  const maxMediaAssets = Number(args.max_media_assets || 20);
+  const maxMediaAssets = normalizeMaxMediaAssets(args.max_media_assets);
   let mediaAnalysis = {
     ok: true,
     partial: false,
@@ -1835,7 +1859,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
       ...buildMediaAssets({
       mediaUrls,
       platform: social.platform || '',
-      maxAssets: Number(args.max_media_assets || 20),
+      maxAssets: maxMediaAssets,
     }),
     ]
     : [];
@@ -1844,7 +1868,7 @@ async function readSocialPostDeep(args = {}, options = {}) {
     const mediaResult = await callMediaReaderTool('analyze_media_batch', {
       assets,
       media_detail: mediaDetail,
-      max_assets: Number(args.max_media_assets || 20),
+      max_assets: maxMediaAssets,
       task: 'summarize_social_post_media',
     }, options);
     mediaAnalysis = mediaResult.structuredContent || mediaResult;
@@ -1951,7 +1975,7 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
   const mediaCount = normalizedMediaItems.length;
   const mediaDetail = normalizeMediaDetail(args.media_detail);
   const includeMedia = args.include_media !== false && mediaDetail !== 'none';
-  const maxMediaAssets = Number(args.max_media_assets || 20);
+  const maxMediaAssets = normalizeMaxMediaAssets(args.max_media_assets);
   let mediaAnalysis = {
     ok: true,
     partial: false,
@@ -2224,7 +2248,7 @@ function mergeXhsMediaItems(items = []) {
   return merged;
 }
 
-function buildMediaAssetsFromXhsItems({ mediaItems = [], platform = '', maxAssets = 20 } = {}) {
+function buildMediaAssetsFromXhsItems({ mediaItems = [], platform = '', maxAssets = DEFAULT_MAX_MEDIA_ASSETS } = {}) {
   const typedItems = mergeXhsMediaItems(mediaItems).slice(0, maxAssets);
   const typeCounts = new Map();
   return typedItems.map((item) => {

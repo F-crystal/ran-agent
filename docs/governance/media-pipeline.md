@@ -85,6 +85,11 @@ asset analysis when normalized resources are needed. XHS deep reads can receive
 normalized media from either the token-aware browse detail payload
 (`imageList`) or the generic parser fallback; known `image`/`video` types must
 be preserved before forwarding assets to `analyze_media_batch` for OCR/VLM.
+Resolvers must not claim image understanding by themselves: XHS browse and
+`wanyi-watermark` supply post text and media URLs, while `media_reader`
+performs the OCR/VLM pass. Default deep reads keep up to 100 media assets and
+use long media-reader budgets so all discovered images are attempted; failures
+remain per-asset partial failures instead of silent truncation.
 XHS missing `xsec_token` is a recoverable resolver condition: generic parser
 metadata and image URLs must still be forwarded to analysis when available.
 XHS PC-share long links under `/discovery/item/<note_id>` are canonicalized to

@@ -106,7 +106,7 @@ async function repairSocialRead({ message, env, logger }) {
           include_comments: false,
           include_media: true,
           media_detail: 'standard',
-          max_media_assets: 20,
+          max_media_assets: 100,
         },
       },
     },
@@ -247,18 +247,26 @@ function normalizeRepairResult(result = {}) {
     ...normalizeToolResults(result.toolResults),
     ...normalizeToolResults(result.toolResult ? [result.toolResult] : []),
   ];
+  const repairedReply = String(result.repairedReply || (
+    status === 'partial_success' ? buildPartialRepairReplyFromToolResults(toolResults) : ''
+  ));
   return {
     repairAttempted: result.attempted === true,
     repairType: sanitizeCode(result.repairType || result.type || ''),
     repairStatus: status,
     ok: status === 'success' || status === 'partial_success',
-    repairedReply: String(result.repairedReply || ''),
+    repairedReply,
     marker: String(result.marker || ''),
     media: result.media && typeof result.media === 'object' && !Array.isArray(result.media) ? result.media : null,
     toolResults,
     repairEvidenceAdded: summarizeRepairEvidence({ marker: result.marker, media: result.media, toolResults }),
     repairErrorCode: sanitizeCode(result.error_code || result.errorCode || result.error || ''),
   };
+}
+
+function buildPartialRepairReplyFromToolResults(toolResults = []) {
+  const social = toolResults.find((item) => /social_reader|read_social/i.test(String(item?.toolName || item?.tool_name || '')));
+  return social ? buildSocialRepairReply(social, true) : '';
 }
 
 function normalizeToolResults(items) {
@@ -320,6 +328,19 @@ function inferStickerQuery(text = '') {
 
 function buildSocialRepairReply(payload = {}, partial = false) {
   if (partial) {
+    const partialSummary = compactUserText(
+      payload.deep_summary
+      || payload.media_analysis?.merged_summary
+      || payload.summary
+      || payload.desc
+      || payload.post_text
+      || payload.text
+      || ''
+    );
+    if (partialSummary) {
+      const end = /[。！？.!?]$/.test(partialSummary) ? '' : '。';
+      return `我读到了一部分内容：${partialSummary}${end}但有些媒体或细节没有成功获取。`;
+    }
     return '我读到了一部分内容，但有些媒体或细节没有成功获取。';
   }
   const summary = compactUserText(

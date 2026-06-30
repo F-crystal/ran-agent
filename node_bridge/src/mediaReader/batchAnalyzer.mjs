@@ -49,8 +49,13 @@ function partialFailureFromResult(asset, result) {
 
 export async function analyzeMediaBatch({ assets = [], mediaDetail = 'standard', analyzeOne, env = process.env }) {
   const maxConcurrency = positiveInt(env.PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY, DEFAULT_MAX_CONCURRENCY);
-  const batchTimeoutMs = positiveInt(env.PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS, DEFAULT_BATCH_TIMEOUT_MS);
   const perItemTimeoutMs = positiveInt(env.PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS, DEFAULT_PER_ITEM_TIMEOUT_MS);
+  const configuredBatchTimeoutMs = positiveInt(env.PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS, 0);
+  const computedBatchTimeoutMs = Math.max(
+    DEFAULT_BATCH_TIMEOUT_MS,
+    Math.ceil((Array.isArray(assets) ? assets.length : 0) / Math.max(maxConcurrency, 1)) * perItemTimeoutMs + 30000
+  );
+  const batchTimeoutMs = configuredBatchTimeoutMs || computedBatchTimeoutMs;
   const queue = [...assets];
   const items = [];
   const partialFailures = [];

@@ -9,6 +9,7 @@ test('social reader exposes read_social_post_deep with standard media detail def
   assert.ok(deepTool);
   assert.deepEqual(deepTool.inputSchema.properties.media_detail.enum, ['none', 'basic', 'standard', 'full']);
   assert.equal(deepTool.inputSchema.properties.media_detail.default, 'standard');
+  assert.equal(deepTool.inputSchema.properties.max_media_assets.default, 100);
 });
 
 test('read_social_post_deep combines social text with media_reader partial batch results', async () => {
@@ -356,6 +357,126 @@ test('read_social_post_deep uses XHS browse detail images when wanyi media fails
   assert.ok(browseCalls.some((call) => call.toolName === 'xiaohongshu_get_feed_detail'));
 });
 
+test('read_social_post_deep analyzes all default XHS media assets', async () => {
+  const noteId = 'all-images-note';
+  const imageList = Array.from({ length: 25 }, (_, index) => ({
+    urlDefault: `https://sns-webpic-qc.xhscdn.com/all-${index + 1}`,
+    width: 936,
+    height: 1202,
+  }));
+  let analyzedAssetCount = 0;
+
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=fresh-token`,
+          include_media: true,
+          media_detail: 'standard',
+        },
+      },
+    },
+    {
+      env: {
+        SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+        XHS_BROWSE_ENABLED: 'true',
+        XHS_BROWSE_MCP_COMMAND: 'mcporter',
+        XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
+        XHS_BROWSE_MIN_INTERVAL_MS: '0',
+        XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+        XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-generic-marker.json',
+      },
+      fetchImpl: async (url) => ({ url }),
+      xhsBrowseCallImpl: async ({ toolName }) => {
+        if (toolName === 'probe') {
+          return { ok: true, available_tools: ['xiaohongshu_get_feed_detail'] };
+        }
+        if (toolName === 'xiaohongshu_get_feed_detail') {
+          return {
+            ok: true,
+            data: {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  data: {
+                    feed_id: noteId,
+                    note: { id: noteId, title: '全图测试', desc: '正文', imageList },
+                  },
+                }),
+              }],
+            },
+          };
+        }
+        throw new Error(`unexpected xhs browse tool ${toolName}`);
+      },
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        assert.equal(toolName, 'analyze_media_batch');
+        analyzedAssetCount = toolArgs.assets.length;
+        assert.equal(toolArgs.max_assets, 100);
+        return {
+          structuredContent: {
+            ok: true,
+            partial: false,
+            items: toolArgs.assets.map((asset) => ({ asset_id: asset.asset_id, type: 'image', overall_summary: asset.asset_id })),
+            merged_summary: '25 张图全部分析完成',
+            partial_failures: [],
+            warnings: [],
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial_success, false);
+  assert.equal(result.structuredContent.media_assets.length, 25);
+  assert.equal(analyzedAssetCount, 25);
+});
+
+test('read_social_post_deep uses dedicated media reader timeout budget', async () => {
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: 'https://v.douyin.com/share-demo',
+          media_detail: 'standard',
+        },
+      },
+    },
+    {
+      env: {
+        SOCIAL_READER_MCP_TIMEOUT_MS: '45000',
+        MEDIA_READER_MCP_TIMEOUT_MS: '900000',
+      },
+      fetchImpl: async (url) => ({ url }),
+      mcpCallImpl: async () => ({
+        content: [{ type: 'text', text: JSON.stringify({ caption: '正文', media: [{ type: 'image', url: 'https://media.example.com/a.png' }] }) }],
+      }),
+      mediaReaderCallImpl: async ({ timeoutMs }) => {
+        assert.equal(timeoutMs, 900000);
+        return {
+          structuredContent: {
+            ok: true,
+            partial: false,
+            items: [{ asset_id: 'image-1', type: 'image', overall_summary: '图片摘要' }],
+            merged_summary: '图片摘要',
+            partial_failures: [],
+            warnings: [],
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.media_analysis.merged_summary, '图片摘要');
+});
+
 test('read_social_post_deep skips jobson detail path when XHS URL has no xsec token', async () => {
   const { mkdtempSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');
@@ -458,6 +579,7 @@ test('read_social_post_deep reports XHS media truncation by max_media_assets', a
           url: 'https://www.xiaohongshu.com/explore/many-images',
           media_detail: 'standard',
           include_media: true,
+          max_media_assets: 20,
         },
       },
     },

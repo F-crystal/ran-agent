@@ -262,7 +262,8 @@ function hasEvidenceForIntent(intent, evidence = []) {
 function detectFinalClaims(replyText = '') {
   const text = String(replyText || '');
   const claims = [];
-  if (/读到了|读到.*(?:全文|正文|原文|内容)|(?:看完|读完|读过|读取了)|(?:全文|原文|正文|内容)\s*(?:是|如下)|帖子说|笔记说|文章说|核心观点是/.test(text)) {
+  const partialReadClaim = /读到.*一部分|一部分.*读到|部分.*(?:成功|内容)|有些.*(?:没有成功|失败)|还有些.*(?:没有成功|失败)/.test(text);
+  if (!partialReadClaim && /读到了|读到.*(?:全文|正文|原文|内容)|(?:看完|读完|读过|读取了)|(?:全文|原文|正文|内容)\s*(?:是|如下)|帖子说|笔记说|文章说|核心观点是/.test(text)) {
     claims.push('read_complete');
   }
   if (/图片里|图里|视频里|音频里|截图里|画面里|我看到/.test(text)) {

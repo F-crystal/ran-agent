@@ -155,6 +155,11 @@ SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true
 SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
 SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS=90000
 XHS_BACKEND_MCP_TIMEOUT_MS=90000
+MEDIA_READER_MCP_TIMEOUT_MS=1200000
+PERSONAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS=60000
+PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY=3
+PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS=1200000
+PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS=120000
 XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
 XHS_GENERIC_FALLBACK_MIN_VERSION=1.2.0
 XHS_BROWSE_ENABLED=false
@@ -271,6 +276,11 @@ XHS reads have two independent branches inside `social_reader`:
 `read_social_post_deep` merges browse detail images with generic parser media
 before calling `media_reader`. The deploy script prepares wrappers/markers
 once, then runtime uses those wrappers instead of cold-starting tool installers.
+Browse and `wanyi-watermark` only provide text/media URLs; image OCR/VLM is done
+by `media_reader.analyze_media_batch`. The default full-read cap is 100 media
+assets with 20-minute media MCP/batch budgets, so complete XHS image reads
+should fail only as explicit per-asset partial failures rather than silent
+20-asset truncation or 45s/120s outer timeout.
 
 Expected state:
 

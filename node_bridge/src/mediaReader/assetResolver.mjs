@@ -251,7 +251,7 @@ export function extractUrlsFromText(text) {
   return [...new Set(matches.map((item) => item.replace(/[，。！？、；：）)\]}】》」'".]+$/u, '')))];
 }
 
-export function buildMediaAssets({ urlOrText = '', mediaUrls = [], platform = '', maxAssets = 20 } = {}) {
+export function buildMediaAssets({ urlOrText = '', mediaUrls = [], platform = '', maxAssets = 100 } = {}) {
   const urls = [...mediaUrls, ...extractUrlsFromText(urlOrText)].filter(Boolean);
   return [...new Set(urls)].slice(0, maxAssets).map((url, index) => {
     const type = detectKindFromUrlOrMime(url);
