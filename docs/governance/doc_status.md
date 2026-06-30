@@ -63,14 +63,17 @@ deployment notes belong under ignored `local_archive/`, not under
   `scripts/diagnose-lite-full.sh`.
 - Search Hub is the unified fresh web/news/academic search entry; actual
   social links still read through `social_reader` / `media_reader`.
-- XHS generic fallback is prepared at deploy time and uses the marker at
+- XHS browse backend and generic fallback are both prepared at deploy time:
+  browse uses `ran-agent-xhs-browse.service` plus the marker at
+  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json`; generic
+  fallback uses
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
 - XHS evidence gate separates `link_resolution`, `metadata_read`, and
   `content_read`; token cache hits cannot claim content read.
 - Request id logging is unified across context-size, routing, evidence, and
   evidence-gate logs.
-- Node root env and `node_bridge/.env.local` are both managed for XHS fallback
-  marker consistency.
+- Node root env and `node_bridge/.env.local` are both managed for XHS browse and
+  generic fallback marker consistency.
 - Opt-in AI daily digest is the only scheduled outbound allowlist path; it uses
   the learned Feishu DM target and the normal Hermes/Feishu reply flow without
   reopening proactive check-ins or reminders.

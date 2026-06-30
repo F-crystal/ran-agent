@@ -1,6 +1,6 @@
 # Media Pipeline
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-06-30)
 
 This document owns the current media pipeline contract. Detailed WeChat buffer
 semantics live in `docs/governance/wechat-bridge-media-buffer.md`; retired
@@ -81,9 +81,12 @@ files are not saved automatically. Sticker assets live under
 2. Partial results are preserved when individual media assets fail.
 
 For platform links, call `media_reader.resolve_platform_media` before direct
-asset analysis when normalized resources are needed. XHS missing `xsec_token`
-is a recoverable resolver condition: generic parser metadata and image URLs
-must still be forwarded to `analyze_media_batch` for OCR/VLM.
+asset analysis when normalized resources are needed. XHS deep reads can receive
+normalized media from either the token-aware browse detail payload
+(`imageList`) or the generic parser fallback; known `image`/`video` types must
+be preserved before forwarding assets to `analyze_media_batch` for OCR/VLM.
+XHS missing `xsec_token` is a recoverable resolver condition: generic parser
+metadata and image URLs must still be forwarded to analysis when available.
 XHS PC-share long links under `/discovery/item/<note_id>` are canonicalized to
 `/explore/<note_id>` with `xsec_token` and `xsec_source` preserved before
 backend provider calls.

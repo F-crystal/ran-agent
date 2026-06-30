@@ -64,7 +64,7 @@ MCP services
 
 **联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。它同时注册到 lite/full；lite 使用 Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed 等轻量 provider，full 使用 Playwright fallback。OpenCLI browser-backed 默认关闭（2C4G/60G 服务器约束），后续 Phase 11.2 可选增强。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
 
-**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书优先使用通用解析 fallback，搜索上下文会缓存 `read_ref`；token-aware 兼容 URL 只作为受控解析线索，日志必须记录 redacted URL 或布尔 evidence。
+**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书在 browse backend 准备好时优先走 `xiaohongshu-mcp` 读取正文和详情图片，搜索上下文会缓存 `read_ref`；通用解析 fallback 只做缺 token、backend 失败或媒体恢复兜底，日志必须记录 redacted URL 或布尔 evidence。
 
 **多模态理解。** 微信图片、音频、视频和文档先经过可信路径校验，再交给 `media_reader` 做 OCR、ASR、VLM 或视频分析。视频采用字幕优先策略：字幕、音频 ASR、关键帧 VLM、元数据逐级降级。
 

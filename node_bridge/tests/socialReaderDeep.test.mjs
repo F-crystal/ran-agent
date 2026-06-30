@@ -254,6 +254,108 @@ test('read_social_post_deep normalizes XHS wanyi media and analyzes image fallba
   assert.ok(backendCalls.some((call) => call.server === 'generic'));
 });
 
+test('read_social_post_deep uses XHS browse detail images when wanyi media fails', async () => {
+  const noteId = '6a41cd4c000000000803df8e';
+  const browseCalls = [];
+  const mediaCalls = [];
+
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: `https://www.xiaohongshu.com/explore/${noteId}?xsec_token=fresh-token&xsec_source=pc_share`,
+          media_detail: 'standard',
+          include_media: true,
+          max_media_assets: 5,
+        },
+      },
+    },
+    {
+      env: {
+        SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+        XHS_BROWSE_ENABLED: 'true',
+        XHS_BROWSE_MCP_COMMAND: 'mcporter',
+        XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
+        XHS_BROWSE_MIN_INTERVAL_MS: '0',
+        XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+        XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-generic-marker.json',
+      },
+      fetchImpl: async (url) => ({ url }),
+      xhsBrowseCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        browseCalls.push({ toolName, arguments: toolArgs });
+        if (toolName === 'probe') {
+          return {
+            ok: true,
+            available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
+          };
+        }
+        if (toolName === 'xiaohongshu_get_feed_detail') {
+          assert.equal(toolArgs.feed_id, noteId);
+          assert.equal(toolArgs.xsec_token, 'fresh-token');
+          return {
+            ok: true,
+            data: {
+              content: [{
+                type: 'text',
+                text: JSON.stringify({
+                  success: true,
+                  data: {
+                    feed_id: noteId,
+                    note: {
+                      id: noteId,
+                      title: '【AI小游戏·已开源】让你的AI当一回造物主',
+                      desc: '正文已经由 xhs_browse 读到',
+                      imageList: [{
+                        urlDefault: 'https://sns-webpic-qc.xhscdn.com/1040g008321vuhj0mne6g5n1o986hp0mku30kngg',
+                        urlPre: 'https://sns-webpic-qc.xhscdn.com/1040g008321vuhj0mne6g5n1o986hp0mku30kngg!nc_n_webp_prv_1',
+                        width: 936,
+                        height: 1202,
+                      }],
+                    },
+                  },
+                }),
+              }],
+            },
+          };
+        }
+        throw new Error(`unexpected xhs browse tool ${toolName}`);
+      },
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        mediaCalls.push({ toolName, arguments: toolArgs });
+        assert.equal(toolName, 'analyze_media_batch');
+        assert.equal(toolArgs.assets.length, 1);
+        assert.equal(toolArgs.assets[0].type, 'image');
+        assert.equal(toolArgs.assets[0].url_host, 'sns-webpic-qc.xhscdn.com');
+        return {
+          structuredContent: {
+            ok: true,
+            partial: false,
+            items: [{ asset_id: 'image-1', type: 'image', overall_summary: '图中展示了 ECO 游戏说明' }],
+            merged_summary: '图中展示了 ECO 游戏说明',
+            partial_failures: [],
+            warnings: [],
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial_success, false);
+  assert.equal(result.structuredContent.source, 'xhs_browse');
+  assert.equal(result.structuredContent.images.length, 1);
+  assert.equal(result.structuredContent.media.length, 1);
+  assert.equal(result.structuredContent.media_assets.length, 1);
+  assert.equal(result.structuredContent.media_assets[0].type, 'image');
+  assert.match(result.structuredContent.deep_summary, /ECO/);
+  assert.equal(result.structuredContent.diagnostics.detail_backend.ok, true);
+  assert.equal(result.structuredContent.diagnostics.media_backend.ok, false);
+  assert.equal(mediaCalls.length, 1);
+  assert.ok(browseCalls.some((call) => call.toolName === 'xiaohongshu_get_feed_detail'));
+});
+
 test('read_social_post_deep skips jobson detail path when XHS URL has no xsec token', async () => {
   const { mkdtempSync, writeFileSync } = await import('node:fs');
   const { tmpdir } = await import('node:os');

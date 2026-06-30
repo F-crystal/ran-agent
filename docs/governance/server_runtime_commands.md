@@ -196,6 +196,11 @@ Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform
 login state must stay in local env files only and must never be printed into
 docs, logs, tool output, or Git.
 
+`XHS_BROWSE_ENABLED=false` is the template default before the browse backend is
+prepared. `scripts/prepare-xhs-browse-backend.sh --write-env` writes
+`XHS_BROWSE_ENABLED=true` only after the marker, binary, mcporter config, and
+wrapper command are ready.
+
 For WeChat bridge or login-state debugging, verify the exact CLI package,
 runtime SDK package, version, import path, and state directory contract before
 proposing token or state migration commands. Treat platform resolver state as
@@ -248,26 +253,39 @@ curl -sS -X POST http://127.0.0.1:8791/scheduled/ai-daily-digest \
 
 Do not enable `PERSONAL_AGENT_PROACTIVE_ENABLED` for this feature.
 
-## XHS Fallback
+## XHS Read Backends
 
-The deploy script prepares the generic fallback once, then runtime uses the
-prepared wrapper/marker instead of cold-starting `uvx`.
+XHS reads have two independent branches inside `social_reader`:
+
+- Detail branch: token-aware browse first (`xiaohongshu-mcp` through
+  `mcporter`) to read post text and detail image lists, then `jobson-xhs-mcp`
+  as the compatibility text path when browse is unavailable.
+- Media branch: generic parser fallback (`wanyi-watermark`) runs independently
+  for missing-token, backend-failure, or media-only recovery cases.
+
+`read_social_post_deep` merges browse detail images with generic parser media
+before calling `media_reader`. The deploy script prepares wrappers/markers
+once, then runtime uses those wrappers instead of cold-starting tool installers.
 
 Expected state:
 
 ```text
 /opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
+/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
 /opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json
 /opt/ran_agent/node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json
 ```
 
 If XHS content reads fail:
 
-1. Run `bash scripts/diagnose-media-xhs.sh`.
-2. Check whether the failure is auth/risk/captcha (`XHS_COOKIE_EXPIRED`,
-   `XHS_IP_RISK`, `XHS_CAPTCHA_REQUIRED`) or a backend timeout
-   (`XHS_BACKEND_TIMEOUT`).
-3. Do not delete social-reader state while cleaning cache.
+1. Run `bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-browse`.
+2. Confirm five layers in order: generic marker ready, browse marker ready,
+   `ran-agent-xhs-browse.service` active, browse bridge search/detail tools
+   confirmed, and login valid.
+3. Then check whether the specific note fails because of auth/risk/captcha
+   (`XHS_COOKIE_EXPIRED`, `XHS_IP_RISK`, `XHS_CAPTCHA_REQUIRED`), backend
+   timeout (`XHS_BACKEND_TIMEOUT`), or note visibility/deletion.
+4. Do not delete social-reader state while cleaning cache.
 
 ## XHS Browse MCP Repair
 
@@ -325,6 +343,9 @@ Only scan a new QR code if the login check reports not logged in, expired
 cookies, or an auth failure:
 
 ```bash
+MARKER=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
+MCPORTER=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_cli'])")
+CONF=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_config_path'])")
 bash scripts/login_xhs_browse_backend.sh --qrcode
 node "$MCPORTER" --config "$CONF" call 'xiaohongshu.check_login_status()' --timeout 120000
 ```
@@ -338,12 +359,33 @@ note was deleted, made private, hidden by author settings, or blocked by XHS
 risk control. In that case, compare:
 
 - `read_social_post_deep` diagnostics from `social_reader`.
-- `xiaohongshu.search_feeds(keyword=...)` returning the target `feed_id`.
-- `xiaohongshu.get_feed_detail(feed_id=..., xsec_token=...)` for the matched
-  search item.
+- Direct `mcporter` search/detail calls using parameter-style arguments:
 
-Do not paste `xsec_token`, cookies, QR payloads, or session files into public
-logs or docs.
+```bash
+MARKER=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
+MCPORTER=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_cli'])")
+CONF=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_config_path'])")
+umask 077
+CHECK_DIR=/opt/ran_agent/.ran_agent_state/social_reader/manual-checks
+mkdir -p "$CHECK_DIR"
+
+export XHS_QUERY='title or keyword'
+node "$MCPORTER" --config "$CONF" call xiaohongshu.search_feeds \
+  keyword="$XHS_QUERY" \
+  --timeout 120000 \
+  --output json >"$CHECK_DIR/xhs-search.json"
+
+export FEED_ID='matched feed id'
+export XSEC_TOKEN='matched xsec token from the search result'
+node "$MCPORTER" --config "$CONF" call xiaohongshu.get_feed_detail \
+  feed_id="$FEED_ID" \
+  xsec_token="$XSEC_TOKEN" \
+  --timeout 120000 \
+  --output json >"$CHECK_DIR/xhs-detail.json"
+```
+
+Delete manual check files after inspection. Do not paste `xsec_token`, cookies,
+QR payloads, detail JSON, or session files into public logs or docs.
 
 ## UV Cache Recovery
 

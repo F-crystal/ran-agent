@@ -64,7 +64,7 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 **Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. It is registered in both lite and full; lite uses lightweight providers such as Tavily, AIHOT, OpenCLI public-only, OpenAlex/arxiv/pubmed, while full may use Playwright fallback. OpenCLI browser-backed mode is disabled by default for the 2C4G/60G server and remains an optional Phase 11.2 enhancement. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.
 
-**Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. Xiaohongshu uses the generic parser fallback as the primary read path, while search context stores `read_ref` handles; token-aware compatibility URLs are controlled resolver evidence, and logs must use redacted URLs or boolean evidence.
+**Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. When the browse backend is prepared, Xiaohongshu first uses `xiaohongshu-mcp` for post text and detail images, while search context stores `read_ref` handles; the generic parser fallback remains for missing-token, backend-failure, or media-recovery cases, and logs must use redacted URLs or boolean evidence.
 
 **Multimodal understanding.** WeChat images, audio, video, and documents first pass trusted-path validation, then go through `media_reader` for OCR, ASR, VLM, or video analysis. Video analysis is subtitle-first: subtitles, audio ASR, keyframe VLM, then metadata fallback.
 

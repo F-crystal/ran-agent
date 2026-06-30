@@ -386,7 +386,7 @@ if has_arg "--smoke-browse" "$@"; then
     if [ -n "$BROWSE_COMMAND" ] && [ -x "$BROWSE_COMMAND" ]; then
       echo "smoke testing via $BROWSE_COMMAND (timeout 30s)..."
       BROWSE_SMOKE_STDERR="$(mktemp)"
-      BROWSE_SMOKE_RESULT=$(timeout 30 "$BROWSE_COMMAND" 2>"$BROWSE_SMOKE_STDERR" <<'MCP_EOF' || true
+      BROWSE_SMOKE_RESULT=$(XHS_BROWSE_MARKER_PATH="$BROWSE_MARKER_PATH" timeout 30 "$BROWSE_COMMAND" 2>"$BROWSE_SMOKE_STDERR" <<'MCP_EOF' || true
 {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"diag-xhs-browse","version":"0.1.0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}

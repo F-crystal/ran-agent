@@ -166,15 +166,22 @@ media directories so redeploys do not depend on manual `mkdir`.
 
 ## XHS And Evidence Gate
 
-- XHS content reading uses the prepared generic parser fallback
-  (`wanyi-watermark`) as the primary read path. `jobson-xhs-mcp` remains a
-  token-aware compatibility path when a fresh `xsec_token` exists.
+- XHS content reading uses the prepared browse backend (`xiaohongshu-mcp`
+  through `mcporter`) as the token-aware main path when `XHS_BROWSE_ENABLED=true`.
+  It reads text and detail `imageList` payloads; `wanyi-watermark` remains the
+  generic fallback when browse has no usable token/detail response.
+- `read_social_post_deep` merges media found by the browse detail path with
+  media found by the generic parser, preserving known `image`/`video` types
+  before sending assets to `media_reader`. It must not rely on XHS CDN URL
+  suffixes to infer image type.
+- `jobson-xhs-mcp` remains a compatibility text path when a fresh `xsec_token`
+  exists but browse is unavailable.
 - Long XHS share URLs are read through URL candidates: resolved URL first,
   canonical `/explore/<note_id>` URL second. This keeps `/discovery/item/...`
   PC-share links with tracking params from failing on the first parser shape.
-- XHS deep read skips the token-aware `jobson-xhs-mcp` detail backend when no
-  `xsec_token` or cached token is available, so image/OCR fallback does not wait
-  for a predictable 90s detail timeout.
+- XHS deep read skips token-aware detail backends when no `xsec_token` or cached
+  token is available, so image/OCR fallback does not wait for a predictable 90s
+  detail timeout.
 - `media_reader.resolve_platform_media(platform="xhs")` treats missing
   `xsec_token` as recoverable: it tries the prepared generic parser fallback,
   preserves returned XHS image URLs as normalized media assets, and lets OCR/VLM
@@ -182,8 +189,10 @@ media directories so redeploys do not depend on manual `mkdir`.
 - XHS platform media resolution canonicalizes PC-share
   `/discovery/item/<note_id>` URLs to `/explore/<note_id>` while preserving
   `xsec_token` and `xsec_source` before calling the backend provider.
-- Runtime marker:
+- Generic fallback runtime marker:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
+- Browse runtime marker:
+  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json`.
 - Token cache paths:
   `/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json`,
   then `/opt/ran_agent/node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json`.

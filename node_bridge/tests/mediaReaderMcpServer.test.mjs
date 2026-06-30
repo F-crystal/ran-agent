@@ -158,33 +158,38 @@ test('analyze_image allows XHS CDN image hosts by default', async () => {
     PERSONAL_AGENT_OCR_PROVIDER: 'mock',
   };
 
-  const result = await handleMediaReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'analyze_image',
-        arguments: { url: 'https://sns-webpic-qc.xhscdn.com/pic.png', ocr: true, vlm: true },
+  for (const url of [
+    'https://sns-webpic-qc.xhscdn.com/pic.png',
+    'https://ci.xiaohongshu.com/pic.png',
+  ]) {
+    const result = await handleMediaReaderMcpRequest(
+      {
+        method: 'tools/call',
+        params: {
+          name: 'analyze_image',
+          arguments: { url, ocr: true, vlm: true },
+        },
       },
-    },
-    {
-      env,
-      fetchImpl: async (url) => responseFromBytes({
-        url,
-        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
-        bytes: pngBytes(),
-      }),
-      resolveHostnameImpl: async () => ['93.184.216.34'],
-      ocrProvider: {
-        analyzeImage: async () => ({ text: '小红书图片正文', blocks: [], model: 'mock-ocr' }),
-      },
-      visionProvider: {
-        analyzeImage: async () => ({ summary: '小红书图片摘要', objects: [], model: 'mock-vlm' }),
-      },
-    }
-  );
+      {
+        env,
+        fetchImpl: async (requestUrl) => responseFromBytes({
+          url: requestUrl,
+          headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+          bytes: pngBytes(),
+        }),
+        resolveHostnameImpl: async () => ['93.184.216.34'],
+        ocrProvider: {
+          analyzeImage: async () => ({ text: '小红书图片正文', blocks: [], model: 'mock-ocr' }),
+        },
+        visionProvider: {
+          analyzeImage: async () => ({ summary: '小红书图片摘要', objects: [], model: 'mock-vlm' }),
+        },
+      }
+    );
 
-  assert.equal(result.structuredContent.ok, true);
-  assert.equal(result.structuredContent.ocr_text, '小红书图片正文');
+    assert.equal(result.structuredContent.ok, true);
+    assert.equal(result.structuredContent.ocr_text, '小红书图片正文');
+  }
 });
 
 test('analyze_image accepts local file_path through the media_reader facade', async () => {

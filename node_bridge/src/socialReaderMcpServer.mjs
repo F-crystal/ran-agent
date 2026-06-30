@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
-import { buildMediaAssets } from './mediaReader/assetResolver.mjs';
+import { buildMediaAssets, hostFromUrl, redactUrl } from './mediaReader/assetResolver.mjs';
 
 // Default Puppeteer executable path for xhs-mcp backend (use system Chromium)
 if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
@@ -1938,12 +1938,16 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     diagnostics.media_raw_preview = media ? sanitizeRawPreview(JSON.stringify(media)) : '';
   }
 
-  // Media is already normalized by runXhsMediaPath
-  const images = mediaOk ? (media.images || []) : [];
-  const videos = mediaOk ? (media.videos || []) : [];
-  const normalizedMediaItems = mediaOk && Array.isArray(media.media) && media.media.length > 0
+  const detailMedia = detailOk ? normalizeXhsMedia(detail) : { images: [], videos: [], media: [], cover_image: '' };
+  const mediaPathItems = mediaOk && Array.isArray(media.media) && media.media.length > 0
     ? media.media
-    : [...images, ...videos];
+    : [
+      ...(mediaOk ? (media.images || []) : []),
+      ...(mediaOk ? (media.videos || []) : []),
+    ];
+  const normalizedMediaItems = mergeXhsMediaItems([...mediaPathItems, ...detailMedia.media]);
+  const images = normalizedMediaItems.filter((item) => item.type === 'image');
+  const videos = normalizedMediaItems.filter((item) => item.type === 'video');
   const mediaCount = normalizedMediaItems.length;
   const mediaDetail = normalizeMediaDetail(args.media_detail);
   const includeMedia = args.include_media !== false && mediaDetail !== 'none';
@@ -1957,11 +1961,10 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     partial_failures: [],
     warnings: [],
   };
-  const mediaUrls = includeMedia ? normalizedMediaItems.map((item) => item.url).filter(Boolean) : [];
-  const totalMediaCount = mediaUrls.length;
+  const totalMediaCount = normalizedMediaItems.filter((item) => item?.url).length;
   const mediaAssets = includeMedia
-    ? buildMediaAssets({
-      mediaUrls,
+    ? buildMediaAssetsFromXhsItems({
+      mediaItems: normalizedMediaItems,
       platform: 'xhs',
       maxAssets: maxMediaAssets,
     })
@@ -2018,9 +2021,9 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
       title,
       desc,
       tags: detail?.tags || [],
-      images: [],
-      videos: [],
-      media: [],
+      images,
+      videos,
+      media: normalizedMediaItems,
       media_assets: [],
       media_analysis: mediaAnalysis,
       post_text: detail?.post_text || desc,
@@ -2086,15 +2089,17 @@ async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, ar
     }
   }
 
-  // Try xhs_browse_note first (uses cache)
+  // Try xhs_browse_note first (uses cache or the token-bearing canonical URL)
   if (noteId && xsecToken) {
     try {
       const browseResult = await xhsBrowseNote({
         note_id: noteId,
-        include_images: false,
+        url: canonicalUrl || resolved.canonical_url || url,
+        include_images: true,
       }, { ...options, xhsBrowseSkipMinInterval: true });
       if (browseResult?.ok === true || browseResult?.structuredContent?.ok === true) {
         const data = browseResult.structuredContent || browseResult;
+        const normalized = normalizeXhsMedia({ ...data, source: 'xhs_browse' });
         return {
           ok: true,
           source: 'xhs_browse',
@@ -2102,6 +2107,10 @@ async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, ar
           desc: data.content || data.desc || '',
           post_text: data.content || data.desc || '',
           tags: data.tags || [],
+          images: normalized.images,
+          videos: normalized.videos,
+          media: normalized.media,
+          cover_image: normalized.cover_image,
           comments_text: data.comments_text || '',
           used_cached_token: Boolean(detailCachedEntry?.xsecToken),
           used_canonical_url: Boolean(detailCachedEntry?.canonical_url || canonicalUrl),
@@ -2199,6 +2208,42 @@ async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
   return { ok: false, error_code: 'WANYI_MEDIA_FAILED', message: 'wanyi-watermark failed for all URL variants' };
 }
 
+function mergeXhsMediaItems(items = []) {
+  const merged = [];
+  const seen = new Set();
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue;
+    const url = String(item.url || '').trim();
+    if (!url) continue;
+    const type = String(item.type || 'media').trim().toLowerCase() || 'media';
+    const key = `${type}:${url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    merged.push({ ...item, type, url });
+  }
+  return merged;
+}
+
+function buildMediaAssetsFromXhsItems({ mediaItems = [], platform = '', maxAssets = 20 } = {}) {
+  const typedItems = mergeXhsMediaItems(mediaItems).slice(0, maxAssets);
+  const typeCounts = new Map();
+  return typedItems.map((item) => {
+    const rawType = String(item.type || '').trim().toLowerCase();
+    const type = ['image', 'video', 'audio', 'platform'].includes(rawType) ? rawType : 'media';
+    const count = (typeCounts.get(type) || 0) + 1;
+    typeCounts.set(type, count);
+    const url = String(item.url || '').trim();
+    return {
+      asset_id: `${type}-${count}`,
+      type,
+      url,
+      url_host: hostFromUrl(url),
+      url_redacted: redactUrl(url),
+      source: platform ? `social_reader:${platform}` : 'explicit_url',
+    };
+  });
+}
+
 // Normalize wanyi media output to standard format
 function normalizeXhsMedia(mediaResult) {
   if (!mediaResult || mediaResult.ok === false) return { images: [], videos: [], media: [], cover_image: '' };
@@ -2215,7 +2260,20 @@ function normalizeXhsMedia(mediaResult) {
 
   function pushImage(item = {}, fallbackSource = sourceBackend) {
     if (!item || typeof item !== 'object') return;
-    const url = firstString(item.url_png, item.url_webp, item.url, item.thumbnail, item.cover_image, item.image_url, item.src);
+    const url = firstString(
+      item.url_png,
+      item.url_webp,
+      item.url,
+      item.urlDefault,
+      item.url_default,
+      item.imageUrl,
+      item.image_url,
+      item.src,
+      item.urlPre,
+      item.url_pre,
+      item.thumbnail,
+      item.cover_image
+    );
     if (!url || seen.has(`image:${url}`)) return;
     seen.add(`image:${url}`);
     images.push({
@@ -2223,7 +2281,7 @@ function normalizeXhsMedia(mediaResult) {
       url,
       url_png: item.url_png || '',
       url_webp: item.url_webp || '',
-      thumbnail: item.thumbnail || item.cover_image || '',
+      thumbnail: firstString(item.thumbnail, item.cover_image, item.urlPre, item.url_pre, item.url_webp),
       width: Number(item.width) || 0,
       height: Number(item.height) || 0,
       source_backend: item.source_backend || fallbackSource,
@@ -2251,7 +2309,7 @@ function normalizeXhsMedia(mediaResult) {
   // 1. XHS image note: images[].url_png / images[].url_webp
   if (Array.isArray(mediaResult.images)) {
     for (const img of mediaResult.images) {
-      pushImage(img, 'wanyi-watermark');
+      pushImage(img, sourceBackend);
     }
   }
 
@@ -2276,7 +2334,7 @@ function normalizeXhsMedia(mediaResult) {
       const type = String(item?.type || '').trim().toLowerCase();
       if (forceType === 'video' || type === 'video') {
         pushVideo(item, sourceBackend);
-      } else if (type === 'image' || item?.url_png || item?.url_webp || item?.thumbnail || item?.image_url) {
+      } else if (type === 'image' || item?.url_png || item?.url_webp || item?.urlDefault || item?.urlPre || item?.url_default || item?.url_pre || item?.thumbnail || item?.image_url || item?.imageUrl) {
         pushImage(item, sourceBackend);
       } else {
         pushVideo(item, sourceBackend);
