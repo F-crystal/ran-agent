@@ -120,5 +120,6 @@ Rollback: set `RAN_AGENT_CONTEXT_POLICY=legacy`.
   URLs must not appear in tool output, logs, docs, or Git.
 - Runtime artifacts under `debug/`, `.ran_agent_state/`, and media task dirs
   are local state and must not be committed.
-- PaddleOCR is best-effort on low-CPU servers; timeout or partial success is
-  expected and should remain typed.
+- Production OCR uses DashScope Qwen-VL OCR. PaddleOCR is a best-effort local
+  override; on low-CPU servers its timeout or partial success should remain
+  typed.
