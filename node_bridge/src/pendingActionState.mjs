@@ -161,6 +161,27 @@ function upsertAction(actions, action) {
 function sanitizePayload(payload) {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return {};
   const sanitized = {};
+  if (payload.serverId || payload.server_id) {
+    sanitized.serverId = sanitizeShort(payload.serverId || payload.server_id);
+  }
+  if (payload.toolId || payload.tool_id || payload.toolName || payload.tool_name) {
+    sanitized.toolId = sanitizeShort(payload.toolId || payload.tool_id || payload.toolName || payload.tool_name);
+  }
+  if (payload.actionFamily || payload.action_family) {
+    sanitized.actionFamily = sanitizeShort(payload.actionFamily || payload.action_family);
+  }
+  if (payload.watchScope || payload.watch_scope) {
+    sanitized.watchScope = sanitizeShort(payload.watchScope || payload.watch_scope);
+  }
+  if (payload.grantId || payload.grant_id) {
+    sanitized.grantId = sanitizeShort(payload.grantId || payload.grant_id);
+  }
+  if (payload.evidenceId || payload.evidence_id) {
+    sanitized.evidenceId = sanitizeShort(payload.evidenceId || payload.evidence_id);
+  }
+  if (payload.arguments && typeof payload.arguments === 'object' && !Array.isArray(payload.arguments)) {
+    sanitized.argumentsHash = hashShort(JSON.stringify(payload.arguments));
+  }
   if (Array.isArray(payload.tags)) {
     sanitized.tags = payload.tags.map(sanitizeShort).filter(Boolean).slice(0, 8);
   }

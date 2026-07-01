@@ -130,3 +130,56 @@ test('confirm cancel and expiry update pending action status', () => {
   }, { env });
   assert.equal(cancelPendingAction(toCancel.actionId, { env }).status, 'cancelled');
 });
+
+test('external MCP pending actions keep safe ids and hash raw arguments', () => {
+  const env = tempEnv();
+  const action = createPendingAction({
+    requestId: 'req-external-mcp',
+    channel: 'wechat',
+    conversationId: 'conv-external-mcp',
+    profile: 'ran-assistant-full',
+    actionType: 'forum_comment',
+    summary: '评论论坛帖子',
+    sanitizedPayload: {
+      serverId: 'forum.example',
+      toolId: 'forum.submit_reply',
+      actionFamily: 'forum_comment',
+      watchScope: 'thread:forum.example/123',
+      grantId: 'grant-abc',
+      evidenceId: 'evidence-123',
+      arguments: {
+        threadId: '123',
+        body: 'raw private reply body must not be stored',
+      },
+      contentRef: 'raw-content-ref',
+      cookie: 'sessionid=secret',
+    },
+    evidence: [
+      {
+        type: 'external_mcp_tool_result',
+        status: 'pending',
+        result_id_hash: 'abcdef1234567890',
+      },
+    ],
+  }, { env, now: new Date('2026-07-01T10:00:00.000Z') });
+
+  assert.deepEqual(action.sanitizedPayload, {
+    serverId: 'forum.example',
+    toolId: 'forum.submit_reply',
+    actionFamily: 'forum_comment',
+    watchScope: 'thread:forum.example/123',
+    grantId: 'grant-abc',
+    evidenceId: 'evidence-123',
+    argumentsHash: action.sanitizedPayload.argumentsHash,
+    contentRefHash: action.sanitizedPayload.contentRefHash,
+  });
+  assert.match(action.sanitizedPayload.argumentsHash, /^[a-f0-9]{16}$/);
+  assert.match(action.sanitizedPayload.contentRefHash, /^[a-f0-9]{16}$/);
+  assert.equal(action.evidence[0].type, 'external_mcp_tool_result');
+
+  const serialized = JSON.stringify(listPendingActions({ env }));
+  assert.equal(serialized.includes('raw private reply body'), false);
+  assert.equal(serialized.includes('raw-content-ref'), false);
+  assert.equal(serialized.includes('sessionid=secret'), false);
+  assert.equal(serialized.includes('conv-external-mcp'), false);
+});
