@@ -9,6 +9,7 @@ import {
   listExternalMcpWatches,
   recordExternalMcpNotification,
   removeExternalMcpWatch,
+  reserveExternalMcpNotification,
 } from '../src/externalMcp/watchlist.mjs';
 
 function tempEnv(t) {
@@ -110,4 +111,23 @@ test('rate budget enforces per-topic cooldown after global budget window passes'
   assert.equal(sameTopic.allowed, false);
   assert.equal(sameTopic.reason, 'topic_cooldown_active');
   assert.equal(nextDay.allowed, true);
+});
+
+test('notification reservation records before later sends can race the same budget', (t) => {
+  const env = tempEnv(t);
+  const first = reserveExternalMcpNotification({
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    topicKey: 'thread:1',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+  const second = reserveExternalMcpNotification({
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    topicKey: 'thread:2',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+
+  assert.equal(first.allowed, true);
+  assert.match(first.event.eventId, /^notify_[a-f0-9]{16}$/);
+  assert.equal(second.allowed, false);
+  assert.equal(second.reason, 'global_daily_budget_exhausted');
 });

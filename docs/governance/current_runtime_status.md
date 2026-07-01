@@ -38,9 +38,11 @@ External MCP candidates (disabled by default)
 - `external_mcp_gateway` is registered as a stable MCP surface in lite/full, but
   production calls are disabled by default with
   `EXTERNAL_MCP_GATEWAY_ENABLED=false` and
-  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`. It must not replace
-  `social_reader`, `media_reader`, `search_hub`, `sticker_catalog`, or
-  `co_reading`.
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`. The launcher also forces both
+  gates off after sourcing local env files unless
+  `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`, so stale env cannot silently
+  create a half-enabled rollout. It must not replace `social_reader`,
+  `media_reader`, `search_hub`, `sticker_catalog`, or `co_reading`.
 
 ## Lite/Full Runtime
 
@@ -115,6 +117,7 @@ Current shared non-secret keys include:
 - `OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp`
 - `OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra`
 - `PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback`
+- `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=false`
 - `EXTERNAL_MCP_GATEWAY_ENABLED=false`
 - `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`
 

@@ -82,6 +82,17 @@ export function recordExternalMcpNotification(input = {}, options = {}) {
   return event;
 }
 
+export function reserveExternalMcpNotification(input = {}, options = {}) {
+  const env = options.env || process.env;
+  const now = normalizeDate(input.now || options.now) || new Date();
+  const budget = checkExternalMcpRateBudget({ ...input, now }, { env });
+  if (!budget.allowed) {
+    return budget;
+  }
+  const event = recordExternalMcpNotification({ ...input, now }, { env });
+  return { allowed: true, reason: 'budget_reserved', event };
+}
+
 function paths(env) {
   const root = path.join(resolveStateDir(env), 'external_mcp');
   return {

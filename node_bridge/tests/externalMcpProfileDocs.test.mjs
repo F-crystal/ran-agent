@@ -36,6 +36,7 @@ test('external MCP governance docs preserve mainlines and proactive safety bound
   }
 
   assert.match(runtimeStatus, /social_reader/);
+  assert.match(runtimeStatus, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=false/);
   assert.match(runtimeStatus, /media_reader/);
   assert.match(runtimeStatus, /search_hub/);
   assert.match(runtimeStatus, /sticker_catalog/);
@@ -45,6 +46,7 @@ test('external MCP governance docs preserve mainlines and proactive safety bound
 
 test('external MCP diagnostics script documents acceptance gates', () => {
   const text = readProjectFile('scripts/diagnose-external-mcp-gateway.sh');
+  assert.match(text, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE/);
   assert.match(text, /EXTERNAL_MCP_GATEWAY_ENABLED/);
   assert.match(text, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED/);
   assert.match(text, /externalMcpRegistry\.test\.mjs/);

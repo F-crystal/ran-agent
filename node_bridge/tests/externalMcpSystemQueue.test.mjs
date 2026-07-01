@@ -38,6 +38,10 @@ test('system queue suppresses explicit silent and remember replies only on exter
     replyText: '{"action":"remember","note":"store quietly"}',
   }), { suppress: true, reason: 'remember' });
   assert.deepEqual(shouldSuppressSystemQueueReply({
+    routeHint: 'external_mcp_system_queue',
+    replyText: 'remember',
+  }), { suppress: true, reason: 'remember' });
+  assert.deepEqual(shouldSuppressSystemQueueReply({
     routeHint: 'scheduled_ai_daily_digest',
     replyText: 'silent',
   }), { suppress: false, reason: '' });

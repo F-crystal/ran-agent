@@ -1,6 +1,15 @@
 import { createHash } from 'node:crypto';
 
 const VALID_GATE_MODES = new Set(['observe', 'enforce', 'repair']);
+const TRUSTED_ACTION_EVIDENCE = Symbol('trustedActionEvidence');
+
+export function trustExternalMcpToolResult(result = {}) {
+  return markTrustedActionEvidence(result, 'external_mcp_tool_result');
+}
+
+export function trustExternalMcpAuthorizationEvidence(result = {}) {
+  return markTrustedActionEvidence({ type: 'authorization', ...result }, 'external_mcp_authorization');
+}
 
 export function getActionGateConfig(env = process.env) {
   const mode = String(env.HERMES_ACTION_GATE_MODE || 'observe').trim().toLowerCase();
@@ -241,9 +250,6 @@ function collectObservedEvidence({ response = {}, toolResults = [] } = {}) {
   if (response.outbound_result && typeof response.outbound_result === 'object' && !Array.isArray(response.outbound_result)) {
     evidence.push(summarizeStateResult('outbound_result', response.outbound_result));
   }
-  if (response.authorization === true || response.external_mcp_authorization === true) {
-    evidence.push({ type: 'authorization', status: 'present', source: 'external_mcp_pending' });
-  }
   for (const toolResult of Array.isArray(toolResults) ? toolResults : []) {
     const summary = summarizeToolResult(toolResult);
     if (summary) evidence.push(summary);
@@ -446,7 +452,11 @@ function summarizeMediaEvidence(media = {}) {
 
 function summarizeToolResult(result = {}) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  if (result.type === 'authorization') {
+    return summarizeTrustedAuthorization(result);
+  }
   if (result.type === 'external_mcp_tool_result' || result.external_mcp === true || result.externalMcp === true) {
+    if (result[TRUSTED_ACTION_EVIDENCE] !== 'external_mcp_tool_result') return null;
     return summarizeExternalMcpToolResult(result);
   }
   const ok = result.ok === true || result.status === 'success';
@@ -482,6 +492,16 @@ function summarizeExternalMcpToolResult(result = {}) {
     status: partial ? 'partial_success' : ok ? 'success' : 'failure',
     result_id_hash: hashOptional(result.resultId || result.result_id || result.artifact_id || result.artifactId || result.id),
     error_code: sanitizeShortString(result.error_code || result.errorCode || result.code),
+  };
+}
+
+function summarizeTrustedAuthorization(result = {}) {
+  if (result[TRUSTED_ACTION_EVIDENCE] !== 'external_mcp_authorization') return null;
+  return {
+    type: 'authorization',
+    status: 'present',
+    source: sanitizeShortString(result.source || 'external_mcp_pending'),
+    result_id_hash: hashOptional(result.actionId || result.action_id || result.grantId || result.grant_id || result.id),
   };
 }
 
@@ -596,7 +616,7 @@ function sanitizeId(value) {
 }
 
 function sanitizeShortString(value) {
-  return String(value || '').trim().replace(/[\r\n\t]/g, ' ').slice(0, 120);
+  return redactSecrets(String(value || '').trim().replace(/[\r\n\t]/g, ' ')).slice(0, 120);
 }
 
 function sanitizeFileName(value) {
@@ -610,6 +630,26 @@ function hashOptional(value) {
 
 function hashShort(value) {
   return createHash('sha256').update(String(value || ''), 'utf8').digest('hex').slice(0, 16);
+}
+
+function markTrustedActionEvidence(input, kind) {
+  const output = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : {};
+  Object.defineProperty(output, TRUSTED_ACTION_EVIDENCE, {
+    value: kind,
+    enumerable: false,
+    configurable: false,
+  });
+  return output;
+}
+
+function redactSecrets(value) {
+  return String(value || '')
+    .replace(/authorization\s*:\s*bearer\s+\S+/gi, 'authorization=[redacted]')
+    .replace(/\b(api[_-]?key|token|secret|password|sessdata)\s*[:=]\s*[^ ,;}]+/gi, '$1=[redacted]')
+    .replace(/cookie\s*=\s*[^ ]+/gi, 'cookie=[redacted]')
+    .replace(/session[-_\w]*\s*=\s*[^ ]+/gi, 'session=[redacted]')
+    .replace(/sk-[a-z0-9_-]{8,}/gi, '[redacted-secret]')
+    .replace(/xox[baprs]-[a-z0-9_-]+/gi, '[redacted-secret]');
 }
 
 function normalizeNonNegativeInt(value, fallback) {

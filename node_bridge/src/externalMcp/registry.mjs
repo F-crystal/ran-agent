@@ -194,6 +194,8 @@ function sanitizeShort(value) {
 
 function redactSecrets(value) {
   return String(value || '')
+    .replace(/authorization\s*:\s*bearer\s+\S+/gi, 'authorization=[redacted]')
+    .replace(/\b(api[_-]?key|token|secret|password|sessdata)\s*[:=]\s*[^ ,;}]+/gi, '$1=[redacted]')
     .replace(/cookie\s*=\s*[^ ]+/gi, 'cookie=[redacted]')
     .replace(/token\s*=\s*[^ ]+/gi, 'token=[redacted]')
     .replace(/session[-_\w]*\s*=\s*[^ ]+/gi, 'session=[redacted]')

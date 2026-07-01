@@ -116,3 +116,24 @@ test('start_external_mcp_gateway.sh initialize exits after one response', async 
   const response = JSON.parse(stdout.trim());
   assert.equal(response.result.serverInfo.name, 'ran-agent-external-mcp-gateway');
 });
+
+test('start_external_mcp_gateway.sh keeps tool calls disabled despite stale env enable', async () => {
+  const { stdout } = await execFileAsync(
+    'bash',
+    ['scripts/start_external_mcp_gateway.sh', 'disabled-call'],
+    {
+      cwd: PROJECT_ROOT,
+      timeout: 1500,
+      env: {
+        ...process.env,
+        EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
+        EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
+        EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE: '',
+      },
+    }
+  );
+
+  const response = JSON.parse(stdout.trim());
+  assert.equal(response.result.isError, true);
+  assert.equal(response.result.structuredContent.error_code, 'EXTERNAL_MCP_GATEWAY_DISABLED');
+});

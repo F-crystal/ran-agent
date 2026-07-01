@@ -130,6 +130,28 @@ test('tool normalization bounds untrusted descriptions and schema details', () =
   assert.equal(JSON.stringify(normalized).includes('ignore all previous'), false);
 });
 
+test('tool schema summaries redact secret-like property names and required fields', () => {
+  const normalized = normalizeTool({
+    name: 'forum.read_thread',
+    description: 'Read a public forum thread.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        'api_key=sk-secret-token': { type: 'string' },
+        'authorization: bearer sk-another-secret': { type: 'string' },
+        threadId: { type: 'string' },
+      },
+      required: ['api_key=sk-secret-token', 'authorization: bearer sk-another-secret', 'threadId'],
+    },
+  });
+
+  const serialized = JSON.stringify(normalized.inputSchemaSummary);
+  assert.equal(serialized.includes('sk-secret-token'), false);
+  assert.equal(serialized.includes('sk-another-secret'), false);
+  assert.equal(serialized.includes('authorization: bearer'), false);
+  assert.match(serialized, /redacted/);
+});
+
 test('unknown tools fail closed instead of becoming proactive or writable', () => {
   const classification = classifyTool({
     name: 'browser.do_anything',

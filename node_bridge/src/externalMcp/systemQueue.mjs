@@ -34,6 +34,7 @@ export function shouldSuppressSystemQueueReply({ routeHint = '', replyText = '' 
   const text = String(replyText || '').trim();
   if (!text) return { suppress: true, reason: 'empty' };
   if (/^(silent|静默|不发送)$/i.test(text)) return { suppress: true, reason: 'silent' };
+  if (/^(remember|记住|记录)$/i.test(text)) return { suppress: true, reason: 'remember' };
   const parsed = parseJson(text);
   const action = String(parsed?.action || parsed?.type || '').trim().toLowerCase();
   if (action === 'silent') return { suppress: true, reason: 'silent' };

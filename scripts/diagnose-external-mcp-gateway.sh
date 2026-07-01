@@ -19,6 +19,34 @@ bash scripts/start_external_mcp_gateway.sh initialize >/tmp/ran-agent-external-m
 grep -q 'ran-agent-external-mcp-gateway' /tmp/ran-agent-external-mcp-initialize.json
 rm -f /tmp/ran-agent-external-mcp-initialize.json
 
+echo "[external-mcp] checking launcher keeps tool calls disabled despite stale env enables"
+EXTERNAL_MCP_GATEWAY_ENABLED=true \
+EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true \
+  bash scripts/start_external_mcp_gateway.sh disabled-call >/tmp/ran-agent-external-mcp-disabled-call.json
+grep -q 'EXTERNAL_MCP_GATEWAY_DISABLED' /tmp/ran-agent-external-mcp-disabled-call.json
+rm -f /tmp/ran-agent-external-mcp-disabled-call.json
+
+echo "[external-mcp] checking Node system queue requires the gateway gate"
+node --input-type=module -e '
+import { handleExternalMcpSystemQueueRequest } from "./node_bridge/src/outboundServer.mjs";
+const result = await handleExternalMcpSystemQueueRequest({
+  env: { EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "true" },
+  bodyText: JSON.stringify({
+    serverId: "forum.example",
+    watchScope: "thread:forum.example/123",
+    topicKey: "thread:forum.example/123",
+    reason: "diagnostic",
+    deliverability: "notify_allowed",
+  }),
+  channelHub: async () => {
+    throw new Error("system queue should not reach Hermes while gateway is disabled");
+  },
+});
+if (result?.payload?.reason !== "external_mcp_gateway_disabled") {
+  throw new Error(`unexpected system queue gate result: ${JSON.stringify(result)}`);
+}
+'
+
 echo "[external-mcp] running acceptance tests"
 node --test \
   node_bridge/tests/externalMcpRegistry.test.mjs \
@@ -35,4 +63,4 @@ node --test \
   node_bridge/tests/channelHub.test.mjs \
   node_bridge/tests/outboundServer.test.mjs
 
-echo "[external-mcp] ok: gateway and system queue remain default-disabled unless EXTERNAL_MCP_GATEWAY_ENABLED=true and EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true are set explicitly"
+echo "[external-mcp] ok: gateway and system queue remain default-disabled unless EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true plus explicit gateway/system-queue enables are set"

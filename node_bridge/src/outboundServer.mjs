@@ -14,9 +14,8 @@ import {
   shouldSuppressSystemQueueReply,
 } from './externalMcp/systemQueue.mjs';
 import {
-  checkExternalMcpRateBudget,
   listExternalMcpWatches,
-  recordExternalMcpNotification,
+  reserveExternalMcpNotification,
 } from './externalMcp/watchlist.mjs';
 import { sendFeishuReply } from './feishuBridge.mjs';
 import {
@@ -436,6 +435,7 @@ export async function handleScheduledAiDigestRequest({
   bodyText = '',
   channelHub = handleIncomingMessage,
   execFileImpl,
+  nowImpl,
 } = {}) {
   let payload;
   try {
@@ -541,7 +541,7 @@ export async function handleExternalMcpSystemQueueRequest({
   );
   const serverId = sanitizeExternalMcpIdentity(payload.serverId || payload.server_id || '');
   const watchScope = sanitizeExternalMcpScope(payload.watchScope || payload.watch_scope || '');
-  const topicKey = sanitizeExternalMcpScope(payload.topicKey || payload.topic_key || watchScope);
+  const topicKey = watchScope;
   if (!globalUserId || !serverId || !watchScope || !topicKey) {
     return {
       status: 400,
@@ -563,6 +563,7 @@ export async function handleExternalMcpSystemQueueRequest({
 
   const deliverability = normalizeExternalMcpDeliverability(payload.deliverability);
   const notifyAllowed = deliverability === 'notify_allowed' && watch.notify !== false;
+  const runtimeNow = typeof nowImpl === 'function' ? nowImpl() : new Date();
   if (deliverability === 'notify_allowed' && watch.notify === false) {
     return {
       status: 200,
@@ -570,16 +571,15 @@ export async function handleExternalMcpSystemQueueRequest({
     };
   }
   if (notifyAllowed) {
-    const budget = checkExternalMcpRateBudget({
+    const reservation = reserveExternalMcpNotification({
       globalUserId,
       serverId,
       topicKey,
-      now: payload.now,
-    }, { env });
-    if (!budget.allowed) {
+    }, { env, now: runtimeNow });
+    if (!reservation.allowed) {
       return {
         status: 200,
-        payload: { ok: true, dropped: true, reason: budget.reason },
+        payload: { ok: true, dropped: true, reason: reservation.reason },
       };
     }
   }
@@ -625,15 +625,6 @@ export async function handleExternalMcpSystemQueueRequest({
         }
       : undefined,
   });
-
-  if (adapterSent) {
-    recordExternalMcpNotification({
-      globalUserId,
-      serverId,
-      topicKey,
-      now: payload.now,
-    }, { env });
-  }
 
   return {
     status: 200,

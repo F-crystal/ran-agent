@@ -378,6 +378,57 @@ test('handleExternalMcpSystemQueueRequest rate limits notify events before Herme
       deliverability: 'notify_allowed',
       now: '2026-07-01T12:00:00Z',
     }),
+    nowImpl: () => new Date('2026-07-01T12:00:00Z'),
+    channelHub: async () => {
+      channelCalled = true;
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.dropped, true);
+  assert.equal(result.payload.reason, 'global_daily_budget_exhausted');
+  assert.equal(channelCalled, false);
+});
+
+test('handleExternalMcpSystemQueueRequest ignores caller-supplied time and topic for budgets', async () => {
+  const env = {
+    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+    EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
+    EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
+  };
+  setFeishuHomeDmTarget({
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: 'oc-home',
+    sender_id: 'ou-home',
+  }, env);
+  addExternalMcpWatch({
+    globalUserId: 'ou-home',
+    serverId: 'forum.example',
+    kind: 'forum',
+    scope: 'thread:forum.example/123',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+  recordExternalMcpNotification({
+    globalUserId: 'ou-home',
+    serverId: 'forum.example',
+    topicKey: 'thread:forum.example/123',
+    now: '2026-07-01T09:00:00Z',
+  }, { env });
+
+  let channelCalled = false;
+  const result = await handleExternalMcpSystemQueueRequest({
+    env,
+    bodyText: JSON.stringify({
+      globalUserId: 'ou-home',
+      serverId: 'forum.example',
+      watchScope: 'thread:forum.example/123',
+      topicKey: 'attacker:unrelated-topic',
+      reason: 'ignore budget by claiming future time',
+      deliverability: 'notify_allowed',
+      now: '2099-01-01T00:00:00Z',
+    }),
+    nowImpl: () => new Date('2026-07-01T12:00:00Z'),
     channelHub: async () => {
       channelCalled = true;
     },

@@ -4,6 +4,15 @@ const PROFILE_RANK = {
   full: 2,
   owner_full: 3,
 };
+const TRUSTED_POLICY_AUTH = Symbol('trustedExternalMcpPolicyAuthorization');
+
+export function trustExternalMcpScopedGrant(grant = {}) {
+  return markTrustedPolicyAuth(grant, 'scoped_grant');
+}
+
+export function trustExternalMcpPendingAction(action = {}) {
+  return markTrustedPolicyAuth(action, 'pending_action');
+}
 
 export function evaluateExternalMcpPolicy(input = {}) {
   const tool = input.tool && typeof input.tool === 'object' && !Array.isArray(input.tool) ? input.tool : {};
@@ -38,6 +47,9 @@ export function evaluateExternalMcpPolicy(input = {}) {
   if (grant.status === 'expired') {
     return deny('scoped_grant_expired', { profile, requiredProfile, sessionMode, trigger, tier });
   }
+  if (grant.status === 'invalid') {
+    return deny('scoped_grant_invalid', { profile, requiredProfile, sessionMode, trigger, tier });
+  }
 
   if (tier === 'T5') {
     if (grant.ok) {
@@ -50,7 +62,7 @@ export function evaluateExternalMcpPolicy(input = {}) {
     if (grant.ok) {
       return allow({ profile, requiredProfile, sessionMode, trigger, tier, scopedGrantId: grant.grantId, requiredEvidence: sideEffectEvidence() });
     }
-    if (isConfirmedPendingAction(input.pendingAction, { serverId, toolName })) {
+    if (isConfirmedPendingAction(input.pendingAction, { serverId, toolName, now: input.now })) {
       return allow({ profile, requiredProfile, sessionMode, trigger, tier, requiredEvidence: sideEffectEvidence() });
     }
     return {
@@ -81,23 +93,49 @@ export function isSideEffectTier(tier) {
 
 function evaluateScopedGrant(grant, { now, serverId, toolName, sessionMode } = {}) {
   if (!grant || typeof grant !== 'object' || Array.isArray(grant)) return { ok: false, status: 'missing' };
+  if (grant[TRUSTED_POLICY_AUTH] !== 'scoped_grant') return { ok: false, status: 'untrusted' };
+  const grantId = sanitizeShort(grant.grantId || grant.grant_id || '');
   const expiresAt = Date.parse(String(grant.expiresAt || grant.expires_at || ''));
   const nowMs = normalizeDate(now).getTime();
+  if (!grantId || !Number.isFinite(expiresAt)) {
+    return { ok: false, status: 'invalid' };
+  }
   if (Number.isFinite(expiresAt) && expiresAt <= nowMs) {
     return { ok: false, status: 'expired' };
   }
   if (sanitizeShort(grant.serverId || grant.server_id || '') !== serverId) return { ok: false, status: 'server_mismatch' };
   if (sanitizeShort(grant.toolName || grant.tool_name || '') !== toolName) return { ok: false, status: 'tool_mismatch' };
   if (normalizeSessionMode(grant.mode || grant.sessionMode) !== sessionMode) return { ok: false, status: 'mode_mismatch' };
-  return { ok: true, status: 'valid', grantId: sanitizeShort(grant.grantId || grant.grant_id || '') };
+  return { ok: true, status: 'valid', grantId };
 }
 
-function isConfirmedPendingAction(action, { serverId, toolName } = {}) {
+function isConfirmedPendingAction(action, { serverId, toolName, now } = {}) {
   if (!action || typeof action !== 'object' || Array.isArray(action)) return false;
+  if (action[TRUSTED_POLICY_AUTH] !== 'pending_action') return false;
+  if (!sanitizeShort(action.actionId || action.action_id || '')) return false;
   if (String(action.status || '').trim().toLowerCase() !== 'confirmed') return false;
-  if (sanitizeShort(action.serverId || action.server_id || '') !== serverId) return false;
-  if (sanitizeShort(action.toolName || action.tool_name || '') !== toolName) return false;
+  const expiresAt = Date.parse(String(action.expiresAt || action.expires_at || ''));
+  if (!Number.isFinite(expiresAt) || expiresAt <= normalizeDate(now).getTime()) return false;
+  const actionType = sanitizeShort(action.actionType || action.action_type || '');
+  if (!actionType || !['external_mcp_write', externalPendingActionType(toolName)].includes(actionType)) return false;
+  const payload = action.sanitizedPayload && typeof action.sanitizedPayload === 'object' && !Array.isArray(action.sanitizedPayload)
+    ? action.sanitizedPayload
+    : {};
+  const actionServerId = sanitizeShort(action.serverId || action.server_id || payload.serverId || payload.server_id || '');
+  const actionToolName = sanitizeShort(action.toolName || action.tool_name || payload.toolId || payload.tool_id || payload.toolName || payload.tool_name || '');
+  if (actionServerId !== serverId) return false;
+  if (actionToolName !== toolName) return false;
   return true;
+}
+
+function markTrustedPolicyAuth(input, kind) {
+  const output = input && typeof input === 'object' && !Array.isArray(input) ? { ...input } : {};
+  Object.defineProperty(output, TRUSTED_POLICY_AUTH, {
+    value: kind,
+    enumerable: false,
+    configurable: false,
+  });
+  return output;
 }
 
 function allow(details = {}) {

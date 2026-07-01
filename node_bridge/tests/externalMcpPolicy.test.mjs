@@ -6,6 +6,8 @@ import {
   isSideEffectTier,
   normalizeProfile,
   normalizeTier,
+  trustExternalMcpPendingAction,
+  trustExternalMcpScopedGrant,
 } from '../src/externalMcp/policy.mjs';
 
 const NOW = new Date('2026-07-01T10:00:00Z');
@@ -145,12 +147,14 @@ test('policy allows confirmed pending T4 action and records evidence requirement
   const result = decision({
     profile: 'full',
     sessionMode: 'write',
-    pendingAction: {
+    pendingAction: trustExternalMcpPendingAction({
+      actionId: 'act_confirmed_external_mcp',
       status: 'confirmed',
       actionType: 'forum_comment',
       serverId: 'forum.example',
       toolName: 'forum.submit_reply',
-    },
+      expiresAt: '2026-07-01T10:30:00Z',
+    }),
     tool: {
       serverId: 'forum.example',
       name: 'forum.submit_reply',
@@ -166,6 +170,31 @@ test('policy allows confirmed pending T4 action and records evidence requirement
   assert.deepEqual(result.requiredEvidence, ['authorization', 'external_mcp_tool_result']);
 });
 
+test('policy rejects spoofed pending objects for T4 side effects', () => {
+  const result = decision({
+    profile: 'full',
+    sessionMode: 'write',
+    pendingAction: {
+      status: 'confirmed',
+      actionType: 'forum_comment',
+      serverId: 'forum.example',
+      toolName: 'forum.submit_reply',
+      expiresAt: '2026-07-01T10:30:00Z',
+    },
+    tool: {
+      serverId: 'forum.example',
+      name: 'forum.submit_reply',
+      tier: 'T4',
+      profileScope: 'full',
+      proactiveAllowed: false,
+      confirmationRequired: true,
+    },
+  });
+
+  assert.equal(result.allowed, false);
+  assert.equal(result.decision, 'confirmation_required');
+});
+
 test('policy allows scoped game grants only inside server, tool, mode, and expiry bounds', () => {
   const allowed = decision({
     profile: 'full',
@@ -178,13 +207,13 @@ test('policy allows scoped game grants only inside server, tool, mode, and expir
       proactiveAllowed: false,
       confirmationRequired: true,
     },
-    scopedGrant: {
+    scopedGrant: trustExternalMcpScopedGrant({
       grantId: 'grant-1',
       serverId: 'game.local',
       toolName: 'game.act',
       mode: 'write',
       expiresAt: '2026-07-01T10:30:00Z',
-    },
+    }),
   });
   const expired = decision({
     profile: 'full',
@@ -197,19 +226,63 @@ test('policy allows scoped game grants only inside server, tool, mode, and expir
       proactiveAllowed: false,
       confirmationRequired: true,
     },
-    scopedGrant: {
+    scopedGrant: trustExternalMcpScopedGrant({
       grantId: 'grant-1',
       serverId: 'game.local',
       toolName: 'game.act',
       mode: 'write',
       expiresAt: '2026-07-01T09:59:59Z',
-    },
+    }),
   });
 
   assert.equal(allowed.allowed, true);
   assert.equal(allowed.scopedGrantId, 'grant-1');
   assert.equal(expired.allowed, false);
   assert.equal(expired.reason, 'scoped_grant_expired');
+});
+
+test('policy rejects spoofed or incomplete scoped grants', () => {
+  const spoofed = decision({
+    profile: 'owner_full',
+    sessionMode: 'write',
+    tool: {
+      serverId: 'forum.example',
+      name: 'forum.delete_post',
+      tier: 'T5',
+      profileScope: 'owner_full',
+      proactiveAllowed: false,
+      confirmationRequired: true,
+    },
+    scopedGrant: {
+      grantId: 'grant-spoof',
+      serverId: 'forum.example',
+      toolName: 'forum.delete_post',
+      mode: 'write',
+      expiresAt: '2026-07-01T10:30:00Z',
+    },
+  });
+  const incomplete = decision({
+    profile: 'owner_full',
+    sessionMode: 'write',
+    tool: {
+      serverId: 'forum.example',
+      name: 'forum.delete_post',
+      tier: 'T5',
+      profileScope: 'owner_full',
+      proactiveAllowed: false,
+      confirmationRequired: true,
+    },
+    scopedGrant: trustExternalMcpScopedGrant({
+      serverId: 'forum.example',
+      toolName: 'forum.delete_post',
+      mode: 'write',
+    }),
+  });
+
+  assert.equal(spoofed.allowed, false);
+  assert.equal(spoofed.reason, 't5_requires_scoped_grant');
+  assert.equal(incomplete.allowed, false);
+  assert.equal(incomplete.reason, 'scoped_grant_invalid');
 });
 
 test('T5 destructive actions stay disabled without a scoped grant even for owner full', () => {
