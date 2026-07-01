@@ -61,7 +61,7 @@ function sanitizeMode(value) {
 
 function sanitizeTrigger(value) {
   const text = sanitizeId(value).toLowerCase();
-  return ['user_turn', 'proactive', 'pending_confirmation', 'repair'].includes(text) ? text : 'user_turn';
+  return ['user_turn', 'proactive', 'activity', 'pending_confirmation', 'repair'].includes(text) ? text : 'user_turn';
 }
 
 function sanitizeDecision(value) {

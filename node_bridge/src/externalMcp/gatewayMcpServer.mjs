@@ -1,10 +1,30 @@
 #!/usr/bin/env node
 import readline from 'node:readline';
 
-import { normalizeManifest, validateManifest } from './registry.mjs';
+import {
+  buildExternalMcpActivitySyntheticTurn,
+  consumeExternalMcpActivityCall,
+  getTrustedExternalMcpActivityGrant,
+  registerExternalMcpAbortController,
+  startExternalMcpActivity,
+  stopExternalMcpActivitiesByUser,
+} from './activityRunner.mjs';
+import { appendExternalMcpEvidence } from './evidenceLog.mjs';
+import {
+  callExternalMcpTool,
+  probeExternalMcpServer,
+} from './executor.mjs';
+import {
+  admitExternalMcpCandidate,
+  getExternalMcpRegistryEntry,
+  listEnabledExternalMcpManifests,
+  normalizeManifest,
+  validateManifest,
+} from './registry.mjs';
 import { evaluateExternalMcpPolicy } from './policy.mjs';
 import {
   closeExternalMcpSession,
+  getExternalMcpSession,
   openExternalMcpSession,
 } from './sessionManager.mjs';
 
@@ -16,11 +36,14 @@ const SERVER_INFO = {
 const TOOL_NAMES = [
   'mcp_catalog_search',
   'mcp_probe_server',
+  'mcp_enable_server',
   'mcp_list_enabled',
   'mcp_list_tools',
   'mcp_call',
   'mcp_open_session',
   'mcp_close_session',
+  'mcp_start_activity',
+  'mcp_stop',
   'mcp_explain_policy',
 ];
 
@@ -30,8 +53,19 @@ export function buildExternalMcpGatewayTools() {
       query: str(),
       limit: int(1, 50),
     }),
-    tool('mcp_probe_server', 'MCP Probe Server', 'Inspect a candidate MCP in discovery mode. Disabled unless owner explicitly enables discovery.', {
+    tool('mcp_probe_server', 'MCP Probe Server', 'Inspect a candidate MCP in discovery mode, then store it as candidate/auto-admitted/needs-owner/denied.', {
       serverId: str(),
+      title: str(),
+      url: str(),
+      transport: str(['streamable-http', 'http', 'sse']),
+      activityKind: str(['game', 'forum', 'browser', 'api']),
+      source: str(),
+    }, ['serverId', 'url']),
+    tool('mcp_enable_server', 'MCP Enable Server', 'Run the admission state machine for a probed candidate. Unknown MCPs are never permanently enabled by this tool alone.', {
+      serverId: str(),
+      url: str(),
+      transport: str(['streamable-http', 'http', 'sse']),
+      activityKind: str(['game', 'forum', 'browser', 'api']),
     }),
     tool('mcp_list_enabled', 'MCP List Enabled', 'List enabled external MCP servers with normalized safe tool summaries.', {}),
     tool('mcp_list_tools', 'MCP List Tools', 'List normalized tools for one enabled external MCP server.', {
@@ -42,7 +76,9 @@ export function buildExternalMcpGatewayTools() {
       toolName: str(),
       arguments: { type: 'object', additionalProperties: true },
       sessionId: str(),
-    }, ['serverId', 'toolName']),
+      activityId: str(),
+      globalUserId: str(),
+    }, ['serverId', 'toolName', 'sessionId']),
     tool('mcp_open_session', 'MCP Open Session', 'Open an observe, interactive, or write session for an enabled external MCP server.', {
       globalUserId: str(),
       serverId: str(),
@@ -54,12 +90,25 @@ export function buildExternalMcpGatewayTools() {
       globalUserId: str(),
       serverId: str(),
     }, ['sessionId']),
+    tool('mcp_start_activity', 'MCP Start Activity', 'Start a bounded external MCP activity such as a game session.', {
+      globalUserId: str(),
+      serverId: str(),
+      kind: str(['game_play', 'forum_read']),
+      maxMinutes: int(1, 240),
+      maxCalls: int(1, 500),
+      maxShares: int(0, 50),
+    }, ['globalUserId', 'serverId', 'kind']),
+    tool('mcp_stop', 'MCP Stop', 'Stop external MCP activities for a global user and revoke their runtime grants.', {
+      globalUserId: str(),
+      activityId: str(),
+      reason: str(),
+    }, ['globalUserId']),
     tool('mcp_explain_policy', 'MCP Explain Policy', 'Explain whether a tool call is allowed, denied, or requires pending confirmation.', {
       serverId: str(),
       toolName: str(),
       profile: str(['lite', 'full', 'owner_full']),
       sessionMode: str(['observe', 'interactive', 'write']),
-      trigger: str(['user_turn', 'proactive']),
+      trigger: str(['user_turn', 'proactive', 'activity']),
     }, ['serverId', 'toolName']),
   ];
 }
@@ -147,16 +196,172 @@ async function dispatchTool(name, args, options) {
     return result({ ok: Boolean(closed), session: closed ? publicSession(closed) : null });
   }
   if (name === 'mcp_probe_server') {
-    return errorResult('external MCP discovery executor is not enabled', 'EXTERNAL_MCP_DISCOVERY_DISABLED');
+    const probe = await (options.executor?.probe || probeExternalMcpServer)({
+      serverId: args.serverId,
+      title: args.title,
+      url: args.url,
+      transport: args.transport || 'streamable-http',
+      activityKind: args.activityKind,
+      source: args.source,
+    }, options);
+    if (!probe?.ok) return errorResult(probe?.error || 'external MCP discovery failed', probe?.error_code || 'EXTERNAL_MCP_DISCOVERY_FAILED');
+    const admission = await admitExternalMcpCandidate(probe.manifest, {
+      ...options,
+      env: options.env || process.env,
+      now: options.now,
+    });
+    return result({ ok: true, probe: publicProbe(probe), admission });
+  }
+  if (name === 'mcp_enable_server') {
+    const existing = getExternalMcpRegistryEntry(args.serverId, options);
+    if (!existing && !args.url) return errorResult('external MCP candidate not found', 'EXTERNAL_MCP_CANDIDATE_NOT_FOUND');
+    if (existing?.manifest) {
+      const admission = await admitExternalMcpCandidate(existing.manifest, {
+        ...options,
+        env: options.env || process.env,
+        now: options.now,
+      });
+      return result({ ok: true, admission });
+    }
+    return await dispatchTool('mcp_probe_server', args, options);
   }
   if (name === 'mcp_call') {
-    return errorResult('external MCP executor is not enabled', 'EXTERNAL_MCP_EXECUTOR_UNAVAILABLE');
+    const server = findServer(args.serverId, options);
+    if (!server) return errorResult('external MCP server not found', 'EXTERNAL_MCP_SERVER_NOT_FOUND');
+    const selectedTool = server.tools.find((item) => item.name === String(args.toolName || '').trim());
+    if (!selectedTool) return errorResult('external MCP tool not found', 'EXTERNAL_MCP_TOOL_NOT_FOUND');
+    if (!args.sessionId) return errorResult('external MCP session is required', 'EXTERNAL_MCP_SESSION_REQUIRED');
+    const session = getExternalMcpSession(args.sessionId, {
+      ...options,
+      globalUserId: args.globalUserId,
+      serverId: server.id,
+    });
+    if (!session) return errorResult('external MCP session not found or expired', 'EXTERNAL_MCP_SESSION_NOT_FOUND');
+    const globalUserId = session.globalUserId;
+    const sessionMode = session.mode;
+    const trigger = args.activityId ? 'activity' : 'user_turn';
+    const scopedGrant = args.activityId
+      ? getTrustedExternalMcpActivityGrant(args.activityId, {
+          ...options,
+          globalUserId,
+          serverId: server.id,
+          now: options.now,
+        })
+      : null;
+    const policy = evaluateExternalMcpPolicy({
+      profile: resolveGatewayProfile(options),
+      sessionMode,
+      trigger,
+      tool: { ...selectedTool, serverId: server.id },
+      now: options.now,
+      watchlistMatched: false,
+      pendingAction: null,
+      scopedGrant,
+    });
+    if (!policy.allowed) {
+      return errorResult(
+        policy.requiresPendingAction ? 'external MCP call requires pending confirmation' : 'external MCP call denied by policy',
+        policy.requiresPendingAction ? 'EXTERNAL_MCP_PENDING_CONFIRMATION_REQUIRED' : 'EXTERNAL_MCP_POLICY_DENIED',
+        { policy }
+      );
+    }
+    if (args.activityId) {
+      const budget = consumeExternalMcpActivityCall(args.activityId, {
+        ...options,
+        now: options.now,
+      });
+      if (!budget.allowed) {
+        return errorResult('external MCP activity budget exhausted', 'EXTERNAL_MCP_ACTIVITY_BUDGET_EXHAUSTED', { reason: budget.reason, policy });
+      }
+    }
+    const manifest = findManifest(server.id, options);
+    const controller = args.activityId ? new AbortController() : null;
+    const unregisterAbort = controller
+      ? registerExternalMcpAbortController({
+          globalUserId,
+          serverId: server.id,
+          activityId: args.activityId,
+          sessionId: args.sessionId,
+        }, controller, options)
+      : () => {};
+    let call;
+    try {
+      call = await (options.executor?.call || callExternalMcpTool)({
+        serverId: server.id,
+        url: manifest?.url,
+        transport: manifest?.transport || server.transport,
+        toolName: selectedTool.name,
+        arguments: args.arguments || {},
+        sessionId: args.sessionId,
+        globalUserId,
+      }, controller ? { ...options, signal: controller.signal } : options);
+    } finally {
+      unregisterAbort();
+    }
+    const activeSession = getExternalMcpSession(args.sessionId, {
+      ...options,
+      globalUserId,
+      serverId: server.id,
+    });
+    const activeGrant = args.activityId
+      ? getTrustedExternalMcpActivityGrant(args.activityId, {
+          ...options,
+          globalUserId,
+          serverId: server.id,
+          now: options.now,
+        })
+      : true;
+    const evidence = appendExternalMcpEvidence({
+      globalUserId,
+      serverId: server.id,
+      toolName: selectedTool.name,
+      tier: selectedTool.tier,
+      sessionMode,
+      trigger,
+      decision: call?.ok && activeSession && activeGrant ? 'allow' : 'failed',
+      result: { ok: call?.ok === true && Boolean(activeSession) && Boolean(activeGrant) },
+      errorCode: call?.error_code || (!activeSession ? 'EXTERNAL_MCP_SESSION_STOPPED' : !activeGrant ? 'EXTERNAL_MCP_ACTIVITY_STOPPED' : ''),
+    }, options);
+    if (!call?.ok) return errorResult(call?.error || 'external MCP tool call failed', call?.error_code || 'EXTERNAL_MCP_CALL_FAILED', { policy, evidence });
+    if (!activeSession) return errorResult('external MCP session stopped before call completed', 'EXTERNAL_MCP_SESSION_STOPPED', { policy, evidence });
+    if (!activeGrant) return errorResult('external MCP activity stopped before call completed', 'EXTERNAL_MCP_ACTIVITY_STOPPED', { policy, evidence });
+    return result({ ok: true, serverId: server.id, toolName: selectedTool.name, result: call.result, policy, evidence });
+  }
+  if (name === 'mcp_start_activity') {
+    const server = findServer(args.serverId, options);
+    if (!server) return errorResult('external MCP server not found', 'EXTERNAL_MCP_SERVER_NOT_FOUND');
+    const activity = startExternalMcpActivity({
+      globalUserId: args.globalUserId,
+      serverId: server.id,
+      kind: args.kind,
+      maxMinutes: args.maxMinutes,
+      maxCalls: args.maxCalls,
+      maxShares: args.maxShares,
+      now: options.now,
+    }, options);
+    if (activity.ok === false) return errorResult(activity.error, activity.error_code);
+    return result({
+      ok: true,
+      activity: publicActivity(activity),
+      syntheticTurn: buildExternalMcpActivitySyntheticTurn(activity, { reason: 'activity_started' }),
+    });
+  }
+  if (name === 'mcp_stop') {
+    const stopped = stopExternalMcpActivitiesByUser(args.globalUserId, {
+      ...options,
+      now: options.now,
+      reason: args.reason || 'user_stop',
+    });
+    return result({ ok: true, stoppedActivityIds: stopped.stoppedActivityIds });
   }
   return errorResult('unknown external MCP gateway tool', 'EXTERNAL_MCP_UNKNOWN_TOOL');
 }
 
 function enabledServers(options = {}) {
-  const registry = Array.isArray(options.registry) ? options.registry : [];
+  const registry = [
+    ...(Array.isArray(options.registry) ? options.registry : []),
+    ...listEnabledExternalMcpManifests(options),
+  ];
   return registry
     .map((entry) => validateManifest(entry))
     .filter((entry) => entry.ok)
@@ -168,6 +373,18 @@ function findServer(serverId, options = {}) {
   return enabledServers(options).find((server) => server.id === id) || null;
 }
 
+function findManifest(serverId, options = {}) {
+  const id = String(serverId || '').trim();
+  return [
+    ...(Array.isArray(options.registry) ? options.registry : []),
+    ...listEnabledExternalMcpManifests(options),
+  ]
+    .map((entry) => validateManifest(entry))
+    .filter((entry) => entry.ok)
+    .map((entry) => entry.manifest)
+    .find((manifest) => manifest.id === id) || null;
+}
+
 function publicServer(manifest) {
   const normalized = normalizeManifest(manifest);
   return {
@@ -176,6 +393,7 @@ function publicServer(manifest) {
     source: normalized.source,
     version: normalized.version,
     transport: normalized.transport,
+    activityKind: normalized.activityKind,
     profileScope: normalized.profileScope,
     proactiveAllowed: normalized.proactiveAllowed,
     tools: normalized.tools.map((toolItem) => ({
@@ -193,6 +411,17 @@ function publicServer(manifest) {
   };
 }
 
+function publicProbe(probe) {
+  return {
+    ok: probe.ok === true,
+    protocolVersion: probe.protocolVersion || '',
+    notifications: Array.isArray(probe.notifications)
+      ? probe.notifications.map((item) => ({ method: String(item?.method || '').slice(0, 120) })).filter((item) => item.method)
+      : [],
+    manifest: probe.manifest ? publicServer(probe.manifest) : null,
+  };
+}
+
 function publicSession(session) {
   return {
     sessionId: session.sessionId,
@@ -204,8 +433,39 @@ function publicSession(session) {
   };
 }
 
+function publicActivity(activity) {
+  return {
+    activityId: activity.activityId,
+    grantId: activity.grantId,
+    globalUserId: activity.globalUserId,
+    serverId: activity.serverId,
+    kind: activity.kind,
+    status: activity.status,
+    sessionId: activity.sessionId,
+    sessionMode: activity.sessionMode,
+    budget: activity.budget,
+    expiresAt: activity.expiresAt,
+  };
+}
+
 function isGatewayEnabled(env = process.env) {
   return ['1', 'true', 'yes', 'on'].includes(String(env.EXTERNAL_MCP_GATEWAY_ENABLED || 'false').trim().toLowerCase());
+}
+
+function resolveGatewayProfile(options = {}) {
+  const env = options.env || process.env;
+  const explicit = sanitizeProfile(options.profile || env.EXTERNAL_MCP_GATEWAY_PROFILE || '');
+  if (explicit) return explicit;
+  const capabilityMode = String(env.RAN_AGENT_CAPABILITY_MODE || '').trim().toLowerCase();
+  if (capabilityMode === 'owner_full') return 'owner_full';
+  const hermesProfile = String(env.HERMES_PROFILE || '').trim().toLowerCase();
+  if (hermesProfile.includes('lite')) return 'lite';
+  return 'full';
+}
+
+function sanitizeProfile(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['lite', 'full', 'owner_full'].includes(normalized) ? normalized : '';
 }
 
 function result(payload) {
@@ -215,8 +475,8 @@ function result(payload) {
   };
 }
 
-function errorResult(message, errorCode) {
-  const payload = { ok: false, error: String(message || 'external MCP gateway error'), error_code: errorCode };
+function errorResult(message, errorCode, extra = {}) {
+  const payload = { ok: false, error: String(message || 'external MCP gateway error'), error_code: errorCode, ...extra };
   return {
     isError: true,
     content: [{ type: 'text', text: payload.error }],

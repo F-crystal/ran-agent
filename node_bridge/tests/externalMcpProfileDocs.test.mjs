@@ -12,9 +12,11 @@ function readProjectFile(relativePath) {
 test('Hermes profiles register the stable external MCP gateway with source fallback disabled', () => {
   for (const profilePath of ['hermes/profile/config.yaml', 'hermes/profile/config.lite.yaml']) {
     const text = readProjectFile(profilePath);
+    const expectedGatewayProfile = profilePath.includes('lite') ? 'lite' : 'full';
     assert.match(text, /mcp-external_mcp_gateway/);
     assert.match(text, /^\s+external_mcp_gateway:\n/m);
     assert.match(text, /scripts\/start_external_mcp_gateway\.sh/);
+    assert.match(text, new RegExp(`EXTERNAL_MCP_GATEWAY_PROFILE:\\s+"${expectedGatewayProfile}"`));
     assert.match(text, /EXTERNAL_MCP_GATEWAY_ENABLED:\s+"false"/);
     assert.match(text, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED:\s+"false"/);
   }
@@ -49,10 +51,12 @@ test('apply script deploy-enables external MCP gates through managed env files',
   assert.match(script, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE:-true\}"/);
   assert.match(script, /EXTERNAL_MCP_GATEWAY_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_GATEWAY_ENABLED:-true\}"/);
   assert.match(script, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED:-true\}"/);
-  assert.match(script, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE\|EXTERNAL_MCP_GATEWAY_ENABLED\|EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED/);
+  assert.match(script, /EXTERNAL_MCP_GATEWAY_PROFILE\|EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE\|EXTERNAL_MCP_GATEWAY_ENABLED\|EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED/);
   assert.match(script, /"EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=\$EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE_DEFAULT"/);
   assert.match(script, /"EXTERNAL_MCP_GATEWAY_ENABLED=\$EXTERNAL_MCP_GATEWAY_ENABLED_DEFAULT"/);
   assert.match(script, /"EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=\$EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED_DEFAULT"/);
+  assert.match(script, /"EXTERNAL_MCP_GATEWAY_PROFILE=full"/);
+  assert.match(script, /"EXTERNAL_MCP_GATEWAY_PROFILE=lite"/);
 });
 
 test('external MCP diagnostics script documents acceptance gates', () => {

@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
 
 import {
+  admitExternalMcpCandidate,
   classifyTool,
+  listEnabledExternalMcpManifests,
+  listExternalMcpRegistryEntries,
   normalizeManifest,
   normalizeTool,
   scanForForbiddenSecrets,
@@ -174,3 +178,128 @@ test('registry rejects dangerous local MCP startup commands', () => {
   assert.equal(result.ok, false);
   assert.match(result.errors.join('\n'), /dangerous_startup_command/);
 });
+
+test('admission auto-admits only safe remote sandbox activity MCP candidates', async (t) => {
+  const env = tempRegistryEnv(t);
+  const admitted = await admitExternalMcpCandidate({
+    id: 'cedartoy-games',
+    title: 'CedarToy Games',
+    source: 'https://github.com/Zizuixixiang/cedareco',
+    transport: 'streamable-http',
+    url: 'https://toy.cedarstar.org/mcp',
+    activityKind: 'game',
+    tools: [
+      {
+        name: 'ecosystem.cmd',
+        description: 'Run a command inside a text-only sandbox game.',
+        inputSchema: {
+          type: 'object',
+          properties: { cmd: { type: 'string' } },
+          required: ['cmd'],
+        },
+      },
+    ],
+  }, {
+    env,
+    lookupImpl: async () => [{ address: '203.0.113.10', family: 4 }],
+    now: '2026-07-02T10:00:00Z',
+  });
+
+  assert.equal(admitted.ok, true);
+  assert.equal(admitted.state, 'auto_admitted');
+  assert.equal(admitted.entry.enabled, true);
+  assert.equal(admitted.entry.manifest.tools[0].tier, 'T3');
+  assert.equal(admitted.entry.manifest.tools[0].reason, 'sandbox_activity');
+
+  const enabled = listEnabledExternalMcpManifests({ env });
+  assert.deepEqual(enabled.map((entry) => entry.id), ['cedartoy-games']);
+});
+
+test('admission does not auto-admit generic read-only API MCP candidates', async (t) => {
+  const env = tempRegistryEnv(t);
+  const result = await admitExternalMcpCandidate({
+    id: 'public-api',
+    title: 'Public API',
+    transport: 'streamable-http',
+    url: 'https://api.example/mcp',
+    activityKind: 'api',
+    tools: [{ name: 'public.read', description: 'Read public data.' }],
+  }, {
+    env,
+    lookupImpl: async () => [{ address: '203.0.113.12', family: 4 }],
+    now: '2026-07-02T10:00:00Z',
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'needs_owner');
+  assert.equal(result.entry.enabled, false);
+  assert.equal(result.entry.reason, 'non_activity_requires_owner');
+});
+
+test('admission never lets Hermes self-enable local executable MCP candidates', async (t) => {
+  const env = tempRegistryEnv(t);
+  const result = await admitExternalMcpCandidate({
+    id: 'local-game',
+    title: 'Local Game',
+    transport: 'stdio',
+    command: 'npx',
+    args: ['@example/game-mcp'],
+    activityKind: 'game',
+    tools: [{ name: 'game.cmd', description: 'Run a sandbox game command.' }],
+  }, { env, now: '2026-07-02T10:00:00Z' });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.state, 'needs_owner');
+  assert.equal(result.entry.enabled, false);
+  assert.equal(result.entry.reason, 'local_executable_requires_owner');
+  assert.deepEqual(result.entry.manifest.args, ['@example/game-mcp']);
+});
+
+test('admission denies unsafe remote candidates before they become enabled', async (t) => {
+  const env = tempRegistryEnv(t);
+  const plainHttp = await admitExternalMcpCandidate({
+    id: 'plain-http',
+    transport: 'streamable-http',
+    url: 'http://example.com/mcp',
+    tools: [{ name: 'public.read', description: 'Read public data.' }],
+  }, { env, now: '2026-07-02T10:00:00Z' });
+  const destructive = await admitExternalMcpCandidate({
+    id: 'danger-game',
+    transport: 'streamable-http',
+    url: 'https://danger.example/mcp',
+    tools: [{ name: 'game.delete_world', description: 'Delete and destroy the world.' }],
+  }, {
+    env,
+    lookupImpl: async () => [{ address: '203.0.113.11', family: 4 }],
+    now: '2026-07-02T10:00:00Z',
+  });
+  const mappedPrivate = await admitExternalMcpCandidate({
+    id: 'mapped-private',
+    transport: 'streamable-http',
+    url: 'https://mapped-private.example/mcp',
+    activityKind: 'game',
+    tools: [{ name: 'game.cmd', description: 'Run a sandbox game command.' }],
+  }, {
+    env,
+    lookupImpl: async () => [{ address: '::ffff:10.0.0.5', family: 6 }],
+    now: '2026-07-02T10:00:00Z',
+  });
+
+  assert.equal(plainHttp.state, 'denied');
+  assert.equal(plainHttp.entry.enabled, false);
+  assert.equal(plainHttp.entry.reason, 'remote_https_required');
+  assert.equal(destructive.state, 'denied');
+  assert.equal(destructive.entry.reason, 'high_risk_tools_denied');
+  assert.equal(mappedPrivate.state, 'denied');
+  assert.equal(mappedPrivate.entry.reason, 'dns_ssrf_check_failed');
+  assert.deepEqual(listExternalMcpRegistryEntries({ env }).filter((entry) => entry.enabled), []);
+});
+
+function tempRegistryEnv(t) {
+  const base = new URL('../.tmp-test-external-mcp-registry/', import.meta.url).pathname;
+  const root = `${base}${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  t.after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  return { RAN_AGENT_STATE_DIR: root };
+}

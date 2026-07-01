@@ -4,6 +4,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 import { createReplyBackend, getReplyBackendConfig } from '../src/replyBackend.mjs';
+import {
+  getTrustedExternalMcpActivityGrant,
+  startExternalMcpActivity,
+} from '../src/externalMcp/activityRunner.mjs';
 import { getEnvironmentPrivacyMode } from '../src/environmentSense.mjs';
 import { createPendingAction, listPendingActions } from '../src/pendingActionState.mjs';
 import { listStickers, saveStickersFromInbox } from '../src/stickerCatalog.mjs';
@@ -221,6 +225,51 @@ test('createReplyBackend handles explicit environment privacy mode toggles befor
 
   assert.match(disabled.replyText, /环境感知已恢复/);
   assert.equal(getEnvironmentPrivacyMode(env).enabled, false);
+});
+
+test('createReplyBackend stops external MCP activities by global user before asking Hermes to summarize', async () => {
+  const env = tempStateEnv();
+  const activity = startExternalMcpActivity({
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    kind: 'game_play',
+    now: '2026-07-02T10:00:00Z',
+  }, { env });
+  let hermesPayload = null;
+  const backend = createReplyBackend({
+    env,
+    hermesImpl: async (payload) => {
+      hermesPayload = payload;
+      return {
+        reply_text: '好，我已经停下这局了。',
+        follow_up_messages: [],
+        media: null,
+      };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    nowImpl: () => new Date('2026-07-02T10:05:00Z'),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '停下这局',
+    sender_id: 'conv-stop-mcp',
+    conversation_id: 'conv-stop-mcp',
+    channel: 'wechat',
+    platform: 'wechat',
+    global_user_id: 'user:ran',
+  });
+
+  assert.equal(response.replyText, '好，我已经停下这局了。');
+  assert.equal(hermesPayload.route_hint, 'external_mcp_stop');
+  assert.match(hermesPayload.text, /stopped_activity_ids:/);
+  assert.match(hermesPayload.text, new RegExp(activity.activityId));
+  assert.equal(getTrustedExternalMcpActivityGrant(activity.activityId, {
+    env,
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    now: '2026-07-02T10:06:00Z',
+  }), null);
 });
 
 test('createReplyBackend logs action contract telemetry in observe mode without changing reply', async () => {

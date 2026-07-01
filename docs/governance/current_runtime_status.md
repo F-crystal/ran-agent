@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-01)
+Status: CURRENT (2026-07-02)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -20,7 +20,7 @@ Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
 
 External MCP candidates
-  -> external_mcp_gateway registry/policy/session/evidence
+  -> external_mcp_gateway admission/registry/executor/policy/session/evidence/activity
   -> optional /external-mcp/system-queue synthetic Hermes turn
 ```
 
@@ -38,10 +38,17 @@ External MCP candidates
 - `external_mcp_gateway` is registered as a stable MCP surface in lite/full.
   Source profiles still fall back to disabled flags, but the standard server
   deploy now writes `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`,
-  `EXTERNAL_MCP_GATEWAY_ENABLED=true`, and
-  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true` so Hermes can use the broker without
-  hand-editing env files. It must not replace `social_reader`, `media_reader`,
-  `search_hub`, `sticker_catalog`, or `co_reading`.
+  `EXTERNAL_MCP_GATEWAY_ENABLED=true`,
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`, and explicit
+  `EXTERNAL_MCP_GATEWAY_PROFILE=full|lite` so Hermes can use the broker without
+  hand-editing env files. Dynamic external MCP admission now uses
+  `probe -> candidate registry -> classify -> auto_admitted / needs_owner /
+  denied`; only safe remote HTTPS sandbox activity candidates can auto-admit.
+  Streamable HTTP execution is implemented with legacy SSE endpoint fallback.
+  Bounded activities create scoped grants, consume call budgets, and can be
+  stopped by global user id before Hermes summarizes. The broker must not
+  replace `social_reader`, `media_reader`, `search_hub`, `sticker_catalog`, or
+  `co_reading`.
 
 ## Lite/Full Runtime
 
@@ -119,6 +126,7 @@ Current shared non-secret keys include:
 - `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`
 - `EXTERNAL_MCP_GATEWAY_ENABLED=true`
 - `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`
+- `EXTERNAL_MCP_GATEWAY_PROFILE=full|lite`
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
 `scripts/clean-uv-cache-safe.sh` for cleanup and do not delete social-reader
@@ -144,7 +152,7 @@ media directories so redeploys do not depend on manual `mkdir`.
 | `ombre_memory` / `ombre_memory_extra` | Optional upstream Ombre Brain direct MCP, full-profile memory/debug surface |
 | `media_generation` | Image and speech generation |
 | `playwright` | Dynamic/visual web pages, full/debug use |
-| `external_mcp_gateway` | Stable broker for reviewed game/forum/browser MCPs |
+| `external_mcp_gateway` | Stable broker for dynamically admitted game/forum/browser MCPs |
 
 - Search Hub is registered in both lite and full. Lite uses lightweight public
   providers; full may use Playwright fallback. OpenCLI browser-backed remains
@@ -180,14 +188,24 @@ media directories so redeploys do not depend on manual `mkdir`.
 - Actual social links still use `social_reader` / `media_reader` first. Search
   Hub must not replace the XHS/Bilibili/Zhihu/WeChat link-read mainline.
 - XHS links must not first-read through browser navigation or terminal.
-- External MCP manifests are untrusted until normalized and classified. T4/T5
-  side effects, forum comments, game actions, and external writes require
-  pending action/待确认 or scoped grant plus real executor evidence; no reply may
-  claim success without an `external_mcp_tool_result`. Proactive external MCP
-  notices require an explicit watchlist/关注 scope and rate budget before a
-  synthetic Hermes turn may notify the Feishu target. The system queue only
-  creates synthetic Hermes turns; `silent`, `remember`, and empty replies are
-  suppressed instead of sending visible text.
+- External MCP manifests are untrusted until normalized and classified. Local
+  executable MCP candidates (`stdio`, command, `uvx`, `npx`) cannot be
+  self-enabled by Hermes and remain `needs_owner`. Remote candidates must pass
+  HTTPS, redirect/DNS/SSRF, no OAuth/account/local-file/local-command, and
+  low-risk tool checks before `auto_admitted`.
+- Bounded external MCP activities use scoped `game_play` or `forum_read` grants.
+  The runner owns budget, cadence, cancellation, and evidence only; Hermes still
+  receives synthetic turns for decisions and sharing. T4/T5 side effects, forum
+  comments, social writes, payment/delete/account actions, and external writes
+  still require pending action/待确认 or a trusted scoped grant plus real executor
+  evidence. No reply may claim success without an `external_mcp_tool_result`.
+  User stop phrases such as "停下这局" are handled before Hermes is called:
+  grants are revoked, runtime fetch/SSE work is aborted, sessions are closed,
+  and Hermes then receives a stop synthetic turn to summarize.
+- Proactive external MCP notices require an explicit watchlist/关注 scope and
+  rate budget before a synthetic Hermes turn may notify the Feishu target. The
+  system queue only creates synthetic Hermes turns; `silent`, `remember`, and
+  empty replies are suppressed instead of sending visible text.
 
 ## XHS And Evidence Gate
 

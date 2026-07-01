@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-01)
+Status: CURRENT (2026-07-02)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -90,8 +90,10 @@ deployment notes belong under ignored `local_archive/`, not under
 - Hermes context optimization is closed as a conservative package: local recent
   history, bounded global active topic, optional cache-friendly append history,
   and opt-in lite soft reset all write only under ignored runtime state.
-- `external_mcp_gateway` is registered as a stable MCP broker for reviewed
-  game/forum/browser MCPs. Source profiles fall back disabled, while standard
-  server deploy enables the gateway/system-queue env gates; notifications
+- `external_mcp_gateway` is registered as a stable MCP broker for dynamically
+  admitted game/forum/browser MCPs. Source profiles fall back disabled, while
+  standard server deploy enables the gateway/system-queue env gates. Dynamic
+  admission uses candidate states, safe remote Streamable HTTP execution,
+  scoped bounded activities, and global-user stop interruption; notifications
   require watchlist and rate budget, while T4/T5 writes require pending action
-  evidence.
+  evidence or trusted scoped grants.

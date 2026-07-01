@@ -1,3 +1,10 @@
+import dns from 'node:dns/promises';
+import fs from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+
+import { resolveStateDir } from '../runtimeState.mjs';
+
 const MAX_TEXT = 360;
 const SAFE_TRANSPORTS = new Set(['stdio', 'http', 'streamable-http', 'sse', 'websocket']);
 const WRITE_WORDS = /\b(post|submit|send|reply|comment|like|react|follow|dm|message|move|act|trade|save|write|update|create)\b/i;
@@ -31,7 +38,8 @@ export function normalizeManifest(input = {}, options = {}) {
   }
   const id = sanitizeId(input.id);
   if (!id) throw new Error('manifest id is required');
-  const tools = Array.isArray(input.tools) ? input.tools.map(normalizeTool) : [];
+  const activityKind = normalizeActivityKind(input.activityKind || input.activity_kind || input.kind || '');
+  const tools = Array.isArray(input.tools) ? input.tools.map((item) => normalizeTool(item, { activityKind })) : [];
   if (tools.length === 0) throw new Error('at least one tool is required');
   const requiredEnv = normalizeStringList(input.requiredEnv || input.required_env || input.envNames || input.env_names)
     .map((item) => item.replace(/[^A-Z0-9_]/g, ''))
@@ -44,6 +52,8 @@ export function normalizeManifest(input = {}, options = {}) {
     source: sanitizeSource(input.source || ''),
     version: sanitizeShort(input.version || ''),
     transport,
+    url: sanitizeUrl(input.url || input.endpoint || input.remoteUrl || input.remote_url || ''),
+    activityKind,
     command: sanitizeCommand(input.command || ''),
     args: normalizeStringList(input.args).slice(0, 32),
     requiredEnv,
@@ -53,9 +63,9 @@ export function normalizeManifest(input = {}, options = {}) {
   };
 }
 
-export function normalizeTool(tool = {}) {
+export function normalizeTool(tool = {}, options = {}) {
   const name = sanitizeToolName(tool.name);
-  const classification = classifyTool(tool);
+  const classification = classifyTool(tool, options);
   return {
     name,
     title: sanitizeText(tool.title || name),
@@ -66,12 +76,15 @@ export function normalizeTool(tool = {}) {
   };
 }
 
-export function classifyTool(tool = {}) {
+export function classifyTool(tool = {}, options = {}) {
   const name = sanitizeToolName(tool.name);
   const description = String(tool.description || '');
   const haystack = `${name} ${description}`;
   if (DESTRUCTIVE_WORDS.test(haystack)) {
     return tier('T5', 'owner_full', false, true, 'unclassified_or_high_risk');
+  }
+  if (isSandboxActivityTool(haystack, options)) {
+    return tier('T3', 'full', true, false, 'sandbox_activity');
   }
   if (/draft|propose|plan/i.test(haystack)) {
     return tier('T3', 'full', false, true, 'draft_or_proposal');
@@ -84,6 +97,149 @@ export function classifyTool(tool = {}) {
     return tier(authenticated ? 'T2' : 'T1', authenticated ? 'full' : 'lite', true, false, authenticated ? 'authenticated_read' : 'public_read');
   }
   return tier('T5', 'owner_full', false, true, 'unclassified_or_high_risk');
+}
+
+export async function admitExternalMcpCandidate(input = {}, options = {}) {
+  const env = options.env || process.env;
+  const now = normalizeDate(options.now || input.now) || new Date();
+  const validated = validateManifest(input, options);
+  if (!validated.ok) {
+    const entry = writeRegistryEntry({
+      state: 'denied',
+      enabled: false,
+      reason: 'manifest_validation_failed',
+      errors: validated.errors,
+      manifest: null,
+      candidateId: sanitizeId(input.id || ''),
+      now,
+    }, env);
+    return { ok: false, state: 'denied', entry, errors: validated.errors };
+  }
+
+  const decision = await classifyAdmission(validated.manifest, options);
+  const entry = writeRegistryEntry({
+    state: decision.state,
+    enabled: decision.state === 'auto_admitted',
+    reason: decision.reason,
+    errors: [],
+    manifest: validated.manifest,
+    candidateId: validated.manifest.id,
+    now,
+  }, env);
+  return { ok: true, state: decision.state, entry };
+}
+
+export function listExternalMcpRegistryEntries(options = {}) {
+  const env = options.env || process.env;
+  return readRegistry(env);
+}
+
+export function listEnabledExternalMcpManifests(options = {}) {
+  return listExternalMcpRegistryEntries(options)
+    .filter((entry) => entry.enabled === true && entry.manifest)
+    .map((entry) => entry.manifest)
+    .filter((manifest) => validateManifest(manifest).ok);
+}
+
+export function getExternalMcpRegistryEntry(serverId, options = {}) {
+  const id = sanitizeId(serverId);
+  return listExternalMcpRegistryEntries(options).find((entry) => entry.serverId === id) || null;
+}
+
+async function classifyAdmission(manifest, options = {}) {
+  if (isLocalExecutableManifest(manifest)) {
+    return { state: 'needs_owner', reason: 'local_executable_requires_owner' };
+  }
+  if (!['http', 'streamable-http', 'sse'].includes(manifest.transport)) {
+    return { state: 'needs_owner', reason: 'unsupported_transport_requires_owner' };
+  }
+  if (manifest.transport === 'sse') {
+    return { state: 'needs_owner', reason: 'legacy_sse_requires_owner' };
+  }
+  const urlSafety = await validateRemoteMcpUrl(manifest.url, options);
+  if (!urlSafety.ok) {
+    return { state: 'denied', reason: urlSafety.reason };
+  }
+  if (manifest.requiredEnv.length > 0 || manifestRequiresAccount(manifest)) {
+    return { state: 'needs_owner', reason: 'account_or_oauth_requires_owner' };
+  }
+  if (manifest.tools.some((tool) => tool.tier === 'T5')) {
+    return { state: 'denied', reason: 'high_risk_tools_denied' };
+  }
+  if (manifest.tools.some((tool) => tool.tier === 'T4')) {
+    return { state: 'needs_owner', reason: 'write_tools_require_owner' };
+  }
+  if (manifest.tools.some((tool) => tool.reason === 'authenticated_read')) {
+    return { state: 'needs_owner', reason: 'authenticated_read_requires_owner' };
+  }
+  if (!isAutoAdmittableActivityManifest(manifest)) {
+    return { state: 'needs_owner', reason: 'non_activity_requires_owner' };
+  }
+  return { state: 'auto_admitted', reason: 'safe_remote_sandbox' };
+}
+
+function isAutoAdmittableActivityManifest(manifest) {
+  if (manifest.activityKind === 'game') {
+    return manifest.tools.every((tool) => tool.tier === 'T3' && tool.reason === 'sandbox_activity');
+  }
+  if (['forum', 'browser'].includes(manifest.activityKind)) {
+    return manifest.tools.every((tool) => tool.tier === 'T1' && tool.reason === 'public_read');
+  }
+  return false;
+}
+
+async function validateRemoteMcpUrl(url, options = {}) {
+  let parsed;
+  try {
+    parsed = new URL(String(url || ''));
+  } catch {
+    return { ok: false, reason: 'remote_url_required' };
+  }
+  if (parsed.protocol !== 'https:') {
+    return { ok: false, reason: 'remote_https_required' };
+  }
+  if (isBlockedHostname(parsed.hostname)) {
+    return { ok: false, reason: 'ssrf_hostname_denied' };
+  }
+  const literalIp = net.isIP(parsed.hostname) ? parsed.hostname : '';
+  if (literalIp) {
+    return isBlockedIp(literalIp)
+      ? { ok: false, reason: 'ssrf_ip_denied' }
+      : { ok: true, reason: 'url_safe' };
+  }
+  try {
+    const records = await lookupHost(parsed.hostname, options.lookupImpl);
+    if (records.length === 0 || records.some((item) => isBlockedIp(item.address))) {
+      return { ok: false, reason: 'dns_ssrf_check_failed' };
+    }
+    return { ok: true, reason: 'url_safe' };
+  } catch {
+    return { ok: false, reason: 'dns_ssrf_check_failed' };
+  }
+}
+
+async function lookupHost(hostname, lookupImpl) {
+  if (typeof lookupImpl === 'function') {
+    const records = await lookupImpl(hostname);
+    return normalizeLookupRecords(records);
+  }
+  return normalizeLookupRecords(await dns.lookup(hostname, { all: true, verbatim: true }));
+}
+
+function normalizeLookupRecords(records) {
+  const list = Array.isArray(records) ? records : records ? [records] : [];
+  return list
+    .map((item) => (typeof item === 'string' ? { address: item } : item))
+    .filter((item) => item && typeof item.address === 'string' && item.address.trim());
+}
+
+function isLocalExecutableManifest(manifest) {
+  return manifest.transport === 'stdio' || Boolean(manifest.command) || manifest.args.length > 0;
+}
+
+function manifestRequiresAccount(manifest) {
+  const serialized = JSON.stringify(manifest).toLowerCase();
+  return /\boauth\b|authorization|bearer|login|account|cookie|token/.test(serialized);
 }
 
 export function scanForForbiddenSecrets(value, path = []) {
@@ -126,6 +282,14 @@ function hasDangerousStartupCommand(input = {}) {
   return /(\|\s*(sudo|sh|bash)|\bsudo\b|\brm\s+-rf\b|curl\b.*\|\s*(sh|bash|sudo)|wget\b.*\|\s*(sh|bash|sudo))/i.test(commandLine);
 }
 
+function isSandboxActivityTool(haystack, options = {}) {
+  if (normalizeActivityKind(options.activityKind || '') !== 'game') return false;
+  if (/\b(file|shell|exec|oauth|account|payment|pay|forum|post|reply|comment|like|follow)\b/i.test(haystack)) {
+    return false;
+  }
+  return /\b(game|sandbox|simulation|simulator|cmd|command|observe|wait|gaze|look|summon|feed|clean|shelter|choose|name|status|trends|folio|chronicle|encyclopedia)\b|游戏|生态|模拟/i.test(haystack);
+}
+
 function tier(tierName, profileScope, proactiveAllowed, confirmationRequired, reason) {
   return {
     tier: tierName,
@@ -162,6 +326,11 @@ function normalizeTransport(value) {
   return SAFE_TRANSPORTS.has(transport) ? transport : 'stdio';
 }
 
+function normalizeActivityKind(value) {
+  const normalized = sanitizeShort(value).toLowerCase();
+  return ['game', 'forum', 'browser', 'api'].includes(normalized) ? normalized : '';
+}
+
 function sanitizeProfileScope(value) {
   const normalized = sanitizeShort(value).toLowerCase();
   return ['lite', 'full', 'owner_full'].includes(normalized) ? normalized : 'full';
@@ -182,6 +351,11 @@ function sanitizeCommand(value) {
 function sanitizeSource(value) {
   const text = sanitizeShort(value);
   return /^https?:\/\//i.test(text) || /^io\.|^com\.|^org\./i.test(text) ? text : '';
+}
+
+function sanitizeUrl(value) {
+  const text = sanitizeShort(value);
+  return /^https?:\/\//i.test(text) ? text : '';
 }
 
 function sanitizeText(value) {
@@ -206,4 +380,88 @@ function redactSecrets(value) {
 function normalizeStringList(value) {
   const list = Array.isArray(value) ? value : value ? [value] : [];
   return list.map((item) => sanitizeShort(item)).filter(Boolean);
+}
+
+function normalizeDate(value) {
+  if (value instanceof Date && Number.isFinite(value.getTime())) return value;
+  const parsed = Date.parse(String(value || ''));
+  return Number.isFinite(parsed) ? new Date(parsed) : null;
+}
+
+function paths(env) {
+  const root = path.join(resolveStateDir(env), 'external_mcp');
+  return {
+    registry: path.join(root, 'registry.json'),
+  };
+}
+
+function readRegistry(env) {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(paths(env).registry, 'utf8'));
+    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object') : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeRegistry(entries, env) {
+  const target = paths(env).registry;
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  fs.writeFileSync(target, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
+}
+
+function writeRegistryEntry({ state, enabled, reason, errors, manifest, candidateId, now }, env) {
+  const serverId = sanitizeId(manifest?.id || candidateId || '');
+  const previous = readRegistry(env).find((entry) => entry.serverId === serverId);
+  const entry = {
+    serverId,
+    state,
+    enabled,
+    reason,
+    errors: Array.isArray(errors) ? errors : [],
+    manifest,
+    createdAt: previous?.createdAt || now.toISOString(),
+    updatedAt: now.toISOString(),
+  };
+  writeRegistry([...readRegistry(env).filter((item) => item.serverId !== serverId), entry], env);
+  return entry;
+}
+
+function isBlockedHostname(hostname) {
+  const normalized = String(hostname || '').trim().toLowerCase().replace(/\.$/, '');
+  return !normalized
+    || normalized === 'localhost'
+    || normalized.endsWith('.localhost')
+    || normalized.endsWith('.local')
+    || normalized.endsWith('.internal')
+    || normalized.endsWith('.lan');
+}
+
+function isBlockedIp(address) {
+  const version = net.isIP(address);
+  if (version === 4) return isBlockedIpv4(address);
+  if (version === 6) {
+    const lower = String(address || '').toLowerCase();
+    const mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    return lower === '::1'
+      || lower === '::'
+      || lower.startsWith('fe80:')
+      || lower.startsWith('fc')
+      || lower.startsWith('fd')
+      || (mapped ? isBlockedIpv4(mapped[1]) : false);
+  }
+  return true;
+}
+
+function isBlockedIpv4(address) {
+  const parts = String(address || '').split('.').map((item) => Number.parseInt(item, 10));
+  if (parts.length !== 4 || parts.some((item) => !Number.isInteger(item) || item < 0 || item > 255)) return true;
+  const [a, b] = parts;
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || (a === 100 && b >= 64 && b <= 127);
 }

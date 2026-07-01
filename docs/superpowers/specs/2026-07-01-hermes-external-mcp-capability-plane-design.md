@@ -1,9 +1,10 @@
 # Hermes External MCP Capability Plane Design
 
-Status: CURRENT (2026-07-01)
+Status: CURRENT (2026-07-02)
 
-Design status: Proposed target architecture. This document is not a statement of
-current runtime behavior. The current production source of truth remains
+Design status: Target architecture with the first implementation slice landed:
+dynamic admission, Streamable HTTP execution, bounded activity grants, and
+global-user stop interruption. The current production source of truth remains
 `docs/governance/current_runtime_status.md`.
 
 ## Goal
@@ -107,12 +108,19 @@ The gateway is a project-local MCP server exposed to Hermes. It provides a
 small, stable tool surface:
 
 - `mcp_catalog_search`: search approved registry entries and local manifests.
-- `mcp_probe_server`: inspect a candidate MCP in discovery mode.
+- `mcp_probe_server`: inspect a candidate MCP and store the resulting manifest
+  as candidate/auto-admitted/needs-owner/denied.
+- `mcp_enable_server`: re-run the admission state machine for a known
+  candidate; it does not blindly enable unknown MCPs.
 - `mcp_list_enabled`: list enabled servers and their safe tool summaries.
 - `mcp_list_tools`: list tools for one enabled server with policy metadata.
 - `mcp_call`: call an approved tool after policy and session checks.
 - `mcp_open_session`: create an observe, interactive, or write session.
 - `mcp_close_session`: close one session.
+- `mcp_start_activity`: create a bounded `game_play` or `forum_read` activity
+  grant and initial synthetic turn.
+- `mcp_stop`: revoke external MCP activity grants, abort runtime work, and close
+  sessions for a global user.
 - `mcp_explain_policy`: explain why a tool is allowed, denied, or requires
   confirmation.
 
@@ -144,13 +152,17 @@ plugin/MCP inventory when they become executable capability surfaces.
 
 Discovery mode can only:
 
-- Start a candidate MCP with an explicitly approved command.
-- Run `initialize`, `tools/list`, and health checks.
+- Connect to remote HTTPS Streamable HTTP MCP candidates, with legacy SSE
+  endpoint fallback.
+- Run `initialize`, `notifications/initialized`, `tools/list`, and health
+  checks.
 - Capture sanitized metadata.
-- Stop the MCP process.
+- Store a candidate registry entry.
 
 Discovery mode cannot:
 
+- Self-enable local executable MCPs, including `stdio`, `command`, `uvx`, or
+  `npx`.
 - Pass account credentials.
 - Call business tools.
 - Persist sessions.
@@ -158,6 +170,10 @@ Discovery mode cannot:
 - Write Hermes profile files.
 
 The discovery report classifies every tool before a server can be enabled.
+Admission follows `probe -> candidate registry -> classify -> auto_admit /
+needs_owner / denied`. Auto-admission is only for remote HTTPS candidates with
+no OAuth/account/files/local commands/write/high-risk tools and passing
+SSRF/redirect/DNS checks.
 
 ### Policy Engine
 
@@ -489,8 +505,13 @@ Integration tests:
 - Synthetic system queue item enters `ChannelHub -> replyBackend -> Hermes`.
 - Hermes can call a fake read-only forum MCP through the gateway.
 - Hermes can draft a reply but cannot submit it without confirmation.
-- A fake game MCP exposes legal actions; `game.act` is blocked without grant.
-- Scoped game grant expires and blocks later moves.
+- A fake game MCP exposes sandbox actions; activity-triggered calls are blocked
+  without a scoped activity grant.
+- Scoped game grant expires or exhausts its call budget and blocks later moves.
+- User stop by global user id revokes grants, aborts runtime work, closes
+  sessions, and then asks Hermes to summarize.
+- CedarToy/cedareco is represented only as manifest/admission test data; it is
+  not written into Hermes profile and is not hardcoded as the only game.
 
 Security checks:
 
@@ -512,11 +533,15 @@ Manual acceptance:
 ## Acceptance Criteria
 
 - Hermes has one stable external MCP gateway in profile configuration.
-- External MCP servers can be discovered without becoming enabled.
+- External MCP servers can be discovered without becoming enabled unless they
+  pass the auto-admission state machine.
 - Enabled external MCP tools have explicit risk tiers and profile scopes.
-- Proactive external MCP use is read-only unless a scoped grant exists.
-- T4/T5 actions always require pending confirmation or an explicit scoped grant.
+- Autonomous external MCP activity requires scoped `game_play` or `forum_read`
+  grants with time/call/share budgets.
+- T4/T5, social write, payment, delete, and account actions always require
+  pending confirmation or an explicit trusted scoped grant.
 - All external calls produce sanitized evidence.
+- `mcp_stop` works by `global_user_id` across WeChat, Feishu, and Desktop.
 - Claims about external reads or actions pass the action contract gate.
 - No credentials, cookies, session files, raw logs, or private cache data are
   committed.

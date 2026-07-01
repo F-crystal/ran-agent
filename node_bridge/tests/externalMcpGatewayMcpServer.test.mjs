@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
@@ -40,11 +41,14 @@ test('external MCP gateway exposes one stable tool surface', () => {
   assert.deepEqual(buildExternalMcpGatewayTools().map((tool) => tool.name), [
     'mcp_catalog_search',
     'mcp_probe_server',
+    'mcp_enable_server',
     'mcp_list_enabled',
     'mcp_list_tools',
     'mcp_call',
     'mcp_open_session',
     'mcp_close_session',
+    'mcp_start_activity',
+    'mcp_stop',
     'mcp_explain_policy',
   ]);
 });
@@ -55,7 +59,7 @@ test('external MCP gateway initialize works while source profile calls stay disa
   const denied = await callTool('mcp_list_enabled', {}, { env: {} });
 
   assert.equal(init.serverInfo.name, 'ran-agent-external-mcp-gateway');
-  assert.equal(tools.tools.length, 8);
+  assert.equal(tools.tools.length, 11);
   assert.equal(denied.isError, true);
   assert.equal(denied.structuredContent.error_code, 'EXTERNAL_MCP_GATEWAY_DISABLED');
 });
@@ -106,6 +110,255 @@ test('external MCP gateway opens observe sessions through the stable surface', a
   assert.equal(result.structuredContent.session.mode, 'observe');
 });
 
+test('external MCP gateway probes candidates through the executor and stores auto-admitted entries', async (t) => {
+  const env = tempGatewayEnv(t);
+  const result = await callTool('mcp_probe_server', {
+    serverId: 'cedartoy-games',
+    url: 'https://toy.cedarstar.org/mcp',
+    transport: 'streamable-http',
+    activityKind: 'game',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    lookupImpl: async () => [{ address: '203.0.113.30', family: 4 }],
+    executor: {
+      async probe() {
+        return {
+          ok: true,
+          manifest: {
+            id: 'cedartoy-games',
+            title: 'CedarToy Games',
+            source: 'https://github.com/Zizuixixiang/cedareco',
+            transport: 'streamable-http',
+            url: 'https://toy.cedarstar.org/mcp',
+            activityKind: 'game',
+            tools: [{ name: 'ecosystem.cmd', description: 'Run a command inside a text-only sandbox game.' }],
+          },
+          notifications: [],
+        };
+      },
+    },
+  });
+  const enabled = await callTool('mcp_list_enabled', {}, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+  });
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.admission.state, 'auto_admitted');
+  assert.deepEqual(enabled.structuredContent.servers.map((server) => server.id), ['cedartoy-games']);
+});
+
+test('external MCP gateway calls admitted tools through policy and executor', async (t) => {
+  const env = tempGatewayEnv(t);
+  await callTool('mcp_probe_server', {
+    serverId: 'cedartoy-games',
+    url: 'https://toy.cedarstar.org/mcp',
+    transport: 'streamable-http',
+    activityKind: 'game',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    lookupImpl: async () => [{ address: '203.0.113.31', family: 4 }],
+    executor: {
+      async probe() {
+        return {
+          ok: true,
+          manifest: {
+            id: 'cedartoy-games',
+            title: 'CedarToy Games',
+            transport: 'streamable-http',
+            url: 'https://toy.cedarstar.org/mcp',
+            activityKind: 'game',
+            tools: [{ name: 'ecosystem.cmd', description: 'Run a command inside a text-only sandbox game.' }],
+          },
+        };
+      },
+    },
+  });
+  const session = await callTool('mcp_open_session', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    mode: 'interactive',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+  });
+  let callInput = null;
+  const result = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'ecosystem.cmd',
+    arguments: { cmd: 'observe' },
+    sessionId: session.structuredContent.session.sessionId,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    executor: {
+      async call(input) {
+        callInput = input;
+        return {
+          ok: true,
+          result: { content: [{ type: 'text', text: '生态缸很平静' }] },
+        };
+      },
+    },
+  });
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(callInput.toolName, 'ecosystem.cmd');
+  assert.equal(callInput.arguments.cmd, 'observe');
+  assert.equal(result.structuredContent.result.content[0].text, '生态缸很平静');
+});
+
+test('external MCP gateway requires a live session for tool calls', async (t) => {
+  const env = tempGatewayEnv(t);
+  const result = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'ecosystem.cmd',
+    arguments: { cmd: 'observe' },
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    registry: [{
+      id: 'cedartoy-games',
+      transport: 'streamable-http',
+      url: 'https://toy.cedarstar.org/mcp',
+      activityKind: 'game',
+      tools: [{ name: 'ecosystem.cmd', description: 'Run a command inside a text-only sandbox game.' }],
+    }],
+  });
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error_code, 'EXTERNAL_MCP_SESSION_REQUIRED');
+});
+
+test('external MCP gateway ignores model-supplied profile and session mode on calls', async (t) => {
+  const env = tempGatewayEnv(t);
+  const opened = await callTool('mcp_open_session', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    mode: 'observe',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    registry: [{
+      id: 'cedartoy-games',
+      transport: 'streamable-http',
+      url: 'https://toy.cedarstar.org/mcp',
+      activityKind: 'game',
+      tools: [{ name: 'ecosystem.cmd', description: 'Run a command inside a text-only sandbox game.' }],
+    }],
+  });
+  const result = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'ecosystem.cmd',
+    sessionId: opened.structuredContent.session.sessionId,
+    profile: 'owner_full',
+    sessionMode: 'interactive',
+    trigger: 'activity',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant-lite' },
+    registry: [{
+      id: 'cedartoy-games',
+      transport: 'streamable-http',
+      url: 'https://toy.cedarstar.org/mcp',
+      activityKind: 'game',
+      tools: [{ name: 'ecosystem.cmd', description: 'Run a command inside a text-only sandbox game.' }],
+    }],
+  });
+
+  assert.equal(result.isError, true);
+  assert.equal(result.structuredContent.error_code, 'EXTERNAL_MCP_POLICY_DENIED');
+  assert.equal(result.structuredContent.policy.profile, 'lite');
+  assert.equal(result.structuredContent.policy.sessionMode, 'observe');
+  assert.equal(result.structuredContent.policy.trigger, 'user_turn');
+});
+
+test('external MCP gateway activity calls require bounded activity grants and consume budget', async (t) => {
+  const env = tempGatewayEnv(t);
+  await callTool('mcp_probe_server', {
+    serverId: 'cedartoy-games',
+    url: 'https://toy.cedarstar.org/mcp',
+    transport: 'streamable-http',
+    activityKind: 'game',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    lookupImpl: async () => [{ address: '203.0.113.32', family: 4 }],
+    executor: {
+      async probe() {
+        return {
+          ok: true,
+          manifest: {
+            id: 'cedartoy-games',
+            transport: 'streamable-http',
+            url: 'https://toy.cedarstar.org/mcp',
+            activityKind: 'game',
+            tools: [{ name: 'ecosystem.cmd', description: 'Run a command inside a text-only sandbox game.' }],
+          },
+        };
+      },
+    },
+  });
+  const activity = await callTool('mcp_start_activity', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    kind: 'game_play',
+    maxMinutes: 30,
+    maxCalls: 1,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+  });
+  const args = {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'ecosystem.cmd',
+    arguments: { cmd: 'wait' },
+    sessionId: activity.structuredContent.activity.sessionId,
+    activityId: activity.structuredContent.activity.activityId,
+  };
+  const first = await callTool('mcp_call', args, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    executor: { async call() { return { ok: true, result: { content: [{ type: 'text', text: '一天过去了' }] } }; } },
+  });
+  const second = await callTool('mcp_call', args, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    executor: { async call() { return { ok: true, result: { content: [{ type: 'text', text: '不该继续' }] } }; } },
+  });
+
+  assert.equal(activity.structuredContent.ok, true);
+  assert.equal(activity.structuredContent.syntheticTurn.route_hint, 'external_mcp_activity');
+  assert.equal(first.structuredContent.ok, true);
+  assert.equal(first.structuredContent.policy.scopedGrantId, activity.structuredContent.activity.grantId);
+  assert.equal(first.structuredContent.evidence.trigger, 'activity');
+  assert.equal(second.isError, true);
+  assert.equal(second.structuredContent.error_code, 'EXTERNAL_MCP_ACTIVITY_BUDGET_EXHAUSTED');
+});
+
+test('external MCP gateway stop interrupts activities by global user id', async (t) => {
+  const env = tempGatewayEnv(t);
+  const activity = await callTool('mcp_start_activity', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    kind: 'game_play',
+    maxMinutes: 30,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    registry: [{
+      id: 'cedartoy-games',
+      transport: 'streamable-http',
+      url: 'https://toy.cedarstar.org/mcp',
+      activityKind: 'game',
+      tools: [{ name: 'ecosystem.cmd', description: 'Run a command inside a text-only sandbox game.' }],
+    }],
+  });
+  const stopped = await callTool('mcp_stop', {
+    globalUserId: 'user:ran',
+    reason: 'user_stop',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+  });
+
+  assert.equal(activity.structuredContent.ok, true);
+  assert.equal(stopped.structuredContent.ok, true);
+  assert.deepEqual(stopped.structuredContent.stoppedActivityIds, [activity.structuredContent.activity.activityId]);
+});
+
 test('start_external_mcp_gateway.sh initialize exits after one response', async () => {
   const { stdout } = await execFileAsync(
     'bash',
@@ -138,3 +391,9 @@ test('start_external_mcp_gateway.sh keeps tool calls disabled despite stale env 
   assert.equal(response.result.isError, true);
   assert.equal(response.result.structuredContent.error_code, 'EXTERNAL_MCP_GATEWAY_DISABLED');
 });
+
+function tempGatewayEnv(t) {
+  const root = fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'test-external-mcp-gateway-'));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  return { RAN_AGENT_STATE_DIR: root };
+}

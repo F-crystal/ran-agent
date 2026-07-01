@@ -241,6 +241,74 @@ test('policy allows scoped game grants only inside server, tool, mode, and expir
   assert.equal(expired.reason, 'scoped_grant_expired');
 });
 
+test('policy requires scoped activity grants for autonomous sandbox game activity', () => {
+  const noGrant = decision({
+    profile: 'full',
+    trigger: 'activity',
+    sessionMode: 'interactive',
+    tool: {
+      serverId: 'cedartoy-games',
+      name: 'ecosystem.cmd',
+      tier: 'T3',
+      profileScope: 'full',
+      proactiveAllowed: true,
+      confirmationRequired: false,
+      reason: 'sandbox_activity',
+    },
+  });
+  const granted = decision({
+    profile: 'full',
+    trigger: 'activity',
+    sessionMode: 'interactive',
+    tool: {
+      serverId: 'cedartoy-games',
+      name: 'ecosystem.cmd',
+      tier: 'T3',
+      profileScope: 'full',
+      proactiveAllowed: true,
+      confirmationRequired: false,
+      reason: 'sandbox_activity',
+    },
+    scopedGrant: trustExternalMcpScopedGrant({
+      grantId: 'grant-game-activity',
+      kind: 'game_play',
+      serverId: 'cedartoy-games',
+      mode: 'interactive',
+      allowedToolPattern: '^ecosystem\\.',
+      expiresAt: '2026-07-01T10:30:00Z',
+    }),
+  });
+  const wrongTool = decision({
+    profile: 'full',
+    trigger: 'activity',
+    sessionMode: 'interactive',
+    tool: {
+      serverId: 'forum.example',
+      name: 'forum.submit_reply',
+      tier: 'T4',
+      profileScope: 'full',
+      proactiveAllowed: false,
+      confirmationRequired: true,
+      reason: 'external_side_effect',
+    },
+    scopedGrant: trustExternalMcpScopedGrant({
+      grantId: 'grant-game-activity',
+      kind: 'game_play',
+      serverId: 'forum.example',
+      mode: 'interactive',
+      allowedToolPattern: '^forum\\.',
+      expiresAt: '2026-07-01T10:30:00Z',
+    }),
+  });
+
+  assert.equal(noGrant.allowed, false);
+  assert.equal(noGrant.reason, 'activity_requires_scoped_grant');
+  assert.equal(granted.allowed, true);
+  assert.equal(granted.scopedGrantId, 'grant-game-activity');
+  assert.equal(wrongTool.allowed, false);
+  assert.equal(wrongTool.decision, 'confirmation_required');
+});
+
 test('policy rejects spoofed or incomplete scoped grants', () => {
   const spoofed = decision({
     profile: 'owner_full',

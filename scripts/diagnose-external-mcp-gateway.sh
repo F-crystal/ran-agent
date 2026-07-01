@@ -60,8 +60,10 @@ if (result?.payload?.reason !== "external_mcp_gateway_disabled") {
 echo "[external-mcp] running acceptance tests"
 node --test \
   node_bridge/tests/externalMcpRegistry.test.mjs \
+  node_bridge/tests/externalMcpExecutor.test.mjs \
   node_bridge/tests/externalMcpPolicy.test.mjs \
   node_bridge/tests/externalMcpSessionManager.test.mjs \
+  node_bridge/tests/externalMcpActivityRunner.test.mjs \
   node_bridge/tests/externalMcpEvidenceLog.test.mjs \
   node_bridge/tests/externalMcpGatewayMcpServer.test.mjs \
   node_bridge/tests/externalMcpSystemQueue.test.mjs \

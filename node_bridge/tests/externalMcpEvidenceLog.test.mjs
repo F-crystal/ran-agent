@@ -66,6 +66,12 @@ test('evidence sanitizer keeps proof fields and redacts raw payloads', () => {
   assert.equal(serialized.includes('extmcp_private_session_id'), false);
 });
 
+test('evidence sanitizer preserves activity trigger for autonomous MCP loops', () => {
+  const event = sanitizeExternalMcpEvidence(rawEvent({ trigger: 'activity' }));
+
+  assert.equal(event.trigger, 'activity');
+});
+
 test('evidence log appends and lists sanitized JSONL events', (t) => {
   const env = tempEnv(t);
   const first = appendExternalMcpEvidence(rawEvent({ requestId: 'req-1', resultId: 'result-1' }), { env, now: '2026-07-01T10:00:00Z' });

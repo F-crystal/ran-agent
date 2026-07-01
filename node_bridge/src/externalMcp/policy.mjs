@@ -43,14 +43,20 @@ export function evaluateExternalMcpPolicy(input = {}) {
     return deny('proactive_requires_watchlist', { profile, requiredProfile, sessionMode, trigger, tier });
   }
 
-  const grant = evaluateScopedGrant(input.scopedGrant, { now: input.now, serverId, toolName, sessionMode });
+  const grant = evaluateScopedGrant(input.scopedGrant, {
+    now: input.now,
+    serverId,
+    toolName,
+    sessionMode,
+    tier,
+    reason: tool.reason,
+  });
   if (grant.status === 'expired') {
     return deny('scoped_grant_expired', { profile, requiredProfile, sessionMode, trigger, tier });
   }
   if (grant.status === 'invalid') {
     return deny('scoped_grant_invalid', { profile, requiredProfile, sessionMode, trigger, tier });
   }
-
   if (tier === 'T5') {
     if (grant.ok) {
       return allow({ profile, requiredProfile, sessionMode, trigger, tier, scopedGrantId: grant.grantId, requiredEvidence: sideEffectEvidence() });
@@ -73,7 +79,19 @@ export function evaluateExternalMcpPolicy(input = {}) {
     };
   }
 
-  return allow({ profile, requiredProfile, sessionMode, trigger, tier, requiredEvidence: readEvidenceForTier(tier) });
+  if (trigger === 'activity' && !grant.ok) {
+    return deny('activity_requires_scoped_grant', { profile, requiredProfile, sessionMode, trigger, tier });
+  }
+
+  return allow({
+    profile,
+    requiredProfile,
+    sessionMode,
+    trigger,
+    tier,
+    scopedGrantId: grant.ok ? grant.grantId : undefined,
+    requiredEvidence: readEvidenceForTier(tier),
+  });
 }
 
 export function normalizeTier(value) {
@@ -91,10 +109,11 @@ export function isSideEffectTier(tier) {
   return normalized === 'T4' || normalized === 'T5';
 }
 
-function evaluateScopedGrant(grant, { now, serverId, toolName, sessionMode } = {}) {
+function evaluateScopedGrant(grant, { now, serverId, toolName, sessionMode, tier, reason } = {}) {
   if (!grant || typeof grant !== 'object' || Array.isArray(grant)) return { ok: false, status: 'missing' };
   if (grant[TRUSTED_POLICY_AUTH] !== 'scoped_grant') return { ok: false, status: 'untrusted' };
   const grantId = sanitizeShort(grant.grantId || grant.grant_id || '');
+  const kind = sanitizeShort(grant.kind || grant.grantKind || grant.grant_kind || '').toLowerCase();
   const expiresAt = Date.parse(String(grant.expiresAt || grant.expires_at || ''));
   const nowMs = normalizeDate(now).getTime();
   if (!grantId || !Number.isFinite(expiresAt)) {
@@ -104,9 +123,36 @@ function evaluateScopedGrant(grant, { now, serverId, toolName, sessionMode } = {
     return { ok: false, status: 'expired' };
   }
   if (sanitizeShort(grant.serverId || grant.server_id || '') !== serverId) return { ok: false, status: 'server_mismatch' };
-  if (sanitizeShort(grant.toolName || grant.tool_name || '') !== toolName) return { ok: false, status: 'tool_mismatch' };
   if (normalizeSessionMode(grant.mode || grant.sessionMode) !== sessionMode) return { ok: false, status: 'mode_mismatch' };
+  if (kind) {
+    if (kind === 'game_play') {
+      if (tier !== 'T3' || String(reason || '') !== 'sandbox_activity') return { ok: false, status: 'tool_mismatch' };
+      if (!matchesGrantToolPattern(grant, toolName)) return { ok: false, status: 'tool_mismatch' };
+      return { ok: true, status: 'valid', grantId };
+    }
+    if (kind === 'forum_read') {
+      if (!['T1', 'T2'].includes(tier) || /post|reply|comment|react|like|follow|send/i.test(toolName)) {
+        return { ok: false, status: 'tool_mismatch' };
+      }
+      if (!matchesGrantToolPattern(grant, toolName)) return { ok: false, status: 'tool_mismatch' };
+      return { ok: true, status: 'valid', grantId };
+    }
+    return { ok: false, status: 'invalid' };
+  }
+  if (sanitizeShort(grant.toolName || grant.tool_name || '') !== toolName) return { ok: false, status: 'tool_mismatch' };
   return { ok: true, status: 'valid', grantId };
+}
+
+function matchesGrantToolPattern(grant, toolName) {
+  const exact = sanitizeShort(grant.toolName || grant.tool_name || '');
+  if (exact) return exact === toolName;
+  const pattern = sanitizeShort(grant.allowedToolPattern || grant.allowed_tool_pattern || '');
+  if (!pattern) return true;
+  try {
+    return new RegExp(pattern).test(toolName);
+  } catch {
+    return false;
+  }
 }
 
 function isConfirmedPendingAction(action, { serverId, toolName, now } = {}) {
@@ -181,6 +227,7 @@ function externalPendingActionType(toolName) {
 
 function normalizeTrigger(value) {
   const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'activity') return 'activity';
   return normalized === 'proactive' ? 'proactive' : 'user_turn';
 }
 

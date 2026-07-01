@@ -508,6 +508,7 @@ export async function handleExternalMcpSystemQueueRequest({
   bodyText = '',
   channelHub = handleIncomingMessage,
   execFileImpl,
+  nowImpl,
 } = {}) {
   const queueGate = getExternalMcpSystemQueueGate(env);
   if (!queueGate.enabled) {

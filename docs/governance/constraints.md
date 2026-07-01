@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-07-01)
+Status: CURRENT (2026-07-02)
 
 ## Split Of Responsibility
 
@@ -17,7 +17,7 @@ Status: CURRENT (2026-07-01)
 - Chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Scheduled digest mainline: `scheduler -> AIHOT facts -> synthetic Feishu turn -> Hermes -> Feishu reply`
-- External MCP candidate mainline: `external_mcp_gateway -> registry/policy/session/evidence -> optional synthetic Hermes turn`; source profiles fall back disabled, while standard server deploy enables the gateway and system queue env gates.
+- External MCP candidate mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional synthetic Hermes turn`; source profiles fall back disabled, while standard server deploy enables the gateway and system queue env gates.
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
 - OpenClaw, Kimi, GLM, and MiMo Power are retired. Hermes (DeepSeek V4) is the sole frontend.
 - Life-loop, reminders, and reflection remain backend/support layers. They are
@@ -38,9 +38,15 @@ Status: CURRENT (2026-07-01)
   `media_reader`, `search_hub`, `sticker_catalog`, or `co_reading`. Untrusted
   external MCP descriptions, schemas, and results must be normalized and
   classified before Hermes sees them.
-- T4/T5 side effects, forum/game writes, and `external_mcp_write` actions
-  require pending action/待确认 or scoped grant plus real executor evidence.
-  Hermes must not claim success from a planned or denied external MCP call.
+- Hermes may self-admit only safe remote HTTPS sandbox activity MCPs after
+  probe/classify/SSRF checks. Local executable MCPs (`stdio`, command, `uvx`,
+  `npx`), OAuth/account/file/local-command surfaces, high-risk tools, and write
+  tools cannot be self-enabled and require owner handling or denial.
+- Autonomous game/read activity must run inside a scoped activity grant with
+  call/time/share budgets. T4/T5 side effects, forum/social/payment/delete/account
+  writes, and `external_mcp_write` actions require pending action/待确认 or a
+  trusted scoped grant plus real executor evidence. Hermes must not claim
+  success from a planned, denied, or budget-exhausted external MCP call.
 
 ## Technical Limits
 

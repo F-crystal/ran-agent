@@ -3,6 +3,7 @@
  */
 
 import { getBackendIngestConfig, ingestExchangeToBackend } from './backendIngestClient.mjs';
+import { stopExternalMcpActivitiesByUser } from './externalMcp/activityRunner.mjs';
 import { shouldSuppressSystemQueueReply } from './externalMcp/systemQueue.mjs';
 import {
   applyActionGateTelemetry,
@@ -56,6 +57,21 @@ export function createReplyBackend(options = {}) {
           followUpMessages: [],
           media: null,
           source: 'hermes',
+        };
+      }
+      if (detectExternalMcpStopCommand(message.text)) {
+        const stopped = stopExternalMcpActivitiesByUser(message.global_user_id || '', {
+          env,
+          now: typeof options.nowImpl === 'function' ? options.nowImpl() : new Date(),
+          reason: 'user_stop_command',
+        });
+        message = {
+          ...message,
+          route_hint: 'external_mcp_stop',
+          text: buildExternalMcpStopPrompt({
+            originalText: message.text,
+            stoppedActivityIds: stopped.stoppedActivityIds,
+          }),
         };
       }
       const actionGateConfig = getActionGateConfig(env);
@@ -714,6 +730,20 @@ function detectConfirmationCommand(text = '') {
   if (/^(取消|算了|不用了|别保存|别发|不删了)$/i.test(normalized)) return 'cancel';
   if (/^(确认|是的|可以|保存|确认保存|发吧|删除吧|确认删除|就这样|确认发送)$/i.test(normalized)) return 'confirm';
   return '';
+}
+
+function detectExternalMcpStopCommand(text = '') {
+  const normalized = String(text || '').trim();
+  return /^(停下这局|别玩了|结束\s*MCP\s*活动|停止\s*MCP|结束游戏|停下游戏|不要继续玩|stop\s+mcp|stop\s+this\s+game)$/i.test(normalized);
+}
+
+function buildExternalMcpStopPrompt({ originalText = '', stoppedActivityIds = [] } = {}) {
+  return [
+    '[External MCP stop event]',
+    `user_text: ${String(originalText || '').trim().slice(0, 120)}`,
+    `stopped_activity_ids: ${(Array.isArray(stoppedActivityIds) ? stoppedActivityIds : []).join(',') || 'none'}`,
+    'Hermes must not continue playing or browsing external MCP now. Briefly acknowledge the stop and summarize what changed if the activity context is available.',
+  ].join('\n');
 }
 
 function isScheduledOrDigestMessage(message = {}) {
