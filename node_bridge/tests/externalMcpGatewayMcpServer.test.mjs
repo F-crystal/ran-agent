@@ -49,7 +49,7 @@ test('external MCP gateway exposes one stable tool surface', () => {
   ]);
 });
 
-test('external MCP gateway initialize works while production calls stay disabled by default', async () => {
+test('external MCP gateway initialize works while source profile calls stay disabled by default', async () => {
   const init = await handleExternalMcpGatewayMcpRequest({ method: 'initialize', params: {} }, { env: {} });
   const tools = await handleExternalMcpGatewayMcpRequest({ method: 'tools/list', params: {} }, { env: {} });
   const denied = await callTool('mcp_list_enabled', {}, { env: {} });
@@ -129,6 +129,7 @@ test('start_external_mcp_gateway.sh keeps tool calls disabled despite stale env 
         EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
         EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
         EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE: '',
+        EXTERNAL_MCP_GATEWAY_SKIP_ENV_FILES: 'true',
       },
     }
   );

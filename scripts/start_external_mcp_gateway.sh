@@ -6,18 +6,20 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
 
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
+if [[ "${EXTERNAL_MCP_GATEWAY_SKIP_ENV_FILES:-false}" != "true" ]]; then
+  if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+  fi
 
-if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$NODE_BRIDGE_ENV_FILE"
-  set +a
+  if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$NODE_BRIDGE_ENV_FILE"
+    set +a
+  fi
 fi
 
 if [[ "${EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE:-false}" != "true" ]]; then

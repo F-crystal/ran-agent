@@ -17,7 +17,7 @@ Status: CURRENT (2026-07-01)
 - Chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Scheduled digest mainline: `scheduler -> AIHOT facts -> synthetic Feishu turn -> Hermes -> Feishu reply`
-- External MCP candidate mainline: `external_mcp_gateway -> registry/policy/session/evidence -> optional synthetic Hermes turn`; current production defaults are `EXTERNAL_MCP_GATEWAY_ENABLED=false` and `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`.
+- External MCP candidate mainline: `external_mcp_gateway -> registry/policy/session/evidence -> optional synthetic Hermes turn`; source profiles fall back disabled, while standard server deploy enables the gateway and system queue env gates.
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
 - OpenClaw, Kimi, GLM, and MiMo Power are retired. Hermes (DeepSeek V4) is the sole frontend.
 - Life-loop, reminders, and reflection remain backend/support layers. They are

@@ -76,14 +76,13 @@ target from normal incoming private-message events and reuses that target for a
 synthetic scheduled turn. The scheduled turn still enters `ChannelHub`, so
 Hermes session and timeline semantics match normal Feishu chat.
 
-External MCP system queue delivery follows the same identity rule when explicitly
-enabled: `/external-mcp/system-queue` uses the learned Feishu DM target and
-creates a synthetic Hermes turn with `route_hint=external_mcp_system_queue`.
-It is disabled by default with `EXTERNAL_MCP_GATEWAY_ENABLED=false` and
-`EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`. It may notify only for registered
-watchlist/关注 scopes within rate budget. T4/T5 external MCP writes still need
-pending action/待确认 or scoped grant and real executor evidence before Hermes
-may claim success.
+External MCP system queue delivery follows the same identity rule:
+`/external-mcp/system-queue` uses the learned Feishu DM target and creates a
+synthetic Hermes turn with `route_hint=external_mcp_system_queue`. Standard
+server deploy enables the gateway and system queue env gates, but it may notify
+only for registered watchlist/关注 scopes within rate budget. T4/T5 external MCP
+writes still need pending action/待确认 or scoped grant and real executor
+evidence before Hermes may claim success.
 
 ## Security
 

@@ -19,7 +19,7 @@ WeChat / Feishu / Desktop Proxy
 Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
 
-External MCP candidates (disabled by default)
+External MCP candidates
   -> external_mcp_gateway registry/policy/session/evidence
   -> optional /external-mcp/system-queue synthetic Hermes turn
 ```
@@ -35,14 +35,13 @@ External MCP candidates (disabled by default)
 - The only scheduled outbound message is the opt-in AI daily digest. It runs
   through the Feishu/Hermes mainline and does not reopen old proactive
   check-ins, reminders, or life-loop outbound behavior.
-- `external_mcp_gateway` is registered as a stable MCP surface in lite/full, but
-  production calls are disabled by default with
-  `EXTERNAL_MCP_GATEWAY_ENABLED=false` and
-  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`. The launcher also forces both
-  gates off after sourcing local env files unless
-  `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`, so stale env cannot silently
-  create a half-enabled rollout. It must not replace `social_reader`,
-  `media_reader`, `search_hub`, `sticker_catalog`, or `co_reading`.
+- `external_mcp_gateway` is registered as a stable MCP surface in lite/full.
+  Source profiles still fall back to disabled flags, but the standard server
+  deploy now writes `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`,
+  `EXTERNAL_MCP_GATEWAY_ENABLED=true`, and
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true` so Hermes can use the broker without
+  hand-editing env files. It must not replace `social_reader`, `media_reader`,
+  `search_hub`, `sticker_catalog`, or `co_reading`.
 
 ## Lite/Full Runtime
 
@@ -117,9 +116,9 @@ Current shared non-secret keys include:
 - `OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp`
 - `OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra`
 - `PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback`
-- `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=false`
-- `EXTERNAL_MCP_GATEWAY_ENABLED=false`
-- `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`
+- `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`
+- `EXTERNAL_MCP_GATEWAY_ENABLED=true`
+- `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
 `scripts/clean-uv-cache-safe.sh` for cleanup and do not delete social-reader
@@ -145,7 +144,7 @@ media directories so redeploys do not depend on manual `mkdir`.
 | `ombre_memory` / `ombre_memory_extra` | Optional upstream Ombre Brain direct MCP, full-profile memory/debug surface |
 | `media_generation` | Image and speech generation |
 | `playwright` | Dynamic/visual web pages, full/debug use |
-| `external_mcp_gateway` | Stable default-disabled broker for future reviewed game/forum/browser MCPs |
+| `external_mcp_gateway` | Stable broker for reviewed game/forum/browser MCPs |
 
 - Search Hub is registered in both lite and full. Lite uses lightweight public
   providers; full may use Playwright fallback. OpenCLI browser-backed remains
@@ -285,9 +284,9 @@ media directories so redeploys do not depend on manual `mkdir`.
 - `PERSONAL_AGENT_PROACTIVE_ENABLED` and
   `PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED` remain `false`.
 - External MCP proactive delivery is not part of the old proactive mainline.
-  The separate system queue remains disabled by
-  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`; if explicitly enabled later, it is
-  watchlist/rate-budget limited and enters Hermes as a synthetic Feishu turn.
+  The separate system queue is deploy-enabled but watchlist/rate-budget limited
+  and enters Hermes as a synthetic Feishu turn. No watch means no visible
+  outbound message.
 
 ## Protected Local State
 

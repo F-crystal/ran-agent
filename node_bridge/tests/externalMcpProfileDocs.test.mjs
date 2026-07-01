@@ -9,7 +9,7 @@ function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(PROJECT_ROOT, relativePath), 'utf8');
 }
 
-test('Hermes profiles register the stable external MCP gateway while keeping runtime disabled by default', () => {
+test('Hermes profiles register the stable external MCP gateway with source fallback disabled', () => {
   for (const profilePath of ['hermes/profile/config.yaml', 'hermes/profile/config.lite.yaml']) {
     const text = readProjectFile(profilePath);
     assert.match(text, /mcp-external_mcp_gateway/);
@@ -27,8 +27,6 @@ test('external MCP governance docs preserve mainlines and proactive safety bound
 
   for (const text of [hermesProfile, runtimeStatus, constraints]) {
     assert.match(text, /external_mcp_gateway/);
-    assert.match(text, /EXTERNAL_MCP_GATEWAY_ENABLED=false/);
-    assert.match(text, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false/);
     assert.match(text, /synthetic Hermes turn|synthetic Feishu turn|合成/);
     assert.match(text, /watchlist|watch list|关注/);
     assert.match(text, /T4\/T5|T4.*T5/);
@@ -36,12 +34,25 @@ test('external MCP governance docs preserve mainlines and proactive safety bound
   }
 
   assert.match(runtimeStatus, /social_reader/);
-  assert.match(runtimeStatus, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=false/);
+  assert.match(runtimeStatus, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true/);
+  assert.match(runtimeStatus, /EXTERNAL_MCP_GATEWAY_ENABLED=true/);
+  assert.match(runtimeStatus, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true/);
   assert.match(runtimeStatus, /media_reader/);
   assert.match(runtimeStatus, /search_hub/);
   assert.match(runtimeStatus, /sticker_catalog/);
   assert.match(runtimeStatus, /co_reading/);
   assert.match(hermesProfile, /不得开启旧 proactive|不要主动发 check-in/);
+});
+
+test('apply script deploy-enables external MCP gates through managed env files', () => {
+  const script = readProjectFile('scripts/apply-hermes-runtime-split.sh');
+  assert.match(script, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE:-true\}"/);
+  assert.match(script, /EXTERNAL_MCP_GATEWAY_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_GATEWAY_ENABLED:-true\}"/);
+  assert.match(script, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED:-true\}"/);
+  assert.match(script, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE\|EXTERNAL_MCP_GATEWAY_ENABLED\|EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED/);
+  assert.match(script, /"EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=\$EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE_DEFAULT"/);
+  assert.match(script, /"EXTERNAL_MCP_GATEWAY_ENABLED=\$EXTERNAL_MCP_GATEWAY_ENABLED_DEFAULT"/);
+  assert.match(script, /"EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=\$EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED_DEFAULT"/);
 });
 
 test('external MCP diagnostics script documents acceptance gates', () => {
