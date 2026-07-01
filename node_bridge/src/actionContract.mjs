@@ -173,7 +173,16 @@ export function logActionContract(result = {}, logger = console) {
 
 function detectActionIntent(message = {}, response = {}) {
   const text = `${message.text || ''}\n${response.reply_text || response.replyText || ''}`;
+  const routeHint = `${message.route_hint || ''}\n${response.route_hint || ''}`;
   const hasMedia = normalizeMediaItems(message.media).length > 0 || normalizeStringArray(message.image_urls).length > 0;
+  const externalMcpSignal = /external[_ -]?mcp|外部\s*MCP/i.test(`${text}\n${routeHint}`);
+
+  if (externalMcpSignal) {
+    if (/(评论|回复|发帖|点赞|关注|提交|走棋|下棋|交易|购买|转账|删除|保存|post|comment|like|follow|submit|move|trade|delete|purchase|buy)/i.test(text)) {
+      return 'external_mcp_write';
+    }
+    return 'external_mcp_read';
+  }
 
   if (/(发邮件|发送邮件|转发|批量外发|发给|发送给|外发)|send email/i.test(text)) {
     return 'external_send';
@@ -210,6 +219,10 @@ function requiredEvidenceForIntent(intent) {
       return ['save_result'];
     case 'external_send':
       return ['authorization', 'outbound_result'];
+    case 'external_mcp_read':
+      return ['external_mcp_tool_result'];
+    case 'external_mcp_write':
+      return ['authorization', 'external_mcp_tool_result'];
     default:
       return [];
   }
@@ -227,6 +240,9 @@ function collectObservedEvidence({ response = {}, toolResults = [] } = {}) {
   }
   if (response.outbound_result && typeof response.outbound_result === 'object' && !Array.isArray(response.outbound_result)) {
     evidence.push(summarizeStateResult('outbound_result', response.outbound_result));
+  }
+  if (response.authorization === true || response.external_mcp_authorization === true) {
+    evidence.push({ type: 'authorization', status: 'present', source: 'external_mcp_pending' });
   }
   for (const toolResult of Array.isArray(toolResults) ? toolResults : []) {
     const summary = summarizeToolResult(toolResult);
@@ -256,6 +272,13 @@ function hasEvidenceForIntent(intent, evidence = []) {
   if (intent === 'external_send') {
     return evidence.some((item) => (item.type === 'outbound_result' && item.status === 'success') || (item.type === 'tool_result' && item.status === 'success'));
   }
+  if (intent === 'external_mcp_read') {
+    return evidence.some((item) => item.type === 'external_mcp_tool_result' && ['success', 'partial_success'].includes(item.status));
+  }
+  if (intent === 'external_mcp_write') {
+    return evidence.some((item) => item.type === 'authorization' && item.status === 'present')
+      && evidence.some((item) => item.type === 'external_mcp_tool_result' && item.status === 'success');
+  }
   return false;
 }
 
@@ -280,6 +303,9 @@ function detectFinalClaims(replyText = '') {
   }
   if (/已发送|已经发送|发送成功|已经发出|转发好了/.test(text)) {
     claims.push('external_sent');
+  }
+  if (/(已经|已).*(?:评论|回复|发帖|点赞|关注|提交|走棋|下棋|交易|保存|删除|操作).*(?:成功|完成|好了)|(?:评论|回复|发帖|点赞|关注|提交|走棋|下棋|交易|操作)成功/.test(text)) {
+    claims.push('external_mcp_action_done');
   }
   if (/完全失败|所有.*失败|所有路.*堵住|完全没读到/.test(text)) {
     claims.push('full_failure');
@@ -318,6 +344,8 @@ function hasActionClaimForIntent(intent, claims = []) {
   if (intent === 'media_generate') return claims.includes('media_generated');
   if (intent === 'memory_write') return claims.includes('state_changed');
   if (intent === 'external_send') return claims.includes('external_sent');
+  if (intent === 'external_mcp_read') return claims.includes('read_complete');
+  if (intent === 'external_mcp_write') return claims.includes('external_mcp_action_done') || claims.includes('state_changed') || claims.includes('external_sent');
   return false;
 }
 
@@ -352,6 +380,10 @@ function missingEvidenceRewriteForIntent(intent) {
       return '我现在还没有完成保存，所以不能说已经保存好了。';
     case 'external_send':
       return '我现在还没有确认发送成功，所以不能说已经发出去了。';
+    case 'external_mcp_read':
+      return '我现在还没有成功读取到这个外部 MCP 内容，所以不能直接判断里面写了什么。';
+    case 'external_mcp_write':
+      return '我现在还没有确认外部 MCP 操作成功，所以不能说已经执行完成。';
     default:
       return '';
   }
@@ -414,6 +446,9 @@ function summarizeMediaEvidence(media = {}) {
 
 function summarizeToolResult(result = {}) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  if (result.type === 'external_mcp_tool_result' || result.external_mcp === true || result.externalMcp === true) {
+    return summarizeExternalMcpToolResult(result);
+  }
   const ok = result.ok === true || result.status === 'success';
   const coverage = summarizeMediaCoverage(result);
   const partial = result.partial_success === true
@@ -434,6 +469,20 @@ function summarizeToolResult(result = {}) {
   if (coverage.truncatedByMaxAssets) summary.truncated_by_max_assets = true;
   if (coverage.warnings.length > 0) summary.warnings = coverage.warnings;
   return summary;
+}
+
+function summarizeExternalMcpToolResult(result = {}) {
+  const ok = result.ok === true || result.status === 'success';
+  const partial = result.partial_success === true || result.partialSuccess === true || result.status === 'partial_success';
+  return {
+    type: 'external_mcp_tool_result',
+    server_id: sanitizeShortString(result.serverId || result.server_id),
+    tool: sanitizeShortString(result.toolName || result.tool_name || result.name),
+    tier: sanitizeShortString(result.tier || ''),
+    status: partial ? 'partial_success' : ok ? 'success' : 'failure',
+    result_id_hash: hashOptional(result.resultId || result.result_id || result.artifact_id || result.artifactId || result.id),
+    error_code: sanitizeShortString(result.error_code || result.errorCode || result.code),
+  };
 }
 
 function summarizeMediaCoverage(result = {}) {

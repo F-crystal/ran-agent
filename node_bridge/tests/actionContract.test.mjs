@@ -198,6 +198,90 @@ test('action contract classifies memory writes and records save result evidence'
   assert.equal(serialized.includes('/opt/ran_agent'), false);
 });
 
+test('action contract classifies external MCP reads and records sanitized external tool evidence', () => {
+  const result = evaluateActionContract({
+    requestId: 'req-external-mcp-read',
+    message: {
+      text: '通过 external_mcp_gateway 读一下这个论坛帖子',
+      route_hint: 'external_mcp_watch',
+      channel: 'wechat',
+      conversation_id: 'conv-external-mcp-read',
+    },
+    response: { reply_text: '读到了，这个帖子主要在讨论游戏 AI。' },
+    toolResults: [
+      {
+        type: 'external_mcp_tool_result',
+        ok: true,
+        serverId: 'forum.example',
+        toolName: 'forum.read_thread',
+        resultId: 'raw-external-result-id',
+        rawText: 'private forum payload',
+      },
+    ],
+    config: { enabled: true, mode: 'observe', maxRepairAttempts: 1 },
+  });
+
+  const evidence = result.observed_evidence.find((item) => item.type === 'external_mcp_tool_result');
+  const serialized = JSON.stringify(result);
+  assert.equal(result.intent, 'external_mcp_read');
+  assert.deepEqual(result.required_evidence, ['external_mcp_tool_result']);
+  assert.equal(result.evidence_satisfied, true);
+  assert.equal(evidence.server_id, 'forum.example');
+  assert.equal(evidence.tool, 'forum.read_thread');
+  assert.equal(evidence.status, 'success');
+  assert.match(evidence.result_id_hash, /^[a-f0-9]{16}$/);
+  assert.equal(serialized.includes('raw-external-result-id'), false);
+  assert.equal(serialized.includes('private forum payload'), false);
+});
+
+test('action gate rewrites unsupported external MCP read claims', () => {
+  const contract = evaluateActionContract({
+    requestId: 'req-external-mcp-read-missing',
+    message: {
+      text: '通过 external_mcp_gateway 读一下论坛帖子',
+      route_hint: 'external_mcp_watch',
+      channel: 'wechat',
+      conversation_id: 'conv-external-mcp-read-missing',
+    },
+    response: { reply_text: '读到了，这个帖子主要在讨论游戏 AI。' },
+    config: { enabled: true, mode: 'enforce', maxRepairAttempts: 1 },
+  });
+  const gate = evaluateActionGate({
+    contract,
+    finalReply: '读到了，这个帖子主要在讨论游戏 AI。',
+    mode: 'enforce',
+  });
+
+  assert.equal(contract.intent, 'external_mcp_read');
+  assert.equal(gate.shouldRewrite, true);
+  assert.match(gate.rewrittenText, /还没有成功读取/);
+});
+
+test('action gate rewrites unsupported external MCP side-effect success claims', () => {
+  const contract = evaluateActionContract({
+    requestId: 'req-external-mcp-write-missing',
+    message: {
+      text: '通过 external_mcp_gateway 评论这个论坛帖子',
+      route_hint: 'external_mcp_action',
+      channel: 'wechat',
+      conversation_id: 'conv-external-mcp-write-missing',
+    },
+    response: { reply_text: '已经评论成功。' },
+    config: { enabled: true, mode: 'enforce', maxRepairAttempts: 1 },
+  });
+  const gate = evaluateActionGate({
+    contract,
+    finalReply: '已经评论成功。',
+    mode: 'enforce',
+  });
+
+  assert.equal(contract.intent, 'external_mcp_write');
+  assert.deepEqual(contract.required_evidence, ['authorization', 'external_mcp_tool_result']);
+  assert.ok(contract.final_claims.includes('external_mcp_action_done'));
+  assert.equal(gate.shouldRewrite, true);
+  assert.match(gate.rewrittenText, /还没有确认外部 MCP 操作成功/);
+});
+
 test('action gate config defaults to enabled observe mode', () => {
   assert.deepEqual(getActionGateConfig({}), {
     enabled: true,
