@@ -6,10 +6,15 @@ import path from 'node:path';
 import {
   getOutboundServerConfig,
   handleEnvironmentSensorRequest,
+  handleExternalMcpSystemQueueRequest,
   handleOutboundRequest,
   handleScheduledAiDigestRequest,
   resolveStateDir,
 } from '../src/outboundServer.mjs';
+import {
+  addExternalMcpWatch,
+  recordExternalMcpNotification,
+} from '../src/externalMcp/watchlist.mjs';
 import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
@@ -184,6 +189,179 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   assert.equal(calls[0].bin, 'lark-cli');
   assert.equal(calls[0].args.includes('--user-id'), true);
   assert.equal(calls[0].args.includes('ou-home'), true);
+});
+
+test('handleExternalMcpSystemQueueRequest is disabled by default and does not call Hermes', async () => {
+  let channelCalled = false;
+  const result = await handleExternalMcpSystemQueueRequest({
+    env: {},
+    bodyText: JSON.stringify({
+      serverId: 'forum.example',
+      watchScope: 'thread:forum.example/123',
+      topicKey: 'thread:forum.example/123',
+      reason: 'watched forum thread changed',
+      deliverability: 'notify_allowed',
+    }),
+    channelHub: async () => {
+      channelCalled = true;
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.dropped, true);
+  assert.equal(result.payload.reason, 'external_mcp_system_queue_disabled');
+  assert.equal(channelCalled, false);
+});
+
+test('handleExternalMcpSystemQueueRequest drops unregistered watch scopes', async () => {
+  const env = {
+    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+    EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
+  };
+  setFeishuHomeDmTarget({
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: 'oc-home',
+    sender_id: 'ou-home',
+  }, env);
+
+  let channelCalled = false;
+  const result = await handleExternalMcpSystemQueueRequest({
+    env,
+    bodyText: JSON.stringify({
+      globalUserId: 'ou-home',
+      serverId: 'forum.example',
+      watchScope: 'thread:forum.example/123',
+      topicKey: 'thread:forum.example/123',
+      reason: 'watched forum thread changed',
+      deliverability: 'notify_allowed',
+    }),
+    channelHub: async () => {
+      channelCalled = true;
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.dropped, true);
+  assert.equal(result.payload.reason, 'watch_not_registered');
+  assert.equal(channelCalled, false);
+});
+
+test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic Hermes turns', async () => {
+  const env = {
+    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+    EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
+    FEISHU_LARK_CLI_BIN: 'lark-cli',
+    FEISHU_LARK_CLI_IDENTITY: 'bot',
+  };
+  setFeishuHomeDmTarget({
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: 'oc-home',
+    sender_id: 'ou-home',
+  }, env);
+  addExternalMcpWatch({
+    globalUserId: 'ou-home',
+    serverId: 'forum.example',
+    kind: 'forum',
+    scope: 'thread:forum.example/123',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+
+  let channelMessage = null;
+  const calls = [];
+  const result = await handleExternalMcpSystemQueueRequest({
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    env,
+    bodyText: JSON.stringify({
+      id: 'watch-event-1',
+      globalUserId: 'ou-home',
+      serverId: 'forum.example',
+      watchScope: 'thread:forum.example/123',
+      topicKey: 'thread:forum.example/123',
+      reason: 'watched forum thread changed',
+      deliverability: 'notify_allowed',
+      allowedCapabilityTiers: ['T1', 'T2'],
+      now: '2026-07-01T12:00:00Z',
+    }),
+    channelHub: async (message, options) => {
+      channelMessage = message;
+      await options.adapter.sendReply({
+        target: {
+          channel_type: 'dm',
+          conversation_id: message.conversation_id,
+          sender_id: message.sender_id,
+        },
+        text: '你关注的帖子有更新',
+        message,
+      });
+      return { replyText: '你关注的帖子有更新', suppressSend: false };
+    },
+    execFileImpl: async (bin, args) => {
+      calls.push({ bin, args });
+      return { stdout: '{"ok":true}' };
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.notified, true);
+  assert.equal(channelMessage.platform, 'feishu');
+  assert.equal(channelMessage.route_hint, 'external_mcp_system_queue');
+  assert.match(channelMessage.text, /watched forum thread changed/);
+  assert.match(channelMessage.text, /allowed_capability_tiers: T1,T2/);
+  assert.equal(calls[0].bin, 'lark-cli');
+  assert.equal(calls[0].args.includes('--user-id'), true);
+  assert.equal(calls[0].args.includes('ou-home'), true);
+});
+
+test('handleExternalMcpSystemQueueRequest rate limits notify events before Hermes is called', async () => {
+  const env = {
+    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+    EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
+  };
+  setFeishuHomeDmTarget({
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: 'oc-home',
+    sender_id: 'ou-home',
+  }, env);
+  addExternalMcpWatch({
+    globalUserId: 'ou-home',
+    serverId: 'forum.example',
+    kind: 'forum',
+    scope: 'thread:forum.example/123',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+  recordExternalMcpNotification({
+    globalUserId: 'ou-home',
+    serverId: 'forum.example',
+    topicKey: 'thread:forum.example/old',
+    now: '2026-07-01T09:00:00Z',
+  }, { env });
+
+  let channelCalled = false;
+  const result = await handleExternalMcpSystemQueueRequest({
+    env,
+    bodyText: JSON.stringify({
+      globalUserId: 'ou-home',
+      serverId: 'forum.example',
+      watchScope: 'thread:forum.example/123',
+      topicKey: 'thread:forum.example/123',
+      reason: 'watched forum thread changed',
+      deliverability: 'notify_allowed',
+      now: '2026-07-01T12:00:00Z',
+    }),
+    channelHub: async () => {
+      channelCalled = true;
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.dropped, true);
+  assert.equal(result.payload.reason, 'global_daily_budget_exhausted');
+  assert.equal(channelCalled, false);
 });
 
 test('handleOutboundRequest drops checkin when proactive delivery is disabled', async () => {

@@ -9,6 +9,15 @@ import { fileURLToPath } from 'node:url';
 
 import { handleIncomingMessage } from './channelHub.mjs';
 import { saveSensorLoggerMessage } from './environmentSense.mjs';
+import {
+  buildExternalMcpSyntheticTurn,
+  shouldSuppressSystemQueueReply,
+} from './externalMcp/systemQueue.mjs';
+import {
+  checkExternalMcpRateBudget,
+  listExternalMcpWatches,
+  recordExternalMcpNotification,
+} from './externalMcp/watchlist.mjs';
 import { sendFeishuReply } from './feishuBridge.mjs';
 import {
   appendPendingOutboundMessage,
@@ -493,6 +502,148 @@ export async function handleScheduledAiDigestRequest({
   };
 }
 
+export async function handleExternalMcpSystemQueueRequest({
+  logger = console,
+  env = process.env,
+  bodyText = '',
+  channelHub = handleIncomingMessage,
+  execFileImpl,
+} = {}) {
+  if (!isExternalMcpSystemQueueEnabled(env)) {
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: 'external_mcp_system_queue_disabled' },
+    };
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    return {
+      status: 400,
+      payload: { error: 'request body must be valid JSON' },
+    };
+  }
+
+  const target = getFeishuHomeDmTarget(env);
+  if (!target) {
+    logger.warn?.('external MCP system queue skipped because Feishu home DM target is missing');
+    return {
+      status: 200,
+      payload: { ok: true, skipped: true, reason: 'feishu_home_dm_target_missing' },
+    };
+  }
+
+  const globalUserId = sanitizeExternalMcpIdentity(
+    payload.globalUserId || payload.global_user_id || target.sender_id
+  );
+  const serverId = sanitizeExternalMcpIdentity(payload.serverId || payload.server_id || '');
+  const watchScope = sanitizeExternalMcpScope(payload.watchScope || payload.watch_scope || '');
+  const topicKey = sanitizeExternalMcpScope(payload.topicKey || payload.topic_key || watchScope);
+  if (!globalUserId || !serverId || !watchScope || !topicKey) {
+    return {
+      status: 400,
+      payload: { error: 'globalUserId, serverId, watchScope, and topicKey are required' },
+    };
+  }
+
+  const watch = listExternalMcpWatches({ env }).find((item) => (
+    item.globalUserId === globalUserId
+    && item.serverId === serverId
+    && item.scope === watchScope
+  ));
+  if (!watch) {
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: 'watch_not_registered' },
+    };
+  }
+
+  const deliverability = normalizeExternalMcpDeliverability(payload.deliverability);
+  const notifyAllowed = deliverability === 'notify_allowed' && watch.notify !== false;
+  if (deliverability === 'notify_allowed' && watch.notify === false) {
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: 'watch_notifications_disabled' },
+    };
+  }
+  if (notifyAllowed) {
+    const budget = checkExternalMcpRateBudget({
+      globalUserId,
+      serverId,
+      topicKey,
+      now: payload.now,
+    }, { env });
+    if (!budget.allowed) {
+      return {
+        status: 200,
+        payload: { ok: true, dropped: true, reason: budget.reason },
+      };
+    }
+  }
+
+  let adapterSent = false;
+  const idempotencyKey = sanitizeExternalMcpIdentity(payload.id || payload.eventId || payload.event_id)
+    || `external-mcp-${Date.now()}`;
+  const message = buildExternalMcpSyntheticTurn({
+    id: idempotencyKey,
+    platform: 'feishu',
+    conversationId: target.conversation_id,
+    senderId: target.sender_id,
+    reason: payload.reason,
+    watchScope,
+    deliverability,
+    allowedCapabilityTiers: payload.allowedCapabilityTiers || payload.allowed_capability_tiers,
+    createdAt: payload.createdAt || payload.created_at,
+  });
+
+  const response = await channelHub(message, {
+    env,
+    logger,
+    adapter: notifyAllowed
+      ? {
+          async sendReply({ target: replyTarget, text, message: sourceMessage }) {
+            if (shouldSuppressSystemQueueReply({
+              routeHint: sourceMessage?.route_hint || '',
+              replyText: text,
+            }).suppress) {
+              return;
+            }
+            await sendFeishuReply({
+              target: {
+                ...replyTarget,
+                source_message_id: sourceMessage?.id || sourceMessage?.message_id || idempotencyKey,
+              },
+              text,
+              env,
+              execFileImpl,
+            });
+            adapterSent = true;
+          },
+        }
+      : undefined,
+  });
+
+  if (adapterSent) {
+    recordExternalMcpNotification({
+      globalUserId,
+      serverId,
+      topicKey,
+      now: payload.now,
+    }, { env });
+  }
+
+  return {
+    status: 200,
+    payload: {
+      ok: true,
+      notified: adapterSent,
+      reply_length: String(response?.replyText || '').length,
+    },
+  };
+}
+
 function buildScheduledAiDigestPrompt(facts) {
   if (String(facts || '').includes('[AIHOT/Search Hub 事实材料]')) {
     return String(facts || '').trim();
@@ -514,6 +665,12 @@ function isProactiveDeliveryEnabled(env = process.env) {
 function isReminderDeliveryEnabled(env = process.env) {
   return ['1', 'true', 'yes', 'on'].includes(
     String(env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED || 'false').trim().toLowerCase()
+  );
+}
+
+function isExternalMcpSystemQueueEnabled(env = process.env) {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(env.EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED || 'false').trim().toLowerCase()
   );
 }
 
@@ -558,6 +715,8 @@ export function createOutboundServer({ bot, logger = console } = {}) {
       let result;
       if (request.method === 'POST' && request.url === '/scheduled/ai-daily-digest') {
         result = await handleScheduledAiDigestRequest({ logger, env: process.env, bodyText: rawBody });
+      } else if (request.method === 'POST' && request.url === '/external-mcp/system-queue') {
+        result = await handleExternalMcpSystemQueueRequest({ logger, env: process.env, bodyText: rawBody });
       } else if (String(request.url || '').startsWith('/environment/sensorlogger/')) {
         result = await handleEnvironmentSensorRequest({
           env: process.env,
@@ -578,4 +737,25 @@ export function createOutboundServer({ bot, logger = console } = {}) {
       response.end(JSON.stringify(result.payload));
     });
   });
+}
+
+function normalizeExternalMcpDeliverability(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return ['silent_only', 'draft_allowed', 'notify_allowed'].includes(text) ? text : 'silent_only';
+}
+
+function sanitizeExternalMcpIdentity(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[\r\n\t]/g, ' ')
+    .replace(/[^a-zA-Z0-9_.:-]/g, '')
+    .slice(0, 120);
+}
+
+function sanitizeExternalMcpScope(value) {
+  return String(value || '')
+    .trim()
+    .replace(/[\r\n\t]/g, ' ')
+    .replace(/[^a-zA-Z0-9_.:/-]/g, '')
+    .slice(0, 180);
 }
