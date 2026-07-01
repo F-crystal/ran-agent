@@ -509,10 +509,11 @@ export async function handleExternalMcpSystemQueueRequest({
   channelHub = handleIncomingMessage,
   execFileImpl,
 } = {}) {
-  if (!isExternalMcpSystemQueueEnabled(env)) {
+  const queueGate = getExternalMcpSystemQueueGate(env);
+  if (!queueGate.enabled) {
     return {
       status: 200,
-      payload: { ok: true, dropped: true, reason: 'external_mcp_system_queue_disabled' },
+      payload: { ok: true, dropped: true, reason: queueGate.reason },
     };
   }
 
@@ -668,9 +669,19 @@ function isReminderDeliveryEnabled(env = process.env) {
   );
 }
 
-function isExternalMcpSystemQueueEnabled(env = process.env) {
+function getExternalMcpSystemQueueGate(env = process.env) {
+  if (!isTruthyEnv(env.EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED)) {
+    return { enabled: false, reason: 'external_mcp_system_queue_disabled' };
+  }
+  if (!isTruthyEnv(env.EXTERNAL_MCP_GATEWAY_ENABLED)) {
+    return { enabled: false, reason: 'external_mcp_gateway_disabled' };
+  }
+  return { enabled: true, reason: '' };
+}
+
+function isTruthyEnv(value) {
   return ['1', 'true', 'yes', 'on'].includes(
-    String(env.EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED || 'false').trim().toLowerCase()
+    String(value || 'false').trim().toLowerCase()
   );
 }
 

@@ -214,9 +214,33 @@ test('handleExternalMcpSystemQueueRequest is disabled by default and does not ca
   assert.equal(channelCalled, false);
 });
 
+test('handleExternalMcpSystemQueueRequest requires the external MCP gateway gate too', async () => {
+  let channelCalled = false;
+  const result = await handleExternalMcpSystemQueueRequest({
+    env: { EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true' },
+    bodyText: JSON.stringify({
+      serverId: 'forum.example',
+      watchScope: 'thread:forum.example/123',
+      topicKey: 'thread:forum.example/123',
+      reason: 'watched forum thread changed',
+      deliverability: 'notify_allowed',
+    }),
+    channelHub: async () => {
+      channelCalled = true;
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.dropped, true);
+  assert.equal(result.payload.reason, 'external_mcp_gateway_disabled');
+  assert.equal(channelCalled, false);
+});
+
 test('handleExternalMcpSystemQueueRequest drops unregistered watch scopes', async () => {
   const env = {
     RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+    EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
     EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
   };
   setFeishuHomeDmTarget({
@@ -252,6 +276,7 @@ test('handleExternalMcpSystemQueueRequest drops unregistered watch scopes', asyn
 test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic Hermes turns', async () => {
   const env = {
     RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+    EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
     EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
     FEISHU_LARK_CLI_BIN: 'lark-cli',
     FEISHU_LARK_CLI_IDENTITY: 'bot',
@@ -319,6 +344,7 @@ test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic
 test('handleExternalMcpSystemQueueRequest rate limits notify events before Hermes is called', async () => {
   const env = {
     RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+    EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
     EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
   };
   setFeishuHomeDmTarget({
