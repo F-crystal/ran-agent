@@ -18,6 +18,10 @@ WeChat / Feishu / Desktop Proxy
 
 Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
+
+External MCP candidates (disabled by default)
+  -> external_mcp_gateway registry/policy/session/evidence
+  -> optional /external-mcp/system-queue synthetic Hermes turn
 ```
 
 - Provider: `hermes`; model: `deepseek-v4-flash`; fallback provider: none.
@@ -31,6 +35,12 @@ Python backend
 - The only scheduled outbound message is the opt-in AI daily digest. It runs
   through the Feishu/Hermes mainline and does not reopen old proactive
   check-ins, reminders, or life-loop outbound behavior.
+- `external_mcp_gateway` is registered as a stable MCP surface in lite/full, but
+  production calls are disabled by default with
+  `EXTERNAL_MCP_GATEWAY_ENABLED=false` and
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`. It must not replace
+  `social_reader`, `media_reader`, `search_hub`, `sticker_catalog`, or
+  `co_reading`.
 
 ## Lite/Full Runtime
 
@@ -58,6 +68,8 @@ Python backend
 - Tool visibility diagnosis: `bash scripts/diagnose-hermes-tools.sh`.
 - Media/XHS diagnosis: `bash scripts/diagnose-media-xhs.sh`.
 - Sticker Catalog smoke: `bash scripts/diagnose-sticker-catalog.sh`.
+- External MCP gateway diagnosis:
+  `bash scripts/diagnose-external-mcp-gateway.sh`.
 - Hermes context/cache observation:
   `journalctl -u ran-agent-node.service --since '30 minutes ago' --no-pager | grep -E 'hermes-provider-usage|hermes-context-components'`.
 
@@ -103,6 +115,8 @@ Current shared non-secret keys include:
 - `OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp`
 - `OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra`
 - `PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback`
+- `EXTERNAL_MCP_GATEWAY_ENABLED=false`
+- `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
 `scripts/clean-uv-cache-safe.sh` for cleanup and do not delete social-reader
@@ -128,6 +142,7 @@ media directories so redeploys do not depend on manual `mkdir`.
 | `ombre_memory` / `ombre_memory_extra` | Optional upstream Ombre Brain direct MCP, full-profile memory/debug surface |
 | `media_generation` | Image and speech generation |
 | `playwright` | Dynamic/visual web pages, full/debug use |
+| `external_mcp_gateway` | Stable default-disabled broker for future reviewed game/forum/browser MCPs |
 
 - Search Hub is registered in both lite and full. Lite uses lightweight public
   providers; full may use Playwright fallback. OpenCLI browser-backed remains
@@ -163,6 +178,14 @@ media directories so redeploys do not depend on manual `mkdir`.
 - Actual social links still use `social_reader` / `media_reader` first. Search
   Hub must not replace the XHS/Bilibili/Zhihu/WeChat link-read mainline.
 - XHS links must not first-read through browser navigation or terminal.
+- External MCP manifests are untrusted until normalized and classified. T4/T5
+  side effects, forum comments, game actions, and external writes require
+  pending action/待确认 or scoped grant plus real executor evidence; no reply may
+  claim success without an `external_mcp_tool_result`. Proactive external MCP
+  notices require an explicit watchlist/关注 scope and rate budget before a
+  synthetic Hermes turn may notify the Feishu target. The system queue only
+  creates synthetic Hermes turns; `silent`, `remember`, and empty replies are
+  suppressed instead of sending visible text.
 
 ## XHS And Evidence Gate
 
@@ -258,6 +281,10 @@ media directories so redeploys do not depend on manual `mkdir`.
   timeline.
 - `PERSONAL_AGENT_PROACTIVE_ENABLED` and
   `PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED` remain `false`.
+- External MCP proactive delivery is not part of the old proactive mainline.
+  The separate system queue remains disabled by
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`; if explicitly enabled later, it is
+  watchlist/rate-budget limited and enters Hermes as a synthetic Feishu turn.
 
 ## Protected Local State
 
@@ -269,6 +296,7 @@ Never commit or force-add:
   `.ran_agent_state/wechat/inbound/`,
   `.ran_agent_state/feishu/inbound/`,
   `.ran_agent_state/action_contract/`,
+  `.ran_agent_state/external_mcp/`,
   `.ran_agent_state/hermes/`,
   `.ran_agent_state/co_reading/`.
 - Provider-visible history, pending action state, sticker assets, inbound media,

@@ -90,3 +90,8 @@ deployment notes belong under ignored `local_archive/`, not under
 - Hermes context optimization is closed as a conservative package: local recent
   history, bounded global active topic, optional cache-friendly append history,
   and opt-in lite soft reset all write only under ignored runtime state.
+- `external_mcp_gateway` is registered as a stable default-disabled MCP broker
+  for future reviewed game/forum/browser MCPs. Production defaults remain
+  `EXTERNAL_MCP_GATEWAY_ENABLED=false` and
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`; notifications require watchlist
+  and rate budget, while T4/T5 writes require pending action evidence.

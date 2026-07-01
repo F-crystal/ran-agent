@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-06-30)
+Status: CURRENT (2026-07-01)
 
 ## Split Of Responsibility
 
@@ -17,11 +17,15 @@ Status: CURRENT (2026-06-30)
 - Chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Scheduled digest mainline: `scheduler -> AIHOT facts -> synthetic Feishu turn -> Hermes -> Feishu reply`
+- External MCP candidate mainline: `external_mcp_gateway -> registry/policy/session/evidence -> optional synthetic Hermes turn`; current production defaults are `EXTERNAL_MCP_GATEWAY_ENABLED=false` and `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`.
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
 - OpenClaw, Kimi, GLM, and MiMo Power are retired. Hermes (DeepSeek V4) is the sole frontend.
 - Life-loop, reminders, and reflection remain backend/support layers. They are
   not an open-ended proactive outbound mainline; only the allowlisted scheduled
   AI daily digest may send scheduled outbound content.
+- External MCP proactive is not a reopened life-loop. It may only be considered
+  for explicit watchlist/关注 scopes, rate budget, and a synthetic Hermes turn;
+  `silent`/`remember`/empty outputs do not send visible text.
 
 ## Specialist Boundaries
 
@@ -30,6 +34,13 @@ Status: CURRENT (2026-06-30)
 - Memory, reflection, knowledge-state, life-loop, night-cycle, ombre-memory remain support layers.
 - The scheduled AI daily digest is an explicit allowlist path and must not be
   generalized into open-ended proactive check-ins.
+- `external_mcp_gateway` is a broker, not a replacement for `social_reader`,
+  `media_reader`, `search_hub`, `sticker_catalog`, or `co_reading`. Untrusted
+  external MCP descriptions, schemas, and results must be normalized and
+  classified before Hermes sees them.
+- T4/T5 side effects, forum/game writes, and `external_mcp_write` actions
+  require pending action/待确认 or scoped grant plus real executor evidence.
+  Hermes must not claim success from a planned or denied external MCP call.
 
 ## Technical Limits
 

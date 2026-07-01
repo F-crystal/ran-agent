@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-07-01)
 
 ## Why Not Prompt Only
 
@@ -17,15 +17,17 @@ back to the same safe rewrite.
 
 An action-bearing response is any response that claims or implies an external
 operation, including reading a link, reading media, sending a sticker, generating
-media, saving state, deleting/updating state, or sending something to an
-external destination. Ordinary chat remains `intent=none`.
+media, saving state, deleting/updating state, reading an external MCP, writing
+through an external MCP, or sending something to an external destination.
+Ordinary chat remains `intent=none`.
 
 ## Contract Shape
 
 Each contract records:
 
 - `intent`: one of `none`, `social_read`, `media_read`, `sticker_send`,
-  `media_generate`, `memory_write`, or `external_send`.
+  `media_generate`, `memory_write`, `external_mcp_read`,
+  `external_mcp_write`, or `external_send`.
 - `required_evidence`: marker, artifact, tool result, save result,
   authorization, or outbound result expected for the intent.
 - `observed_evidence`: sanitized runtime evidence visible to Node.
@@ -113,6 +115,11 @@ success claim.
 - `external_send`: no successful outbound result means the reply must not claim
   a message/email/forward was sent. Failed outbound evidence becomes a failure
   statement.
+- `external_mcp_read`: no successful `external_mcp_tool_result` means the
+  reply must not claim an external MCP game/forum/browser state was read.
+- `external_mcp_write`: no authorization plus successful
+  `external_mcp_tool_result` means the reply must not claim a T4/T5 external
+  MCP side effect was completed.
 
 The safe rewrite does not expose action-gate internals, provider tokens,
 cookies, absolute paths, tool traces, or raw artifact content.
@@ -142,6 +149,9 @@ Forbidden repair intents:
 - `memory_write`: long-term memory writes, preferences, co-reading mutations,
   or saving media as a sticker.
 - `external_send`: emails, forwards, replies to third parties, or bulk sends.
+- `external_mcp_write`: forum comments, game actions, browser side effects, or
+  arbitrary external MCP writes. These require pending action/待确认 or scoped
+  grant and are never inferred from model text alone.
 - `destructive_update`: deletes, overwrites, or bulk data changes.
 
 High-risk intents are not repaired in `repair` mode. If evidence is missing,

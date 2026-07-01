@@ -50,6 +50,7 @@ platform_toolsets:
     - mcp-sticker_catalog
     - mcp-personal_memory
     - mcp-obsidian_memory
+    - mcp-external_mcp_gateway
   gateway:
     - web
     - skills
@@ -62,6 +63,7 @@ platform_toolsets:
     - mcp-sticker_catalog
     - mcp-personal_memory
     - mcp-obsidian_memory
+    - mcp-external_mcp_gateway
 
 mcp_servers:
   time:
@@ -129,6 +131,17 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_obsidian_memory_mcp.sh
     timeout: 180
     connect_timeout: 90
+
+  external_mcp_gateway:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_external_mcp_gateway.sh
+    env:
+      EXTERNAL_MCP_GATEWAY_ENABLED: "false"
+      EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "false"
+    timeout: 120
+    connect_timeout: 60
 
   tavily:
     url: "https://mcp.tavily.com/mcp/?tavilyApiKey=${TAVILY_API_KEY}"
