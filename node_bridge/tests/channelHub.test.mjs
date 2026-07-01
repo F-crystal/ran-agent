@@ -59,6 +59,37 @@ test('channel hub routes normalized WeChat message through replyBackend and time
   assert.deepEqual(records.map((item) => item.role), ['user', 'assistant']);
 });
 
+test('channel hub suppresses adapter sends for silent synthetic external MCP turns', async () => {
+  const env = tempEnv();
+  let sendCalled = false;
+  const response = await handleIncomingMessage({
+    id: 'external-mcp-silent-1',
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: 'oc-home',
+    sender_id: 'ou-home',
+    route_hint: 'external_mcp_system_queue',
+    text: 'system wake',
+    created_at: 1000,
+  }, {
+    env,
+    logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: {
+      async getReply() {
+        return { replyText: '', suppressSend: true, suppressReason: 'silent', followUpMessages: [], media: null };
+      },
+    },
+    adapter: {
+      async sendReply() {
+        sendCalled = true;
+      },
+    },
+  });
+
+  assert.equal(response.suppressSend, true);
+  assert.equal(sendCalled, false);
+});
+
 test('channel hub provides cross-platform active topic to Feishu message', async () => {
   const env = tempEnv();
   await handleIncomingMessage({

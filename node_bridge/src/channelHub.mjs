@@ -123,7 +123,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     tags: inferTags(message),
   }, logger);
 
-  if (options.adapter?.sendReply) {
+  if (options.adapter?.sendReply && response.suppressSend !== true) {
     await options.adapter.sendReply({
       target: buildReplyTarget(message),
       text: response.replyText || '',

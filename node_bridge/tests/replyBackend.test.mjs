@@ -80,6 +80,88 @@ test('createReplyBackend defaults to Hermes reply backend', async () => {
   assert.equal(response.source, 'hermes');
 });
 
+test('createReplyBackend suppresses silent external MCP synthetic turns', async () => {
+  const backend = createReplyBackend({
+    env: {
+      HERMES_ACTION_GATE_ENABLED: 'true',
+      HERMES_ACTION_GATE_MODE: 'observe',
+    },
+    hermesImpl: async () => ({
+      reply_text: 'silent',
+      follow_up_messages: [],
+      media: null,
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: 'system wake',
+    sender_id: 'conv-silent',
+    conversation_id: 'conv-silent',
+    channel: 'feishu',
+    route_hint: 'external_mcp_system_queue',
+  });
+
+  assert.equal(response.replyText, '');
+  assert.equal(response.suppressSend, true);
+  assert.equal(response.suppressReason, 'silent');
+});
+
+test('createReplyBackend suppresses remember external MCP synthetic turns without sending JSON', async () => {
+  const backend = createReplyBackend({
+    env: {
+      HERMES_ACTION_GATE_ENABLED: 'true',
+      HERMES_ACTION_GATE_MODE: 'observe',
+    },
+    hermesImpl: async () => ({
+      reply_text: '{"action":"remember","note":"quietly store this"}',
+      follow_up_messages: [],
+      media: null,
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: 'system wake',
+    sender_id: 'conv-remember',
+    conversation_id: 'conv-remember',
+    channel: 'feishu',
+    route_hint: 'external_mcp_system_queue',
+  });
+
+  assert.equal(response.replyText, '');
+  assert.equal(response.suppressSend, true);
+  assert.equal(response.suppressReason, 'remember');
+});
+
+test('createReplyBackend does not suppress literal silent in normal chat', async () => {
+  const backend = createReplyBackend({
+    env: {
+      HERMES_ACTION_GATE_ENABLED: 'true',
+      HERMES_ACTION_GATE_MODE: 'observe',
+    },
+    hermesImpl: async () => ({
+      reply_text: 'silent',
+      follow_up_messages: [],
+      media: null,
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: 'say silent',
+    sender_id: 'conv-normal-silent',
+    conversation_id: 'conv-normal-silent',
+    channel: 'feishu',
+  });
+
+  assert.equal(response.replyText, 'silent');
+  assert.equal(response.suppressSend, false);
+});
+
 test('createReplyBackend forwards stale continuity context to Hermes', async () => {
   let hermesPayload = null;
   const backend = createReplyBackend({

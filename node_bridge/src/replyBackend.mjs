@@ -3,6 +3,7 @@
  */
 
 import { getBackendIngestConfig, ingestExchangeToBackend } from './backendIngestClient.mjs';
+import { shouldSuppressSystemQueueReply } from './externalMcp/systemQueue.mjs';
 import {
   applyActionGateTelemetry,
   evaluateActionContract,
@@ -234,11 +235,18 @@ export function createReplyBackend(options = {}) {
         logActionContract(applyActionGateTelemetry(contract, gate, repair), options.logger || console);
       }
 
-      return {
+      const suppression = shouldSuppressSystemQueueReply({
+        routeHint: message.route_hint || '',
         replyText: finalReplyText,
+      });
+
+      return {
+        replyText: suppression.suppress ? '' : finalReplyText,
         followUpMessages: Array.isArray(response.follow_up_messages) ? response.follow_up_messages : [],
-        media: finalResponseMedia,
+        media: suppression.suppress ? null : finalResponseMedia,
         source: 'hermes',
+        suppressSend: suppression.suppress,
+        suppressReason: suppression.reason,
       };
     },
     config,
