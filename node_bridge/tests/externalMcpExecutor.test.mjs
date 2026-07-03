@@ -1,10 +1,82 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import https from 'node:https';
+import { PassThrough } from 'node:stream';
 import test from 'node:test';
 
 import {
   callExternalMcpTool,
   probeExternalMcpServer,
 } from '../src/externalMcp/executor.mjs';
+
+test('safe fetch pinned lookup honors Node all-address lookup requests', async (t) => {
+  const originalRequest = https.request;
+  const lookups = [];
+
+  https.request = (requestOptions, onResponse) => {
+    let requestBody = '';
+    const request = new EventEmitter();
+    request.write = (chunk) => {
+      requestBody += String(chunk);
+      return true;
+    };
+    request.end = () => {
+      requestOptions.lookup(requestOptions.hostname, { all: true }, (error, addresses, family) => {
+        lookups.push({ error, addresses, family });
+      });
+      const body = JSON.parse(requestBody || '{}');
+      const response = new PassThrough();
+      response.statusCode = body.method === 'notifications/initialized' ? 202 : 200;
+      response.statusMessage = 'OK';
+      response.headers = {
+        'content-type': 'application/json',
+        ...(body.method === 'initialize' ? { 'mcp-session-id': 'upstream-session-1' } : {}),
+      };
+      onResponse(response);
+      if (body.method === 'initialize') {
+        response.end(JSON.stringify({
+          jsonrpc: '2.0',
+          id: body.id,
+          result: {
+            protocolVersion: '2025-06-18',
+            serverInfo: { name: 'cedartoy', version: '1.0.0' },
+          },
+        }));
+      } else if (body.method === 'tools/list') {
+        response.end(JSON.stringify({
+          jsonrpc: '2.0',
+          id: body.id,
+          result: { tools: [{ name: 'ecosystem.cmd', description: 'Run a sandbox game command.' }] },
+        }));
+      } else {
+        response.end('');
+      }
+    };
+    request.destroy = (error) => {
+      if (error) request.emit('error', error);
+    };
+    return request;
+  };
+  t.after(() => {
+    https.request = originalRequest;
+  });
+
+  const result = await probeExternalMcpServer({
+    serverId: 'cedartoy-games',
+    url: 'https://toy.cedarstar.org/mcp',
+    transport: 'streamable-http',
+    activityKind: 'game',
+  }, {
+    lookupImpl: async () => [{ address: '203.0.113.23', family: 4 }],
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(lookups.map((item) => item.addresses), [
+    [{ address: '203.0.113.23', family: 4 }],
+    [{ address: '203.0.113.23', family: 4 }],
+    [{ address: '203.0.113.23', family: 4 }],
+  ]);
+});
 
 test('streamable HTTP executor initializes, lists tools, and calls tools', async () => {
   const requests = [];

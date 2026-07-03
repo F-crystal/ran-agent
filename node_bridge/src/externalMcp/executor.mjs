@@ -318,7 +318,7 @@ async function httpsFetchPinned(allowed, init = {}) {
       method: init.method || 'GET',
       headers: headersToObject(init.headers),
       servername: net.isIP(parsed.hostname) ? undefined : parsed.hostname,
-      lookup: (_hostname, _opts, callback) => callback(null, allowed.address, Number(allowed.family) || net.isIP(allowed.address) || 4),
+      lookup: pinnedLookup(allowed),
     }, (res) => {
       responseStream = res;
       res.once('end', cleanup);
@@ -351,6 +351,19 @@ async function httpsFetchPinned(allowed, init = {}) {
     if (init.body !== undefined && init.body !== null) request.write(init.body);
     request.end();
   });
+}
+
+function pinnedLookup(allowed) {
+  const family = Number(allowed.family) || net.isIP(allowed.address) || 4;
+  return (_hostname, opts, callback) => {
+    process.nextTick(() => {
+      if (opts?.all) {
+        callback(null, [{ address: allowed.address, family }]);
+        return;
+      }
+      callback(null, allowed.address, family);
+    });
+  };
 }
 
 function headersToObject(headers) {
