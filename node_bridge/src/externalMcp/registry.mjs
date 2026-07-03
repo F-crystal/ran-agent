@@ -6,10 +6,15 @@ import path from 'node:path';
 import { resolveStateDir } from '../runtimeState.mjs';
 
 const MAX_TEXT = 360;
+const MAX_SCHEMA_FIELDS = 64;
+const LEGACY_SCHEMA_SUMMARY_FIELDS = 32;
+const MAX_SCHEMA_SCAN_NODES = 512;
+const MAX_SCHEMA_SCAN_DEPTH = 32;
 const SAFE_TRANSPORTS = new Set(['stdio', 'http', 'streamable-http', 'sse', 'websocket']);
 const WRITE_WORDS = /\b(post|submit|send|reply|comment|like|react|follow|dm|message|move|act|trade|save|write|update|create)\b/i;
 const DESTRUCTIVE_WORDS = /\b(delete|remove|destroy|purchase|buy|transfer|report|bulk|spend|irreversible|sudo|shell|exec)\b/i;
 const READ_WORDS = /\b(read|search|list|get|fetch|observe|watch|mentions|profile|thread|summarize|summary)\b/i;
+const ACCOUNT_BOUNDARY_WORDS = /(?:\b(?:oauth|authorization|bearer|api[ _.-]?key|private[ _.-]?key|client[ _.-]?secret|login|log[ _.-]?in|signin|sign[ _.-]?in|signup|sign[ _.-]?up|register|registration|account|cookie|token|access[ _.-]?token|refresh[ _.-]?token|session|session[ _.-]?id|sessdata|jsessionid|phpsessid|jwt|csrf|xsrf|password|secret|credential|credentials)\b|登录|登入|注册|账号|帐号|账户|帐户|密码|口令|凭证|令牌|密钥|私钥|授权|鉴权)/i;
 
 export function validateManifest(input = {}, options = {}) {
   const errors = [];
@@ -65,22 +70,31 @@ export function normalizeManifest(input = {}, options = {}) {
 
 export function normalizeTool(tool = {}, options = {}) {
   const name = sanitizeToolName(tool.name);
+  const inputSchemaSummary = summarizeToolSchema(tool);
   const classification = classifyTool(tool, options);
   return {
     name,
     title: sanitizeText(tool.title || name),
     description: sanitizeText(tool.description || ''),
-    inputSchemaSummary: summarizeSchema(tool.inputSchema || tool.input_schema || {}),
+    inputSchemaSummary,
     annotations: normalizeAnnotations(tool.annotations || {}),
     ...classification,
   };
 }
 
 export function classifyTool(tool = {}, options = {}) {
+  const rawName = String(tool.name || '');
   const name = sanitizeToolName(tool.name);
+  const title = String(tool.title || '');
   const description = String(tool.description || '');
-  const haystack = `${name} ${description}`;
+  const rawSchema = rawInputSchema(tool);
+  const schema = summarizeToolSchema(tool);
+  const schemaRisk = rawSchema === null ? inspectSchemaSummaryRisk(schema) : inspectSchemaRisk(rawSchema);
+  const haystack = `${rawName} ${name} ${title} ${description} ${schema.propertyNames.join(' ')} ${schema.required.join(' ')}`;
   if (DESTRUCTIVE_WORDS.test(haystack)) {
+    return tier('T5', 'owner_full', false, true, 'unclassified_or_high_risk');
+  }
+  if (hasAccountBoundaryText(haystack) || schemaRisk.accountBoundary || schemaRisk.truncated) {
     return tier('T5', 'owner_full', false, true, 'unclassified_or_high_risk');
   }
   if (isSandboxActivityTool(haystack, options)) {
@@ -93,7 +107,7 @@ export function classifyTool(tool = {}, options = {}) {
     return tier('T4', 'full', false, true, 'external_side_effect');
   }
   if (READ_WORDS.test(haystack)) {
-    const authenticated = /\b(auth|private|mention|feed|account)\b/i.test(haystack);
+    const authenticated = /\b(auth|private|mention|feed)\b/i.test(haystack) || hasAccountBoundaryText(haystack);
     return tier(authenticated ? 'T2' : 'T1', authenticated ? 'full' : 'lite', true, false, authenticated ? 'authenticated_read' : 'public_read');
   }
   return tier('T5', 'owner_full', false, true, 'unclassified_or_high_risk');
@@ -122,7 +136,8 @@ export async function admitExternalMcpCandidate(input = {}, options = {}) {
     enabled: decision.state === 'auto_admitted',
     reason: decision.reason,
     errors: [],
-    manifest: validated.manifest,
+    manifest: decision.manifest || validated.manifest,
+    excludedTools: decision.excludedTools || [],
     candidateId: validated.manifest.id,
     now,
   }, env);
@@ -137,8 +152,8 @@ export function listExternalMcpRegistryEntries(options = {}) {
 export function listEnabledExternalMcpManifests(options = {}) {
   return listExternalMcpRegistryEntries(options)
     .filter((entry) => entry.enabled === true && entry.manifest)
-    .map((entry) => entry.manifest)
-    .filter((manifest) => validateManifest(manifest).ok);
+    .map(enabledManifestForEntry)
+    .filter(Boolean);
 }
 
 export function getExternalMcpRegistryEntry(serverId, options = {}) {
@@ -160,8 +175,17 @@ async function classifyAdmission(manifest, options = {}) {
   if (!urlSafety.ok) {
     return { state: 'denied', reason: urlSafety.reason };
   }
-  if (manifest.requiredEnv.length > 0 || manifestRequiresAccount(manifest)) {
+  if (manifest.requiredEnv.length > 0 || manifestMetadataRequiresAccount(manifest)) {
     return { state: 'needs_owner', reason: 'account_or_oauth_requires_owner' };
+  }
+  const subset = autoAdmittableToolSubset(manifest);
+  if (subset.tools.length > 0) {
+    return {
+      state: 'auto_admitted',
+      reason: subset.excludedTools.length > 0 ? 'safe_remote_sandbox_tool_subset' : 'safe_remote_sandbox',
+      manifest: { ...manifest, tools: subset.tools },
+      excludedTools: subset.excludedTools,
+    };
   }
   if (manifest.tools.some((tool) => tool.tier === 'T5')) {
     return { state: 'denied', reason: 'high_risk_tools_denied' };
@@ -172,20 +196,44 @@ async function classifyAdmission(manifest, options = {}) {
   if (manifest.tools.some((tool) => tool.reason === 'authenticated_read')) {
     return { state: 'needs_owner', reason: 'authenticated_read_requires_owner' };
   }
-  if (!isAutoAdmittableActivityManifest(manifest)) {
-    return { state: 'needs_owner', reason: 'non_activity_requires_owner' };
-  }
-  return { state: 'auto_admitted', reason: 'safe_remote_sandbox' };
+  return { state: 'needs_owner', reason: 'non_activity_requires_owner' };
 }
 
-function isAutoAdmittableActivityManifest(manifest) {
-  if (manifest.activityKind === 'game') {
-    return manifest.tools.every((tool) => tool.tier === 'T3' && tool.reason === 'sandbox_activity');
-  }
-  if (['forum', 'browser'].includes(manifest.activityKind)) {
-    return manifest.tools.every((tool) => tool.tier === 'T1' && tool.reason === 'public_read');
-  }
+function autoAdmittableToolSubset(manifest) {
+  const tools = manifest.tools.filter((tool) => isAutoAdmittableTool(manifest, tool));
+  return {
+    tools,
+    excludedTools: manifest.tools
+      .filter((tool) => !tools.includes(tool))
+      .map(excludedToolSummary),
+  };
+}
+
+function isAutoAdmittableTool(manifest, tool) {
+  if (manifest.activityKind === 'game') return tool.tier === 'T3' && tool.reason === 'sandbox_activity';
+  if (['forum', 'browser'].includes(manifest.activityKind)) return tool.tier === 'T1' && tool.reason === 'public_read';
   return false;
+}
+
+function enabledManifestForEntry(entry) {
+  const validated = validateManifest(entry.manifest || {});
+  if (!validated.ok) return null;
+  if (!['safe_remote_sandbox', 'safe_remote_sandbox_tool_subset'].includes(String(entry.reason || ''))) {
+    return validated.manifest;
+  }
+  const subset = autoAdmittableToolSubset(validated.manifest);
+  return subset.tools.length > 0 ? { ...validated.manifest, tools: subset.tools } : null;
+}
+
+function excludedToolSummary(tool) {
+  return {
+    name: tool.name,
+    title: tool.title,
+    tier: tool.tier,
+    profileScope: tool.profileScope,
+    confirmationRequired: tool.confirmationRequired,
+    reason: tool.reason,
+  };
 }
 
 async function validateRemoteMcpUrl(url, options = {}) {
@@ -238,8 +286,11 @@ function isLocalExecutableManifest(manifest) {
 }
 
 function manifestRequiresAccount(manifest) {
-  const serialized = JSON.stringify(manifest).toLowerCase();
-  return /\boauth\b|authorization|bearer|login|account|cookie|token/.test(serialized);
+  return hasAccountBoundaryText(JSON.stringify(manifest));
+}
+
+function manifestMetadataRequiresAccount(manifest) {
+  return manifestRequiresAccount({ ...manifest, tools: [] });
 }
 
 export function scanForForbiddenSecrets(value, path = []) {
@@ -284,10 +335,18 @@ function hasDangerousStartupCommand(input = {}) {
 
 function isSandboxActivityTool(haystack, options = {}) {
   if (normalizeActivityKind(options.activityKind || '') !== 'game') return false;
-  if (/\b(file|shell|exec|oauth|account|payment|pay|forum|post|reply|comment|like|follow)\b/i.test(haystack)) {
+  if (hasAccountBoundaryText(haystack) || /\b(file|shell|exec|auth|payment|pay|forum|post|reply|comment|like|follow)\b/i.test(haystack)) {
     return false;
   }
   return /\b(game|sandbox|simulation|simulator|cmd|command|observe|wait|gaze|look|summon|feed|clean|shelter|choose|name|status|trends|folio|chronicle|encyclopedia)\b|游戏|生态|模拟/i.test(haystack);
+}
+
+function hasAccountBoundaryText(value) {
+  const text = String(value || '');
+  const identifierSplit = text
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/[_./:-]+/g, ' ');
+  return ACCOUNT_BOUNDARY_WORDS.test(text) || ACCOUNT_BOUNDARY_WORDS.test(identifierSplit);
 }
 
 function tier(tierName, profileScope, proactiveAllowed, confirmationRequired, reason) {
@@ -302,14 +361,111 @@ function tier(tierName, profileScope, proactiveAllowed, confirmationRequired, re
 
 function summarizeSchema(schema) {
   const input = schema && typeof schema === 'object' && !Array.isArray(schema) ? schema : {};
-  const properties = input.properties && typeof input.properties === 'object' && !Array.isArray(input.properties)
-    ? input.properties
-    : {};
+  const propertyNames = [];
+  const required = [];
+  collectSchemaFields(input, { propertyNames, required });
   return {
     type: sanitizeShort(input.type || 'object') || 'object',
-    propertyNames: Object.keys(properties).map(sanitizeShort).filter(Boolean).slice(0, 32),
-    required: normalizeStringList(input.required).slice(0, 32),
+    propertyNames,
+    required,
   };
+}
+
+function summarizeToolSchema(tool = {}) {
+  const rawSchema = rawInputSchema(tool);
+  if (rawSchema !== null) return summarizeSchema(rawSchema);
+  return normalizeSchemaSummary(tool.inputSchemaSummary || tool.input_schema_summary || {});
+}
+
+function rawInputSchema(tool = {}) {
+  if (Object.prototype.hasOwnProperty.call(tool, 'inputSchema')) return tool.inputSchema;
+  if (Object.prototype.hasOwnProperty.call(tool, 'input_schema')) return tool.input_schema;
+  return null;
+}
+
+function normalizeSchemaSummary(summary = {}) {
+  const input = summary && typeof summary === 'object' && !Array.isArray(summary) ? summary : {};
+  return {
+    type: sanitizeShort(input.type || 'object') || 'object',
+    propertyNames: normalizeStringList(input.propertyNames || input.property_names).slice(0, MAX_SCHEMA_FIELDS),
+    required: normalizeStringList(input.required).slice(0, MAX_SCHEMA_FIELDS),
+  };
+}
+
+function collectSchemaFields(schema, output, depth = 0) {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema) || depth > 6) return;
+  const properties = schema.properties && typeof schema.properties === 'object' && !Array.isArray(schema.properties)
+    ? schema.properties
+    : {};
+  for (const [key, child] of Object.entries(properties)) {
+    pushUniqueBounded(output.propertyNames, sanitizeShort(key), MAX_SCHEMA_FIELDS);
+    collectSchemaFields(child, output, depth + 1);
+  }
+  for (const item of normalizeStringList(schema.required)) {
+    pushUniqueBounded(output.required, item, MAX_SCHEMA_FIELDS);
+  }
+  if (schema.items && typeof schema.items === 'object' && !Array.isArray(schema.items)) {
+    collectSchemaFields(schema.items, output, depth + 1);
+  }
+  for (const key of ['anyOf', 'oneOf', 'allOf']) {
+    const variants = Array.isArray(schema[key]) ? schema[key] : [];
+    for (const variant of variants) collectSchemaFields(variant, output, depth + 1);
+  }
+}
+
+function pushUniqueBounded(list, value, max) {
+  if (!value || list.length >= max || list.includes(value)) return;
+  list.push(value);
+}
+
+function inspectSchemaRisk(schema) {
+  const state = {
+    accountBoundary: false,
+    truncated: false,
+    nodes: 0,
+    seen: new WeakSet(),
+  };
+  scanSchemaRisk(schema, state, 0);
+  return {
+    accountBoundary: state.accountBoundary,
+    truncated: state.truncated,
+  };
+}
+
+function inspectSchemaSummaryRisk(summary) {
+  const normalized = normalizeSchemaSummary(summary);
+  return {
+    accountBoundary: hasAccountBoundaryText(`${normalized.type} ${normalized.propertyNames.join(' ')} ${normalized.required.join(' ')}`),
+    truncated: normalized.propertyNames.length >= LEGACY_SCHEMA_SUMMARY_FIELDS
+      || normalized.required.length >= LEGACY_SCHEMA_SUMMARY_FIELDS,
+  };
+}
+
+function scanSchemaRisk(value, state, depth) {
+  if (state.accountBoundary || state.truncated) return;
+  if (typeof value === 'string') {
+    if (hasAccountBoundaryText(value)) state.accountBoundary = true;
+    return;
+  }
+  if (!value || typeof value !== 'object') return;
+  if (state.seen.has(value)) return;
+  state.seen.add(value);
+  state.nodes += 1;
+  if (state.nodes > MAX_SCHEMA_SCAN_NODES || depth > MAX_SCHEMA_SCAN_DEPTH) {
+    state.truncated = true;
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) scanSchemaRisk(item, state, depth + 1);
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (hasAccountBoundaryText(key)) {
+      state.accountBoundary = true;
+      return;
+    }
+    scanSchemaRisk(child, state, depth + 1);
+  }
 }
 
 function normalizeAnnotations(annotations) {
@@ -410,7 +566,7 @@ function writeRegistry(entries, env) {
   fs.writeFileSync(target, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
 }
 
-function writeRegistryEntry({ state, enabled, reason, errors, manifest, candidateId, now }, env) {
+function writeRegistryEntry({ state, enabled, reason, errors, manifest, excludedTools, candidateId, now }, env) {
   const serverId = sanitizeId(manifest?.id || candidateId || '');
   const previous = readRegistry(env).find((entry) => entry.serverId === serverId);
   const entry = {
@@ -420,6 +576,7 @@ function writeRegistryEntry({ state, enabled, reason, errors, manifest, candidat
     reason,
     errors: Array.isArray(errors) ? errors : [],
     manifest,
+    excludedTools: Array.isArray(excludedTools) ? excludedTools : [],
     createdAt: previous?.createdAt || now.toISOString(),
     updatedAt: now.toISOString(),
   };

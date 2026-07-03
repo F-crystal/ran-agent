@@ -147,6 +147,139 @@ test('external MCP gateway probes candidates through the executor and stores aut
   assert.deepEqual(enabled.structuredContent.servers.map((server) => server.id), ['cedartoy-games']);
 });
 
+test('external MCP gateway quarantines risky tools from mixed activity servers', async (t) => {
+  const env = tempGatewayEnv(t);
+  const probe = await callTool('mcp_probe_server', {
+    serverId: 'cedartoy-games',
+    url: 'https://toy.cedarstar.org/',
+    transport: 'streamable-http',
+    activityKind: 'game',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    lookupImpl: async () => [{ address: '203.0.113.33', family: 4 }],
+    executor: {
+      async probe() {
+        return {
+          ok: true,
+          manifest: {
+            id: 'cedartoy-games',
+            title: 'CedarToy Games',
+            transport: 'streamable-http',
+            url: 'https://toy.cedarstar.org/',
+            activityKind: 'game',
+            tools: [
+              { name: 'list_games', description: '列出所有可用游戏，返回分类列表及简介' },
+              { name: 'get_guide', description: '获取指定游戏的玩法说明' },
+              { name: 'play', description: '执行游戏操作' },
+              { name: 'login', description: '登录游戏账号' },
+              {
+                name: 'play_extra',
+                description: '执行游戏操作',
+                inputSchema: {
+                  type: 'object',
+                  properties: {
+                    payload: {
+                      type: 'object',
+                      properties: {
+                        token: { type: 'string' },
+                      },
+                      required: ['token'],
+                    },
+                  },
+                },
+              },
+              { name: 'account', description: '注册账号用；游客也能玩，账号仅供存档和持久身份。' },
+            ],
+          },
+        };
+      },
+    },
+  });
+  const tools = await callTool('mcp_list_tools', {
+    serverId: 'cedartoy-games',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+  });
+  const account = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'account',
+    sessionId: 'extmcp_missing',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+  });
+
+  assert.equal(probe.structuredContent.admission.state, 'auto_admitted');
+  assert.equal(probe.structuredContent.admission.entry.reason, 'safe_remote_sandbox_tool_subset');
+  assert.deepEqual(tools.structuredContent.tools.map((tool) => tool.name), ['list_games', 'get_guide', 'play']);
+  assert.equal(account.isError, true);
+  assert.equal(account.structuredContent.error_code, 'EXTERNAL_MCP_TOOL_NOT_FOUND');
+});
+
+test('external MCP gateway activity grants include auto-admitted generic game tools', async (t) => {
+  const env = tempGatewayEnv(t);
+  await callTool('mcp_probe_server', {
+    serverId: 'cedartoy-games',
+    url: 'https://toy.cedarstar.org/',
+    transport: 'streamable-http',
+    activityKind: 'game',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    lookupImpl: async () => [{ address: '203.0.113.34', family: 4 }],
+    executor: {
+      async probe() {
+        return {
+          ok: true,
+          manifest: {
+            id: 'cedartoy-games',
+            title: 'CedarToy Games',
+            transport: 'streamable-http',
+            url: 'https://toy.cedarstar.org/',
+            activityKind: 'game',
+            tools: [
+              { name: 'list_games', description: '列出所有可用游戏，返回分类列表及简介' },
+              { name: 'get_guide', description: '获取指定游戏的玩法说明' },
+              { name: 'play', description: '执行游戏操作' },
+              { name: 'account', description: '注册账号用；游客也能玩，账号仅供存档和持久身份。' },
+            ],
+          },
+        };
+      },
+    },
+  });
+  const activity = await callTool('mcp_start_activity', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    kind: 'game_play',
+    maxMinutes: 30,
+    maxCalls: 2,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+  });
+  let callInput = null;
+  const result = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'play',
+    arguments: { game: 'eco', action: 'eco_observe', params: { player_id: 'hmsran01', action: 'gaze' } },
+    sessionId: activity.structuredContent.activity.sessionId,
+    activityId: activity.structuredContent.activity.activityId,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    executor: {
+      async call(input) {
+        callInput = input;
+        return { ok: true, result: { content: [{ type: 'text', text: '一池清水' }] } };
+      },
+    },
+  });
+
+  assert.equal(activity.structuredContent.ok, true);
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(callInput.toolName, 'play');
+  assert.equal(callInput.url, 'https://toy.cedarstar.org/');
+});
+
 test('external MCP gateway calls admitted tools through policy and executor', async (t) => {
   const env = tempGatewayEnv(t);
   await callTool('mcp_probe_server', {

@@ -337,6 +337,7 @@ async function dispatchTool(name, args, options) {
       maxMinutes: args.maxMinutes,
       maxCalls: args.maxCalls,
       maxShares: args.maxShares,
+      allowedToolPattern: activityToolPattern(server, args.kind),
       now: options.now,
     }, options);
     if (activity.ok === false) return errorResult(activity.error, activity.error_code);
@@ -446,6 +447,27 @@ function publicActivity(activity) {
     budget: activity.budget,
     expiresAt: activity.expiresAt,
   };
+}
+
+function activityToolPattern(server, kind) {
+  const normalizedKind = String(kind || '').trim().toLowerCase();
+  const tools = Array.isArray(server?.tools) ? server.tools : [];
+  const names = tools
+    .filter((toolItem) => activityAllowsTool(normalizedKind, toolItem))
+    .map((toolItem) => String(toolItem.name || '').trim())
+    .filter(Boolean)
+    .slice(0, 128);
+  return names.length > 0 ? `^(?:${names.map(escapeRegExp).join('|')})$` : '';
+}
+
+function activityAllowsTool(kind, toolItem) {
+  if (kind === 'game_play') return toolItem.tier === 'T3' && toolItem.reason === 'sandbox_activity';
+  if (kind === 'forum_read') return ['T1', 'T2'].includes(toolItem.tier) && toolItem.confirmationRequired !== true;
+  return false;
+}
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function isGatewayEnabled(env = process.env) {
