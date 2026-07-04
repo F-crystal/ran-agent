@@ -41,7 +41,6 @@ test('social reader exposes only read-only tools with object schemas', () => {
       'read_social_post',
       'read_social_post_deep',
       'read_music_share',
-      'check_social_login',
     ]
   );
   for (const tool of tools) {
@@ -72,7 +71,7 @@ test('social reader MCP tools/list hides XHS browse tools by default', async () 
   assert.equal(listed.tools.some((tool) => tool.name === 'xhs_browse_note'), false);
 });
 
-test('social reader rejects direct XHS browse calls unless explicitly enabled', async () => {
+test('social reader rejects retired direct XHS browse calls', async () => {
   const result = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
@@ -85,16 +84,64 @@ test('social reader rejects direct XHS browse calls unless explicitly enabled', 
   );
 
   assert.equal(result.structuredContent.ok, false);
-  assert.equal(result.structuredContent.error_code, 'XHS_BROWSE_TOOL_HIDDEN');
+  assert.equal(result.structuredContent.error_code, 'XHS_ACCOUNT_BACKED_DISABLED');
 });
 
-test('social reader exposes XHS browse tools only when explicitly enabled', async () => {
+test('social reader never exposes XHS browse tools', async () => {
   const listed = await handleSocialReaderMcpRequest(
     { method: 'tools/list', params: {} },
     { env: { SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true' } }
   );
 
-  assert.ok(listed.tools.some((tool) => tool.name === 'xhs_browse_note'));
+  assert.equal(listed.tools.some((tool) => tool.name.startsWith('xhs_browse_')), false);
+  assert.equal(listed.tools.some((tool) => tool.name === 'check_social_login'), false);
+});
+
+test('read_social_post public-only XHS ignores poisoned account-backed environment', async () => {
+  const calls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post',
+        arguments: {
+          url: '公开解析测试 https://www.xiaohongshu.com/explore/public-only-note?xsec_token=poison',
+          include_comments: true,
+        },
+      },
+    },
+    {
+      env: xhsReadyEnv({
+        XHS_COOKIE: 'a1=secret',
+        XHS_BROWSE_ENABLED: 'true',
+        XHS_BROWSE_MCP_COMMAND: 'mcporter',
+        SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+      }),
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              title: '公开解析标题',
+              desc: '公开解析正文',
+              images: [{ urlDefault: 'https://sns-webpic-qc.xhscdn.com/public-only-1' }],
+            }),
+          }],
+        };
+      },
+      xhsBrowseCallImpl: async () => {
+        throw new Error('xhs browse must not be called in public-only mode');
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.source, 'wanyi-watermark-mcp');
+  assert.equal(result.structuredContent.comments_supported, false);
+  assert.equal(calls.length, 1);
 });
 
 test('detectSocialPlatform recognizes common Chinese social share hosts', () => {
@@ -168,711 +215,45 @@ test('read_social_post does not cold-start default XHS generic parser when marke
       env: {
         XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-marker.json',
       },
-      mcpCallImpl: async ({ server, toolName }) => {
-        calls.push({ server, toolName });
-        throw new Error(`unexpected cold start: ${server}.${toolName}`);
-      },
     }
   );
 
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.partial, true);
   assert.equal(result.structuredContent.content_available, false);
-  assert.equal(result.structuredContent.error_code, 'XHS_GENERIC_FALLBACK_NOT_READY');
+  assert.equal(result.structuredContent.error_code, 'XHS_PUBLIC_PARSE_FAILED');
   assert.deepEqual(calls, []);
 });
 
-test('read_social_post_deep uses XHS browse backend to refresh missing token', async () => {
-  const calls = [];
-  const noteId = 'test-refresh-missing-token-001';
-  const cachePath = path.join(os.tmpdir(), `xhs-refresh-token-${process.pid}-${Date.now()}.json`);
-  const env = {
-    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
-    XHS_BROWSE_ENABLED: 'true',
-    XHS_BROWSE_MCP_COMMAND: 'mcporter',
-    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
-    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-    XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-marker.json',
-    XHS_NOTE_TOKEN_CACHE_PATH: cachePath,
-  };
+test('XHS browse tools remain unavailable even when legacy browse env is set', async () => {
   const options = {
-    env,
-    xhsBrowseCallImpl: async ({ toolName, arguments: toolArgs }) => {
-      calls.push({ toolName, arguments: toolArgs });
-      if (toolName === 'probe') {
-        return {
-          ok: true,
-          available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
-        };
-      }
-      if (toolName === 'xiaohongshu_search_feeds') {
-        assert.equal(toolArgs.keyword, 'AI小游戏·已开源 让你的AI当一回造物主');
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                feeds: [{
-                  id: noteId,
-                  xsec_token: 'fresh-token',
-                  noteCard: {
-                    displayTitle: 'AI小游戏 已开源',
-                    user: { nickname: '作者D', userId: 'user999' },
-                  },
-                }],
-              }),
-            }],
-          },
-        };
-      }
-      if (toolName === 'xiaohongshu_get_feed_detail') {
-        assert.deepEqual(toolArgs, {
-          feed_id: noteId,
-          xsec_token: 'fresh-token',
-        });
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                data: {
-                  id: noteId,
-                  title: 'AI小游戏 已开源',
-                  desc: '让你的 AI 当一回造物主的正文',
-                },
-              }),
-            }],
-          },
-        };
-      }
-      throw new Error(`unexpected tool: ${toolName}`);
+    env: {
+      SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+      XHS_BROWSE_ENABLED: 'true',
+      XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
+      XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
     },
-    mcpCallImpl: async ({ server, toolName }) => {
-      calls.push({ server, toolName });
-      throw new Error(`unexpected MCP call: ${server}.${toolName}`);
+    xhsBrowseCallImpl: async () => {
+      throw new Error('browse backend must not be called');
     },
   };
 
-  const result = await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'read_social_post_deep',
-        arguments: {
-          url: '【AI小游戏·已开源】让你的AI当一回造物主 http://xhslink.com/o/8GL4ed8HNRt',
-          include_media: false,
-        },
-      },
-    },
-    {
-      ...options,
-      fetchImpl: async () => ({
-        ok: true,
-        url: `https://www.xiaohongshu.com/explore/${noteId}`,
-      }),
-    }
-  );
-  const data = result.structuredContent || result;
+  const listed = await handleSocialReaderMcpRequest({ method: 'tools/list', params: {} }, options);
+  assert.equal(listed.tools.some((tool) => tool.name.startsWith('xhs_browse_')), false);
 
-  assert.equal(data.ok, true);
-  assert.equal(data.post_text, '让你的 AI 当一回造物主的正文');
-  assert.equal(data.diagnostics.detail_backend.name, 'xhs_browse');
-  assert.deepEqual(
-    calls.map((call) => call.toolName || `${call.server}.${call.toolName}`),
-    ['probe', 'xiaohongshu_search_feeds', 'probe', 'xiaohongshu_get_feed_detail']
-  );
-  assert.equal(JSON.stringify(data).includes('fresh-token'), false);
-});
-
-test('read_social_post_deep falls back to jobson search when XHS browse backend throws', async () => {
-  const browseCalls = [];
-  const mcpCalls = [];
-  const env = {
-    XHS_COOKIE: 'a1=demo',
-    XHS_BROWSE_ENABLED: 'true',
-    XHS_BROWSE_MCP_COMMAND: 'missing-mcporter',
-    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
-    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-    XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-marker.json',
-  };
-
-  const result = await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'read_social_post_deep',
-        arguments: {
-          url: 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/no-token 复制打开',
-          include_media: false,
-        },
-      },
-    },
-    {
-      env,
-      fetchImpl: async () => ({
-        status: 302,
-        headers: {
-          get(name) {
-            return name.toLowerCase() === 'location'
-              ? 'https://www.xiaohongshu.com/explore/note-browse-down'
-              : null;
-          },
-        },
-      }),
-      xhsBrowseCallImpl: async ({ toolName }) => {
-        browseCalls.push(toolName);
-        throw new Error('mcporter missing');
-      },
-      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
-        mcpCalls.push({ server, toolName, arguments: toolArgs });
-        if (server === 'xhs' && toolName === 'search_notes') {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify([
-                {
-                  title: 'FIFA回应中国区天价世界杯版权',
-                  url: 'https://www.xiaohongshu.com/explore/note-browse-down?xsec_token=jobson-token',
-                },
-              ]),
-            }],
-          };
-        }
-        if (server === 'xhs' && toolName === 'get_note_content') {
-          return { content: [{ type: 'text', text: 'jobson fallback 正文' }] };
-        }
-        throw new Error(`unexpected tool: ${server}.${toolName}`);
-      },
-    }
-  );
-
-  const data = result.structuredContent || result;
-  assert.equal(data.ok, true);
-  assert.equal(data.post_text, 'jobson fallback 正文');
-  assert.equal(data.diagnostics.detail_backend.name, 'jobson-xhs-mcp');
-  assert.deepEqual(browseCalls, ['probe', 'probe']);
-  assert.deepEqual(
-    mcpCalls.map((call) => [call.server, call.toolName, call.arguments]),
-    [
-      ['xhs', 'search_notes', { keywords: 'FIFA回应中国区天价世界杯版权' }],
-      ['xhs', 'get_note_content', { url: 'https://www.xiaohongshu.com/explore/note-browse-down?xsec_token=jobson-token' }],
-    ]
-  );
-});
-
-test('xhs_browse_search stores token context and xhs_browse_note reads by read_ref without exposing token', async () => {
-  const calls = [];
-  const env = {
-    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
-    XHS_BROWSE_ENABLED: 'true',
-    XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
-    XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
-    XHS_BROWSE_MIN_INTERVAL_MS: '0',
-    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-  };
-  const options = {
-    env,
-    xhsBrowseCallImpl: async ({ toolName, arguments: toolArgs }) => {
-      calls.push({ toolName, arguments: toolArgs });
-      if (toolName === 'probe') {
-        return {
-          ok: true,
-          available_tools: ['search_notes', 'get_note_content'],
-        };
-      }
-      if (toolName === 'search_notes') {
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                items: [{
-                  id: 'note123',
-                  xsecToken: 'token123',
-                  noteCard: {
-                    displayTitle: '测试标题',
-                    type: 'normal',
-                    user: { nickname: '作者A', userId: 'user123' },
-                    cover: { urlDefault: 'https://example.com/cover.jpg' },
-                    interactInfo: { likedCount: 7, collectedCount: 3, commentCount: 2 },
-                  },
-                }],
-              }),
-            }],
-          },
-        };
-      }
-      if (toolName === 'get_note_content') {
-        assert.equal(
-          toolArgs.url,
-          'https://www.xiaohongshu.com/explore/note123?xsec_token=token123'
-        );
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ id: 'note123', title: '测试标题', desc: '详情正文' }),
-            }],
-          },
-        };
-      }
-      throw new Error(`unexpected tool: ${toolName}`);
-    },
-  };
-
-  const searchResult = await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_search',
-        arguments: { query: '测试', max_results: 1 },
-      },
-    },
-    options
-  );
-  const search = searchResult.structuredContent || searchResult;
-
-  assert.equal(search.ok, true);
-  assert.equal(search.results[0].note_id, 'note123');
-  assert.equal(search.results[0].read_ref, 'xhs:note:note123');
-  assert.equal(Object.hasOwn(search.results[0], 'xsecToken'), false);
-  assert.equal(JSON.stringify(search).includes('token123'), false);
-
-  const noteResult = await handleSocialReaderMcpRequest(
+  const direct = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
       params: {
         name: 'xhs_browse_note',
-        arguments: { read_ref: 'xhs:note:note123' },
-      },
-    },
-    options
-  );
-  const note = noteResult.structuredContent || noteResult;
-
-  assert.equal(note.ok, true);
-  assert.equal(note.note_id, 'note123');
-  assert.equal(note.content, '详情正文');
-  assert.equal(JSON.stringify(note).includes('token123'), false);
-  assert.deepEqual(
-    calls.map((call) => call.toolName),
-    ['probe', 'search_notes', 'probe', 'get_note_content']
-  );
-});
-
-test('xhs_browse supports xiaohongshu-mcp search_feeds and get_feed_detail tools', async () => {
-  const calls = [];
-  const env = {
-    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
-    XHS_BROWSE_ENABLED: 'true',
-    XHS_BROWSE_MCP_COMMAND: 'mcporter',
-    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
-    XHS_BROWSE_MIN_INTERVAL_MS: '0',
-    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-  };
-  const options = {
-    env,
-    xhsBrowseCallImpl: async ({ toolName, arguments: toolArgs }) => {
-      calls.push({ toolName, arguments: toolArgs });
-      if (toolName === 'probe') {
-        return {
-          ok: true,
-          available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
-        };
-      }
-      if (toolName === 'xiaohongshu_search_feeds') {
-        assert.deepEqual(toolArgs, { keyword: '造物主 AI小游戏' });
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                feeds: [{
-                  id: 'note-mcp',
-                  xsec_token: 'token-mcp',
-                  noteCard: {
-                    displayTitle: '服务器笔记',
-                    user: { nickname: '作者C', userId: 'user789' },
-                  },
-                }],
-              }),
-            }],
-          },
-        };
-      }
-      if (toolName === 'xiaohongshu_get_feed_detail') {
-        assert.deepEqual(toolArgs, { feed_id: 'note-mcp', xsec_token: 'token-mcp' });
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                data: {
-                  id: 'note-mcp',
-                  title: '服务器笔记',
-                  desc: 'xiaohongshu-mcp 详情正文',
-                  image_list: [{ url: 'https://example.com/a.jpg' }],
-                },
-              }),
-            }],
-          },
-        };
-      }
-      throw new Error(`unexpected tool: ${toolName}`);
-    },
-  };
-
-  const searchResult = await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_search',
-        arguments: { query: '造物主 AI小游戏', max_results: 1 },
-      },
-    },
-    options
-  );
-  const search = searchResult.structuredContent || searchResult;
-
-  assert.equal(search.ok, true);
-  assert.equal(search.results[0].note_id, 'note-mcp');
-  assert.equal(JSON.stringify(search).includes('token-mcp'), false);
-
-  const noteResult = await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_note',
-        arguments: { read_ref: 'xhs:note:note-mcp' },
-      },
-    },
-    options
-  );
-  const note = noteResult.structuredContent || noteResult;
-
-  assert.equal(note.ok, true);
-  assert.equal(note.note_id, 'note-mcp');
-  assert.equal(note.content, 'xiaohongshu-mcp 详情正文');
-  assert.deepEqual(note.images, [{ url: 'https://example.com/a.jpg' }]);
-  assert.equal(JSON.stringify(note).includes('token-mcp'), false);
-  assert.deepEqual(
-    calls.map((call) => call.toolName),
-    ['probe', 'xiaohongshu_search_feeds', 'probe', 'xiaohongshu_get_feed_detail']
-  );
-});
-
-test('xhs_browse_note parses nested xiaohongshu-mcp detail payloads', async () => {
-  const env = {
-    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
-    XHS_BROWSE_ENABLED: 'true',
-    XHS_BROWSE_MCP_COMMAND: 'mcporter',
-    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
-    XHS_BROWSE_MIN_INTERVAL_MS: '0',
-    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-  };
-  const options = {
-    env,
-    xhsBrowseCallImpl: async ({ toolName }) => {
-      if (toolName === 'probe') {
-        return {
-          ok: true,
-          available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
-        };
-      }
-      if (toolName === 'xiaohongshu_search_feeds') {
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                feeds: [{
-                  id: 'nested-note',
-                  xsecToken: 'nested-token',
-                  noteCard: { displayTitle: '嵌套笔记' },
-                }],
-              }),
-            }],
-          },
-        };
-      }
-      if (toolName === 'xiaohongshu_get_feed_detail') {
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                data: {
-                  feed: {
-                    id: 'nested-note',
-                    noteCard: {
-                      displayTitle: '嵌套笔记',
-                      desc: '嵌套详情正文',
-                      imageList: [{ url: 'https://example.com/nested.jpg' }],
-                    },
-                  },
-                },
-              }),
-            }],
-          },
-        };
-      }
-      throw new Error(`unexpected tool: ${toolName}`);
-    },
-  };
-
-  await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_search',
-        arguments: { query: '嵌套笔记', max_results: 1 },
+        arguments: { read_ref: 'xhs:note:legacy-note' },
       },
     },
     options
   );
 
-  const noteResult = await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_note',
-        arguments: { read_ref: 'xhs:note:nested-note' },
-      },
-    },
-    options
-  );
-  const note = noteResult.structuredContent || noteResult;
-
-  assert.equal(note.ok, true);
-  assert.equal(note.title, '嵌套笔记');
-  assert.equal(note.content, '嵌套详情正文');
-  assert.deepEqual(note.images, [{ url: 'https://example.com/nested.jpg' }]);
-  assert.equal(note.raw_fields_seen.title, true);
-  assert.equal(note.raw_fields_seen.desc, true);
-  assert.equal(note.raw_fields_seen.images, true);
-});
-
-test('xhs_browse_note rejects empty detail payloads instead of reporting success', async () => {
-  const env = {
-    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
-    XHS_BROWSE_ENABLED: 'true',
-    XHS_BROWSE_MCP_COMMAND: 'mcporter',
-    XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
-    XHS_BROWSE_MIN_INTERVAL_MS: '0',
-    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-    XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-marker.json',
-  };
-  const options = {
-    env,
-    xhsBrowseCallImpl: async ({ toolName }) => {
-      if (toolName === 'probe') {
-        return {
-          ok: true,
-          available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
-        };
-      }
-      if (toolName === 'xiaohongshu_search_feeds') {
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                feeds: [{
-                  id: 'empty-note',
-                  xsecToken: 'empty-token',
-                  noteCard: { displayTitle: '空笔记' },
-                }],
-              }),
-            }],
-          },
-        };
-      }
-      if (toolName === 'xiaohongshu_get_feed_detail') {
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ success: true, data: {} }),
-            }],
-          },
-        };
-      }
-      throw new Error(`unexpected tool: ${toolName}`);
-    },
-  };
-
-  await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_search',
-        arguments: { query: '空笔记', max_results: 1 },
-      },
-    },
-    options
-  );
-
-  const noteResult = await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_note',
-        arguments: { read_ref: 'xhs:note:empty-note' },
-      },
-    },
-    options
-  );
-  const note = noteResult.structuredContent || noteResult;
-
-  assert.equal(note.ok, false);
-  assert.equal(note.error_code, 'XHS_NOTE_READ_FAILED');
-  assert.match(note.message, /no readable fields/);
-});
-
-test('xhs_browse_note falls back when browse backend returns a failure payload', async () => {
-  // Set up a temporary marker for the XHS generic fallback
-  const { mkdtempSync, writeFileSync, mkdirSync } = await import('node:fs');
-  const { tmpdir } = await import('node:os');
-  const { join } = await import('node:path');
-  const markerDir = mkdtempSync(join(tmpdir(), 'xhs-marker-'));
-  const markerPath = join(markerDir, 'generic-fallback-ready.json');
-  writeFileSync(markerPath, JSON.stringify({
-    ok: true,
-    package: 'wanyi-watermark',
-    tool_name: 'parse_xhs_link',
-    command: 'echo',
-    args: [],
-    backend_python: 'echo',
-    backend_module: 'test',
-  }));
-
-  const calls = [];
-  const env = {
-    XHS_GENERIC_FALLBACK_READY_PATH: markerPath,
-    SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
-    XHS_BROWSE_ENABLED: 'true',
-    XHS_BROWSE_MCP_COMMAND: 'mock-xhs',
-    XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
-    XHS_BROWSE_MIN_INTERVAL_MS: '0',
-    XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-  };
-  const options = {
-    env,
-    xhsBrowseCallImpl: async ({ toolName }) => {
-      calls.push({ source: 'browse', toolName });
-      if (toolName === 'probe') {
-        return { ok: true, available_tools: ['search_notes', 'get_note_content'] };
-      }
-      if (toolName === 'search_notes') {
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                items: [{
-                  id: 'server-note',
-                  xsecToken: 'server-token',
-                  noteCard: {
-                    displayTitle: '服务端笔记',
-                    user: { nickname: '作者B', userId: 'user456' },
-                  },
-                }],
-              }),
-            }],
-          },
-        };
-      }
-      if (toolName === 'get_note_content') {
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: false,
-                error: 'note failed',
-                message: 'backend failed',
-                stack: 'hidden stack',
-              }),
-            }],
-          },
-        };
-      }
-      throw new Error(`unexpected browse tool: ${toolName}`);
-    },
-    mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
-      calls.push({ source: 'mcp', server, toolName, arguments: toolArgs });
-      if (server === 'generic' && toolName === 'parse_xhs_link') {
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              status: 'success',
-              desc: '通用解析详情',
-              images: [{ url_png: 'https://example.com/detail.png' }],
-            }),
-          }],
-        };
-      }
-      throw new Error(`unexpected mcp tool: ${server}.${toolName}`);
-    },
-  };
-
-  await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_search',
-        arguments: { query: '服务端', max_results: 1 },
-      },
-    },
-    options
-  );
-
-  const noteResult = await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_note',
-        arguments: { read_ref: 'xhs:note:server-note' },
-      },
-    },
-    options
-  );
-  const note = noteResult.structuredContent || noteResult;
-
-  assert.equal(note.ok, true);
-  assert.equal(note.note_id, 'server-note');
-  assert.equal(note.title, '服务端笔记');
-  assert.equal(note.content, '通用解析详情');
-  assert.deepEqual(note.images, [{ url_png: 'https://example.com/detail.png' }]);
-  assert.equal(note.source, 'wanyi-watermark-mcp');
-  assert.equal(note.fallback_from, 'XHS_NOTE_READ_FAILED');
-  assert.equal(JSON.stringify(note).includes('server-token'), false);
-  assert.deepEqual(
-    calls.map((call) => call.source === 'browse' ? call.toolName : `${call.server}.${call.toolName}`),
-    ['probe', 'search_notes', 'probe', 'get_note_content', 'generic.parse_xhs_link']
-  );
+  assert.equal(direct.structuredContent.ok, false);
+  assert.equal(direct.structuredContent.error_code, 'XHS_ACCOUNT_BACKED_DISABLED');
 });
 
 test('read_social_post normalizes successful XHS generic parser JSON', async () => {
@@ -958,14 +339,27 @@ test('read_social_post treats XHS generic parser error JSON as failure', async (
     }
   );
 
-  assert.equal(result.structuredContent.ok, false);
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
   assert.equal(result.structuredContent.platform, 'xhs');
-  assert.equal(result.structuredContent.error_code, 'GENERIC_PARSE_FAILED');
-  assert.match(result.structuredContent.error, /小红书图文解析失败/);
+  assert.equal(result.structuredContent.error_code, 'XHS_PUBLIC_PARSE_FAILED');
+  assert.equal(result.structuredContent.should_answer_from_content, false);
 });
 
-test('read_social_post can reuse token context cached by xhs_browse_search', async () => {
+test('read_social_post ignores legacy token cache and never calls xhs backend', async () => {
   const calls = [];
+  const cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-legacy-cache-'));
+  const cachePath = path.join(cacheDir, 'xhs-note-token-cache.json');
+  fs.writeFileSync(cachePath, JSON.stringify({
+    version: 1,
+    entries: {
+      'cached-note': {
+        xsecToken: 'cached-token',
+        canonical_url: 'https://www.xiaohongshu.com/explore/cached-note?xsec_token=cached-token',
+        createdAt: Date.now(),
+      },
+    },
+  }));
   const env = xhsReadyEnv({
     XHS_COOKIE: 'a1=demo',
     SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
@@ -974,51 +368,21 @@ test('read_social_post can reuse token context cached by xhs_browse_search', asy
     XHS_BROWSE_MCP_ARGS_JSON: '["mock"]',
     XHS_BROWSE_MIN_INTERVAL_MS: '0',
     XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
+    XHS_NOTE_TOKEN_CACHE_PATH: cachePath,
   });
   const options = {
     env,
     xhsBrowseCallImpl: async ({ toolName }) => {
-      if (toolName === 'probe') {
-        return { ok: true, available_tools: ['search_notes', 'get_note_content'] };
-      }
-      if (toolName === 'search_notes') {
-        return {
-          ok: true,
-          data: {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({
-                success: true,
-                items: [{ id: 'cached-note', xsecToken: 'cached-token', noteCard: { displayTitle: '缓存笔记' } }],
-              }),
-            }],
-          },
-        };
-      }
       throw new Error(`unexpected browse tool: ${toolName}`);
     },
     mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
       calls.push({ server, toolName, arguments: toolArgs });
       if (server === 'generic' && toolName === 'parse_xhs_link') {
-        throw new Error('generic parser unavailable');
-      }
-      if (server === 'xhs' && toolName === 'get_note_content') {
-        return { content: [{ type: 'text', text: '缓存 token 读取正文' }] };
+        return { content: [{ type: 'text', text: JSON.stringify({ desc: '公开解析正文' }) }] };
       }
       throw new Error(`unexpected tool: ${server}.${toolName}`);
     },
   };
-
-  await handleSocialReaderMcpRequest(
-    {
-      method: 'tools/call',
-      params: {
-        name: 'xhs_browse_search',
-        arguments: { query: '缓存笔记', max_results: 1 },
-      },
-    },
-    options
-  );
 
   const post = await handleSocialReaderMcpRequest(
     {
@@ -1032,19 +396,18 @@ test('read_social_post can reuse token context cached by xhs_browse_search', asy
   );
 
   assert.equal(post.structuredContent.ok, true);
-  assert.equal(post.structuredContent.post_text, '缓存 token 读取正文');
-  assert.equal(post.structuredContent.url, 'https://www.xiaohongshu.com/explore/cached-note?xsec_token=cached-token');
+  assert.equal(post.structuredContent.post_text, '公开解析正文');
+  assert.equal(post.structuredContent.url, 'https://www.xiaohongshu.com/explore/cached-note');
   assert.deepEqual(
     calls.map((call) => [call.server, call.toolName, call.arguments]),
     [
       ['generic', 'parse_xhs_link', { share_link: 'https://www.xiaohongshu.com/explore/cached-note' }],
-      ['xhs', 'get_note_content', { url: 'https://www.xiaohongshu.com/explore/cached-note?xsec_token=cached-token' }],
     ]
   );
-  assert.equal(JSON.stringify(post).includes('cached-token'), true);
+  assert.equal(JSON.stringify(post).includes('cached-token'), false);
 });
 
-test('check_social_login reports missing xhs cookie without spawning child MCP', async () => {
+test('check_social_login is no longer an exposed social reader tool', async () => {
   const result = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
@@ -1062,8 +425,7 @@ test('check_social_login reports missing xhs cookie without spawning child MCP',
   );
 
   assert.equal(result.structuredContent.ok, false);
-  assert.equal(result.structuredContent.platform, 'xhs');
-  assert.match(result.structuredContent.error, /XHS_COOKIE/);
+  assert.match(result.structuredContent.error, /unknown tool/);
 });
 
 test('read_social_post routes non-xhs links to generic parser with share_link argument', async () => {
@@ -1453,7 +815,8 @@ test('resolveXhsShareUrl rejects non-whitelisted xhs-looking domains', async () 
   assert.equal(result.error_code, 'UNSUPPORTED_PLATFORM');
 });
 
-test('read_social_post accepts share text and sends cleaned final XHS URL to generic parser', async () => {
+test('read_social_post accepts share text and sends original XHS share text to generic parser first', async () => {
+  const shareText = 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/r5Ot5yz9ty 先复制再打开【小红书】';
   const calls = [];
   const result = await handleSocialReaderMcpRequest(
     {
@@ -1461,7 +824,7 @@ test('read_social_post accepts share text and sends cleaned final XHS URL to gen
       params: {
         name: 'read_social_post',
         arguments: {
-          url: 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/r5Ot5yz9ty 先复制再打开【小红书】',
+          url: shareText,
           include_comments: true,
           max_comments: 2,
         },
@@ -1496,7 +859,7 @@ test('read_social_post accepts share text and sends cleaned final XHS URL to gen
   assert.deepEqual(
     calls.map((call) => [call.server, call.toolName, call.arguments.share_link]),
     [
-      ['generic', 'parse_xhs_link', 'https://www.xiaohongshu.com/explore/note-clean?xsec_token=clean-token&xsec_source=app_share'],
+      ['generic', 'parse_xhs_link', shareText],
     ]
   );
 });
@@ -1568,16 +931,11 @@ test('resolve_social_url stores canonical XHS explore URL for discovery share li
 
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.has_xsec_token, true);
-  assert.equal(result.structuredContent.cache_written, true);
-  const cache = JSON.parse(readFileSync(cachePath, 'utf8'));
-  const entry = cache.entries['6a2b8f33000000001702ac99'];
-  assert.equal(
-    entry.canonical_url,
-    'https://www.xiaohongshu.com/explore/6a2b8f33000000001702ac99?xsec_token=ABhlbvu1Hb6w6jyzeLPQTj67358eDrzbWm0hGNJRKVovY%3D&xsec_source=pc_share'
-  );
+  assert.equal(result.structuredContent.cache_written, false);
+  assert.equal(fs.existsSync(cachePath), false);
 });
 
-test('read_social_post uses search fallback when shortlink resolves without token', async () => {
+test('read_social_post does not search for a fresh token when shortlink resolves without token', async () => {
   const calls = [];
   const result = await handleSocialReaderMcpRequest(
     {
@@ -1601,34 +959,23 @@ test('read_social_post uses search fallback when shortlink resolves without toke
           },
         },
       }),
-      mcpCallImpl: async ({ toolName, arguments: toolArgs }) => {
-        calls.push({ toolName, arguments: toolArgs });
-        if (toolName === 'search_notes') {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify([
-                { title: 'FIFA回应中国区天价世界杯版权', url: 'https://www.xiaohongshu.com/explore/note-search?xsec_token=fresh-search' },
-              ]),
-            }],
-          };
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        if (server === 'generic' && toolName === 'parse_xhs_link') {
+          return { content: [{ type: 'text', text: JSON.stringify({ desc: '公开短链正文' }) }] };
         }
-        if (toolName === 'get_note_content') {
-          return { content: [{ type: 'text', text: '搜索兜底正文' }] };
-        }
-        throw new Error(`unexpected tool: ${toolName}`);
+        throw new Error(`unexpected tool: ${server}.${toolName}`);
       },
     }
   );
 
   assert.equal(result.structuredContent.ok, true);
-  assert.equal(result.structuredContent.url, 'https://www.xiaohongshu.com/explore/note-search?xsec_token=fresh-search');
+  assert.equal(result.structuredContent.url, 'https://www.xiaohongshu.com/explore/note-search');
+  assert.equal(result.structuredContent.post_text, '公开短链正文');
   assert.deepEqual(
-    calls.map((call) => [call.toolName, call.arguments]),
+    calls.map((call) => [call.server, call.toolName, call.arguments]),
     [
-      ['parse_xhs_link', { share_link: 'https://www.xiaohongshu.com/explore/note-search' }],
-      ['search_notes', { keywords: 'FIFA回应中国区天价世界杯版权' }],
-      ['get_note_content', { url: 'https://www.xiaohongshu.com/explore/note-search?xsec_token=fresh-search' }],
+      ['generic', 'parse_xhs_link', { share_link: 'FIFA回应中国区天价世界杯版权 http://xhslink.com/o/no-token 复制打开' }],
     ]
   );
 });
@@ -1716,13 +1063,14 @@ test('read_social_post retries XHS generic parser with canonical URL for long di
   assert.deepEqual(
     calls.map((call) => call.arguments.share_link),
     [
+      shareText,
       'https://www.xiaohongshu.com/discovery/item/6a2b810f000000003502f581?source=webshare&xhsshare=pc_web&xsec_token=ABhlbvu1Hb6w6jyzeLPQTj63fw0_DFYm4ddIuyWKZ4Xbo=&xsec_source=pc_share',
       'https://www.xiaohongshu.com/explore/6a2b810f000000003502f581?xsec_token=ABhlbvu1Hb6w6jyzeLPQTj63fw0_DFYm4ddIuyWKZ4Xbo%3D&xsec_source=pc_share',
     ]
   );
 });
 
-test('read_social_post does not blindly choose ambiguous search results', async () => {
+test('read_social_post ignores legacy search result ambiguity and fails public-only when parsers fail', async () => {
   const result = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
@@ -1745,25 +1093,17 @@ test('read_social_post does not blindly choose ambiguous search results', async 
           },
         },
       }),
-      mcpCallImpl: async ({ toolName }) => {
-        if (toolName === 'search_notes') {
-          return {
-            content: [{
-              type: 'text',
-              text: JSON.stringify([
-                { title: 'FIFA回应中国区天价世界杯版权', url: 'https://www.xiaohongshu.com/explore/one?xsec_token=one' },
-                { title: 'FIFA回应中国区天价世界杯版权', url: 'https://www.xiaohongshu.com/explore/two?xsec_token=two' },
-              ]),
-            }],
-          };
-        }
-        throw new Error(`unexpected tool: ${toolName}`);
+      mcpCallImpl: async ({ server, toolName }) => {
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return { content: [{ type: 'text', text: '{"status":"error","message":"获取失败"}' }] };
       },
     }
   );
 
-  assert.equal(result.structuredContent.ok, false);
-  assert.equal(result.structuredContent.error_code, 'AMBIGUOUS_SEARCH_RESULT');
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.error_code, 'XHS_PUBLIC_PARSE_FAILED');
 });
 
 test('read_social_post returns structured errors for no URL and unsupported platform', async () => {
@@ -1788,8 +1128,7 @@ test('read_social_post returns structured errors for no URL and unsupported plat
   assert.equal(unsupported.structuredContent.error_code, 'UNSUPPORTED_PLATFORM');
 });
 
-test('read_social_post caps max_comments to 1-100', async () => {
-  const seen = [];
+test('read_social_post caps max_comments but XHS public-only never fetches comments', async () => {
   const low = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
@@ -1804,14 +1143,13 @@ test('read_social_post caps max_comments to 1-100', async () => {
     },
     {
       env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
-      mcpCallImpl: async ({ toolName }) => {
-        if (toolName === 'get_note_content') return { content: [{ type: 'text', text: '正文' }] };
-        if (toolName === 'get_note_comments') return { content: [{ type: 'text', text: '0. A\n\n1. B' }] };
-        throw new Error(`unexpected ${toolName}`);
+      mcpCallImpl: async ({ server, toolName }) => {
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return { content: [{ type: 'text', text: '{"desc":"正文"}' }] };
       },
     }
   );
-  seen.push(low.structuredContent.max_comments, low.structuredContent.comments_text);
 
   const high = await handleSocialReaderMcpRequest(
     {
@@ -1826,18 +1164,22 @@ test('read_social_post caps max_comments to 1-100', async () => {
     },
     {
       env: xhsReadyEnv({ XHS_COOKIE: 'a1=demo' }),
-      mcpCallImpl: async ({ toolName }) => {
-        if (toolName === 'get_note_content') return { content: [{ type: 'text', text: '正文' }] };
-        throw new Error(`unexpected ${toolName}`);
+      mcpCallImpl: async ({ server, toolName }) => {
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return { content: [{ type: 'text', text: '{"desc":"正文"}' }] };
       },
     }
   );
-  seen.push(high.structuredContent.max_comments);
 
-  assert.deepEqual(seen, [1, '0. A', 100]);
+  assert.deepEqual(
+    [low.structuredContent.max_comments, low.structuredContent.comments_text, high.structuredContent.max_comments],
+    [1, '', 100]
+  );
+  assert.equal(low.structuredContent.comments_supported, false);
 });
 
-test('read_social_post returns XHS_BACKEND_TIMEOUT on backend timeout', async () => {
+test('read_social_post returns public parse failure on parser timeout', async () => {
   const result = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
@@ -1856,13 +1198,12 @@ test('read_social_post returns XHS_BACKEND_TIMEOUT on backend timeout', async ()
     }
   );
 
-  // With fallback chain: XHS timeout → generic fallback → partial result
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.partial, true);
+  assert.equal(result.structuredContent.error_code, 'XHS_PUBLIC_PARSE_FAILED');
   assert.equal(result.structuredContent.content_available, false);
   assert.equal(result.structuredContent.should_answer_from_content, false);
   assert.equal(result.structuredContent.post_text, '');
-  assert.match(result.structuredContent.xhs_error, /timed out/);
 });
 
 test('read_social_post returns partial result on generic backend failure', async () => {
@@ -1892,7 +1233,7 @@ test('read_social_post returns partial result on generic backend failure', async
   assert.equal(result.structuredContent.post_text, '');
 });
 
-test('XHS timeout error message shows XHS-specific timeout (90000ms) not generic (45000ms)', async () => {
+test('XHS parser timeout stays within public-only failure result', async () => {
   const result = await handleSocialReaderMcpRequest(
     {
       method: 'tools/call',
@@ -1918,11 +1259,9 @@ test('XHS timeout error message shows XHS-specific timeout (90000ms) not generic
     }
   );
 
-  // With fallback chain: XHS timeout → generic fallback → partial result
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.partial, true);
-  assert.match(result.structuredContent.xhs_error, /90000ms/);
-  assert.doesNotMatch(result.structuredContent.xhs_error, /45000ms/);
+  assert.equal(result.structuredContent.error_code, 'XHS_PUBLIC_PARSE_FAILED');
 });
 
 test('readSocialPost XHS path passes XHS timeout to readGenericSocialPost', async () => {

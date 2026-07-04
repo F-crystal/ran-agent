@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-01)
+Status: CURRENT (2026-07-04)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -24,13 +24,9 @@ manual systemd or env edits.
   `bash scripts/diagnose-hermes-tools.sh`
 - Diagnose media/XHS routing:
   `bash scripts/diagnose-media-xhs.sh`
-- Prepare XHS browse MCP backend:
-  `bash scripts/prepare-xhs-browse-backend.sh --write-env`
-  If GitHub release downloads are flaky on the server, pre-copy the tarball and
-  run with `XHS_BROWSE_ARCHIVE_PATH=/path/to/xiaohongshu-mcp-linux-amd64.tar.gz`.
-- Start/login XHS browse MCP backend:
-  `bash scripts/start_xhs_browse_backend.sh`,
-  `bash scripts/login_xhs_browse_backend.sh`
+- Prepare XHS public parsers:
+  `bash scripts/prepare-xhs-generic-fallback.sh` and
+  `bash scripts/prepare-xhs-public-sidecar.sh`
 - Clean UV cache safely:
   `bash scripts/clean-uv-cache-safe.sh`
 
@@ -74,10 +70,12 @@ bash scripts/diagnose-ombre-memory.sh
   `/opt/ran_agent/debug/wechat/inbound`.
 - XHS generic fallback marker path:
   `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
-- Non-blocking XHS generic fallback preparation before service restart.
-- Non-blocking XHS browse MCP backend preparation before service restart.
-- `ran-agent-xhs-browse.service` for the xiaohongshu-mcp HTTP backend on
-  `127.0.0.1:18060`; `social_reader` bridges to it through mcporter stdio.
+- XHS-Downloader public sidecar marker path:
+  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json`.
+- Non-blocking XHS generic fallback and public sidecar preparation before
+  service restart.
+- Active cleanup of account-backed XHS state: `XHS_COOKIE`, XHS MCP env keys,
+  `ran-agent-xhs-browse.service`, the browse marker, and legacy token cache.
 - Ombre Brain runtime preparation under
   `/opt/ran_agent/.ran_agent_state/ombre-brain` and private buckets under
   `/opt/ran_agent/vault/ombre`.
@@ -119,7 +117,7 @@ bash scripts/apply-hermes-runtime-split.sh
 |---------|------|---------|------|---------|
 | `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | Daily lite-context entry |
 | `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | Full debug/heavy-tool entry |
-| `ran-agent-xhs-browse.service` | `18060` | n/a | `/opt/ran_agent/.ran_agent_state/xhs-browse` | Xiaohongshu browse MCP HTTP backend for `social_reader` |
+| `ran-agent-xhs-public-sidecar.service` | `18061` | n/a | `/opt/ran_agent/.ran_agent_state/xhs-public-sidecar` | XHS-Downloader public API sidecar for `social_reader` |
 | `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Optional upstream Ombre Brain memory service |
 
 `8642` is a lite-context entry, not a security sandbox. Node bridge routes
@@ -165,15 +163,11 @@ PERSONAL_AGENT_OCR_MODEL=qwen-vl-ocr-2025-11-20
 PERSONAL_AGENT_OCR_TIMEOUT_MS=120000
 XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
 XHS_GENERIC_FALLBACK_MIN_VERSION=1.2.0
-XHS_BROWSE_ENABLED=false
-SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false
-XHS_BROWSE_MARKER_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
-XHS_BROWSE_ROOT_DIR=/opt/ran_agent/.ran_agent_state/xhs-browse
-XHS_BROWSE_MCP_URL=http://127.0.0.1:18060/mcp
-XHS_BROWSE_MCP_COMMAND=bash
-XHS_BROWSE_MCP_ARGS_JSON='["/opt/ran_agent/scripts/run_xhs_browse_mcp.sh"]'
-XHS_BROWSE_MCP_COOKIE_ENV=XHS_COOKIE
-XHS_NOTE_TOKEN_CACHE_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json
+XHS_PUBLIC_SIDECAR_ENABLED=true
+XHS_PUBLIC_SIDECAR_URL=http://127.0.0.1:18061/xhs/detail
+XHS_PUBLIC_SIDECAR_TIMEOUT_MS=90000
+XHS_PUBLIC_HTML_FALLBACK_ENABLED=true
+XHS_PUBLIC_SIDECAR_MARKER_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json
 UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache
 UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
 UV_LINK_MODE=copy
@@ -206,10 +200,9 @@ Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform
 login state must stay in local env files only and must never be printed into
 docs, logs, tool output, or Git.
 
-`XHS_BROWSE_ENABLED=false` is the template default before the browse backend is
-prepared. `scripts/prepare-xhs-browse-backend.sh --write-env` writes
-`XHS_BROWSE_ENABLED=true` only after the marker, binary, mcporter config, and
-wrapper command are ready.
+The standard deploy removes account-backed XHS keys from all managed env files.
+Do not add `XHS_COOKIE`, `XHS_MCP_*`, `PERSONAL_AGENT_XHS_MCP_*`, or
+`XHS_BROWSE_*` keys back into Hermes or Node env.
 
 For WeChat bridge or login-state debugging, verify the exact CLI package,
 runtime SDK package, version, import path, and state directory contract before
@@ -226,7 +219,7 @@ bash scripts/diagnose-ombre-memory.sh
 bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-multi-frontend.sh
 bash scripts/diagnose-hermes-tools.sh
-bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-browse
+bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-public-sidecar --smoke-social-tools
 ```
 
 For direct API checks, use the local Hermes API key from the server env. Do not
@@ -239,12 +232,10 @@ paste key-bearing curl commands into public docs.
 - Actual social-platform links enter `social_reader` / `media_reader` first.
 - XHS links (`xhslink.com`, `xiaohongshu.com`, `xhs.com`, or `小红书`) must not
   be first-read through `browser_navigate` or terminal.
-- Token-cache hits are link resolution evidence only; they do not mean content
-  was read.
-- XHS browse tools stay hidden from normal Hermes tool lists by default
-  (`SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=false`). `read_social_post` and
-  `read_social_post_deep` may still use the backend internally to refresh
-  `xsec_token` and read details before falling back to generic parsing.
+- XHS is public-only. Token caches, browse tools, search/feed/profile, QR login,
+  and `check_social_login` are not part of Hermes XHS reading.
+- Public parser metadata is not content-read evidence. `content_read` requires
+  actual text or media/OCR fields.
 
 ## Scheduled AI Daily Digest
 
@@ -263,153 +254,53 @@ curl -sS -X POST http://127.0.0.1:8791/scheduled/ai-daily-digest \
 
 Do not enable `PERSONAL_AGENT_PROACTIVE_ENABLED` for this feature.
 
-## XHS Read Backends
+## XHS Public Read Backends
 
-XHS reads have two independent branches inside `social_reader`:
+XHS reads are public-only inside `social_reader`:
 
-- Detail branch: token-aware browse first (`xiaohongshu-mcp` through
-  `mcporter`) to read post text and detail image lists, then `jobson-xhs-mcp`
-  as the compatibility text path when browse is unavailable.
-- Media branch: generic parser fallback (`wanyi-watermark`) runs independently
-  for missing-token, backend-failure, or media-only recovery cases.
-  The prepared version must be at least `XHS_GENERIC_FALLBACK_MIN_VERSION`
-  (default `1.2.0`) so old `v1.0.1` markers do not silently keep stale XHS
-  parsing behavior.
+1. Resolve short links and note ids.
+2. Try `wanyi-watermark parse_xhs_link`.
+3. Try the XHS-Downloader sidecar `POST /xhs/detail` with
+   `download=false` and `cookie=""`.
+4. Try `wanyi-watermark parse_generic_link`.
+5. Try minimal HTML/OG metadata fallback.
+6. Forward discovered public media URLs to `media_reader.analyze_media_batch`.
 
-`read_social_post_deep` merges browse detail images with generic parser media
-before calling `media_reader`. The deploy script prepares wrappers/markers
-once, then runtime uses those wrappers instead of cold-starting tool installers.
-Browse and `wanyi-watermark` only provide text/media URLs; image OCR/VLM is done
-by `media_reader.analyze_media_batch`. The default full-read cap is 100 media
-assets with 20-minute media MCP/batch budgets, so complete XHS image reads
-should fail only as explicit per-asset partial failures rather than silent
-20-asset truncation or 45s/120s outer timeout.
-Production OCR defaults to DashScope Qwen-VL OCR. PaddleOCR remains a local
-override, but low-CPU servers commonly report `OCR_TIMEOUT` on text-heavy XHS
-cards even when VLM summaries succeed.
-`scripts/start_media_reader_mcp.sh` carries the same DashScope/120s fallback
-defaults; use `PERSONAL_AGENT_OCR_PROVIDER=paddleocr` only as an explicit local
-override.
+The deploy script prepares wrappers/markers once, then runtime uses those
+wrappers instead of cold-starting installers. Public parsers only provide
+text/media URLs; image OCR/VLM is done by `media_reader`. The default full-read
+cap is 100 media assets with 20-minute media MCP/batch budgets, so complete XHS
+image reads should fail only as explicit per-asset partial failures rather than
+silent truncation.
 
 Expected state:
 
 ```text
 /opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
-/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
-/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json
-/opt/ran_agent/node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json
+/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json
+ran-agent-xhs-public-sidecar.service active on 127.0.0.1:18061
+ran-agent-xhs-browse.service absent or inactive
+no XHS_COOKIE / XHS_BROWSE_* / XHS_NOTE_TOKEN_CACHE_* in managed env files
 ```
 
 If XHS content reads fail:
 
-1. Run `bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-browse`.
-2. Confirm five layers in order: generic marker ready, browse marker ready,
-   `ran-agent-xhs-browse.service` active, browse bridge search/detail tools
-   confirmed, and login valid.
-3. Then check whether the specific note fails because of auth/risk/captcha
-   (`XHS_COOKIE_EXPIRED`, `XHS_IP_RISK`, `XHS_CAPTCHA_REQUIRED`), backend
-   timeout (`XHS_BACKEND_TIMEOUT`), or note visibility/deletion.
-4. Do not delete social-reader state while cleaning cache.
+1. Run
+   `bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-public-sidecar --smoke-social-tools`.
+2. Confirm account-backed XHS is disabled, wanyi is ready, the public sidecar is
+   ready, and `tools/list` has no `check_social_login` or `xhs_browse_*`.
+3. Check whether the specific note is simply not publicly readable. Do not
+   repair this by adding cookies, QR login, `xiaohongshu-mcp`, or token cache.
 
-## XHS Browse MCP Repair
-
-The XHS browse path has two layers:
-
-- `ran-agent-xhs-browse.service` runs `xiaohongshu-mcp` as a local HTTP MCP
-  backend on `127.0.0.1:18060`.
-- `scripts/run_xhs_browse_mcp.sh` exposes that HTTP backend to Hermes
-  `social_reader` through `mcporter serve --stdio`.
-
-If direct `mcporter list xiaohongshu --schema` works but
-`scripts/run_xhs_browse_mcp.sh` exits with:
-
-```text
-Server 'xiaohongshu' is not configured for keep-alive and cannot be served by the daemon bridge.
-```
-
-then the backend is installed, but the mcporter bridge entry is missing
-`lifecycle: keep-alive`. Pull the latest repo and let prepare repair the
-project-scoped mcporter config; no binary re-download is needed when the marker
-and archive are already valid:
+Old account-backed commands now intentionally fail with
+`XHS_ACCOUNT_BACKED_DISABLED`:
 
 ```bash
-cd /opt/ran_agent
-source /opt/ran_agent/.venv/bin/activate
-git pull --ff-only
-bash scripts/prepare-xhs-browse-backend.sh --write-env
-sudo systemctl daemon-reload
-sudo systemctl restart ran-agent-xhs-browse.service
-sudo systemctl restart ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-node.service
-bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-browse
+bash scripts/prepare-xhs-browse-backend.sh
+bash scripts/start_xhs_browse_backend.sh
+bash scripts/login_xhs_browse_backend.sh
+bash scripts/run_xhs_browse_mcp.sh
 ```
-
-Expected browse smoke:
-
-```text
-xhs browse search tool: CONFIRMED
-xhs browse detail tool: CONFIRMED
-```
-
-If either line is not confirmed, the diagnostic now prints
-`xhs browse bridge error:` with the first bridge startup error. Fix that error
-before treating the issue as an XHS auth or note-visibility problem.
-
-Check login only after the bridge smoke confirms the search/detail tools:
-
-```bash
-MARKER=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
-MCPORTER=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_cli'])")
-CONF=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_config_path'])")
-node "$MCPORTER" --config "$CONF" call 'xiaohongshu.check_login_status()' --timeout 120000
-```
-
-Only scan a new QR code if the login check reports not logged in, expired
-cookies, or an auth failure:
-
-```bash
-MARKER=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
-MCPORTER=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_cli'])")
-CONF=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_config_path'])")
-bash scripts/login_xhs_browse_backend.sh --qrcode
-node "$MCPORTER" --config "$CONF" call 'xiaohongshu.check_login_status()' --timeout 120000
-```
-
-`--qrcode` saves MCP image content under
-`/tmp/xhs-browse-login-qrcode` by default; override with
-`XHS_BROWSE_QRCODE_DIR=/path/to/dir` when needed.
-
-When browse smoke and login both pass, a specific note can still fail if the
-note was deleted, made private, hidden by author settings, or blocked by XHS
-risk control. In that case, compare:
-
-- `read_social_post_deep` diagnostics from `social_reader`.
-- Direct `mcporter` search/detail calls using parameter-style arguments:
-
-```bash
-MARKER=/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json
-MCPORTER=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_cli'])")
-CONF=$(python3 -c "import json; print(json.load(open('$MARKER'))['mcporter_config_path'])")
-umask 077
-CHECK_DIR=/opt/ran_agent/.ran_agent_state/social_reader/manual-checks
-mkdir -p "$CHECK_DIR"
-
-export XHS_QUERY='title or keyword'
-node "$MCPORTER" --config "$CONF" call xiaohongshu.search_feeds \
-  keyword="$XHS_QUERY" \
-  --timeout 120000 \
-  --output json >"$CHECK_DIR/xhs-search.json"
-
-export FEED_ID='matched feed id'
-export XSEC_TOKEN='matched xsec token from the search result'
-node "$MCPORTER" --config "$CONF" call xiaohongshu.get_feed_detail \
-  feed_id="$FEED_ID" \
-  xsec_token="$XSEC_TOKEN" \
-  --timeout 120000 \
-  --output json >"$CHECK_DIR/xhs-detail.json"
-```
-
-Delete manual check files after inspection. Do not paste `xsec_token`, cookies,
-QR payloads, detail JSON, or session files into public logs or docs.
 
 ## UV Cache Recovery
 

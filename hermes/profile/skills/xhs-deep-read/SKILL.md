@@ -7,9 +7,12 @@ description: Use when reading Xiaohongshu or other social links from WeChat.
 
 - Use `social_reader` for Xiaohongshu, Bilibili, music shares, and social URLs.
 - Prefer deep read tools when the user asks for analysis, extraction, or summary.
-- Never reveal cookies, xsec tokens, cache files, or platform resolver internals.
-- If login or platform access fails, say the read failed and explain the visible
-  reason without leaking credentials.
+- Xiaohongshu is public-only. Do not ask for cookies, QR login, account refresh,
+  `xiaohongshu-mcp`, or `xhs_browse` tools.
+- Never reveal xsec tokens, parser internals, cache files, or raw platform
+  resolver diagnostics.
+- If public parsers cannot read a note, say it is not publicly readable through
+  the configured chain. Do not diagnose this as a cookie or login failure.
 
 ## Result Adjudication
 
@@ -28,3 +31,5 @@ alone.
 - Only say the post is unreadable when `ok=false`, or when text fields are empty,
   `media_count=0`, and media analysis has no usable content.
 - Do not reuse older conclusions. The latest tool result wins.
+- `comments_supported=false` is expected for Xiaohongshu. Do not claim comments
+  were read unless the tool result explicitly contains comment text.

@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-02)
+Status: CURRENT (2026-07-04)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -63,17 +63,18 @@ deployment notes belong under ignored `local_archive/`, not under
   `scripts/diagnose-lite-full.sh`.
 - Search Hub is the unified fresh web/news/academic search entry; actual
   social links still read through `social_reader` / `media_reader`.
-- XHS browse backend and generic fallback are both prepared at deploy time:
-  browse uses `ran-agent-xhs-browse.service` plus the marker at
-  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json`; generic
-  fallback uses
-  `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
+- XHS is public-only. Deploy prepares `wanyi-watermark` via
+  `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`
+  and the XHS-Downloader sidecar via
+  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json`;
+  account-backed browse service, `XHS_COOKIE`, `xiaohongshu-mcp`, and legacy
+  token caches are removed by `scripts/apply-hermes-runtime-split.sh`.
 - XHS evidence gate separates `link_resolution`, `metadata_read`, and
-  `content_read`; token cache hits cannot claim content read.
+  `content_read`; public metadata cannot claim content read.
 - Request id logging is unified across context-size, routing, evidence, and
   evidence-gate logs.
-- Node root env and `node_bridge/.env.local` are both managed for XHS browse and
-  generic fallback marker consistency.
+- Node root env and `node_bridge/.env.local` are both managed for XHS public
+  parser and generic fallback marker consistency.
 - Media reader startup fallback now matches production DashScope OCR defaults;
   PaddleOCR is an explicit local override.
 - Opt-in AI daily digest is the only scheduled outbound allowlist path; it uses

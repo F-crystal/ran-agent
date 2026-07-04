@@ -360,7 +360,15 @@ test('resolve_platform_media returns structured Bilibili dependency errors when 
   assert.match(result.structuredContent.error_code, /DEPENDENCY_MISSING|PLATFORM_RESOLVER_NOT_CONFIGURED/);
 });
 
-test('resolve_platform_media resolves XHS share text and warns when video asset is hidden by backend', async () => {
+test('resolve_platform_media resolves XHS share text through public generic parser', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-public-generic-'));
+  const markerPath = path.join(tempDir, 'generic-fallback-ready.json');
+  fs.writeFileSync(markerPath, JSON.stringify({
+    ok: true,
+    command: 'unused-in-test',
+    args: [],
+    tool_name: 'parse_xhs_link',
+  }));
   const result = await callResolve(
     {
       url_or_text: '标题/正文片段 ... http://xhslink.com/o/xxxx 复制打开小红书',
@@ -368,22 +376,25 @@ test('resolve_platform_media resolves XHS share text and warns when video asset 
       max_comments: 2,
     },
     {
+      env: {
+        ...process.env,
+        XHS_GENERIC_FALLBACK_READY_PATH: markerPath,
+      },
       fetchImpl: async (url) => redirectResponse({
         url,
         location: 'https://www.xiaohongshu.com/explore/65f000000000000000000001?xsec_token=redacted-in-test',
       }),
       resolveHostnameImpl: async () => ['93.184.216.34'],
-      platformProviders: {
-        xhs: {
-          resolve: async () => ({
-            metadata: { title: '小红书标题', note_id: '65f000000000000000000001', has_video: true },
-            post_text: '小红书正文',
-            comments: ['评论一', '评论二', '评论三'],
-            media: [
-              { type: 'image', url: 'https://sns-img.xhscdn.com/image.jpg', mime: 'image/jpeg' },
-            ],
-          }),
-        },
+      mcpCallImpl: async ({ server, toolName }) => {
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return {
+          content: [{ type: 'text', text: JSON.stringify({
+            title: '小红书标题',
+            desc: '小红书正文',
+            images: [{ urlDefault: 'https://sns-img.xhscdn.com/image.jpg' }],
+          }) }],
+        };
       },
     }
   );
@@ -391,47 +402,52 @@ test('resolve_platform_media resolves XHS share text and warns when video asset 
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.platform, 'xhs');
   assert.equal(result.structuredContent.resolver, 'xhsResolver');
-  assert.deepEqual(result.structuredContent.comments, ['评论一', '评论二']);
+  assert.equal(result.structuredContent.source, 'generic_parser_fallback');
+  assert.deepEqual(result.structuredContent.comments, []);
+  assert.equal(result.structuredContent.comments_supported, false);
   assert.equal(result.structuredContent.media[0].url, undefined);
   assert.equal(result.structuredContent.media[0].url_redacted, 'https://sns-img.xhscdn.com/image.jpg');
-  assert.ok(result.structuredContent.warnings.some((warning) => warning.code === 'XHS_VIDEO_ASSET_NOT_EXPOSED_BY_BACKEND'));
+  assert.ok(result.structuredContent.warnings.some((warning) => warning.code === 'XHS_COMMENTS_UNSUPPORTED_PUBLIC_ONLY'));
 });
 
-test('resolve_platform_media canonicalizes XHS discovery links before provider calls', async () => {
+test('resolve_platform_media canonicalizes XHS discovery links before public parser calls', async () => {
   const shareText = '14 【置身钉内作者再发千字长文：云空未必空 - 大厂吃瓜前线 | 小红书 - 你的生活兴趣社区】 😆 dyYDHnM0OCNfOH9 😆 https://www.xiaohongshu.com/discovery/item/6a2b8f33000000001702ac99?source=webshare&xhsshare=pc_web&xsec_token=ABhlbvu1Hb6w6jyzeLPQTj67358eDrzbWm0hGNJRKVovY=&xsec_source=pc_share';
-  const providerCalls = [];
+  const parserCalls = [];
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-public-canonical-'));
+  const markerPath = path.join(tempDir, 'generic-fallback-ready.json');
+  fs.writeFileSync(markerPath, JSON.stringify({
+    ok: true,
+    command: 'unused-in-test',
+    args: [],
+    tool_name: 'parse_xhs_link',
+  }));
 
   const result = await callResolve(
     { url_or_text: shareText, platform: 'xhs' },
     {
+      env: {
+        ...process.env,
+        XHS_GENERIC_FALLBACK_READY_PATH: markerPath,
+      },
       resolveHostnameImpl: async () => ['93.184.216.34'],
-      platformProviders: {
-        xhs: {
-          resolve: async (args) => {
-            providerCalls.push(args);
-            return {
-              metadata: { title: '云空未必空', note_id: args.note_id },
-              post_text: '正文',
-              media: [],
-            };
-          },
-        },
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        parserCalls.push({ server, toolName, arguments: toolArgs });
+        return { content: [{ type: 'text', text: JSON.stringify({ title: '云空未必空', desc: '正文' }) }] };
       },
     }
   );
 
   assert.equal(result.structuredContent.ok, true);
-  assert.equal(providerCalls.length, 1);
+  assert.equal(parserCalls.length, 1);
   assert.equal(
-    providerCalls[0].url,
+    parserCalls[0].arguments.share_link,
     'https://www.xiaohongshu.com/explore/6a2b8f33000000001702ac99?xsec_token=ABhlbvu1Hb6w6jyzeLPQTj67358eDrzbWm0hGNJRKVovY%3D&xsec_source=pc_share'
   );
-  assert.equal(providerCalls[0].note_id, '6a2b8f33000000001702ac99');
   assert.equal(result.structuredContent.resolved_url_redacted, 'https://www.xiaohongshu.com/explore/6a2b8f33000000001702ac99?[redacted]');
   assert.equal(result.structuredContent.warnings.some((warning) => warning.code === 'XHS_MISSING_XSEC_TOKEN'), false);
 });
 
-test('resolve_platform_media returns structured XHS shortlink and auth errors', async () => {
+test('resolve_platform_media returns structured XHS shortlink failure and never auth errors', async () => {
   const shortlinkFailure = await callResolve(
     { url_or_text: 'https://xhslink.com/o/xxxx', platform: 'xhs' },
     {
@@ -439,15 +455,12 @@ test('resolve_platform_media returns structured XHS shortlink and auth errors', 
         throw new Error('network timeout');
       },
       resolveHostnameImpl: async () => ['93.184.216.34'],
-      platformProviders: {
-        xhs: { resolve: async () => ({ metadata: {}, media: [] }) },
-      },
     }
   );
   assert.equal(shortlinkFailure.isError, true);
   assert.equal(shortlinkFailure.structuredContent.error_code, 'XHS_SHORTLINK_RESOLVE_FAILED');
 
-  const authFailure = await callResolve(
+  const publicFailure = await callResolve(
     { url_or_text: 'https://www.xiaohongshu.com/explore/65f000000000000000000001', platform: 'xhs' },
     {
       resolveHostnameImpl: async () => ['93.184.216.34'],
@@ -462,8 +475,10 @@ test('resolve_platform_media returns structured XHS shortlink and auth errors', 
       },
     }
   );
-  assert.equal(authFailure.isError, true);
-  assert.equal(authFailure.structuredContent.error_code, 'XHS_AUTH_REQUIRED');
+  assert.equal(publicFailure.isError, undefined);
+  assert.equal(publicFailure.structuredContent.ok, true);
+  assert.equal(publicFailure.structuredContent.error_code, 'XHS_PUBLIC_PARSE_FAILED');
+  assert.equal(publicFailure.structuredContent.account_backed, false);
 });
 
 test('resolve_platform_media XHS timeout triggers generic fallback, not hard error', async () => {
@@ -471,13 +486,6 @@ test('resolve_platform_media XHS timeout triggers generic fallback, not hard err
     { url_or_text: 'https://www.xiaohongshu.com/explore/fallback-test?xsec_token=tok', platform: 'xhs' },
     {
       resolveHostnameImpl: async () => ['93.184.216.34'],
-      platformProviders: {
-        xhs: {
-          resolve: async () => {
-            throw new Error('MCP backend timed out after 90000ms: uvx');
-          },
-        },
-      },
     }
   );
   // Should return partial result (ok: true), not error (isError: true)
@@ -485,6 +493,51 @@ test('resolve_platform_media XHS timeout triggers generic fallback, not hard err
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.platform, 'xhs');
   assert.equal(result.structuredContent.resolver, 'xhsResolver');
+});
+
+test('resolve_platform_media XHS public-only ignores account-backed MCP command', async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'xhs-public-only-media-'));
+  const markerPath = path.join(tempDir, 'generic-fallback-ready.json');
+  fs.writeFileSync(markerPath, JSON.stringify({
+    ok: true,
+    command: 'unused-in-test',
+    args: [],
+    tool_name: 'parse_xhs_link',
+  }));
+  const calls = [];
+
+  const result = await callResolve(
+    { url_or_text: 'https://www.xiaohongshu.com/explore/public-media?xsec_token=poison', platform: 'xhs' },
+    {
+      env: {
+        ...process.env,
+        XHS_GENERIC_FALLBACK_READY_PATH: markerPath,
+        PERSONAL_AGENT_XHS_MCP_COMMAND: 'uvx',
+        PERSONAL_AGENT_XHS_MCP_ARGS_JSON: '["--from","jobson-xhs-mcp","xhs-mcp"]',
+      },
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        calls.push({ server, toolName, arguments: toolArgs });
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              desc: '公开 media 正文',
+              images: [{ urlDefault: 'https://sns-webpic-qc.xhscdn.com/public-media-1' }],
+            }),
+          }],
+        };
+      },
+    }
+  );
+
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.source, 'generic_parser_fallback');
+  assert.equal(result.structuredContent.media.length, 1);
+  assert.deepEqual(calls.map((call) => [call.server, call.toolName]), [['generic', 'parse_xhs_link']]);
 });
 
 test('resolve_platform_media XHS missing xsec token keeps generic parser image assets', async () => {
@@ -598,8 +651,9 @@ test('resolve_platform_media XHS non-recoverable error still throws', async () =
       },
     }
   );
-  // Non-recoverable errors should still be errors
-  assert.equal(result.isError, true);
+  assert.equal(result.isError, undefined);
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.error_code, 'XHS_PUBLIC_PARSE_FAILED');
 });
 
 test('analyze_video routes platform pages through platform resolver instead of direct ffprobe', async () => {

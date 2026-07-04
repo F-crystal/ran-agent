@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-07-04)
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -64,7 +64,7 @@ MCP services
 
 **联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。它同时注册到 lite/full；lite 使用 Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed 等轻量 provider，full 使用 Playwright fallback。OpenCLI browser-backed 默认关闭（2C4G/60G 服务器约束），后续 Phase 11.2 可选增强。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
 
-**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书在 browse backend 准备好时优先走 `xiaohongshu-mcp` 读取正文和详情图片，搜索上下文会缓存 `read_ref`；通用解析 fallback 只做缺 token、backend 失败或媒体恢复兜底，日志必须记录 redacted URL 或布尔 evidence。
+**社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书固定走公开解析链路：`wanyi-watermark`、XHS-Downloader public sidecar、通用网页/OG 兜底，再把公开媒体 URL 交给 `media_reader` 做 OCR/VLM；不配置 `XHS_COOKIE`、扫码登录或账号态 MCP。公开解析失败时返回不可读/metadata-only，不会动用个人账号。
 
 **多模态理解。** 微信图片、音频、视频和文档先经过可信路径校验，再交给 `media_reader` 做 OCR、ASR、VLM 或视频分析。视频采用字幕优先策略：字幕、音频 ASR、关键帧 VLM、元数据逐级降级。
 
@@ -191,11 +191,11 @@ runtime 配置变更必须从 repo 源配置进入，再通过
 | Retired MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | 历史变量，当前 runtime 不需要配置 |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR 和媒体生成 |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | provider-neutral vault 维护 runner；默认 Qwen-compatible，小步处理 inbox，默认超过 10 条或最老 120 分钟触发维护 |
-| 社交平台 | `XHS_COOKIE`, `SESSDATA` | 小红书、B 站等平台认证 |
+| 社交平台 | `SESSDATA` | B 站认证可选；小红书为 public-only，不使用 `XHS_COOKIE` |
 | Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault 检索与索引 |
 | 媒体上下文 | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | 默认 compact，可回退 legacy |
 | UV cache | `UV_CACHE_DIR`, `UV_TOOL_DIR`, `UV_LINK_MODE`, `UV_PYTHON_DOWNLOADS` | 固定 uv/uvx 缓存路径，防止磁盘膨胀 |
-| XHS timeout | `SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS`, `XHS_BACKEND_MCP_TIMEOUT_MS` | XHS 后端超时（默认 90s），与通用 social reader 超时独立 |
+| XHS public parser | `XHS_GENERIC_FALLBACK_READY_PATH`, `XHS_PUBLIC_SIDECAR_URL`, `XHS_PUBLIC_SIDECAR_TIMEOUT_MS` | 小红书公开解析与 XHS-Downloader sidecar；不使用登录态 |
 
 完整变量模板见 `.env.example`。服务器当前状态和最新部署口径见 `docs/governance/current_runtime_status.md`。
 
@@ -286,7 +286,7 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 | 平台 | 当前路径 | 认证 |
 |------|----------|------|
 | B 站 | `social_reader` + `media_reader`，字幕优先、ASR/关键帧兜底 | `SESSDATA` 可选 |
-| 小红书 | `social_reader`，generic parser fallback + token-aware compatibility path | `XHS_COOKIE` 可选但常用 |
+| 小红书 | `social_reader`，wanyi public parser + XHS-Downloader sidecar + HTML/OG 兜底；媒体交给 `media_reader` | 不支持登录态读取 |
 | 微信公众号 | HTML 抓取、正文解析、验证码识别和结构化降级 | 通常无需登录 |
 | 图片/音频/视频/文档 | `media_reader` | 本地可信路径或远程 URL |
 
@@ -296,7 +296,7 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 
 这是单用户个人系统。不要提交这些路径或内容：`.env.local`、`node_bridge/.env.local`、`.ran_agent_state/`、`data/`、`logs/`、`debug/`、`state/`、`local_archive/`、`vault/` 私有内容、Cookie、API key、代理 URL、平台登录态。
 
-平台 resolver 凭据如 `SESSDATA`、`XHS_COOKIE` 和代理 URL 也不能出现在日志、文档、工具输出或 Git 历史里。
+平台 resolver 凭据如 `SESSDATA` 和代理 URL 不能出现在日志、文档、工具输出或 Git 历史里；`XHS_COOKIE` 不属于当前 runtime 配置项。
 
 ---
 

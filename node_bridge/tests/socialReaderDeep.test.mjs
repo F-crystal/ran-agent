@@ -255,9 +255,9 @@ test('read_social_post_deep normalizes XHS wanyi media and analyzes image fallba
   assert.ok(backendCalls.some((call) => call.server === 'generic'));
 });
 
-test('read_social_post_deep uses XHS browse detail images when wanyi media fails', async () => {
+test('read_social_post_deep uses XHS-Downloader public sidecar when wanyi media fails', async () => {
   const noteId = '6a41cd4c000000000803df8e';
-  const browseCalls = [];
+  const fetchCalls = [];
   const mediaCalls = [];
 
   const result = await handleSocialReaderMcpRequest(
@@ -275,53 +275,40 @@ test('read_social_post_deep uses XHS browse detail images when wanyi media fails
     },
     {
       env: {
-        SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
-        XHS_BROWSE_ENABLED: 'true',
-        XHS_BROWSE_MCP_COMMAND: 'mcporter',
-        XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
-        XHS_BROWSE_MIN_INTERVAL_MS: '0',
-        XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
         XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-generic-marker.json',
+        XHS_PUBLIC_SIDECAR_URL: 'http://127.0.0.1:5556/xhs/detail',
       },
-      fetchImpl: async (url) => ({ url }),
-      xhsBrowseCallImpl: async ({ toolName, arguments: toolArgs }) => {
-        browseCalls.push({ toolName, arguments: toolArgs });
-        if (toolName === 'probe') {
-          return {
-            ok: true,
-            available_tools: ['xiaohongshu_search_feeds', 'xiaohongshu_get_feed_detail'],
-          };
-        }
-        if (toolName === 'xiaohongshu_get_feed_detail') {
-          assert.equal(toolArgs.feed_id, noteId);
-          assert.equal(toolArgs.xsec_token, 'fresh-token');
-          return {
-            ok: true,
+      fetchImpl: async (requestUrl, init = {}) => {
+        fetchCalls.push({ requestUrl, init });
+        assert.equal(requestUrl, 'http://127.0.0.1:5556/xhs/detail');
+        assert.equal(JSON.parse(init.body).cookie, '');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
             data: {
-              content: [{
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  data: {
-                    feed_id: noteId,
-                    note: {
-                      id: noteId,
-                      title: '【AI小游戏·已开源】让你的AI当一回造物主',
-                      desc: '正文已经由 xhs_browse 读到',
-                      imageList: [{
-                        urlDefault: 'https://sns-webpic-qc.xhscdn.com/1040g008321vuhj0mne6g5n1o986hp0mku30kngg',
-                        urlPre: 'https://sns-webpic-qc.xhscdn.com/1040g008321vuhj0mne6g5n1o986hp0mku30kngg!nc_n_webp_prv_1',
-                        width: 936,
-                        height: 1202,
-                      }],
-                    },
-                  },
-                }),
-              }],
+              note: {
+                id: noteId,
+                title: '【AI小游戏·已开源】让你的AI当一回造物主',
+                desc: '正文已经由 public sidecar 读到',
+                imageList: [{
+                  urlDefault: 'https://sns-webpic-qc.xhscdn.com/1040g008321vuhj0mne6g5n1o986hp0mku30kngg',
+                  urlPre: 'https://sns-webpic-qc.xhscdn.com/1040g008321vuhj0mne6g5n1o986hp0mku30kngg!nc_n_webp_prv_1',
+                  width: 936,
+                  height: 1202,
+                }],
+              },
             },
-          };
-        }
-        throw new Error(`unexpected xhs browse tool ${toolName}`);
+          }),
+        };
+      },
+      xhsBrowseCallImpl: async () => {
+        throw new Error('xhs browse must not be called');
+      },
+      mcpCallImpl: async ({ server, toolName }) => {
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return { content: [{ type: 'text', text: '{"status":"error","message":"wanyi failed"}' }] };
       },
       mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
         mediaCalls.push({ toolName, arguments: toolArgs });
@@ -345,16 +332,87 @@ test('read_social_post_deep uses XHS browse detail images when wanyi media fails
 
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.partial_success, false);
-  assert.equal(result.structuredContent.source, 'xhs_browse');
+  assert.equal(result.structuredContent.source, 'xhs-downloader-sidecar');
   assert.equal(result.structuredContent.images.length, 1);
   assert.equal(result.structuredContent.media.length, 1);
   assert.equal(result.structuredContent.media_assets.length, 1);
   assert.equal(result.structuredContent.media_assets[0].type, 'image');
   assert.match(result.structuredContent.deep_summary, /ECO/);
   assert.equal(result.structuredContent.diagnostics.detail_backend.ok, true);
-  assert.equal(result.structuredContent.diagnostics.media_backend.ok, false);
+  assert.equal(result.structuredContent.diagnostics.media_backend.ok, true);
   assert.equal(mediaCalls.length, 1);
-  assert.ok(browseCalls.some((call) => call.toolName === 'xiaohongshu_get_feed_detail'));
+  assert.equal(fetchCalls.length, 1);
+});
+
+test('read_social_post_deep XHS public-only never calls account-backed browse or xhs MCP', async () => {
+  const backendCalls = [];
+  const mediaCalls = [];
+  const result = await handleSocialReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'read_social_post_deep',
+        arguments: {
+          url: 'https://www.xiaohongshu.com/explore/public-deep?xsec_token=poison',
+          include_media: true,
+          media_detail: 'standard',
+        },
+      },
+    },
+    {
+      env: {
+        XHS_COOKIE: 'a1=secret',
+        SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
+        XHS_BROWSE_ENABLED: 'true',
+        XHS_BROWSE_MCP_COMMAND: 'mcporter',
+        XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
+      },
+      fetchImpl: async (url) => ({ url }),
+      xhsBrowseCallImpl: async () => {
+        throw new Error('xhs browse must not be called in public-only mode');
+      },
+      mcpCallImpl: async ({ server, toolName, arguments: toolArgs }) => {
+        backendCalls.push({ server, toolName, arguments: toolArgs });
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({
+              title: '公开 deep 标题',
+              desc: '公开 deep 正文',
+              images: [
+                { urlDefault: 'https://sns-webpic-qc.xhscdn.com/public-deep-1', width: 936, height: 1202 },
+                { urlDefault: 'https://sns-webpic-qc.xhscdn.com/public-deep-2', width: 936, height: 1202 },
+              ],
+            }),
+          }],
+        };
+      },
+      mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
+        mediaCalls.push({ toolName, arguments: toolArgs });
+        assert.equal(toolName, 'analyze_media_batch');
+        assert.equal(toolArgs.assets.length, 2);
+        return {
+          structuredContent: {
+            ok: true,
+            partial: false,
+            items: toolArgs.assets.map((asset) => ({ asset_id: asset.asset_id, type: 'image', overall_summary: asset.asset_id })),
+            merged_summary: '公开图片已分析',
+            partial_failures: [],
+            warnings: [],
+          },
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.source, 'wanyi-watermark');
+  assert.equal(result.structuredContent.images.length, 2);
+  assert.equal(result.structuredContent.post_text, '公开 deep 正文');
+  assert.equal(backendCalls.length, 1);
+  assert.equal(mediaCalls.length, 1);
 });
 
 test('read_social_post_deep analyzes all default XHS media assets', async () => {
@@ -380,37 +438,18 @@ test('read_social_post_deep analyzes all default XHS media assets', async () => 
     },
     {
       env: {
-        SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: 'true',
-        XHS_BROWSE_ENABLED: 'true',
-        XHS_BROWSE_MCP_COMMAND: 'mcporter',
-        XHS_BROWSE_MCP_ARGS_JSON: '["serve","--servers","xiaohongshu","--stdio"]',
-        XHS_BROWSE_MIN_INTERVAL_MS: '0',
-        XHS_BROWSE_MAX_CALLS_PER_SESSION: '99',
-        XHS_GENERIC_FALLBACK_READY_PATH: '/tmp/ran-agent-missing-xhs-generic-marker.json',
+        XHS_COOKIE: 'a1=secret',
       },
       fetchImpl: async (url) => ({ url }),
-      xhsBrowseCallImpl: async ({ toolName }) => {
-        if (toolName === 'probe') {
-          return { ok: true, available_tools: ['xiaohongshu_get_feed_detail'] };
-        }
-        if (toolName === 'xiaohongshu_get_feed_detail') {
-          return {
-            ok: true,
-            data: {
-              content: [{
-                type: 'text',
-                text: JSON.stringify({
-                  success: true,
-                  data: {
-                    feed_id: noteId,
-                    note: { id: noteId, title: '全图测试', desc: '正文', imageList },
-                  },
-                }),
-              }],
-            },
-          };
-        }
-        throw new Error(`unexpected xhs browse tool ${toolName}`);
+      xhsBrowseCallImpl: async () => {
+        throw new Error('xhs browse must not be called');
+      },
+      mcpCallImpl: async ({ server, toolName }) => {
+        assert.equal(server, 'generic');
+        assert.equal(toolName, 'parse_xhs_link');
+        return {
+          content: [{ type: 'text', text: JSON.stringify({ title: '全图测试', desc: '正文', images: imageList }) }],
+        };
       },
       mediaReaderCallImpl: async ({ toolName, arguments: toolArgs }) => {
         assert.equal(toolName, 'analyze_media_batch');

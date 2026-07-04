@@ -1,6 +1,6 @@
 # Media Pipeline
 
-Status: CURRENT (2026-07-01)
+Status: CURRENT (2026-07-04)
 
 This document owns the current media pipeline contract. Detailed WeChat buffer
 semantics live in `docs/governance/wechat-bridge-media-buffer.md`; retired
@@ -81,20 +81,18 @@ files are not saved automatically. Sticker assets live under
 2. Partial results are preserved when individual media assets fail.
 
 For platform links, call `media_reader.resolve_platform_media` before direct
-asset analysis when normalized resources are needed. XHS deep reads can receive
-normalized media from either the token-aware browse detail payload
-(`imageList`) or the generic parser fallback; known `image`/`video` types must
-be preserved before forwarding assets to `analyze_media_batch` for OCR/VLM.
-Resolvers must not claim image understanding by themselves: XHS browse and
-`wanyi-watermark` supply post text and media URLs, while `media_reader`
-performs the OCR/VLM pass. Default deep reads keep up to 100 media assets and
-use long media-reader budgets so all discovered images are attempted; failures
-remain per-asset partial failures instead of silent truncation.
-XHS missing `xsec_token` is a recoverable resolver condition: generic parser
+asset analysis when normalized resources are needed. XHS is public-only:
+`wanyi-watermark`, the XHS-Downloader sidecar, and HTML/OG fallback may supply
+post text and media URLs, but account-backed browse/cookie providers are not
+part of the runtime. Known `image`/`video` types must be preserved before
+forwarding assets to `analyze_media_batch` for OCR/VLM.
+Resolvers must not claim image understanding by themselves: public XHS parsers
+supply post text and media URLs, while `media_reader` performs the OCR/VLM
+pass. Default deep reads keep up to 100 media assets and use long media-reader
+budgets so all discovered images are attempted; failures remain per-asset
+partial failures instead of silent truncation.
+XHS missing `xsec_token` is a recoverable resolver condition: public parser
 metadata and image URLs must still be forwarded to analysis when available.
-XHS PC-share long links under `/discovery/item/<note_id>` are canonicalized to
-`/explore/<note_id>` with `xsec_token` and `xsec_source` preserved before
-backend provider calls.
 
 Video analysis is subtitle-first when available, then audio ASR, then keyframe
 VLM, then metadata-only fallback.
@@ -116,8 +114,9 @@ Rollback: set `RAN_AGENT_CONTEXT_POLICY=legacy`.
 
 ## Security
 
-- Platform resolver credentials such as `SESSDATA`, `XHS_COOKIE`, and proxy
-  URLs must not appear in tool output, logs, docs, or Git.
+- Platform resolver credentials such as `SESSDATA` and proxy URLs must not
+  appear in tool output, logs, docs, or Git; `XHS_COOKIE` is not a current
+  runtime setting.
 - Runtime artifacts under `debug/`, `.ran_agent_state/`, and media task dirs
   are local state and must not be committed.
 - Production OCR uses DashScope Qwen-VL OCR. PaddleOCR is a best-effort local

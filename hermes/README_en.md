@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-06-23)
+Status: CURRENT (2026-07-04)
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 
@@ -164,7 +164,7 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen vision, ASR, media generation |
 | `MIMO_TOKEN_PLAN_API_KEY` | Retired MiMo Power MCP; not required by the current runtime |
 | `TAVILY_API_KEY` | Optional Tavily provider for Search Hub |
-| `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
+| `SESSDATA` | Optional Bilibili auth; Xiaohongshu reading is public-only and does not use `XHS_COOKIE` |
 | `CO_READING_ROOT_DIR`, `CO_READING_OWNER_TOKEN` | co_reading local state directory and owner-only write auth |
 | `CO_READING_WEB_ENABLED`, `CO_READING_WEB_ACCESS_TOKEN` | Optional Tailscale Web reader switch and browser access token |
 | `CO_READING_ASK_CONTEXT_CHARS`, `CO_READING_ASK_THREAD_LIMIT` | Context window and recent-thread limits for Hermes co-reading replies |

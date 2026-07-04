@@ -147,13 +147,19 @@ fi
 
 echo ""
 echo "=== 3. Env var check (names only) ==="
-for key in RAN_AGENT_REPO_ROOT XHS_COOKIE TAVILY_API_KEY DEEPSEEK_API_KEY DASHSCOPE_API_KEY; do
+for key in RAN_AGENT_REPO_ROOT TAVILY_API_KEY DEEPSEEK_API_KEY DASHSCOPE_API_KEY; do
   found="MISSING"
   for f in .env.local node_bridge/.env.local "$HERMES_HOME/.env" "$HERMES_HOME/profiles/ran-assistant/.env"; do
     [ -f "$f" ] && grep -q "^${key}=" "$f" 2>/dev/null && found="PRESENT" && break
   done
   echo "$key: $found"
 done
+ACCOUNT_BACKED_KEYS=$(grep -hE '^(XHS_COOKIE|XHS_MCP_|PERSONAL_AGENT_XHS_MCP_|XHS_BROWSE_|SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS|XHS_NOTE_TOKEN_CACHE_)' "${ENV_FILES[@]}" 2>/dev/null | cut -d= -f1 | sort -u | tr '\n' ' ' || true)
+if [ -n "$ACCOUNT_BACKED_KEYS" ]; then
+  echo "account-backed XHS env: PRESENT ($ACCOUNT_BACKED_KEYS) -- SHOULD BE REMOVED"
+else
+  echo "account-backed XHS env: ABSENT"
+fi
 
 echo ""
 echo "=== 4. Artifact age distribution ==="
@@ -185,7 +191,7 @@ for bucket, count in buckets.items():
 "
 
 echo ""
-echo "=== 5. XHS token cache status ==="
+echo "=== 5. Legacy XHS token cache guard ==="
 XHS_CACHE_PATHS=(
   ".ran_agent_state/social_reader/xhs-note-token-cache.json"
   "node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json"
@@ -193,9 +199,9 @@ XHS_CACHE_PATHS=(
 for cache_path in "${XHS_CACHE_PATHS[@]}"; do
   if [ -f "$cache_path" ]; then
     entry_count=$("$PYTHON_BIN" -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "parse_error")
-    echo "$cache_path: EXISTS ($entry_count entries)"
+    echo "$cache_path: EXISTS ($entry_count entries) -- SHOULD BE REMOVED"
   else
-    echo "$cache_path: NOT FOUND"
+    echo "$cache_path: NOT FOUND (OK)"
   fi
 done
 
@@ -203,7 +209,7 @@ echo ""
 echo "=== 6. UV cache and timeout env ==="
 for f in .env.local node_bridge/.env.local "$HERMES_HOME/.env" "$HERMES_HOME/profiles/ran-assistant/.env"; do
   if [ -f "$f" ]; then
-    for key in UV_CACHE_DIR UV_TOOL_DIR SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS XHS_BACKEND_MCP_TIMEOUT_MS SOCIAL_READER_MCP_TIMEOUT_MS MEDIA_READER_MCP_TIMEOUT_MS PERSONAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS PERSONAL_AGENT_OCR_PROVIDER PERSONAL_AGENT_OCR_MODEL PERSONAL_AGENT_OCR_TIMEOUT_MS XHS_GENERIC_FALLBACK_MIN_VERSION; do
+    for key in UV_CACHE_DIR UV_TOOL_DIR SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS XHS_BACKEND_MCP_TIMEOUT_MS SOCIAL_READER_MCP_TIMEOUT_MS MEDIA_READER_MCP_TIMEOUT_MS PERSONAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS PERSONAL_AGENT_OCR_PROVIDER PERSONAL_AGENT_OCR_MODEL PERSONAL_AGENT_OCR_TIMEOUT_MS XHS_GENERIC_FALLBACK_MIN_VERSION XHS_PUBLIC_SIDECAR_ENABLED XHS_PUBLIC_SIDECAR_URL XHS_PUBLIC_SIDECAR_TIMEOUT_MS XHS_PUBLIC_HTML_FALLBACK_ENABLED XHS_PUBLIC_SIDECAR_MARKER_PATH; do
       val=$(grep "^${key}=" "$f" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
       if [ -n "$val" ]; then
         echo "$f: $key=$val"
@@ -340,129 +346,129 @@ else
 fi
 
 echo ""
-echo "--- XHS browse backend readiness ---"
-BROWSE_MARKER_PATH="$(effective_env_value XHS_BROWSE_MARKER_PATH /opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json)"
-echo "XHS_BROWSE_ENABLED: $(effective_env_value XHS_BROWSE_ENABLED false)"
-echo "SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS: $(effective_env_value SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS false)"
-echo "XHS_BROWSE_MCP_COMMAND: $(effective_env_value XHS_BROWSE_MCP_COMMAND NOT_SET)"
-echo "XHS_BROWSE_MCP_ARGS_JSON: $(effective_env_value XHS_BROWSE_MCP_ARGS_JSON NOT_SET)"
-echo "XHS_BROWSE_MCP_COOKIE_ENV: $(effective_env_value XHS_BROWSE_MCP_COOKIE_ENV XHS_COOKIE)"
-echo "XHS_BROWSE_MCP_URL: $(effective_env_value XHS_BROWSE_MCP_URL http://127.0.0.1:18060/mcp)"
-echo "marker path: $BROWSE_MARKER_PATH"
-
-if [ -f "$BROWSE_MARKER_PATH" ]; then
-  echo "marker: EXISTS"
-  if ! "$PYTHON_BIN" -m json.tool "$BROWSE_MARKER_PATH" > /dev/null 2>&1; then
-    echo "ERROR: marker CORRUPTED (not valid JSON)"
-    echo "marker content (first 200 chars): $(head -c 200 "$BROWSE_MARKER_PATH" 2>/dev/null)"
-    echo "xhs browse: NOT READY (marker corrupted)"
+echo "--- Account-backed XHS guard ---"
+OLD_BROWSE_MARKER="/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json"
+OLD_TOKEN_CACHE="/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json"
+if [ -f "$OLD_BROWSE_MARKER" ]; then
+  echo "old browse marker: PRESENT -- SHOULD BE REMOVED"
+else
+  echo "old browse marker: ABSENT"
+fi
+if [ -f "$OLD_TOKEN_CACHE" ]; then
+  echo "old token cache: PRESENT -- SHOULD BE REMOVED"
+else
+  echo "old token cache: ABSENT"
+fi
+if command -v systemctl >/dev/null 2>&1; then
+  if systemctl list-unit-files ran-agent-xhs-browse.service >/dev/null 2>&1; then
+    if systemctl is-active --quiet ran-agent-xhs-browse.service 2>/dev/null; then
+      echo "ran-agent-xhs-browse.service: ACTIVE -- SHOULD BE STOPPED"
+    else
+      echo "ran-agent-xhs-browse.service: INSTALLED BUT INACTIVE -- SHOULD BE REMOVED"
+    fi
   else
-    BROWSE_MARKER_OK="$(json_field "$BROWSE_MARKER_PATH" ok)"
-    BROWSE_BACKEND="$(json_field "$BROWSE_MARKER_PATH" backend)"
-    BROWSE_RELEASE="$(json_field "$BROWSE_MARKER_PATH" release_tag)"
-    BROWSE_SERVER="$(json_field "$BROWSE_MARKER_PATH" server_name)"
-    BROWSE_MCP_URL="$(json_field "$BROWSE_MARKER_PATH" mcp_url)"
-    BROWSE_MCP_EXEC="$(json_field "$BROWSE_MARKER_PATH" mcp_executable)"
-    BROWSE_LOGIN_EXEC="$(json_field "$BROWSE_MARKER_PATH" login_executable)"
-    BROWSE_MCPORTER="$(json_field "$BROWSE_MARKER_PATH" mcporter_cli)"
-    BROWSE_MCPORTER_CONFIG="$(json_field "$BROWSE_MARKER_PATH" mcporter_config_path)"
-    BROWSE_COMMAND="$(json_field "$BROWSE_MARKER_PATH" command)"
-    echo "marker ok: ${BROWSE_MARKER_OK:-NOT SET}"
-    echo "marker backend: ${BROWSE_BACKEND:-NOT SET}"
-    echo "marker release_tag: ${BROWSE_RELEASE:-NOT SET}"
-    echo "marker server_name: ${BROWSE_SERVER:-NOT SET}"
-    echo "marker mcp_url: ${BROWSE_MCP_URL:-NOT SET}"
-    echo "marker mcp_executable: ${BROWSE_MCP_EXEC:-NOT SET}"
-    echo "marker login_executable: ${BROWSE_LOGIN_EXEC:-NOT SET}"
-    echo "marker mcporter_cli: ${BROWSE_MCPORTER:-NOT SET}"
-    echo "marker mcporter_config_path: ${BROWSE_MCPORTER_CONFIG:-NOT SET}"
-    echo "marker command: ${BROWSE_COMMAND:-NOT SET}"
-    if [ -n "$BROWSE_MCP_EXEC" ] && [ -x "$BROWSE_MCP_EXEC" ]; then
-      echo "mcp_executable: EXECUTABLE"
+    echo "ran-agent-xhs-browse.service: ABSENT"
+  fi
+fi
+echo "account-backed XHS disabled: $( [ -z "$ACCOUNT_BACKED_KEYS" ] && [ ! -f "$OLD_BROWSE_MARKER" ] && [ ! -f "$OLD_TOKEN_CACHE" ] && echo OK || echo CHECK_REQUIRED )"
+
+echo ""
+echo "--- XHS public sidecar readiness ---"
+SIDECAR_MARKER_PATH="$(effective_env_value XHS_PUBLIC_SIDECAR_MARKER_PATH /opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json)"
+SIDECAR_URL="$(effective_env_value XHS_PUBLIC_SIDECAR_URL http://127.0.0.1:18061/xhs/detail)"
+echo "XHS_PUBLIC_SIDECAR_ENABLED: $(effective_env_value XHS_PUBLIC_SIDECAR_ENABLED true)"
+echo "XHS_PUBLIC_SIDECAR_URL: $SIDECAR_URL"
+echo "XHS_PUBLIC_SIDECAR_TIMEOUT_MS: $(effective_env_value XHS_PUBLIC_SIDECAR_TIMEOUT_MS 90000)"
+echo "XHS_PUBLIC_HTML_FALLBACK_ENABLED: $(effective_env_value XHS_PUBLIC_HTML_FALLBACK_ENABLED true)"
+echo "marker path: $SIDECAR_MARKER_PATH"
+
+if [ -f "$SIDECAR_MARKER_PATH" ]; then
+  echo "marker: EXISTS"
+  if ! "$PYTHON_BIN" -m json.tool "$SIDECAR_MARKER_PATH" > /dev/null 2>&1; then
+    echo "ERROR: marker CORRUPTED (not valid JSON)"
+    echo "marker content (first 200 chars): $(head -c 200 "$SIDECAR_MARKER_PATH" 2>/dev/null)"
+    echo "xhs public sidecar: NOT READY (marker corrupted)"
+  else
+    SIDECAR_MARKER_OK="$(json_field "$SIDECAR_MARKER_PATH" ok)"
+    SIDECAR_BACKEND="$(json_field "$SIDECAR_MARKER_PATH" backend)"
+    SIDECAR_SOURCE="$(json_field "$SIDECAR_MARKER_PATH" source_dir)"
+    SIDECAR_PYTHON="$(json_field "$SIDECAR_MARKER_PATH" venv_python)"
+    SIDECAR_COMMAND="$(json_field "$SIDECAR_MARKER_PATH" command)"
+    SIDECAR_MARKER_URL="$(json_field "$SIDECAR_MARKER_PATH" api_url)"
+    SIDECAR_VERSION="$(json_field "$SIDECAR_MARKER_PATH" version)"
+    SIDECAR_COMMIT="$(json_field "$SIDECAR_MARKER_PATH" commit)"
+    SIDECAR_COOKIE="$(json_field "$SIDECAR_MARKER_PATH" cookie)"
+    SIDECAR_DOWNLOAD="$(json_field "$SIDECAR_MARKER_PATH" download)"
+    echo "marker ok: ${SIDECAR_MARKER_OK:-NOT SET}"
+    echo "marker backend: ${SIDECAR_BACKEND:-NOT SET}"
+    echo "marker source_dir: ${SIDECAR_SOURCE:-NOT SET}"
+    echo "marker venv_python: ${SIDECAR_PYTHON:-NOT SET}"
+    echo "marker command: ${SIDECAR_COMMAND:-NOT SET}"
+    echo "marker api_url: ${SIDECAR_MARKER_URL:-NOT SET}"
+    echo "marker version: ${SIDECAR_VERSION:-NOT SET}"
+    echo "marker commit: ${SIDECAR_COMMIT:-NOT SET}"
+    echo "marker cookie: $( [ -z "$SIDECAR_COOKIE" ] && echo EMPTY || echo SHOULD_BE_EMPTY )"
+    echo "marker download: ${SIDECAR_DOWNLOAD:-NOT SET}"
+    if [ "$SIDECAR_MARKER_OK" = "True" ] && [ -n "$SIDECAR_SOURCE" ] && [ -f "$SIDECAR_SOURCE/main.py" ] && [ -n "$SIDECAR_PYTHON" ] && [ -x "$SIDECAR_PYTHON" ] && [ -n "$SIDECAR_COMMAND" ] && [ -x "$SIDECAR_COMMAND" ]; then
+      echo "xhs public sidecar install: READY"
     else
-      echo "mcp_executable: NOT EXECUTABLE"
-    fi
-    if [ -n "$BROWSE_MCPORTER" ] && [ -f "$BROWSE_MCPORTER" ]; then
-      echo "mcporter_cli: FOUND"
-    else
-      echo "mcporter_cli: NOT FOUND"
-    fi
-    if [ -n "$BROWSE_MCPORTER_CONFIG" ] && [ -f "$BROWSE_MCPORTER_CONFIG" ]; then
-      echo "mcporter_config: FOUND"
-    else
-      echo "mcporter_config: NOT FOUND"
-    fi
-    if [ "$BROWSE_MARKER_OK" = "True" ] && [ -n "$BROWSE_MCP_EXEC" ] && [ -x "$BROWSE_MCP_EXEC" ] && [ -n "$BROWSE_MCPORTER" ] && [ -f "$BROWSE_MCPORTER" ]; then
-      echo "xhs browse install: READY"
-    else
-      echo "xhs browse install: NOT READY"
-      echo "hint: run scripts/prepare-xhs-browse-backend.sh --write-env"
+      echo "xhs public sidecar install: NOT READY"
+      echo "hint: run scripts/prepare-xhs-public-sidecar.sh"
     fi
   fi
 else
   echo "marker: NOT FOUND"
-  echo "xhs browse install: NOT READY"
-  echo "hint: run scripts/prepare-xhs-browse-backend.sh --write-env"
+  echo "xhs public sidecar install: NOT READY"
+  echo "hint: run scripts/prepare-xhs-public-sidecar.sh"
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
-  if systemctl list-unit-files ran-agent-xhs-browse.service >/dev/null 2>&1; then
-    if systemctl is-active --quiet ran-agent-xhs-browse.service 2>/dev/null; then
-      echo "ran-agent-xhs-browse.service: ACTIVE"
+  if systemctl list-unit-files ran-agent-xhs-public-sidecar.service >/dev/null 2>&1; then
+    if systemctl is-active --quiet ran-agent-xhs-public-sidecar.service 2>/dev/null; then
+      echo "ran-agent-xhs-public-sidecar.service: ACTIVE"
     else
-      echo "ran-agent-xhs-browse.service: NOT ACTIVE"
+      echo "ran-agent-xhs-public-sidecar.service: NOT ACTIVE"
     fi
   else
-    echo "ran-agent-xhs-browse.service: NOT INSTALLED"
+    echo "ran-agent-xhs-public-sidecar.service: NOT INSTALLED"
   fi
 fi
 
-if has_arg "--smoke-browse" "$@"; then
+if has_arg "--smoke-public-sidecar" "$@"; then
   echo ""
-  echo "--- XHS browse bridge smoke test ---"
-  if [ ! -f "$BROWSE_MARKER_PATH" ]; then
-    echo "SKIPPED: marker not found. Run scripts/prepare-xhs-browse-backend.sh --write-env first."
+  echo "--- XHS public sidecar smoke test ---"
+  if ! command -v curl >/dev/null 2>&1; then
+    echo "SKIPPED: curl not found"
   else
-    BROWSE_COMMAND="$(json_field "$BROWSE_MARKER_PATH" command)"
-    if [ -n "$BROWSE_COMMAND" ] && [ -x "$BROWSE_COMMAND" ]; then
-      echo "smoke testing via $BROWSE_COMMAND (timeout 30s)..."
-      BROWSE_SMOKE_STDERR="$(mktemp)"
-      BROWSE_SMOKE_RESULT=$(XHS_BROWSE_MARKER_PATH="$BROWSE_MARKER_PATH" timeout 30 "$BROWSE_COMMAND" 2>"$BROWSE_SMOKE_STDERR" <<'MCP_EOF' || true
-{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"diag-xhs-browse","version":"0.1.0"}}}
+    DOCS_URL="${SIDECAR_URL%/xhs/detail}/docs"
+    if curl -fsS -m 5 "$DOCS_URL" >/dev/null 2>&1; then
+      echo "xhs public sidecar HTTP docs: CONFIRMED"
+    else
+      echo "xhs public sidecar HTTP docs: NOT CONFIRMED"
+    fi
+  fi
+fi
+
+if has_arg "--smoke-social-tools" "$@"; then
+  echo ""
+  echo "--- Social reader public-only tools smoke test ---"
+  SOCIAL_TOOLS_RESULT=$(timeout 30 bash scripts/start_social_reader_mcp.sh <<'MCP_EOF' 2>/dev/null || true
+{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"diag-social-tools","version":"0.1.0"}}}
 {"jsonrpc":"2.0","method":"notifications/initialized","params":{}}
 {"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}
 MCP_EOF
 )
-      BROWSE_SMOKE_ERROR="$(head -n 3 "$BROWSE_SMOKE_STDERR" 2>/dev/null | tr '\n' ' ' | sed 's/[[:space:]]\+/ /g' | cut -c1-300)"
-      rm -f "$BROWSE_SMOKE_STDERR"
-      if [ -n "$BROWSE_SMOKE_ERROR" ]; then
-        echo "xhs browse bridge error: $BROWSE_SMOKE_ERROR"
-      fi
-      if echo "$BROWSE_SMOKE_RESULT" | grep -Eq 'search_feeds|search_notes'; then
-        echo "xhs browse search tool: CONFIRMED"
-      else
-        echo "xhs browse search tool: NOT CONFIRMED"
-      fi
-      if echo "$BROWSE_SMOKE_RESULT" | grep -Eq 'get_feed_detail|get_note_info|get_note_content'; then
-        echo "xhs browse detail tool: CONFIRMED"
-      else
-        echo "xhs browse detail tool: NOT CONFIRMED"
-      fi
-    else
-      echo "SKIPPED: marker command not executable: $BROWSE_COMMAND"
-    fi
+  if echo "$SOCIAL_TOOLS_RESULT" | grep -q '"read_social_post"'; then
+    echo "read_social_post tool: PRESENT"
+  else
+    echo "read_social_post tool: NOT CONFIRMED"
+  fi
+  if echo "$SOCIAL_TOOLS_RESULT" | grep -Eq 'check_social_login|xhs_browse_'; then
+    echo "login/browse tools: PRESENT -- SHOULD BE ABSENT"
+  else
+    echo "login/browse tools: ABSENT"
   fi
 fi
-
-# Token cache (read-only, no side effects)
-for cache_path in ".ran_agent_state/social_reader/xhs-note-token-cache.json" "node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json"; do
-  if [ -f "$cache_path" ]; then
-    count=$("$PYTHON_BIN" -c "import json; d=json.load(open('$cache_path')); print(len(d.get('entries', d)))" 2>/dev/null || echo "?")
-    echo "token cache: $cache_path ($count entries)"
-  else
-    echo "token cache: $cache_path NOT FOUND"
-  fi
-done
 
 echo "browser fallback: DISABLED (lite default)"
 

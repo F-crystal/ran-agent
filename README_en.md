@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-07-04)
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -64,7 +64,7 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 **Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. It is registered in both lite and full; lite uses lightweight providers such as Tavily, AIHOT, OpenCLI public-only, OpenAlex/arxiv/pubmed, while full may use Playwright fallback. OpenCLI browser-backed mode is disabled by default for the 2C4G/60G server and remains an optional Phase 11.2 enhancement. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.
 
-**Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. When the browse backend is prepared, Xiaohongshu first uses `xiaohongshu-mcp` for post text and detail images, while search context stores `read_ref` handles; the generic parser fallback remains for missing-token, backend-failure, or media-recovery cases, and logs must use redacted URLs or boolean evidence.
+**Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. Xiaohongshu is public-only: it tries `wanyi-watermark`, the XHS-Downloader public sidecar, and minimal HTML/OG fallback, then sends public media URLs to `media_reader` for OCR/VLM. It does not use `XHS_COOKIE`, QR login, or account-backed MCP; public parse failures return unreadable/metadata-only results instead of touching a personal account.
 
 **Multimodal understanding.** WeChat images, audio, video, and documents first pass trusted-path validation, then go through `media_reader` for OCR, ASR, VLM, or video analysis. Video analysis is subtitle-first: subtitles, audio ASR, keyframe VLM, then metadata fallback.
 
@@ -184,11 +184,11 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Retired MiMo | `MIMO_TOKEN_PLAN_API_KEY`, `MIMO_POWER_*` | Historical variables; not required by the current runtime |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR and media generation |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | Provider-neutral vault maintenance runner; Qwen-compatible by default, processes inbox in small steps, and triggers maintenance above 10 pending items or oldest item age of 120 minutes by default |
-| Social platforms | `XHS_COOKIE`, `SESSDATA` | Xiaohongshu and Bilibili auth |
+| Social platforms | `SESSDATA` | Optional Bilibili auth; Xiaohongshu is public-only and does not use `XHS_COOKIE` |
 | Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault retrieval and indexing |
 | Media context | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | compact by default, legacy fallback available |
 | UV cache | `UV_CACHE_DIR`, `UV_TOOL_DIR`, `UV_LINK_MODE`, `UV_PYTHON_DOWNLOADS` | Fixed uv/uvx cache paths to prevent disk growth |
-| XHS timeout | `SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS`, `XHS_BACKEND_MCP_TIMEOUT_MS` | XHS backend timeout, independent from generic social reader timeout |
+| XHS public parser | `XHS_GENERIC_FALLBACK_READY_PATH`, `XHS_PUBLIC_SIDECAR_URL`, `XHS_PUBLIC_SIDECAR_TIMEOUT_MS` | Xiaohongshu public parsing and XHS-Downloader sidecar; no login state |
 
 The full template is `.env.example`. The authoritative current runtime state is `docs/governance/current_runtime_status.md`.
 
@@ -279,7 +279,7 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 | Platform | Current Path | Auth |
 |----------|--------------|------|
 | Bilibili | `social_reader` + `media_reader`, subtitle-first with ASR/keyframe fallback | optional `SESSDATA` |
-| Xiaohongshu | `social_reader`, generic parser fallback + token-aware compatibility path | optional but common `XHS_COOKIE` |
+| Xiaohongshu | `social_reader`, wanyi public parser + XHS-Downloader sidecar + HTML/OG fallback; media goes to `media_reader` | login-backed reading unsupported |
 | WeChat articles | HTML fetch, body parsing, captcha detection, structured degradation | usually login-free |
 | Images/audio/video/documents | `media_reader` | trusted local path or remote URL |
 
@@ -289,7 +289,7 @@ hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输
 
 This is a single-user personal system. Never commit these paths or values: `.env.local`, `node_bridge/.env.local`, `.ran_agent_state/`, `data/`, `logs/`, `debug/`, `state/`, `local_archive/`, private `vault/` content, cookies, API keys, proxy URLs, or platform login state.
 
-Platform resolver credentials such as `SESSDATA`, `XHS_COOKIE`, and proxy URLs must not appear in logs, docs, tool output, or Git history.
+Platform resolver credentials such as `SESSDATA` and proxy URLs must not appear in logs, docs, tool output, or Git history; `XHS_COOKIE` is not a current runtime setting.
 
 ---
 

@@ -57,6 +57,7 @@ test('apply script writes compact lite/full systemd units and removes stale runt
 
   const liteUnit = readFileSync(join(systemdDir, 'ran-agent-hermes.service'), 'utf8');
   const fullUnit = readFileSync(join(systemdDir, 'ran-agent-hermes-full.service'), 'utf8');
+  const xhsPublicUnit = readFileSync(join(systemdDir, 'ran-agent-xhs-public-sidecar.service'), 'utf8');
 
   assert.match(liteUnit, /Description=Ran Agent Hermes Lite Gateway \(port 8642\)/);
   assert.match(liteUnit, /Environment=HERMES_HOME=\/home\/ubuntu\/\.hermes-ran-agent\/lite/);
@@ -92,7 +93,17 @@ test('apply script writes compact lite/full systemd units and removes stale runt
     assert.match(unit, /Environment=UV_PYTHON_DOWNLOADS=never/);
     assert.match(unit, /Environment=SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000/);
     assert.match(unit, /Environment=XHS_BACKEND_MCP_TIMEOUT_MS=90000/);
+    assert.match(unit, /Environment=XHS_PUBLIC_SIDECAR_URL=http:\/\/127\.0\.0\.1:18061\/xhs\/detail/);
+    assert.doesNotMatch(unit, /XHS_COOKIE/);
+    assert.doesNotMatch(unit, /XHS_BROWSE/);
+    assert.doesNotMatch(unit, /start_xhs_browse_backend/);
   }
+
+  assert.match(xhsPublicUnit, /Description=Ran Agent XHS Public Sidecar \(XHS-Downloader API, port 18061\)/);
+  assert.match(xhsPublicUnit, /ExecStart=.*scripts\/start_xhs_public_sidecar\.sh/);
+  assert.doesNotMatch(xhsPublicUnit, /XHS_COOKIE/);
+  assert.doesNotMatch(xhsPublicUnit, /xiaohongshu-mcp/);
+  assert.equal(existsSync(join(systemdDir, 'ran-agent-xhs-browse.service')), false);
 
   // OpenCLI browser-backed disabled in both units (via env files)
   // Full retains Playwright fallback (set in env files, not in unit Environment= lines)
@@ -131,6 +142,46 @@ test('apply script env upsert includes UV cache and XHS timeout vars', () => {
   assert.match(text, /XHS_GENERIC_FALLBACK_READY_PATH=\/opt\/ran_agent\/\.ran_agent_state\/social_reader\/generic-fallback-ready\.json/);
   assert.match(text, /WEIXIN_SDK_INBOUND_MEDIA_DIRS=\/tmp\/weixin-agent\/media\/inbound/);
   assert.match(text, /SEARCH_HUB_ENABLE_OPENCLI_BROWSER=false/);
+});
+
+test('apply script env upsert removes account-backed XHS keys and writes public-only sidecar keys', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'xhs-public-env-upsert-'));
+  const envFile = join(dir, '.env');
+  writeFileSync(envFile, [
+    'XHS_COOKIE=secret-cookie',
+    'XHS_MCP_COMMAND=uvx',
+    'XHS_MCP_ARGS_JSON=["--from","jobson-xhs-mcp","xhs-mcp"]',
+    'PERSONAL_AGENT_XHS_MCP_COMMAND=uvx',
+    'PERSONAL_AGENT_XHS_MCP_ARGS_JSON=["xhs"]',
+    'XHS_BROWSE_ENABLED=true',
+    'SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=true',
+    'XHS_BROWSE_MCP_COMMAND=mcporter',
+    'XHS_NOTE_TOKEN_CACHE_PATH=/tmp/xhs-cache.json',
+    'UNRELATED_SECRET=keep',
+  ].join('\n'));
+
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    'source scripts/apply-hermes-runtime-split.sh',
+    `upsert_env_file ${JSON.stringify(envFile)} SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true XHS_PUBLIC_SIDECAR_ENABLED=true XHS_PUBLIC_SIDECAR_URL=http://127.0.0.1:18061/xhs/detail XHS_PUBLIC_HTML_FALLBACK_ENABLED=true`,
+  ].join('\n')], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    stdio: 'pipe',
+  });
+
+  const text = readFileSync(envFile, 'utf8');
+  assert.match(text, /UNRELATED_SECRET=keep/);
+  assert.match(text, /SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true/);
+  assert.match(text, /XHS_PUBLIC_SIDECAR_ENABLED=true/);
+  assert.match(text, /XHS_PUBLIC_SIDECAR_URL=http:\/\/127\.0\.0\.1:18061\/xhs\/detail/);
+  assert.match(text, /XHS_PUBLIC_HTML_FALLBACK_ENABLED=true/);
+  assert.doesNotMatch(text, /XHS_COOKIE/);
+  assert.doesNotMatch(text, /XHS_MCP_/);
+  assert.doesNotMatch(text, /PERSONAL_AGENT_XHS_MCP_/);
+  assert.doesNotMatch(text, /XHS_BROWSE/);
+  assert.doesNotMatch(text, /SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS/);
+  assert.doesNotMatch(text, /XHS_NOTE_TOKEN_CACHE/);
 });
 
 test('media reader startup defaults to DashScope OCR full-read budget', () => {

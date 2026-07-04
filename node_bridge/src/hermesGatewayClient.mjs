@@ -7,7 +7,7 @@
 
 import { execFile as execFileCallback } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import fs, { readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { ensureConversationMediaContext } from './mediaContextStore.mjs';
@@ -893,48 +893,6 @@ function buildSocialMediaRetryHint(payload = {}, recentMessages = []) {
 
 // --- Social Link Evidence Gate ---
 
-const XHS_TOKEN_CACHE_PATHS = [
-  '/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json',
-  '/opt/ran_agent/node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json',
-];
-
-function normalizeXhsTokenCache(raw) {
-  // { entries: { note_id: entry } }
-  if (raw.entries && typeof raw.entries === 'object' && !Array.isArray(raw.entries)) return raw.entries;
-  // Array of entries
-  if (Array.isArray(raw)) {
-    const map = {};
-    for (const entry of raw) {
-      if (!entry || typeof entry !== 'object') continue;
-      if (entry.note_id) map[entry.note_id] = entry;
-      if (entry.url) map[entry.url] = entry;
-      if (entry.canonical_url) map[entry.canonical_url] = entry;
-    }
-    return map;
-  }
-  // Direct object { key: entry }
-  return raw;
-}
-
-export function readXhsTokenCache(env = process.env) {
-  const candidates = [env.XHS_TOKEN_CACHE_PATH, ...XHS_TOKEN_CACHE_PATHS].filter(Boolean);
-  for (const cachePath of candidates) {
-    try {
-      const raw = JSON.parse(readFileSync(cachePath, 'utf8'));
-      if (raw && typeof raw === 'object') return normalizeXhsTokenCache(raw);
-    } catch { /* try next path */ }
-  }
-  return {};
-}
-
-// Normalize a URL for comparison: strip trailing punctuation, remove protocol, remove trailing slash, lowercase
-const TRAILING_PUNCT_RE = /[、。！？；：“”‘’（）《》【】\[\]()\s,.!?;:　]+$/;
-function normalizeComparableUrl(u) {
-  let s = u.replace(TRAILING_PUNCT_RE, '').replace(/\/+$/, '');
-  s = s.replace(/^https?:\/\//i, '');
-  return s.toLowerCase();
-}
-
 function redactUrlForEvidenceLog(value) {
   const text = String(value || '').trim();
   if (!text) return '';
@@ -950,56 +908,6 @@ function redactUrlForEvidenceLog(value) {
       .replace(/\b(token|cookie|authorization|xsec_token|api_key|apikey|key|signature|session)=([^\s&]+)/ig, '$1=[redacted]')
       .slice(0, 240);
   }
-}
-
-// Extract short code from xhslink URLs: /o/<code> or /a/<code>, lowercase for comparison
-function extractShortCode(u) {
-  const m = u.match(/xhslink\.com\/[oa]\/([A-Za-z0-9_-]+)/i);
-  return m ? m[1].toLowerCase() : null;
-}
-
-// Extract note_id from xiaohongshu URLs
-function extractNoteId(u) {
-  const m = u.match(/(?:explore|discovery\/item|note)\/([a-f0-9]+)/i);
-  return m ? m[1] : null;
-}
-
-export function matchXhsTokenCacheEntry(text, cache) {
-  const rawText = String(text || '');
-  // Extract all URLs from text — stop at whitespace and trailing CJK/fullwidth punctuation only.
-  // Do NOT exclude . ? & = which are valid URL-internal characters.
-  const urlMatches = rawText.match(/https?:\/\/[^\s　。！？；：“”‘’（）《》]+/gi) || [];
-  if (urlMatches.length === 0) return null;
-
-  const entries = Object.values(cache || {}).filter((e) => e && typeof e === 'object');
-
-  for (const rawUrl of urlMatches) {
-    const url = normalizeComparableUrl(rawUrl);
-    const shortCode = extractShortCode(rawUrl);
-    const noteId = extractNoteId(rawUrl);
-
-    for (const entry of entries) {
-      const entryUrl = entry.url ? normalizeComparableUrl(entry.url) : '';
-      const entryCanonical = entry.canonical_url ? normalizeComparableUrl(entry.canonical_url) : '';
-
-      // Exact URL match (normalized: protocol-agnostic, trailing-punctuation-stripped)
-      if (entryUrl && entryUrl === url) return entry;
-      if (entryCanonical && entryCanonical === url) return entry;
-
-      // Short code match: extract from both URLs and compare (case-insensitive)
-      if (shortCode) {
-        const entryShortCode = extractShortCode(entry.url || '') || extractShortCode(entry.canonical_url || '');
-        if (entryShortCode && entryShortCode === shortCode) return entry;
-      }
-
-      // Note ID match
-      if (noteId && entry.note_id === noteId) return entry;
-
-      // Canonical URL contains note_id
-      if (noteId && entryCanonical && entryCanonical.includes(noteId)) return entry;
-    }
-  }
-  return null;
 }
 
 export function buildSocialEvidenceReport(payload, toolTraceOrResults = null, env = process.env, logger = console, requestId = createRequestId()) {
@@ -1024,36 +932,24 @@ export function buildSocialEvidenceReport(payload, toolTraceOrResults = null, en
     evidence_source: 'none',
   };
 
-  // 1. Check token cache for link_resolution evidence
-  const cache = readXhsTokenCache(env);
-  const cacheEntry = matchXhsTokenCacheEntry(text, cache);
-  if (cacheEntry?.canonical_url || cacheEntry?.note_id) {
-    report.link_resolution = { ok: true, source: 'token_cache', canonical_url: cacheEntry.canonical_url || null };
-    report.evidence_source = 'token_cache';
-    const metaFields = ['title', 'user', 'author', 'cover', 'type'].filter((f) => cacheEntry[f]);
-    if (metaFields.length > 0) {
-      report.metadata_read = { ok: true, source: 'token_cache', fields: metaFields };
-    }
-  }
-
-  // 2. If tool trace available, parse for higher-level evidence
+  // 1. If tool trace available, parse for higher-level evidence
   if (toolTraceOrResults) {
     report.evidence_source = 'tool_result';
     // Parse tool results for content_read fields:
     // post_text, desc, note_text, content, ocr_text, image_text, full_text
   }
 
-  // 3. Determine allow_claim_read
+  // 2. Determine allow_claim_read
   report.allow_claim_read = report.content_read?.ok === true;
 
-  // 4. Log evidence stages
+  // 3. Log evidence stages
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} has_social_link=true`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=link_resolution ok=${report.link_resolution.ok} source=${report.link_resolution.source || 'null'} canonical_url=${redactUrlForEvidenceLog(report.link_resolution.canonical_url) || 'null'}`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=metadata_read ok=${report.metadata_read.ok} fields=${JSON.stringify(report.metadata_read.fields)}`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} platform=${platform} stage=content_read ok=${report.content_read.ok} source=${report.content_read.source || 'null'} fields=${JSON.stringify(report.content_read.fields)}`);
   logger?.log?.(`[xhs-evidence] request_id=${requestId} allow_claim_read=${report.allow_claim_read} evidence_source=${report.evidence_source}`);
   if (!toolTraceOrResults) {
-    logger?.log?.(`[xhs-evidence] request_id=${requestId} WARNING: tool_result trace not available; using token_cache + reply_text_only fallback`);
+    logger?.log?.(`[xhs-evidence] request_id=${requestId} WARNING: tool_result trace not available; public parser evidence required`);
   }
 
   return report;

@@ -10,23 +10,33 @@ echo "RAN_AGENT_REPO_ROOT=${RAN_AGENT_REPO_ROOT:-NOT SET}"
 
 echo ""
 echo "=== 2. Check .env.local keys (names only, no values) ==="
-for key in RAN_AGENT_REPO_ROOT XHS_COOKIE SESSDATA DASHSCOPE_API_KEY; do
+for key in RAN_AGENT_REPO_ROOT SESSDATA DASHSCOPE_API_KEY XHS_PUBLIC_SIDECAR_URL; do
   if grep -qE "^${key}=" .env.local 2>/dev/null; then
     echo "$key: PRESENT"
   else
     echo "$key: MISSING"
   fi
 done
+if grep -qE '^(XHS_COOKIE|XHS_MCP_|PERSONAL_AGENT_XHS_MCP_|XHS_BROWSE_|SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS|XHS_NOTE_TOKEN_CACHE_)' .env.local 2>/dev/null; then
+  echo "account-backed XHS keys: PRESENT -- SHOULD BE REMOVED"
+else
+  echo "account-backed XHS keys: ABSENT"
+fi
 
 echo ""
 echo "=== 3. Check node_bridge/.env.local keys (names only) ==="
-for key in RAN_AGENT_REPO_ROOT XHS_COOKIE; do
+for key in RAN_AGENT_REPO_ROOT XHS_PUBLIC_SIDECAR_URL; do
   if grep -qE "^${key}=" node_bridge/.env.local 2>/dev/null; then
     echo "$key: PRESENT"
   else
     echo "$key: MISSING"
   fi
 done
+if grep -qE '^(XHS_COOKIE|XHS_MCP_|PERSONAL_AGENT_XHS_MCP_|XHS_BROWSE_|SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS|XHS_NOTE_TOKEN_CACHE_)' node_bridge/.env.local 2>/dev/null; then
+  echo "account-backed XHS keys: PRESENT -- SHOULD BE REMOVED"
+else
+  echo "account-backed XHS keys: ABSENT"
+fi
 
 echo ""
 echo "=== 4. Test social_reader startup (no -x, just stderr) ==="

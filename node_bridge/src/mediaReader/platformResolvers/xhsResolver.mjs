@@ -4,7 +4,7 @@ import {
   assertSafePlatformUrl,
   resolveShortlink,
 } from './index.mjs';
-import { callMcpToolViaStdio, parseJsonArrayEnv, textFromMcpResult } from './mcpClient.mjs';
+import { callMcpToolViaStdio, textFromMcpResult } from './mcpClient.mjs';
 
 const DEFAULT_MAX_XHS_ASSETS = 100;
 
@@ -86,32 +86,6 @@ function readGenericFallbackMarker(env = process.env) {
   }
 }
 
-function isRecoverableXhsError(error) {
-  const code = String(error?.error_code || '').trim();
-  // Non-recoverable: auth, cookie, risk control, config errors
-  if (['XHS_AUTH_REQUIRED', 'XHS_COOKIE_MISSING', 'XHS_RISK_CONTROL', 'PLATFORM_RESOLVER_NOT_CONFIGURED'].includes(code)) return false;
-  // Recoverable by explicit code
-  if (['XHS_BACKEND_TIMEOUT', 'XHS_BACKEND_MCP_ERROR', 'XHS_NETWORK_ERROR', 'XHS_SHORTLINK_RESOLVE_FAILED', 'XHS_MISSING_XSEC_TOKEN'].includes(code)) return true;
-  // Recoverable by message inspection (only when no explicit error_code)
-  if (!code) {
-    const msg = String(error?.message || error || '').toLowerCase();
-    if (msg.includes('timed out') || msg.includes('timeout')) return true;
-    if (msg.includes('enotfound') || msg.includes('econnrefused') || msg.includes('network')) return true;
-  }
-  return false;
-}
-
-function mapXhsError(error) {
-  const code = String(error?.error_code || '').trim();
-  if (code) return code;
-  const text = `${error?.message || error || ''}`.toLowerCase();
-  if (text.includes('risk') || text.includes('captcha') || text.includes('verify')) return 'XHS_RISK_CONTROL';
-  if (text.includes('login') || text.includes('auth') || text.includes('cookie')) return 'XHS_AUTH_REQUIRED';
-  if (text.includes('xsec')) return 'XHS_MISSING_XSEC_TOKEN';
-  if (text.includes('timed out') || text.includes('timeout')) return 'XHS_BACKEND_TIMEOUT';
-  return 'XHS_BACKEND_MCP_ERROR';
-}
-
 function normalizeMedia(media = [], maxAssets = DEFAULT_MAX_XHS_ASSETS) {
   return media
     .filter(Boolean)
@@ -170,6 +144,10 @@ function collectGenericMediaFromValue(output, value, fallbackType, maxAssets) {
   const imageUrl = firstTextValue(
     value.url_png,
     value.url_webp,
+    value.urlDefault,
+    value.urlPre,
+    value.url_default,
+    value.url_pre,
     value.image_url,
     value.imageUrl,
     value.cover_url,
@@ -213,6 +191,10 @@ function normalizeGenericFallbackResult(text = '', { noteId = '', sourceHost = '
   collectGenericMediaFromValue(media, parsed.image_urls, 'image', maxAssets);
   collectGenericMediaFromValue(media, parsed.imageUrls, 'image', maxAssets);
   collectGenericMediaFromValue(media, parsed.images, 'image', maxAssets);
+  collectGenericMediaFromValue(media, parsed.imageList, 'image', maxAssets);
+  collectGenericMediaFromValue(media, parsed.image_list, 'image', maxAssets);
+  collectGenericMediaFromValue(media, parsed.data?.note?.imageList, 'image', maxAssets);
+  collectGenericMediaFromValue(media, parsed.data?.note?.images, 'image', maxAssets);
   collectGenericMediaFromValue(media, parsed.media, 'image', maxAssets);
   collectGenericMediaFromValue(media, parsed.media_list, 'image', maxAssets);
   collectGenericMediaFromValue(media, parsed.medias, 'image', maxAssets);
@@ -238,60 +220,177 @@ function providerFromOptions(options = {}) {
   return options.platformProviders?.xhs;
 }
 
-async function callXhsMcp({ toolName, resolvedUrl, maxComments }, options = {}) {
-  const env = options.env || process.env;
-  if (typeof options.mcpCallImpl === 'function') {
-    return await options.mcpCallImpl({
-      server: 'xhs',
-      toolName,
-      arguments: toolName === 'get_note_comments'
-        ? { url: resolvedUrl, max_count: maxComments }
-        : { url: resolvedUrl },
-    });
-  }
-  const command = String(env.PERSONAL_AGENT_XHS_MCP_COMMAND || '').trim();
-  if (!command) {
-    return null;
-  }
-  return await callMcpToolViaStdio({
-    command,
-    args: parseJsonArrayEnv(env.PERSONAL_AGENT_XHS_MCP_ARGS_JSON, []),
-    env: process.env,
-    toolName,
-    arguments: toolName === 'get_note_comments'
-      ? { url: resolvedUrl, max_count: maxComments }
-      : { url: resolvedUrl },
-    timeoutMs: Number(env.XHS_BACKEND_MCP_TIMEOUT_MS || env.PERSONAL_AGENT_PLATFORM_RESOLVE_TIMEOUT_MS || 90000),
-  });
+function genericMarkerOrInjected(env, options = {}) {
+  return readGenericFallbackMarker(env)
+    || (typeof options.mcpCallImpl === 'function' ? { ok: true, command: 'injected-test-generic-parser', args: [], tool_name: 'parse_xhs_link' } : null);
 }
 
-async function resolveWithMcp({ resolvedUrl, noteId, args, maxAssets }, options = {}) {
-  const postResult = await callXhsMcp({
-    toolName: 'get_note_content',
-    resolvedUrl,
-    maxComments: Number(args.max_comments || 30),
-  }, options);
-  if (!postResult) {
-    return null;
-  }
-  let comments = [];
-  if (args.include_comments === true) {
-    const commentsResult = await callXhsMcp({
-      toolName: 'get_note_comments',
-      resolvedUrl,
-      maxComments: Number(args.max_comments || 30),
-    }, options);
-    const commentsText = textFromMcpResult(commentsResult);
-    comments = commentsText
-      ? commentsText.split(/\n\s*\n/).map((item) => item.trim()).filter(Boolean).slice(0, Number(args.max_comments || 30))
-      : [];
-  }
+function xhsPublicSidecarConfig(env = process.env) {
+  const enabled = boolFromEnv(env, 'XHS_PUBLIC_SIDECAR_ENABLED', true);
+  const url = String(env.XHS_PUBLIC_SIDECAR_URL || '').trim();
   return {
-    metadata: { note_id: noteId, source_url_host: hostFromUrl(resolvedUrl) },
-    post_text: textFromMcpResult(postResult),
-    comments,
+    enabled,
+    url,
+    timeoutMs: positiveTimeoutMs(env.XHS_PUBLIC_SIDECAR_TIMEOUT_MS, env.SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS, 90000),
+    configured: Boolean(enabled && url),
+  };
+}
+
+async function parseResponseBody(response) {
+  if (typeof response?.json === 'function') return await response.json();
+  if (typeof response?.text === 'function') {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+  return response;
+}
+
+async function fetchXhsPublicSidecar({ resolvedUrl, noteId, sourceHost, maxAssets }, options = {}) {
+  const env = options.env || process.env;
+  const config = xhsPublicSidecarConfig(env);
+  if (!config.configured) return null;
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  if (typeof fetchImpl !== 'function') return null;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  try {
+    const response = await fetchImpl(config.url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ url: resolvedUrl, download: false, cookie: '' }),
+    });
+    if (response?.ok === false || Number(response?.status || 200) >= 400) return null;
+    const body = await parseResponseBody(response);
+    return normalizeGenericFallbackResult(typeof body === 'string' ? body : JSON.stringify(body), {
+      noteId,
+      sourceHost,
+      maxAssets,
+    });
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function hasPublicFallbackContent(fallback) {
+  return Boolean(fallback?.post_text || fallback?.media?.length);
+}
+
+async function resolvePublicXhsFallback({ originalUrl, resolvedUrl, noteId, args, maxAssets }, options = {}) {
+  const env = options.env || process.env;
+  const sourceHost = hostFromUrl(resolvedUrl);
+  const marker = genericMarkerOrInjected(env, options);
+  const warnings = [];
+  if (!hasXsecToken(resolvedUrl)) warnings.push(warning('XHS_MISSING_XSEC_TOKEN'));
+  if (args.include_comments === true) warnings.push(warning('XHS_COMMENTS_UNSUPPORTED_PUBLIC_ONLY'));
+
+  if (marker?.ok) {
+    try {
+      const toolName = marker.tool_name || 'parse_xhs_link';
+      const timeoutMs = resolveXhsGenericFallbackTimeoutMs(env);
+      const genericResult = typeof options.mcpCallImpl === 'function'
+        ? await options.mcpCallImpl({
+          server: 'generic',
+          toolName,
+          arguments: { share_link: resolvedUrl },
+          timeoutMs,
+        })
+        : await callMcpToolViaStdio({
+          command: marker.command,
+          args: marker.args || [],
+          env: process.env,
+          toolName,
+          arguments: { share_link: resolvedUrl },
+          timeoutMs,
+        });
+      const fallback = normalizeGenericFallbackResult(textFromMcpResult(genericResult), {
+        noteId,
+        sourceHost,
+        maxAssets,
+      });
+      if (hasPublicFallbackContent(fallback)) {
+        return {
+          ok: true,
+          partial: true,
+          content_available: true,
+          full_text_available: false,
+          evidence_level: 'generic_parser',
+          should_answer_from_content: true,
+          source: 'generic_parser_fallback',
+          platform: 'xhs',
+          resolver: 'xhsResolver',
+          original_url: originalUrl,
+          resolved_url: resolvedUrl,
+          metadata: fallback.metadata,
+          post_text: fallback.post_text,
+          comments: [],
+          comments_supported: false,
+          media: normalizeMedia(fallback.media, maxAssets),
+          max_assets: maxAssets,
+          public_only: true,
+          account_backed: false,
+          warnings: [...warnings, warning('GENERIC_PARSER_FALLBACK'), warning('FULL_TEXT_UNAVAILABLE')],
+        };
+      }
+    } catch {
+      // Try the next public-only path.
+    }
+  }
+
+  const sidecar = await fetchXhsPublicSidecar({ resolvedUrl, noteId, sourceHost, maxAssets }, options);
+  if (hasPublicFallbackContent(sidecar)) {
+    return {
+      ok: true,
+      partial: true,
+      content_available: true,
+      full_text_available: false,
+      evidence_level: 'xhs_downloader_public_sidecar',
+      should_answer_from_content: true,
+      source: 'xhs-downloader-sidecar',
+      platform: 'xhs',
+      resolver: 'xhsResolver',
+      original_url: originalUrl,
+      resolved_url: resolvedUrl,
+      metadata: sidecar.metadata,
+      post_text: sidecar.post_text,
+      comments: [],
+      comments_supported: false,
+      media: normalizeMedia(sidecar.media, maxAssets),
+      max_assets: maxAssets,
+      public_only: true,
+      account_backed: false,
+      warnings: [...warnings, warning('XHS_DOWNLOADER_PUBLIC_SIDECAR')],
+    };
+  }
+
+  return {
+    ok: true,
+    partial: true,
+    content_available: false,
+    full_text_available: false,
+    evidence_level: 'metadata_only',
+    should_answer_from_content: false,
+    source: 'xhs_public_only',
+    platform: 'xhs',
+    resolver: 'xhsResolver',
+    original_url: originalUrl,
+    resolved_url: resolvedUrl,
+    metadata: { note_id: noteId, source_url_host: sourceHost },
+    post_text: '',
+    comments: [],
+    comments_supported: false,
     media: [],
     max_assets: maxAssets,
+    public_only: true,
+    account_backed: false,
+    error_code: 'XHS_PUBLIC_PARSE_FAILED',
+    warnings: [...warnings, warning('XHS_PUBLIC_PARSE_FAILED'), warning('PARTIAL_RESULT')],
   };
 }
 
@@ -314,165 +413,11 @@ export async function resolveXhsMedia(args = {}, options = {}) {
   await assertSafePlatformUrl(resolvedUrl, { platform: 'xhs', options });
   const noteId = noteIdFromUrl(resolvedUrl);
   const maxAssets = normalizeMaxAssets(args.max_assets);
-  const provider = providerFromOptions(options);
-
-  let providerResult;
-  try {
-    if (provider?.resolve) {
-      providerResult = await provider.resolve({
-        url: resolvedUrl,
-        original_url: originalUrl,
-        note_id: noteId,
-        media_detail: args.media_detail || 'standard',
-        include_comments: args.include_comments === true,
-        max_comments: Number(args.max_comments || 30),
-        max_assets: maxAssets,
-      });
-    } else {
-      providerResult = await resolveWithMcp({ resolvedUrl, noteId, args, maxAssets }, options);
-      if (!providerResult) {
-        throw new MediaReaderError('PLATFORM_RESOLVER_NOT_CONFIGURED', 'PLATFORM_RESOLVER_NOT_CONFIGURED: XHS backend provider is not configured');
-      }
-    }
-  } catch (error) {
-    const code = mapXhsError(error);
-    // Only attempt fallback for recoverable errors
-    if (!isRecoverableXhsError(error)) {
-      if (error instanceof MediaReaderError) throw error;
-      throw new MediaReaderError(code, `${code}: XHS backend resolver failed`);
-    }
-
-    // For recoverable errors, try generic parser fallback via readiness marker
-    const marker = readGenericFallbackMarker(env);
-    if (!marker?.ok) {
-      // No generic fallback available — return metadata-only partial
-      return {
-        ok: true,
-        partial: true,
-        content_available: false,
-        full_text_available: false,
-        evidence_level: 'metadata_only',
-        should_answer_from_content: false,
-        platform: 'xhs',
-        resolver: 'xhsResolver',
-        original_url: originalUrl,
-        resolved_url: resolvedUrl,
-        metadata: { note_id: noteId, source_url_host: hostFromUrl(resolvedUrl) },
-        post_text: '',
-        comments: [],
-        media: [],
-        max_assets: maxAssets,
-        warnings: [
-          warning(code, { message: `XHS backend failed: ${error?.message || error}` }),
-          warning('XHS_GENERIC_FALLBACK_NOT_READY'),
-          warning('PARTIAL_RESULT'),
-        ],
-      };
-    }
-
-    try {
-      const toolName = marker.tool_name || 'parse_xhs_link';
-      const timeoutMs = resolveXhsGenericFallbackTimeoutMs(env);
-      const genericResult = typeof options.mcpCallImpl === 'function'
-        ? await options.mcpCallImpl({
-          server: 'generic',
-          toolName,
-          arguments: { share_link: resolvedUrl },
-          timeoutMs,
-        })
-        : await callMcpToolViaStdio({
-          command: marker.command,
-          args: marker.args || [],
-          env: process.env,
-          toolName,
-          arguments: { share_link: resolvedUrl },
-          timeoutMs,
-        });
-      const text = textFromMcpResult(genericResult);
-      if (text) {
-        const fallback = normalizeGenericFallbackResult(text, {
-          noteId,
-          sourceHost: hostFromUrl(resolvedUrl),
-          maxAssets,
-        });
-        return {
-          ok: true,
-          partial: true,
-          content_available: Boolean(fallback.post_text || fallback.media.length),
-          full_text_available: false,
-          evidence_level: 'generic_parser',
-          should_answer_from_content: Boolean(fallback.post_text || fallback.media.length),
-          source: 'generic_parser_fallback',
-          platform: 'xhs',
-          resolver: 'xhsResolver',
-          original_url: originalUrl,
-          resolved_url: resolvedUrl,
-          metadata: fallback.metadata,
-          post_text: fallback.post_text,
-          comments: [],
-          media: normalizeMedia(fallback.media, maxAssets),
-          max_assets: maxAssets,
-          warnings: [
-            warning(code, { message: `XHS backend failed: ${error?.message || error}` }),
-            warning('GENERIC_PARSER_FALLBACK'),
-            warning('FULL_TEXT_UNAVAILABLE'),
-          ],
-        };
-      }
-    } catch {
-      // Generic parser also failed — fall through to metadata-only partial result
-    }
-
-    // Metadata-only partial result
-    return {
-      ok: true,
-      partial: true,
-      content_available: false,
-      full_text_available: false,
-      evidence_level: 'metadata_only',
-      should_answer_from_content: false,
-      platform: 'xhs',
-      resolver: 'xhsResolver',
-      original_url: originalUrl,
-      resolved_url: resolvedUrl,
-      metadata: { note_id: noteId, source_url_host: hostFromUrl(resolvedUrl) },
-      post_text: '',
-      comments: [],
-      media: [],
-      max_assets: maxAssets,
-      warnings: [
-        warning(code, { message: `XHS backend failed: ${error?.message || error}` }),
-        warning('PARTIAL_RESULT'),
-      ],
-    };
-  }
-
-  const media = normalizeMedia(providerResult?.media || [], maxAssets);
-  const metadata = {
-    ...(providerResult?.metadata || {}),
-    note_id: providerResult?.metadata?.note_id || noteId,
-  };
-  const warnings = Array.isArray(providerResult?.warnings) ? [...providerResult.warnings] : [];
-  if (!hasXsecToken(resolvedUrl)) {
-    warnings.push(warning('XHS_MISSING_XSEC_TOKEN'));
-  }
-  if ((metadata.has_video || providerResult?.has_video) && !mediaHasVideo(media)) {
-    warnings.push(warning('XHS_VIDEO_ASSET_NOT_EXPOSED_BY_BACKEND'));
-  }
-  const comments = Array.isArray(providerResult?.comments) ? providerResult.comments.slice(0, Number(args.max_comments || 30)) : [];
+  const result = await resolvePublicXhsFallback({ originalUrl, resolvedUrl, noteId, args, maxAssets }, options);
   return {
-    ok: true,
-    platform: 'xhs',
-    resolver: 'xhsResolver',
-    original_url: originalUrl,
-    resolved_url: resolvedUrl,
-    metadata,
-    post_text: String(providerResult?.post_text || ''),
-    comments,
-    media,
-    subtitle: providerResult?.subtitle || null,
-    transcript_source: providerResult?.subtitle ? 'subtitle' : 'none',
-    visual_source: media.some((item) => ['image', 'cover'].includes(item.type)) ? 'thumbnail' : 'none',
-    warnings,
+    ...result,
+    subtitle: null,
+    transcript_source: 'none',
+    visual_source: Array.isArray(result.media) && result.media.some((item) => ['image', 'cover'].includes(item.type)) ? 'thumbnail' : 'none',
   };
 }

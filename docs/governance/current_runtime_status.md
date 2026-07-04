@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-02)
+Status: CURRENT (2026-07-04)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -107,6 +107,11 @@ Current shared non-secret keys include:
 - `HERMES_CACHE_TELEMETRY_ENABLED=true`
 - `SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true`
 - `XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`
+- `XHS_GENERIC_FALLBACK_MIN_VERSION=1.2.0`
+- `XHS_PUBLIC_SIDECAR_URL=http://127.0.0.1:18061/xhs/detail`
+- `XHS_PUBLIC_SIDECAR_TIMEOUT_MS=90000`
+- `XHS_PUBLIC_HTML_FALLBACK_ENABLED=true`
+- `XHS_PUBLIC_SIDECAR_MARKER_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json`
 - `UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache`
 - `UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools`
 - `UV_LINK_MODE=copy`
@@ -209,63 +214,41 @@ media directories so redeploys do not depend on manual `mkdir`.
 
 ## XHS And Evidence Gate
 
-- XHS content reading uses the prepared browse backend (`xiaohongshu-mcp`
-  through `mcporter`) as the token-aware main path when `XHS_BROWSE_ENABLED=true`.
-  It reads text and detail `imageList` payloads; `wanyi-watermark` remains the
-  generic fallback when browse has no usable token/detail response. The fallback
-  marker is considered stale below `XHS_GENERIC_FALLBACK_MIN_VERSION` (default
-  `1.2.0`) because older `v1.0.1` installs miss recent XHS parsing fixes.
-- `read_social_post_deep` merges media found by the browse detail path with
-  media found by the generic parser, preserving known `image`/`video` types
-  before sending assets to `media_reader`. It must not rely on XHS CDN URL
-  suffixes to infer image type.
-- XHS browse and `wanyi-watermark` are resource resolvers, not OCR/VLM readers.
-  Complete image understanding happens only after merged assets enter
+- XHS content reading is public-only. The chain is URL/short-link resolution,
+  `wanyi-watermark parse_xhs_link`, XHS-Downloader sidecar
+  `POST /xhs/detail`, `wanyi-watermark parse_generic_link`, and minimal
+  HTML/OG fallback. Account-backed `XHS_COOKIE`, QR login, `xiaohongshu-mcp`,
+  `jobson-xhs-mcp`, `xhs_browse_*`, and token caches are not runtime paths.
+- Deploy prepares the generic parser marker at
+  `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`
+  and the XHS-Downloader sidecar marker at
+  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json`.
+  `scripts/apply-hermes-runtime-split.sh` removes the old
+  `ran-agent-xhs-browse.service`, browse marker, and token cache.
+- `read_social_post_deep` merges media found by public parsers, preserving
+  known `image`/`video` types before sending assets to `media_reader`. It must
+  not rely on XHS CDN URL suffixes to infer image type.
+- Public XHS parsers are resource resolvers, not OCR/VLM readers. Complete
+  image understanding happens only after merged assets enter
   `media_reader.analyze_media_batch`. The default full-read cap is 100 media
   assets, with 20-minute MCP/batch budgets so normal multi-image notes are not
   silently truncated by legacy 20-asset or 120s defaults.
   `scripts/start_media_reader_mcp.sh` defaults to DashScope Qwen-VL OCR with a
   120s OCR budget when env files are absent; PaddleOCR is explicit override
   only.
-- `jobson-xhs-mcp` remains a compatibility text path when a fresh `xsec_token`
-  exists but browse is unavailable.
-- Long XHS share URLs are read through URL candidates: resolved URL first,
-  canonical `/explore/<note_id>` URL second. This keeps `/discovery/item/...`
-  PC-share links with tracking params from failing on the first parser shape.
-- XHS deep read skips token-aware detail backends when no `xsec_token` or cached
-  token is available, so image/OCR fallback does not wait for a predictable 90s
-  detail timeout.
-- `media_reader.resolve_platform_media(platform="xhs")` treats missing
-  `xsec_token` as recoverable: it tries the prepared generic parser fallback,
-  preserves returned XHS image URLs as normalized media assets, and lets OCR/VLM
-  continue instead of returning a hard backend error.
-- XHS platform media resolution canonicalizes PC-share
-  `/discovery/item/<note_id>` URLs to `/explore/<note_id>` while preserving
-  `xsec_token` and `xsec_source` before calling the backend provider.
-- Generic fallback runtime marker:
-  `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
-- Browse runtime marker:
-  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-browse-ready.json`.
-- Token cache paths:
-  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-note-token-cache.json`,
-  then `/opt/ran_agent/node_bridge/.ran_agent_state/social_reader/xhs-note-token-cache.json`.
-- Token cache supports `{ entries: {} }`, arrays, direct objects, http/https
-  normalization, xhslink short-code matching, canonical note ids, and trailing
-  punctuation stripping.
-- Token cache writes and repairs canonical URLs as `/explore/<note_id>` with
-  `xsec_token` and `xsec_source` preserved, so older cached `/discovery/item`
-  PC-share URLs do not keep poisoning token-aware backend calls.
+- Public parse failure is an explicit unreadable/metadata-only result. Hermes
+  must not ask the user to refresh cookies or scan QR codes for XHS.
 - `buildSocialEvidenceReport()` separates `link_resolution`,
   `metadata_read`, and `content_read`.
-- Canonical URLs and token cache hits are link-resolution evidence only.
-  `allow_claim_read=true` requires content fields such as `post_text`, `desc`,
-  `note_text`, `content`, `ocr_text`, `image_text`, or `full_text`.
+- Canonical URLs and public metadata are link-resolution/metadata evidence
+  only. `allow_claim_read=true` requires content fields such as `post_text`,
+  `desc`, `note_text`, `content`, `ocr_text`, `image_text`, or `full_text`.
 - XHS deep-read media evidence keeps both `analyzed_media_count` (assets sent to
   media analysis) and `successful_media_count` (assets that produced analysis
   items). Complete-read claims must not pass when successful media coverage is
   partial.
-- Evidence logs must not print raw `xsec_token`; canonical URLs are logged with
-  redacted query strings.
+- Evidence logs must not print raw XHS query tokens; canonical URLs are logged
+  with redacted query strings.
 - `sendChatToHermesGateway()` creates one request id per request and reuses it
   across context-size, routing, evidence, and gate logs.
 - `replyBackend` runs Hermes Action Contract Gate before replies leave Node.
@@ -320,7 +303,7 @@ Never commit or force-add:
   `.ran_agent_state/hermes/`,
   `.ran_agent_state/co_reading/`.
 - Provider-visible history, pending action state, sticker assets, inbound media,
-  co-reading chunks, and social-reader token cache are runtime state only.
+  co-reading chunks, and public parser/sidecar markers are runtime state only.
 - `local_archive/`.
 - private `vault/` content.
 - generated caches such as `.venv/`, `.pytest_cache/`, `node_modules/`.

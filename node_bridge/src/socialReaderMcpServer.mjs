@@ -2,18 +2,9 @@
 import http from 'node:http';
 import https from 'node:https';
 import fs from 'node:fs';
-import path from 'node:path';
 import { spawn } from 'node:child_process';
 import readline from 'node:readline';
 import { buildMediaAssets, hostFromUrl, redactUrl } from './mediaReader/assetResolver.mjs';
-
-// Default Puppeteer executable path for xhs-mcp backend (use system Chromium)
-if (!process.env.PUPPETEER_EXECUTABLE_PATH) {
-  process.env.PUPPETEER_EXECUTABLE_PATH = '/snap/bin/chromium';
-}
-if (!process.env.PUPPETEER_SKIP_DOWNLOAD) {
-  process.env.PUPPETEER_SKIP_DOWNLOAD = 'true';
-}
 
 const SERVER_INFO = {
   name: 'ran-agent-social-reader',
@@ -43,57 +34,6 @@ const PLATFORM_HOSTS = [
   ['weibo', ['weibo.com', 'weibo.cn']],
   ['zhihu', ['zhihu.com']],
 ];
-// Internal cache for note_id -> xsecToken mapping (never exposed to users)
-const xhsNoteTokenCache = new Map();
-const XHS_NOTE_TOKEN_CACHE_MAX_SIZE = 1000;
-let xhsNoteTokenCacheLoaded = false;
-
-function shouldExposeXhsBrowseTools(env = process.env) {
-  return String(env.SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS || '').trim().toLowerCase() === 'true';
-}
-
-function resolveXhsNoteTokenCachePath(env = process.env) {
-  const configured = String(env.XHS_NOTE_TOKEN_CACHE_PATH || '').trim();
-  if (configured) {
-    return path.isAbsolute(configured) ? configured : path.resolve(process.cwd(), configured);
-  }
-  return path.resolve(process.cwd(), '.ran_agent_state/social_reader/xhs-note-token-cache.json');
-}
-
-function loadXhsNoteTokenCache(env = process.env) {
-  if (xhsNoteTokenCacheLoaded) return;
-  xhsNoteTokenCacheLoaded = true;
-  const filePath = resolveXhsNoteTokenCachePath(env);
-  try {
-    const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    const entries = payload && typeof payload === 'object' ? payload.entries || payload : {};
-    for (const [noteId, entry] of Object.entries(entries)) {
-      if (noteId && entry && typeof entry === 'object') {
-        xhsNoteTokenCache.set(noteId, entry);
-      }
-    }
-  } catch {
-    // Cache is best-effort state; missing or invalid files should not break reading.
-  }
-}
-
-function persistXhsNoteTokenCache(env = process.env) {
-  const filePath = resolveXhsNoteTokenCachePath(env);
-  const debug = String(env.XHS_NOTE_TOKEN_CACHE_DEBUG || '').trim() === '1';
-  try {
-    fs.mkdirSync(path.dirname(filePath), { recursive: true });
-    const entries = Object.fromEntries(xhsNoteTokenCache.entries());
-    fs.writeFileSync(filePath, `${JSON.stringify({ entries }, null, 2)}\n`, { mode: 0o600 });
-    if (debug) {
-      console.error(`[xhs-cache] persisted ${xhsNoteTokenCache.size} entries to ${filePath}`);
-    }
-  } catch (error) {
-    if (debug) {
-      console.error(`[xhs-cache] persist failed: ${filePath} error=${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-}
-
 function buildXhsCanonicalUrl(noteId, xsecToken = '', xsecSource = '') {
   if (!noteId) return '';
   const canonical = new URL(`https://www.xiaohongshu.com/explore/${noteId}`);
@@ -102,78 +42,8 @@ function buildXhsCanonicalUrl(noteId, xsecToken = '', xsecSource = '') {
   return canonical.toString();
 }
 
-function normalizeXhsCanonicalUrl(noteId, candidateUrl = '', xsecToken = '', xsecSource = '') {
-  if (!noteId) return '';
-  const info = candidateUrl ? parseXhsUrlInfo(candidateUrl) : null;
-  const token = xsecToken || info?.xsec_token || '';
-  const source = xsecSource || info?.xsec_source || '';
-  return buildXhsCanonicalUrl(noteId, token, source);
-}
-
-function cacheXhsNoteToken(noteId, xsecToken = '', metadata = {}, options = {}) {
-  if (!noteId) return;
-  const env = options.env || process.env;
-  loadXhsNoteTokenCache(env);
-  if (xhsNoteTokenCache.size >= XHS_NOTE_TOKEN_CACHE_MAX_SIZE) {
-    const firstKey = xhsNoteTokenCache.keys().next().value;
-    if (firstKey) xhsNoteTokenCache.delete(firstKey);
-  }
-  const existing = xhsNoteTokenCache.get(noteId) || {};
-  const xsecSource = metadata.xsec_source || existing.xsec_source || '';
-  const canonicalUrl = normalizeXhsCanonicalUrl(
-    noteId,
-    metadata.canonical_url || existing.canonical_url || '',
-    xsecToken || existing.xsecToken || '',
-    xsecSource
-  );
-  xhsNoteTokenCache.set(noteId, {
-    ...existing,
-    xsecToken: xsecToken || existing.xsecToken || '',
-    xsec_source: xsecSource,
-    canonical_url: canonicalUrl,
-    url: metadata.url || canonicalUrl || existing.url || '',
-    title: metadata.title || existing.title || '',
-    user: metadata.user || existing.user || '',
-    user_id: metadata.user_id || existing.user_id || '',
-    cover_image: metadata.cover_image || existing.cover_image || '',
-    type: metadata.type || existing.type || '',
-    stats: metadata.stats || existing.stats || {},
-    createdAt: Date.now(),
-  });
-  if (String(env.XHS_NOTE_TOKEN_CACHE_DEBUG || '').trim() === '1') {
-    const tokenLen = (xsecToken || existing.xsecToken || '').length;
-    console.error(`[xhs-cache] cached noteId=${noteId} token_len=${tokenLen} path=${resolveXhsNoteTokenCachePath(env)}`);
-  }
-  persistXhsNoteTokenCache(env);
-}
-
-function getCachedXhsNoteToken(noteId, options = {}) {
-  if (!noteId) return null;
-  loadXhsNoteTokenCache(options.env || process.env);
-  const entry = xhsNoteTokenCache.get(noteId);
-  if (!entry) return null;
-  const TTL_MS = 24 * 60 * 60 * 1000;
-  if (Date.now() - entry.createdAt > TTL_MS) {
-    xhsNoteTokenCache.delete(noteId);
-    return null;
-  }
-  const normalizedCanonicalUrl = normalizeXhsCanonicalUrl(
-    noteId,
-    entry.canonical_url || '',
-    entry.xsecToken || entry.xsec_token || '',
-    entry.xsec_source || ''
-  );
-  if (normalizedCanonicalUrl && normalizedCanonicalUrl !== entry.canonical_url) {
-    entry.canonical_url = normalizedCanonicalUrl;
-    xhsNoteTokenCache.set(noteId, entry);
-    persistXhsNoteTokenCache(options.env || process.env);
-  }
-  return entry;
-}
-
-
-
 export function buildSocialReaderTools(env = process.env) {
+  void env;
   const tools = [
     {
       name: 'resolve_social_url',
@@ -281,101 +151,8 @@ export function buildSocialReaderTools(env = process.env) {
         additionalProperties: false,
       },
     },
-    {
-      name: 'check_social_login',
-      title: 'Check Social Login',
-      description: 'Check whether the configured read-only social backend has usable login state.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          platform: {
-            type: 'string',
-            description: 'Platform id to check.',
-            enum: ['xhs'],
-          },
-        },
-        required: ['platform'],
-        additionalProperties: false,
-      },
-    },
   ];
-  if (!shouldExposeXhsBrowseTools(env)) {
-    return tools;
-  }
-  return [
-    ...tools,
-    {
-      name: 'xhs_browse_probe',
-      title: 'XHS Browse Probe',
-      description: 'Probe XHS browse backend availability and discover available tools. Always available.',
-      inputSchema: {
-        type: 'object',
-        properties: {},
-        required: [],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: 'xhs_browse_search',
-      title: 'XHS Browse Search',
-      description: 'Search Xiaohongshu notes by keyword. Requires XHS_BROWSE_ENABLED=true and XHS_BROWSE_SEARCH_ENABLED=true.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          query: { type: 'string', description: 'Search query keyword.' },
-          max_results: { type: 'integer', description: 'Maximum results. Default 5, hard limit 10.', minimum: 1, maximum: 10, default: 5 },
-          sort: { type: 'string', description: 'Sort order.', enum: ['relevance', 'latest', 'popular'], default: 'relevance' },
-        },
-        required: ['query'],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: 'xhs_browse_note',
-      title: 'XHS Browse Note',
-      description: 'Get Xiaohongshu note details by note_id, URL, or read_ref returned by xhs_browse_search. Requires XHS_BROWSE_ENABLED=true and XHS_BROWSE_NOTE_ENABLED=true.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          note_id: { type: 'string', description: 'Note ID to fetch.' },
-          read_ref: { type: 'string', description: 'Opaque read reference returned by xhs_browse_search, for example xhs:note:<note_id>.' },
-          url: { type: 'string', description: 'XHS note URL when available.' },
-          include_images: { type: 'boolean', description: 'Include images.', default: true },
-        },
-        required: [],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: 'xhs_browse_user',
-      title: 'XHS Browse User',
-      description: 'Get Xiaohongshu user profile. Requires XHS_BROWSE_USER_ENABLED=true (disabled by default).',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          user_id: { type: 'string', description: 'User ID.' },
-          max_items: { type: 'integer', description: 'Max notes. Default 5, hard limit 10.', minimum: 1, maximum: 10, default: 5 },
-        },
-        required: ['user_id'],
-        additionalProperties: false,
-      },
-    },
-    {
-      name: 'xhs_browse_feed',
-      title: 'XHS Browse Feed',
-      description: 'Get Xiaohongshu recommendation feed. Requires XHS_BROWSE_FEED_ENABLED=true (disabled by default).',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          category: { type: 'string', description: 'Feed category.', enum: ['default', 'food', 'travel', 'fashion'], default: 'default' },
-          max_items: { type: 'integer', description: 'Max items. Default 5, hard limit 10.', minimum: 1, maximum: 10, default: 5 },
-        },
-        required: [],
-        additionalProperties: false,
-      },
-    },
-
-  ];
+  return tools;
 }
 
 export function detectSocialPlatform(url) {
@@ -447,6 +224,36 @@ function textFromMcpResult(result) {
     .trim();
 }
 
+function normalizeGenericImageList(payload) {
+  const source = payload?.data?.note || payload?.note || payload || {};
+  for (const key of ['images', 'imageList', 'image_list', 'image_urls', 'imageUrls']) {
+    const value = source[key] || payload?.[key];
+    if (!Array.isArray(value)) continue;
+    return value
+      .map((item) => {
+        if (typeof item === 'string') {
+          return { url: item };
+        }
+        if (item && typeof item === 'object') {
+          return item;
+        }
+        return null;
+      })
+      .filter(Boolean);
+  }
+  return [];
+}
+
+function normalizeGenericVideoList(payload) {
+  const source = payload?.data?.note || payload?.note || payload || {};
+  for (const key of ['videos', 'videoList', 'video_list']) {
+    const value = source[key] || payload?.[key];
+    if (Array.isArray(value)) return value.filter((item) => item && typeof item === 'object');
+  }
+  const videoUrl = firstString(source.video_url, source.videoUrl, source.media_url, source.url);
+  return videoUrl ? [{ type: 'video', url: videoUrl, thumbnail: firstString(source.thumbnail, source.cover_url, source.cover_image) }] : [];
+}
+
 function normalizeGenericParserPayload(text) {
   const rawText = String(text || '').trim();
   if (!rawText) {
@@ -485,7 +292,14 @@ function normalizeGenericParserPayload(text) {
     };
   }
 
+  const source = payload?.data?.note || payload?.note || payload;
   const postText = firstString(
+    source.desc,
+    source.caption,
+    source.content,
+    source.text,
+    source.description,
+    source.title,
     payload.desc,
     payload.caption,
     payload.content,
@@ -497,66 +311,18 @@ function normalizeGenericParserPayload(text) {
   return {
     ok: true,
     post_text: postText,
-    title: firstString(payload.title),
-    note_id: firstString(payload.note_id, payload.id),
+    title: firstString(source.title, source.displayTitle, payload.title),
+    note_id: firstString(source.note_id, source.noteId, source.id, payload.note_id, payload.id, payload.feed_id),
     parser_status: status || '',
-    media_type: firstString(payload.type),
-    images: Array.isArray(payload.images) ? payload.images : [],
+    media_type: firstString(source.type, payload.type),
+    images: normalizeGenericImageList(payload),
     media: payload.media,
     media_list: payload.media_list,
     medias: payload.medias,
-    videos: payload.videos,
+    videos: normalizeGenericVideoList(payload),
     audios: payload.audios,
     attachments: payload.attachments,
-    image_count: payload.image_count,
-  };
-}
-
-function xhsBackendTextError(text, toolName) {
-  const normalized = String(text || '').trim();
-  if (!normalized) {
-    return null;
-  }
-  if (/cookie已失效|cookie失效|cookie expired|invalid cookie/i.test(normalized)) {
-    return {
-      error_code: 'XHS_COOKIE_EXPIRED',
-      message: `${toolName} returned login failure: ${normalized}`,
-      hint: 'XHS cookie has expired. Re-login to xiaohongshu.com and update XHS_COOKIE in .env.local.',
-    };
-  }
-  if (/验证码|风控|risk|captcha/i.test(normalized)) {
-    return {
-      error_code: 'XHS_IP_RISK',
-      message: `${toolName} returned risk control: ${normalized}`,
-      hint: 'XHS detected IP risk or requires captcha. Try again later or use a different network.',
-    };
-  }
-  if (/^获取失败[。.!！\s]*$/i.test(normalized) || /获取失败/.test(normalized)) {
-    return {
-      error_code: 'BACKEND_MCP_ERROR',
-      message: `${toolName} returned backend failure text: ${normalized}`,
-    };
-  }
-  return null;
-}
-
-function buildXhsDiagnostic({ platform, url, noteId, whichBackend, backendToolName, errorCode, backendError, hasCookie, hasXsecToken, usedCachedToken, usedCanonicalUrl, rawFieldsSeen, rawPreview, env }) {
-  const cookieDiag = platform === 'xhs' ? xhsCookieDiagnostics(env || process.env) : undefined;
-  return {
-    platform: platform || 'xhs',
-    url: url || '',
-    note_id: noteId || '',
-    which_backend: whichBackend || '',
-    backend_tool_name: backendToolName || '',
-    error_code: errorCode || '',
-    backend_error: backendError || '',
-    has_cookie: hasCookie !== undefined ? hasCookie : Boolean(cookieDiag?.status === 'SET'),
-    has_xsec_token: hasXsecToken !== undefined ? hasXsecToken : false,
-    used_cached_token: usedCachedToken || false,
-    used_canonical_url: usedCanonicalUrl || false,
-    raw_fields_seen: rawFieldsSeen || {},
-    raw_preview: rawPreview ? rawPreview.slice(0, 1000) : '',
-    cookie_diagnostics: cookieDiag,
+    image_count: payload.image_count ?? source.image_count,
   };
 }
 
@@ -569,6 +335,25 @@ function sanitizeRawPreview(text, maxLen = 1000) {
     return `${key}${sep}***REDACTED***`;
   });
   return cleaned;
+}
+
+function xhsObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
+}
+
+function pickXhsNoteData(data) {
+  const root = xhsObject(data) || {};
+  const dataNode = xhsObject(root.data) || {};
+  const resultNode = xhsObject(root.result) || {};
+  const payloadNode = xhsObject(root.payload) || {};
+  return xhsObject(root.note)
+    || xhsObject(dataNode.note)
+    || xhsObject(resultNode.note)
+    || xhsObject(payloadNode.note)
+    || xhsObject(root.noteCard)
+    || xhsObject(dataNode.noteCard)
+    || xhsObject(resultNode.noteCard)
+    || root;
 }
 
 function extractRawFieldsSeen(data) {
@@ -726,16 +511,6 @@ function resolveXhsBackendTimeoutMs(env = process.env) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TIMEOUT_MS;
 }
 
-function xhsServerConfig(env = process.env) {
-  return {
-    command: env.XHS_MCP_COMMAND || 'uvx',
-    args: parseJsonArrayEnv(env.XHS_MCP_ARGS_JSON, ['--from', 'jobson-xhs-mcp', 'xhs-mcp']),
-    env: {
-      XHS_COOKIE: env.XHS_COOKIE || '',
-    },
-  };
-}
-
 function bilibiliServerConfig(env = process.env) {
   return {
     command: env.BILIBILI_MCP_COMMAND || 'npx',
@@ -882,7 +657,12 @@ export function parseXhsUrlInfo(url) {
 
 function buildXhsReadUrlCandidates({ rawText = '', resolved = {} } = {}) {
   const candidates = [];
-  function push(value) {
+  function pushRaw(value) {
+    const text = String(value || '').trim();
+    if (!text || candidates.includes(text)) return;
+    candidates.push(text);
+  }
+  function pushUrl(value) {
     const text = String(value || '').trim();
     if (!text) return;
     const extracted = extractFirstUrl(text);
@@ -897,10 +677,10 @@ function buildXhsReadUrlCandidates({ rawText = '', resolved = {} } = {}) {
     candidates.push(url);
   }
 
-  push(resolved.resolved_url);
-  push(resolved.canonical_url);
-  push(resolved.url);
-  push(rawText);
+  pushRaw(rawText);
+  pushUrl(resolved.url || extractFirstUrl(rawText).url);
+  pushUrl(resolved.canonical_url);
+  pushUrl(resolved.resolved_url);
   return candidates;
 }
 
@@ -1019,213 +799,6 @@ export async function resolveXhsShareUrl(input, options = {}) {
   };
 }
 
-async function prepareXhsBackendUrl({ rawText, resolved }, options = {}) {
-  if (!resolved.note_id) {
-    return {
-      ok: false,
-      error_code: 'MISSING_NOTE_ID',
-      error: 'MISSING_NOTE_ID: could not parse note id from XHS URL',
-    };
-  }
-  if (resolved.xsec_token && resolved.canonical_url) {
-    return {
-      ok: true,
-      backend_url: resolved.canonical_url,
-      source: 'resolved_url',
-    };
-  }
-  const cachedEntry = getCachedXhsNoteToken(resolved.note_id, options);
-  if (cachedEntry?.xsecToken && cachedEntry?.canonical_url) {
-    return {
-      ok: true,
-      backend_url: cachedEntry.canonical_url,
-      source: 'xhs_browse_cache',
-    };
-  }
-  return await resolveFreshXhsTokenFromSearch({ rawText, resolved }, options);
-}
-
-async function resolveFreshXhsTokenFromSearch({ rawText, resolved }, options = {}) {
-  const keywords = buildXhsSearchKeywords(rawText, resolved);
-  if (!keywords) {
-    return {
-      ok: false,
-      error_code: 'MISSING_XSEC_TOKEN',
-      error: 'MISSING_XSEC_TOKEN: no xsec_token and no searchable title hint',
-      note_id: resolved.note_id || '',
-    };
-  }
-
-  const browsePrepared = await resolveFreshXhsTokenFromBrowseSearch({ resolved, keywords }, options);
-  if (browsePrepared?.ok === true) {
-    return browsePrepared;
-  }
-
-  let searchResult;
-  try {
-    searchResult = await callBackendMcpTool('xhs', 'search_notes', { keywords }, options);
-  } catch (error) {
-    return backendErrorPayload(error, { platform: 'xhs', tool: 'search_notes' });
-  }
-  const candidates = extractXhsSearchCandidates(searchResult);
-  const withInfo = candidates
-    .map((candidate) => ({
-      ...candidate,
-      info: parseXhsUrlInfo(candidate.url || ''),
-    }))
-    .filter((candidate) => candidate.info.note_id && candidate.info.xsec_token);
-
-  const noteMatches = withInfo.filter((candidate) => candidate.info.note_id === resolved.note_id);
-  if (noteMatches.length === 1) {
-    return {
-      ok: true,
-      backend_url: noteMatches[0].info.canonical_url,
-      source: 'search_note_id',
-      keywords,
-    };
-  }
-  if (noteMatches.length > 1) {
-    return {
-      ok: false,
-      error_code: 'AMBIGUOUS_SEARCH_RESULT',
-      error: 'AMBIGUOUS_SEARCH_RESULT: multiple search results matched note_id',
-      note_id: resolved.note_id,
-      keywords,
-    };
-  }
-
-  const titleMatches = withInfo.filter((candidate) => titleMatchesHint(candidate.title, keywords));
-  if (!resolved.note_id && titleMatches.length === 1) {
-    return {
-      ok: true,
-      backend_url: titleMatches[0].info.canonical_url,
-      source: 'search_title',
-      keywords,
-    };
-  }
-  if (resolved.note_id && titleMatches.length === 1 && titleMatches[0].info.note_id === resolved.note_id) {
-    return {
-      ok: true,
-      backend_url: titleMatches[0].info.canonical_url,
-      source: 'search_title_note_id',
-      keywords,
-    };
-  }
-  if (titleMatches.length > 1) {
-    return {
-      ok: false,
-      error_code: 'AMBIGUOUS_SEARCH_RESULT',
-      error: 'AMBIGUOUS_SEARCH_RESULT: multiple title search results matched',
-      note_id: resolved.note_id || '',
-      keywords,
-    };
-  }
-
-  return {
-    ok: false,
-    error_code: 'MISSING_XSEC_TOKEN',
-    error: 'MISSING_XSEC_TOKEN: search did not return a fresh token for this note',
-    note_id: resolved.note_id || '',
-    keywords,
-  };
-}
-
-async function resolveFreshXhsTokenFromBrowseSearch({ resolved, keywords }, options = {}) {
-  const env = options.env || process.env;
-  const config = getXhsBrowseConfig(env);
-  if (!config.enabled || !config.isConfigured || !config.searchEnabled) {
-    return null;
-  }
-
-  let searchResult;
-  try {
-    searchResult = await xhsBrowseSearch({
-      query: keywords,
-      max_results: config.maxResults,
-    }, { ...options, xhsBrowseSkipMinInterval: true });
-  } catch {
-    return null;
-  }
-  if (searchResult?.ok !== true || !Array.isArray(searchResult.results)) {
-    return null;
-  }
-
-  const noteId = resolved.note_id || '';
-  const matches = searchResult.results.filter((candidate) => candidate.note_id === noteId);
-  if (matches.length !== 1) {
-    return null;
-  }
-
-  const cachedEntry = getCachedXhsNoteToken(noteId, options);
-  if (!cachedEntry?.xsecToken || !cachedEntry?.canonical_url) {
-    return null;
-  }
-
-  return {
-    ok: true,
-    backend_url: cachedEntry.canonical_url,
-    source: 'xhs_browse_search',
-    keywords,
-  };
-}
-
-function buildXhsSearchKeywords(rawText, resolved) {
-  const extracted = extractFirstUrl(rawText || '');
-  const hint = (resolved?.title_hint || extracted.before_text || '').trim();
-  return hint
-    .replace(/\s+/g, ' ')
-    .replace(/[，。！？、；："'【】《》]+/g, ' ')
-    .trim()
-    .slice(0, 80);
-}
-
-function extractXhsSearchCandidates(result) {
-  const structured = result?.structuredContent || null;
-  const text = textFromMcpResult(result);
-  const values = [];
-  collectCandidateObjects(structured, values);
-  if (text) {
-    try {
-      collectCandidateObjects(JSON.parse(text), values);
-    } catch {
-      collectCandidateObjectsFromText(text, values);
-    }
-  }
-  return values;
-}
-
-function collectCandidateObjects(value, output) {
-  if (!value) {
-    return;
-  }
-  if (Array.isArray(value)) {
-    for (const item of value) {
-      collectCandidateObjects(item, output);
-    }
-    return;
-  }
-  if (typeof value !== 'object') {
-    return;
-  }
-  const url = firstString(value.url, value.note_url, value.link, value.share_url);
-  const title = firstString(value.title, value.display_title, value.desc, value.content);
-  if (url) {
-    output.push({ url, title });
-  }
-  for (const nestedKey of ['items', 'notes', 'data', 'results', 'list']) {
-    if (value[nestedKey]) {
-      collectCandidateObjects(value[nestedKey], output);
-    }
-  }
-}
-
-function collectCandidateObjectsFromText(text, output) {
-  const urls = String(text || '').match(/https?:\/\/[^\s"'<>【】「」《》]+/ig) || [];
-  for (const url of urls) {
-    output.push({ url: url.replace(/[，。！？、；：）)\]}】》」'".]+$/u, ''), title: '' });
-  }
-}
-
 function firstString(...values) {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) {
@@ -1233,33 +806,6 @@ function firstString(...values) {
     }
   }
   return '';
-}
-
-function titleMatchesHint(title, hint) {
-  const normalizedTitle = normalizeSearchText(title);
-  const normalizedHint = normalizeSearchText(hint);
-  return Boolean(normalizedTitle && normalizedHint && (
-    normalizedTitle.includes(normalizedHint)
-    || normalizedHint.includes(normalizedTitle)
-  ));
-}
-
-function normalizeSearchText(text) {
-  return String(text || '')
-    .toLowerCase()
-    .replace(/https?:\/\/\S+/g, '')
-    .replace(/[^\p{Letter}\p{Number}]+/gu, '')
-    .trim();
-}
-
-function classifyXhsError(error) {
-  const msg = String(error?.message || error || '').toLowerCase();
-  if (msg.includes('timed out') || msg.includes('timeout')) return 'XHS_BACKEND_TIMEOUT';
-  if (msg.includes('cookie') || msg.includes('login') || msg.includes('401')) return 'XHS_COOKIE_INVALID';
-  if (msg.includes('xsec')) return 'XHS_SHORTLINK_RESOLVE_FAILED';
-  if (msg.includes('captcha') || msg.includes('risk') || msg.includes('verify')) return 'XHS_ANTI_BOT_OR_CAPTCHA';
-  if (msg.includes('enotfound') || msg.includes('econnrefused') || msg.includes('network')) return 'XHS_NETWORK_ERROR';
-  return 'XHS_BACKEND_MCP_ERROR';
 }
 
 function backendErrorPayload(error, extra = {}) {
@@ -1300,20 +846,6 @@ async function resolveSocialUrl(url, options = {}) {
     }
     const noteId = resolved.note_id || '';
     const xsecToken = resolved.xsec_token || '';
-    let cacheWritten = false;
-    const cachePath = resolveXhsNoteTokenCachePath(options.env || process.env);
-    if (noteId && xsecToken) {
-      try {
-        cacheXhsNoteToken(noteId, xsecToken, {
-          xsec_source: resolved.xsec_source || '',
-          canonical_url: resolved.canonical_url || resolved.resolved_url || '',
-          url: extracted.url,
-        }, options);
-        cacheWritten = true;
-      } catch {
-        // Cache write is best-effort
-      }
-    }
     return buildTextResult({
       ok: true,
       url: extracted.url,
@@ -1322,8 +854,9 @@ async function resolveSocialUrl(url, options = {}) {
       note_id: noteId,
       xsec_source: resolved.xsec_source || '',
       has_xsec_token: Boolean(xsecToken),
-      cache_written: cacheWritten,
-      cache_path: cachePath,
+      cache_written: false,
+      public_only: true,
+      account_backed: false,
     });
   }
   const resolvedUrl = await defaultResolveUrl(extracted.url, {
@@ -1356,33 +889,6 @@ async function defaultResolveUrl(url, options = {}) {
     return url;
   } finally {
     clearTimeout(timeout);
-  }
-}
-
-async function checkSocialLogin(platform, options = {}) {
-  if (platform !== 'xhs') {
-    return buildErrorResult(`UNSUPPORTED_PLATFORM: unsupported login check platform: ${platform}`, { error_code: 'UNSUPPORTED_PLATFORM', platform });
-  }
-  const env = options.env || process.env;
-  const cookieDiag = xhsCookieDiagnostics(env);
-  if (!String(env.XHS_COOKIE || '').trim()) {
-    return buildErrorResult('LOGIN_REQUIRED: XHS_COOKIE is required for xhs login checks', {
-      error_code: 'XHS_COOKIE_MISSING',
-      platform: 'xhs',
-      cookie_diagnostics: cookieDiag,
-    });
-  }
-  try {
-    const result = await callBackendMcpTool('xhs', 'check_cookie', {}, options);
-    const text = textFromMcpResult(result);
-    const ok = /有效|valid/i.test(text) && !/失效|invalid/i.test(text);
-    return buildTextResult({
-      ok,
-      platform: 'xhs',
-      status_text: text,
-    });
-  } catch (error) {
-    return backendErrorResult(error, { platform: 'xhs' });
   }
 }
 
@@ -1604,9 +1110,8 @@ async function readWechatArticlePost(args = {}, options = {}) {
   });
 }
 
-function partialSocialFailureResult({ platform, url, failure, env }) {
+function partialSocialFailureResult({ platform, url, failure }) {
   const errorCode = String(failure?.error_code || 'SOCIAL_READER_PARTIAL_FAILURE');
-  const cookieDiag = platform === 'xhs' ? xhsCookieDiagnostics(env || process.env) : undefined;
   const partialFailure = {
     asset_id: 'platform-1',
     error_code: errorCode,
@@ -1614,7 +1119,6 @@ function partialSocialFailureResult({ platform, url, failure, env }) {
     platform,
     captcha_detected: failure?.captcha_detected === true,
     recovery_suggestion: failure?.recovery_suggestion || '',
-    cookie_diagnostics: cookieDiag,
   };
   return buildTextResult({
     ok: true,
@@ -1900,7 +1404,6 @@ async function readSocialPostDeep(args = {}, options = {}) {
   });
 }
 
-// XHS two-path deep read: detail (structured text) + media (wanyi-watermark) independently
 async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
   const url = extracted.url || args.url || '';
   const resolved = { ...extractFirstUrl(url), resolved_url: '', canonical_url: '' };
@@ -1916,60 +1419,46 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
   }
 
   const noteId = resolved.note_id || '';
-  const cachedEntry = noteId ? getCachedXhsNoteToken(noteId, options) : null;
-  const hasCookie = Boolean(String(env.XHS_COOKIE || '').trim());
+  const publicResult = await readXhsPublicChain({
+    rawText: args.url || url,
+    resolved,
+    includeComments: false,
+    maxComments: 0,
+  }, options);
+  const publicData = publicResult?.structuredContent || null;
+  const publicOk = publicData?.ok === true && hasUsableXhsPublicContent(publicData);
+  const source = publicOk && publicData.source === 'wanyi-watermark-mcp'
+    ? 'wanyi-watermark'
+    : (publicData?.source || 'xhs_public_only');
+  const normalizedMedia = publicOk ? normalizeXhsMedia({ ...publicData, source }) : { images: [], videos: [], media: [], cover_image: '' };
 
-  // Determine media URLs for wanyi fallback (priority: original short link > canonical > resolved)
-  const wanyiUrl = url || resolved.resolved_url || '';
-
-  // Run both paths in parallel
-  const [detailResult, mediaResult] = await Promise.allSettled([
-    // Path 1: Detail (structured text)
-    runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, args }, options),
-    // Path 2: Media (wanyi-watermark)
-    runXhsMediaPath({ wanyiUrl, resolved, env }, options),
-  ]);
-
-  const detail = detailResult.status === 'fulfilled' ? detailResult.value : { ok: false, error_code: 'DETAIL_EXCEPTION', message: String(detailResult.reason) };
-  const media = mediaResult.status === 'fulfilled' ? mediaResult.value : { ok: false, error_code: 'MEDIA_EXCEPTION', message: String(mediaResult.reason) };
-
-  const detailOk = detail?.ok === true;
-  const mediaOk = media?.ok === true;
-
-  // Build diagnostics
   const diagnostics = {
     detail_backend: {
-      name: detail?.source || 'unknown',
-      ok: detailOk,
-      error_code: detail?.error_code || '',
-      message: detail?.message || '',
-      raw_fields_seen: detail?.raw_fields_seen || {},
-      used_cached_token: detail?.used_cached_token || false,
-      used_canonical_url: detail?.used_canonical_url || false,
+      name: source,
+      ok: publicOk,
+      error_code: publicOk ? '' : 'XHS_PUBLIC_PARSE_FAILED',
+      message: publicOk ? '' : 'Public XHS parsers could not extract readable content; account-backed readers are disabled.',
+      raw_fields_seen: publicOk ? extractRawFieldsSeen(publicData) : {},
+      used_cached_token: false,
+      used_canonical_url: Boolean(resolved.canonical_url),
     },
     media_backend: {
-      name: 'wanyi-watermark',
-      ok: mediaOk,
-      error_code: media?.error_code || '',
-      message: media?.message || '',
-      media_count: normalizeXhsMedia(media).images.length + normalizeXhsMedia(media).videos.length,
-      raw_fields_seen: media?.raw_fields_seen || {},
+      name: source,
+      ok: normalizedMedia.media.length > 0,
+      error_code: normalizedMedia.media.length > 0 ? '' : 'XHS_PUBLIC_MEDIA_UNAVAILABLE',
+      message: normalizedMedia.media.length > 0 ? '' : 'Public XHS parsers returned no media resources.',
+      media_count: normalizedMedia.media.length,
+      raw_fields_seen: publicOk ? extractRawFieldsSeen(publicData) : {},
     },
+    public_only: true,
+    account_backed: false,
   };
 
   if (debug) {
-    diagnostics.detail_raw_preview = detail ? sanitizeRawPreview(JSON.stringify(detail)) : '';
-    diagnostics.media_raw_preview = media ? sanitizeRawPreview(JSON.stringify(media)) : '';
+    diagnostics.public_raw_preview = publicData ? sanitizeRawPreview(JSON.stringify(publicData)) : '';
   }
 
-  const detailMedia = detailOk ? normalizeXhsMedia(detail) : { images: [], videos: [], media: [], cover_image: '' };
-  const mediaPathItems = mediaOk && Array.isArray(media.media) && media.media.length > 0
-    ? media.media
-    : [
-      ...(mediaOk ? (media.images || []) : []),
-      ...(mediaOk ? (media.videos || []) : []),
-    ];
-  const normalizedMediaItems = mergeXhsMediaItems([...mediaPathItems, ...detailMedia.media]);
+  const normalizedMediaItems = mergeXhsMediaItems(normalizedMedia.media);
   const images = normalizedMediaItems.filter((item) => item.type === 'image');
   const videos = normalizedMediaItems.filter((item) => item.type === 'video');
   const mediaCount = normalizedMediaItems.length;
@@ -2011,16 +1500,18 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     || mediaAnalysisPartial
     || (includeMedia && analyzedMediaCount > successfulMediaCount);
 
-  // Both failed
-  if (!detailOk && !mediaOk) {
+  if (!publicOk) {
     return buildTextResult({
       ok: false,
       partial_success: false,
       platform: 'xhs',
       note_id: noteId,
       url,
-      error_code: detail?.error_code || media?.error_code || 'XHS_DEEP_READ_FAILED',
-      message: `Detail: ${detail?.message || 'failed'}. Media: ${media?.message || 'failed'}.`,
+      source: 'xhs_public_only',
+      public_only: true,
+      account_backed: false,
+      error_code: 'XHS_PUBLIC_PARSE_FAILED',
+      message: 'Public XHS parsers could not extract readable content; account-backed readers are disabled.',
       images: [],
       videos: [],
       media: [],
@@ -2030,10 +1521,10 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
     });
   }
 
-  // Detail ok but no media
-  if (detailOk && mediaCount === 0) {
-    const title = detail?.title || detail?.note_title || '';
-    const desc = detail?.desc || detail?.content || detail?.post_text || '';
+  const title = publicData?.title || publicData?.note_title || '';
+  const desc = publicData?.desc || publicData?.content || publicData?.post_text || '';
+
+  if (mediaCount === 0) {
     return buildTextResult({
       ok: true,
       partial_success: false,
@@ -2041,44 +1532,44 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
       platform: 'xhs',
       note_id: noteId,
       url,
-      source: detail?.source || 'xhs_browse',
+      source,
+      public_only: true,
+      account_backed: false,
       title,
       desc,
-      tags: detail?.tags || [],
+      tags: publicData?.tags || [],
       images,
       videos,
       media: normalizedMediaItems,
       media_assets: [],
       media_analysis: mediaAnalysis,
-      post_text: detail?.post_text || desc,
-      comments_text: detail?.comments_text || '',
+      post_text: publicData?.post_text || desc,
+      comments_text: '',
+      comments_supported: false,
       diagnostics,
     });
   }
 
-  // Merge results (detail ok + media ok, or detail failed + media ok)
-  const title = detailOk ? (detail?.title || detail?.note_title || media?.title || '') : (media?.title || '');
-  const desc = detailOk ? (detail?.desc || detail?.content || detail?.post_text || media?.desc || '') : (media?.desc || '');
-  const tags = detailOk ? (detail?.tags || []) : [];
-
   return buildTextResult({
     ok: true,
-    partial_success: (!detailOk && mediaOk) || partialMediaRead,
+    partial_success: partialMediaRead,
     platform: 'xhs',
     note_id: noteId,
     url,
-    source: detailOk ? (detail?.source || 'xhs_browse') : 'wanyi-watermark',
+    source,
+    public_only: true,
+    account_backed: false,
     title,
     desc,
-    tags,
+    tags: publicData?.tags || [],
     images,
     videos,
     media: normalizedMediaItems,
     media_assets: mediaAssets,
     media_analysis: mediaAnalysis,
-    post_text: detailOk ? (detail?.post_text || desc) : '',
-    comments_text: detail?.comments_text || '',
-    message: !detailOk && mediaOk ? '正文未完整获取，但媒体资源已获取' : undefined,
+    post_text: publicData?.post_text || desc,
+    comments_text: '',
+    comments_supported: false,
     media_count: mediaCount,
     total_media_count: totalMediaCount,
     analyzed_media_count: analyzedMediaCount,
@@ -2090,146 +1581,11 @@ async function readXhsPostDeep({ extracted, args, debug, env }, options = {}) {
       ...(mediaAnalysisPartial ? ['MEDIA_ANALYSIS_PARTIAL'] : []),
     ],
     deep_summary: [
-      detailOk ? (detail?.post_text || desc) : '',
+      publicData?.post_text || desc,
       mediaAnalysis?.merged_summary ? `媒体: ${mediaAnalysis.merged_summary}` : '',
     ].filter(Boolean).join('\n\n'),
     diagnostics,
   });
-}
-
-// Detail path: try xhs_browse_note or jobson get_note_content
-async function runXhsDetailPath({ url, resolved, cachedEntry, hasCookie, env, args }, options = {}) {
-  const noteId = resolved.note_id || '';
-  let detailCachedEntry = cachedEntry;
-  let xsecToken = detailCachedEntry?.xsecToken || resolved.xsec_token || '';
-  let canonicalUrl = detailCachedEntry?.canonical_url || resolved.canonical_url || '';
-
-  if (!xsecToken && noteId) {
-    const prepared = await prepareXhsBackendUrl({ rawText: args.url || url, resolved }, options);
-    if (prepared?.ok === true) {
-      detailCachedEntry = getCachedXhsNoteToken(noteId, options) || detailCachedEntry;
-      xsecToken = detailCachedEntry?.xsecToken || parseXhsUrlInfo(prepared.backend_url || '').xsec_token || '';
-      canonicalUrl = detailCachedEntry?.canonical_url || prepared.backend_url || canonicalUrl;
-    }
-  }
-
-  // Try xhs_browse_note first (uses cache or the token-bearing canonical URL)
-  if (noteId && xsecToken) {
-    try {
-      const browseResult = await xhsBrowseNote({
-        note_id: noteId,
-        url: canonicalUrl || resolved.canonical_url || url,
-        include_images: true,
-      }, { ...options, xhsBrowseSkipMinInterval: true });
-      if (browseResult?.ok === true || browseResult?.structuredContent?.ok === true) {
-        const data = browseResult.structuredContent || browseResult;
-        const normalized = normalizeXhsMedia({ ...data, source: 'xhs_browse' });
-        return {
-          ok: true,
-          source: 'xhs_browse',
-          title: data.title || '',
-          desc: data.content || data.desc || '',
-          post_text: data.content || data.desc || '',
-          tags: data.tags || [],
-          images: normalized.images,
-          videos: normalized.videos,
-          media: normalized.media,
-          cover_image: normalized.cover_image,
-          comments_text: data.comments_text || '',
-          used_cached_token: Boolean(detailCachedEntry?.xsecToken),
-          used_canonical_url: Boolean(detailCachedEntry?.canonical_url || canonicalUrl),
-          raw_fields_seen: extractRawFieldsSeen(data),
-        };
-      }
-    } catch (e) {
-      // Fall through to jobson
-    }
-  }
-
-  // Try jobson get_note_content with canonical URL
-  if (!xsecToken) {
-    return {
-      ok: false,
-      error_code: 'XHS_DETAIL_TOKEN_MISSING',
-      message: 'Skipping token-aware XHS detail backend because no xsec_token is available',
-      source: 'jobson-xhs-mcp',
-    };
-  }
-  if (canonicalUrl || url) {
-    try {
-      const postResult = await callBackendMcpTool('xhs', 'get_note_content', { url: canonicalUrl || url }, options);
-      const postText = textFromMcpResult(postResult);
-      const postTextError = xhsBackendTextError(postText, 'get_note_content');
-      if (!postTextError) {
-        return {
-          ok: true,
-          source: 'jobson-xhs-mcp',
-          post_text: postText,
-          desc: postText,
-          used_cached_token: Boolean(detailCachedEntry?.xsecToken),
-          used_canonical_url: Boolean(canonicalUrl),
-          raw_fields_seen: { desc: Boolean(postText) },
-        };
-      }
-      return { ok: false, error_code: postTextError.error_code, message: postTextError.message, source: 'jobson-xhs-mcp' };
-    } catch (e) {
-      return { ok: false, error_code: 'XHS_BACKEND_EXCEPTION', message: e instanceof Error ? e.message : String(e), source: 'jobson-xhs-mcp' };
-    }
-  }
-
-  return { ok: false, error_code: 'XHS_NO_DETAIL_SOURCE', message: 'No note_id or URL for detail path' };
-}
-
-// Media path: wanyi-watermark generic parser (independent of detail)
-async function runXhsMediaPath({ wanyiUrl, resolved, env }, options = {}) {
-  const envRef = options.env || env || process.env;
-  const xhsTimeoutMs = resolveXhsBackendTimeoutMs(envRef);
-  const xhsFallbackConfig = getXhsFallbackServerConfig(envRef);
-  // Priority: original short link > canonical URL
-  const urls = [wanyiUrl, resolved?.canonical_url, resolved?.resolved_url].filter(Boolean);
-  const uniqueUrls = [...new Set(urls)];
-
-  for (const tryUrl of uniqueUrls) {
-    try {
-      if (!xhsFallbackConfig) continue;
-      const result = await readGenericSocialPost({
-        url: tryUrl,
-        platform: 'xhs',
-        includeComments: false,
-        maxComments: 0,
-      }, { ...options, xhsTimeoutMs, _xhsFallbackConfig: xhsFallbackConfig });
-      if (result?.structuredContent?.ok === true) {
-        const data = result.structuredContent;
-        const normalized = normalizeXhsMedia(data);
-        const mediaCount = normalized.images.length + normalized.videos.length;
-        if (mediaCount > 0) {
-          return {
-            ok: true,
-            source: 'wanyi-watermark',
-            title: data.title || '',
-            desc: data.post_text || data.desc || '',
-            images: normalized.images,
-            videos: normalized.videos,
-            media: normalized.media,
-            cover_image: normalized.cover_image,
-            raw_fields_seen: extractRawFieldsSeen(data),
-          };
-        }
-        // wanyi returned success but no media
-        return {
-          ok: false,
-          error_code: 'WANYI_NO_MEDIA',
-          message: 'wanyi returned success but no normalized media resources',
-          source: 'wanyi-watermark',
-          raw_fields_seen: extractRawFieldsSeen(data),
-        };
-      }
-    } catch {
-      // Try next URL
-    }
-  }
-
-  return { ok: false, error_code: 'WANYI_MEDIA_FAILED', message: 'wanyi-watermark failed for all URL variants' };
 }
 
 function mergeXhsMediaItems(items = []) {
@@ -2377,212 +1733,273 @@ function normalizeXhsMedia(mediaResult) {
   return { images, videos, media: [...images, ...videos], cover_image: coverImage };
 }
 
-function xhsCookieDiagnostics(env) {
-  const cookie = String(env.XHS_COOKIE || '').trim();
-  if (!cookie) return { status: 'MISSING', error_code: 'XHS_COOKIE_MISSING' };
-  const len = cookie.length;
-  // Simple sha256 prefix for diagnostic (no crypto import needed)
-  let hash = 0;
-  for (let i = 0; i < Math.min(cookie.length, 256); i++) {
-    hash = ((hash << 5) - hash + cookie.charCodeAt(i)) | 0;
+function hasUsableXhsPublicContent(payload = {}) {
+  if (payload?.ok === false) return false;
+  const normalized = normalizeXhsMedia(payload);
+  return Boolean(
+    firstString(payload.post_text, payload.desc, payload.content, payload.title)
+    || normalized.images.length
+    || normalized.videos.length
+  );
+}
+
+function xhsGenericConfigOrInjected(env, options = {}) {
+  return getXhsFallbackServerConfig(env)
+    || (typeof options.mcpCallImpl === 'function' ? { command: 'injected-test-generic-parser', args: [], env: {} } : null);
+}
+
+function finalizeXhsPublicResult(result, { source } = {}) {
+  if (!result?.structuredContent?.ok) return result;
+  if (source) {
+    result.structuredContent.source = source;
   }
-  const hashPrefix = Math.abs(hash).toString(16).slice(0, 12).padStart(12, '0');
-  return { status: 'SET', len, hash_prefix: hashPrefix };
+  result.structuredContent.comments_text = '';
+  result.structuredContent.comments_supported = false;
+  result.structuredContent.account_backed = false;
+  result.structuredContent.public_only = true;
+  if (Array.isArray(result.content) && result.content[0]?.type === 'text') {
+    result.content[0].text = JSON.stringify(result.structuredContent, null, 2);
+  }
+  return result;
+}
+
+async function readXhsPublicParserTool({ url, toolName = 'parse_xhs_link', source = '' }, { includeComments, maxComments, env }, options = {}) {
+  const config = xhsGenericConfigOrInjected(env, options);
+  if (!config) return null;
+  const xhsTimeoutMs = resolveXhsBackendTimeoutMs(env);
+  const result = await readGenericSocialPost({
+    url,
+    platform: 'xhs',
+    includeComments,
+    maxComments,
+  }, {
+    ...options,
+    xhsTimeoutMs,
+    _xhsFallbackConfig: config,
+    _genericParserToolName: toolName,
+  });
+  if (result?.structuredContent?.ok === true && hasUsableXhsPublicContent(result.structuredContent)) {
+    return finalizeXhsPublicResult(result, { source });
+  }
+  return null;
+}
+
+function getXhsPublicSidecarConfig(env = process.env) {
+  const enabled = String(env.XHS_PUBLIC_SIDECAR_ENABLED || 'true').trim().toLowerCase() !== 'false';
+  const url = String(env.XHS_PUBLIC_SIDECAR_URL || '').trim();
+  const timeoutMs = positiveInt(env.XHS_PUBLIC_SIDECAR_TIMEOUT_MS, 90000);
+  return { enabled, url, timeoutMs, configured: Boolean(enabled && url) };
+}
+
+async function parseResponseBody(response) {
+  if (typeof response?.json === 'function') {
+    return await response.json();
+  }
+  if (typeof response?.text === 'function') {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text;
+    }
+  }
+  return response;
+}
+
+async function readXhsDownloaderSidecar({ url, env }, options = {}) {
+  const config = getXhsPublicSidecarConfig(env);
+  if (!config.configured) return null;
+  const requestUrl = extractFirstUrl(url).url || String(url || '').trim();
+  try {
+    const parsed = new URL(requestUrl);
+    if (!isAllowedXhsHostname(parsed.hostname)) return null;
+  } catch {
+    return null;
+  }
+  const fetchImpl = resolveFetchImpl(options.fetchImpl);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
+  try {
+    const response = await fetchImpl(config.url, {
+      method: 'POST',
+      signal: controller.signal,
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        url: requestUrl,
+        download: false,
+        cookie: '',
+      }),
+    });
+    if (response?.ok === false || (Number(response?.status) >= 400)) {
+      return null;
+    }
+    const body = await parseResponseBody(response);
+    const normalized = normalizeGenericParserPayload(typeof body === 'string' ? body : JSON.stringify(body));
+    if (!normalized.ok) return null;
+    const payload = {
+      ok: true,
+      platform: 'xhs',
+      url: requestUrl,
+      source: 'xhs-downloader-sidecar',
+      parser_tool: 'xhs_downloader_detail',
+      post_text: normalized.post_text,
+      comments_text: '',
+      comments_supported: false,
+      public_only: true,
+      account_backed: false,
+      ...(normalized.title ? { title: normalized.title } : {}),
+      ...(normalized.note_id ? { note_id: normalized.note_id } : {}),
+      ...(Array.isArray(normalized.images) && normalized.images.length ? { images: normalized.images } : {}),
+      ...(Array.isArray(normalized.videos) && normalized.videos.length ? { videos: normalized.videos } : {}),
+      ...(normalized.media ? { media: normalized.media } : {}),
+    };
+    return hasUsableXhsPublicContent(payload) ? buildTextResult(payload) : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function decodeHtmlEntities(text = '') {
+  return String(text || '')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>');
+}
+
+function extractMetaContent(html = '', name = '') {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const pattern = new RegExp(`<meta\\s+[^>]*(?:property|name)=["']${escaped}["'][^>]*content=["']([^"']+)["'][^>]*>`, 'i');
+  const match = String(html || '').match(pattern);
+  return match ? decodeHtmlEntities(match[1]) : '';
+}
+
+async function readXhsHtmlPublicFallback({ url, env }, options = {}) {
+  if (String(env.XHS_PUBLIC_HTML_FALLBACK_ENABLED || '').trim().toLowerCase() !== 'true') return null;
+  const requestUrl = extractFirstUrl(url).url || String(url || '').trim();
+  try {
+    const parsed = new URL(requestUrl);
+    if (!isAllowedXhsHostname(parsed.hostname)) return null;
+  } catch {
+    return null;
+  }
+  const fetchImpl = resolveFetchImpl(options.fetchImpl);
+  const timeoutMs = positiveInt(env.XHS_PUBLIC_HTML_FALLBACK_TIMEOUT_MS, 30000);
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetchImpl(requestUrl, {
+      method: 'GET',
+      signal: controller.signal,
+      headers: {
+        'user-agent': BROWSER_USER_AGENT,
+        accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      },
+    });
+    if (response?.ok === false || (Number(response?.status) >= 400)) return null;
+    const html = typeof response?.text === 'function' ? await response.text() : '';
+    const title = firstString(extractMetaContent(html, 'og:title'), extractMetaContent(html, 'title'));
+    const desc = firstString(extractMetaContent(html, 'og:description'), extractMetaContent(html, 'description'));
+    const image = extractMetaContent(html, 'og:image');
+    const payload = {
+      ok: true,
+      platform: 'xhs',
+      url: requestUrl,
+      source: 'xhs-html-public-fallback',
+      title,
+      post_text: desc || title,
+      comments_text: '',
+      comments_supported: false,
+      public_only: true,
+      account_backed: false,
+      images: image ? [{ url: image }] : [],
+    };
+    return hasUsableXhsPublicContent(payload) ? buildTextResult(payload) : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function readXhsPublicChain({ rawText, resolved, includeComments, maxComments }, options = {}) {
+  const env = options.env || process.env;
+  const candidates = buildXhsReadUrlCandidates({ rawText, resolved });
+  for (const candidateUrl of candidates) {
+    const parsed = await readXhsPublicParserTool({
+      url: candidateUrl,
+      toolName: 'parse_xhs_link',
+    }, { includeComments, maxComments, env }, options);
+    if (parsed) return parsed;
+  }
+  for (const candidateUrl of candidates) {
+    const sidecar = await readXhsDownloaderSidecar({ url: candidateUrl, env }, options);
+    if (sidecar) return sidecar;
+  }
+  for (const candidateUrl of candidates) {
+    const generic = await readXhsPublicParserTool({
+      url: candidateUrl,
+      toolName: 'parse_generic_link',
+      source: 'wanyi-watermark-generic',
+    }, { includeComments, maxComments, env }, options);
+    if (generic) return generic;
+  }
+  for (const candidateUrl of candidates) {
+    const html = await readXhsHtmlPublicFallback({ url: candidateUrl, env }, options);
+    if (html) return html;
+  }
+  return null;
+}
+
+function buildXhsPublicParseFailedResult({ rawText, resolved } = {}) {
+  return buildTextResult({
+    ok: true,
+    partial: true,
+    content_available: false,
+    full_text_available: false,
+    evidence_level: 'metadata_only',
+    should_answer_from_content: false,
+    platform: 'xhs',
+    url: resolved?.resolved_url || resolved?.canonical_url || resolved?.original_url || String(rawText || ''),
+    note_id: resolved?.note_id || '',
+    source: 'xhs_public_only',
+    post_text: '',
+    comments_text: '',
+    comments_supported: false,
+    public_only: true,
+    account_backed: false,
+    error_code: 'XHS_PUBLIC_PARSE_FAILED',
+    warnings: [
+      { code: 'XHS_PUBLIC_PARSE_FAILED', message: 'Public XHS parsers could not extract readable content; account-backed readers are disabled.' },
+      { code: 'PARTIAL_RESULT', message: 'Returning URL and metadata only; full content unavailable' },
+    ],
+    fallback_chain: ['wanyi_watermark', 'xhs_downloader_public_sidecar', 'wanyi_generic', 'html_public_fallback', 'partial'],
+  });
+}
+
+function displayXhsResolvedUrl(resolved = {}, fallback = '') {
+  return resolved.canonical_url || resolved.resolved_url || resolved.url || fallback || '';
 }
 
 async function readXhsPost({ rawText, resolved, includeComments, maxComments }, options = {}) {
-  const env = options.env || process.env;
-  const hasCookie = String(env.XHS_COOKIE || '').trim();
-  const cookieDiag = xhsCookieDiagnostics(env);
-  const genericFallbackEnabled = String(env.SOCIAL_READER_GENERIC_FALLBACK_ENABLED || 'true') !== 'false';
-  const xhsTimeoutMs = resolveXhsBackendTimeoutMs(env);
-  if (genericFallbackEnabled) {
-    const xhsFallbackConfig = getXhsFallbackServerConfig(env);
-    if (xhsFallbackConfig) {
-      for (const candidateUrl of buildXhsReadUrlCandidates({ rawText, resolved })) {
-        const generic = await readGenericSocialPost({
-          url: candidateUrl,
-          platform: 'xhs',
-          includeComments,
-          maxComments,
-        }, {
-          ...options,
-          xhsTimeoutMs,
-          _xhsFallbackConfig: xhsFallbackConfig,
-        });
-        if (generic.structuredContent?.ok === true) {
-          generic.structuredContent.primary = true;
-          generic.content[0].text = JSON.stringify(generic.structuredContent, null, 2);
-          return generic;
-        }
-      }
-    } else {
-      return buildTextResult({
-        ok: true,
-        partial: true,
-        content_available: false,
-        full_text_available: false,
-        evidence_level: 'metadata_only',
-        should_answer_from_content: false,
-        platform: 'xhs',
-        url: resolved.resolved_url || resolved.canonical_url || resolved.original_url || String(rawText || ''),
-        note_id: resolved.note_id || '',
-        source: 'partial_fallback',
-        post_text: '',
-        comments_text: '',
-        error_code: 'XHS_GENERIC_FALLBACK_NOT_READY',
-        warnings: [
-          { code: 'XHS_GENERIC_FALLBACK_NOT_READY', message: 'Generic fallback tool not prepared; run scripts/prepare-xhs-generic-fallback.sh' },
-          { code: 'PARTIAL_RESULT', message: 'Returning URL and metadata only; full content unavailable' },
-        ],
-        fallback_chain: ['generic_marker', 'partial'],
-      });
+  const result = await readXhsPublicChain({ rawText, resolved, includeComments, maxComments }, options);
+  if (result) {
+    result.structuredContent.primary = true;
+    result.structuredContent.url = displayXhsResolvedUrl(resolved, result.structuredContent.url);
+    if (resolved?.note_id && !result.structuredContent.note_id) {
+      result.structuredContent.note_id = resolved.note_id;
     }
+    result.content[0].text = JSON.stringify(result.structuredContent, null, 2);
+    return result;
   }
-  if (!hasCookie) {
-    return buildErrorResult('LOGIN_REQUIRED: XHS_COOKIE is required for xhs content/comments', {
-      error_code: 'XHS_COOKIE_MISSING',
-      platform: 'xhs',
-      cookie_diagnostics: cookieDiag,
-      hint: 'Set XHS_COOKIE in .env.local. Cookie may expire periodically; re-login to xiaohongshu.com and copy fresh cookie.',
-    });
-  }
-
-  const prepared = await prepareXhsBackendUrl({ rawText, resolved }, options);
-  if (!prepared.ok) {
-    if (prepared.error_code === 'AMBIGUOUS_SEARCH_RESULT') {
-      return buildErrorResult(prepared.error || prepared.error_code, {
-        ...prepared,
-        platform: 'xhs',
-        url: resolved.resolved_url || resolved.original_url || String(rawText),
-      });
-    }
-    if (genericFallbackEnabled) {
-      const xhsFallbackConfig = getXhsFallbackServerConfig(env);
-      if (xhsFallbackConfig) {
-        return await readGenericSocialPost({ url: resolved.resolved_url || resolved.original_url || String(rawText), platform: 'xhs', includeComments, maxComments }, { ...options, _xhsFallbackConfig: xhsFallbackConfig });
-      }
-    }
-    return buildErrorResult(prepared.error || prepared.error_code, prepared);
-  }
-  const url = prepared.backend_url;
-
-  try {
-    const postResult = await callBackendMcpTool('xhs', 'get_note_content', { url }, options);
-    const postText = textFromMcpResult(postResult);
-    const postTextError = xhsBackendTextError(postText, 'get_note_content');
-    if (postTextError) {
-      const error = new Error(postTextError.message);
-      error.error_code = postTextError.error_code;
-      throw error;
-    }
-    let commentsText = '';
-    if (includeComments) {
-      const commentsResult = await callBackendMcpTool('xhs', 'get_note_comments', { url }, options);
-      commentsText = limitCommentBlocks(textFromMcpResult(commentsResult), maxComments);
-      const commentsTextError = xhsBackendTextError(commentsText, 'get_note_comments');
-      if (commentsTextError) {
-        const error = new Error(commentsTextError.message);
-        error.error_code = commentsTextError.error_code;
-        throw error;
-      }
-    }
-    return buildTextResult({
-      ok: true,
-      platform: 'xhs',
-      url,
-      source: 'jobson-xhs-mcp',
-      include_comments: includeComments,
-      max_comments: maxComments,
-      post_text: postText,
-      comments_text: commentsText,
-    });
-  } catch (error) {
-    if (genericFallbackEnabled) {
-      // Check marker before attempting generic fallback
-      const xhsFallbackConfig = getXhsFallbackServerConfig(options.env || process.env);
-      if (!xhsFallbackConfig) {
-        const errorCode = classifyXhsError(error);
-        return buildTextResult({
-          ok: true,
-          partial: true,
-          content_available: false,
-          full_text_available: false,
-          evidence_level: 'metadata_only',
-          should_answer_from_content: false,
-          platform: 'xhs',
-          url: resolved.resolved_url || resolved.canonical_url || url,
-          note_id: resolved.note_id || '',
-          source: 'partial_fallback',
-          post_text: '',
-          comments_text: '',
-          warnings: [
-            { code: errorCode, message: `XHS backend failed: ${error instanceof Error ? error.message : String(error)}` },
-            { code: 'XHS_GENERIC_FALLBACK_NOT_READY', message: 'Generic fallback tool not prepared; run scripts/prepare-xhs-generic-fallback.sh' },
-            { code: 'PARTIAL_RESULT', message: 'Returning URL and metadata only; full content unavailable' },
-          ],
-          fallback_chain: ['jobson_xhs_mcp', 'partial'],
-          xhs_error: error instanceof Error ? error.message : String(error),
-        });
-      }
-      // Marker ready — try generic fallback with marker-gated config
-      const fallback = await readGenericSocialPost({ url, platform: 'xhs', includeComments, maxComments }, { ...options, _xhsFallbackConfig: xhsFallbackConfig });
-      if (fallback.structuredContent?.ok === true) {
-        fallback.structuredContent.partial = true;
-        fallback.structuredContent.content_available = true;
-        fallback.structuredContent.full_text_available = false;
-        fallback.structuredContent.evidence_level = 'generic_parser';
-        fallback.structuredContent.should_answer_from_content = true;
-        fallback.structuredContent.source = 'generic_parser_fallback';
-        fallback.structuredContent.xhs_error = error instanceof Error ? error.message : String(error);
-        fallback.structuredContent.fallback = true;
-        fallback.structuredContent.fallback_from = error?.error_code || 'XHS_BACKEND_EXCEPTION';
-        fallback.structuredContent.warnings = [
-          { code: 'GENERIC_PARSER_FALLBACK', message: 'Used generic parser after XHS backend failure' },
-          { code: 'FULL_TEXT_UNAVAILABLE', message: 'Content from generic parser, not original XHS backend' },
-        ];
-        fallback.structuredContent.diagnostics = buildXhsDiagnostic({
-          platform: 'xhs', url, whichBackend: 'generic_parser', backendToolName: 'wanyi-watermark',
-          errorCode: error?.error_code || 'XHS_BACKEND_EXCEPTION',
-          backendError: error instanceof Error ? error.message : String(error),
-          hasCookie, hasXsecToken: Boolean(resolved.xsec_token),
-          usedCachedToken: Boolean(prepared.source === 'xhs_browse_cache'),
-          usedCanonicalUrl: Boolean(prepared.backend_url),
-          env,
-        });
-        fallback.content[0].text = JSON.stringify(fallback.structuredContent, null, 2);
-        return fallback;
-      }
-      // Generic parser also failed — return metadata-only partial result
-      const errorCode = classifyXhsError(error);
-      return buildTextResult({
-        ok: true,
-        partial: true,
-        content_available: false,
-        full_text_available: false,
-        evidence_level: 'metadata_only',
-        should_answer_from_content: false,
-        platform: 'xhs',
-        url: resolved.resolved_url || resolved.canonical_url || url,
-        note_id: resolved.note_id || '',
-        source: 'partial_fallback',
-        post_text: '',
-        comments_text: '',
-        warnings: [
-          { code: errorCode, message: `XHS backend failed: ${error instanceof Error ? error.message : String(error)}` },
-          { code: 'GENERIC_PARSER_FAILED', message: 'Generic parser also failed' },
-          { code: 'PARTIAL_RESULT', message: 'Returning URL and metadata only; full content unavailable' },
-        ],
-        fallback_chain: ['jobson_xhs_mcp', 'wanyi_watermark', 'partial'],
-        xhs_error: error instanceof Error ? error.message : String(error),
-      });
-    }
-    return backendErrorResult(error, { platform: 'xhs', url });
-  }
+  return buildXhsPublicParseFailedResult({ rawText, resolved });
 }
 
 async function readGenericSocialPost({ url, platform, includeComments, maxComments }, options = {}) {
-  const toolName = genericParserToolForPlatform(platform);
+  const toolName = options._genericParserToolName || genericParserToolForPlatform(platform);
   const env = options.env || process.env;
   const timeoutMs = options._overrideTimeoutMs
     || options.xhsTimeoutMs
@@ -2664,19 +2081,18 @@ function limitCommentBlocks(text, maxComments) {
 }
 
 async function callBackendMcpTool(server, toolName, toolArguments = {}, options = {}) {
+  if (server === 'xhs') {
+    throw new Error('XHS_ACCOUNT_BACKED_DISABLED: XHS account-backed MCP backends are retired');
+  }
   if (typeof options.mcpCallImpl === 'function') {
     return await options.mcpCallImpl({ server, toolName, arguments: toolArguments });
   }
   const env = options.env || process.env;
-  const config = server === 'xhs'
-    ? xhsServerConfig(env)
-    : server === 'bilibili'
+  const config = server === 'bilibili'
       ? bilibiliServerConfig(env)
       : genericParserServerConfig(env);
   const timeoutMs = options._overrideTimeoutMs
-    || (server === 'xhs'
-      ? resolveXhsBackendTimeoutMs(env)
-      : resolveTimeoutMs(env));
+    || resolveTimeoutMs(env);
   return await callMcpToolViaStdio({
     command: config.command,
     args: config.args,
@@ -2794,9 +2210,10 @@ export async function callMcpToolViaStdio({
 }
 
 async function callTool(name, args = {}, options = {}) {
-  if (String(name || '').startsWith('xhs_browse_') && !shouldExposeXhsBrowseTools(options.env || process.env)) {
-    return buildErrorResult('XHS browse tools are hidden. Set SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS=true to enable diagnostics.', {
-      error_code: 'XHS_BROWSE_TOOL_HIDDEN',
+  void options;
+  if (String(name || '').startsWith('xhs_browse_')) {
+    return buildErrorResult('XHS_ACCOUNT_BACKED_DISABLED: xhs_browse tools are retired; Xiaohongshu reads are public-only.', {
+      error_code: 'XHS_ACCOUNT_BACKED_DISABLED',
     });
   }
   if (name === 'resolve_social_url') {
@@ -2811,30 +2228,6 @@ async function callTool(name, args = {}, options = {}) {
   if (name === 'read_music_share') {
     return await readMusicShare(args, options);
   }
-  if (name === 'check_social_login') {
-    return await checkSocialLogin(String(args.platform || ''), options);
-  }
-  if (name === 'xhs_browse_probe') {
-    const result = await xhsBrowseProbe(args, options);
-    return wrapMcpResult(result);
-  }
-  if (name === 'xhs_browse_search') {
-    const result = await xhsBrowseSearch(args, options);
-    return wrapMcpResult(result);
-  }
-  if (name === 'xhs_browse_note') {
-    const result = await xhsBrowseNote(args, options);
-    return wrapMcpResult(result);
-  }
-  if (name === 'xhs_browse_user') {
-    const result = await xhsBrowseUser(args, options);
-    return wrapMcpResult(result);
-  }
-  if (name === 'xhs_browse_feed') {
-    const result = await xhsBrowseFeed(args, options);
-    return wrapMcpResult(result);
-  }
-
   return buildErrorResult(`unknown tool: ${name}`);
 }
 
@@ -2903,1160 +2296,4 @@ export function runSocialReaderMcpServer(options = {}) {
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   runSocialReaderMcpServer();
-}
-// ============================================================================
-// XHS Browse 常量和配置
-// ============================================================================
-
-const XHS_BROWSE_DEFAULTS = {
-  enabled: false,
-  maxResults: 5,
-  maxResultsHardLimit: 10,
-  maxItems: 5,
-  maxItemsHardLimit: 10,
-  minIntervalMs: 30000,
-  maxCallsPerSession: 10,
-  timeoutMs: 60000,
-  searchEnabled: true,
-  noteEnabled: true,
-  userEnabled: false,
-  feedEnabled: false,
-};
-
-const XHS_BROWSE_TOOL_CANDIDATES = {
-  search: ['search_notes', 'search_feeds', 'search', 'query_notes', 'search_note', 'xhs_search_note'],
-  note: ['get_note_info', 'get_feed_detail', 'get_note', 'note_detail', 'get_note_content', 'xhs_get_note_detail'],
-  user: ['get_user_notes', 'user_profile', 'user_homepage'],
-  feed: ['get_feed', 'explore', 'recommendation_feed'],
-};
-
-const XHS_BROWSE_ERROR_CODES = {
-  DISABLED: 'XHS_BROWSE_DISABLED',
-  BACKEND_UNAVAILABLE: 'XHS_BROWSE_BACKEND_UNAVAILABLE',
-  TOOL_NOT_FOUND: 'XHS_BROWSE_TOOL_NOT_FOUND',
-  PROTOCOL_ERROR: 'XHS_BROWSE_PROTOCOL_ERROR',
-  SEARCH_FAILED: 'XHS_SEARCH_FAILED',
-  NOTE_READ_FAILED: 'XHS_NOTE_READ_FAILED',
-  PROFILE_DISABLED: 'XHS_PROFILE_DISABLED',
-  PROFILE_FAILED: 'XHS_PROFILE_FAILED',
-  FEED_DISABLED: 'XHS_FEED_DISABLED',
-  FEED_FAILED: 'XHS_FEED_FAILED',
-  AUTH_REQUIRED: 'XHS_AUTH_REQUIRED',
-  RISK_CONTROL: 'XHS_RISK_CONTROL',
-  RATE_LIMITED: 'XHS_RATE_LIMITED',
-  INVALID_ARGUMENT: 'XHS_INVALID_ARGUMENT',
-  TIMEOUT: 'XHS_TIMEOUT',
-  BACKEND_MCP_ERROR: 'XHS_BACKEND_MCP_ERROR',
-};
-
-function xhsBrowseToolMatches(toolName, candidate) {
-  const name = String(toolName || '');
-  return name === candidate || name.endsWith(`.${candidate}`) || name.endsWith(`_${candidate}`) || name.endsWith(`-${candidate}`);
-}
-
-// Session 调用计数（内存中，重启后重置）
-let xhsBrowseSessionCallCount = 0;
-let xhsBrowseLastCallTime = 0;
-
-// ============================================================================
-// XHS Browse 配置读取函数
-// ============================================================================
-
-function getXhsBrowseConfig(env = process.env) {
-  const enabled = String(env.XHS_BROWSE_ENABLED || 'false').toLowerCase() === 'true';
-  const command = String(env.XHS_BROWSE_MCP_COMMAND || '').trim();
-  const argsJson = String(env.XHS_BROWSE_MCP_ARGS_JSON || '');
-  const cookieEnv = String(env.XHS_BROWSE_MCP_COOKIE_ENV || 'XHS_COOKIE');
-  const timeoutMs = Number(env.XHS_BROWSE_MCP_TIMEOUT_MS || XHS_BROWSE_DEFAULTS.timeoutMs);
-  const maxResults = Math.min(
-    Number(env.XHS_BROWSE_MAX_RESULTS || XHS_BROWSE_DEFAULTS.maxResults),
-    XHS_BROWSE_DEFAULTS.maxResultsHardLimit
-  );
-  const maxItems = Math.min(
-    Number(env.XHS_BROWSE_MAX_ITEMS || XHS_BROWSE_DEFAULTS.maxItems),
-    XHS_BROWSE_DEFAULTS.maxItemsHardLimit
-  );
-  const minIntervalMs = Number(env.XHS_BROWSE_MIN_INTERVAL_MS || XHS_BROWSE_DEFAULTS.minIntervalMs);
-  const maxCallsPerSession = Number(env.XHS_BROWSE_MAX_CALLS_PER_SESSION || XHS_BROWSE_DEFAULTS.maxCallsPerSession);
-  const searchEnabled = String(env.XHS_BROWSE_SEARCH_ENABLED || 'true').toLowerCase() === 'true';
-  const noteEnabled = String(env.XHS_BROWSE_NOTE_ENABLED || 'true').toLowerCase() === 'true';
-  const userEnabled = String(env.XHS_BROWSE_USER_ENABLED || 'false').toLowerCase() === 'true';
-  const feedEnabled = String(env.XHS_BROWSE_FEED_ENABLED || 'false').toLowerCase() === 'true';
-
-  // 获取 Cookie（通过变量名间接引用，不直接存储）
-  const cookie = String(env[cookieEnv] || '');
-
-  return {
-    enabled,
-    command,
-    args: parseJsonArrayEnv(argsJson, []),
-    cookieEnv,
-    cookie,
-    timeoutMs,
-    maxResults,
-    maxItems,
-    minIntervalMs,
-    maxCallsPerSession,
-    searchEnabled,
-    noteEnabled,
-    userEnabled,
-    feedEnabled,
-    isConfigured: command && command.length > 0,
-  };
-}
-
-function xhsBrowseServerConfig(env = process.env) {
-  const config = getXhsBrowseConfig(env);
-  return {
-    command: config.command,
-    args: config.args,
-    env: config.cookieEnv ? { [config.cookieEnv]: config.cookie } : {},
-  };
-}
-
-// ============================================================================
-// XHS Browse Rate Limiting
-// ============================================================================
-
-function checkXhsBrowseRateLimit(config, options = {}) {
-  const now = Date.now();
-  
-  // 检查调用间隔
-  if (!options.skipMinInterval && xhsBrowseLastCallTime > 0) {
-    const interval = now - xhsBrowseLastCallTime;
-    if (interval < config.minIntervalMs) {
-      return {
-        ok: false,
-        error_code: XHS_BROWSE_ERROR_CODES.RATE_LIMITED,
-        message: `Rate limited: minimum interval is ${config.minIntervalMs}ms, please wait ${Math.ceil((config.minIntervalMs - interval) / 1000)}s`,
-      };
-    }
-  }
-
-  // 检查 session 调用次数
-  if (xhsBrowseSessionCallCount >= config.maxCallsPerSession) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.RATE_LIMITED,
-      message: `Rate limited: maximum ${config.maxCallsPerSession} calls per session exceeded`,
-    };
-  }
-
-  // 更新计数
-  xhsBrowseLastCallTime = now;
-  xhsBrowseSessionCallCount++;
-
-  return null; // 没有限流
-}
-
-// ============================================================================
-// XHS Browse Backend Adapter
-// ============================================================================
-
-async function callXhsBrowseBackend(toolName, args, config, options = {}) {
-  if (typeof options.xhsBrowseCallImpl === 'function') {
-    return await options.xhsBrowseCallImpl({
-      toolName,
-      arguments: args,
-      config,
-    });
-  }
-  return new Promise((resolve, reject) => {
-    if (!config.command || !config.args || config.args.length === 0) {
-      resolve({
-        ok: false,
-        error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-        message: 'XHS_BROWSE_MCP_COMMAND not configured',
-      });
-      return;
-    }
-
-    let stdout = '';
-    let stderr = '';
-    let child;
-    const targetId = toolName === 'probe' ? 2 : 3;
-
-    try {
-      child = spawn(config.command, config.args, {
-        env: { ...process.env, ...config.env },
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-    } catch (error) {
-      resolve({
-        ok: false,
-        error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-        message: `Failed to spawn backend: ${error.message}`,
-      });
-      return;
-    }
-
-    const timeoutHandle = setTimeout(() => {
-      if (child) {
-        child.kill('SIGTERM');
-      }
-      resolve({
-        ok: false,
-        error_code: XHS_BROWSE_ERROR_CODES.TIMEOUT,
-        message: `Backend call timeout after ${config.timeoutMs}ms`,
-      });
-    }, config.timeoutMs);
-
-    let settled = false;
-    const finishResolve = (result) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutHandle);
-      resolve(result);
-    };
-
-    const finishReject = (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeoutHandle);
-      reject(error);
-    };
-
-    const rl = readline.createInterface({
-      input: child.stdout,
-      crlfDelay: Infinity,
-    });
-
-    rl.on('line', (line) => {
-      const trimmed = line.trim();
-      if (!trimmed) return;
-
-      let payload;
-      try {
-        payload = JSON.parse(trimmed);
-      } catch {
-        return;
-      }
-
-      // 处理 initialize 响应
-      if (payload.id === 1) {
-        if (payload.error) {
-          finishResolve({
-            ok: false,
-            error_code: XHS_BROWSE_ERROR_CODES.PROTOCOL_ERROR,
-            message: `Initialize failed: ${payload.error.message}`,
-          });
-        }
-        return;
-      }
-
-      // 处理 tools/list 响应
-      if (payload.id === 2) {
-        if (payload.error) {
-          finishResolve({
-            ok: false,
-            error_code: XHS_BROWSE_ERROR_CODES.PROTOCOL_ERROR,
-            message: `tools/list failed: ${payload.error.message}`,
-          });
-        } else {
-          finishResolve({
-            ok: true,
-            available_tools: (payload.result?.tools || []).map(t => t.name),
-          });
-        }
-        return;
-      }
-
-      // 处理工具调用响应
-      if (payload.id === targetId && targetId === 3) {
-        if (payload.error) {
-          finishResolve({
-            ok: false,
-            error_code: XHS_BROWSE_ERROR_CODES.BACKEND_MCP_ERROR,
-            message: payload.error.message,
-          });
-        } else {
-          finishResolve({
-            ok: true,
-            data: payload.result,
-          });
-        }
-        return;
-      }
-    });
-
-    child.stderr.on('data', (chunk) => {
-      stderr += String(chunk);
-    });
-
-    child.on('error', finishReject);
-    child.on('exit', (code, signal) => {
-      if (!settled && code !== 0) {
-        finishResolve({
-          ok: false,
-          error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-          message: `Backend exited with code ${code}: ${stderr.trim()}`,
-        });
-      } else if (!settled) {
-        finishResolve({
-          ok: false,
-          error_code: XHS_BROWSE_ERROR_CODES.BACKEND_MCP_ERROR,
-          message: `Backend exited without JSON-RPC response: code=${code} signal=${signal || ''}: ${stderr.trim()}`,
-        });
-      }
-    });
-
-    // 发送 MCP 协议消息
-    child.stdin.write(JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'initialize',
-      params: {
-        protocolVersion: '2024-11-05',
-        capabilities: {},
-        clientInfo: { name: 'ran-agent-social-reader', version: '0.1.0' },
-      },
-    }) + '\n');
-
-    child.stdin.write(JSON.stringify({
-      jsonrpc: '2.0',
-      method: 'notifications/initialized',
-      params: {},
-    }) + '\n');
-
-    // 请求 tools/list
-    if (toolName === 'probe') {
-      child.stdin.write(JSON.stringify({
-        jsonrpc: '2.0',
-        id: targetId,
-        method: 'tools/list',
-        params: {},
-      }) + '\n');
-    } else {
-      // 调用具体工具
-      child.stdin.write(JSON.stringify({
-        jsonrpc: '2.0',
-        id: targetId,
-        method: 'tools/call',
-        params: {
-          name: toolName,
-          arguments: args,
-        },
-      }) + '\n');
-    }
-  });
-}
-
-async function probeXhsBrowseBackend(config, options = {}) {
-  if (!config.isConfigured) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-      message: 'XHS_BROWSE not configured',
-    };
-  }
-
-  const result = await callXhsBrowseBackend('probe', {}, config, options);
-  
-  if (!result.ok) {
-    return result;
-  }
-
-  // 匹配工具名
-  const availableTools = result.available_tools || [];
-  const matchedTools = {};
-
-  for (const [category, candidates] of Object.entries(XHS_BROWSE_TOOL_CANDIDATES)) {
-    for (const candidate of candidates) {
-      const matched = availableTools.find((tool) => xhsBrowseToolMatches(tool, candidate));
-      if (matched) {
-        matchedTools[category] = matched;
-        break;
-      }
-    }
-  }
-
-  return {
-    ok: true,
-    backend: 'xhs_browse',
-    command: config.command,
-    args: config.args,
-    callable_verified: true,
-    declared_tools: availableTools,
-    available_tools: availableTools,
-    matched_tools: matchedTools,
-  };
-}
-
-function mapXhsBrowseToolName(category, config, matchedTools) {
-  if (matchedTools && matchedTools[category]) {
-    return matchedTools[category];
-  }
-  
-  const candidates = XHS_BROWSE_TOOL_CANDIDATES[category];
-  return candidates ? candidates[0] : category;
-}
-
-function parseMcpStructuredData(data) {
-  if (!data) return {};
-  if (data.structuredContent && typeof data.structuredContent === 'object') {
-    return data.structuredContent;
-  }
-  const text = textFromMcpResult(data);
-  if (!text) {
-    return data && typeof data === 'object' ? data : {};
-  }
-  try {
-    return JSON.parse(text);
-  } catch {
-    return { content: text };
-  }
-}
-
-function parseXhsNoteLookup(args = {}) {
-  const readRef = String(args.read_ref || '').trim();
-  const fromRef = readRef.match(/^xhs:note:([^:\s]+)$/);
-  const rawUrl = String(args.url || '').trim();
-  const urlInfo = rawUrl ? parseXhsUrlInfo(rawUrl) : null;
-  return {
-    noteId: String(args.note_id || '').trim() || (fromRef ? fromRef[1] : '') || urlInfo?.note_id || '',
-    readRef,
-    url: rawUrl,
-    urlInfo,
-  };
-}
-
-function xhsBrowseBackendArgsForNote(toolName, noteId, entry = {}, includeImages = true) {
-  const xsecToken = entry.xsecToken || entry.xsec_token || '';
-  const xsecSource = entry.xsec_source || '';
-  const canonicalUrl = entry.canonical_url || buildXhsCanonicalUrl(noteId, xsecToken, xsecSource);
-  if (xhsBrowseToolMatches(toolName, 'get_note_content')) {
-    return { url: canonicalUrl };
-  }
-  if (xhsBrowseToolMatches(toolName, 'get_feed_detail')) {
-    return { feed_id: noteId, xsec_token: xsecToken };
-  }
-  if (xhsBrowseToolMatches(toolName, 'xhs_get_note_detail')) {
-    return { feedId: noteId, xsecToken, include_images: includeImages };
-  }
-  if (xhsBrowseToolMatches(toolName, 'get_note_info') || xhsBrowseToolMatches(toolName, 'get_note') || xhsBrowseToolMatches(toolName, 'note_detail')) {
-    return {
-      note_id: noteId,
-      xsec_token: xsecToken,
-      url: canonicalUrl,
-      include_images: includeImages,
-    };
-  }
-  return { feedId: noteId, xsecToken, include_images: includeImages };
-}
-
-function xhsObject(value) {
-  return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
-}
-
-function hasXhsNoteFields(value) {
-  const item = xhsObject(value);
-  if (!item) return false;
-  const noteCard = xhsObject(item.noteCard) || xhsObject(item.note_card) || {};
-  return Boolean(
-    item.id || item.note_id || item.title || item.displayTitle || item.display_title
-    || item.content || item.desc || item.description || item.post_text
-    || item.images || item.image_list || item.imageList
-    || noteCard.id || noteCard.note_id || noteCard.title || noteCard.displayTitle || noteCard.display_title
-    || noteCard.content || noteCard.desc || noteCard.description || noteCard.post_text
-    || noteCard.images || noteCard.image_list || noteCard.imageList
-  );
-}
-
-function pickXhsNoteData(rawData) {
-  const roots = [rawData, rawData?.data, rawData?.result].map(xhsObject).filter(Boolean);
-  const candidates = [];
-  for (const root of roots) {
-    candidates.push(root.feed, root.note, root.noteCard, root.note_card, root);
-  }
-  return candidates.map(xhsObject).find(hasXhsNoteFields) || candidates.map(xhsObject).find(Boolean) || {};
-}
-
-function xhsBrowseNoteHasReadableContent(note) {
-  return Boolean(
-    String(note?.title || note?.content || note?.desc || note?.post_text || '').trim()
-    || (Array.isArray(note?.images) && note.images.length > 0)
-  );
-}
-
-function normalizeXhsBrowseResponse(category, rawData, originalQuery, options = {}) {
-  const debugShape = {
-    category,
-    raw_keys: rawData && typeof rawData === 'object' ? Object.keys(rawData).sort() : [],
-  };
-
-  // 根据类别归一化响应结构
-  if (category === 'search') {
-    // xhs-mcp returns items[] or feeds[] with nested noteCard structure
-    const searchData = rawData.data || rawData;
-    const rawItems = searchData.items || searchData.feeds || searchData.results || [];
-    
-    // Parse and normalize each item
-    const normalizedItems = rawItems.map(item => {
-      // xhs-mcp structure: item.noteCard.* nested, item.id and item.xsecToken at top level
-      const noteCard = item.noteCard || item;
-      const user = noteCard.user || item.user || {};
-      const cover = noteCard.cover || item.cover || {};
-      const interactInfo = noteCard.interactInfo || item.interactInfo || {};
-      const urlInfo = parseXhsUrlInfo(item.url || item.note_url || item.link || '');
-      
-      const noteId = item.id || item.note_id || noteCard.id || noteCard.note_id || urlInfo.note_id || '';
-      const xsecToken = item.xsecToken || item.xsec_token || noteCard.xsecToken || noteCard.xsec_token || urlInfo.xsec_token || '';
-      const xsecSource = item.xsecSource || item.xsec_source || noteCard.xsecSource || noteCard.xsec_source || urlInfo.xsec_source || '';
-      const canonicalUrl = xsecToken
-        ? buildXhsCanonicalUrl(noteId, xsecToken, xsecSource)
-        : (urlInfo.canonical_url || buildXhsCanonicalUrl(noteId));
-      const stats = {
-        liked_count: interactInfo.likedCount || interactInfo.liked_count || 0,
-        collected_count: interactInfo.collectedCount || interactInfo.collected_count || 0,
-        comment_count: interactInfo.commentCount || interactInfo.comment_count || 0,
-        shared_count: interactInfo.sharedCount || interactInfo.shared_count || 0,
-      };
-      
-      // Cache search context internally (tokens are never exposed to model/user output).
-      if (noteId) {
-        cacheXhsNoteToken(noteId, xsecToken, {
-          title: noteCard.displayTitle || noteCard.display_title || '',
-          user: user.nickname || user.nickName || '',
-          user_id: user.userId || user.id || '',
-          cover_image: cover.urlDefault || cover.urlPre || cover.coverUrl || item.cover_image || '',
-          type: noteCard.type || '',
-          xsec_source: xsecSource,
-          canonical_url: canonicalUrl,
-          url: canonicalUrl,
-          stats,
-        }, options);
-      }
-      
-      return {
-        note_id: noteId,
-        read_ref: noteId ? `xhs:note:${noteId}` : '',
-        title: noteCard.displayTitle || noteCard.display_title || item.title || '',
-        user: user.nickname || user.nickName || user.name || user.username || '',
-        user_id: user.userId || user.id || '',
-        cover_image: cover.urlDefault || cover.urlPre || cover.coverUrl || item.cover_image || '',
-        type: noteCard.type || item.type || '',
-        ...stats,
-        url: noteId ? `https://www.xiaohongshu.com/explore/${noteId}` : (item.url || ''),
-        xsecToken: xsecToken, // Keep for internal use, will be filtered in output if needed
-      };
-    });
-    
-    // Remove xsecToken from final output (internal only)
-    const results = normalizedItems.map(({ xsecToken, ...rest }) => rest);
-    
-    return {
-      ok: true,
-      query: originalQuery || searchData.query || '',
-      results: results,
-      total_count: searchData.total_count || searchData.total || searchData.count || rawItems.length,
-      debug_shape: {
-        ...debugShape,
-        item_count: rawItems.length,
-      },
-    };
-  }
-
-  if (category === 'note') {
-    const noteData = pickXhsNoteData(rawData);
-    const noteCard = xhsObject(noteData.noteCard) || xhsObject(noteData.note_card) || noteData;
-    const images = noteData.images || noteData.image_list || noteData.imageList || noteCard.images || noteCard.image_list || noteCard.imageList || [];
-    return {
-      ok: true,
-      note_id: noteData.note_id || noteData.id || noteCard.note_id || noteCard.id || '',
-      title: noteData.title || noteData.displayTitle || noteData.display_title || noteCard.title || noteCard.displayTitle || noteCard.display_title || '',
-      content: noteData.content || noteData.desc || noteData.description || noteData.post_text || noteCard.content || noteCard.desc || noteCard.description || noteCard.post_text || '',
-      images,
-      user: noteData.user || noteCard.user || { id: noteData.user_id || '', name: noteData.username || '' },
-      create_time: noteData.create_time || noteData.created_at || noteCard.time || '',
-      debug_shape: debugShape,
-    };
-  }
-
-  if (category === 'user') {
-    return {
-      ok: true,
-      user_id: rawData.user_id || rawData.id || '',
-      user_info: {
-        name: rawData.user_info?.name || rawData.username || rawData.name || '',
-        avatar: rawData.user_info?.avatar || rawData.avatar || '',
-        followers: rawData.user_info?.followers || rawData.followers || '',
-        following: rawData.user_info?.following || rawData.following || '',
-      },
-      notes: (rawData.notes || []).map(note => ({
-        note_id: note.note_id || note.id || '',
-        title: note.title || '',
-        cover_image: note.cover_image || note.cover || '',
-        create_time: note.create_time || note.created_at || '',
-      })),
-      debug_shape: debugShape,
-    };
-  }
-
-  if (category === 'feed') {
-    return {
-      ok: true,
-      category: rawData.category || 'default',
-      feed: (rawData.feed || rawData.items || []).map(item => ({
-        note_id: item.note_id || item.id || '',
-        title: item.title || '',
-        user: item.user || { id: item.user_id || '', name: item.username || '' },
-        url: item.url || item.link || '',
-      })),
-      debug_shape: debugShape,
-    };
-  }
-
-  return { ok: true, data: rawData, debug_shape: debugShape };
-}
-
-async function fallbackXhsBrowseNote({ noteId, lookup, cachedEntry, fallbackFrom }, options = {}) {
-  const fallbackUrl = lookup?.url || cachedEntry?.url || cachedEntry?.canonical_url || buildXhsCanonicalUrl(noteId);
-  const envRef = options.env || process.env;
-  const xhsFallbackConfig = getXhsFallbackServerConfig(envRef);
-  if (!xhsFallbackConfig) return null;
-  const fallback = await readGenericSocialPost({
-    url: fallbackUrl,
-    platform: 'xhs',
-    includeComments: false,
-    maxComments: 0,
-  }, { ...options, xhsTimeoutMs: resolveXhsBackendTimeoutMs(envRef), _xhsFallbackConfig: xhsFallbackConfig });
-
-  if (fallback.structuredContent?.ok !== true) {
-    return null;
-  }
-
-  return {
-    ok: true,
-    partial: false,
-    note_id: noteId,
-    title: cachedEntry?.title || fallback.structuredContent.title || '',
-    content: fallback.structuredContent.post_text || '',
-    images: Array.isArray(fallback.structuredContent.images) ? fallback.structuredContent.images : [],
-    user: { id: cachedEntry?.user_id || '', name: cachedEntry?.user || '' },
-    source: 'wanyi-watermark-mcp',
-    read_ref: `xhs:note:${noteId}`,
-    ...(fallbackFrom ? { fallback_from: fallbackFrom } : {}),
-  };
-}
-
-function getXhsBrowseFailurePayload(rawData) {
-  if (!rawData || typeof rawData !== 'object') {
-    return null;
-  }
-  if (rawData.success === false || rawData.ok === false) {
-    return {
-      message: String(rawData.message || rawData.error || 'Failed to read note'),
-      backend_error: rawData.error ? String(rawData.error) : '',
-    };
-  }
-  return null;
-}
-
-// ============================================================================
-// XHS Browse 工具实现
-// ============================================================================
-
-async function xhsBrowseProbe(args, options = {}) {
-  const config = getXhsBrowseConfig(options.env || process.env);
-  
-  if (!config.isConfigured) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-      message: 'XHS_BROWSE_MCP_COMMAND not configured',
-    };
-  }
-
-  return await probeXhsBrowseBackend(config, options);
-}
-
-async function xhsBrowseSearch(args, options = {}) {
-  const config = getXhsBrowseConfig(options.env || process.env);
-
-  if (!config.enabled) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
-      message: 'XHS_BROWSE is disabled. Set XHS_BROWSE_ENABLED=true to enable.',
-    };
-  }
-
-  if (!config.searchEnabled) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
-      message: 'XHS_BROWSE_SEARCH is disabled. Set XHS_BROWSE_SEARCH_ENABLED=true to enable.',
-    };
-  }
-
-  if (!config.isConfigured) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-      message: 'XHS_BROWSE backend not configured',
-    };
-  }
-
-  // 限流检查
-  const rateLimitError = checkXhsBrowseRateLimit(config, { skipMinInterval: options.xhsBrowseSkipMinInterval === true });
-  if (rateLimitError) {
-    return rateLimitError;
-  }
-
-  // 参数验证
-  const query = String(args.query || '').trim();
-  if (!query) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.INVALID_ARGUMENT,
-      message: 'query is required',
-    };
-  }
-
-  let maxResults = Number(args.max_results || config.maxResults);
-  maxResults = Math.min(maxResults, XHS_BROWSE_DEFAULTS.maxResultsHardLimit);
-
-  const sort = args.sort || 'relevance';
-
-  // 探测后端并获取工具映射
-  const probeResult = await probeXhsBrowseBackend(config, options);
-  if (!probeResult.ok) {
-    return probeResult;
-  }
-
-  if (!probeResult.matched_tools?.search) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.TOOL_NOT_FOUND,
-      message: 'Search tool not found in backend',
-      available_tools: probeResult.available_tools,
-    };
-  }
-
-  // 调用后端
-  const backendToolName = probeResult.matched_tools.search;
-  // 根据后端工具名称映射参数
-  const backendArgs = {};
-  if (xhsBrowseToolMatches(backendToolName, 'search_notes')) {
-    backendArgs.keywords = query;
-  } else if (xhsBrowseToolMatches(backendToolName, 'search_feeds')) {
-    backendArgs.keyword = query;
-  } else if (xhsBrowseToolMatches(backendToolName, 'xhs_search_note') || backendToolName.includes('search')) {
-    backendArgs.keyword = query;
-  } else {
-    backendArgs.query = query;
-  }
-  if (!xhsBrowseToolMatches(backendToolName, 'search_feeds')) {
-    backendArgs.max_results = maxResults;
-    backendArgs.sort = sort;
-  }
-
-  const result = await callXhsBrowseBackend(backendToolName, backendArgs, config, options);
-
-  if (!result.ok) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.SEARCH_FAILED,
-      message: result.message || 'Search failed',
-    };
-  }
-
-  // Parse xhs-mcp response: result.data.content[0].text contains JSON string
-  let rawData = {};
-  try {
-    const mcpContent = result.data?.content?.[0]?.text;
-    if (mcpContent) {
-      const parsed = JSON.parse(mcpContent);
-      // xhs-mcp returns {success, items/feeds, count} or {success: false, error, message}
-      if (parsed.success === false) {
-        return {
-          ok: false,
-          error_code: XHS_BROWSE_ERROR_CODES.SEARCH_FAILED,
-          message: parsed.message || parsed.error || 'Search failed',
-          debug: { raw: mcpContent.substring(0, 500) },
-        };
-      }
-      // Map xhs-mcp fields to expected format
-      rawData = {
-        items: parsed.items || parsed.feeds || parsed.data?.items || parsed.data?.feeds || [],
-        total_count: parsed.count || parsed.total || parsed.data?.count || parsed.data?.total || 0,
-        query: parsed.keyword || parsed.query || query || '',
-      };
-    }
-  } catch (parseError) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.SEARCH_FAILED,
-      message: 'Failed to parse backend response: ' + parseError.message,
-      debug: { raw: result.data ? JSON.stringify(result.data).substring(0, 500) : 'empty' },
-    };
-  }
-
-  const normalized = normalizeXhsBrowseResponse('search', rawData, query, options);
-  
-  // Truncate results to maxResults
-  if (normalized.ok && normalized.results && normalized.results.length > maxResults) {
-    normalized.results = normalized.results.slice(0, maxResults);
-    normalized.total_count = normalized.results.length;
-  }
-  
-  return normalized;
-}
-
-async function xhsBrowseNote(args, options = {}) {
-  const env = options.env || process.env;
-  const debug = args.debug === true;
-  const config = getXhsBrowseConfig(env);
-  const hasCookie = Boolean(String(env.XHS_COOKIE || '').trim());
-
-  if (!config.enabled) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
-      message: 'XHS_BROWSE is disabled. Set XHS_BROWSE_ENABLED=true to enable.',
-    };
-  }
-
-  if (!config.noteEnabled) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
-      message: 'XHS_BROWSE_NOTE is disabled. Set XHS_BROWSE_NOTE_ENABLED=true to enable.',
-    };
-  }
-
-  if (!config.isConfigured) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-      message: 'XHS_BROWSE backend not configured',
-    };
-  }
-
-  // 限流检查
-  const rateLimitError = checkXhsBrowseRateLimit(config, { skipMinInterval: options.xhsBrowseSkipMinInterval === true });
-  if (rateLimitError) {
-    return rateLimitError;
-  }
-
-  // 参数验证
-  const lookup = parseXhsNoteLookup(args);
-  const noteId = lookup.noteId;
-  if (!noteId) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.INVALID_ARGUMENT,
-      message: 'note_id, read_ref, or url is required',
-    };
-  }
-  if (lookup.urlInfo?.xsec_token) {
-    cacheXhsNoteToken(noteId, lookup.urlInfo.xsec_token, {
-      xsec_source: lookup.urlInfo.xsec_source,
-      canonical_url: lookup.urlInfo.canonical_url,
-      url: lookup.urlInfo.canonical_url,
-    }, options);
-  }
-
-  // 探测后端并获取工具映射
-  const probeResult = await probeXhsBrowseBackend(config, options);
-  if (!probeResult.ok) {
-    return probeResult;
-  }
-
-  if (!probeResult.matched_tools?.note) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.TOOL_NOT_FOUND,
-      message: 'Note tool not found in backend',
-      available_tools: probeResult.available_tools,
-    };
-  }
-
-  // Get xsecToken from cache (populated by search results or resolve_social_url)
-  const cachedEntry = getCachedXhsNoteToken(noteId, options);
-  const xsecToken = cachedEntry?.xsecToken || '';
-  const usedCachedToken = Boolean(xsecToken);
-  const usedCanonicalUrl = Boolean(cachedEntry?.canonical_url && xsecToken);
-
-  // If no xsecToken in cache, try the generic parser against the cached or bare URL.
-  if (!xsecToken) {
-    const fallbackResult = await fallbackXhsBrowseNote({ noteId, lookup, cachedEntry }, options);
-    if (fallbackResult) {
-      fallbackResult.fallback_from = 'XHS_NOTE_NO_TOKEN';
-      fallbackResult.diagnostics = buildXhsDiagnostic({
-        platform: 'xhs', noteId, whichBackend: 'generic_parser', backendToolName: 'wanyi-watermark',
-        errorCode: '', hasCookie, hasXsecToken: false, usedCachedToken: false, usedCanonicalUrl: false, env,
-      });
-      return fallbackResult;
-    }
-    return {
-      ok: false,
-      error_code: 'XHS_NOTE_CONTEXT_REQUIRED',
-      message: `No cached token context for note_id: ${noteId}. Search first or provide an XHS URL that fallback can parse.`,
-      hint: 'Run xhs_browse_search with a relevant query, then read the returned read_ref.',
-      diagnostics: buildXhsDiagnostic({
-        platform: 'xhs', noteId, whichBackend: 'none', hasCookie, hasXsecToken: false, usedCachedToken: false, usedCanonicalUrl: false, env,
-      }),
-    };
-  }
-
-  // Call backend with the argument style expected by the matched backend tool.
-  const backendToolName = probeResult.matched_tools.note;
-  const result = await callXhsBrowseBackend(
-    backendToolName,
-    xhsBrowseBackendArgsForNote(backendToolName, noteId, cachedEntry, args.include_images !== false),
-    config,
-    options
-  );
-
-  if (!result.ok) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
-      message: result.message || 'Failed to read note',
-      diagnostics: buildXhsDiagnostic({
-        platform: 'xhs', noteId, whichBackend: 'xhs_browse', backendToolName,
-        errorCode: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED, backendError: result.message,
-        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl, env,
-      }),
-    };
-  }
-
-  const rawData = parseMcpStructuredData(result.data || {});
-  const backendFailure = getXhsBrowseFailurePayload(rawData);
-  if (backendFailure) {
-    // Classify the error more precisely
-    const classifiedError = xhsBackendTextError(backendFailure.message || '', backendToolName);
-    const errorCode = classifiedError?.error_code || XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED;
-
-    const fallbackResult = await fallbackXhsBrowseNote({
-      noteId,
-      lookup,
-      cachedEntry,
-      fallbackFrom: errorCode,
-    }, options);
-    if (fallbackResult) {
-      fallbackResult.diagnostics = buildXhsDiagnostic({
-        platform: 'xhs', noteId, whichBackend: 'generic_parser', backendToolName,
-        errorCode, backendError: backendFailure.message,
-        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
-        rawFieldsSeen: extractRawFieldsSeen(rawData),
-        rawPreview: debug ? sanitizeRawPreview(JSON.stringify(rawData)) : '',
-        env,
-      });
-      return fallbackResult;
-    }
-    return {
-      ok: false,
-      error_code: errorCode,
-      message: backendFailure.message,
-      backend_error: backendFailure.backend_error,
-      note_id: noteId,
-      read_ref: `xhs:note:${noteId}`,
-      diagnostics: buildXhsDiagnostic({
-        platform: 'xhs', noteId, whichBackend: 'xhs_browse', backendToolName,
-        errorCode, backendError: backendFailure.message,
-        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
-        rawFieldsSeen: extractRawFieldsSeen(rawData),
-        rawPreview: debug ? sanitizeRawPreview(JSON.stringify(rawData)) : '',
-        env,
-      }),
-    };
-  }
-
-  const normalized = normalizeXhsBrowseResponse('note', rawData, '', options);
-  if (!xhsBrowseNoteHasReadableContent(normalized)) {
-    const fallbackResult = await fallbackXhsBrowseNote({
-      noteId,
-      lookup,
-      cachedEntry,
-      fallbackFrom: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
-    }, options);
-    if (fallbackResult) {
-      fallbackResult.diagnostics = buildXhsDiagnostic({
-        platform: 'xhs', noteId, whichBackend: 'generic_parser', backendToolName,
-        errorCode: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED, backendError: 'XHS browse detail returned no readable fields',
-        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
-        rawFieldsSeen: extractRawFieldsSeen(rawData),
-        rawPreview: debug ? sanitizeRawPreview(JSON.stringify(rawData)) : '',
-        env,
-      });
-      return fallbackResult;
-    }
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED,
-      message: 'XHS browse detail returned no readable fields',
-      note_id: noteId,
-      read_ref: `xhs:note:${noteId}`,
-      diagnostics: buildXhsDiagnostic({
-        platform: 'xhs', noteId, whichBackend: 'xhs_browse', backendToolName,
-        errorCode: XHS_BROWSE_ERROR_CODES.NOTE_READ_FAILED, backendError: 'empty normalized note',
-        hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
-        rawFieldsSeen: extractRawFieldsSeen(rawData),
-        rawPreview: debug ? sanitizeRawPreview(JSON.stringify(rawData)) : '',
-        env,
-      }),
-    };
-  }
-  // Add diagnostics to successful response
-  normalized.raw_fields_seen = extractRawFieldsSeen(rawData);
-  if (debug) {
-    normalized.raw_preview = sanitizeRawPreview(JSON.stringify(rawData));
-  }
-  normalized.diagnostics = buildXhsDiagnostic({
-    platform: 'xhs', noteId, whichBackend: 'xhs_browse', backendToolName,
-    hasCookie, hasXsecToken: true, usedCachedToken, usedCanonicalUrl,
-    rawFieldsSeen: extractRawFieldsSeen(rawData), env,
-  });
-  return normalized;
-}
-
-async function xhsBrowseUser(args, options = {}) {
-  const config = getXhsBrowseConfig(options.env || process.env);
-
-  if (!config.enabled) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
-      message: 'XHS_BROWSE is disabled. Set XHS_BROWSE_ENABLED=true to enable.',
-    };
-  }
-
-  if (!config.userEnabled) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.PROFILE_DISABLED,
-      message: 'XHS_BROWSE_USER is disabled by default. Set XHS_BROWSE_USER_ENABLED=true to enable.',
-    };
-  }
-
-  if (!config.isConfigured) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-      message: 'XHS_BROWSE backend not configured',
-    };
-  }
-
-  // 限流检查
-  const rateLimitError = checkXhsBrowseRateLimit(config);
-  if (rateLimitError) {
-    return rateLimitError;
-  }
-
-  // 参数验证
-  const userId = String(args.user_id || '').trim();
-  if (!userId) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.INVALID_ARGUMENT,
-      message: 'user_id is required',
-    };
-  }
-
-  let maxItems = Number(args.max_items || config.maxItems);
-  maxItems = Math.min(maxItems, XHS_BROWSE_DEFAULTS.maxItemsHardLimit);
-
-  // 探测后端并获取工具映射
-  const probeResult = await probeXhsBrowseBackend(config, options);
-  if (!probeResult.ok) {
-    return probeResult;
-  }
-
-  if (!probeResult.matched_tools?.user) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.TOOL_NOT_FOUND,
-      message: 'User tool not found in backend',
-      available_tools: probeResult.available_tools,
-    };
-  }
-
-  // 调用后端
-  const backendToolName = probeResult.matched_tools.user;
-  const result = await callXhsBrowseBackend(backendToolName, {
-    user_id: userId,
-    max_items: maxItems,
-  }, config, options);
-
-  if (!result.ok) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.PROFILE_FAILED,
-      message: result.message || 'Failed to get user profile',
-    };
-  }
-
-  return normalizeXhsBrowseResponse('user', result.data || {}, '', options);
-}
-
-async function xhsBrowseFeed(args, options = {}) {
-  const config = getXhsBrowseConfig(options.env || process.env);
-
-  if (!config.enabled) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.DISABLED,
-      message: 'XHS_BROWSE is disabled. Set XHS_BROWSE_ENABLED=true to enable.',
-    };
-  }
-
-  if (!config.feedEnabled) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.FEED_DISABLED,
-      message: 'XHS_BROWSE_FEED is disabled by default due to risk control. Set XHS_BROWSE_FEED_ENABLED=true to enable.',
-    };
-  }
-
-  if (!config.isConfigured) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.BACKEND_UNAVAILABLE,
-      message: 'XHS_BROWSE backend not configured',
-    };
-  }
-
-  // 限流检查
-  const rateLimitError = checkXhsBrowseRateLimit(config);
-  if (rateLimitError) {
-    return rateLimitError;
-  }
-
-  // 探测后端并获取工具映射
-  const probeResult = await probeXhsBrowseBackend(config, options);
-  if (!probeResult.ok) {
-    return probeResult;
-  }
-
-  if (!probeResult.matched_tools?.feed) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.TOOL_NOT_FOUND,
-      message: 'Feed tool not found in backend',
-      available_tools: probeResult.available_tools,
-    };
-  }
-
-  const category = args.category || 'default';
-  let maxItems = Number(args.max_items || config.maxItems);
-  maxItems = Math.min(maxItems, XHS_BROWSE_DEFAULTS.maxItemsHardLimit);
-
-  // 调用后端
-  const backendToolName = probeResult.matched_tools.feed;
-  const result = await callXhsBrowseBackend(backendToolName, {
-    category,
-    max_items: maxItems,
-  }, config, options);
-
-  if (!result.ok) {
-    return {
-      ok: false,
-      error_code: XHS_BROWSE_ERROR_CODES.FEED_FAILED,
-      message: result.message || 'Failed to get feed',
-    };
-  }
-
-  return normalizeXhsBrowseResponse('feed', result.data || {}, '', options);
 }
