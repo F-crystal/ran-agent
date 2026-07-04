@@ -441,10 +441,23 @@ if has_arg "--smoke-public-sidecar" "$@"; then
     echo "SKIPPED: curl not found"
   else
     DOCS_URL="${SIDECAR_URL%/xhs/detail}/docs"
-    if curl -fsS -m 5 "$DOCS_URL" >/dev/null 2>&1; then
-      echo "xhs public sidecar HTTP docs: CONFIRMED"
+    OPENAPI_URL="${SIDECAR_URL%/xhs/detail}/openapi.json"
+    CONFIRMED_URL=""
+    for _attempt in 1 2 3 4 5 6; do
+      if curl -fsS -m 5 "$DOCS_URL" >/dev/null 2>&1; then
+        CONFIRMED_URL="$DOCS_URL"
+        break
+      fi
+      if curl -fsS -m 5 "$OPENAPI_URL" >/dev/null 2>&1; then
+        CONFIRMED_URL="$OPENAPI_URL"
+        break
+      fi
+      sleep 2
+    done
+    if [ -n "$CONFIRMED_URL" ]; then
+      echo "xhs public sidecar HTTP: CONFIRMED ($CONFIRMED_URL)"
     else
-      echo "xhs public sidecar HTTP docs: NOT CONFIRMED"
+      echo "xhs public sidecar HTTP: NOT CONFIRMED"
     fi
   fi
 fi
