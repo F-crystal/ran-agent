@@ -1,31 +1,39 @@
+import {
+  buildProactiveSyntheticTurn,
+  evaluateProactiveEgress,
+  normalizeProactiveEvent,
+  parseHermesProactiveAction,
+} from '../proactiveEvents.mjs';
+
 const ROUTE_HINT = 'external_mcp_system_queue';
 const VALID_DELIVERABILITY = new Set(['silent_only', 'draft_allowed', 'notify_allowed']);
 const VALID_TIERS = new Set(['T0', 'T1', 'T2', 'T3']);
 
 export function buildExternalMcpSyntheticTurn(input = {}) {
-  const deliverability = normalizeDeliverability(input.deliverability);
-  const tiers = normalizeTiers(input.allowedCapabilityTiers || input.allowed_capability_tiers);
-  const reason = sanitizeText(input.reason || '');
-  const watchScope = sanitizeText(input.watchScope || input.watch_scope || '');
-  const text = [
-    '[External MCP system turn]',
-    `reason: ${reason}`,
-    `watch_scope: ${watchScope}`,
-    `deliverability: ${deliverability}`,
-    `allowed_capability_tiers: ${tiers.join(',') || 'T1'}`,
-    'Hermes may stay silent, remember quietly, draft, or notify only if the evidence and deliverability allow it.',
-  ].join('\n');
+  const event = input.proactiveEvent || normalizeProactiveEvent(input, {
+    kind: inferExternalMcpKind(input.kind || input.watchKind || input.watch_kind),
+    eventId: input.id,
+    globalUserId: input.globalUserId || input.global_user_id || input.senderId || input.sender_id,
+    watchScope: input.watchScope || input.watch_scope,
+    reason: input.reason,
+    evidenceRefs: input.evidenceRefs || input.evidence_refs,
+    deliverability: input.deliverability,
+    allowedCapabilityTiers: input.allowedCapabilityTiers || input.allowed_capability_tiers,
+    budgetClass: 'external_mcp',
+  }).event;
+  const turn = buildProactiveSyntheticTurn(event, {
+    conversation_id: input.conversationId || input.conversation_id,
+    sender_id: input.senderId || input.sender_id,
+  });
   return {
-    id: sanitizeId(input.id || `external-mcp-${Date.now()}`),
-    message_id: sanitizeId(input.id || `external-mcp-${Date.now()}`),
-    platform: sanitizePlatform(input.platform || 'feishu'),
+    ...turn,
+    id: sanitizeId(input.id || event?.event_id || `external-mcp-${Date.now()}`),
+    message_id: sanitizeId(input.id || event?.event_id || `external-mcp-${Date.now()}`),
+    platform: sanitizePlatform(input.platform || turn.platform || 'feishu'),
     channel_type: 'dm',
-    conversation_id: sanitizeId(input.conversationId || input.conversation_id || ''),
-    sender_id: sanitizeId(input.senderId || input.sender_id || ''),
+    conversation_id: sanitizeId(input.conversationId || input.conversation_id || turn.conversation_id || ''),
+    sender_id: sanitizeId(input.senderId || input.sender_id || turn.sender_id || ''),
     route_hint: ROUTE_HINT,
-    text,
-    media: [],
-    created_at: Number(input.createdAt || input.created_at || Date.now()),
   };
 }
 
@@ -39,7 +47,18 @@ export function shouldSuppressSystemQueueReply({ routeHint = '', replyText = '' 
   const action = String(parsed?.action || parsed?.type || '').trim().toLowerCase();
   if (action === 'silent') return { suppress: true, reason: 'silent' };
   if (action === 'remember') return { suppress: true, reason: 'remember' };
-  return { suppress: false, reason: '' };
+  if (action === 'draft') return { suppress: true, reason: 'draft_requires_confirmation' };
+  if (action === 'notify') return { suppress: false, reason: '' };
+  if (parsed) return { suppress: true, reason: 'unsupported_action' };
+  return { suppress: true, reason: 'malformed_action' };
+}
+
+export function evaluateExternalMcpSystemQueueEgress({ event, replyText } = {}) {
+  return evaluateProactiveEgress({ event, replyText });
+}
+
+export function parseExternalMcpSystemQueueAction(replyText) {
+  return parseHermesProactiveAction(replyText);
 }
 
 export function externalMcpSystemQueueRouteHint() {
@@ -57,6 +76,13 @@ function normalizeTiers(values) {
     .map((item) => String(item || '').trim().toUpperCase())
     .filter((item) => VALID_TIERS.has(item))
     .slice(0, 4);
+}
+
+function inferExternalMcpKind(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (text === 'game') return 'game_activity';
+  if (text === 'forum') return 'forum_watch';
+  return 'external_mcp';
 }
 
 function parseJson(text) {

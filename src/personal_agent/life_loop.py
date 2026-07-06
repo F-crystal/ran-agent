@@ -12,7 +12,6 @@ from personal_agent.config import AppConfig
 from personal_agent.db import Database
 from personal_agent.knowledge_agent import KnowledgeAgent
 from personal_agent.memory_specialist import MemorySpecialist
-from personal_agent.proactive_support import build_proactive_hint, is_in_silent_window
 
 
 @dataclass(frozen=True)
@@ -47,7 +46,7 @@ class LifeLoopRunResult:
 
 
 class LifeLoop:
-    """Generates periodic opportunities for companionship and low-risk maintenance."""
+    """Generates periodic background opportunities without visible proactive sends."""
 
     def __init__(
         self,
@@ -77,12 +76,8 @@ class LifeLoop:
         """Generate current lifecycle opportunities without executing downstream action."""
 
         local_now = now_local or datetime.now()
-        utc_now = now_utc or datetime.utcnow()
+        del now_utc
         opportunities: list[LifeOpportunity] = []
-
-        companion_opportunity = self._build_companion_opportunity(local_now=local_now, utc_now=utc_now)
-        if companion_opportunity is not None:
-            opportunities.append(companion_opportunity)
 
         reflection_opportunity = self._build_reflection_opportunity(local_now=local_now)
         if reflection_opportunity is not None:
@@ -100,10 +95,6 @@ class LifeLoop:
         if exploration_opportunity is not None:
             opportunities.append(exploration_opportunity)
 
-        reminder_opportunity = self._build_reminder_opportunity(local_now=local_now)
-        if reminder_opportunity is not None:
-            opportunities.append(reminder_opportunity)
-
         self._logger.info(
             "life loop generated opportunities count=%s kinds=%s",
             len(opportunities),
@@ -113,69 +104,6 @@ class LifeLoop:
             opportunities=tuple(opportunities),
             generated_at=local_now.strftime("%Y-%m-%d %H:%M:%S"),
         )
-
-    def _build_companion_opportunity(
-        self,
-        *,
-        local_now: datetime,
-        utc_now: datetime,
-    ) -> LifeOpportunity | None:
-        """Return one companion opportunity when timing and context make it eligible."""
-
-        if is_in_silent_window(self._config, local_now):
-            return None
-
-        last_activity_at = self._database.get_last_wechat_activity_at()
-        if last_activity_at is None:
-            return None
-
-        idle_delta = utc_now - last_activity_at
-        if idle_delta < timedelta(minutes=self._config.proactive_idle_minutes):
-            return None
-
-        proactive_count = self._database.count_today_proactive_messages(local_now.strftime("%Y-%m-%d"))
-        if proactive_count >= self._config.proactive_daily_limit:
-            return None
-
-        last_generated_at = self._get_loop_timestamp("life_loop:last_companion_opportunity_at")
-        if last_generated_at is not None and (
-            local_now - last_generated_at
-        ) < timedelta(minutes=self._config.proactive_check_interval_minutes):
-            return None
-
-        opener_clue, hint_context = build_proactive_hint(
-            database=self._database,
-            config=self._config,
-            memory_specialist=self._memory_specialist,
-        )
-        if not opener_clue:
-            return None
-
-        opportunity = self._new_opportunity(
-            kind="companion",
-            consumer="orchestrator_agent",
-            attention_hint="worth_a_look",
-            reason="idle threshold reached and recent context suggests a low-pressure opener",
-            context={
-                "channel": "wechat",
-                "idle_minutes": int(idle_delta.total_seconds() // 60),
-                "daily_proactive_count": proactive_count,
-                "time_of_day": _time_of_day(local_now),
-            },
-            signals={
-                "memory_relevance": "medium",
-                "continuity_strength": "medium",
-                "user_interrupt_risk": "low",
-            },
-            payload={
-                "opener_clue": opener_clue,
-                **hint_context,
-            },
-            created_at=local_now,
-            ttl_minutes=self._config.proactive_check_interval_minutes,
-        )
-        self._set_loop_timestamp("life_loop:last_companion_opportunity_at", local_now)
-        return opportunity
 
     def _build_reflection_opportunity(self, *, local_now: datetime) -> LifeOpportunity | None:
         """Return one reflection opportunity when the reflection loop is due."""
@@ -319,50 +247,6 @@ class LifeLoop:
             ttl_minutes=60,
         )
         self._set_loop_timestamp("life_loop:last_exploration_at", local_now)
-        return opportunity
-
-    def _build_reminder_opportunity(self, *, local_now: datetime) -> LifeOpportunity | None:
-        """Return one reminder opportunity when there are due reminders to send.
-
-        Note: This is a lightweight check. The actual reminder sending is handled
-        by the dedicated reminder_check_job that runs every minute.
-        """
-        # Guard: respect reminder delivery configuration
-        if not self._config.reminder_delivery_enabled:
-            return None
-
-        # Check for due reminders
-        now_str = local_now.strftime("%Y-%m-%d %H:%M:%S")
-        due_reminders = self._database.get_due_reminders(now_str)
-
-        if not due_reminders:
-            return None
-
-        # Get the next upcoming reminder for context
-        next_reminder = due_reminders[0]
-
-        opportunity = self._new_opportunity(
-            kind="reminder",
-            consumer="todo_manager",
-            attention_hint="worth_a_look",
-            reason=f"{len(due_reminders)} reminder(s) are due to be sent",
-            context={
-                "channel": "wechat",
-                "due_count": len(due_reminders),
-                "next_reminder_content": str(next_reminder["content"])[:100],
-                "time_of_day": _time_of_day(local_now),
-            },
-            signals={
-                "reminder_urgency": "high" if len(due_reminders) > 0 else "medium",
-                "user_interrupt_risk": "low",
-            },
-            payload={
-                "due_reminder_ids": [int(r["id"]) for r in due_reminders],
-                "action": "send_reminders",
-            },
-            created_at=local_now,
-            ttl_minutes=5,  # Short TTL since reminders are time-sensitive
-        )
         return opportunity
 
     def _new_opportunity(

@@ -38,7 +38,8 @@ async function callTool(name, args = {}, options = {}) {
 }
 
 test('external MCP gateway exposes one stable tool surface', () => {
-  assert.deepEqual(buildExternalMcpGatewayTools().map((tool) => tool.name), [
+  const tools = buildExternalMcpGatewayTools();
+  assert.deepEqual(tools.map((tool) => tool.name), [
     'mcp_catalog_search',
     'mcp_probe_server',
     'mcp_enable_server',
@@ -51,6 +52,10 @@ test('external MCP gateway exposes one stable tool surface', () => {
     'mcp_stop',
     'mcp_explain_policy',
   ]);
+  const callToolSchema = tools.find((tool) => tool.name === 'mcp_call')?.inputSchema;
+  assert.ok(callToolSchema?.properties?.requestId);
+  assert.ok(callToolSchema?.properties?.watchScope);
+  assert.ok(callToolSchema?.properties?.topicKey);
 });
 
 test('external MCP gateway initialize works while source profile calls stay disabled by default', async () => {
@@ -320,6 +325,8 @@ test('external MCP gateway calls admitted tools through policy and executor', as
     toolName: 'ecosystem.cmd',
     arguments: { cmd: 'observe' },
     sessionId: session.structuredContent.session.sessionId,
+    requestId: 'req-ecosystem-observe',
+    watchScope: 'game:cedartoy/eco',
   }, {
     env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
     executor: {
@@ -337,6 +344,8 @@ test('external MCP gateway calls admitted tools through policy and executor', as
   assert.equal(callInput.toolName, 'ecosystem.cmd');
   assert.equal(callInput.arguments.cmd, 'observe');
   assert.equal(result.structuredContent.result.content[0].text, '生态缸很平静');
+  assert.equal(result.structuredContent.evidence.request_id, 'req-ecosystem-observe');
+  assert.equal(result.structuredContent.evidence.watch_scope, 'game:cedartoy/eco');
 });
 
 test('external MCP gateway requires a live session for tool calls', async (t) => {

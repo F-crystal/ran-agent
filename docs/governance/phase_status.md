@@ -38,8 +38,9 @@ belong in code, tests, or local archive records, not here.
   `content_read`; only content evidence allows "read" claims.
 - Node root env and `node_bridge/.env.local` both receive the XHS fallback
   marker path during apply.
-- Scheduled AI daily digest is an allowlisted Feishu/Hermes path only and does
-  not reopen old proactive/life-loop outbound behavior.
+- Scheduled AI daily digest and explicit user-created reminders are allowlisted
+  outbound paths only; reminders use ProactiveEvent egress and neither path
+  reopens old proactive/life-loop check-ins.
 
 ## Historical Notes
 

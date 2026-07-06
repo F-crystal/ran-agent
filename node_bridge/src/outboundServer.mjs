@@ -11,26 +11,34 @@ import { handleIncomingMessage } from './channelHub.mjs';
 import { saveSensorLoggerMessage } from './environmentSense.mjs';
 import {
   buildExternalMcpSyntheticTurn,
-  shouldSuppressSystemQueueReply,
+  evaluateExternalMcpSystemQueueEgress,
 } from './externalMcp/systemQueue.mjs';
 import {
+  commitExternalMcpNotificationReservation,
   listExternalMcpWatches,
+  releaseExternalMcpNotificationReservation,
   reserveExternalMcpNotification,
 } from './externalMcp/watchlist.mjs';
+import { verifyExternalMcpEvidenceRefs } from './externalMcp/evidenceLog.mjs';
 import { sendFeishuReply } from './feishuBridge.mjs';
 import {
-  appendPendingOutboundMessage,
-  drainPendingOutboundMessages,
-  getCheckinRange,
+  commitProactiveEventDelivery,
+  releaseProactiveEventDelivery,
+  reserveProactiveEventDelivery,
+} from './proactiveEventLedger.mjs';
+import {
+  buildProactiveSyntheticTurn,
+  evaluateProactiveAdmission,
+  evaluateProactiveEgress,
+  isTruthyEnv,
+  normalizeProactiveEvent,
+} from './proactiveEvents.mjs';
+import {
   getFeishuHomeDmTarget,
-  getProactiveDispatchState,
   resolveStateDir,
-  setProactiveDispatchState,
 } from './runtimeState.mjs';
 export { resolveStateDir } from './runtimeState.mjs';
 
-const DEFAULT_OUTBOUND_RETRY_DELAY_MS = 5 * 60 * 1000;
-const DEFAULT_OUTBOUND_SEGMENT_DELAY_MS = 800;
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const AI_DAILY_DIGEST_TEMPLATE_PATH = path.join(
   PROJECT_ROOT,
@@ -62,140 +70,6 @@ export function getOutboundServerConfig(env = process.env) {
     port: Number(env.NODE_BRIDGE_OUTBOUND_PORT || '8791'),
     accountId: env.PERSONAL_AGENT_WECHAT_ACCOUNT_ID || '',
   };
-}
-
-function toIsoAfterMinutes(minutes) {
-  return new Date(Date.now() + minutes * 60 * 1000).toISOString();
-}
-
-function randomIntInRange(min, max) {
-  const safeMin = Math.max(1, Math.floor(min));
-  const safeMax = Math.max(safeMin, Math.floor(max));
-  return Math.floor(Math.random() * (safeMax - safeMin + 1)) + safeMin;
-}
-
-function getOutboundRetryDelayMs(env = process.env) {
-  const raw = Number(env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS || DEFAULT_OUTBOUND_RETRY_DELAY_MS);
-  if (!Number.isFinite(raw) || raw < 1000) {
-    return DEFAULT_OUTBOUND_RETRY_DELAY_MS;
-  }
-  return Math.floor(raw);
-}
-
-function getOutboundSegmentDelayMs(env = process.env) {
-  const raw = Number(env.NODE_BRIDGE_OUTBOUND_SEGMENT_DELAY_MS || DEFAULT_OUTBOUND_SEGMENT_DELAY_MS);
-  if (!Number.isFinite(raw) || raw < 0) {
-    return DEFAULT_OUTBOUND_SEGMENT_DELAY_MS;
-  }
-  return Math.floor(raw);
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function isDispatchBlockedNow(env = process.env) {
-  const state = getProactiveDispatchState(env);
-  if (!state.nextAllowedAt) {
-    return false;
-  }
-  const nextAllowedAtMs = Date.parse(state.nextAllowedAt);
-  if (!Number.isFinite(nextAllowedAtMs)) {
-    return false;
-  }
-  return Date.now() < nextAllowedAtMs;
-}
-
-function isLowValueProactiveText(text) {
-  const normalized = String(text || '').trim().replace(/\s+/g, '');
-  if (!normalized) {
-    return true;
-  }
-  const blockedPatterns = [
-    /刚想到你最近挺忙的[，,。]?今天还顺吗[。？?]?$/,
-    /^这条消息会被缓存[。！!]?$/,
-  ];
-  return blockedPatterns.some((pattern) => pattern.test(normalized));
-}
-
-function splitTextSegments(text) {
-  const normalized = String(text || '').trim();
-  if (!normalized) {
-    return [];
-  }
-  return normalized
-    .split(/\n{2,}/)
-    .map((item) => item.trim())
-    .filter(Boolean);
-}
-
-function normalizeFollowUpMessages(messages) {
-  if (!Array.isArray(messages)) {
-    return [];
-  }
-  const flattened = [];
-  for (const message of messages) {
-    for (const segment of splitTextSegments(message)) {
-      flattened.push(segment);
-    }
-  }
-  return flattened;
-}
-
-function toIsoAfterMs(delayMs) {
-  return new Date(Date.now() + Math.max(0, Math.floor(delayMs))).toISOString();
-}
-
-function buildOutboundSequence(payload) {
-  const textSegments = splitTextSegments(payload.text);
-  const explicitFollowUps = normalizeFollowUpMessages(payload.follow_up_messages);
-  const allSegments = textSegments.length > 1
-    ? [textSegments[0], ...textSegments.slice(1), ...explicitFollowUps]
-    : [textSegments[0] || '', ...explicitFollowUps];
-  const primaryText = String(allSegments.shift() || '').trim();
-  return {
-    primaryText,
-    followUpMessages: allSegments,
-  };
-}
-
-async function sendOutboundSequence(bot, payload, env = process.env) {
-  const media = normalizeOutboundMediaPayload(payload.media);
-  const { primaryText, followUpMessages } = buildOutboundSequence(payload);
-  const segmentDelayMs = getOutboundSegmentDelayMs(env);
-
-  if (!primaryText && !media) {
-    throw new Error("one of 'text' or 'media' must be provided");
-  }
-
-  if (!followUpMessages.length) {
-    await bot.sendMessage(buildBotMessagePayload({ text: primaryText, media }));
-    return;
-  }
-
-  const firstPayload = media
-    ? buildBotMessagePayload({ text: primaryText, media })
-    : primaryText;
-  await bot.sendMessage(firstPayload);
-
-  for (const followUp of followUpMessages) {
-    if (segmentDelayMs > 0) {
-      await sleep(segmentDelayMs);
-    }
-    await bot.sendMessage(followUp);
-  }
-}
-
-function queueOutboundRetry(payload, env = process.env, reason = 'send_failed') {
-  const retryDelayMs = getOutboundRetryDelayMs(env);
-  appendPendingOutboundMessage(
-    {
-      text: payload.text || '[media]',
-      reason,
-      nextAttemptAt: toIsoAfterMs(retryDelayMs),
-    },
-    env
-  );
 }
 
 export function resolveWeixinAccountConfig(env = process.env) {
@@ -271,104 +145,19 @@ export async function handleOutboundRequest({ bot, logger = console, method, url
       payload: { error: "one of 'text' or 'media' must be provided" },
     };
   }
-  if (normalizedText && isLowValueProactiveText(normalizedText)) {
-    logger.warn?.('proactive outbound dropped by low-value text guard');
-    return {
-      status: 200,
-      payload: { ok: true, dropped: true, reason: 'low_value_proactive_text' },
-    };
-  }
-  const forceSend = payload.force === true;
   const messageKind = typeof payload.kind === 'string' ? payload.kind.trim().toLowerCase() : 'checkin';
-  if (messageKind !== 'reminder' && !forceSend && !isProactiveDeliveryEnabled(process.env)) {
-    logger.warn?.('proactive outbound dropped because proactive delivery is disabled');
+  if (messageKind === 'reminder') {
+    logger.warn?.('legacy reminder outbound dropped; use /proactive/event');
     return {
       status: 200,
-      payload: { ok: true, dropped: true, reason: 'proactive_delivery_disabled' },
+      payload: { ok: true, dropped: true, reason: 'legacy_reminder_route_retired' },
     };
   }
-  if (messageKind === 'reminder' && !isReminderDeliveryEnabled(process.env)) {
-    logger.warn?.('reminder outbound dropped because reminder delivery is disabled');
-    return {
-      status: 200,
-      payload: { ok: true, dropped: true, reason: 'reminder_delivery_disabled' },
-    };
-  }
-  const bypassCooldown = messageKind === 'reminder';
-  if (!forceSend && !bypassCooldown && isDispatchBlockedNow(process.env)) {
-    appendPendingOutboundMessage(
-      {
-        text: normalizedText || '[media]',
-        reason: 'checkin_cooldown_not_reached',
-        nextAttemptAt: getProactiveDispatchState(process.env).nextAllowedAt || toIsoAfterMs(getOutboundRetryDelayMs(process.env)),
-      },
-      process.env
-    );
-    logger.info?.('proactive outbound queued by checkin cooldown');
-    return {
-      status: 200,
-      payload: { ok: true, queued: true, reason: 'checkin_cooldown_not_reached' },
-    };
-  }
-
-  try {
-    const pendingMessages = drainPendingOutboundMessages(1, process.env);
-    if (pendingMessages.length > 0) {
-      const pendingText = String(pendingMessages[0]?.text || '').trim();
-      if (!isReminderDeliveryEnabled(process.env) && isReminderLikeText(pendingText)) {
-        logger.warn?.('pending reminder outbound dropped because reminder delivery is disabled');
-      } else {
-        try {
-          await sendOutboundSequence(bot, { text: pendingText, media: null }, process.env);
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error);
-          appendPendingOutboundMessage(
-            {
-              text: pendingText || '[media]',
-              reason: `send_failed:${message}`,
-              nextAttemptAt: toIsoAfterMs(getOutboundRetryDelayMs(process.env)),
-            },
-            process.env
-          );
-          throw error;
-        }
-      }
-    }
-    await sendOutboundSequence(
-      bot,
-      {
-        text: normalizedText,
-        media: normalizedMedia,
-        follow_up_messages: payload.follow_up_messages,
-      },
-      process.env
-    );
-    const checkinRange = getCheckinRange(process.env);
-    const nextDelayMinutes = randomIntInRange(checkinRange.minMinutes, checkinRange.maxMinutes);
-    setProactiveDispatchState(
-      { nextAllowedAt: toIsoAfterMinutes(nextDelayMinutes) },
-      process.env
-    );
-    logger.info?.(`proactive outbound message sent text=${normalizedText || '[media-only]'}`);
-    return {
-      status: 200,
-      payload: { ok: true, nextCheckinInMinutes: nextDelayMinutes },
-    };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    queueOutboundRetry(
-      {
-        text: normalizedText || '[media]',
-      },
-      process.env,
-      `send_failed:${message}`
-    );
-    logger.error?.(`proactive outbound send failed and queued: ${message}`);
-    return {
-      status: 200,
-      payload: { ok: true, queued: true, reason: 'send_failed' },
-    };
-  }
+  logger.warn?.('legacy proactive outbound dropped; use /proactive/event');
+  return {
+    status: 200,
+    payload: { ok: true, dropped: true, reason: 'legacy_checkin_route_retired' },
+  };
 }
 
 export async function handleEnvironmentSensorRequest({
@@ -502,6 +291,133 @@ export async function handleScheduledAiDigestRequest({
   };
 }
 
+export async function handleProactiveEventRequest({
+  logger = console,
+  env = process.env,
+  bodyText = '',
+  channelHub = handleIncomingMessage,
+  execFileImpl,
+  nowImpl,
+} = {}) {
+  let payload;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    return {
+      status: 400,
+      payload: { error: 'request body must be valid JSON' },
+    };
+  }
+
+  const target = getFeishuHomeDmTarget(env);
+  if (!target) {
+    logger.warn?.('proactive event skipped because Feishu home DM target is missing');
+    return {
+      status: 200,
+      payload: { ok: true, skipped: true, reason: 'feishu_home_dm_target_missing' },
+    };
+  }
+
+  const normalized = normalizeProactiveEvent(payload, {
+    globalUserId: target.sender_id,
+    channel: 'feishu',
+  });
+  if (!normalized.ok) {
+    return {
+      status: 400,
+      payload: { error: normalized.error || 'invalid_proactive_event' },
+    };
+  }
+  const event = normalized.event;
+  const endpointScope = evaluateDirectProactiveEventScope(event);
+  if (!endpointScope.accepted) {
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: endpointScope.reason },
+    };
+  }
+  if (event.kind === 'reminder' && !isReminderDeliveryEnabled(env)) {
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: 'reminder_delivery_disabled' },
+    };
+  }
+
+  const runtimeNow = typeof nowImpl === 'function' ? nowImpl() : new Date();
+  const admission = evaluateProactiveAdmission(event, { env, now: runtimeNow });
+  if (!admission.accepted) {
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: admission.reason },
+    };
+  }
+  const reservation = reserveProactiveEventDelivery(event, { env, now: runtimeNow });
+  if (!reservation.allowed) {
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: reservation.reason },
+    };
+  }
+
+  let adapterSent = false;
+  let egressReason = '';
+  const message = buildProactiveSyntheticTurn(event, {
+    conversation_id: target.conversation_id,
+    sender_id: target.sender_id,
+  });
+
+  let response;
+  try {
+    response = await channelHub(message, {
+      env,
+      logger,
+      adapter: {
+        async sendReply({ target: replyTarget, text, message: sourceMessage }) {
+          const egress = evaluateProactiveEgress({ event, replyText: text });
+          egressReason = egress.reason;
+          if (!egress.send) {
+            return;
+          }
+          await sendFeishuReply({
+            target: {
+              ...replyTarget,
+              source_message_id: sourceMessage?.id || sourceMessage?.message_id || event.event_id,
+            },
+            text: egress.message,
+            env,
+            execFileImpl,
+          });
+          commitProactiveEventDelivery(reservation.record.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
+          adapterSent = true;
+        },
+      },
+    });
+  } catch (error) {
+    releaseProactiveEventDelivery(reservation.record.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
+    const messageText = error instanceof Error ? error.message : String(error);
+    logger.error?.(`proactive event failed: ${messageText}`);
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: 'send_failed' },
+    };
+  }
+  if (!adapterSent) {
+    releaseProactiveEventDelivery(reservation.record.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
+  }
+
+  return {
+    status: 200,
+    payload: {
+      ok: true,
+      event_id: event.event_id,
+      status: adapterSent ? 'sent' : 'suppressed',
+      notified: adapterSent,
+      reason: adapterSent ? 'sent' : (egressReason || response?.suppressReason || 'not_notified'),
+      reply_length: String(response?.replyText || '').length,
+    },
+  };
+}
+
 export async function handleExternalMcpSystemQueueRequest({
   logger = console,
   env = process.env,
@@ -571,8 +487,57 @@ export async function handleExternalMcpSystemQueueRequest({
       payload: { ok: true, dropped: true, reason: 'watch_notifications_disabled' },
     };
   }
+  const idempotencyKey = sanitizeExternalMcpIdentity(payload.id || payload.eventId || payload.event_id)
+    || `external-mcp-${Date.now()}`;
+  const evidenceRefs = normalizeExternalMcpEvidenceRefs(payload.evidenceRefs || payload.evidence_refs);
+  const allowedCapabilityTiers = allowedExternalMcpEvidenceTiersForWatch(watch);
+  let trustedEvidenceRefs = evidenceRefs;
   if (notifyAllowed) {
-    const reservation = reserveExternalMcpNotification({
+    const evidence = verifyExternalMcpEvidenceRefs({
+      refs: evidenceRefs,
+      globalUserId,
+      serverId,
+      watchScope,
+      allowedCapabilityTiers,
+    }, { env, now: runtimeNow });
+    if (!evidence.ok) {
+      return {
+        status: 200,
+        payload: { ok: true, dropped: true, reason: evidence.reason },
+      };
+    }
+    trustedEvidenceRefs = evidence.trustedRefs;
+  }
+  const proactiveEvent = normalizeProactiveEvent(payload, {
+    eventId: idempotencyKey,
+    kind: externalMcpWatchKindToEventKind(watch.kind),
+    globalUserId,
+    channel: 'feishu',
+    watchScope,
+    reason: payload.reason,
+    evidenceRefs: trustedEvidenceRefs,
+    dedupeKey: watchScope,
+    deliverability,
+    allowedCapabilityTiers,
+    budgetClass: 'external_mcp',
+  });
+  if (!proactiveEvent.ok) {
+    return {
+      status: 400,
+      payload: { error: proactiveEvent.error || 'invalid_proactive_event' },
+    };
+  }
+  const event = proactiveEvent.event;
+  const admission = evaluateProactiveAdmission(event, { env, now: runtimeNow });
+  if (!admission.accepted) {
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: admission.reason },
+    };
+  }
+  let reservation = null;
+  if (notifyAllowed) {
+    reservation = reserveExternalMcpNotification({
       globalUserId,
       serverId,
       topicKey,
@@ -586,52 +551,64 @@ export async function handleExternalMcpSystemQueueRequest({
   }
 
   let adapterSent = false;
-  const idempotencyKey = sanitizeExternalMcpIdentity(payload.id || payload.eventId || payload.event_id)
-    || `external-mcp-${Date.now()}`;
+  let egressReason = '';
   const message = buildExternalMcpSyntheticTurn({
     id: idempotencyKey,
+    proactiveEvent: event,
     platform: 'feishu',
     conversationId: target.conversation_id,
     senderId: target.sender_id,
-    reason: payload.reason,
-    watchScope,
-    deliverability,
-    allowedCapabilityTiers: payload.allowedCapabilityTiers || payload.allowed_capability_tiers,
-    createdAt: payload.createdAt || payload.created_at,
   });
 
-  const response = await channelHub(message, {
-    env,
-    logger,
-    adapter: notifyAllowed
-      ? {
-          async sendReply({ target: replyTarget, text, message: sourceMessage }) {
-            if (shouldSuppressSystemQueueReply({
-              routeHint: sourceMessage?.route_hint || '',
-              replyText: text,
-            }).suppress) {
-              return;
-            }
-            await sendFeishuReply({
-              target: {
-                ...replyTarget,
-                source_message_id: sourceMessage?.id || sourceMessage?.message_id || idempotencyKey,
-              },
-              text,
-              env,
-              execFileImpl,
-            });
-            adapterSent = true;
-          },
-        }
-      : undefined,
-  });
+  let response;
+  try {
+    response = await channelHub(message, {
+      env,
+      logger,
+      adapter: {
+        async sendReply({ target: replyTarget, text, message: sourceMessage }) {
+          const egress = evaluateExternalMcpSystemQueueEgress({ event, replyText: text });
+          egressReason = egress.reason;
+          if (!notifyAllowed || !egress.send) {
+            return;
+          }
+          await sendFeishuReply({
+            target: {
+              ...replyTarget,
+              source_message_id: sourceMessage?.id || sourceMessage?.message_id || idempotencyKey,
+            },
+            text: egress.message,
+            env,
+            execFileImpl,
+          });
+          commitExternalMcpNotificationReservation(reservation.event.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
+          adapterSent = true;
+        },
+      },
+    });
+  } catch (error) {
+    if (reservation?.event?.reservationId) {
+      releaseExternalMcpNotificationReservation(reservation.event.reservationId, { env });
+    }
+    const messageText = error instanceof Error ? error.message : String(error);
+    logger.error?.(`external MCP system queue failed: ${messageText}`);
+    return {
+      status: 200,
+      payload: { ok: true, dropped: true, reason: 'send_failed' },
+    };
+  }
+  if (!adapterSent && reservation?.event?.reservationId) {
+    releaseExternalMcpNotificationReservation(reservation.event.reservationId, { env });
+  }
 
   return {
     status: 200,
     payload: {
       ok: true,
+      event_id: event.event_id,
+      status: adapterSent ? 'sent' : 'suppressed',
       notified: adapterSent,
+      reason: adapterSent ? 'sent' : (egressReason || response?.suppressReason || 'not_notified'),
       reply_length: String(response?.replyText || '').length,
     },
   };
@@ -649,19 +626,31 @@ function buildScheduledAiDigestPrompt(facts) {
   return [template.trim(), '', '[AIHOT/Search Hub 事实材料]', factsText].join('\n').trim();
 }
 
-function isProactiveDeliveryEnabled(env = process.env) {
-  return ['1', 'true', 'yes', 'on'].includes(
-    String(env.PERSONAL_AGENT_PROACTIVE_ENABLED || 'false').trim().toLowerCase()
-  );
+function evaluateDirectProactiveEventScope(event) {
+  if (event.kind === 'reminder') {
+    return { accepted: true, reason: 'accepted' };
+  }
+  return {
+    accepted: false,
+    reason: 'proactive_event_kind_requires_dedicated_pipeline',
+  };
 }
 
 function isReminderDeliveryEnabled(env = process.env) {
-  return ['1', 'true', 'yes', 'on'].includes(
-    String(env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED || 'false').trim().toLowerCase()
-  );
+  const newValue = String(env.HERMES_PROACTIVE_REMINDERS_ENABLED || '').trim();
+  if (newValue) {
+    return isTruthyEnv(newValue);
+  }
+  return isTruthyEnv(env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED);
 }
 
 function getExternalMcpSystemQueueGate(env = process.env) {
+  if (!isTruthyEnv(env.HERMES_PROACTIVE_EVENTS_ENABLED)) {
+    return { enabled: false, reason: 'proactive_events_disabled' };
+  }
+  if (!isTruthyEnv(env.HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED)) {
+    return { enabled: false, reason: 'proactive_external_mcp_disabled' };
+  }
   if (!isTruthyEnv(env.EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED)) {
     return { enabled: false, reason: 'external_mcp_system_queue_disabled' };
   }
@@ -669,16 +658,6 @@ function getExternalMcpSystemQueueGate(env = process.env) {
     return { enabled: false, reason: 'external_mcp_gateway_disabled' };
   }
   return { enabled: true, reason: '' };
-}
-
-function isTruthyEnv(value) {
-  return ['1', 'true', 'yes', 'on'].includes(
-    String(value || 'false').trim().toLowerCase()
-  );
-}
-
-function isReminderLikeText(text) {
-  return /^提醒一下[：:]/.test(String(text || '').trim());
 }
 
 function normalizeOutboundMediaPayload(media) {
@@ -697,16 +676,6 @@ function normalizeOutboundMediaPayload(media) {
   return fileName ? { type, url, fileName } : { type, url };
 }
 
-function buildBotMessagePayload({ text = '', media = null } = {}) {
-  if (media && text) {
-    return { text, media };
-  }
-  if (media) {
-    return { media };
-  }
-  return text;
-}
-
 export function createOutboundServer({ bot, logger = console } = {}) {
   return http.createServer(async (request, response) => {
     let rawBody = '';
@@ -718,6 +687,8 @@ export function createOutboundServer({ bot, logger = console } = {}) {
       let result;
       if (request.method === 'POST' && request.url === '/scheduled/ai-daily-digest') {
         result = await handleScheduledAiDigestRequest({ logger, env: process.env, bodyText: rawBody });
+      } else if (request.method === 'POST' && request.url === '/proactive/event') {
+        result = await handleProactiveEventRequest({ logger, env: process.env, bodyText: rawBody });
       } else if (request.method === 'POST' && request.url === '/external-mcp/system-queue') {
         result = await handleExternalMcpSystemQueueRequest({ logger, env: process.env, bodyText: rawBody });
       } else if (String(request.url || '').startsWith('/environment/sensorlogger/')) {
@@ -745,6 +716,30 @@ export function createOutboundServer({ bot, logger = console } = {}) {
 function normalizeExternalMcpDeliverability(value) {
   const text = String(value || '').trim().toLowerCase();
   return ['silent_only', 'draft_allowed', 'notify_allowed'].includes(text) ? text : 'silent_only';
+}
+
+function externalMcpWatchKindToEventKind(value) {
+  const text = String(value || '').trim().toLowerCase();
+  if (text === 'game') return 'game_activity';
+  if (text === 'forum') return 'forum_watch';
+  return 'external_mcp';
+}
+
+function allowedExternalMcpEvidenceTiersForWatch(watch = {}) {
+  const kind = String(watch.kind || '').trim().toLowerCase();
+  if (kind === 'game') {
+    return ['T3'];
+  }
+  return ['T1', 'T2'];
+}
+
+function normalizeExternalMcpEvidenceRefs(values) {
+  const list = Array.isArray(values) ? values : values ? [values] : [];
+  return Array.from(new Set(
+    list
+      .map((item) => sanitizeExternalMcpScope(item))
+      .filter(Boolean)
+  )).slice(0, 20);
 }
 
 function sanitizeExternalMcpIdentity(value) {

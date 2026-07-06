@@ -50,7 +50,7 @@ export function checkExternalMcpRateBudget(input = {}, options = {}) {
   if (!globalUserId || !serverId || !topicKey) {
     return { allowed: false, reason: 'invalid_rate_scope' };
   }
-  const events = readEvents(env);
+  const events = readActiveEvents(env, now);
   const sameUserEvents = events.filter((item) => item.globalUserId === globalUserId);
   const sameDay = dayKey(now);
   if (sameUserEvents.some((item) => dayKey(item.createdAt) === sameDay)) {
@@ -73,10 +73,12 @@ export function recordExternalMcpNotification(input = {}, options = {}) {
   const now = normalizeDate(input.now || options.now) || new Date();
   const event = {
     eventId: `notify_${hashShort(`${input.globalUserId}:${input.serverId}:${input.topicKey}:${now.toISOString()}`)}`,
+    reservationId: `reservation_${hashShort(`${input.globalUserId}:${input.serverId}:${input.topicKey}:${now.toISOString()}:sent`)}`,
     globalUserId: sanitizeIdentity(input.globalUserId || input.global_user_id || ''),
     serverId: sanitizeIdentity(input.serverId || input.server_id || ''),
     topicKey: sanitizeScope(input.topicKey || input.topic_key || ''),
     createdAt: now.toISOString(),
+    status: 'sent',
   };
   writeJson(paths(env).events, [...readEvents(env), event].slice(-500));
   return event;
@@ -89,8 +91,48 @@ export function reserveExternalMcpNotification(input = {}, options = {}) {
   if (!budget.allowed) {
     return budget;
   }
-  const event = recordExternalMcpNotification({ ...input, now }, { env });
+  const event = {
+    eventId: `notify_${hashShort(`${input.globalUserId}:${input.serverId}:${input.topicKey}:${now.toISOString()}`)}`,
+    reservationId: `reservation_${hashShort(`${input.globalUserId}:${input.serverId}:${input.topicKey}:${now.toISOString()}:reserved`)}`,
+    globalUserId: sanitizeIdentity(input.globalUserId || input.global_user_id || ''),
+    serverId: sanitizeIdentity(input.serverId || input.server_id || ''),
+    topicKey: sanitizeScope(input.topicKey || input.topic_key || ''),
+    createdAt: now.toISOString(),
+    reserveExpiresAt: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+    status: 'reserved',
+  };
+  writeJson(paths(env).events, [...readEvents(env), event].slice(-500));
   return { allowed: true, reason: 'budget_reserved', event };
+}
+
+export function commitExternalMcpNotificationReservation(reservationId, options = {}) {
+  const env = options.env || process.env;
+  const now = normalizeDate(options.now) || new Date();
+  const id = sanitizeIdentity(reservationId);
+  const events = readEvents(env);
+  let committed = null;
+  const next = events.map((item) => {
+    if (item?.reservationId !== id && item?.eventId !== id) return item;
+    committed = {
+      ...item,
+      status: 'sent',
+      sentAt: now.toISOString(),
+    };
+    return committed;
+  });
+  writeJson(paths(env).events, next.slice(-500));
+  return committed;
+}
+
+export function releaseExternalMcpNotificationReservation(reservationId, options = {}) {
+  const env = options.env || process.env;
+  const id = sanitizeIdentity(reservationId);
+  const events = readEvents(env);
+  const next = events.filter((item) => (
+    item?.reservationId !== id && item?.eventId !== id
+  ));
+  writeJson(paths(env).events, next.slice(-500));
+  return { ok: next.length !== events.length, reservationId: id };
 }
 
 function paths(env) {
@@ -108,6 +150,19 @@ function readWatches(env) {
 
 function readEvents(env) {
   return readJson(paths(env).events);
+}
+
+function readActiveEvents(env, now) {
+  const nowMs = now.getTime();
+  return readEvents(env).filter((item) => {
+    const status = String(item.status || 'sent').trim().toLowerCase();
+    if (status === 'released' || status === 'failed') return false;
+    if (status === 'reserved') {
+      const expiresMs = Date.parse(String(item.reserveExpiresAt || ''));
+      return Number.isFinite(expiresMs) && expiresMs >= nowMs;
+    }
+    return status === 'sent' || status === '';
+  });
 }
 
 function readJson(filePath) {

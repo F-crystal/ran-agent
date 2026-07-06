@@ -18,7 +18,7 @@ test('apply script env upsert preserves existing Search Hub secrets and optional
     'set -euo pipefail',
     'export RAN_AGENT_NO_SUDO=1',
     'source scripts/apply-hermes-runtime-split.sh',
-    `upsert_env_file ${JSON.stringify(envFile)} SEARCH_HUB_PROFILE_MODE=lite '?OPENALEX_MAILTO=' SEARCH_HUB_ENABLED=true PERSONAL_AGENT_PROACTIVE_ENABLED=false PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false`,
+    `upsert_env_file ${JSON.stringify(envFile)} SEARCH_HUB_PROFILE_MODE=lite '?OPENALEX_MAILTO=' SEARCH_HUB_ENABLED=true PERSONAL_AGENT_PROACTIVE_ENABLED=false PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false HERMES_PROACTIVE_EVENTS_ENABLED=true HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true HERMES_PROACTIVE_REMINDERS_ENABLED=true`,
   ].join('\n')], {
     cwd: new URL('../..', import.meta.url).pathname,
     stdio: 'pipe',
@@ -31,6 +31,9 @@ test('apply script env upsert preserves existing Search Hub secrets and optional
   assert.match(text, /SEARCH_HUB_ENABLED=true/);
   assert.match(text, /PERSONAL_AGENT_PROACTIVE_ENABLED=false/);
   assert.match(text, /PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false/);
+  assert.match(text, /HERMES_PROACTIVE_EVENTS_ENABLED=true/);
+  assert.match(text, /HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true/);
+  assert.match(text, /HERMES_PROACTIVE_REMINDERS_ENABLED=true/);
   assert.doesNotMatch(text, /custom-old/);
 });
 
@@ -66,6 +69,9 @@ test('apply script writes compact lite/full systemd units and removes stale runt
   assert.match(liteUnit, /Environment=API_SERVER_MODEL_NAME=ran-assistant-lite/);
   assert.match(liteUnit, /Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false/);
   assert.match(liteUnit, /Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false/);
+  assert.match(liteUnit, /Environment=HERMES_PROACTIVE_EVENTS_ENABLED=true/);
+  assert.match(liteUnit, /Environment=HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true/);
+  assert.match(liteUnit, /Environment=HERMES_PROACTIVE_REMINDERS_ENABLED=true/);
   assert.match(liteUnit, /ExecStart=.*hermes -p ran-assistant-lite gateway run/);
   assert.doesNotMatch(liteUnit, /HERMES_PROFILE=ran-assistant\n/);
   assert.doesNotMatch(liteUnit, /API_SERVER_PORT=8643/);
@@ -77,6 +83,9 @@ test('apply script writes compact lite/full systemd units and removes stale runt
   assert.match(fullUnit, /Environment=API_SERVER_MODEL_NAME=ran-assistant/);
   assert.match(fullUnit, /Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false/);
   assert.match(fullUnit, /Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false/);
+  assert.match(fullUnit, /Environment=HERMES_PROACTIVE_EVENTS_ENABLED=true/);
+  assert.match(fullUnit, /Environment=HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true/);
+  assert.match(fullUnit, /Environment=HERMES_PROACTIVE_REMINDERS_ENABLED=true/);
   assert.match(fullUnit, /ExecStart=.*hermes -p ran-assistant gateway run/);
   assert.doesNotMatch(fullUnit, /ran-assistant-lite/);
 
@@ -111,8 +120,12 @@ test('apply script writes compact lite/full systemd units and removes stale runt
   // Proactive/reminder freeze stays false
   assert.match(liteUnit, /Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false/);
   assert.match(liteUnit, /Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false/);
+  assert.match(liteUnit, /Environment=HERMES_PROACTIVE_EVENTS_ENABLED=true/);
+  assert.match(liteUnit, /Environment=HERMES_PROACTIVE_REMINDERS_ENABLED=true/);
   assert.match(fullUnit, /Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false/);
   assert.match(fullUnit, /Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false/);
+  assert.match(fullUnit, /Environment=HERMES_PROACTIVE_EVENTS_ENABLED=true/);
+  assert.match(fullUnit, /Environment=HERMES_PROACTIVE_REMINDERS_ENABLED=true/);
 });
 
 test('apply script env upsert includes UV cache and XHS timeout vars', () => {

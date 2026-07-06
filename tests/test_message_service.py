@@ -86,10 +86,15 @@ class StubOutboundClient:
 
     def __init__(self) -> None:
         self.sent_texts: list[str] = []
+        self.events: list[dict[str, object]] = []
 
     def send_text(self, text: str, **_: object) -> dict[str, object]:
         self.sent_texts.append(text)
         return {"ok": True}
+
+    def send_proactive_event(self, event: dict[str, object]) -> dict[str, object]:
+        self.events.append(event)
+        return {"ok": True, "status": "sent", "notified": True}
 
 
 class PersonalAgentServiceTest(unittest.TestCase):
@@ -1027,7 +1032,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         self.assertIn("不要角色扮演", system_prompt)
         self.assertIn("通常2到4句", system_prompt)
 
-    def test_service_sends_proactive_companion_message_and_records_trace(self) -> None:
+    def test_service_retires_proactive_companion_message_without_trace(self) -> None:
         self.database.record_timeline_event(
             source="wechat",
             event_type="user_message",
@@ -1081,18 +1086,16 @@ class PersonalAgentServiceTest(unittest.TestCase):
             now_local=datetime(2026, 4, 11, 21, 10, 0),
         )
 
-        self.assertEqual(len(batch.outbound_messages), 1)
-        self.assertEqual(len(outbound_client.sent_texts), 1)
-        self.assertEqual(outbound_client.sent_texts[0], "刚想到你最近一直在忙论文，今天还顺吗。")
+        self.assertEqual(len(batch.outbound_messages), 0)
+        self.assertEqual(len(outbound_client.sent_texts), 0)
+        self.assertEqual(len(outbound_client.events), 0)
+        self.assertEqual(batch.judgments[0].reason, "legacy_companion_proactive_retired")
 
         events = self.database.fetch_timeline_events()
-        self.assertEqual(events[-1]["event_type"], "agent_proactive")
-        self.assertEqual(events[-1]["content"], "刚想到你最近一直在忙论文，今天还顺吗。")
+        self.assertNotEqual(events[-1]["event_type"], "agent_proactive")
 
         raw_state = self.database.get_handoff_value("agent_internal_state")
-        assert raw_state is not None
-        self.assertIn('"last_proactive_at":"2026-04-11 21:10:00"', raw_state)
-        self.assertIn('"recent_proactive_trace"', raw_state)
+        self.assertTrue(raw_state is None or '"last_proactive_at":"2026-04-11 21:10:00"' not in raw_state)
 
 
 if __name__ == "__main__":

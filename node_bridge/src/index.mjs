@@ -19,7 +19,6 @@ import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMe
 import { resolveStickerAsset } from './stickerCatalog.mjs';
 import {
   appendPendingOutboundMessage,
-  drainPendingOutboundMessages,
   resolveStateDir,
   setCheckinRange,
 } from './runtimeState.mjs';
@@ -265,11 +264,6 @@ function normalizeFollowUpTexts(messages) {
   return normalized;
 }
 
-function isProactiveDeliveryEnabled(env = process.env) {
-  const value = String(env.PERSONAL_AGENT_PROACTIVE_ENABLED || 'false').trim().toLowerCase();
-  return ['1', 'true', 'yes', 'on'].includes(value);
-}
-
 function normalizeChatReplyResult(replyResult, options = {}) {
   const explicitFollowUps = normalizeFollowUpTexts(replyResult?.followUpMessages);
   const mediaFromMarker = extractTrustedReplyMediaMarker(replyResult?.replyText, options);
@@ -365,17 +359,7 @@ export function buildAgent({ logger, env }) {
   }
 
   async function flushPendingOutboundQueue() {
-    if (!isProactiveDeliveryEnabled(env)) {
-      logger.info?.('[node-bridge] pending proactive outbound queue held because proactive delivery is disabled');
-      return;
-    }
-    const drained = drainPendingOutboundMessages(8, env)
-      .map((item) => String(item?.text || '').trim())
-      .filter(Boolean);
-    if (drained.length === 0) {
-      return;
-    }
-    await deliverQueuedMessages(drained);
+    logger.info?.('[node-bridge] legacy pending proactive outbound queue retired; not flushing');
   }
 
   return {

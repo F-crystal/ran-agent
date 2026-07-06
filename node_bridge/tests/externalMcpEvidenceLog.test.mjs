@@ -7,6 +7,7 @@ import {
   appendExternalMcpEvidence,
   listExternalMcpEvidence,
   sanitizeExternalMcpEvidence,
+  verifyExternalMcpEvidenceRefs,
 } from '../src/externalMcp/evidenceLog.mjs';
 
 function tempEnv(t) {
@@ -30,6 +31,7 @@ function rawEvent(overrides = {}) {
     globalUserId: 'user:ran',
     serverId: 'forum.example',
     toolName: 'forum.read_thread',
+    watchScope: 'thread:forum.example/123',
     tier: 'T1',
     sessionMode: 'observe',
     trigger: 'proactive',
@@ -54,11 +56,13 @@ test('evidence sanitizer keeps proof fields and redacts raw payloads', () => {
   assert.equal(event.global_user_id, 'user:ran');
   assert.equal(event.server_id, 'forum.example');
   assert.equal(event.tool_id, 'forum.read_thread');
+  assert.equal(event.watch_scope, 'thread:forum.example/123');
   assert.equal(event.tier, 'T1');
   assert.equal(event.session_mode, 'observe');
   assert.equal(event.trigger, 'proactive');
   assert.equal(event.decision, 'allowed');
   assert.match(event.result_id_hash, /^[a-f0-9]{16}$/);
+  assert.match(event.evidence_ref, /^external_mcp_evidence:[a-f0-9]{16}$/);
   assert.equal(serialized.includes('private-result-id'), false);
   assert.equal(serialized.includes('session-secret'), false);
   assert.equal(serialized.includes('/Users/fengran'), false);
@@ -88,10 +92,76 @@ test('evidence log appends and lists sanitized JSONL events', (t) => {
   const serialized = JSON.stringify(listed);
 
   assert.equal(first.request_id, 'req-1');
+  assert.match(first.evidence_ref, /^external_mcp_evidence:[a-f0-9]{16}$/);
   assert.equal(second.tool_id, 'forum.submit_reply');
   assert.equal(listed.length, 2);
   assert.deepEqual(listed.map((item) => item.request_id), ['req-1', 'req-2']);
   assert.equal(serialized.includes('result-1'), false);
   assert.equal(serialized.includes('result-2'), false);
   assert.equal(serialized.includes('private forum text'), false);
+});
+
+test('evidence verifier accepts only trusted matching evidence refs', (t) => {
+  const env = tempEnv(t);
+  const evidence = appendExternalMcpEvidence(rawEvent({ requestId: 'req-1' }), { env, now: '2026-07-01T10:00:00Z' });
+
+  const trusted = verifyExternalMcpEvidenceRefs({
+    refs: [evidence.evidence_ref],
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    watchScope: 'thread:forum.example/123',
+    allowedCapabilityTiers: ['T1', 'T2'],
+  }, { env, now: '2026-07-01T10:01:00Z' });
+  const spoofed = verifyExternalMcpEvidenceRefs({
+    refs: ['external_mcp_evidence:spoofed'],
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    watchScope: 'thread:forum.example/123',
+    allowedCapabilityTiers: ['T1', 'T2'],
+  }, { env, now: '2026-07-01T10:01:00Z' });
+  const mismatchedScope = verifyExternalMcpEvidenceRefs({
+    refs: [evidence.evidence_ref],
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    watchScope: 'thread:forum.example/other',
+    allowedCapabilityTiers: ['T1', 'T2'],
+  }, { env, now: '2026-07-01T10:01:00Z' });
+  const scopeLessEvidence = appendExternalMcpEvidence(rawEvent({
+    requestId: 'req-empty-scope',
+    watchScope: '',
+    resultId: 'result-empty-scope',
+  }), { env, now: '2026-07-01T10:00:30Z' });
+  const emptyScopeRejected = verifyExternalMcpEvidenceRefs({
+    refs: [scopeLessEvidence.evidence_ref],
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    watchScope: 'thread:forum.example/123',
+    allowedCapabilityTiers: ['T1', 'T2'],
+  }, { env, now: '2026-07-01T10:01:00Z' });
+  const missingTierScope = verifyExternalMcpEvidenceRefs({
+    refs: [evidence.evidence_ref],
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    watchScope: 'thread:forum.example/123',
+  }, { env, now: '2026-07-01T10:01:00Z' });
+  const wrongTier = verifyExternalMcpEvidenceRefs({
+    refs: [evidence.evidence_ref],
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    watchScope: 'thread:forum.example/123',
+    allowedCapabilityTiers: ['T3'],
+  }, { env, now: '2026-07-01T10:01:00Z' });
+
+  assert.equal(trusted.ok, true);
+  assert.deepEqual(trusted.trustedRefs, [evidence.evidence_ref]);
+  assert.equal(spoofed.ok, false);
+  assert.equal(spoofed.reason, 'evidence_not_trusted');
+  assert.equal(mismatchedScope.ok, false);
+  assert.equal(mismatchedScope.reason, 'evidence_scope_mismatch');
+  assert.equal(emptyScopeRejected.ok, false);
+  assert.equal(emptyScopeRejected.reason, 'evidence_scope_mismatch');
+  assert.equal(missingTierScope.ok, false);
+  assert.equal(missingTierScope.reason, 'evidence_tier_scope_required');
+  assert.equal(wrongTier.ok, false);
+  assert.equal(wrongTier.reason, 'evidence_tier_not_allowed');
 });

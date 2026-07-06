@@ -77,9 +77,9 @@ deployment notes belong under ignored `local_archive/`, not under
   parser and generic fallback marker consistency.
 - Media reader startup fallback now matches production DashScope OCR defaults;
   PaddleOCR is an explicit local override.
-- Opt-in AI daily digest is the only scheduled outbound allowlist path; it uses
-  the learned Feishu DM target and the normal Hermes/Feishu reply flow without
-  reopening proactive check-ins or reminders.
+- Scheduled outbound allowlist paths are the opt-in AI daily digest and
+  explicit user-created reminders. Reminders use ProactiveEvent egress; neither
+  path reopens old proactive check-ins.
 - `co_reading` Web reader is Tailscale-only, supports bilingual reading,
   browser imports, scoped Hermes margin replies, and explicit shared annotation
   deposit to `vault/inbox/co_reading/`.

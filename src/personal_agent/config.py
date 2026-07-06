@@ -80,6 +80,22 @@ def _load_default_tool_use_prompt() -> str:
     return prompt
 
 
+def _env_enabled(name: str, default: str = "false") -> bool:
+    return os.getenv(name, default).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_disabled(name: str, default: str = "true") -> bool:
+    return os.getenv(name, default).strip().lower() in {"0", "false", "no", "off"}
+
+
+def _first_bool_env(names: tuple[str, ...], default: str = "false") -> bool:
+    for name in names:
+        raw = os.getenv(name)
+        if raw is not None and raw.strip():
+            return raw.strip().lower() in {"1", "true", "yes", "on"}
+    return default.strip().lower() in {"1", "true", "yes", "on"}
+
+
 DEFAULT_SYSTEM_PROMPT = _load_default_system_prompt()
 DEFAULT_MEMORY_POLICY_PROMPT = _load_default_memory_policy_prompt()
 DEFAULT_TOOL_USE_PROMPT = _load_default_tool_use_prompt()
@@ -136,7 +152,9 @@ class AppConfig:
     daily_carryover_minute: int = 0
     reminder_check_interval_minutes: int = 5
     proactive_enabled: bool = False
+    proactive_events_enabled: bool = False
     reminder_delivery_enabled: bool = False
+    proactive_reminders_enabled: bool = False
     ai_daily_digest_enabled: bool = False
     ai_daily_digest_hour: int = 10
     ai_daily_digest_minute: int = 0
@@ -285,27 +303,23 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         ),
         knowledge_cron_hours=os.getenv("PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS", "6,12,18,23").strip(),
         knowledge_cron_minute=int(os.getenv("PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE", "0").strip()),
-        daily_carryover_enabled=os.getenv(
-            "PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
+        daily_carryover_enabled=not _env_disabled("PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED", "true"),
         daily_carryover_hour=int(os.getenv("PERSONAL_AGENT_DAILY_CARRYOVER_HOUR", "4").strip()),
         daily_carryover_minute=int(os.getenv("PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE", "0").strip()),
         reminder_check_interval_minutes=int(
             os.getenv("PERSONAL_AGENT_REMINDER_CHECK_INTERVAL_MINUTES", "5").strip()
         ),
-        proactive_enabled=os.getenv(
-            "PERSONAL_AGENT_PROACTIVE_ENABLED",
+        proactive_enabled=_env_enabled("PERSONAL_AGENT_PROACTIVE_ENABLED", "false"),
+        proactive_events_enabled=_env_enabled("HERMES_PROACTIVE_EVENTS_ENABLED", "false"),
+        reminder_delivery_enabled=_first_bool_env(
+            ("HERMES_PROACTIVE_REMINDERS_ENABLED", "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED"),
             "false",
-        ).strip().lower() in {"1", "true", "yes", "on"},
-        reminder_delivery_enabled=os.getenv(
-            "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED",
+        ),
+        proactive_reminders_enabled=_first_bool_env(
+            ("HERMES_PROACTIVE_REMINDERS_ENABLED", "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED"),
             "false",
-        ).strip().lower() in {"1", "true", "yes", "on"},
-        ai_daily_digest_enabled=os.getenv(
-            "AI_DAILY_DIGEST_ENABLED",
-            "false",
-        ).strip().lower() in {"1", "true", "yes", "on"},
+        ),
+        ai_daily_digest_enabled=_env_enabled("AI_DAILY_DIGEST_ENABLED", "false"),
         ai_daily_digest_hour=int(os.getenv("AI_DAILY_DIGEST_HOUR", "10").strip()),
         ai_daily_digest_minute=int(os.getenv("AI_DAILY_DIGEST_MINUTE", "0").strip()),
         proactive_idle_minutes=int(
@@ -348,10 +362,7 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         proactive_memory_context_max_chars=int(
             os.getenv("PERSONAL_AGENT_PROACTIVE_MEMORY_CONTEXT_MAX_CHARS", "300").strip()
         ),
-        hermes_bounded_context_enabled=os.getenv(
-            "PERSONAL_AGENT_HERMES_BOUNDED_CONTEXT_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
+        hermes_bounded_context_enabled=not _env_disabled("PERSONAL_AGENT_HERMES_BOUNDED_CONTEXT_ENABLED", "true"),
         hermes_bounded_context_interval_minutes=int(
             os.getenv("PERSONAL_AGENT_HERMES_BOUNDED_CONTEXT_INTERVAL_MINUTES", "720").strip()
         ),
@@ -364,15 +375,11 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         profile_memory_repeat_threshold=int(
             os.getenv("PERSONAL_AGENT_PROFILE_MEMORY_REPEAT_THRESHOLD", "2").strip()
         ),
-        memory_llm_enabled=os.getenv("PERSONAL_AGENT_MEMORY_LLM_ENABLED", "true").strip().lower()
-        not in {"0", "false", "no", "off"},
+        memory_llm_enabled=not _env_disabled("PERSONAL_AGENT_MEMORY_LLM_ENABLED", "true"),
         memory_llm_history_limit=int(
             os.getenv("PERSONAL_AGENT_MEMORY_LLM_HISTORY_LIMIT", "6").strip()
         ),
-        vector_memory_enabled=os.getenv(
-            "PERSONAL_AGENT_VECTOR_MEMORY_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
+        vector_memory_enabled=not _env_disabled("PERSONAL_AGENT_VECTOR_MEMORY_ENABLED", "true"),
         vector_memory_candidate_limit=int(
             os.getenv("PERSONAL_AGENT_VECTOR_MEMORY_CANDIDATE_LIMIT", "200").strip()
         ),
@@ -416,36 +423,18 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
             "PERSONAL_AGENT_TOOL_USE_SYSTEM_PROMPT",
             DEFAULT_TOOL_USE_PROMPT,
         ).strip(),
-        reviewer_enabled=os.getenv(
-            "PERSONAL_AGENT_REVIEWER_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
-        reviewer_debug_log_enabled=os.getenv(
-            "PERSONAL_AGENT_REVIEWER_DEBUG_LOG_ENABLED",
-            "false",
-        ).strip().lower() in {"1", "true", "yes", "on"},
-        reviewer_blacklist_enabled=os.getenv(
-            "PERSONAL_AGENT_REVIEWER_BLACKLIST_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
-        off_topic_check_enabled=os.getenv(
-            "PERSONAL_AGENT_OFF_TOPIC_CHECK_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
-        self_reflection_enabled=os.getenv(
-            "PERSONAL_AGENT_SELF_REFLECTION_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
+        reviewer_enabled=not _env_disabled("PERSONAL_AGENT_REVIEWER_ENABLED", "true"),
+        reviewer_debug_log_enabled=_env_enabled("PERSONAL_AGENT_REVIEWER_DEBUG_LOG_ENABLED", "false"),
+        reviewer_blacklist_enabled=not _env_disabled("PERSONAL_AGENT_REVIEWER_BLACKLIST_ENABLED", "true"),
+        off_topic_check_enabled=not _env_disabled("PERSONAL_AGENT_OFF_TOPIC_CHECK_ENABLED", "true"),
+        self_reflection_enabled=not _env_disabled("PERSONAL_AGENT_SELF_REFLECTION_ENABLED", "true"),
         self_reflection_interval_minutes=int(
             os.getenv("PERSONAL_AGENT_SELF_REFLECTION_INTERVAL_MINUTES", "720").strip()
         ),
         self_reflection_sample_limit=int(
             os.getenv("PERSONAL_AGENT_SELF_REFLECTION_SAMPLE_LIMIT", "200").strip()
         ),
-        knowledge_agent_enabled=os.getenv(
-            "PERSONAL_AGENT_KNOWLEDGE_AGENT_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
+        knowledge_agent_enabled=not _env_disabled("PERSONAL_AGENT_KNOWLEDGE_AGENT_ENABLED", "true"),
         knowledge_agent_runner_name=os.getenv(
             "PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER",
             "qwen",
@@ -464,16 +453,10 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
                 os.getenv("PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS", "300"),
             ).strip()
         ),
-        night_cycle_enabled=os.getenv(
-            "PERSONAL_AGENT_NIGHT_CYCLE_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
+        night_cycle_enabled=not _env_disabled("PERSONAL_AGENT_NIGHT_CYCLE_ENABLED", "true"),
         night_cycle_hour=int(os.getenv("PERSONAL_AGENT_NIGHT_CYCLE_HOUR", "0").strip()),
         night_cycle_minute=int(os.getenv("PERSONAL_AGENT_NIGHT_CYCLE_MINUTE", "0").strip()),
-        backend_qwen_enabled=os.getenv(
-            "PERSONAL_AGENT_BACKEND_QWEN_ENABLED",
-            "false",
-        ).strip().lower() in {"1", "true", "yes", "on"},
+        backend_qwen_enabled=_env_enabled("PERSONAL_AGENT_BACKEND_QWEN_ENABLED", "false"),
         qwen_api_key_env_var=os.getenv(
             "PERSONAL_AGENT_QWEN_API_KEY_ENV",
             "DASHSCOPE_API_KEY",
@@ -487,10 +470,7 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         qwen_timeout_seconds=int(
             os.getenv("PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS", "300").strip()
         ),
-        persona_evolution_enabled=os.getenv(
-            "PERSONAL_AGENT_PERSONA_EVOLUTION_ENABLED",
-            "true",
-        ).strip().lower() not in {"0", "false", "no", "off"},
+        persona_evolution_enabled=not _env_disabled("PERSONAL_AGENT_PERSONA_EVOLUTION_ENABLED", "true"),
         persona_proposals_dir=debug_dir / "persona_proposals",
         identity_path=resolved_base_dir / "IDENTITY.md",
         soul_path=resolved_base_dir / "SOUL.md",

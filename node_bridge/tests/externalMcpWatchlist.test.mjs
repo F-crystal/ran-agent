@@ -6,9 +6,11 @@ import test from 'node:test';
 import {
   addExternalMcpWatch,
   checkExternalMcpRateBudget,
+  commitExternalMcpNotificationReservation,
   listExternalMcpWatches,
   recordExternalMcpNotification,
   removeExternalMcpWatch,
+  releaseExternalMcpNotificationReservation,
   reserveExternalMcpNotification,
 } from '../src/externalMcp/watchlist.mjs';
 
@@ -113,21 +115,54 @@ test('rate budget enforces per-topic cooldown after global budget window passes'
   assert.equal(nextDay.allowed, true);
 });
 
-test('notification reservation records before later sends can race the same budget', (t) => {
+test('notification reservations block concurrent budget checks until committed or released', (t) => {
   const env = tempEnv(t);
-  const first = reserveExternalMcpNotification({
+  const firstBudget = checkExternalMcpRateBudget({
     globalUserId: 'user:ran',
     serverId: 'forum.example',
     topicKey: 'thread:1',
   }, { env, now: '2026-07-01T10:00:00Z' });
-  const second = reserveExternalMcpNotification({
+  const reservation = reserveExternalMcpNotification({
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    topicKey: 'thread:1',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+  const secondBudget = checkExternalMcpRateBudget({
     globalUserId: 'user:ran',
     serverId: 'forum.example',
     topicKey: 'thread:2',
   }, { env, now: '2026-07-01T10:00:00Z' });
 
-  assert.equal(first.allowed, true);
-  assert.match(first.event.eventId, /^notify_[a-f0-9]{16}$/);
-  assert.equal(second.allowed, false);
-  assert.equal(second.reason, 'global_daily_budget_exhausted');
+  assert.equal(firstBudget.allowed, true);
+  assert.equal(reservation.allowed, true);
+  assert.match(reservation.event.reservationId, /^reservation_[a-f0-9]{16}$/);
+  assert.equal(secondBudget.allowed, false);
+  assert.equal(secondBudget.reason, 'global_daily_budget_exhausted');
+
+  const released = releaseExternalMcpNotificationReservation(reservation.event.reservationId, { env });
+  const afterRelease = checkExternalMcpRateBudget({
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    topicKey: 'thread:2',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+  assert.equal(released.ok, true);
+  assert.equal(afterRelease.allowed, true);
+
+  const secondReservation = reserveExternalMcpNotification({
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    topicKey: 'thread:2',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+  const committed = commitExternalMcpNotificationReservation(secondReservation.event.reservationId, {
+    env,
+    now: '2026-07-01T10:01:00Z',
+  });
+  const afterCommit = checkExternalMcpRateBudget({
+    globalUserId: 'user:ran',
+    serverId: 'forum.example',
+    topicKey: 'thread:3',
+  }, { env, now: '2026-07-01T10:02:00Z' });
+  assert.equal(committed.status, 'sent');
+  assert.equal(afterCommit.allowed, false);
+  assert.equal(afterCommit.reason, 'global_daily_budget_exhausted');
 });

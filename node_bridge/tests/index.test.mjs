@@ -457,13 +457,13 @@ test('buildAgent keeps paragraph-separated replies in the synchronous response',
   assert.deepEqual(followUps, null);
 });
 
-test('buildAgent does not flush pending proactive messages when proactive delivery is disabled', async () => {
+test('buildAgent does not flush pending proactive messages even if legacy proactive delivery is enabled', async () => {
   const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(stateBaseDir, { recursive: true });
   const stateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-pending-disabled-'));
   const env = {
     RAN_AGENT_STATE_DIR: stateDir,
-    PERSONAL_AGENT_PROACTIVE_ENABLED: 'false',
+    PERSONAL_AGENT_PROACTIVE_ENABLED: 'true',
     NODE_BRIDGE_MERGE_WINDOW_MS: '10',
     async handleWeChatTextMessage() {
       return {

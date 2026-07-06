@@ -17,10 +17,7 @@ from personal_agent.agent_internal_state import (
     SuppressedOpportunityTrace,
     apply_decisions,
     append_opportunities,
-    has_recent_action,
-    has_recent_proactive_seed,
     load_agent_internal_state,
-    record_proactive_send,
     save_agent_internal_state,
 )
 from personal_agent.config import AppConfig
@@ -36,7 +33,7 @@ from personal_agent.interfaces.chat import IncomingMessage
 from personal_agent.interfaces.model import ModelClient, ModelRequest
 from personal_agent.context_compact import ContextCompactor, CompactionResult
 from personal_agent.exploration_specialist import ExplorationSpecialist
-from personal_agent.knowledge_agent import KnowledgeAgent, KnowledgeState, load_knowledge_state
+from personal_agent.knowledge_agent import KnowledgeAgent
 from personal_agent.life_loop import LifeOpportunity
 from personal_agent.memory_specialist import MemorySpecialist
 from personal_agent.preference_profile import load_preference_weak_reference
@@ -78,23 +75,12 @@ class OpportunityJudgment:
 
 
 @dataclass(frozen=True)
-class ProactiveMessagePlan:
-    """One proactive outbound message approved by the orchestrator."""
-
-    opportunity_id: str
-    text: str
-    channel: str
-    seed: str
-    reason: str
-
-
-@dataclass(frozen=True)
 class OpportunityExecutionBatch:
     """Structured opportunity evaluation with real actions ready for execution."""
 
     judgments: tuple[OpportunityJudgment, ...]
     surfaced_count: int
-    outbound_messages: tuple[ProactiveMessagePlan, ...]
+    outbound_messages: tuple[object, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -198,7 +184,6 @@ class OrchestratorAgent:
 
         started = perf_counter()
         state = load_agent_internal_state(self._database)
-        knowledge_state = load_knowledge_state(self._config)
         opportunity_traces = [
             OpportunityTrace(
                 opportunity_id=opportunity.id,
@@ -217,21 +202,12 @@ class OrchestratorAgent:
         action_traces: list[AgentActionTrace] = []
         suppressed_traces: list[SuppressedOpportunityTrace] = []
         pending_items: list[PendingItem] = []
-        outbound_messages: list[ProactiveMessagePlan] = []
         for opportunity in opportunities:
             judgment = self._judge_opportunity(
                 opportunity,
                 state=state,
-                knowledge_state=knowledge_state,
                 now_local=now_local,
             )
-            if judgment.action == "message":
-                judgment = self._revise_message_judgment(
-                    opportunity=opportunity,
-                    judgment=judgment,
-                    knowledge_state=knowledge_state,
-                    now_local=now_local,
-                )
             judgments.append(judgment)
             action_traces.append(
                 AgentActionTrace(
@@ -263,17 +239,6 @@ class OrchestratorAgent:
                         created_at=now_local.strftime("%Y-%m-%d %H:%M:%S"),
                     )
                 )
-            if judgment.action == "message" and judgment.suggested_text.strip():
-                outbound_messages.append(
-                    ProactiveMessagePlan(
-                        opportunity_id=judgment.opportunity_id,
-                        text=judgment.suggested_text.strip(),
-                        channel=str(opportunity.context.get("channel", "wechat")).strip() or "wechat",
-                        seed=str(opportunity.payload.get("seed", "")).strip(),
-                        reason=judgment.reason,
-                    )
-                )
-            
             # Execute background work for silent actions
             if judgment.action == "silent":
                 self._execute_silent_work(opportunity, judgment)
@@ -299,7 +264,7 @@ class OrchestratorAgent:
         return OpportunityExecutionBatch(
             judgments=tuple(judgments),
             surfaced_count=len(opportunities),
-            outbound_messages=tuple(outbound_messages),
+            outbound_messages=(),
         )
 
     def _execute_silent_work(
@@ -382,35 +347,16 @@ class OrchestratorAgent:
                 str(e),
             )
 
-    def record_proactive_send(
-        self,
-        *,
-        opportunity_id: str,
-        seed: str,
-        text: str,
-        now_local: datetime,
-    ) -> None:
-        """Persist one successful proactive send into the agent internal state."""
-
-        state = load_agent_internal_state(self._database)
-        state = record_proactive_send(
-            state,
-            opportunity_id=opportunity_id,
-            seed=seed,
-            text=text,
-            now_local=now_local,
-        )
-        save_agent_internal_state(self._database, state)
-
     def _judge_opportunity(
         self,
         opportunity: LifeOpportunity,
         *,
         state: AgentInternalState,
-        knowledge_state: KnowledgeState,
         now_local: datetime,
     ) -> OpportunityJudgment:
         """Apply lightweight judgment without turning into a rigid rules engine."""
+
+        del state, now_local
 
         if opportunity.kind == "exploration":
             return OpportunityJudgment(
@@ -444,6 +390,14 @@ class OrchestratorAgent:
                 reason="knowledge_maintenance_fits_background_work",
             )
 
+        if opportunity.kind == "companion":
+            return OpportunityJudgment(
+                opportunity_id=opportunity.id,
+                kind=opportunity.kind,
+                action="drop",
+                reason="legacy_companion_proactive_retired",
+            )
+
         if opportunity.kind != "companion":
             return OpportunityJudgment(
                 opportunity_id=opportunity.id,
@@ -451,249 +405,6 @@ class OrchestratorAgent:
                 action="drop",
                 reason="unsupported_opportunity_kind",
             )
-
-        if has_recent_action(
-            state,
-            kind="companion",
-            action="message",
-            now_local=now_local,
-            within_minutes=self._config.proactive_idle_minutes,
-        ):
-            return OpportunityJudgment(
-                opportunity_id=opportunity.id,
-                kind=opportunity.kind,
-                action="defer",
-                reason="recent_companion_action",
-            )
-
-        try:
-            expires_at = datetime.strptime(opportunity.expires_at, "%Y-%m-%d %H:%M:%S")
-        except ValueError:
-            expires_at = now_local
-        if expires_at < now_local:
-            return OpportunityJudgment(
-                opportunity_id=opportunity.id,
-                kind=opportunity.kind,
-                action="drop",
-                reason="opportunity_expired",
-            )
-
-        interrupt_risk = str(opportunity.signals.get("user_interrupt_risk", "")).strip().lower()
-        if interrupt_risk == "high":
-            return OpportunityJudgment(
-                opportunity_id=opportunity.id,
-                kind=opportunity.kind,
-                action="defer",
-                reason="interrupt_risk_too_high",
-            )
-
-        opener_clue = str(opportunity.payload.get("opener_clue", "")).strip()
-        seed = str(opportunity.payload.get("seed", "")).strip()
-        source_channel = str(opportunity.context.get("channel", "wechat")).strip() or "wechat"
-        if has_recent_proactive_seed(
-            state,
-            seed=seed,
-            now_local=now_local,
-            within_minutes=self._config.proactive_idle_minutes,
-        ):
-            return OpportunityJudgment(
-                opportunity_id=opportunity.id,
-                kind=opportunity.kind,
-                action="drop",
-                reason="recent_seed_repeated",
-            )
-        session_support = self._memory_specialist.get_session_support(source_channel)
-        local_context_strength = sum(
-            1
-            for bucket in (
-                session_support.recent_user_messages,
-                session_support.working_memories,
-                session_support.profile_memories,
-            )
-            if bucket
-        )
-        if (
-            knowledge_state.pending_knowledge_maintenance
-            and not opener_clue
-            and local_context_strength < 2
-        ):
-            return OpportunityJudgment(
-                opportunity_id=opportunity.id,
-                kind=opportunity.kind,
-                action="defer",
-                reason="knowledge_pending_and_local_context_too_thin",
-            )
-        if not opener_clue or local_context_strength < 2:
-            inspection_results = self._qwen_agent_runtime.inspect_local_context(
-                channel=source_channel,
-                user_text=opener_clue or str(opportunity.payload.get("source_type", "")),
-            )
-            inspection_note = "; ".join(
-                f"{item.tool_name}={len(item.payload)}"
-                for item in inspection_results
-            )
-            return OpportunityJudgment(
-                opportunity_id=opportunity.id,
-                kind=opportunity.kind,
-                action="inspect_more",
-                reason="local_context_not_confident_enough",
-                uses_local_context=True,
-                notes=inspection_note or (
-                    f"recent_messages={len(session_support.recent_user_messages)},"
-                    f" working_memories={len(session_support.working_memories)},"
-                    f" profile_memories={len(session_support.profile_memories)}"
-                ),
-            )
-
-        return OpportunityJudgment(
-            opportunity_id=opportunity.id,
-            kind=opportunity.kind,
-            action="message",
-            reason="natural_companion_opportunity_available",
-            suggested_text=opener_clue,
-        )
-
-    def _revise_message_judgment(
-        self,
-        *,
-        opportunity: LifeOpportunity,
-        judgment: OpportunityJudgment,
-        knowledge_state: KnowledgeState,
-        now_local: datetime,
-    ) -> OpportunityJudgment:
-        """Generate final proactive text through conversation agent speaking layer."""
-
-        seed = str(opportunity.payload.get("seed", "")).strip()
-        hint_text = judgment.suggested_text.strip()
-        if not hint_text:
-            return OpportunityJudgment(
-                opportunity_id=judgment.opportunity_id,
-                kind=judgment.kind,
-                action="drop",
-                reason="no_natural_hint",
-            )
-
-        source_channel = str(opportunity.context.get("channel", "wechat")).strip() or "wechat"
-        recall_result = self._memory_specialist.recall_for_turn(
-            user_text=seed or hint_text,
-            route="text_chat",
-            response_mode="casual_chat",
-        )
-        memory_context = ""
-        if recall_result.should_inject:
-            memory_context = self._memory_specialist.build_memory_context(recall_result)
-        proactive_text = self._compose_proactive_message(
-            channel=source_channel,
-            seed=seed,
-            opener_clue=hint_text,
-            knowledge_state=knowledge_state,
-            memory_context=memory_context,
-        )
-        if not proactive_text:
-            return OpportunityJudgment(
-                opportunity_id=judgment.opportunity_id,
-                kind=judgment.kind,
-                action="drop",
-                reason="message_generation_failed",
-            )
-        if self._is_low_value_proactive_text(
-            proactive_text=proactive_text,
-            seed=seed,
-            opener_clue=hint_text,
-        ):
-            return OpportunityJudgment(
-                opportunity_id=judgment.opportunity_id,
-                kind=judgment.kind,
-                action="drop",
-                reason="low_value_proactive_text",
-            )
-        return OpportunityJudgment(
-            opportunity_id=judgment.opportunity_id,
-            kind=judgment.kind,
-            action="message",
-            reason="companion_message_ready",
-            suggested_text=proactive_text,
-        )
-
-    def _compose_proactive_message(
-        self,
-        *,
-        channel: str,
-        seed: str,
-        opener_clue: str,
-        knowledge_state: KnowledgeState,
-        memory_context: str,
-    ) -> str:
-        """Compose a concise proactive opener without relying on retired chat runtime."""
-
-        user_message = "\n".join(
-            [
-                "请基于以下线索，生成一句自然、简短、不打扰的中文关心消息。",
-                f"- 渠道: {channel}",
-                f"- 种子: {seed or 'none'}",
-                f"- 开场线索: {opener_clue}",
-                f"- 知识维护待处理: {'yes' if knowledge_state.pending_knowledge_maintenance else 'no'}",
-            ]
-        )
-        if memory_context.strip():
-            user_message += (
-                "\n- 记忆线索:\n"
-                f"{memory_context.strip()[: self._config.proactive_memory_context_max_chars]}"
-            )
-        request = ModelRequest(
-            system_prompt=(
-                "你是一个克制的个人助理。只输出一句给用户的话，不要解释，不要使用 markdown，"
-                "避免命令口吻，长度控制在 12-40 字。必须结合线索里的具体事项，不要只说泛泛关心。"
-            ),
-            user_message=user_message,
-            memory_context="",
-        )
-        response = self._model_client.generate_reply(request)
-        text = response.text.strip()
-        if response.is_error or not text:
-            self._logger.warning(
-                "proactive message compose failed provider=%s is_error=%s",
-                response.provider,
-                response.is_error,
-            )
-            return ""
-        return text
-
-    def _is_low_value_proactive_text(
-        self,
-        *,
-        proactive_text: str,
-        seed: str,
-        opener_clue: str,
-    ) -> bool:
-        """Return whether one proactive text is too generic to send."""
-
-        text = proactive_text.strip()
-        if not text:
-            return True
-        normalized_text = re.sub(r"\s+", "", text)
-        blocked_patterns = (
-            r"刚想到你最近挺忙的[，,。]?(今天)?还顺吗[。？?]?$",
-            r"^这条消息会被缓存[。！!]?$",
-        )
-        if any(re.match(pattern, normalized_text) for pattern in blocked_patterns):
-            return True
-
-        cleaned_seed = seed.strip()
-        if cleaned_seed and cleaned_seed not in text:
-            has_generic_prompt = bool(
-                re.search(r"(最近|这几天).{0,6}(忙|累|辛苦)|还顺吗|还好吗|怎么样", normalized_text)
-            )
-            if has_generic_prompt:
-                return True
-
-        # If neither seed nor clue details appear, this message is likely too abstract.
-        clue_fragments = [frag for frag in re.split(r"[，。！？、\s]+", opener_clue) if len(frag.strip()) >= 2]
-        if clue_fragments and not any(frag in text for frag in clue_fragments[:2]) and (
-            not cleaned_seed or cleaned_seed not in text
-        ):
-            return True
-        return False
 
     def _load_session_state(self, message: IncomingMessage) -> ConversationSessionState:
         """Load one short-lived session state from handoff storage."""

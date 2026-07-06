@@ -40,7 +40,11 @@ echo "[external-mcp] checking Node system queue requires the gateway gate"
 node --input-type=module -e '
 import { handleExternalMcpSystemQueueRequest } from "./node_bridge/src/outboundServer.mjs";
 const result = await handleExternalMcpSystemQueueRequest({
-  env: { EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "true" },
+  env: {
+    HERMES_PROACTIVE_EVENTS_ENABLED: "true",
+    HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: "true",
+    EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "true",
+  },
   bodyText: JSON.stringify({
     serverId: "forum.example",
     watchScope: "thread:forum.example/123",

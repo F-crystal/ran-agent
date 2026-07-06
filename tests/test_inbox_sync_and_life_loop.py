@@ -32,10 +32,15 @@ class StubOutboundClient:
 
     def __init__(self) -> None:
         self.sent: list[str] = []
+        self.events: list[dict[str, object]] = []
 
     def send_text(self, text: str, **_: object) -> dict[str, object]:
         self.sent.append(text)
         return {"ok": True}
+
+    def send_proactive_event(self, event: dict[str, object]) -> dict[str, object]:
+        self.events.append(event)
+        return {"ok": True, "status": "sent", "notified": True}
 
 
 def _build_logger() -> logging.Logger:
@@ -139,7 +144,7 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
         self.assertIn("category: audio", note_text)
         self.assertIn("voice-note.m4a", note_text)
 
-    def test_evaluate_life_opportunities_sends_proactive_message(self) -> None:
+    def test_evaluate_life_opportunities_does_not_send_retired_companion_message(self) -> None:
         self.database.record_timeline_event(
             source="wechat",
             event_type="user_message",
@@ -181,14 +186,14 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
             now_local=datetime(2026, 4, 13, 11, 10, 0),
         )
 
-        self.assertEqual(len(batch.outbound_messages), 1)
-        self.assertEqual(outbound.sent, ["刚想到你在改论文，进展还顺吗？"])
+        self.assertEqual(len(batch.outbound_messages), 0)
+        self.assertEqual(outbound.sent, [])
+        self.assertEqual(batch.judgments[0].reason, "legacy_companion_proactive_retired")
 
         events = self.database.fetch_timeline_events()
-        self.assertEqual(events[-1]["event_type"], "agent_proactive")
-        self.assertEqual(events[-1]["content"], "刚想到你在改论文，进展还顺吗？")
+        self.assertNotEqual(events[-1]["event_type"], "agent_proactive")
 
-    def test_evaluate_life_opportunities_drops_low_value_proactive_message(self) -> None:
+    def test_evaluate_life_opportunities_retires_low_value_companion_path_before_generation(self) -> None:
         self.database.record_timeline_event(
             source="wechat",
             event_type="user_message",
@@ -232,9 +237,20 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
 
         self.assertEqual(len(batch.outbound_messages), 0)
         self.assertEqual(outbound.sent, [])
+        self.assertEqual(batch.judgments[0].reason, "legacy_companion_proactive_retired")
 
     def test_reminder_check_job_sends_persisted_due_reminder_after_restart(self) -> None:
-        first_database = Database(self.config, self.logger)
+        reminder_config = AppConfig(
+            base_dir=self.config.base_dir,
+            data_dir=self.config.data_dir,
+            logs_dir=self.config.logs_dir,
+            vault_dir=self.config.vault_dir,
+            database_path=self.config.database_path,
+            log_file_path=self.config.log_file_path,
+            proactive_enabled=False,
+            reminder_delivery_enabled=True,
+        )
+        first_database = Database(reminder_config, self.logger)
         first_database.initialize()
         todo_id = first_database.create_todo(
             content="交房租",
@@ -242,26 +258,30 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
             source="user",
         )
 
-        restarted_database = Database(self.config, self.logger)
+        restarted_database = Database(reminder_config, self.logger)
         restarted_database.initialize()
         restarted_service = PersonalAgentService(
             database=restarted_database,
             model_client=PlaceholderModelClient(),
             logger=self.logger,
-            config=self.config,
+            config=reminder_config,
         )
         outbound = StubOutboundClient()
         restarted_service._outbound_client = outbound  # type: ignore[attr-defined]
 
         reminder_check_job(
-            config=self.config,
+            config=reminder_config,
             database=restarted_database,
             message_service=restarted_service,
             logger=self.logger,
         )
 
-        self.assertEqual(len(outbound.sent), 1)
-        self.assertIn("提醒一下：交房租", outbound.sent[0])
+        self.assertEqual(outbound.sent, [])
+        self.assertEqual(len(outbound.events), 1)
+        self.assertEqual(outbound.events[0]["kind"], "reminder")
+        self.assertEqual(outbound.events[0]["watch_scope"], f"todo:{todo_id}")
+        self.assertEqual(outbound.events[0]["evidence_refs"], [f"todo:{todo_id}"])
+        self.assertIn("交房租", str(outbound.events[0]["reason"]))
 
         events = restarted_database.fetch_timeline_events()
         self.assertEqual(events[-1]["event_type"], "reminder_batch_sent")
@@ -306,6 +326,7 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
         )
 
         self.assertEqual(outbound.sent, [])
+        self.assertEqual(outbound.events, [])
         todo = self.database.get_todo_by_id(todo_id)
         self.assertIsNotNone(todo)
         assert todo is not None
@@ -327,7 +348,7 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
             source="agent",
             event_type="agent_proactive",
             content="夜深了，提醒一下：交房租",
-            tags=f"message,proactive,wechat,seed:reminder:{todo_id}",
+            tags=f"message,proactive,feishu,seed:reminder:{todo_id}:20000101T090000",
             importance=1,
         )
 
@@ -342,6 +363,7 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
         )
 
         self.assertEqual(outbound.sent, [])
+        self.assertEqual(outbound.events, [])
         events = self.database.fetch_timeline_events()
         self.assertEqual(events[-1]["event_type"], "reminder_batch_sent")
         self.assertIn('"sent_count": 0', events[-1]["content"])

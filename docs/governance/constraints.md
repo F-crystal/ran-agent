@@ -17,15 +17,21 @@ Status: CURRENT (2026-07-02)
 - Chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Scheduled digest mainline: `scheduler -> AIHOT facts -> synthetic Feishu turn -> Hermes -> Feishu reply`
-- External MCP candidate mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional synthetic Hermes turn`; source profiles fall back disabled, while standard server deploy enables the gateway and system queue env gates.
+- External MCP candidate mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional ProactiveEvent synthetic Hermes turn`; source profiles fall back disabled, while standard server deploy enables the gateway, proactive event, and system queue env gates.
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
 - OpenClaw, Kimi, GLM, and MiMo Power are retired. Hermes (DeepSeek V4) is the sole frontend.
-- Life-loop, reminders, and reflection remain backend/support layers. They are
-  not an open-ended proactive outbound mainline; only the allowlisted scheduled
-  AI daily digest may send scheduled outbound content.
+- Life-loop and reflection remain backend/support layers. They are not an
+  open-ended proactive outbound mainline. Explicit reminders may notify only as
+  structured ProactiveEvents; the allowlisted AI daily digest keeps its separate
+  scheduled Feishu/Hermes path.
 - External MCP proactive is not a reopened life-loop. It may only be considered
-  for explicit watchlist/关注 scopes, rate budget, and a synthetic Hermes turn;
-  `silent`/`remember`/empty outputs do not send visible text.
+  for explicit watchlist/关注 scopes, trusted external MCP evidence-log refs,
+  rate budget, and a synthetic Hermes turn from `/external-mcp/system-queue`.
+  Caller-supplied evidence strings or tier lists are not evidence; the evidence
+  log entry must match the same user, server, non-empty watch scope, and
+  server-derived safe tier. `silent`/`remember`/`draft`/malformed outputs do not
+  send visible text; budget uses a short reservation lease that is released when
+  Hermes stays silent or delivery fails.
 
 ## Specialist Boundaries
 

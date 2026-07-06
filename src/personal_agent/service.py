@@ -404,49 +404,31 @@ class PersonalAgentService:
         *,
         now_local: datetime | None = None,
     ) -> LifeOpportunityExecutionBatch:
-        """Evaluate and execute life-loop opportunities, including proactive sends."""
-
-        if not self._config.proactive_enabled:
-            self._logger.info("skip life-loop execution because proactive messaging is frozen")
-            return LifeOpportunityExecutionBatch(judgments=(), outbound_messages=())
+        """Evaluate background life-loop opportunities without legacy proactive sends."""
 
         local_now = now_local or datetime.now()
-        execution_batch = self._orchestrator_agent.evaluate_opportunities(
-            opportunities,
-            now_local=local_now,
+        retired_judgments = tuple(
+            LifeOpportunityJudgment(
+                opportunity_id=opportunity.id,
+                kind=opportunity.kind,
+                action="drop",
+                reason="legacy_companion_proactive_retired",
+                uses_local_context=False,
+            )
+            for opportunity in opportunities
+            if opportunity.kind == "companion"
         )
-        sent_payloads: list[dict[str, object]] = []
-        for plan in execution_batch.outbound_messages:
-            try:
-                bridge_result = self._outbound_client.send_text(plan.text, kind="checkin")
-                self._database.record_timeline_event(
-                    source="agent",
-                    event_type="agent_proactive",
-                    content=plan.text,
-                    tags=_build_proactive_tags(plan.channel, plan.seed),
-                    importance=1,
-                )
-                self._orchestrator_agent.record_proactive_send(
-                    opportunity_id=plan.opportunity_id,
-                    seed=plan.seed,
-                    text=plan.text,
-                    now_local=local_now,
-                )
-                sent_payloads.append(
-                    {
-                        "opportunity_id": plan.opportunity_id,
-                        "channel": plan.channel,
-                        "text": plan.text,
-                        "reason": plan.reason,
-                        "bridge": bridge_result,
-                    }
-                )
-            except Exception:
-                self._logger.exception(
-                    "life opportunity proactive send failed opportunity_id=%s channel=%s",
-                    plan.opportunity_id,
-                    plan.channel,
-                )
+        background_opportunities = tuple(
+            opportunity for opportunity in opportunities if opportunity.kind != "companion"
+        )
+        execution_batch = (
+            self._orchestrator_agent.evaluate_opportunities(
+                background_opportunities,
+                now_local=local_now,
+            )
+            if background_opportunities
+            else None
+        )
         judgments = tuple(
             LifeOpportunityJudgment(
                 opportunity_id=item.opportunity_id,
@@ -456,11 +438,11 @@ class PersonalAgentService:
                 uses_local_context=item.uses_local_context,
                 suggested_text=item.suggested_text or None,
             )
-            for item in execution_batch.judgments
+            for item in (execution_batch.judgments if execution_batch else ())
         )
         return LifeOpportunityExecutionBatch(
-            judgments=judgments,
-            outbound_messages=tuple(sent_payloads),
+            judgments=(*retired_judgments, *judgments),
+            outbound_messages=(),
         )
 
     def run_life_loop_state(self, *, now_local: datetime | None = None) -> dict[str, object]:
@@ -843,88 +825,71 @@ class PersonalAgentService:
         seed: str = "",
         reason: str = "",
     ) -> dict[str, object]:
-        """Send a proactive message through the outbound channel.
+        """Reject the retired direct proactive text route.
 
-        Args:
-            text: Message text to send
-            channel: Target channel (default: wechat)
-            seed: Seed identifier for deduplication
-            reason: Reason for sending (for logging)
-
-        Returns:
-            Dictionary with send result details
+        Visible proactive delivery must now go through structured ProactiveEvent
+        synthetic turns so Hermes writes the message and Node applies egress.
         """
-        self._logger.info(
-            "sending proactive message channel=%s seed=%s reason=%s",
+        self._logger.warning(
+            "legacy proactive text route rejected channel=%s seed=%s reason=%s text_chars=%s",
             channel,
             seed,
             reason,
+            len(text),
         )
+        return {
+            "success": False,
+            "channel": channel,
+            "text": text,
+            "seed": seed,
+            "reason": reason,
+            "error": "legacy proactive text route retired; use send_proactive_event",
+        }
 
-        if not self._config.proactive_enabled:
-            self._logger.info("skip proactive message because proactive messaging is frozen")
-            return {
-                "success": False,
-                "channel": channel,
-                "text": text,
-                "seed": seed,
-                "reason": reason,
-                "error": "proactive messaging frozen",
-            }
+    def send_proactive_event(self, event: dict[str, object]) -> dict[str, object]:
+        """Submit one structured proactive event through the Node bridge."""
 
+        event_id = str(event.get("event_id") or event.get("eventId") or "").strip()
+        kind = str(event.get("kind") or "").strip()
+        self._logger.info("submitting proactive event kind=%s event_id=%s", kind, event_id)
         try:
-            outbound_kind = "reminder" if seed.startswith("reminder:") else "checkin"
-            bridge_result = self._outbound_client.send_text(text, kind=outbound_kind)
-
-            # Record to timeline
-            self._database.record_timeline_event(
-                source="agent",
-                event_type="agent_proactive",
-                content=text,
-                tags=_build_proactive_tags(channel, seed),
-                importance=1,
-            )
-
-            # Record in orchestrator state if seed provided
-            if seed:
-                self._orchestrator_agent.record_proactive_send(
-                    opportunity_id=f"proactive:{seed}",
-                    seed=seed,
-                    text=text,
-                    now_local=datetime.now(),
-                )
-
-            self._logger.info(
-                "proactive message sent channel=%s seed=%s bridge=%s",
-                channel,
-                seed,
-                bridge_result,
-            )
-
-            return {
-                "success": True,
-                "channel": channel,
-                "text": text,
-                "seed": seed,
-                "reason": reason,
-                "bridge_result": bridge_result,
-            }
-
+            bridge_result = self._outbound_client.send_proactive_event(event)
         except Exception as e:
             self._logger.exception(
-                "proactive message send failed channel=%s seed=%s error=%s",
-                channel,
-                seed,
+                "proactive event submit failed kind=%s event_id=%s error=%s",
+                kind,
+                event_id,
                 str(e),
             )
             return {
                 "success": False,
-                "channel": channel,
-                "text": text,
-                "seed": seed,
-                "reason": reason,
+                "event_id": event_id,
+                "kind": kind,
                 "error": str(e),
             }
+        success = bridge_result.get("notified") is True or bridge_result.get("status") == "sent"
+        if success:
+            self._database.record_timeline_event(
+                source="agent",
+                event_type="agent_proactive",
+                content=json.dumps(
+                    {
+                        "event_id": event_id,
+                        "kind": kind,
+                        "watch_scope": event.get("watch_scope", ""),
+                        "reason": event.get("reason", ""),
+                    },
+                    ensure_ascii=False,
+                ),
+                tags=_build_proactive_tags(str(event.get("channel") or "feishu"), str(event.get("dedupe_key") or event_id)),
+                importance=1,
+            )
+        return {
+            "success": success,
+            "event_id": event_id,
+            "kind": kind,
+            "bridge_result": bridge_result,
+        }
 
     def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
         """Send one scheduled AI daily digest trigger through Node bridge."""

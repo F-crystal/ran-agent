@@ -78,6 +78,9 @@ export function buildExternalMcpGatewayTools() {
       sessionId: str(),
       activityId: str(),
       globalUserId: str(),
+      requestId: str(),
+      watchScope: str(),
+      topicKey: str(),
     }, ['serverId', 'toolName', 'sessionId']),
     tool('mcp_open_session', 'MCP Open Session', 'Open an observe, interactive, or write session for an enabled external MCP server.', {
       globalUserId: str(),
@@ -312,9 +315,12 @@ async function dispatchTool(name, args, options) {
         })
       : true;
     const evidence = appendExternalMcpEvidence({
+      requestId: args.requestId || args.request_id || '',
       globalUserId,
       serverId: server.id,
       toolName: selectedTool.name,
+      watchScope: args.watchScope || args.watch_scope || args.topicKey || args.topic_key
+        || args.arguments?.watchScope || args.arguments?.watch_scope || args.arguments?.scope || '',
       tier: selectedTool.tier,
       sessionMode,
       trigger,

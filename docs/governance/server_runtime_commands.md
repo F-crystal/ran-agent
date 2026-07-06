@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-04)
+Status: CURRENT (2026-07-05)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -12,6 +12,8 @@ manual systemd or env edits.
   `bash scripts/apply-hermes-runtime-split.sh`
 - Diagnose lite/full convergence:
   `bash scripts/diagnose-lite-full.sh`
+- Diagnose proactive events:
+  `bash scripts/diagnose-proactive-events.sh`
 - Diagnose Search Hub:
   `bash scripts/diagnose-search-hub.sh`
 - Diagnose Ombre Brain:
@@ -53,7 +55,9 @@ cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
 git pull --ff-only
 bash scripts/apply-hermes-runtime-split.sh
+bash scripts/diagnose-proactive-events.sh
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-external-mcp-gateway.sh
 bash scripts/diagnose-ombre-memory.sh
 ```
 
@@ -64,6 +68,17 @@ bash scripts/diagnose-ombre-memory.sh
   `ran-agent-hermes-full.service`.
 - Runtime env upsert for Hermes homes, root Node env, and
   `/opt/ran_agent/node_bridge/.env.local`.
+- Service restart for `ran-agent-python.service`, `ran-agent-node.service`,
+  `ran-agent-hermes.service`, and `ran-agent-hermes-full.service` so new env
+  gates are loaded by running processes.
+- Proactive event gates:
+  `HERMES_PROACTIVE_EVENTS_ENABLED=true`,
+  `HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true`,
+  `HERMES_PROACTIVE_REMINDERS_ENABLED=true`, while legacy
+  `PERSONAL_AGENT_PROACTIVE_ENABLED=false` remains frozen.
+- `/opt/ran_agent` diagnostics run strict proactive env checks: `.env.local`,
+  `node_bridge/.env.local`, and the running Python/Node service environments
+  must all show those gates after deployment.
 - UV cache/tool directories under `/opt/ran_agent/.ran_agent_state/`.
 - Trusted runtime media directories, including
   `/opt/ran_agent/.ran_agent_state/wechat/inbound` and

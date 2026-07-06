@@ -53,7 +53,7 @@ class LifeLoopTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
-    def test_life_loop_generates_companion_reflection_and_maintenance_opportunities(self) -> None:
+    def test_life_loop_generates_background_opportunities_without_companion(self) -> None:
         self.database.record_timeline_event(
             source="wechat",
             event_type="user_message",
@@ -101,28 +101,19 @@ class LifeLoopTest(unittest.TestCase):
         self.assertEqual(
             opportunity_kinds,
             {
-                "companion",
                 "reflection",
                 "maintenance",
                 "exploration",
             },
         )
-        companion_opportunity = next(
-            opportunity for opportunity in result.opportunities if opportunity.kind == "companion"
-        )
-        self.assertEqual(companion_opportunity.consumer, "orchestrator_agent")
-        self.assertEqual(companion_opportunity.source, "life_loop")
-        self.assertEqual(companion_opportunity.status, "open")
-        self.assertEqual(companion_opportunity.attention_hint, "worth_a_look")
-        self.assertIn("opener_clue", companion_opportunity.payload)
-        self.assertIn("论文", str(companion_opportunity.payload["opener_clue"]))
+        self.assertNotIn("companion", opportunity_kinds)
         exploration_opportunity = next(
             opportunity for opportunity in result.opportunities if opportunity.kind == "exploration"
         )
         self.assertEqual(exploration_opportunity.consumer, "exploration_specialist")
         self.assertEqual(exploration_opportunity.source, "life_loop")
 
-    def test_life_loop_skips_companion_opportunity_in_silent_window(self) -> None:
+    def test_life_loop_never_emits_companion_opportunity(self) -> None:
         self.database.record_timeline_event(
             source="wechat",
             event_type="user_message",
@@ -147,7 +138,8 @@ class LifeLoopTest(unittest.TestCase):
             now_utc=datetime(2026, 4, 10, 8, 30, 0),
         )
 
-        self.assertNotIn("companion", {opportunity.kind for opportunity in result.opportunities})
+        opportunity_kinds = {opportunity.kind for opportunity in result.opportunities}
+        self.assertNotIn("companion", opportunity_kinds)
 
     def test_serialize_opportunities_returns_json_array(self) -> None:
         self.database.record_timeline_event(

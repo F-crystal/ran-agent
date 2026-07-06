@@ -12,7 +12,6 @@ from personal_agent.orchestrator_agent import OrchestratorAgent
 from personal_agent.config import AppConfig
 from personal_agent.db import Database
 from personal_agent.interfaces.model import ModelRequest, ModelResponse, PlaceholderModelClient
-from personal_agent.knowledge_agent import KnowledgeState, save_knowledge_state
 from personal_agent.life_loop import LifeOpportunity
 from personal_agent.memory_specialist import MemorySpecialist
 
@@ -112,7 +111,7 @@ class ChatAgentOpportunityTest(unittest.TestCase):
 
         self.assertEqual([item.action for item in batch.judgments], ["silent", "silent"])
 
-    def test_chat_agent_companion_can_request_local_inspect_more(self) -> None:
+    def test_chat_agent_companion_path_is_retired_before_local_inspection(self) -> None:
         batch = self.chat_agent.evaluate_opportunities(
             (
                 LifeOpportunity(
@@ -132,10 +131,11 @@ class ChatAgentOpportunityTest(unittest.TestCase):
             now_local=datetime(2026, 4, 11, 21, 10, 0),
         )
 
-        self.assertEqual(batch.judgments[0].action, "inspect_more")
-        self.assertTrue(batch.judgments[0].uses_local_context)
+        self.assertEqual(batch.judgments[0].action, "drop")
+        self.assertEqual(batch.judgments[0].reason, "legacy_companion_proactive_retired")
+        self.assertFalse(batch.judgments[0].uses_local_context)
 
-    def test_chat_agent_companion_can_choose_message_when_context_is_available(self) -> None:
+    def test_chat_agent_companion_message_path_is_retired_even_with_context(self) -> None:
         self.chat_agent = self._build_chat_agent_with_fixed_reply(
             "刚想到你最近一直在忙论文，今天还顺吗。"
         )
@@ -176,22 +176,11 @@ class ChatAgentOpportunityTest(unittest.TestCase):
             now_local=datetime(2026, 4, 11, 21, 10, 0),
         )
 
-        self.assertEqual(batch.judgments[0].action, "message")
-        self.assertIn("论文", batch.judgments[0].suggested_text)
-        self.assertEqual(len(batch.outbound_messages), 1)
-        self.assertIn("论文", batch.outbound_messages[0].text)
+        self.assertEqual(batch.judgments[0].action, "drop")
+        self.assertEqual(batch.judgments[0].reason, "legacy_companion_proactive_retired")
+        self.assertEqual(len(batch.outbound_messages), 0)
 
-    def test_chat_agent_defers_thin_companion_when_knowledge_pending(self) -> None:
-        save_knowledge_state(
-            self.config,
-            KnowledgeState(
-                updated_at="2026-04-11 20:00:00",
-                pending_knowledge_maintenance=True,
-                recent_curated_topics=("论文",),
-                recent_source_additions=("source-a",),
-            ),
-        )
-
+    def test_chat_agent_drops_thin_companion_even_when_knowledge_pending(self) -> None:
         batch = self.chat_agent.evaluate_opportunities(
             (
                 LifeOpportunity(
@@ -211,11 +200,8 @@ class ChatAgentOpportunityTest(unittest.TestCase):
             now_local=datetime(2026, 4, 11, 21, 10, 0),
         )
 
-        self.assertEqual(batch.judgments[0].action, "defer")
-        self.assertEqual(
-            batch.judgments[0].reason,
-            "knowledge_pending_and_local_context_too_thin",
-        )
+        self.assertEqual(batch.judgments[0].action, "drop")
+        self.assertEqual(batch.judgments[0].reason, "legacy_companion_proactive_retired")
 
 
 if __name__ == "__main__":

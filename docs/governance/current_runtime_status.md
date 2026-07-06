@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-04)
+Status: CURRENT (2026-07-05)
 
 This is the compact source of truth for current production behavior. Detailed
 operator commands live in `docs/governance/server_runtime_commands.md`.
@@ -32,14 +32,21 @@ External MCP candidates
 - Desktop Proxy is disabled by default and should stay bound to localhost or a
   controlled private network when enabled. Set `DESKTOP_PROXY_API_KEY` before
   exposing it beyond the local machine.
-- The only scheduled outbound message is the opt-in AI daily digest. It runs
-  through the Feishu/Hermes mainline and does not reopen old proactive
-  check-ins, reminders, or life-loop outbound behavior.
+- Scheduled outbound is limited to allowlisted paths: the opt-in AI daily
+  digest and explicit user-created reminders. Neither path reopens old
+  life-loop/check-in behavior.
+- Visible proactive delivery now uses structured `ProactiveEvent` synthetic
+  turns. The old `life_loop/checkin -> /outbound/send` route is retired for text
+  and media, including `force=true`; explicit reminders and external MCP
+  watch/game notifications must pass admission, Hermes structured action, and
+  deterministic egress before delivery.
 - `external_mcp_gateway` is registered as a stable MCP surface in lite/full.
   Source profiles still fall back to disabled flags, but the standard server
   deploy now writes `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`,
   `EXTERNAL_MCP_GATEWAY_ENABLED=true`,
-  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`, and explicit
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`,
+  `HERMES_PROACTIVE_EVENTS_ENABLED=true`,
+  `HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true`, and explicit
   `EXTERNAL_MCP_GATEWAY_PROFILE=full|lite` so Hermes can use the broker without
   hand-editing env files. Dynamic external MCP admission now uses
   `probe -> candidate registry -> classify -> auto_admitted / needs_owner /
@@ -78,6 +85,8 @@ External MCP candidates
 - Sticker Catalog smoke: `bash scripts/diagnose-sticker-catalog.sh`.
 - External MCP gateway diagnosis:
   `bash scripts/diagnose-external-mcp-gateway.sh`.
+- Proactive event diagnosis:
+  `bash scripts/diagnose-proactive-events.sh`.
 - Hermes context/cache observation:
   `journalctl -u ran-agent-node.service --since '30 minutes ago' --no-pager | grep -E 'hermes-provider-usage|hermes-context-components'`.
 
@@ -131,6 +140,9 @@ Current shared non-secret keys include:
 - `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`
 - `EXTERNAL_MCP_GATEWAY_ENABLED=true`
 - `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`
+- `HERMES_PROACTIVE_EVENTS_ENABLED=true`
+- `HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true`
+- `HERMES_PROACTIVE_REMINDERS_ENABLED=true`
 - `EXTERNAL_MCP_GATEWAY_PROFILE=full|lite`
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
@@ -282,12 +294,22 @@ media directories so redeploys do not depend on manual `mkdir`.
 - Delivery reuses `ChannelHub -> replyBackend -> hermesGatewayClient ->
   sendFeishuReply()`, so follow-up questions stay in the same Feishu/Hermes
   timeline.
-- `PERSONAL_AGENT_PROACTIVE_ENABLED` and
-  `PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED` remain `false`.
+- `PERSONAL_AGENT_PROACTIVE_ENABLED` and legacy
+  `PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED` remain `false`; reminder delivery
+  is controlled by `HERMES_PROACTIVE_REMINDERS_ENABLED` and enters Hermes via
+  `/proactive/event`.
 - External MCP proactive delivery is not part of the old proactive mainline.
-  The separate system queue is deploy-enabled but watchlist/rate-budget limited
-  and enters Hermes as a synthetic Feishu turn. No watch means no visible
-  outbound message.
+  The system queue is deploy-enabled but watchlist/trusted-evidence/rate-budget
+  limited and enters Hermes as a synthetic Feishu turn. Evidence refs must exist
+  in the local external MCP evidence log for the same user/server/non-empty
+  scope, with allowed evidence tiers derived by Node from the registered watch
+  kind; request body strings and caller-supplied tier lists do not self-authorize.
+  External MCP/forum/game notifications cannot enter through the generic
+  `/proactive/event` endpoint. A short reservation lease blocks concurrent
+  budget overruns and is committed only after adapter send succeeds. Hermes must
+  return structured `notify`; `silent`, `remember`, `draft`, malformed JSON,
+  generic text, missing `why_now`, or missing evidence do not send visible
+  messages.
 
 ## Protected Local State
 

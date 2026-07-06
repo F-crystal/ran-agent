@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timedelta
 
 from personal_agent.ai_daily_digest import run_ai_daily_digest
 from personal_agent.config import AppConfig
@@ -36,10 +37,6 @@ def life_loop_job(
     logger: logging.Logger,
 ) -> None:
     """Run one lightweight life-loop pass and record surfaced opportunities and judgments."""
-
-    if not config.proactive_enabled:
-        logger.info("life loop job skipped because proactive messaging is frozen")
-        return
 
     logger.info("life loop job started")
     result = LifeLoop(config=config, database=database, logger=logger).run()
@@ -209,11 +206,8 @@ def reminder_check_job(
     message_service: PersonalAgentService,
     logger: logging.Logger,
 ) -> None:
-    """Check for due reminders and send proactive reminder messages."""
+    """Check for due reminders and submit structured proactive reminder events."""
 
-    if not config.proactive_enabled:
-        logger.info("reminder check job skipped because proactive messaging is frozen")
-        return
     if not config.reminder_delivery_enabled:
         logger.info("reminder check job skipped because reminder delivery is disabled")
         return
@@ -236,27 +230,35 @@ def reminder_check_job(
     sent_count = 0
     for todo in check_result.due_reminders:
         reminder_message = todo_manager.format_reminder_message(todo)
-        reminder_seed = f"reminder:{todo.id}"
+        reminder_seed = _reminder_event_key(todo.id, todo.reminder_at)
 
-        if database.has_recent_proactive_seed(channel="wechat", seed=reminder_seed, window_minutes=30):
+        if database.has_recent_proactive_seed(channel="feishu", seed=reminder_seed, window_minutes=30):
             logger.info("reminder skipped by recent dedupe todo_id=%s seed=%s", todo.id, reminder_seed)
             continue
 
-        # Send via message service
         try:
-            message_service.send_proactive_message(
-                text=reminder_message,
-                channel="wechat",
-                seed=reminder_seed,
-                reason=f"Reminder for todo: {todo.content[:50]}",
+            bridge_result = message_service.send_proactive_event(
+                _build_reminder_proactive_event(
+                    todo_id=todo.id,
+                    content=todo.content,
+                    reminder_at=todo.reminder_at or "",
+                    formatted_message=reminder_message,
+                )
             )
-            database.mark_todo_reminded(todo.id)
-            sent_count += 1
-            logger.info(
-                "reminder sent todo_id=%s content=%s",
-                todo.id,
-                todo.content[:50],
-            )
+            if bridge_result.get("success") is True:
+                database.mark_todo_reminded(todo.id)
+                sent_count += 1
+                logger.info(
+                    "reminder event sent todo_id=%s content=%s",
+                    todo.id,
+                    todo.content[:50],
+                )
+            else:
+                logger.warning(
+                    "reminder event not sent todo_id=%s result=%s",
+                    todo.id,
+                    bridge_result,
+                )
         except Exception as e:
             logger.exception("failed to send reminder todo_id=%s error=%s", todo.id, str(e))
             continue
@@ -283,3 +285,35 @@ def reminder_check_job(
         sent_count,
         check_result.next_check_time,
     )
+
+
+def _build_reminder_proactive_event(
+    *,
+    todo_id: int,
+    content: str,
+    reminder_at: str,
+    formatted_message: str,
+) -> dict[str, object]:
+    now = datetime.now()
+    key = _reminder_event_key(todo_id, reminder_at)
+    return {
+        "event_id": key,
+        "kind": "reminder",
+        "global_user_id": "owner",
+        "channel": "feishu",
+        "watch_scope": f"todo:{todo_id}",
+        "reason": f"Explicit reminder is due: {formatted_message or content}",
+        "evidence_refs": [f"todo:{todo_id}"],
+        "dedupe_key": key,
+        "created_at": now.astimezone().isoformat(),
+        "expires_at": (now + timedelta(hours=1)).astimezone().isoformat(),
+        "deliverability": "notify_allowed",
+        "allowed_capability_tiers": ["T0"],
+        "quiet_policy": "ignore_for_explicit_reminder",
+        "budget_class": "reminder",
+    }
+
+
+def _reminder_event_key(todo_id: int, reminder_at: str | None) -> str:
+    compact_time = str(reminder_at or "due").replace(" ", "T").replace(":", "").replace("-", "")
+    return f"reminder:{todo_id}:{compact_time}"

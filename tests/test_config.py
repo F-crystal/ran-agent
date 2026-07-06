@@ -69,7 +69,9 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(config.night_cycle_hour, 0)
         self.assertEqual(config.night_cycle_minute, 0)
         self.assertFalse(config.proactive_enabled)
+        self.assertFalse(config.proactive_events_enabled)
         self.assertFalse(config.reminder_delivery_enabled)
+        self.assertFalse(config.proactive_reminders_enabled)
         self.assertFalse(config.ai_daily_digest_enabled)
         self.assertEqual(config.ai_daily_digest_hour, 10)
         self.assertEqual(config.ai_daily_digest_minute, 0)
@@ -122,6 +124,8 @@ class ConfigLoadingTest(unittest.TestCase):
                 "PERSONAL_AGENT_NIGHT_CYCLE_HOUR": "1",
                 "PERSONAL_AGENT_NIGHT_CYCLE_MINUTE": "15",
                 "PERSONAL_AGENT_PROACTIVE_ENABLED": "true",
+                "HERMES_PROACTIVE_EVENTS_ENABLED": "true",
+                "HERMES_PROACTIVE_REMINDERS_ENABLED": "true",
                 "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED": "false",
                 "PERSONAL_AGENT_VECTOR_MEMORY_ENABLED": "false",
                 "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_PROVIDER": "openai_compatible",
@@ -162,7 +166,9 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(config.night_cycle_hour, 1)
         self.assertEqual(config.night_cycle_minute, 15)
         self.assertTrue(config.proactive_enabled)
-        self.assertFalse(config.reminder_delivery_enabled)
+        self.assertTrue(config.proactive_events_enabled)
+        self.assertTrue(config.reminder_delivery_enabled)
+        self.assertTrue(config.proactive_reminders_enabled)
         self.assertFalse(config.vector_memory_enabled)
         self.assertEqual(config.vector_memory_embedding_provider, "openai_compatible")
         self.assertEqual(config.vector_memory_embedding_model, "text-embedding-3-small")
