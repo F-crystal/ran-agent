@@ -1,6 +1,6 @@
 ---
 name: archive-and-push
-description: "当用户说“归档”时使用：运行基线测试、检查敏感文件、初始化/提交 git、可选 dry-run、推送到 origin main，并在 local_archive/docs/ 生成本地归档记录。"
+description: "当用户说“归档”时使用：运行基线测试、检查敏感文件、初始化/提交 git、将当前工作分支合并到 main、推送 origin main，并在 local_archive/docs/ 生成本地归档记录。"
 ---
 
 # Archive And Push
@@ -20,8 +20,9 @@ description: "当用户说“归档”时使用：运行基线测试、检查敏
   - `./scripts/archive_and_push.sh --dry-run --skip-tests`
 - [ ] 检查输出摘要中的 `sensitive_present`、`stage_candidates`、`archive_record`
 - [ ] 确认 `archive_record` 在 `local_archive/docs/governance/archive/` 下
-- [ ] 如果仓库还没有初始化，允许脚本执行 `git init` 并切到 `main`
-- [ ] 准备正式归档时执行 push 路径
+- [ ] 如果仓库还没有初始化，允许脚本执行 `git init`
+- [ ] 准备正式归档时执行 push 路径；脚本会先在当前工作分支提交，
+      再 fast-forward 合并到 `main`，最后推送 `origin main`
   - `./scripts/archive_and_push.sh --push`
 - [ ] 如需指定或修正远程，补上 SSH 或 HTTPS remote URL；脚本会对齐本地 `origin`
   - `./scripts/archive_and_push.sh --push --remote-url <git-url>`
@@ -38,6 +39,8 @@ description: "当用户说“归档”时使用：运行基线测试、检查敏
 - `--remote-url` 可用 SSH 或 HTTPS；如果 `origin` 已存在但不同，脚本会先 `remote set-url` 对齐。
 - GitHub HTTPS/SSH 任一路径 push 失败时，脚本会推导另一种 URL、更新本地 `origin`、重试；重试成功后保留可工作的 URL。
 - 脚本正式归档前会清空 index 并重新 stage。未传 `--path` 时 stage 允许范围内的全量工作区；传 `--path` 时只 stage 指定路径。
+- 正式 `--push` 默认从当前工作分支开始：提交当前分支变更，要求工作树干净，然后 fast-forward 合并到 `main` 并推送 `origin main`。如果不能 fast-forward，停止并让操作者处理分支差异。
+- 只有明确需要旧行为时才用 `--no-merge-current-branch`，它会直接切到 `main` 后提交/推送。
 - 如果没有变更可提交，保留 dry-run 结果并报告 `nothing to commit`。
 - 实际 push 只在用户准备好发布时执行；dry-run 只做预检。
 
@@ -49,6 +52,9 @@ description: "当用户说“归档”时使用：运行基线测试、检查敏
 
 # Final archive
 ./scripts/archive_and_push.sh --push
+
+# Final archive from current feature branch into main
+./scripts/archive_and_push.sh --push --commit-message "fix: describe change"
 
 # Final archive with explicit remote
 ./scripts/archive_and_push.sh --push --remote-url git@github.com:owner/repo.git

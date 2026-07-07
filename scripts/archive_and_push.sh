@@ -5,6 +5,7 @@ ROOT_DIR="${ARCHIVE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 DRY_RUN=1
 RUN_TESTS=1
 SELF_TEST=0
+MERGE_CURRENT_BRANCH=1
 REMOTE_NAME="origin"
 REMOTE_URL="${ARCHIVE_REMOTE_URL:-}"
 BRANCH_NAME="main"
@@ -25,16 +26,18 @@ fi
 
 usage() {
   cat <<'EOF'
-Usage: scripts/archive_and_push.sh [--push] [--dry-run] [--skip-tests] [--remote-url URL] [--commit-message MSG] [--record PATH] [--path PATH] [--self-test]
+Usage: scripts/archive_and_push.sh [--push] [--dry-run] [--skip-tests] [--remote-url URL] [--commit-message MSG] [--record PATH] [--path PATH] [--no-merge-current-branch] [--self-test]
 
 Options:
-  --push             Run the full archive path, including git commit and push when a remote exists.
+  --push             Commit current branch, fast-forward merge it to main, then push main.
   --dry-run          Preflight only. Run checks and print a summary, but do not init git or commit.
   --skip-tests       Skip the baseline test commands.
   --remote-url URL   Add origin with this URL if it is missing.
   --commit-message   Override the commit message.
   --record PATH      Override the archive record output path. Defaults to local_archive/docs/governance/archive/.
   --path PATH        Stage only this path. Repeat for multiple paths.
+  --no-merge-current-branch
+                     Legacy behavior: commit directly on main before pushing.
   --self-test        Run local URL-conversion checks and exit.
 EOF
 }
@@ -109,6 +112,9 @@ parse_args() {
         [ "$#" -gt 0 ] || die "--path requires a value"
         STAGE_PATHS+=("$1")
         ;;
+      --no-merge-current-branch)
+        MERGE_CURRENT_BRANCH=0
+        ;;
       --self-test)
         SELF_TEST=1
         ;;
@@ -147,6 +153,27 @@ ensure_main_branch() {
   else
     run_cmd git -C "$ROOT_DIR" checkout -b "$BRANCH_NAME"
   fi
+}
+
+current_branch_name() {
+  git -C "$ROOT_DIR" branch --show-current
+}
+
+ensure_clean_worktree_for_checkout() {
+  local status
+  status="$(git -C "$ROOT_DIR" status --porcelain)"
+  [ -z "$status" ] || die "working tree still has unstaged/untracked changes; commit or clean them before switching branches"
+}
+
+merge_current_branch_to_main() {
+  local source_branch="$1"
+  if [ "$MERGE_CURRENT_BRANCH" -ne 1 ] || [ -z "$source_branch" ] || [ "$source_branch" = "$BRANCH_NAME" ]; then
+    return 0
+  fi
+
+  ensure_clean_worktree_for_checkout
+  ensure_main_branch
+  run_cmd git -C "$ROOT_DIR" merge --ff-only "$source_branch"
 }
 
 run_baseline_tests() {
@@ -551,12 +578,27 @@ main() {
   fi
 
   ensure_git_repo
-  ensure_main_branch
+  local source_branch
+  source_branch="$(current_branch_name)"
+  if [ "$MERGE_CURRENT_BRANCH" -ne 1 ]; then
+    ensure_main_branch
+    source_branch="$(current_branch_name)"
+  fi
   ensure_origin_remote
   stage_allowed_files
   ensure_no_forbidden_staged
   collect_staged_files
   commit_changes || {
+    if [ "$MERGE_CURRENT_BRANCH" -eq 1 ] && [ -n "$source_branch" ] && [ "$source_branch" != "$BRANCH_NAME" ]; then
+      merge_current_branch_to_main "$source_branch"
+      local merged_sha
+      merged_sha="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
+      staged_list="$(git -C "$ROOT_DIR" diff --name-only "$BRANCH_NAME".."$source_branch" 2>/dev/null || true)"
+      push_changes
+      write_archive_record "$merged_sha" "$PUSH_STATE" "$staged_list"
+      print_summary "push" "$merged_sha" "$PUSH_STATE"
+      exit 0
+    fi
     print_summary "no-op" "none" "skipped"
     exit 0
   }
@@ -566,6 +608,8 @@ main() {
   commit_sha="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
   staged_list="$(printf '%s\n' "${STAGED_FILES[@]}")"
 
+  merge_current_branch_to_main "$source_branch"
+  commit_sha="$(git -C "$ROOT_DIR" rev-parse --short HEAD)"
   push_changes
   write_archive_record "$commit_sha" "$PUSH_STATE" "$staged_list"
   print_summary "push" "$commit_sha" "$PUSH_STATE"
