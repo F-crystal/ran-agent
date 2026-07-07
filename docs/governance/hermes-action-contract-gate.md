@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: CURRENT (2026-07-01)
+Status: CURRENT (2026-07-07)
 
 ## Why Not Prompt Only
 
@@ -121,8 +121,14 @@ success claim.
   `external_mcp_tool_result` means the reply must not claim a T4/T5 external
   MCP side effect was completed.
 
-The safe rewrite does not expose action-gate internals, provider tokens,
-cookies, absolute paths, tool traces, or raw artifact content.
+The safe rewrite is a neutral bridge notice: it must not use first-person bridge
+persona text, action-gate internals, provider tokens, cookies, absolute paths,
+tool traces, or raw artifact content.
+
+Bridge-authored notices use `bridge_*` sources such as `bridge_action_gate`,
+`bridge_action_repair`, and `bridge_pending_action`. They can be sent to the
+user, but they are filtered out of Hermes recent/global assistant history so
+Hermes does not later replay bridge safety text as its own personality.
 
 ## Automatic Repair Scope
 

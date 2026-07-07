@@ -72,6 +72,29 @@ export function closeExternalMcpSession(sessionId, options = {}) {
   return closed;
 }
 
+export function updateExternalMcpSession(sessionId, patch = {}, options = {}) {
+  const env = options.env || process.env;
+  const now = normalizeDate(options.now) || new Date();
+  const expectedUser = sanitizeIdentity(options.globalUserId || options.global_user_id || '');
+  const expectedServer = sanitizeIdentity(options.serverId || options.server_id || '');
+  const sessions = readSessions(env);
+  const index = sessions.findIndex((item) => item.sessionId === sanitizeSessionId(sessionId));
+  if (index < 0) return null;
+  const session = sessions[index];
+  if (session.status !== 'active' || isExpired(session, now)) return null;
+  if (expectedUser && session.globalUserId !== expectedUser) return null;
+  if (expectedServer && session.serverId !== expectedServer) return null;
+  const upstreamSessionId = sanitizeUpstreamSessionId(patch.upstreamSessionId || patch.upstream_session_id || '');
+  const updated = {
+    ...session,
+    ...(upstreamSessionId ? { upstreamSessionId } : {}),
+    updatedAt: now.toISOString(),
+  };
+  sessions[index] = updated;
+  writeSessions(sessions, env);
+  return updated;
+}
+
 function paths(env) {
   const root = path.join(resolveStateDir(env), 'external_mcp');
   return {
@@ -130,4 +153,8 @@ function sanitizeSessionId(value) {
 
 function sanitizeIdentity(value) {
   return String(value || '').trim().replace(/[\r\n\t]/g, ' ').replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 120);
+}
+
+function sanitizeUpstreamSessionId(value) {
+  return String(value || '').trim().replace(/[\r\n\t]/g, '').replace(/[^a-zA-Z0-9_.:/=-]/g, '').slice(0, 240);
 }

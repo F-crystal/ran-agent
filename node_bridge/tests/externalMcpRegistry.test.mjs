@@ -249,6 +249,35 @@ test('admission auto-admits safe tool subset from mixed remote activity MCP cand
   assert.deepEqual(enabled[0].tools.map((tool) => tool.name), ['list_games', 'get_guide', 'play']);
 });
 
+test('admission auto-admits compact CedarToy game tool names and quarantines account tools', async (t) => {
+  const env = tempRegistryEnv(t);
+  const admitted = await admitExternalMcpCandidate({
+    id: 'cedartoy-games',
+    title: 'CedarToy Games',
+    source: 'https://github.com/Zizuixixiang/cedareco',
+    transport: 'streamable-http',
+    url: 'https://toy.cedarstar.org/',
+    activityKind: 'game',
+    tools: [
+      { name: 'listgames', description: '列出所有可用游戏，返回分类列表及简介' },
+      { name: 'getguide', description: '获取指定游戏的玩法说明' },
+      { name: 'play', description: '执行游戏操作' },
+      { name: 'account', description: '注册账号用；游客也能玩，账号仅供存档和持久身份。' },
+    ],
+  }, {
+    env,
+    lookupImpl: async () => [{ address: '203.0.113.19', family: 4 }],
+    now: '2026-07-03T10:00:00Z',
+  });
+
+  assert.equal(admitted.ok, true);
+  assert.equal(admitted.state, 'auto_admitted');
+  assert.deepEqual(admitted.entry.manifest.tools.map((tool) => tool.name), ['listgames', 'getguide', 'play']);
+  assert.deepEqual(admitted.entry.excludedTools.map((tool) => [tool.name, tool.reason]), [
+    ['account', 'unclassified_or_high_risk'],
+  ]);
+});
+
 test('enabled auto-admitted registry entries are pruned when read back', async (t) => {
   const env = tempRegistryEnv(t);
   fs.mkdirSync(`${env.RAN_AGENT_STATE_DIR}/external_mcp`, { recursive: true });

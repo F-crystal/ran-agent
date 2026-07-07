@@ -69,7 +69,7 @@ export function getHermesGatewayConfig(env = process.env) {
   const profile = String(env.HERMES_PROFILE || 'ran-assistant').trim();
   const mode = normalizeMode(env.HERMES_REPLY_MODE || env.HERMES_GATEWAY_CLIENT_MODE || 'api');
   const command = String(env.HERMES_COMMAND || 'hermes').trim() || 'hermes';
-  const timeoutSeconds = Math.max(30, Number.parseInt(String(env.HERMES_REPLY_TIMEOUT_SECONDS || '180'), 10) || 180);
+  const timeoutSeconds = Math.max(1, Number.parseInt(String(env.HERMES_REPLY_TIMEOUT_SECONDS || '180'), 10) || 180);
   const projectRoot = resolveProjectRoot(env);
   const {
     contextPolicyMode,
@@ -491,6 +491,7 @@ async function sendChatToHermesApi(message, options = {}) {
   const response = await fetchImpl(endpoint, {
     method: 'POST',
     headers: buildHermesHeaders(config, options.sessionContext),
+    signal: AbortSignal.timeout(config.timeoutSeconds * 1000),
     body: JSON.stringify({
       model: config.profile || 'ran-assistant',
       messages: [
@@ -978,18 +979,18 @@ export function applySocialLinkEvidenceGate(payload, replyText, evidenceReport, 
     return { replyText, evidenceGateTriggered: false, evidenceStage: 'none' };
   }
 
-  // Gate triggered — rewrite in courtly style, honest about what stage succeeded
+  // Gate triggered: keep the bridge-authored fallback neutral.
   // Order: metadata_read → link_resolution → none
   let rewrite;
   let rewriteReason;
   if (evidenceReport.metadata_read?.ok) {
-    rewrite = '臣这边只拿到了一些标题/作者等元数据，但没有拿到正文内容。';
+    rewrite = '只拿到标题/作者等元数据，未拿到正文内容。';
     rewriteReason = 'metadata_only';
   } else if (evidenceReport.link_resolution?.ok) {
-    rewrite = '臣这边只确认链接已解析，但没有拿到正文内容，不能说已经读到了全文。';
+    rewrite = '只确认链接已解析，未拿到正文内容，不能说已经读到全文。';
     rewriteReason = 'link_resolution_only';
   } else {
-    rewrite = '臣这边没有成功解析这个链接，也没有读到正文。';
+    rewrite = '链接未成功解析，也未读到正文。';
     rewriteReason = 'no_evidence';
   }
 

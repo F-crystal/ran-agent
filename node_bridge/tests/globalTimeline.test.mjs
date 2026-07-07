@@ -66,6 +66,17 @@ test('global timeline returns local and global recent history', () => {
   assert.equal(global.some((item) => item.content.includes('飞书里继续说内莉·布莱')), true);
 });
 
+test('bridge notices are not replayed as Hermes assistant recent history', () => {
+  const timelinePath = tempTimelinePath();
+  appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'u', role: 'user', text: '帮我读一下链接', created_at: 1 });
+  appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'assistant', role: 'assistant', source: 'bridge_action_gate', text: '链接内容未成功读取，暂不能判断正文。', created_at: 2 });
+  appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'assistant', role: 'assistant', source: 'hermes', text: '可以把截图发来，我再看。', created_at: 3 });
+
+  const local = getLocalRecentHistory({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', conversation_id: 'wx-a', limit: 10, charBudget: 1000 });
+
+  assert.deepEqual(local.map((item) => item.content), ['帮我读一下链接', '可以把截图发来，我再看。']);
+});
+
 test('active topic and continuity note include cross-platform referents', () => {
   const timelinePath = tempTimelinePath();
   appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'u', role: 'user', text: '我们聊内莉·布莱，她把自己送进疯人院这个故事', created_at: 1 });

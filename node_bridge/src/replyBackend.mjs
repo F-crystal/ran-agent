@@ -56,7 +56,7 @@ export function createReplyBackend(options = {}) {
           replyText: privacyConfirmation(environmentPrivacyCommand, { env }),
           followUpMessages: [],
           media: null,
-          source: 'hermes',
+          source: 'bridge_environment_privacy',
         };
       }
       if (detectExternalMcpStopCommand(message.text)) {
@@ -92,7 +92,7 @@ export function createReplyBackend(options = {}) {
           replyText: pendingOutcome.replyText,
           followUpMessages: [],
           media: pendingOutcome.media || null,
-          source: 'hermes',
+          source: pendingOutcome.source || 'bridge_pending_action',
         };
       }
       const response = await chatImpl(
@@ -129,42 +129,11 @@ export function createReplyBackend(options = {}) {
         }
       );
 
-      const ingestConfig = backendOptions.ingestConfig || getBackendIngestConfig(env);
-      const ingest = options.ingestImpl || ingestExchangeToBackend;
-      const ingestPayload = {
-        channel: message.platform || message.channel || 'wechat',
-        sender_id: message.sender_id,
-        conversation_id: message.conversation_id || message.conversationId || message.sender_id,
-        global_user_id: message.global_user_id || '',
-        user_text: message.text,
-        reply_text: response.reply_text,
-        source: 'hermes',
-        image_urls: Array.isArray(message.image_urls)
-          ? message.image_urls.filter((item) => typeof item === 'string' && item.trim())
-          : [],
-        media: normalizeMediaItems(message.media),
-      };
-      // Debug log for multimedia sync
       const logger = options.logger || console;
-      logger.log?.(`[ingest] sender_id_hash=${hashForLog(ingestPayload.sender_id)} text_length=${ingestPayload.user_text?.length || 0} image_urls_count=${ingestPayload.image_urls?.length || 0} media_count=${ingestPayload.media?.length || 0}`);
-      if (ingestPayload.media?.length > 0) {
-        logger.log?.(`[ingest] media items: ${JSON.stringify(ingestPayload.media.map(m => ({ type: m.type, mimeType: m.mimeType })))}`);
-      }
-      try {
-        await ingest(ingestPayload, {
-          config: ingestConfig,
-          fetchImpl: backendOptions.fetchImpl,
-        });
-        logger.log?.(`[ingest] success`);
-      } catch (error) {
-        const messageText = error instanceof Error ? error.message : String(error);
-        logger.warn?.(`backend ingest skipped: ${messageText}`);
-      }
-
       const mediaFromMarker = extractTrustedMediaMarker(response.reply_text, {
         resolveStickerAssetImpl: options.resolveStickerAssetImpl || resolveStickerAsset,
         env,
-        logger: options.logger || console,
+        logger,
       });
       const responseMedia = response.media && typeof response.media === 'object'
         ? response.media
@@ -175,6 +144,7 @@ export function createReplyBackend(options = {}) {
 
       let finalReplyText = responseText;
       let finalResponseMedia = responseMedia;
+      let responseSource = 'hermes';
       if (actionGateConfig.enabled) {
         let rawContractReplyText = response.reply_text;
         let contract = evaluateActionContract({
@@ -204,11 +174,12 @@ export function createReplyBackend(options = {}) {
             logger: options.logger || console,
           });
           if (repair.ok) {
+            responseSource = 'bridge_action_repair';
             rawContractReplyText = buildRepairedContractReply(rawContractReplyText, repair);
             const repairedMediaMarker = extractTrustedMediaMarker(rawContractReplyText, {
               resolveStickerAssetImpl: options.resolveStickerAssetImpl || resolveStickerAsset,
               env,
-              logger: options.logger || console,
+              logger,
             });
             const contractRepairMedia = repair.media || repairedMediaMarker?.media || finalResponseMedia;
             finalResponseMedia = repairedMediaMarker?.media || (isOutboundRepairMedia(repair.media) ? repair.media : null) || finalResponseMedia;
@@ -245,28 +216,119 @@ export function createReplyBackend(options = {}) {
         }
         if (gate.shouldRewrite) {
           finalReplyText = gate.rewrittenText;
+          responseSource = 'bridge_action_gate';
         } else {
           finalReplyText = responseText;
         }
         logActionContract(applyActionGateTelemetry(contract, gate, repair), options.logger || console);
       }
 
+      let finalFollowUpMessages = normalizeFollowUpMessages(response.follow_up_messages);
+      if (actionGateConfig.enabled && finalFollowUpMessages.length > 0) {
+        const gatedFollowUps = [];
+        for (const followUpText of finalFollowUpMessages) {
+          const followContract = evaluateActionContract({
+            requestId,
+            channel: message.platform || message.channel || 'wechat',
+            conversationId: message.conversation_id || message.conversationId || message.sender_id,
+            profile: gatewayConfig.profile || response.profile || response.model || '',
+            message,
+            response: { ...response, media: finalResponseMedia, reply_text: followUpText },
+            config: actionGateConfig,
+          });
+          const followGate = evaluateActionGate({
+            contract: followContract,
+            finalReply: followUpText,
+            mode: actionGateConfig.mode === 'observe' ? 'observe' : 'enforce',
+          });
+          if (followGate.shouldRewrite) {
+            responseSource = 'bridge_action_gate';
+            gatedFollowUps.push(followGate.rewrittenText);
+          } else {
+            gatedFollowUps.push(followUpText);
+          }
+          logActionContract(applyActionGateTelemetry(followContract, followGate, { repairAttempted: false, repairStatus: 'skipped' }), logger);
+        }
+        finalFollowUpMessages = gatedFollowUps;
+      }
+
       const suppression = shouldSuppressSystemQueueReply({
         routeHint: message.route_hint || '',
         replyText: finalReplyText,
       });
+      const visibleReplyText = suppression.suppress ? '' : finalReplyText;
+      const visibleFollowUpMessages = suppression.suppress ? [] : finalFollowUpMessages;
+      const visibleMedia = suppression.suppress ? null : finalResponseMedia;
+
+      await ingestVisibleExchange({
+        message,
+        replyText: visibleReplyText,
+        source: responseSource,
+        media: normalizeMediaItems(message.media),
+        imageUrls: Array.isArray(message.image_urls)
+          ? message.image_urls.filter((item) => typeof item === 'string' && item.trim())
+          : [],
+        ingestConfig: backendOptions.ingestConfig || getBackendIngestConfig(env),
+        ingestImpl: options.ingestImpl || ingestExchangeToBackend,
+        fetchImpl: backendOptions.fetchImpl,
+        logger,
+      });
 
       return {
-        replyText: suppression.suppress ? '' : finalReplyText,
-        followUpMessages: Array.isArray(response.follow_up_messages) ? response.follow_up_messages : [],
-        media: suppression.suppress ? null : finalResponseMedia,
-        source: 'hermes',
+        replyText: visibleReplyText,
+        followUpMessages: visibleFollowUpMessages,
+        media: visibleMedia,
+        source: responseSource,
         suppressSend: suppression.suppress,
         suppressReason: suppression.reason,
       };
     },
     config,
   };
+}
+
+function normalizeFollowUpMessages(items) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => String(item || '').trim())
+    .filter(Boolean);
+}
+
+async function ingestVisibleExchange({
+  message,
+  replyText,
+  source,
+  media,
+  imageUrls,
+  ingestConfig,
+  ingestImpl,
+  fetchImpl,
+  logger,
+}) {
+  const ingestPayload = {
+    channel: message.platform || message.channel || 'wechat',
+    sender_id: message.sender_id,
+    conversation_id: message.conversation_id || message.conversationId || message.sender_id,
+    global_user_id: message.global_user_id || '',
+    user_text: message.text,
+    reply_text: replyText,
+    source,
+    image_urls: Array.isArray(imageUrls) ? imageUrls : [],
+    media: normalizeMediaItems(media),
+  };
+  logger.log?.(`[ingest] sender_id_hash=${hashForLog(ingestPayload.sender_id)} text_length=${ingestPayload.user_text?.length || 0} image_urls_count=${ingestPayload.image_urls?.length || 0} media_count=${ingestPayload.media?.length || 0}`);
+  if (ingestPayload.media?.length > 0) {
+    logger.log?.(`[ingest] media items: ${JSON.stringify(ingestPayload.media.map(m => ({ type: m.type, mimeType: m.mimeType })))}`);
+  }
+  try {
+    await ingestImpl(ingestPayload, {
+      config: ingestConfig,
+      fetchImpl,
+    });
+    logger.log?.('[ingest] success');
+  } catch (error) {
+    const messageText = error instanceof Error ? error.message : String(error);
+    logger.warn?.(`backend ingest skipped: ${messageText}`);
+  }
 }
 
 async function handlePendingActionBeforeHermes({
@@ -287,10 +349,10 @@ async function handlePendingActionBeforeHermes({
   const pendingActions = findPendingActionsForConversation({ channel, conversationId }, { env, now });
 
   if (confirmation && pendingActions.length === 0) {
-    return { replyText: '这个确认项已经过期或已经处理了，我不会执行它。' };
+    return { replyText: '确认项已过期或已处理，未执行。', source: 'bridge_pending_action' };
   }
   if (confirmation && pendingActions.length > 1) {
-    return { replyText: '这里有多个待确认操作，请说清楚要确认哪一个。' };
+    return { replyText: '存在多个待确认操作，请说明要确认哪一个。', source: 'bridge_pending_action' };
   }
   if (confirmation && pendingActions.length === 1) {
     if (mode !== 'repair') {
@@ -305,7 +367,7 @@ async function handlePendingActionBeforeHermes({
         confirmationResult: confirmation,
         finalAction: 'blocked_high_risk',
       }, logger);
-      return { replyText: '当前确认执行没有启用，所以我不会执行这个操作。' };
+      return { replyText: '当前未启用确认执行，操作未执行。', source: 'bridge_pending_action' };
     }
     return await handlePendingConfirmation({
       confirmation,
@@ -359,8 +421,9 @@ async function handlePendingActionBeforeHermes({
       finalAction: execution.ok ? 'executed_with_evidence' : 'execution_failed_safe_rewrite',
     }, logger);
     return {
-      replyText: execution.replyText || (execution.ok ? '已完成。' : '执行没有成功，所以我不能说已经完成了。'),
+      replyText: execution.replyText || (execution.ok ? '已完成。' : '执行未成功，暂不能说已经完成。'),
       media: execution.media || null,
+      source: 'bridge_pending_action',
     };
   }
 
@@ -377,7 +440,7 @@ async function handlePendingActionBeforeHermes({
     confirmationResult: '',
     finalAction: 'pending_confirmation',
   }, logger);
-  return { replyText: confirmationPromptForAction(pending) };
+  return { replyText: confirmationPromptForAction(pending), source: 'bridge_pending_action' };
 }
 
 async function handlePendingConfirmation({
@@ -406,7 +469,7 @@ async function handlePendingConfirmation({
       confirmationResult: 'cancelled',
       finalAction: 'confirmation_cancelled',
     }, logger);
-    return { replyText: '已取消，我不会执行这个操作。' };
+    return { replyText: '已取消，操作未执行。', source: 'bridge_pending_action' };
   }
 
   const confirmed = confirmPendingAction(action.actionId, { env, now });
@@ -426,7 +489,11 @@ async function handlePendingConfirmation({
       executionEvidenceAdded: execution.evidence,
       finalAction: 'confirmed_executed',
     }, logger);
-    return { replyText: execution.replyText || '已确认并执行。', media: execution.media || null };
+    return {
+      replyText: execution.replyText || '已确认并执行。',
+      media: execution.media || null,
+      source: 'bridge_pending_action',
+    };
   }
   markPendingActionFailed(action.actionId, execution.evidence, { env, now });
   logPendingActionTelemetry({
@@ -442,7 +509,10 @@ async function handlePendingConfirmation({
     executionEvidenceAdded: execution.evidence,
     finalAction: 'execution_failed_safe_rewrite',
   }, logger);
-  return { replyText: execution.replyText || '执行没有成功，所以我不能说已经完成了。' };
+  return {
+    replyText: execution.replyText || '执行未成功，暂不能说已经完成。',
+    source: 'bridge_pending_action',
+  };
 }
 
 function detectPendingActionCandidate(message = {}) {
@@ -569,7 +639,7 @@ async function executePendingAction(action, { options, env, message }) {
   } catch {
     return {
       ok: false,
-      replyText: '执行没有成功，所以我不能说已经完成了。',
+      replyText: '执行未成功，暂不能说已经完成。',
       evidence: [{ type: resultEvidenceType(action.actionType), status: 'failure', error_code: 'PENDING_EXECUTION_EXCEPTION' }],
     };
   }
@@ -581,7 +651,7 @@ async function executeConfirmedAction(action, { env, message, runtimePayload } =
     if (media.length === 0) {
       return {
         ok: false,
-        replyText: '我没有拿到可安全保存的原始图片，所以没有保存。',
+        replyText: '未拿到可安全保存的原始图片，未保存。',
         evidence: [{ type: 'save_result', status: 'failure', error_code: 'STICKER_SAVE_MEDIA_UNAVAILABLE' }],
       };
     }
@@ -610,7 +680,7 @@ async function executeConfirmedAction(action, { env, message, runtimePayload } =
     if (!stickerId) {
       return {
         ok: false,
-        replyText: '我没有明确拿到要删除的表情包编号，所以没有删除。',
+        replyText: '未明确指定要删除的表情包编号，未删除。',
         evidence: [{ type: 'delete_result', status: 'failure', error_code: 'STICKER_DELETE_TARGET_MISSING' }],
       };
     }
@@ -632,7 +702,7 @@ async function executeConfirmedAction(action, { env, message, runtimePayload } =
     if (!stickerId) {
       return {
         ok: false,
-        replyText: '我没有明确拿到要更新的表情包编号，所以没有更新。',
+        replyText: '未明确指定要更新的表情包编号，未更新。',
         evidence: [{ type: 'save_result', status: 'failure', error_code: 'STICKER_UPDATE_TARGET_MISSING' }],
       };
     }
@@ -656,7 +726,7 @@ async function executeConfirmedAction(action, { env, message, runtimePayload } =
   }
   return {
     ok: false,
-    replyText: '这个操作需要更明确的安全执行接口；我没有执行，也不会假装已经完成。',
+    replyText: '该操作缺少明确的安全执行接口，未执行，也不能标记为已完成。',
     evidence: [{ type: resultEvidenceType(action.actionType), status: 'failure', error_code: 'PENDING_EXECUTOR_UNAVAILABLE' }],
   };
 }
@@ -711,18 +781,18 @@ function resultEvidenceType(actionType) {
 
 function confirmationPromptForAction(action = {}) {
   if (action.actionType === 'sticker_save') {
-    return '要不要我把这张图保存到表情包库？你回“确认保存”就行。';
+    return '是否保存这张图到表情包库？回复“确认保存”即可。';
   }
   if (action.actionType === 'external_send') {
-    return '要我现在发送这条内容吗？你回“确认发送”就行。';
+    return '是否现在发送这条内容？回复“确认发送”即可。';
   }
   if (action.actionType === 'sticker_delete') {
-    return '要删除这个表情包吗？你回“确认删除”就行。';
+    return '是否删除这个表情包？回复“确认删除”即可。';
   }
   if (action.actionType === 'sticker_update') {
-    return '要更新这个表情包吗？你回“确认”就行。';
+    return '是否更新这个表情包？回复“确认”即可。';
   }
-  return '这个操作需要确认。你回“确认”我再执行。';
+  return '这个操作需要确认。回复“确认”后执行。';
 }
 
 function detectConfirmationCommand(text = '') {

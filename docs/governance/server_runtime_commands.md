@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-05)
+Status: CURRENT (2026-07-07)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -14,6 +14,8 @@ manual systemd or env edits.
   `bash scripts/diagnose-lite-full.sh`
 - Diagnose proactive events:
   `bash scripts/diagnose-proactive-events.sh`
+- Diagnose external MCP gateway:
+  `bash scripts/diagnose-external-mcp-gateway.sh`
 - Diagnose Search Hub:
   `bash scripts/diagnose-search-hub.sh`
 - Diagnose Ombre Brain:
@@ -58,6 +60,8 @@ bash scripts/apply-hermes-runtime-split.sh
 bash scripts/diagnose-proactive-events.sh
 bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-external-mcp-gateway.sh
+bash scripts/diagnose-multi-frontend.sh
+bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-ombre-memory.sh
 ```
 
@@ -76,6 +80,13 @@ bash scripts/diagnose-ombre-memory.sh
   `HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true`,
   `HERMES_PROACTIVE_REMINDERS_ENABLED=true`, while legacy
   `PERSONAL_AGENT_PROACTIVE_ENABLED=false` remains frozen.
+- Reply-window gates:
+  `HERMES_REPLY_TIMEOUT_SECONDS=1200`,
+  `NODE_BRIDGE_QUICK_ACK_ENABLED=true`,
+  `NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS=4500`,
+  `NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理，稍后发送结果。`,
+  `FEISHU_SEND_TIMEOUT_SECONDS=30`, and
+  `FEISHU_DOWNLOAD_TIMEOUT_SECONDS=30`.
 - `/opt/ran_agent` diagnostics run strict proactive env checks: `.env.local`,
   `node_bridge/.env.local`, and the running Python/Node service environments
   must all show those gates after deployment.
@@ -209,6 +220,12 @@ HERMES_ACTION_GATE_MODE=repair
 HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS=1
 HERMES_ACTION_PENDING_ENABLED=true
 HERMES_ACTION_PENDING_TTL_MINUTES=30
+HERMES_REPLY_TIMEOUT_SECONDS=1200
+NODE_BRIDGE_QUICK_ACK_ENABLED=true
+NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS=4500
+NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理，稍后发送结果。
+FEISHU_SEND_TIMEOUT_SECONDS=30
+FEISHU_DOWNLOAD_TIMEOUT_SECONDS=30
 ```
 
 Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform
@@ -229,6 +246,7 @@ local runtime data, not portable documentation.
 ```bash
 cd /opt/ran_agent
 bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-external-mcp-gateway.sh
 bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-ombre-memory.sh
 bash scripts/diagnose-hermes-continuity.sh

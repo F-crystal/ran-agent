@@ -4,6 +4,25 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
 cd "$REPO_ROOT"
 
+resolve_node_bin() {
+  if [[ -n "${NODE_BIN:-}" ]]; then
+    printf '%s\n' "$NODE_BIN"
+    return 0
+  fi
+  if command -v node >/dev/null 2>&1; then
+    command -v node
+    return 0
+  fi
+  if [[ -x "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node" ]]; then
+    printf '%s\n' "$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+    return 0
+  fi
+  echo "ERROR: node not found; set NODE_BIN to a Node.js executable" >&2
+  exit 127
+}
+
+NODE_EXE="$(resolve_node_bin)"
+
 echo "[proactive-events] checking managed env files"
 STRICT_ENV_CHECK="${RAN_AGENT_PROACTIVE_DIAG_STRICT_ENV:-}"
 if [[ -z "$STRICT_ENV_CHECK" && "$REPO_ROOT" == "/opt/ran_agent" ]]; then
@@ -71,7 +90,7 @@ require_service_env() {
 }
 
 echo "[proactive-events] checking Node handlers fail closed"
-node --input-type=module <<'NODE'
+"$NODE_EXE" --input-type=module <<'NODE'
 import fs from 'node:fs';
 import path from 'node:path';
 import {

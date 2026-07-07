@@ -1,6 +1,6 @@
 # External MCP Gateway
 
-Status: CURRENT (2026-07-06)
+Status: CURRENT (2026-07-07)
 
 This document owns the current external MCP gateway and system-queue contract.
 The design history lives under `docs/superpowers/`; this file records the
@@ -57,6 +57,14 @@ probe -> candidate registry -> classify -> auto_admitted / needs_owner / denied
 ## Execution And Evidence
 
 - Streamable HTTP execution is implemented with legacy SSE endpoint fallback.
+- `mcp_explain_policy` and `mcp_call` must use the same trusted policy context
+  whenever a `sessionId` or `activityId` is provided. Without live context,
+  `mcp_explain_policy` is hypothetical and must report that context source.
+- Tool resolution is exact-match first, then unique compact alias match
+  (`list_games` can resolve to `listgames`). Alias collisions fail closed.
+- The local session may privately persist a remote Streamable HTTP upstream
+  session id for reuse. Public session output and executor evidence must never
+  expose the upstream session id.
 - Every external MCP call must produce sanitized executor evidence before
   Hermes may claim success.
 - No reply may claim success without an `external_mcp_tool_result`.

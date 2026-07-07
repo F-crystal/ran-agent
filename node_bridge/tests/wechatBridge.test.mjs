@@ -435,7 +435,7 @@ test('handleWeChatTextMessage ignores fully empty payload', async () => {
     }
   );
 
-  assert.equal(reply, '我暂时还没收到可处理的消息内容。');
+  assert.equal(reply, '暂未收到可处理的消息内容。');
 });
 
 test('sanitizeReplyText strips leaked tool payload wrappers', () => {

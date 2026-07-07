@@ -352,7 +352,7 @@ test('action gate rewrites unsupported external MCP read claims', () => {
 
   assert.equal(contract.intent, 'external_mcp_read');
   assert.equal(gate.shouldRewrite, true);
-  assert.match(gate.rewrittenText, /还没有成功读取/);
+  assert.equal(gate.rewrittenText, '外部 MCP 内容未成功读取，暂不能判断其中内容。');
 });
 
 test('action gate rewrites unsupported external MCP side-effect success claims', () => {
@@ -377,7 +377,7 @@ test('action gate rewrites unsupported external MCP side-effect success claims',
   assert.deepEqual(contract.required_evidence, ['authorization', 'external_mcp_tool_result']);
   assert.ok(contract.final_claims.includes('external_mcp_action_done'));
   assert.equal(gate.shouldRewrite, true);
-  assert.match(gate.rewrittenText, /还没有确认外部 MCP 操作成功/);
+  assert.equal(gate.rewrittenText, '尚未确认外部 MCP 操作成功，暂不能说已经执行完成。');
 });
 
 test('action gate config defaults to enabled observe mode', () => {
@@ -432,7 +432,7 @@ test('enforce mode rewrites social read claims without evidence', () => {
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '我现在还没有成功读取到这个链接的内容，所以不能直接判断里面写了什么。可以再试一次，或者你把截图/正文发我。');
+  assert.equal(gate.rewrittenText, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
   assert.equal(gate.gateDecision, 'rewrite');
   assert.equal(gate.finalAction, 'safe_rewrite');
   assert.deepEqual(gate.reasons, ['missing_required_evidence']);
@@ -456,7 +456,7 @@ test('enforce mode rewrites partial social reads without claiming total failure'
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '我读到了一部分内容，但有些媒体或细节没有成功获取。');
+  assert.equal(gate.rewrittenText, '已读取到部分内容，但有些媒体或细节没有成功获取。');
   assert.equal(gate.partialSuccessDetected, true);
   assert.deepEqual(gate.reasons, ['partial_success_claim_mismatch']);
 });
@@ -488,7 +488,7 @@ test('enforce mode rewrites complete social read claims when media coverage is p
   assert.equal(contract.observed_evidence[0].analyzed_media_count, 5);
   assert.equal(contract.observed_evidence[0].successful_media_count, 1);
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '我读到了一部分内容，但有些媒体或细节没有成功获取。');
+  assert.equal(gate.rewrittenText, '已读取到部分内容，但有些媒体或细节没有成功获取。');
   assert.deepEqual(gate.reasons, ['partial_success_claim_mismatch']);
 });
 
@@ -507,7 +507,7 @@ test('enforce mode rewrites media read claims without artifact evidence', () => 
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '我这边没有成功读取到这个媒体内容，不能直接描述里面是什么。');
+  assert.equal(gate.rewrittenText, '媒体内容未成功读取，暂不能描述其中内容。');
 });
 
 test('enforce mode rewrites sticker claims without valid RAN_MEDIA evidence', () => {
@@ -525,7 +525,7 @@ test('enforce mode rewrites sticker claims without valid RAN_MEDIA evidence', ()
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '哈哈我懂你意思～');
+  assert.equal(gate.rewrittenText, '收到这个表情包请求。');
 });
 
 test('enforce mode preserves valid sticker markers', () => {
@@ -564,7 +564,7 @@ test('enforce mode rewrites media generation claims without marker or artifact',
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '这次没有拿到可发送的生成结果，所以我不能说已经生成好了。');
+  assert.equal(gate.rewrittenText, '这次没有拿到可发送的生成结果，暂不能说已经生成完成。');
 });
 
 test('enforce mode preserves WECHAT_MEDIA generation evidence', () => {
@@ -601,7 +601,45 @@ test('enforce mode rewrites memory write claims without save result', () => {
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '我现在还没有完成保存，所以不能说已经保存好了。');
+  assert.equal(gate.rewrittenText, '保存尚未完成，暂不能说已经保存。');
+});
+
+test('action gate safe rewrites are neutral bridge notices', () => {
+  const cases = [
+    {
+      message: { text: '总结一下 http://xhslink.com/o/abc123', channel: 'wechat', conversation_id: 'conv-neutral-social' },
+      response: { reply_text: '我看完这篇笔记了。' },
+    },
+    {
+      message: { text: '生成一张猫图', channel: 'wechat', conversation_id: 'conv-neutral-generate' },
+      response: { reply_text: '图片已经生成好了。' },
+    },
+    {
+      message: { text: '记住这个偏好', channel: 'wechat', conversation_id: 'conv-neutral-memory' },
+      response: { reply_text: '已经保存好了。' },
+    },
+    {
+      message: { text: '通过 external_mcp_gateway 评论这个论坛帖子', route_hint: 'external_mcp_action', channel: 'wechat', conversation_id: 'conv-neutral-mcp' },
+      response: { reply_text: '已经评论成功。' },
+    },
+  ];
+
+  for (const item of cases) {
+    const contract = evaluateActionContract({
+      requestId: item.message.conversation_id,
+      message: item.message,
+      response: item.response,
+      config: { enabled: true, mode: 'enforce', maxRepairAttempts: 1 },
+    });
+    const gate = evaluateActionGate({
+      contract,
+      finalReply: item.response.reply_text,
+      mode: 'enforce',
+    });
+
+    assert.equal(gate.shouldRewrite, true);
+    assert.doesNotMatch(gate.rewrittenText, /我|臣|Action Gate|tool trace|token|cookie|\/opt\/ran_agent/);
+  }
 });
 
 test('enforce mode preserves memory write with save result', () => {
@@ -637,7 +675,7 @@ test('enforce mode rewrites external send claims without outbound success', () =
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '我现在还没有确认发送成功，所以不能说已经发出去了。');
+  assert.equal(gate.rewrittenText, '尚未确认发送成功，暂不能说已经发出。');
 });
 
 test('enforce mode rewrites failed outbound success claims', () => {
@@ -655,7 +693,7 @@ test('enforce mode rewrites failed outbound success claims', () => {
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '发送没有成功，我现在不能说已经发出去了。');
+  assert.equal(gate.rewrittenText, '发送没有成功，暂不能说已经发出。');
 });
 
 test('enforce mode leaves ordinary chat unchanged', () => {

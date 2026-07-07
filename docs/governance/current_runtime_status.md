@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-06)
+Status: CURRENT (2026-07-07)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -54,32 +54,16 @@ External MCP candidates
 
 ## Deployment And Diagnostics
 
-- Standard deploy/drift repair: `bash scripts/apply-hermes-runtime-split.sh`.
-- Standard lite/full diagnosis: `bash scripts/diagnose-lite-full.sh`.
-- Search Hub diagnosis: `bash scripts/diagnose-search-hub.sh`.
-- Ombre Brain diagnosis: `bash scripts/diagnose-ombre-memory.sh`.
-- Continuity diagnosis: `bash scripts/diagnose-hermes-continuity.sh`.
-- Multi-frontend diagnosis: `bash scripts/diagnose-multi-frontend.sh`.
-- Tool visibility diagnosis: `bash scripts/diagnose-hermes-tools.sh`.
-- Media/XHS diagnosis: `bash scripts/diagnose-media-xhs.sh`.
-- Sticker Catalog smoke: `bash scripts/diagnose-sticker-catalog.sh`.
-- External MCP gateway diagnosis:
-  `bash scripts/diagnose-external-mcp-gateway.sh`.
-- Proactive event diagnosis:
-  `bash scripts/diagnose-proactive-events.sh`.
-
+Standard deploy/drift repair is `bash scripts/apply-hermes-runtime-split.sh`.
+Run diagnostics through the repo scripts named in
+`docs/governance/server_runtime_commands.md`, including lite/full,
+external MCP, proactive events, multi-frontend, continuity, and Ombre Brain.
 Do not hand-edit systemd or runtime env as the normal repair path.
 
 ## Runtime Env Contract
 
-The deploy script keeps these env files aligned:
-
-- `/opt/ran_agent/.env.local`
-- `/opt/ran_agent/node_bridge/.env.local`
-- `/home/ubuntu/.hermes-ran-agent/.env`
-- `/home/ubuntu/.hermes-ran-agent/lite/.env`
-- `/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env`
-- `/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/.env`
+The deploy script keeps root Node env, `node_bridge/.env.local`, lite/full
+Hermes homes, and lite/full Hermes profile env files aligned.
 
 Important non-secret env groups:
 
@@ -93,6 +77,9 @@ Important non-secret env groups:
 - External MCP/proactive gates: `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`,
   `EXTERNAL_MCP_GATEWAY_ENABLED=true`,
   `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`, `HERMES_PROACTIVE_*`.
+- Reply-window gates: `HERMES_REPLY_TIMEOUT_SECONDS`,
+  `NODE_BRIDGE_QUICK_ACK_*`, `FEISHU_SEND_TIMEOUT_SECONDS`, and
+  `FEISHU_DOWNLOAD_TIMEOUT_SECONDS`.
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
 `scripts/clean-uv-cache-safe.sh` for cleanup and do not delete social-reader
@@ -144,6 +131,10 @@ Core safety facts:
 - `replyBackend` runs Hermes Action Contract Gate before replies leave Node.
   Unsupported success claims are observed, rewritten, or repaired according to
   mode; pending state lives under `.ran_agent_state/action_contract/`.
+- Bridge-authored action-gate, repair, and pending-action notices use `bridge_*`
+  sources and are not replayed into Hermes assistant history.
+- Slow WeChat/Feishu work may send one quick ack and then one async final reply
+  through the same adapter path. Fast replies still send once.
 - Public XHS parsers are resource resolvers, not OCR/VLM readers. Complete
   image understanding happens only after assets enter `media_reader`.
 - Complete-read claims require content evidence; canonical URLs and public
@@ -154,27 +145,14 @@ Core safety facts:
 
 ## Scheduled AI Daily Digest
 
-- Enable with `AI_DAILY_DIGEST_ENABLED=true`; default time is `10:00`
-  `Asia/Shanghai`.
-- The job fetches AIHOT facts, applies
-  `src/personal_agent/prompts/ai_daily_digest_report.md`, and sends a synthetic
-  Feishu DM turn to Node bridge `/scheduled/ai-daily-digest`.
-- Delivery reuses `ChannelHub -> replyBackend -> hermesGatewayClient ->
-  sendFeishuReply()`, so follow-up questions stay in the same Feishu/Hermes
-  timeline.
-- If no Feishu DM target exists, the digest is skipped. Do not hard-code raw
-  Feishu ids in public docs.
+Enable with `AI_DAILY_DIGEST_ENABLED=true`; default time is `10:00`
+`Asia/Shanghai`. Delivery reuses the Feishu `ChannelHub -> replyBackend`
+path, so follow-up questions stay in the same timeline. If no Feishu DM target
+exists, the digest is skipped. Do not hard-code raw Feishu ids in public docs.
 
 ## Protected Local State
 
-Never commit or force-add:
-
-- `.env.local`, `node_bridge/.env.local`, credentials, cookies, proxy URLs.
-- `.ran_agent_state/`, `data/`, `logs/`, `debug/`, `state/`.
-- Runtime substate under `.ran_agent_state/stickers/`,
-  `.ran_agent_state/wechat/inbound/`, `.ran_agent_state/feishu/inbound/`,
-  `.ran_agent_state/action_contract/`, `.ran_agent_state/external_mcp/`,
-  `.ran_agent_state/hermes/`, and `.ran_agent_state/co_reading/`.
-- Provider-visible history, pending action state, sticker assets, inbound media,
-  co-reading chunks, parser/sidecar markers, private `vault/` content,
-  `local_archive/`, `.venv/`, `.pytest_cache/`, and `node_modules/`.
+Never commit or force-add env files, credentials, cookies, proxy URLs, runtime
+state, logs, debug output, provider-visible history, pending-action state,
+media assets, parser/sidecar markers, private `vault/` content,
+`local_archive/`, `.venv/`, caches, or `node_modules/`.

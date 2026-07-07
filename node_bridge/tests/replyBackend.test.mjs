@@ -320,6 +320,7 @@ test('createReplyBackend logs action contract telemetry in observe mode without 
 
 test('createReplyBackend enforces safe rewrite before returning unsupported social read claims', async () => {
   const logs = [];
+  let ingestPayload = null;
   const backend = createReplyBackend({
     env: {
       HERMES_ACTION_GATE_ENABLED: 'true',
@@ -332,7 +333,10 @@ test('createReplyBackend enforces safe rewrite before returning unsupported soci
       media: null,
       model: 'deepseek-v4-flash',
     }),
-    ingestImpl: async () => ({ ok: true }),
+    ingestImpl: async (payload) => {
+      ingestPayload = payload;
+      return { ok: true };
+    },
     logger: { log(message) { logs.push(String(message)); }, warn() {} },
   });
 
@@ -343,7 +347,11 @@ test('createReplyBackend enforces safe rewrite before returning unsupported soci
     channel: 'wechat',
   }, { requestId: 'req-action-enforce' });
 
-  assert.equal(response.replyText, '我现在还没有成功读取到这个链接的内容，所以不能直接判断里面写了什么。可以再试一次，或者你把截图/正文发我。');
+  assert.equal(response.replyText, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
+  assert.equal(response.source, 'bridge_action_gate');
+  assert.equal(ingestPayload?.reply_text, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
+  assert.equal(ingestPayload?.source, 'bridge_action_gate');
+  assert.equal(String(ingestPayload?.reply_text || '').includes('旅行'), false);
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
   assert.ok(line, 'expected action contract log line');
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
@@ -354,6 +362,63 @@ test('createReplyBackend enforces safe rewrite before returning unsupported soci
   assert.deepEqual(payload.original_claim_types, ['read_complete']);
   assert.equal(line.includes('abc123'), false);
   assert.equal(line.includes('旅行'), false);
+});
+
+test('createReplyBackend gates unsafe follow-up messages before they can be sent', async () => {
+  const backend = createReplyBackend({
+    env: {
+      HERMES_ACTION_GATE_ENABLED: 'true',
+      HERMES_ACTION_GATE_MODE: 'enforce',
+    },
+    hermesImpl: async () => ({
+      reply_text: '先说一句普通话。',
+      follow_up_messages: ['第二条：已经完整读完链接了，内容是旅行攻略。'],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '帮我读一下 http://xhslink.com/o/abc123',
+    sender_id: 'conv-action-follow-up',
+    conversation_id: 'conv-action-follow-up',
+    channel: 'wechat',
+  });
+
+  assert.equal(response.replyText, '先说一句普通话。');
+  assert.deepEqual(response.followUpMessages, ['链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。']);
+  assert.equal(response.source, 'bridge_action_gate');
+});
+
+test('createReplyBackend suppresses follow-ups for silent external MCP synthetic turns', async () => {
+  const backend = createReplyBackend({
+    env: {
+      HERMES_ACTION_GATE_ENABLED: 'true',
+      HERMES_ACTION_GATE_MODE: 'enforce',
+    },
+    hermesImpl: async () => ({
+      reply_text: 'silent',
+      follow_up_messages: ['这个 follow-up 不应该发出'],
+      media: null,
+      model: 'deepseek-v4-flash',
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: 'system wake',
+    sender_id: 'conv-silent-follow-up',
+    conversation_id: 'conv-silent-follow-up',
+    channel: 'feishu',
+    route_hint: 'external_mcp_system_queue',
+  });
+
+  assert.equal(response.replyText, '');
+  assert.deepEqual(response.followUpMessages, []);
+  assert.equal(response.suppressSend, true);
 });
 
 test('createReplyBackend repair mode repairs social read evidence once and keeps repaired reply', async () => {
@@ -376,7 +441,7 @@ test('createReplyBackend repair mode repairs social read evidence once and keeps
       return {
         ok: true,
         status: 'success',
-        repairedReply: '我现在读取到了这个链接内容：它在讲旅行规划。',
+        repairedReply: '链接内容已读取：它在讲旅行规划。',
         toolResult: {
           toolName: 'mcp_social_reader_read_social_post_deep',
           ok: true,
@@ -397,7 +462,7 @@ test('createReplyBackend repair mode repairs social read evidence once and keeps
 
   assert.equal(repairCalls.length, 1);
   assert.equal(repairCalls[0].repairType, 'social_read');
-  assert.equal(response.replyText, '我现在读取到了这个链接内容：它在讲旅行规划。');
+  assert.equal(response.replyText, '链接内容已读取：它在讲旅行规划。');
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
   assert.equal(payload.gate_mode, 'repair');
@@ -428,7 +493,7 @@ test('createReplyBackend repair mode can repair social claims returned through H
       return {
         ok: true,
         status: 'success',
-        repairedReply: '我现在读取到了这个链接内容：它在讲旅行规划。',
+        repairedReply: '链接内容已读取：它在讲旅行规划。',
         toolResult: {
           toolName: 'mcp_social_reader_read_social_post_deep',
           ok: true,
@@ -461,7 +526,7 @@ test('createReplyBackend repair mode can repair social claims returned through H
 
   assert.equal(repairCalls.length, 1);
   assert.equal(repairCalls[0].repairType, 'social_read');
-  assert.equal(response.replyText, '我现在读取到了这个链接内容：它在讲旅行规划。');
+  assert.equal(response.replyText, '链接内容已读取：它在讲旅行规划。');
 });
 
 test('createReplyBackend repair mode safe rewrites when social repair fails', async () => {
@@ -489,7 +554,8 @@ test('createReplyBackend repair mode safe rewrites when social repair fails', as
     channel: 'wechat',
   }, { requestId: 'req-action-repair-social-fail' });
 
-  assert.equal(response.replyText, '我现在还没有成功读取到这个链接的内容，所以不能直接判断里面写了什么。可以再试一次，或者你把截图/正文发我。');
+  assert.equal(response.replyText, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
+  assert.equal(response.source, 'bridge_action_gate');
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
   assert.equal(payload.repair_attempted, true);
@@ -531,7 +597,7 @@ test('createReplyBackend repair mode keeps partial social repair honest', async 
     channel: 'wechat',
   });
 
-  assert.equal(response.replyText, '我读到了一部分内容：前三张图已经读到：图中展示了路线、预算和注意事项。但有些媒体或细节没有成功获取。');
+  assert.equal(response.replyText, '已读取到部分内容：前三张图已经读到：图中展示了路线、预算和注意事项。但有些媒体或细节没有成功获取。');
 });
 
 test('createReplyBackend repair mode downgrades complete reply when repaired XHS media coverage is partial', async () => {
@@ -570,7 +636,8 @@ test('createReplyBackend repair mode downgrades complete reply when repaired XHS
     channel: 'wechat',
   });
 
-  assert.equal(response.replyText, '我读到了一部分内容，但有些媒体或细节没有成功获取。');
+  assert.equal(response.replyText, '已读取到部分内容，但有些媒体或细节没有成功获取。');
+  assert.equal(response.source, 'bridge_action_gate');
 });
 
 test('createReplyBackend repair mode repairs media read through artifact evidence', async () => {
@@ -730,7 +797,8 @@ test('createReplyBackend repair mode does not fake generated media when repair h
     channel: 'wechat',
   });
 
-  assert.equal(response.replyText, '这次没有拿到可发送的生成结果，所以我不能说已经生成好了。');
+  assert.equal(response.replyText, '这次没有拿到可发送的生成结果，暂不能说已经生成完成。');
+  assert.equal(response.source, 'bridge_action_gate');
   assert.equal(response.media, null);
 });
 
@@ -758,7 +826,8 @@ test('createReplyBackend repair mode downgrades when sticker repair fails', asyn
     channel: 'wechat',
   });
 
-  assert.equal(response.replyText, '哈哈我懂你意思～');
+  assert.equal(response.replyText, '收到这个表情包请求。');
+  assert.equal(response.source, 'bridge_action_gate');
   assert.equal(response.media, null);
 });
 
@@ -835,6 +904,7 @@ test('createReplyBackend repair mode creates pending for external sends without 
 
   assert.equal(executed, false);
   assert.match(response.replyText, /确认发送/);
+  assert.equal(response.source, 'bridge_pending_action');
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
   assert.equal(payload.pending_action_type, 'external_send');
@@ -904,7 +974,8 @@ test('createReplyBackend repair mode respects max repair attempts', async () => 
   });
 
   assert.equal(repairCalled, false);
-  assert.equal(response.replyText, '我现在还没有成功读取到这个链接的内容，所以不能直接判断里面写了什么。可以再试一次，或者你把截图/正文发我。');
+  assert.equal(response.replyText, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
+  assert.equal(response.source, 'bridge_action_gate');
 });
 
 test('createReplyBackend directly executes explicitly authorized sticker save', async () => {
@@ -1152,7 +1223,7 @@ test('createReplyBackend refuses expired and multiple pending confirmations', as
     conversation_id: 'conv-expired-pending',
     channel: 'wechat',
   });
-  assert.match(expired.replyText, /确认项已经过期/);
+  assert.match(expired.replyText, /确认项已过期/);
 
   createPendingAction({
     requestId: 'req-multi-a',
@@ -1180,7 +1251,7 @@ test('createReplyBackend refuses expired and multiple pending confirmations', as
     conversation_id: 'conv-multi-pending',
     channel: 'wechat',
   });
-  assert.match(multi.replyText, /有多个待确认操作/);
+  assert.match(multi.replyText, /存在多个待确认操作/);
 });
 
 test('createReplyBackend does not execute high risk actions in observe or enforce modes', async () => {
@@ -1238,7 +1309,8 @@ test('createReplyBackend does not execute existing pending confirmations in obse
     });
 
     assert.equal(executed, false);
-    assert.match(response.replyText, /没有启用/);
+    assert.match(response.replyText, /未启用/);
+    assert.equal(response.source, 'bridge_pending_action');
   }
 });
 

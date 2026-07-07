@@ -457,6 +457,64 @@ test('buildAgent keeps paragraph-separated replies in the synchronous response',
   assert.deepEqual(followUps, null);
 });
 
+test('buildAgent quick-acks slow replies and sends final text asynchronously', async () => {
+  let resolveReply;
+  const finalMessages = [];
+  const agent = buildAgent({
+    logger: { log() {}, warn() {}, error() {} },
+    env: {
+      NODE_BRIDGE_MERGE_WINDOW_MS: '0',
+      NODE_BRIDGE_QUICK_ACK_ENABLED: 'true',
+      NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS: '20',
+      NODE_BRIDGE_QUICK_ACK_TEXT: '处理中，稍后发结果。',
+      handleWeChatTextMessage: async () => await new Promise((resolve) => {
+        resolveReply = resolve;
+      }),
+      sendFollowUpMessages: async (messages) => {
+        finalMessages.push(...messages);
+      },
+    },
+  });
+
+  const result = await agent.chat({
+    text: '需要很久',
+    conversationId: 'wx-slow-ack',
+  });
+  assert.deepEqual(result, { text: '处理中，稍后发结果。' });
+
+  resolveReply({ replyText: '最终结果', followUpMessages: [] });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.deepEqual(finalMessages, ['最终结果']);
+});
+
+test('buildAgent does not quick-ack fast replies', async () => {
+  const finalMessages = [];
+  const agent = buildAgent({
+    logger: { log() {}, warn() {}, error() {} },
+    env: {
+      NODE_BRIDGE_MERGE_WINDOW_MS: '0',
+      NODE_BRIDGE_QUICK_ACK_ENABLED: 'true',
+      NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS: '100',
+      async handleWeChatTextMessage() {
+        return { replyText: '马上好', followUpMessages: [] };
+      },
+      sendFollowUpMessages: async (messages) => {
+        finalMessages.push(...messages);
+      },
+    },
+  });
+
+  const result = await agent.chat({
+    text: '快问',
+    conversationId: 'wx-fast-no-ack',
+  });
+
+  assert.deepEqual(result, { text: '马上好' });
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.deepEqual(finalMessages, []);
+});
+
 test('buildAgent does not flush pending proactive messages even if legacy proactive delivery is enabled', async () => {
   const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
   fs.mkdirSync(stateBaseDir, { recursive: true });

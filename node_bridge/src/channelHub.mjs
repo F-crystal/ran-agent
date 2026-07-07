@@ -118,6 +118,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     role: 'assistant',
     text: response.replyText || '',
     media_summary: summarizeReplyMedia(response.media),
+    source: response.source || 'hermes',
     source_message_id: message.id,
     created_at: Date.now(),
     tags: inferTags(message),

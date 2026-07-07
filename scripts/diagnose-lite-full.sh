@@ -9,13 +9,36 @@ HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="$HERMES_HOME/lite"
 REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+NODE_ENV_FILE="${RAN_AGENT_NODE_ENV_FILE:-/opt/ran_agent/.env.local}"
+SYSTEMCTL_BIN="$(command -v systemctl 2>/dev/null || true)"
+JOURNALCTL_BIN="$(command -v journalctl 2>/dev/null || true)"
 
-systemd_cat_has() {
+systemd_cat() {
   local service="$1"
-  local pattern="$2"
-  local output
-  output=$(systemctl cat "$service" 2>/dev/null) || return 1
-  printf '%s\n' "$output" | grep -qF "$pattern"
+  if [ -z "$SYSTEMCTL_BIN" ]; then
+    return 1
+  fi
+  "$SYSTEMCTL_BIN" cat "$service" 2>/dev/null
+}
+
+systemd_is_active() {
+  local service="$1"
+  if [ -z "$SYSTEMCTL_BIN" ]; then
+    echo "unknown"
+    return 0
+  fi
+  "$SYSTEMCTL_BIN" is-active "$service" 2>/dev/null || echo "unknown"
+}
+
+journalctl_recent() {
+  if [ -z "$JOURNALCTL_BIN" ]; then
+    return 1
+  fi
+  if command -v sudo >/dev/null 2>&1; then
+    sudo "$JOURNALCTL_BIN" "$@"
+  else
+    "$JOURNALCTL_BIN" "$@"
+  fi
 }
 
 dropin_state() {
@@ -51,7 +74,7 @@ fi
 echo ""
 echo "=== 3. Systemd services ==="
 for svc in ran-agent-hermes ran-agent-hermes-full; do
-  status=$(systemctl is-active "$svc" 2>/dev/null || echo "unknown")
+  status=$(systemd_is_active "$svc")
   echo "$svc: $status"
 done
 
@@ -59,8 +82,8 @@ echo ""
 echo "=== Systemd compact status ==="
 # Compact check uses fixed-string grep -F matching on systemctl cat output.
 # 20-timeout.conf is allowed; only 90/30 legacy drop-ins are stale.
-LITE_CAT=$(systemctl cat ran-agent-hermes.service 2>/dev/null) || LITE_CAT=""
-FULL_CAT=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null) || FULL_CAT=""
+LITE_CAT=$(systemd_cat ran-agent-hermes.service) || LITE_CAT=""
+FULL_CAT=$(systemd_cat ran-agent-hermes-full.service) || FULL_CAT=""
 
 lite_compact_ok=1
 for pat in 'Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite' \
@@ -99,24 +122,36 @@ dropin_30_env=$(dropin_state "$SYSTEMD_DIR/ran-agent-hermes.service.d/30-hermes-
 echo "stale 90-lite-runtime.conf: $dropin_90"
 echo "stale 30-hermes-runtime.conf: $dropin_30_runtime"
 echo "stale 30-hermes-env.conf: $dropin_30_env"
-lite_effective_profile=$(systemctl cat ran-agent-hermes.service 2>/dev/null | sed -n 's/^Environment=HERMES_PROFILE=//p' | tail -n 1)
-full_effective_profile=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null | sed -n 's/^Environment=HERMES_PROFILE=//p' | tail -n 1)
-lite_effective_port=$(systemctl cat ran-agent-hermes.service 2>/dev/null | sed -n 's/^Environment=API_SERVER_PORT=//p' | tail -n 1)
-full_effective_port=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null | sed -n 's/^Environment=API_SERVER_PORT=//p' | tail -n 1)
+lite_effective_profile=$(printf '%s\n' "$LITE_CAT" | sed -n 's/^Environment=HERMES_PROFILE=//p' | tail -n 1)
+full_effective_profile=$(printf '%s\n' "$FULL_CAT" | sed -n 's/^Environment=HERMES_PROFILE=//p' | tail -n 1)
+lite_effective_port=$(printf '%s\n' "$LITE_CAT" | sed -n 's/^Environment=API_SERVER_PORT=//p' | tail -n 1)
+full_effective_port=$(printf '%s\n' "$FULL_CAT" | sed -n 's/^Environment=API_SERVER_PORT=//p' | tail -n 1)
 echo "lite effective profile: ${lite_effective_profile:-UNKNOWN}"
 echo "full effective profile: ${full_effective_profile:-UNKNOWN}"
 echo "lite port: ${lite_effective_port:-UNKNOWN}"
 echo "full port: ${full_effective_port:-UNKNOWN}"
+lite_reply_timeout=$(printf '%s\n' "$LITE_CAT" | sed -n 's/^Environment=HERMES_REPLY_TIMEOUT_SECONDS=//p' | tail -n 1)
+full_reply_timeout=$(printf '%s\n' "$FULL_CAT" | sed -n 's/^Environment=HERMES_REPLY_TIMEOUT_SECONDS=//p' | tail -n 1)
+node_reply_timeout=$(grep -E '^HERMES_REPLY_TIMEOUT_SECONDS=' "$NODE_ENV_FILE" 2>/dev/null | tail -n 1 | cut -d= -f2- || true)
+echo "lite HERMES_REPLY_TIMEOUT_SECONDS: ${lite_reply_timeout:-UNKNOWN}"
+echo "full HERMES_REPLY_TIMEOUT_SECONDS: ${full_reply_timeout:-UNKNOWN}"
+echo "node HERMES_REPLY_TIMEOUT_SECONDS: ${node_reply_timeout:-NOT SET}"
+if [ -n "$lite_reply_timeout" ] && [ -n "$full_reply_timeout" ] && [ "$lite_reply_timeout" != "$full_reply_timeout" ]; then
+  echo "WARNING: lite/full HERMES_REPLY_TIMEOUT_SECONDS differ"
+fi
+if [ -n "$node_reply_timeout" ] && [ -n "$lite_reply_timeout" ] && [ "$node_reply_timeout" != "$lite_reply_timeout" ]; then
+  echo "WARNING: node and lite HERMES_REPLY_TIMEOUT_SECONDS differ"
+fi
 if [ "$dropin_90" = "PRESENT" ] || [ "$dropin_30_runtime" = "PRESENT" ] || [ "$dropin_30_env" = "PRESENT" ]; then
   echo "WARNING: stale Hermes runtime drop-in remains; run scripts/apply-hermes-runtime-split.sh"
 fi
 
 echo ""
 echo "=== UV cache status ==="
-lite_uv_cache=$(systemctl cat ran-agent-hermes.service 2>/dev/null | sed -n 's/^Environment=UV_CACHE_DIR=//p' | tail -n 1)
-full_uv_cache=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null | sed -n 's/^Environment=UV_CACHE_DIR=//p' | tail -n 1)
-lite_uv_tool=$(systemctl cat ran-agent-hermes.service 2>/dev/null | sed -n 's/^Environment=UV_TOOL_DIR=//p' | tail -n 1)
-full_uv_tool=$(systemctl cat ran-agent-hermes-full.service 2>/dev/null | sed -n 's/^Environment=UV_TOOL_DIR=//p' | tail -n 1)
+lite_uv_cache=$(printf '%s\n' "$LITE_CAT" | sed -n 's/^Environment=UV_CACHE_DIR=//p' | tail -n 1)
+full_uv_cache=$(printf '%s\n' "$FULL_CAT" | sed -n 's/^Environment=UV_CACHE_DIR=//p' | tail -n 1)
+lite_uv_tool=$(printf '%s\n' "$LITE_CAT" | sed -n 's/^Environment=UV_TOOL_DIR=//p' | tail -n 1)
+full_uv_tool=$(printf '%s\n' "$FULL_CAT" | sed -n 's/^Environment=UV_TOOL_DIR=//p' | tail -n 1)
 echo "lite UV_CACHE_DIR: ${lite_uv_cache:-NOT SET}"
 echo "full UV_CACHE_DIR: ${full_uv_cache:-NOT SET}"
 echo "lite UV_TOOL_DIR: ${lite_uv_tool:-NOT SET}"
@@ -161,7 +196,7 @@ echo ""
 echo "=== 3b. Effective systemd runtime snippets ==="
 for svc in ran-agent-hermes.service ran-agent-hermes-full.service; do
   echo "--- $svc ---"
-  systemctl cat "$svc" 2>/dev/null \
+  systemd_cat "$svc" \
     | grep -E '^(# /etc/systemd/system/ran-agent-hermes|# /etc/systemd/system/ran-agent-hermes-full|Environment(File)?=|ExecStart=|WorkingDirectory=|User=)' \
     || echo "NOT FOUND"
 done
@@ -323,8 +358,8 @@ fi
 
 echo ""
 echo "=== 9. Recent capability mode logs ==="
-sudo journalctl -u ran-agent-node.service --since "15 minutes ago" --no-pager 2>/dev/null | grep 'hermes-capability-mode' | tail -8 || echo "No recent capability mode logs"
+journalctl_recent -u ran-agent-node.service --since "15 minutes ago" --no-pager 2>/dev/null | grep 'hermes-capability-mode' | tail -8 || echo "No recent capability mode logs"
 
 echo ""
 echo "=== 10. Recent vision errors (5 minutes) ==="
-sudo journalctl -u ran-agent-hermes.service -u ran-agent-hermes-full.service --since "5 minutes ago" --no-pager 2>/dev/null | grep -i 'vision_analyze\|image_url.*BadRequest\|unknown variant.*image_url' | tail -5 || echo "No recent vision errors"
+journalctl_recent -u ran-agent-hermes.service -u ran-agent-hermes-full.service --since "5 minutes ago" --no-pager 2>/dev/null | grep -i 'vision_analyze\|image_url.*BadRequest\|unknown variant.*image_url' | tail -5 || echo "No recent vision errors"

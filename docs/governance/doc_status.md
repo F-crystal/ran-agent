@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-06)
+Status: CURRENT (2026-07-07)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -90,6 +90,8 @@ deployment notes belong under ignored `local_archive/`, not under
   runtime state.
 - Hermes Action Contract Gate is the current guard for tool-backed actions:
   high-risk writes require explicit confirmation or pending-action state.
+- Bridge-authored safety notices are neutral `bridge_*` messages. They may be
+  sent to users, but are filtered out of Hermes recent/global assistant history.
 - Hermes context optimization is closed as a conservative package: local recent
   history, bounded global active topic, optional cache-friendly append history,
   and opt-in lite soft reset all write only under ignored runtime state.
@@ -100,3 +102,9 @@ deployment notes belong under ignored `local_archive/`, not under
   scoped bounded activities, and global-user stop interruption; notifications
   require watchlist and rate budget, while T4/T5 writes require pending action
   evidence or trusted scoped grants.
+- External MCP policy explain/call paths share trusted session context; compact
+  aliases like `list_games`/`listgames` resolve only when unique, and private
+  upstream session ids are reused without entering public evidence.
+- Slow WeChat/Feishu replies use the managed reply-window contract:
+  `HERMES_REPLY_TIMEOUT_SECONDS`, quick ack, async final send, and distinct
+  Feishu ack/final idempotency keys.

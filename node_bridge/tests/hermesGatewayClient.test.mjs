@@ -188,6 +188,39 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.equal(response.model, 'ran-assistant');
 });
 
+test('sendChatToHermesGateway aborts Hermes API fetch on reply timeout', async () => {
+  let sawAbort = false;
+  await assert.rejects(
+    () => sendChatToHermesGateway(
+      {
+        text: '慢请求',
+        sender_id: 'conv-hermes-timeout',
+        channel: 'wechat',
+      },
+      {
+        config: getHermesGatewayConfig({
+          HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+          HERMES_API_KEY: 'token',
+          HERMES_REPLY_MODE: 'api',
+          HERMES_REPLY_TIMEOUT_SECONDS: '1',
+          RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+        }),
+        fetchImpl: async (url, init) => {
+          assert.ok(init.signal, 'Hermes API fetch should receive an abort signal');
+          return await new Promise((resolve, reject) => {
+            init.signal.addEventListener('abort', () => {
+              sawAbort = true;
+              reject(init.signal.reason || new Error('aborted'));
+            }, { once: true });
+          });
+        },
+      }
+    ),
+    /aborted|abort|timeout/i
+  );
+  assert.equal(sawAbort, true);
+});
+
 test('sendChatToHermesGateway injects lightweight environment context when state is fresh', async () => {
   const stateDir = tempGatewayStateDir('hermes-env-context-');
   const env = {
@@ -1753,7 +1786,7 @@ test('applySocialLinkEvidenceGate: social link + claim + no content_read trigger
     { log() {} }
   );
   assert.equal(result.evidenceGateTriggered, true);
-  assert.match(result.replyText, /没有成功解析这个链接/);
+  assert.match(result.replyText, /链接未成功解析/);
 });
 
 test('applySocialLinkEvidenceGate: link_resolution only + claim triggers gate with link_resolution text', () => {
@@ -1775,7 +1808,7 @@ test('applySocialLinkEvidenceGate: metadata_read only + claim triggers gate with
     { log() {} }
   );
   assert.equal(result.evidenceGateTriggered, true);
-  assert.match(result.replyText, /只拿到了一些标题/);
+  assert.match(result.replyText, /只拿到标题/);
 });
 
 test('applySocialLinkEvidenceGate: content_read ok passes through', () => {
@@ -1792,7 +1825,7 @@ test('applySocialLinkEvidenceGate: content_read ok passes through', () => {
 test('applySocialLinkEvidenceGate: failure acknowledgment does not trigger gate', () => {
   const result = applySocialLinkEvidenceGate(
     { text: '看看 http://xhslink.com/o/abc123' },
-    '臣这边只确认链接已解析，但没有拿到正文内容',
+    '只确认链接已解析，未拿到正文内容',
     { hasSocialLink: true, platform: 'xhs', link_resolution: { ok: true }, metadata_read: { ok: false }, content_read: { ok: false }, allow_claim_read: false, evidence_source: 'public_parser' },
     { log() {} }
   );

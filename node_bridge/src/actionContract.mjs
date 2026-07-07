@@ -118,7 +118,7 @@ export function evaluateActionGate({
   } else if (failedOutboundSuccessClaim) {
     shouldRewrite = true;
     reasons.push('outbound_failed_success_claim');
-    rewrittenText = '发送没有成功，我现在不能说已经发出去了。';
+    rewrittenText = '发送没有成功，暂不能说已经发出。';
   } else if (!evidenceSatisfied && actionClaimed) {
     shouldRewrite = true;
     reasons.push('missing_required_evidence');
@@ -375,21 +375,21 @@ function missingEvidenceForIntent(intent, evidence = []) {
 function missingEvidenceRewriteForIntent(intent) {
   switch (intent) {
     case 'social_read':
-      return '我现在还没有成功读取到这个链接的内容，所以不能直接判断里面写了什么。可以再试一次，或者你把截图/正文发我。';
+      return '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。';
     case 'media_read':
-      return '我这边没有成功读取到这个媒体内容，不能直接描述里面是什么。';
+      return '媒体内容未成功读取，暂不能描述其中内容。';
     case 'sticker_send':
-      return '哈哈我懂你意思～';
+      return '收到这个表情包请求。';
     case 'media_generate':
-      return '这次没有拿到可发送的生成结果，所以我不能说已经生成好了。';
+      return '这次没有拿到可发送的生成结果，暂不能说已经生成完成。';
     case 'memory_write':
-      return '我现在还没有完成保存，所以不能说已经保存好了。';
+      return '保存尚未完成，暂不能说已经保存。';
     case 'external_send':
-      return '我现在还没有确认发送成功，所以不能说已经发出去了。';
+      return '尚未确认发送成功，暂不能说已经发出。';
     case 'external_mcp_read':
-      return '我现在还没有成功读取到这个外部 MCP 内容，所以不能直接判断里面写了什么。';
+      return '外部 MCP 内容未成功读取，暂不能判断其中内容。';
     case 'external_mcp_write':
-      return '我现在还没有确认外部 MCP 操作成功，所以不能说已经执行完成。';
+      return '尚未确认外部 MCP 操作成功，暂不能说已经执行完成。';
     default:
       return '';
   }
@@ -397,9 +397,9 @@ function missingEvidenceRewriteForIntent(intent) {
 
 function partialRewriteForIntent(intent) {
   if (intent === 'media_read') {
-    return '我读到了一部分媒体内容，但还有些细节没有成功获取。';
+    return '已读取到部分媒体内容，但还有些细节没有成功获取。';
   }
-  return '我读到了一部分内容，但有些媒体或细节没有成功获取。';
+  return '已读取到部分内容，但有些媒体或细节没有成功获取。';
 }
 
 function extractMarkerEvidence(text = '') {

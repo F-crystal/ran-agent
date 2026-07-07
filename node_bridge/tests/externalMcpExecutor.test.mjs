@@ -179,6 +179,39 @@ test('streamable HTTP executor initializes, lists tools, and calls tools', async
   assert.match(requests[2].headers.accept, /text\/event-stream/);
 });
 
+test('streamable HTTP executor reuses upstream session id for tool calls', async () => {
+  const requests = [];
+  const fetchImpl = async (url, request) => {
+    const body = JSON.parse(String(request.body || '{}'));
+    const headers = Object.fromEntries(new Headers(request.headers).entries());
+    requests.push({ method: body.method, headers, body });
+    assert.equal(body.method, 'tools/call');
+    return new Response(JSON.stringify({
+      jsonrpc: '2.0',
+      id: body.id,
+      result: {
+        content: [{ type: 'text', text: 'observed' }],
+      },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'mcp-session-id': 'remote-session-2' },
+    });
+  };
+
+  const call = await callExternalMcpTool({
+    url: 'http://127.0.0.1:38888/mcp',
+    transport: 'streamable-http',
+    toolName: 'listgames',
+    arguments: {},
+    upstreamSessionId: 'remote-session-1',
+  }, { skipUrlSafety: true, fetchImpl });
+
+  assert.equal(call.ok, true);
+  assert.equal(call.upstreamSessionId, 'remote-session-2');
+  assert.deepEqual(requests.map((item) => item.method), ['tools/call']);
+  assert.equal(requests[0].headers['mcp-session-id'], 'remote-session-1');
+});
+
 test('executor reports cancellation without calling remote MCP', async () => {
   let fetchCalled = false;
   const controller = new AbortController();

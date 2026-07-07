@@ -26,6 +26,7 @@ import {
   closeExternalMcpSession,
   getExternalMcpSession,
   openExternalMcpSession,
+  updateExternalMcpSession,
 } from './sessionManager.mjs';
 
 const SERVER_INFO = {
@@ -109,6 +110,9 @@ export function buildExternalMcpGatewayTools() {
     tool('mcp_explain_policy', 'MCP Explain Policy', 'Explain whether a tool call is allowed, denied, or requires pending confirmation.', {
       serverId: str(),
       toolName: str(),
+      sessionId: str(),
+      activityId: str(),
+      globalUserId: str(),
       profile: str(['lite', 'full', 'owner_full']),
       sessionMode: str(['observe', 'interactive', 'write']),
       trigger: str(['user_turn', 'proactive', 'activity']),
@@ -163,18 +167,13 @@ async function dispatchTool(name, args, options) {
   if (name === 'mcp_explain_policy') {
     const server = findServer(args.serverId, options);
     if (!server) return errorResult('external MCP server not found', 'EXTERNAL_MCP_SERVER_NOT_FOUND');
-    const selectedTool = server.tools.find((item) => item.name === String(args.toolName || '').trim());
-    if (!selectedTool) return errorResult('external MCP tool not found', 'EXTERNAL_MCP_TOOL_NOT_FOUND');
-    const policy = evaluateExternalMcpPolicy({
-      profile: args.profile || 'lite',
-      sessionMode: args.sessionMode || 'observe',
-      trigger: args.trigger || 'user_turn',
-      tool: { ...selectedTool, serverId: server.id },
-      watchlistMatched: args.watchlistMatched === true,
-      pendingAction: args.pendingAction,
-      scopedGrant: args.scopedGrant,
-    });
-    return result({ ok: true, policy });
+    const selected = selectServerTool(server, args.toolName);
+    if (selected.errorCode) return errorResult('external MCP tool name is ambiguous', selected.errorCode);
+    if (!selected.tool) return errorResult('external MCP tool not found', 'EXTERNAL_MCP_TOOL_NOT_FOUND');
+    const context = resolvePolicyContext({ args, server, selectedTool: selected.tool, options, allowHypothetical: true });
+    if (context.error) return errorResult(context.error, context.errorCode);
+    const policy = evaluateExternalMcpPolicy(context.input);
+    return result({ ok: true, context_source: context.source, policy });
   }
   if (name === 'mcp_open_session') {
     const server = findServer(args.serverId, options);
@@ -231,7 +230,9 @@ async function dispatchTool(name, args, options) {
   if (name === 'mcp_call') {
     const server = findServer(args.serverId, options);
     if (!server) return errorResult('external MCP server not found', 'EXTERNAL_MCP_SERVER_NOT_FOUND');
-    const selectedTool = server.tools.find((item) => item.name === String(args.toolName || '').trim());
+    const selected = selectServerTool(server, args.toolName);
+    if (selected.errorCode) return errorResult('external MCP tool name is ambiguous', selected.errorCode);
+    const selectedTool = selected.tool;
     if (!selectedTool) return errorResult('external MCP tool not found', 'EXTERNAL_MCP_TOOL_NOT_FOUND');
     if (!args.sessionId) return errorResult('external MCP session is required', 'EXTERNAL_MCP_SESSION_REQUIRED');
     const session = getExternalMcpSession(args.sessionId, {
@@ -242,25 +243,11 @@ async function dispatchTool(name, args, options) {
     if (!session) return errorResult('external MCP session not found or expired', 'EXTERNAL_MCP_SESSION_NOT_FOUND');
     const globalUserId = session.globalUserId;
     const sessionMode = session.mode;
-    const trigger = args.activityId ? 'activity' : 'user_turn';
-    const scopedGrant = args.activityId
-      ? getTrustedExternalMcpActivityGrant(args.activityId, {
-          ...options,
-          globalUserId,
-          serverId: server.id,
-          now: options.now,
-        })
-      : null;
-    const policy = evaluateExternalMcpPolicy({
-      profile: resolveGatewayProfile(options),
-      sessionMode,
-      trigger,
-      tool: { ...selectedTool, serverId: server.id },
-      now: options.now,
-      watchlistMatched: false,
-      pendingAction: null,
-      scopedGrant,
-    });
+    const context = resolvePolicyContext({ args, server, selectedTool, options, session });
+    if (context.error) return errorResult(context.error, context.errorCode);
+    const trigger = context.trigger;
+    const scopedGrant = context.scopedGrant;
+    const policy = evaluateExternalMcpPolicy(context.input);
     if (!policy.allowed) {
       return errorResult(
         policy.requiresPendingAction ? 'external MCP call requires pending confirmation' : 'external MCP call denied by policy',
@@ -296,16 +283,26 @@ async function dispatchTool(name, args, options) {
         toolName: selectedTool.name,
         arguments: args.arguments || {},
         sessionId: args.sessionId,
+        upstreamSessionId: session.upstreamSessionId || '',
         globalUserId,
       }, controller ? { ...options, signal: controller.signal } : options);
     } finally {
       unregisterAbort();
     }
-    const activeSession = getExternalMcpSession(args.sessionId, {
+    let activeSession = getExternalMcpSession(args.sessionId, {
       ...options,
       globalUserId,
       serverId: server.id,
     });
+    if (call?.upstreamSessionId && activeSession) {
+      activeSession = updateExternalMcpSession(args.sessionId, {
+        upstreamSessionId: call.upstreamSessionId,
+      }, {
+        ...options,
+        globalUserId,
+        serverId: server.id,
+      }) || activeSession;
+    }
     const activeGrant = args.activityId
       ? getTrustedExternalMcpActivityGrant(args.activityId, {
           ...options,
@@ -390,6 +387,64 @@ function findManifest(serverId, options = {}) {
     .filter((entry) => entry.ok)
     .map((entry) => entry.manifest)
     .find((manifest) => manifest.id === id) || null;
+}
+
+function selectServerTool(server, requestedName) {
+  const requested = String(requestedName || '').trim();
+  if (!requested) return { tool: null };
+  const tools = Array.isArray(server?.tools) ? server.tools : [];
+  const exact = tools.filter((toolItem) => toolItem.name === requested);
+  if (exact.length === 1) return { tool: exact[0] };
+  const compact = compactToolName(requested);
+  if (!compact) return { tool: null };
+  const matches = tools.filter((toolItem) => compactToolName(toolItem.name) === compact);
+  if (matches.length === 1) return { tool: matches[0] };
+  if (matches.length > 1) return { errorCode: 'EXTERNAL_MCP_TOOL_AMBIGUOUS' };
+  return { tool: null };
+}
+
+function compactToolName(value) {
+  return String(value || '').trim().toLowerCase().replace(/[_\-.]/g, '');
+}
+
+function resolvePolicyContext({ args = {}, server, selectedTool, options = {}, session = null, allowHypothetical = false } = {}) {
+  const liveSession = session || (args.sessionId
+    ? getExternalMcpSession(args.sessionId, {
+        ...options,
+        globalUserId: args.globalUserId,
+        serverId: server.id,
+      })
+    : null);
+  if (args.sessionId && !liveSession) {
+    return { error: 'external MCP session not found or expired', errorCode: 'EXTERNAL_MCP_SESSION_NOT_FOUND' };
+  }
+  const globalUserId = liveSession?.globalUserId || String(args.globalUserId || '').trim();
+  const trigger = args.activityId ? 'activity' : (liveSession ? 'user_turn' : (allowHypothetical ? args.trigger || 'user_turn' : 'user_turn'));
+  const sessionMode = liveSession?.mode || (allowHypothetical ? args.sessionMode || 'observe' : 'observe');
+  const scopedGrant = args.activityId
+    ? getTrustedExternalMcpActivityGrant(args.activityId, {
+        ...options,
+        globalUserId,
+        serverId: server.id,
+        now: options.now,
+      })
+    : null;
+  return {
+    source: liveSession ? 'session' : 'hypothetical',
+    trigger,
+    sessionMode,
+    scopedGrant,
+    input: {
+      profile: liveSession ? resolveGatewayProfile(options) : (allowHypothetical ? args.profile || 'lite' : resolveGatewayProfile(options)),
+      sessionMode,
+      trigger,
+      tool: { ...selectedTool, serverId: server.id },
+      now: options.now,
+      watchlistMatched: false,
+      pendingAction: null,
+      scopedGrant,
+    },
+  };
 }
 
 function publicServer(manifest) {

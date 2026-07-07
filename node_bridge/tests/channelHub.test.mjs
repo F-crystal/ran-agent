@@ -289,7 +289,7 @@ test('channel hub enforce mode sends safe rewrite for unsupported action claims'
     },
   });
 
-  const rewritten = '我现在还没有成功读取到这个链接的内容，所以不能直接判断里面写了什么。可以再试一次，或者你把截图/正文发我。';
+  const rewritten = '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。';
   assert.equal(response.replyText, rewritten);
   assert.equal(sent.text, rewritten);
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
@@ -331,7 +331,7 @@ test('channel hub repair mode applies repaired reply through adapter', async () 
       return {
         ok: true,
         status: 'success',
-        repairedReply: '我现在读取到了这个链接内容：它在讲旅行规划。',
+        repairedReply: '链接内容已读取：它在讲旅行规划。',
         toolResult: { toolName: 'mcp_social_reader_read_social_post_deep', ok: true, artifact_id: 'private-artifact' },
       };
     },
@@ -344,8 +344,8 @@ test('channel hub repair mode applies repaired reply through adapter', async () 
   });
 
   assert.equal(repairCalls, 1);
-  assert.equal(response.replyText, '我现在读取到了这个链接内容：它在讲旅行规划。');
-  assert.equal(sent.text, '我现在读取到了这个链接内容：它在讲旅行规划。');
+  assert.equal(response.replyText, '链接内容已读取：它在讲旅行规划。');
+  assert.equal(sent.text, '链接内容已读取：它在讲旅行规划。');
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
   assert.equal(payload.repair_status, 'success');
@@ -387,7 +387,7 @@ test('channel hub scheduled digest path does not trigger sticker repair', async 
   });
 
   assert.equal(repairCalls, 0);
-  assert.equal(response.replyText, '哈哈我懂你意思～');
+  assert.equal(response.replyText, '收到这个表情包请求。');
 });
 
 test('channel hub creates pending sticker save and executes confirmation through adapter', async () => {

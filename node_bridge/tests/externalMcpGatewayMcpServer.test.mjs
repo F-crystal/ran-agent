@@ -412,6 +412,167 @@ test('external MCP gateway ignores model-supplied profile and session mode on ca
   assert.equal(result.structuredContent.policy.trigger, 'user_turn');
 });
 
+test('external MCP gateway explains policy with the same trusted context used by calls', async (t) => {
+  const env = tempGatewayEnv(t);
+  const registry = [{
+    id: 'cedartoy-games',
+    transport: 'streamable-http',
+    url: 'https://toy.cedarstar.org/mcp',
+    activityKind: 'game',
+    tools: [{ name: 'ecosystem.cmd', description: 'Run a command inside a text-only sandbox game.' }],
+  }];
+  const opened = await callTool('mcp_open_session', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    mode: 'observe',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    registry,
+  });
+  const explain = await callTool('mcp_explain_policy', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'ecosystem.cmd',
+    sessionId: opened.structuredContent.session.sessionId,
+    profile: 'owner_full',
+    sessionMode: 'interactive',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant-lite' },
+    registry,
+  });
+  const call = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'ecosystem.cmd',
+    sessionId: opened.structuredContent.session.sessionId,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant-lite' },
+    registry,
+  });
+
+  assert.equal(explain.structuredContent.ok, true);
+  assert.equal(explain.structuredContent.context_source, 'session');
+  assert.equal(explain.structuredContent.policy.profile, 'lite');
+  assert.equal(explain.structuredContent.policy.sessionMode, 'observe');
+  assert.equal(explain.structuredContent.policy.trigger, 'user_turn');
+  assert.equal(call.isError, true);
+  assert.deepEqual(explain.structuredContent.policy, call.structuredContent.policy);
+});
+
+test('external MCP gateway resolves unique compact tool aliases without exposing ambiguous matches', async (t) => {
+  const env = tempGatewayEnv(t);
+  const registry = [{
+    id: 'cedartoy-games',
+    transport: 'streamable-http',
+    url: 'https://toy.cedarstar.org/',
+    activityKind: 'game',
+    tools: [
+      { name: 'listgames', description: '列出所有可用游戏，返回分类列表及简介' },
+      { name: 'getguide', description: '获取指定游戏的玩法说明' },
+      { name: 'play', description: '执行游戏操作' },
+    ],
+  }];
+  const session = await callTool('mcp_open_session', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    mode: 'interactive',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    registry,
+  });
+  let calledToolName = '';
+  const result = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'list_games',
+    sessionId: session.structuredContent.session.sessionId,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    registry,
+    executor: {
+      async call(input) {
+        calledToolName = input.toolName;
+        return { ok: true, result: { content: [{ type: 'text', text: 'eco' }] } };
+      },
+    },
+  });
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(calledToolName, 'listgames');
+  assert.equal(result.structuredContent.toolName, 'listgames');
+
+  const ambiguous = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'get-guide',
+    sessionId: session.structuredContent.session.sessionId,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    registry: [{
+      ...registry[0],
+      tools: [
+        { name: 'get_guide', description: '获取指定游戏的玩法说明' },
+        { name: 'getguide', description: '获取指定游戏的玩法说明' },
+      ],
+    }],
+  });
+  assert.equal(ambiguous.isError, true);
+  assert.equal(ambiguous.structuredContent.error_code, 'EXTERNAL_MCP_TOOL_AMBIGUOUS');
+});
+
+test('external MCP gateway persists upstream MCP session ids between calls without exposing them', async (t) => {
+  const env = tempGatewayEnv(t);
+  const registry = [{
+    id: 'cedartoy-games',
+    transport: 'streamable-http',
+    url: 'https://toy.cedarstar.org/',
+    activityKind: 'game',
+    tools: [{ name: 'listgames', description: '列出所有可用游戏，返回分类列表及简介' }],
+  }];
+  const session = await callTool('mcp_open_session', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    mode: 'interactive',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    registry,
+  });
+  const upstreams = [];
+  const options = {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    registry,
+    executor: {
+      async call(input) {
+        upstreams.push(input.upstreamSessionId || '');
+        return {
+          ok: true,
+          upstreamSessionId: upstreams.length === 1 ? 'remote-session-1' : 'remote-session-2',
+          result: { content: [{ type: 'text', text: 'ok' }] },
+        };
+      },
+    },
+  };
+
+  const first = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'listgames',
+    sessionId: session.structuredContent.session.sessionId,
+  }, options);
+  const second = await callTool('mcp_call', {
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    toolName: 'listgames',
+    sessionId: session.structuredContent.session.sessionId,
+  }, options);
+
+  assert.equal(first.structuredContent.ok, true);
+  assert.equal(second.structuredContent.ok, true);
+  assert.deepEqual(upstreams, ['', 'remote-session-1']);
+  assert.equal(JSON.stringify(session.structuredContent.session).includes('remote-session'), false);
+  assert.equal(JSON.stringify(second.structuredContent.evidence).includes('remote-session'), false);
+});
+
 test('external MCP gateway activity calls require bounded activity grants and consume budget', async (t) => {
   const env = tempGatewayEnv(t);
   await callTool('mcp_probe_server', {

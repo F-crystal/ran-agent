@@ -49,6 +49,7 @@ export function appendTurn(turn = {}) {
   if (!record.text_summary && preparedText.text_summary) record.text_summary = preparedText.text_summary;
   if (turn.media_summary) record.media_summary = sanitizeTimelineText(turn.media_summary, 800);
   if (turn.source_message_id) record.source_message_id = String(turn.source_message_id);
+  if (turn.source) record.source = sanitizeTimelineSource(turn.source);
   const tags = normalizeTags(turn.tags, text);
   if (tags.length > 0) record.tags = tags;
 
@@ -202,6 +203,7 @@ export function getActiveTopicContext({
 } = {}) {
   const records = readTimelineRecords({ timelinePath, limit: 80 })
     .filter((record) => record.global_user_id === global_user_id)
+    .filter((record) => !isBridgeNoticeRecord(record))
     .filter((record) => record.role === 'user' || record.compacted === true || record.platform === 'summary')
     .slice(-12);
   const { freshRecords, staleRecords } = splitRecordsByFreshness(records, { now, freshnessHours });
@@ -245,6 +247,7 @@ export function buildContinuityNote({
 
 function recordsTopicText(records = []) {
   return records
+    .filter((record) => !isBridgeNoticeRecord(record))
     .map((record) => record.text_summary || record.media_summary || record.text || '')
     .filter(Boolean)
     .join(' / ');
@@ -285,7 +288,7 @@ function recordsToMessages(records, limit, charBudget) {
   let used = 0;
   const max = Math.max(0, Number(limit) || 0);
   const budget = Math.max(0, Number(charBudget) || 0);
-  for (const record of records.slice(-max).reverse()) {
+  for (const record of records.filter((item) => !isBridgeNoticeRecord(item)).slice(-max).reverse()) {
     const content = sanitizeTimelineText(record.text_summary || record.media_summary || record.text || '', 1200);
     if (!content) continue;
     const role = record.role === 'assistant' ? 'assistant' : 'user';
@@ -295,6 +298,14 @@ function recordsToMessages(records, limit, charBudget) {
     used += clipped.length;
   }
   return selected;
+}
+
+function isBridgeNoticeRecord(record = {}) {
+  return /^bridge_/i.test(String(record.source || '').trim());
+}
+
+function sanitizeTimelineSource(value) {
+  return String(value || '').trim().toLowerCase().replace(/[^a-z0-9_.:-]/g, '_').slice(0, 80);
 }
 
 export function sanitizeTimelineText(value, maxChars = 1200) {

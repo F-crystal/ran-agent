@@ -8,6 +8,7 @@ import {
   getExternalMcpSession,
   listExternalMcpSessions,
   openExternalMcpSession,
+  updateExternalMcpSession,
 } from '../src/externalMcp/sessionManager.mjs';
 
 function tempEnv(t) {
@@ -134,4 +135,32 @@ test('session manager closes sessions by marking them closed', (t) => {
     serverId: 'forum.example',
     now: '2026-07-01T10:03:00Z',
   }), null);
+});
+
+test('session manager stores upstream MCP session ids privately', (t) => {
+  const env = tempEnv(t);
+  const session = openExternalMcpSession({
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    mode: 'interactive',
+    now: '2026-07-01T10:00:00Z',
+  }, { env });
+
+  const updated = updateExternalMcpSession(session.sessionId, {
+    upstreamSessionId: 'remote-session-1',
+  }, {
+    env,
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    now: '2026-07-01T10:01:00Z',
+  });
+  const loaded = getExternalMcpSession(session.sessionId, {
+    env,
+    globalUserId: 'user:ran',
+    serverId: 'cedartoy-games',
+    now: '2026-07-01T10:02:00Z',
+  });
+
+  assert.equal(updated.upstreamSessionId, 'remote-session-1');
+  assert.equal(loaded.upstreamSessionId, 'remote-session-1');
 });

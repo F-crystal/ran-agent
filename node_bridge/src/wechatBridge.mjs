@@ -75,7 +75,7 @@ export async function handleWeChatTextMessage(message, options = {}) {
   const mediaCount = Array.isArray(payload.media) ? payload.media.length : 0;
   if (!payload.text.trim() && payload.image_urls.length === 0 && mediaCount === 0) {
     logger.info?.('ignoring empty wechat message');
-    return '我暂时还没收到可处理的消息内容。';
+    return '暂未收到可处理的消息内容。';
   }
 
   if (!payload.sender_id.trim()) {
@@ -190,7 +190,7 @@ export function sanitizeReplyText(rawText, options = {}) {
   if (strippedMetaLines) {
     return strippedMetaLines;
   }
-  return '我刚才执行任务时出现了异常输出，我会继续处理并给你干净结论。';
+  return '刚才执行任务时出现了异常输出，后续会继续处理并给出干净结论。';
 }
 
 export function extractTextFromWeChatRequest(request) {

@@ -168,7 +168,7 @@ async function repairMediaRead({ message, env, logger }) {
   return {
     ok: true,
     status: 'success',
-    repairedReply: summary ? `我现在读到了媒体内容：${summary}` : '我现在读到了这个媒体内容，但可用摘要比较有限。',
+    repairedReply: summary ? `媒体内容已读取：${summary}` : '媒体内容已读取，可用摘要较有限。',
     media: {
       type: artifact.type || 'file',
       artifact_id: artifact.id,
@@ -339,9 +339,9 @@ function buildSocialRepairReply(payload = {}, partial = false) {
     );
     if (partialSummary) {
       const end = /[。！？.!?]$/.test(partialSummary) ? '' : '。';
-      return `我读到了一部分内容：${partialSummary}${end}但有些媒体或细节没有成功获取。`;
+      return `已读取到部分内容：${partialSummary}${end}但有些媒体或细节没有成功获取。`;
     }
-    return '我读到了一部分内容，但有些媒体或细节没有成功获取。';
+    return '已读取到部分内容，但有些媒体或细节没有成功获取。';
   }
   const summary = compactUserText(
     payload.summary
@@ -354,7 +354,7 @@ function buildSocialRepairReply(payload = {}, partial = false) {
     || payload.text
     || ''
   );
-  return summary ? `我现在读取到了这个链接内容：${summary}` : '我现在读取到了这个链接内容，可以基于读取结果继续整理。';
+  return summary ? `链接内容已读取：${summary}` : '链接内容已读取，可以基于读取结果继续整理。';
 }
 
 function summarizeSocialMediaCoverage(payload = {}) {

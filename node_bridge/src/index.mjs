@@ -16,6 +16,7 @@ import { startCoReadingWebServer } from './coReading/webServer.mjs';
 import { startFeishuBridge } from './feishuBridge.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
+import { getQuickAckConfig, quickAckDelay } from './quickAck.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
 import {
   appendPendingOutboundMessage,
@@ -338,9 +339,13 @@ export function buildAgent({ logger, env }) {
   const sendFollowUpMessages = typeof env.sendFollowUpMessages === 'function'
     ? env.sendFollowUpMessages
     : null;
+  const sendStructuredMessage = typeof env.sendStructuredMessage === 'function'
+    ? env.sendStructuredMessage
+    : null;
   const handleMessageImpl = typeof env.handleWeChatTextMessage === 'function'
     ? env.handleWeChatTextMessage
     : handleWeChatTextMessage;
+  const quickAckConfig = getQuickAckConfig(env, 'wechat');
 
   async function deliverQueuedMessages(messages) {
     const normalizedMessages = normalizeFollowUpTexts(messages);
@@ -362,6 +367,51 @@ export function buildAgent({ logger, env }) {
     logger.info?.('[node-bridge] legacy pending proactive outbound queue retired; not flushing');
   }
 
+  async function buildReplyResult(mergedRequest) {
+    return normalizeChatReplyResult(await handleMessageImpl(mergedRequest, {
+      logger,
+      env,
+      returnResult: true,
+    }), { env, logger });
+  }
+
+  function scheduleFollowUps(followUps) {
+    setTimeout(() => {
+      flushPendingOutboundQueue().catch(() => {});
+      if (followUps.length > 0) {
+        setTimeout(() => {
+          deliverQueuedMessages(followUps).catch(() => {});
+        }, Math.max(0, followUpDelayMs));
+      }
+    }, 0);
+  }
+
+  function buildResponsePayload(replyResult) {
+    const responsePayload = {};
+    if (replyResult.replyText) {
+      responsePayload.text = replyResult.replyText;
+    }
+    if (replyResult.media && typeof replyResult.media === 'object') {
+      logger.log?.(`[node-bridge] outgoing media type=${replyResult.media.type || ''} fileName=${replyResult.media.fileName || ''}`);
+      responsePayload.media = replyResult.media;
+    }
+    return responsePayload;
+  }
+
+  async function sendAsyncFinal(replyResult) {
+    const payload = buildResponsePayload(replyResult);
+    const messages = [];
+    if (payload.text) messages.push(payload.text);
+    if (payload.media && sendStructuredMessage) {
+      await sendStructuredMessage(payload);
+      if (replyResult.followUpMessages.length > 0) {
+        await deliverQueuedMessages(replyResult.followUpMessages);
+      }
+      return;
+    }
+    await deliverQueuedMessages([...messages, ...replyResult.followUpMessages]);
+  }
+
   return {
     async chat(request) {
       logger.log(
@@ -381,29 +431,29 @@ export function buildAgent({ logger, env }) {
       }
 
       return mergeCoordinator.enqueue(normalizedRequest, async (mergedRequest) => {
-        const replyResult = normalizeChatReplyResult(await handleMessageImpl(mergedRequest, {
-          logger,
-          env,
-          returnResult: true,
-        }), { env, logger });
-        const followUps = replyResult.followUpMessages;
-        setTimeout(() => {
-          flushPendingOutboundQueue().catch(() => {});
-          if (followUps.length > 0) {
+        const replyPromise = buildReplyResult(mergedRequest);
+        if (quickAckConfig.enabled) {
+          const winner = await Promise.race([
+            replyPromise.then((replyResult) => ({ type: 'reply', replyResult })),
+            quickAckDelay(quickAckConfig.timeoutMs).then(() => ({ type: 'timeout' })),
+          ]);
+          if (winner.type === 'timeout') {
             setTimeout(() => {
-              deliverQueuedMessages(followUps).catch(() => {});
-            }, Math.max(0, followUpDelayMs));
+              replyPromise
+                .then((replyResult) => sendAsyncFinal(replyResult))
+                .catch((error) => {
+                  const message = error instanceof Error ? error.message : String(error);
+                  logger.warn?.(`[node-bridge] async final reply failed: ${message}`);
+                });
+            }, 0);
+            return { text: quickAckConfig.ackText };
           }
-        }, 0);
-        const responsePayload = {};
-        if (replyResult.replyText) {
-          responsePayload.text = replyResult.replyText;
+          scheduleFollowUps(winner.replyResult.followUpMessages);
+          return buildResponsePayload(winner.replyResult);
         }
-        if (replyResult.media && typeof replyResult.media === 'object') {
-          logger.log?.(`[node-bridge] outgoing media type=${replyResult.media.type || ''} fileName=${replyResult.media.fileName || ''}`);
-          responsePayload.media = replyResult.media;
-        }
-        return responsePayload;
+        const replyResult = await replyPromise;
+        scheduleFollowUps(replyResult.followUpMessages);
+        return buildResponsePayload(replyResult);
       });
     },
   };

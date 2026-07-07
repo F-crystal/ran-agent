@@ -397,6 +397,67 @@ test('handleFeishuEventLine sends media replies through media sender', async () 
   }
 });
 
+test('handleFeishuEventLine quick-acks slow replies and sends final with a distinct idempotency key', async () => {
+  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
+  const stateDir = await fs.promises.mkdtemp(path.join(PROJECT_ROOT, '.ran_agent_state', 'feishu-quick-ack-'));
+  process.env.RAN_AGENT_STATE_DIR = stateDir;
+  let resolveBackend;
+  const calls = [];
+
+  try {
+    const state = createFeishuBridgeState();
+    await handleFeishuEventLine(
+      '{"schema":"2.0","event":{"message":{"message_id":"om-quick-ack","chat_id":"oc-quick-ack","chat_type":"p2p","content":"{\\"text\\":\\"慢任务\\"}"},"sender":{"sender_id":{"open_id":"ou-quick-ack"}}}}',
+      {
+        state,
+        logger: { log() {}, warn() {}, error() {} },
+        env: {
+          ...process.env,
+          FEISHU_LARK_CLI_BIN: 'lark-cli',
+          NODE_BRIDGE_QUICK_ACK_ENABLED: 'true',
+          NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS: '20',
+          NODE_BRIDGE_QUICK_ACK_TEXT: '处理中，稍后发结果。',
+        },
+        execFileImpl: async (bin, args, options) => {
+          calls.push({ bin, args, options });
+          return { stdout: '{"ok":true}' };
+        },
+        channelHub: async (normalized, options) => {
+          await new Promise((resolve) => {
+            resolveBackend = resolve;
+          });
+          await options.adapter.sendReply({
+            target: {
+              channel_type: normalized.channel_type,
+              conversation_id: normalized.conversation_id,
+              sender_id: normalized.sender_id,
+            },
+            text: '最终结果',
+            message: normalized,
+          });
+        },
+      }
+    );
+
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args.includes('处理中，稍后发结果。'), true);
+    resolveBackend();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+
+    assert.equal(calls.length, 2);
+    assert.equal(calls[1].args.includes('最终结果'), true);
+    const firstKey = calls[0].args.at(calls[0].args.indexOf('--idempotency-key') + 1);
+    const secondKey = calls[1].args.at(calls[1].args.indexOf('--idempotency-key') + 1);
+    assert.notEqual(firstKey, secondKey);
+  } finally {
+    if (previousStateDir === undefined) {
+      delete process.env.RAN_AGENT_STATE_DIR;
+    } else {
+      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
+    }
+  }
+});
+
 test('handleFeishuEventLine downloads inbound image resources and injects save candidates', async (t) => {
   const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
   const stateDir = await fs.promises.mkdtemp(path.join(PROJECT_ROOT, '.ran_agent_state', 'feishu-inbound-'));

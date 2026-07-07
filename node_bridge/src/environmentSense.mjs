@@ -448,7 +448,7 @@ export function privacyConfirmation(command, { env = process.env, now = new Date
   if (!command) return null;
   if (command.action === 'disable') {
     setEnvironmentPrivacyMode({ enabled: false, reason: 'user' }, { env, now });
-    return '环境感知已恢复。之后我只会收到轻量环境摘要，不会看到原始定位或原始传感器数据。';
+    return '环境感知已恢复。之后只会接收轻量环境摘要，不会看到原始定位或原始传感器数据。';
   }
   const expiresAt = command.ttl === 'today' ? endOfShanghaiToday(now).toISOString() : '';
   setEnvironmentPrivacyMode({
@@ -458,6 +458,6 @@ export function privacyConfirmation(command, { env = process.env, now = new Date
     expiresAt,
   }, { env, now });
   return command.ttlMs || expiresAt
-    ? '隐私模式已打开，到期前我不会接收环境感知摘要。'
-    : '隐私模式已打开。我不会接收环境感知摘要；你说“恢复环境感知”就能重新开启。';
+    ? '隐私模式已打开，到期前不会接收环境感知摘要。'
+    : '隐私模式已打开。不会接收环境感知摘要；发送“恢复环境感知”即可重新开启。';
 }

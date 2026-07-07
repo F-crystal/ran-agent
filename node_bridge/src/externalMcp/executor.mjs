@@ -40,8 +40,10 @@ export async function callExternalMcpTool(input = {}, options = {}) {
   if (options.signal?.aborted) return abortedResult();
   try {
     const client = await createMcpHttpClient(input, options);
-    await client.initialize();
-    await client.initialized();
+    if (!client.sessionId) {
+      await client.initialize();
+      await client.initialized();
+    }
     const result = await client.callTool(input.toolName || input.tool_name, input.arguments || {});
     return {
       ok: true,
@@ -50,6 +52,22 @@ export async function callExternalMcpTool(input = {}, options = {}) {
       notifications: client.notifications,
     };
   } catch (error) {
+    if (error?.code === 'EXTERNAL_MCP_SESSION_LOST' && (input.upstreamSessionId || input.upstream_session_id)) {
+      try {
+        const client = await createMcpHttpClient({ ...input, upstreamSessionId: '', upstream_session_id: '' }, options);
+        await client.initialize();
+        await client.initialized();
+        const result = await client.callTool(input.toolName || input.tool_name, input.arguments || {});
+        return {
+          ok: true,
+          result,
+          upstreamSessionId: client.sessionId,
+          notifications: client.notifications,
+        };
+      } catch (retryError) {
+        return errorResult(retryError);
+      }
+    }
     return errorResult(error);
   }
 }
@@ -73,7 +91,7 @@ class McpHttpClient {
     this.timeoutMs = normalizePositiveInt(options.timeoutMs || input.timeoutMs, DEFAULT_TIMEOUT_MS);
     this.parentSignal = options.signal || null;
     this.protocolVersion = DEFAULT_PROTOCOL_VERSION;
-    this.sessionId = '';
+    this.sessionId = sanitizeUpstreamSessionId(input.upstreamSessionId || input.upstream_session_id || '');
     this.nextId = 1;
     this.notifications = [];
     if (typeof this.fetchImpl !== 'function') {
@@ -437,6 +455,10 @@ function normalizeTransport(value) {
 function normalizePositiveInt(value, fallback) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function sanitizeUpstreamSessionId(value) {
+  return String(value || '').trim().replace(/[\r\n\t]/g, '').replace(/[^a-zA-Z0-9_.:/=-]/g, '').slice(0, 240);
 }
 
 function isBlockedHostname(hostname) {

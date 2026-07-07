@@ -58,10 +58,30 @@ for key in \
   RAN_AGENT_TIMELINE_ARCHIVE_DIR \
   HERMES_SESSION_CONTINUITY_ENABLED \
   HERMES_GLOBAL_RECENT_TURNS \
-  HERMES_ACTIVE_TOPIC_CHAR_BUDGET
+  HERMES_ACTIVE_TOPIC_CHAR_BUDGET \
+  HERMES_REPLY_TIMEOUT_SECONDS \
+  NODE_BRIDGE_QUICK_ACK_ENABLED \
+  NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS \
+  FEISHU_SEND_TIMEOUT_SECONDS \
+  FEISHU_DOWNLOAD_TIMEOUT_SECONDS
 do
   echo "$key: $(env_value "$key")"
 done
+
+echo ""
+echo "=== 1b. Reply-window quick ack ==="
+quick_ack_enabled="$(env_value NODE_BRIDGE_QUICK_ACK_ENABLED)"
+quick_ack_timeout="$(env_value NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS)"
+quick_ack_text_set="SET"
+if [ "$(env_value NODE_BRIDGE_QUICK_ACK_TEXT)" = "NOT SET" ]; then
+  quick_ack_text_set="NOT SET"
+fi
+echo "quick ack enabled: $quick_ack_enabled"
+echo "quick ack timeout ms: $quick_ack_timeout"
+echo "quick ack text: $quick_ack_text_set"
+if [ "$quick_ack_enabled" != "true" ]; then
+  echo "WARNING: quick ack is disabled; slow replies can still miss frontend send windows"
+fi
 
 echo ""
 echo "=== 2. lark-cli ==="
