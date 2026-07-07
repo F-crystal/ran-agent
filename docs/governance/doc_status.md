@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-04)
+Status: CURRENT (2026-07-06)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -30,6 +30,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/sticker-catalog.md` | Cross-channel sticker catalog and safe `RAN_MEDIA` contract |
 | `docs/governance/hermes-action-contract-gate.md` | Hermes action contract validation, repair, and pending-action rules |
 | `docs/governance/hermes-context-optimization.md` | Hermes context optimization, cache-friendly history, and soft reset |
+| `docs/governance/external-mcp-gateway.md` | External MCP gateway, admission, evidence, and proactive system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |
 | `docs/governance/mimo-power-mcp.md` | Retired MiMo Power MCP record |
 | `docs/governance/multi_frontend_identity_strategy.md` | Multi-frontend identity and timeline |
@@ -47,7 +48,8 @@ deployment notes belong under ignored `local_archive/`, not under
 - Keep `AGENTS.md` light and self-contained. Keep `CLAUDE.md` as a shim to
   `AGENTS.md`. Detailed runtime facts belong in `docs/governance/` or skills.
 - Keep `docs/governance/current_runtime_status.md` compact; move commands to
-  `server_runtime_commands.md` and historical detail to `phase_status.md`.
+  `server_runtime_commands.md`, specialized runtime contracts to focused
+  governance docs, and historical detail to `phase_status.md`.
 - Keep `server_runtime_commands.md` script-first. Do not add one-off pasteable
   repair logs.
 - Keep governance docs in English. README files may be Chinese/English pairs.

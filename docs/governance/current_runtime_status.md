@@ -1,9 +1,10 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-05)
+Status: CURRENT (2026-07-06)
 
 This is the compact source of truth for current production behavior. Detailed
-operator commands live in `docs/governance/server_runtime_commands.md`.
+commands live in `docs/governance/server_runtime_commands.md`; focused runtime
+contracts live in the linked governance docs below.
 
 ## Mainline
 
@@ -20,7 +21,7 @@ Python backend
   -> ingest / memory / knowledge / reflection / scheduler / reminders
 
 External MCP candidates
-  -> external_mcp_gateway admission/registry/executor/policy/session/evidence/activity
+  -> external_mcp_gateway
   -> optional /external-mcp/system-queue synthetic Hermes turn
 ```
 
@@ -32,30 +33,9 @@ External MCP candidates
 - Desktop Proxy is disabled by default and should stay bound to localhost or a
   controlled private network when enabled. Set `DESKTOP_PROXY_API_KEY` before
   exposing it beyond the local machine.
-- Scheduled outbound is limited to allowlisted paths: the opt-in AI daily
-  digest and explicit user-created reminders. Neither path reopens old
-  life-loop/check-in behavior.
-- Visible proactive delivery now uses structured `ProactiveEvent` synthetic
-  turns. The old `life_loop/checkin -> /outbound/send` route is retired for text
-  and media, including `force=true`; explicit reminders and external MCP
-  watch/game notifications must pass admission, Hermes structured action, and
-  deterministic egress before delivery.
-- `external_mcp_gateway` is registered as a stable MCP surface in lite/full.
-  Source profiles still fall back to disabled flags, but the standard server
-  deploy now writes `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`,
-  `EXTERNAL_MCP_GATEWAY_ENABLED=true`,
-  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`,
-  `HERMES_PROACTIVE_EVENTS_ENABLED=true`,
-  `HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true`, and explicit
-  `EXTERNAL_MCP_GATEWAY_PROFILE=full|lite` so Hermes can use the broker without
-  hand-editing env files. Dynamic external MCP admission now uses
-  `probe -> candidate registry -> classify -> auto_admitted / needs_owner /
-  denied`; only safe remote HTTPS sandbox activity candidates can auto-admit.
-  Streamable HTTP execution is implemented with legacy SSE endpoint fallback.
-  Bounded activities create scoped grants, consume call budgets, and can be
-  stopped by global user id before Hermes summarizes. The broker must not
-  replace `social_reader`, `media_reader`, `search_hub`, `sticker_catalog`, or
-  `co_reading`.
+- Scheduled outbound is limited to allowlisted paths: explicit reminders, the
+  opt-in AI daily digest, and governed external MCP watchlist notifications.
+  Generic life-loop/check-in outbound remains retired.
 
 ## Lite/Full Runtime
 
@@ -87,12 +67,10 @@ External MCP candidates
   `bash scripts/diagnose-external-mcp-gateway.sh`.
 - Proactive event diagnosis:
   `bash scripts/diagnose-proactive-events.sh`.
-- Hermes context/cache observation:
-  `journalctl -u ran-agent-node.service --since '30 minutes ago' --no-pager | grep -E 'hermes-provider-usage|hermes-context-components'`.
 
 Do not hand-edit systemd or runtime env as the normal repair path.
 
-## Env And Cache Contract
+## Runtime Env Contract
 
 The deploy script keeps these env files aligned:
 
@@ -103,174 +81,50 @@ The deploy script keeps these env files aligned:
 - `/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env`
 - `/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/.env`
 
-Current shared non-secret keys include:
+Important non-secret env groups:
 
-- `HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1`
-- `HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1`
-- `HERMES_CONTEXT_INJECTION_MODE=auto`
-- `HERMES_CONTEXT_CACHE_STRATEGY=balanced`
-- `HERMES_CACHE_FRIENDLY_HISTORY=false`
-- `HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS=6`
-- `HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET=12000`
-- `HERMES_CACHE_FRIENDLY_HISTORY_PROFILE=lite`
-- `HERMES_CACHE_TELEMETRY_ENABLED=true`
-- `SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true`
-- `XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`
-- `XHS_GENERIC_FALLBACK_MIN_VERSION=1.2.0`
-- `XHS_PUBLIC_SIDECAR_URL=http://127.0.0.1:18061/xhs/detail`
-- `XHS_PUBLIC_SIDECAR_TIMEOUT_MS=90000`
-- `XHS_PUBLIC_HTML_FALLBACK_ENABLED=true`
-- `XHS_PUBLIC_SIDECAR_MARKER_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json`
-- `UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache`
-- `UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools`
-- `UV_LINK_MODE=copy`
-- `UV_PYTHON_DOWNLOADS=never`
-- `WEIXIN_SDK_INBOUND_MEDIA_DIRS=/tmp/weixin-agent/media/inbound`
-- `OMBRE_BRAIN_ENABLED=true`
-- `OMBRE_BRAIN_MCP_ENABLED=true`
-- `OMBRE_BRAIN_RUNNER=source`
-- `OMBRE_BRAIN_REPO_URL=https://github.com/P0luz/Ombre-Brain`
-- `OMBRE_BRAIN_HOME=/opt/ran_agent/.ran_agent_state/ombre-brain`
-- `OMBRE_BRAIN_SOURCE_DIR=/opt/ran_agent/.ran_agent_state/ombre-brain/upstream`
-- `OMBRE_BRAIN_VENV=/opt/ran_agent/.ran_agent_state/ombre-brain/.venv`
-- `OMBRE_BUCKETS_DIR=/opt/ran_agent/vault/ombre`
-- `OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp`
-- `OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra`
-- `PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback`
-- `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`
-- `EXTERNAL_MCP_GATEWAY_ENABLED=true`
-- `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`
-- `HERMES_PROACTIVE_EVENTS_ENABLED=true`
-- `HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true`
-- `HERMES_PROACTIVE_REMINDERS_ENABLED=true`
-- `EXTERNAL_MCP_GATEWAY_PROFILE=full|lite`
+- Hermes routing and cache: `HERMES_LITE_API_BASE_URL`,
+  `HERMES_FULL_API_BASE_URL`, `HERMES_CONTEXT_INJECTION_MODE`,
+  `HERMES_CONTEXT_CACHE_STRATEGY`, `HERMES_CACHE_*`.
+- Public XHS/media: `SOCIAL_READER_GENERIC_FALLBACK_ENABLED`,
+  `XHS_PUBLIC_*`, `MEDIA_READER_*`, `PERSONAL_AGENT_OCR_*`.
+- Managed UV/Ombre state: `UV_CACHE_DIR`, `UV_TOOL_DIR`,
+  `OMBRE_BRAIN_*`, `PERSONAL_AGENT_OMBRE_*`.
+- External MCP/proactive gates: `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`,
+  `EXTERNAL_MCP_GATEWAY_ENABLED=true`,
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`, `HERMES_PROACTIVE_*`.
 
 UV/UVX runtime work must use the managed cache/tool directories. Use
 `scripts/clean-uv-cache-safe.sh` for cleanup and do not delete social-reader
 state, vault, data, or XHS note debug output.
-
-WeChat SDK inbound media is copied into
-`/opt/ran_agent/.ran_agent_state/wechat/inbound` before Hermes/media_reader
-analysis. `scripts/apply-hermes-runtime-split.sh` owns creation of the trusted
-media directories so redeploys do not depend on manual `mkdir`.
 
 ## MCP And Routing
 
 | Server | Purpose |
 |--------|---------|
 | `search_hub` | Fresh web/news/academic/platform search entry |
-| `co_reading` | Full-profile private shared reading room plus Web reader with chunked books, synced progress, bilingual reading, shared annotations, scoped Hermes margin replies, and explicit Vault deposit |
+| `co_reading` | Full-profile shared reading room and Web reader |
 | `time` | Timezone-aware time queries (`Asia/Shanghai`) |
 | `media_reader` | OCR, ASR, VLM, video, batch media analysis |
 | `social_reader` | Social content reading (Bilibili, XHS, WeChat articles, music) |
-| `sticker_catalog` | Local sticker picker/attach/save catalog; lite uses public pick/attach plus explicit inbound save, full may use owner-only management |
+| `sticker_catalog` | Local sticker picker/attach/save catalog |
 | `personal_memory` | Personal memory recall and backend health check |
 | `obsidian_memory` | Optional Obsidian vault search, disabled by default |
-| `ombre_memory` / `ombre_memory_extra` | Optional upstream Ombre Brain direct MCP, full-profile memory/debug surface |
+| `ombre_memory` / `ombre_memory_extra` | Optional upstream Ombre Brain direct MCP |
 | `media_generation` | Image and speech generation |
 | `playwright` | Dynamic/visual web pages, full/debug use |
-| `external_mcp_gateway` | Stable broker for dynamically admitted game/forum/browser MCPs |
+| `external_mcp_gateway` | Stable broker for governed external MCPs |
 
-- Search Hub is registered in both lite and full. Lite uses lightweight public
-  providers; full may use Playwright fallback. OpenCLI browser-backed remains
-  disabled by default for the 2C4G/60G server.
-- Sticker Catalog is registered in both lite and full. Lite may use
-  `sticker_tags`, `sticker_pick`, `sticker_attach`, and
-  `sticker_save_from_inbox` only when the user explicitly asks to save trusted
-  inbound media as a sticker. `sticker_update`, `sticker_delete`, and
-  `sticker_list` remain explicit full-profile owner actions.
-  Assets stay in `.ran_agent_state/stickers/`, and `RAN_MEDIA` carries only
-  `stickerId`. Details: `docs/governance/sticker-catalog.md`.
-- Ombre Brain uses the canonical upstream
-  `https://github.com/P0luz/Ombre-Brain`. The deploy script prepares its local
-  source runner under `.ran_agent_state/ombre-brain/upstream`, keeps buckets in
-  private `vault/ombre/`, and makes Python `personal_memory` use upstream Ombre
-  first with the repo-local shim as fallback. Direct `/mcp` plus `/mcp-extra`
-  tools are exposed to full only when the runner is available and
-  `OMBRE_BRAIN_MCP_ENABLED=true`. Lite keeps using `personal_memory` as the small
-  memory surface and must not directly expose `mcp-ombre_memory`. Docker is an
-  optional runner, not a Hermes prerequisite.
-- Co Reading is not exposed in the lite daily conversation toolset to keep the
-  default prompt smaller. The MCP remains available in the full profile, while
-  the Web reader remains available independently. Chunk text lives under
-  `.ran_agent_state/co_reading/library/**/*.txt.gz`; SQLite stores metadata,
-  FTS index rows, progress, annotations, threads, events, imports, and storage
-  stats. Private annotations are not returned to Hermes-facing read/search
-  tools. Optional Web reader `/reader` is controlled by `CO_READING_WEB_ENABLED`
-  and should be exposed only through Tailscale. It supports browser imports,
-  bilingual reading, scoped Hermes margin replies, and explicit shared
-  annotation deposit to `vault/inbox/co_reading/`. Details:
-  `docs/governance/co-reading.md` and
-  `docs/governance/co-reading-web-reader.md`.
-- Actual social links still use `social_reader` / `media_reader` first. Search
-  Hub must not replace the XHS/Bilibili/Zhihu/WeChat link-read mainline.
-- XHS links must not first-read through browser navigation or terminal.
-- External MCP manifests are untrusted until normalized and classified. Local
-  executable MCP candidates (`stdio`, command, `uvx`, `npx`) cannot be
-  self-enabled by Hermes and remain `needs_owner`. Remote candidates must pass
-  HTTPS, redirect/DNS/SSRF, no OAuth/account/local-file/local-command, and
-  low-risk tool checks before `auto_admitted`.
-- Bounded external MCP activities use scoped `game_play` or `forum_read` grants.
-  The runner owns budget, cadence, cancellation, and evidence only; Hermes still
-  receives synthetic turns for decisions and sharing. T4/T5 side effects, forum
-  comments, social writes, payment/delete/account actions, and external writes
-  still require pending action/待确认 or a trusted scoped grant plus real executor
-  evidence. No reply may claim success without an `external_mcp_tool_result`.
-  User stop phrases such as "停下这局" are handled before Hermes is called:
-  grants are revoked, runtime fetch/SSE work is aborted, sessions are closed,
-  and Hermes then receives a stop synthetic turn to summarize.
-- Proactive external MCP notices require an explicit watchlist/关注 scope and
-  rate budget before a synthetic Hermes turn may notify the Feishu target. The
-  system queue only creates synthetic Hermes turns; `silent`, `remember`, and
-  empty replies are suppressed instead of sending visible text.
+- Search Hub is the daily fresh-search entry. Actual social links still use
+  `social_reader` / `media_reader` first.
+- XHS links are public-only and must not first-read through browser navigation,
+  terminal navigation, cookies, QR login, or account-backed MCPs.
+- Co Reading is kept out of the lite daily conversation toolset; it remains
+  available in full and through the Tailscale-only Web reader.
+- Sticker Catalog is registered in lite/full. Lite can pick/attach stickers and
+  save trusted inbound media only when the user explicitly asks to save it.
 
-## XHS And Evidence Gate
-
-- XHS content reading is public-only. The chain is URL/short-link resolution,
-  `wanyi-watermark parse_xhs_link`, XHS-Downloader sidecar
-  `POST /xhs/detail`, `wanyi-watermark parse_generic_link`, and minimal
-  HTML/OG fallback. Account-backed `XHS_COOKIE`, QR login, `xiaohongshu-mcp`,
-  `jobson-xhs-mcp`, `xhs_browse_*`, and token caches are not runtime paths.
-- Deploy prepares the generic parser marker at
-  `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`
-  and the XHS-Downloader sidecar marker at
-  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json`.
-  `scripts/apply-hermes-runtime-split.sh` removes the old
-  `ran-agent-xhs-browse.service`, browse marker, and token cache.
-- `read_social_post_deep` merges media found by public parsers, preserving
-  known `image`/`video` types before sending assets to `media_reader`. It must
-  not rely on XHS CDN URL suffixes to infer image type.
-- Public XHS parsers are resource resolvers, not OCR/VLM readers. Complete
-  image understanding happens only after merged assets enter
-  `media_reader.analyze_media_batch`. The default full-read cap is 100 media
-  assets, with 20-minute MCP/batch budgets so normal multi-image notes are not
-  silently truncated by legacy 20-asset or 120s defaults.
-  `scripts/start_media_reader_mcp.sh` defaults to DashScope Qwen-VL OCR with a
-  120s OCR budget when env files are absent; PaddleOCR is explicit override
-  only.
-- Public parse failure is an explicit unreadable/metadata-only result. Hermes
-  must not ask the user to refresh cookies or scan QR codes for XHS.
-- `buildSocialEvidenceReport()` separates `link_resolution`,
-  `metadata_read`, and `content_read`.
-- Canonical URLs and public metadata are link-resolution/metadata evidence
-  only. `allow_claim_read=true` requires content fields such as `post_text`,
-  `desc`, `note_text`, `content`, `ocr_text`, `image_text`, or `full_text`.
-- XHS deep-read media evidence keeps both `analyzed_media_count` (assets sent to
-  media analysis) and `successful_media_count` (assets that produced analysis
-  items). Complete-read claims must not pass when successful media coverage is
-  partial.
-- Evidence logs must not print raw XHS query tokens; canonical URLs are logged
-  with redacted query strings.
-- `sendChatToHermesGateway()` creates one request id per request and reuses it
-  across context-size, routing, evidence, and gate logs.
-- `replyBackend` runs Hermes Action Contract Gate before replies leave Node.
-  `observe` logs evidence contracts, `enforce` rewrites unsupported success
-  claims, and `repair` enables low-risk repair plus high-risk pending
-  confirmation. Pending state lives under
-  `.ran_agent_state/action_contract/`; details:
-  `docs/governance/hermes-action-contract-gate.md`.
-
-## Media And Frontends
+## Safety Gates
 
 - Media pipeline details: `docs/governance/media-pipeline.md`.
 - Sticker Catalog details and server smoke: `docs/governance/sticker-catalog.md`.
@@ -278,38 +132,38 @@ media directories so redeploys do not depend on manual `mkdir`.
   `docs/governance/multi_frontend_identity_strategy.md`.
 - WeChat media buffer details:
   `docs/governance/wechat-bridge-media-buffer.md`.
-- MiMo Power is retired and no longer exposed in Hermes runtime profiles.
+- Hermes context optimization:
+  `docs/governance/hermes-context-optimization.md`.
+- Hermes Action Contract Gate:
+  `docs/governance/hermes-action-contract-gate.md`.
+- External MCP gateway and system queue:
+  `docs/governance/external-mcp-gateway.md`.
+
+Core safety facts:
+
+- `replyBackend` runs Hermes Action Contract Gate before replies leave Node.
+  Unsupported success claims are observed, rewritten, or repaired according to
+  mode; pending state lives under `.ran_agent_state/action_contract/`.
+- Public XHS parsers are resource resolvers, not OCR/VLM readers. Complete
+  image understanding happens only after assets enter `media_reader`.
+- Complete-read claims require content evidence; canonical URLs and public
+  metadata are only link-resolution/metadata evidence.
+- External MCP manifests are untrusted until normalized and classified. Local
+  executable MCP candidates cannot self-enable; T4/T5 side effects require
+  pending action evidence or trusted scoped grants plus real executor evidence.
 
 ## Scheduled AI Daily Digest
 
 - Enable with `AI_DAILY_DIGEST_ENABLED=true`; default time is `10:00`
-  `Asia/Shanghai` through `AI_DAILY_DIGEST_HOUR=10` and
-  `AI_DAILY_DIGEST_MINUTE=0`.
-- The job fetches AIHOT facts, applies the editable report-style template at
+  `Asia/Shanghai`.
+- The job fetches AIHOT facts, applies
   `src/personal_agent/prompts/ai_daily_digest_report.md`, and sends a synthetic
   Feishu DM turn to Node bridge `/scheduled/ai-daily-digest`.
-- Node bridge records the latest Feishu DM target from normal incoming Feishu
-  private messages. If no DM target exists, the digest is skipped; do not hard
-  code raw Feishu ids in public docs.
 - Delivery reuses `ChannelHub -> replyBackend -> hermesGatewayClient ->
   sendFeishuReply()`, so follow-up questions stay in the same Feishu/Hermes
   timeline.
-- `PERSONAL_AGENT_PROACTIVE_ENABLED` and legacy
-  `PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED` remain `false`; reminder delivery
-  is controlled by `HERMES_PROACTIVE_REMINDERS_ENABLED` and enters Hermes via
-  `/proactive/event`.
-- External MCP proactive delivery is not part of the old proactive mainline.
-  The system queue is deploy-enabled but watchlist/trusted-evidence/rate-budget
-  limited and enters Hermes as a synthetic Feishu turn. Evidence refs must exist
-  in the local external MCP evidence log for the same user/server/non-empty
-  scope, with allowed evidence tiers derived by Node from the registered watch
-  kind; request body strings and caller-supplied tier lists do not self-authorize.
-  External MCP/forum/game notifications cannot enter through the generic
-  `/proactive/event` endpoint. A short reservation lease blocks concurrent
-  budget overruns and is committed only after adapter send succeeds. Hermes must
-  return structured `notify`; `silent`, `remember`, `draft`, malformed JSON,
-  generic text, missing `why_now`, or missing evidence do not send visible
-  messages.
+- If no Feishu DM target exists, the digest is skipped. Do not hard-code raw
+  Feishu ids in public docs.
 
 ## Protected Local State
 
@@ -317,15 +171,10 @@ Never commit or force-add:
 
 - `.env.local`, `node_bridge/.env.local`, credentials, cookies, proxy URLs.
 - `.ran_agent_state/`, `data/`, `logs/`, `debug/`, `state/`.
-- `.ran_agent_state/stickers/`,
-  `.ran_agent_state/wechat/inbound/`,
-  `.ran_agent_state/feishu/inbound/`,
-  `.ran_agent_state/action_contract/`,
-  `.ran_agent_state/external_mcp/`,
-  `.ran_agent_state/hermes/`,
-  `.ran_agent_state/co_reading/`.
+- Runtime substate under `.ran_agent_state/stickers/`,
+  `.ran_agent_state/wechat/inbound/`, `.ran_agent_state/feishu/inbound/`,
+  `.ran_agent_state/action_contract/`, `.ran_agent_state/external_mcp/`,
+  `.ran_agent_state/hermes/`, and `.ran_agent_state/co_reading/`.
 - Provider-visible history, pending action state, sticker assets, inbound media,
-  co-reading chunks, and public parser/sidecar markers are runtime state only.
-- `local_archive/`.
-- private `vault/` content.
-- generated caches such as `.venv/`, `.pytest_cache/`, `node_modules/`.
+  co-reading chunks, parser/sidecar markers, private `vault/` content,
+  `local_archive/`, `.venv/`, `.pytest_cache/`, and `node_modules/`.

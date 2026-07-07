@@ -1,6 +1,6 @@
 # Cleanup Scope
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-07-06)
 
 ## Deleted (2026-04-13)
 
@@ -27,6 +27,12 @@ Status: CURRENT (2026-05-22)
 - `node_bridge/tests/openclawToolUseWeatherRegression.test.mjs`
 - `openclaw/` directory (fully removed)
 - `.openclaw/` directory (fully removed)
+
+## Deleted (2026-07-06, MiMo Power Retirement Cleanup)
+
+- `node_bridge/src/mimoPowerMcpServer.mjs` (retired MiMo Token Plan MCP facade)
+- `node_bridge/tests/mimoPowerMcpServer.test.mjs` (tests for removed facade)
+- `scripts/start_mimo_power_mcp.sh` (retired MiMo startup wrapper)
 
 ## Archived (2026-05-14)
 

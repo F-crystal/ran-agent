@@ -230,11 +230,11 @@ class ConfigLoadingTest(unittest.TestCase):
     def test_repo_mcp_config_does_not_register_retired_mimo_power(self) -> None:
         mcp_path = Path(__file__).resolve().parents[1] / ".mcp.json"
         mcp_data = json.loads(mcp_path.read_text(encoding="utf-8"))
+        root = Path(__file__).resolve().parents[1]
 
         self.assertNotIn("mimo_power", mcp_data["mcpServers"])
-        historical_wrapper = Path(__file__).resolve().parents[1] / "scripts" / "start_mimo_power_mcp.sh"
-        self.assertTrue(historical_wrapper.exists())
-        self.assertNotIn("~", historical_wrapper.read_text(encoding="utf-8"))
+        self.assertFalse((root / "scripts" / "start_mimo_power_mcp.sh").exists())
+        self.assertFalse((root / "node_bridge" / "src" / "mimoPowerMcpServer.mjs").exists())
 
     def test_scheduler_uses_configured_job_intervals(self) -> None:
         class FakeScheduler:
