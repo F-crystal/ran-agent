@@ -820,6 +820,35 @@ test('cache-friendly append log redacts tokens cookies and absolute paths', asyn
   assert.match(text, /\[path\]/);
 });
 
+test('cache-friendly append log redacts activity target tokens', async () => {
+  const conversationId = 'wx-cache-friendly-activity-token';
+  const stateDir = tempGatewayStateDir();
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_CACHE_FRIENDLY_HISTORY: 'true',
+  });
+
+  await sendChatToHermesGateway(
+    {
+      text: '你先继续玩 CedarToy，回头给我发结果',
+      sender_id: conversationId,
+      conversation_id: conversationId,
+      channel: 'wechat',
+      global_user_id: 'user:ran',
+    },
+    { config, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: 'ok' } }] }), logger: { log() {}, warn() {} } }
+  );
+
+  const text = fs.readFileSync(readProviderVisibleHistoryFiles(stateDir)[0], 'utf8');
+  assert.doesNotMatch(text, /acttarget_[a-f0-9]+/);
+  assert.doesNotMatch(text, /activityTargetToken: acttarget_/);
+  assert.match(text, /activityTargetToken: \[redacted\]/);
+});
+
 test('cache-friendly append log leaves social claim for replyBackend action gate', async () => {
   const conversationId = 'wx-cache-friendly-gate-summary';
   const stateDir = tempGatewayStateDir();
@@ -1340,6 +1369,34 @@ test('sendChatToHermesGateway injects full temporal context for relative time wo
   const userMsg = capturedBody.messages.find((m) => m.role === 'user');
   assert.ok(userMsg.content.includes('微信桥接实时上下文'), 'relative time should trigger full temporal context');
   assert.ok(userMsg.content.includes('Asia/Shanghai'), 'full context should include timezone');
+});
+
+test('Hermes prompt includes scoped activity target token only for explicit background intent', async (t) => {
+  const stateDir = tempGatewayStateDir('hermes-activity-token-');
+  const explicit = await captureHermesRequest({
+    env: { RAN_AGENT_STATE_DIR: stateDir },
+    payload: {
+      text: '你先继续玩 CedarToy，回头给我发结果',
+      sender_id: 'wx-sender',
+      conversation_id: 'wx-conv',
+      channel: 'wechat',
+      global_user_id: 'user:ran',
+    },
+  });
+  const normal = await captureHermesRequest({
+    env: { RAN_AGENT_STATE_DIR: stateDir },
+    payload: {
+      text: '聊聊 CedarToy 的规则',
+      sender_id: 'wx-sender',
+      conversation_id: 'wx-conv',
+      channel: 'wechat',
+      global_user_id: 'user:ran',
+    },
+  });
+
+  assert.match(explicit.capturedBody.messages.at(-1).content, /activityTargetToken: acttarget_/);
+  assert.match(explicit.capturedBody.messages.at(-1).content, /background: true/);
+  assert.doesNotMatch(normal.capturedBody.messages.at(-1).content, /activityTargetToken:/);
 });
 
 test('sendChatToHermesGateway uses compact temporal context for plain messages', async () => {
@@ -2102,6 +2159,43 @@ test('provider usage telemetry records token and cache counters when present', a
   assert.equal(payload.total_tokens, 168);
   assert.equal(payload.prompt_cache_hit_tokens, 100);
   assert.equal(payload.prompt_cache_miss_tokens, 23);
+  assert.equal(typeof payload.client_prompt_chars, 'number');
+  assert.equal(typeof payload.client_prompt_estimated_tokens, 'number');
+  assert.equal(typeof payload.provider_input_to_client_prompt_ratio, 'number');
+  assert.equal(payload.possible_server_session_accumulation, false);
+});
+
+test('provider usage telemetry flags server-side session accumulation', async () => {
+  const logs = [];
+  const warns = [];
+  await sendChatToHermesGateway(
+    { text: 'hello', sender_id: 'usage-huge', conversation_id: 'usage-huge', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+      }),
+      fetchImpl: async () => makeJsonResponse({
+        choices: [{ message: { content: 'ok' } }],
+        usage: {
+          prompt_tokens: 350000,
+          completion_tokens: 45,
+          total_tokens: 350045,
+        },
+      }),
+      logger: {
+        log(msg) { logs.push(msg); },
+        warn(msg) { warns.push(msg); },
+      },
+    }
+  );
+
+  const payload = parseProviderUsageLog(logs);
+  assert.equal(payload.possible_server_session_accumulation, true);
+  assert.ok(payload.provider_input_to_client_prompt_ratio > 10);
+  assert.ok(warns.some((line) => line.includes('[hermes-provider-usage-warning]')));
 });
 
 test('context injection rich mode preserves legacy-sized local history budget', async () => {

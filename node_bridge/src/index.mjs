@@ -13,7 +13,9 @@ import {
 } from './outboundServer.mjs';
 import { startDesktopProxyServer } from './desktopProxyServer.mjs';
 import { startCoReadingWebServer } from './coReading/webServer.mjs';
-import { startFeishuBridge } from './feishuBridge.mjs';
+import { sendFeishuReply, startFeishuBridge } from './feishuBridge.mjs';
+import { handleIncomingMessage } from './channelHub.mjs';
+import { runDueExternalMcpActivities } from './externalMcp/activityRunner.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { getQuickAckConfig, quickAckDelay } from './quickAck.mjs';
@@ -330,6 +332,86 @@ function normalizeReplyMediaForWeixinSdk(media, { env = process.env, logger = co
 export function formatPendingMessagesForReply(messages) {
   void messages;
   return '';
+}
+
+export function isExternalMcpActivityRunnerEnabled(env = process.env) {
+  if (String(env.HERMES_PROACTIVE_EVENTS_ENABLED || 'true').trim().toLowerCase() === 'false') {
+    return false;
+  }
+  if (String(env.EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED || 'true').trim().toLowerCase() === 'false') {
+    return false;
+  }
+  if (String(env.EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED || 'true').trim().toLowerCase() === 'false') {
+    return false;
+  }
+  if (String(env.HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED || 'true').trim().toLowerCase() === 'false') {
+    return false;
+  }
+  return true;
+}
+
+export function startExternalMcpActivityRunnerLoop({
+  env = process.env,
+  logger = console,
+  intervalMs,
+  channelHub = handleIncomingMessage,
+  runDueImpl = runDueExternalMcpActivities,
+  sendText,
+} = {}) {
+  if (!isExternalMcpActivityRunnerEnabled(env)) {
+    return { enabled: false, tick: async () => ({ skipped: true, reason: 'disabled' }), stop() {} };
+  }
+  let running = false;
+  const actualIntervalMs = Math.min(Math.max(Number(intervalMs || env.EXTERNAL_MCP_ACTIVITY_TICK_MS || 60_000), 5_000), 15 * 60_000);
+  const sendTextImpl = sendText || ((target, text) => sendExternalMcpActivityText(target, text, { env }));
+  const tick = async () => {
+    if (running) return { skipped: true, reason: 'already_running' };
+    running = true;
+    try {
+      return await runDueImpl({
+        env,
+        logger,
+        channelHub,
+        sendText: sendTextImpl,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      logger.warn?.(`[external-mcp-activity] runner tick failed: ${message}`);
+      return { skipped: true, reason: 'tick_failed' };
+    } finally {
+      running = false;
+    }
+  };
+  const timer = setInterval(() => {
+    tick().catch(() => {});
+  }, actualIntervalMs);
+  timer.unref?.();
+  return {
+    enabled: true,
+    tick,
+    stop() {
+      clearInterval(timer);
+    },
+  };
+}
+
+async function sendExternalMcpActivityText(target = {}, text = '', { env = process.env } = {}) {
+  if (target.platform === 'wechat' && typeof env.sendFollowUpMessages === 'function') {
+    await env.sendFollowUpMessages([text]);
+    return;
+  }
+  if (target.platform === 'feishu') {
+    await sendFeishuReply({
+      target: {
+        conversation_id: target.conversationId,
+        sender_id: target.senderId,
+      },
+      text,
+      env,
+    });
+    return;
+  }
+  throw new Error('unsupported external MCP activity target');
 }
 
 export function buildAgent({ logger, env }) {
@@ -650,28 +732,30 @@ async function main() {
   resetSyncBufferIfNeeded(weixinAccountConfig.accountId);
   await verifyWeixinReachability();
   const proactiveBot = await createProactiveBot(process.env);
+  const runtimeEnv = {
+    ...process.env,
+    async sendStructuredMessage(payload) {
+      await proactiveBot.sendMessage(payload);
+    },
+    async sendFollowUpMessages(messages) {
+      for (const text of messages) {
+        await proactiveBot.sendMessage(text);
+        if (messages.length > 1) {
+          await sleep(Number(process.env.NODE_BRIDGE_FOLLOW_UP_DELAY_MS || '800'));
+        }
+      }
+    },
+  };
   const agent = buildAgent({
     logger: console,
-    env: {
-      ...process.env,
-      async sendStructuredMessage(payload) {
-        await proactiveBot.sendMessage(payload);
-      },
-      async sendFollowUpMessages(messages) {
-        for (const text of messages) {
-          await proactiveBot.sendMessage(text);
-          if (messages.length > 1) {
-            await sleep(Number(process.env.NODE_BRIDGE_FOLLOW_UP_DELAY_MS || '800'));
-          }
-        }
-      },
-    },
+    env: runtimeEnv,
   });
   const outboundConfig = getOutboundServerConfig(process.env);
   const outboundServer = createOutboundServer({ bot: proactiveBot, logger: console });
   const feishuBridge = startFeishuBridge({ env: process.env, logger: console });
   const desktopProxyServer = startDesktopProxyServer({ env: process.env, logger: console });
   const coReadingWebServer = startCoReadingWebServer({ env: process.env, logger: console });
+  const activityRunner = startExternalMcpActivityRunnerLoop({ env: runtimeEnv, logger: console });
 
   await new Promise((resolve, reject) => {
     outboundServer.once('error', reject);
@@ -684,6 +768,7 @@ async function main() {
   try {
     await startWithRetry(agent, weixinAccountConfig);
   } finally {
+    activityRunner.stop();
     feishuBridge?.stop?.();
     await new Promise((resolve) => coReadingWebServer?.close ? coReadingWebServer.close(resolve) : resolve());
     await new Promise((resolve) => desktopProxyServer?.close ? desktopProxyServer.close(resolve) : resolve());

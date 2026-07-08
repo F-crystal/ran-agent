@@ -79,8 +79,10 @@ fi
 echo "quick ack enabled: $quick_ack_enabled"
 echo "quick ack timeout ms: $quick_ack_timeout"
 echo "quick ack text: $quick_ack_text_set"
-if [ "$quick_ack_enabled" != "true" ]; then
-  echo "WARNING: quick ack is disabled; slow replies can still miss frontend send windows"
+if [ "$quick_ack_enabled" = "true" ]; then
+  echo "WARNING: quick ack is enabled; ordinary chats may receive an extra placeholder reply"
+else
+  echo "OK: quick ack is disabled by default; async proactive finals handle long authorized work"
 fi
 
 echo ""

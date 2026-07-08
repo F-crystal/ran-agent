@@ -122,3 +122,47 @@ test('system queue egress only sends structured notify actions with matching evi
   assert.equal(noWhyNow.send, false);
   assert.equal(noWhyNow.reason, 'why_now_missing');
 });
+
+test('system queue egress uses configured proactive notify length budget', () => {
+  const event = {
+    event_id: 'game-1',
+    kind: 'game_activity',
+    global_user_id: 'ou-home',
+    channel: 'feishu',
+    watch_scope: 'game:cedartoy/slot-1',
+    reason: 'scoped game activity finished',
+    evidence_refs: ['external_mcp_evidence:game123'],
+    dedupe_key: 'game:cedartoy/slot-1',
+    created_at: '2026-07-01T12:00:00.000Z',
+    expires_at: '2026-07-01T13:00:00.000Z',
+    deliverability: 'notify_allowed',
+    allowed_capability_tiers: ['T3'],
+    quiet_policy: 'respect',
+    budget_class: 'external_mcp',
+  };
+  const message = `进展：${'这局已经推进并记录了关键状态。'.repeat(55)}`;
+
+  const configured = evaluateExternalMcpSystemQueueEgress({
+    event,
+    env: { HERMES_PROACTIVE_NOTIFY_MAX_CHARS: '1600' },
+    replyText: JSON.stringify({
+      action: 'notify',
+      message,
+      evidence_refs: ['external_mcp_evidence:game123'],
+      why_now: 'game activity reached a final state',
+    }),
+  });
+  assert.equal(configured.send, true);
+
+  const defaultBudget = evaluateExternalMcpSystemQueueEgress({
+    event,
+    replyText: JSON.stringify({
+      action: 'notify',
+      message,
+      evidence_refs: ['external_mcp_evidence:game123'],
+      why_now: 'game activity reached a final state',
+    }),
+  });
+  assert.equal(defaultBudget.send, false);
+  assert.equal(defaultBudget.reason, 'message_too_long');
+});

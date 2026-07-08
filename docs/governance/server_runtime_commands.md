@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-07)
+Status: CURRENT (2026-07-08)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -78,11 +78,15 @@ bash scripts/diagnose-ombre-memory.sh
 - Proactive event gates:
   `HERMES_PROACTIVE_EVENTS_ENABLED=true`,
   `HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true`,
-  `HERMES_PROACTIVE_REMINDERS_ENABLED=true`, while legacy
+  `HERMES_PROACTIVE_REMINDERS_ENABLED=true`,
+  `HERMES_PROACTIVE_NOTIFY_MAX_CHARS=1600`, while legacy
   `PERSONAL_AGENT_PROACTIVE_ENABLED=false` remains frozen.
+- External MCP activity runner gates:
+  `EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=true` and
+  `EXTERNAL_MCP_ACTIVITY_TICK_MS=60000`.
 - Reply-window gates:
   `HERMES_REPLY_TIMEOUT_SECONDS=1200`,
-  `NODE_BRIDGE_QUICK_ACK_ENABLED=true`,
+  `NODE_BRIDGE_QUICK_ACK_ENABLED=false`,
   `NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS=4500`,
   `NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理，稍后发送结果。`,
   `FEISHU_SEND_TIMEOUT_SECONDS=30`, and
@@ -207,6 +211,7 @@ OMBRE_BRAIN_HOME=/opt/ran_agent/.ran_agent_state/ombre-brain
 OMBRE_BRAIN_SOURCE_DIR=/opt/ran_agent/.ran_agent_state/ombre-brain/upstream
 OMBRE_BRAIN_VENV=/opt/ran_agent/.ran_agent_state/ombre-brain/.venv
 OMBRE_BUCKETS_DIR=/opt/ran_agent/vault/ombre
+OMBRE_BRAIN_STATUS_FILE=/opt/ran_agent/.ran_agent_state/ombre-brain/status.json
 OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
 OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra
 PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback
@@ -221,11 +226,14 @@ HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS=1
 HERMES_ACTION_PENDING_ENABLED=true
 HERMES_ACTION_PENDING_TTL_MINUTES=30
 HERMES_REPLY_TIMEOUT_SECONDS=1200
-NODE_BRIDGE_QUICK_ACK_ENABLED=true
+NODE_BRIDGE_QUICK_ACK_ENABLED=false
 NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS=4500
 NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理，稍后发送结果。
 FEISHU_SEND_TIMEOUT_SECONDS=30
 FEISHU_DOWNLOAD_TIMEOUT_SECONDS=30
+HERMES_PROACTIVE_NOTIFY_MAX_CHARS=1600
+EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=true
+EXTERNAL_MCP_ACTIVITY_TICK_MS=60000
 ```
 
 Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform

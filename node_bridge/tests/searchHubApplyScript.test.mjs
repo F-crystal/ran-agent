@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import test from 'node:test';
 
@@ -273,6 +273,10 @@ test('apply script writes Hermes context optimization defaults to Node env', () 
   assert.match(script, /HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS:-1\}"/);
   assert.match(script, /HERMES_ACTION_PENDING_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTION_PENDING_ENABLED:-true\}"/);
   assert.match(script, /HERMES_ACTION_PENDING_TTL_MINUTES_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTION_PENDING_TTL_MINUTES:-30\}"/);
+  assert.match(script, /NODE_BRIDGE_QUICK_ACK_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_NODE_BRIDGE_QUICK_ACK_ENABLED:-false\}"/);
+  assert.match(script, /HERMES_PROACTIVE_NOTIFY_MAX_CHARS_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_PROACTIVE_NOTIFY_MAX_CHARS:-1600\}"/);
+  assert.match(script, /EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED:-true\}"/);
+  assert.match(script, /EXTERNAL_MCP_ACTIVITY_TICK_MS_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_ACTIVITY_TICK_MS:-60000\}"/);
   assert.match(script, /"HERMES_ACTION_GATE_ENABLED=\$HERMES_ACTION_GATE_ENABLED_DEFAULT"/);
   assert.match(script, /"HERMES_ACTION_GATE_MODE=\$HERMES_ACTION_GATE_MODE_DEFAULT"/);
   assert.match(script, /"HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS=\$HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS_DEFAULT"/);
@@ -284,6 +288,10 @@ test('apply script writes Hermes context optimization defaults to Node env', () 
   assert.match(script, /"HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET=\$HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET_DEFAULT"/);
   assert.match(script, /"HERMES_CACHE_FRIENDLY_HISTORY_PROFILE=\$HERMES_CACHE_FRIENDLY_HISTORY_PROFILE_DEFAULT"/);
   assert.match(script, /"HERMES_CACHE_TELEMETRY_ENABLED=\$HERMES_CACHE_TELEMETRY_ENABLED_DEFAULT"/);
+  assert.match(script, /"HERMES_PROACTIVE_NOTIFY_MAX_CHARS=\$HERMES_PROACTIVE_NOTIFY_MAX_CHARS_DEFAULT"/);
+  assert.match(script, /"EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=\$EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED_DEFAULT"/);
+  assert.match(script, /"EXTERNAL_MCP_ACTIVITY_TICK_MS=\$EXTERNAL_MCP_ACTIVITY_TICK_MS_DEFAULT"/);
+  assert.match(script, /upsert_env_file "\$NODE_BRIDGE_ENV_FILE"[\s\S]*"PERSONAL_AGENT_PROACTIVE_ENABLED=false"/);
   assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_TURNS=10"/);
   assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_CHAR_BUDGET=6000"/);
   assert.doesNotMatch(script, /"HERMES_GLOBAL_RECENT_TURNS=6"/);
@@ -796,6 +804,16 @@ test('diagnose-ombre-memory.sh keeps full config path separate from lite env HER
   writeFileSync(join(liteHome, '.env'), `HERMES_HOME=${liteHome}\n`);
   writeFileSync(join(fullHome, 'config.yaml'), 'platform_toolsets:\n  cli: []\nmcp_servers: {}\n');
   writeFileSync(join(liteHome, 'config.yaml'), 'platform_toolsets:\n  cli: []\nmcp_servers: {}\n');
+  const statusFile = join(rootDir, '.ran_agent_state', 'ombre-brain', 'status.json');
+  mkdirSync(dirname(statusFile), { recursive: true });
+  writeFileSync(statusFile, JSON.stringify({
+    schema_version: 1,
+    deploy_ready: false,
+    needs_update: true,
+    repo: { update: 'timeout', after: 'abc123', remote: 'def456' },
+    requirements: { install: 'skipped_unchanged' },
+    warnings: ['source_update_timeout'],
+  }));
 
   const output = execFileSync('bash', ['scripts/diagnose-ombre-memory.sh'], {
     cwd: new URL('../..', import.meta.url).pathname,
@@ -812,6 +830,11 @@ test('diagnose-ombre-memory.sh keeps full config path separate from lite env HER
 
   assert.match(output, new RegExp(`--- lite: ${liteHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/config\\.yaml ---`));
   assert.match(output, new RegExp(`--- full: ${fullHome.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}/config\\.yaml ---`));
+  assert.match(output, /=== Status ===/);
+  assert.match(output, /deploy_ready: false/);
+  assert.match(output, /needs_update: true/);
+  assert.match(output, /repo_update: timeout/);
+  assert.match(output, /warnings: PRESENT/);
 });
 
 test('prepare-ombre-brain.sh creates compose and config without secrets', () => {
@@ -821,23 +844,29 @@ test('prepare-ombre-brain.sh creates compose and config without secrets', () => 
   const bucketsDir = join(dir, 'vault', 'ombre');
   mkdirSync(rootDir, { recursive: true });
 
-  execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
-    cwd: new URL('../..', import.meta.url).pathname,
-    env: {
-      ...process.env,
-      RAN_AGENT_REPO_ROOT: rootDir,
-      OMBRE_BRAIN_RUNNER: 'docker',
-      OMBRE_BRAIN_HOME: homeDir,
-      OMBRE_BUCKETS_DIR: bucketsDir,
-      OMBRE_COMPRESS_API_KEY: 'must-not-be-written',
-      OMBRE_DASHBOARD_PASSWORD: 'must-not-be-written',
-    },
-    stdio: 'pipe',
-  });
+  let failed = false;
+  try {
+    execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
+      cwd: new URL('../..', import.meta.url).pathname,
+      env: {
+        ...process.env,
+        RAN_AGENT_REPO_ROOT: rootDir,
+        OMBRE_BRAIN_RUNNER: 'docker',
+        OMBRE_BRAIN_HOME: homeDir,
+        OMBRE_BUCKETS_DIR: bucketsDir,
+        OMBRE_COMPRESS_API_KEY: 'must-not-be-written',
+        OMBRE_DASHBOARD_PASSWORD: 'must-not-be-written',
+      },
+      stdio: 'pipe',
+    });
+  } catch {
+    failed = true;
+  }
 
   const compose = readFileSync(join(homeDir, 'docker-compose.yml'), 'utf8');
   const config = readFileSync(join(homeDir, 'config.yaml'), 'utf8');
   const upstream = readFileSync(join(homeDir, 'upstream_url.txt'), 'utf8');
+  const status = JSON.parse(readFileSync(join(homeDir, 'status.json'), 'utf8'));
 
   assert.match(compose, /p0luz\/ombre-brain:latest/);
   assert.match(compose, /127\.0\.0\.1/);
@@ -846,6 +875,9 @@ test('prepare-ombre-brain.sh creates compose and config without secrets', () => 
   assert.match(config, /transport: "streamable-http"/);
   assert.match(config, new RegExp(`buckets_dir: "${bucketsDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
   assert.match(upstream, /https:\/\/github\.com\/P0luz\/Ombre-Brain/);
+  assert.equal(status.deploy_ready, failed ? false : true);
+  assert.equal(status.runner, 'docker');
+  assert.equal(JSON.stringify(status).includes('must-not-be-written'), false);
 });
 
 test('prepare-ombre-brain.sh wraps existing source update in 5 minute timeout', () => {
@@ -882,6 +914,9 @@ test('prepare-ombre-brain.sh wraps existing source update in 5 minute timeout', 
 
   assert.match(readFileSync(timeoutLog, 'utf8'), /300 git -C .* pull --ff-only/);
   assert.match(output, /WARNING: source update timed out or failed; preserving current checkout/);
+  const status = JSON.parse(readFileSync(join(homeDir, 'status.json'), 'utf8'));
+  assert.equal(status.deploy_ready, true);
+  assert.equal(status.repo.update, 'timeout');
 });
 
 test('prepare-ombre-brain.sh skips pip install when requirements are unchanged', () => {

@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-07)
+Status: CURRENT (2026-07-08)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -73,10 +73,11 @@ Important non-secret env groups:
 - Public XHS/media: `SOCIAL_READER_GENERIC_FALLBACK_ENABLED`,
   `XHS_PUBLIC_*`, `MEDIA_READER_*`, `PERSONAL_AGENT_OCR_*`.
 - Managed UV/Ombre state: `UV_CACHE_DIR`, `UV_TOOL_DIR`,
-  `OMBRE_BRAIN_*`, `PERSONAL_AGENT_OMBRE_*`.
+  `OMBRE_BRAIN_*`, `OMBRE_BRAIN_STATUS_FILE`, `PERSONAL_AGENT_OMBRE_*`.
 - External MCP/proactive gates: `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`,
   `EXTERNAL_MCP_GATEWAY_ENABLED=true`,
-  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`, `HERMES_PROACTIVE_*`.
+  `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`,
+  `EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=true`, `HERMES_PROACTIVE_*`.
 - Reply-window gates: `HERMES_REPLY_TIMEOUT_SECONDS`,
   `NODE_BRIDGE_QUICK_ACK_*`, `FEISHU_SEND_TIMEOUT_SECONDS`, and
   `FEISHU_DOWNLOAD_TIMEOUT_SECONDS`.
@@ -133,8 +134,13 @@ Core safety facts:
   mode; pending state lives under `.ran_agent_state/action_contract/`.
 - Bridge-authored action-gate, repair, and pending-action notices use `bridge_*`
   sources and are not replayed into Hermes assistant history.
-- Slow WeChat/Feishu work may send one quick ack and then one async final reply
-  through the same adapter path. Fast replies still send once.
+- Ordinary WeChat/Feishu chats do not quick-ack by default. Long authorized
+  background work must return a later proactive final through approved event
+  gates and the same adapter path.
+- External MCP background activity uses a short bridge-created target token
+  only on explicit user intent, then uses `activityId` for later tool calls;
+  session ids, target ids, upstream ids, cookies, and tokens must not appear
+  in activity prompts or public evidence.
 - Public XHS parsers are resource resolvers, not OCR/VLM readers. Complete
   image understanding happens only after assets enter `media_reader`.
 - Complete-read claims require content evidence; canonical URLs and public

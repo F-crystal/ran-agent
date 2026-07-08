@@ -53,8 +53,8 @@ export function shouldSuppressSystemQueueReply({ routeHint = '', replyText = '' 
   return { suppress: true, reason: 'malformed_action' };
 }
 
-export function evaluateExternalMcpSystemQueueEgress({ event, replyText } = {}) {
-  return evaluateProactiveEgress({ event, replyText });
+export function evaluateExternalMcpSystemQueueEgress({ event, replyText, env } = {}) {
+  return evaluateProactiveEgress({ event, replyText, env });
 }
 
 export function parseExternalMcpSystemQueueAction(replyText) {

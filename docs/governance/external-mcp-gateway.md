@@ -1,6 +1,6 @@
 # External MCP Gateway
 
-Status: CURRENT (2026-07-07)
+Status: CURRENT (2026-07-08)
 
 This document owns the current external MCP gateway and system-queue contract.
 The design history lives under `docs/superpowers/`; this file records the
@@ -99,3 +99,17 @@ Requirements:
 
 `silent`, `remember`, `draft`, malformed JSON, generic text, missing `why_now`,
 or missing evidence must not send visible messages.
+
+## Background Activity
+
+When the user explicitly says to continue work and report back later, the bridge
+may inject a short-lived `activityTargetToken` into the current Hermes prompt.
+Hermes can use that token only to start a bounded `mcp_start_activity` with
+`background: true`; the target comes from the trusted inbound message, not from
+model-supplied recipient fields.
+
+After startup, Hermes uses `activityId` for `mcp_call`. The gateway resolves the
+private session internally. Activity prompts and public tool output must not
+contain `sessionId`, `sessionKey`, upstream MCP session ids, recipient ids,
+cookies, or tokens. Visible results still require structured `notify` plus
+trusted evidence refs.

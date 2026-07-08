@@ -86,6 +86,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { handleExternalMcpGatewayMcpRequest } from './node_bridge/src/externalMcp/gatewayMcpServer.mjs';
+import { createExternalMcpActivityTargetToken } from './node_bridge/src/externalMcp/activityRunner.mjs';
 
 const stateBase = path.join(process.cwd(), '.ran_agent_state');
 fs.mkdirSync(stateBase, { recursive: true });
@@ -159,6 +160,32 @@ assert.equal(first.structuredContent.toolName, 'listgames');
 assert.deepEqual(upstreams, ['', 'remote-session-1']);
 assert.equal(JSON.stringify(first.structuredContent).includes('remote-session'), false);
 assert.equal(JSON.stringify(second.structuredContent).includes('remote-session'), false);
+
+const token = createExternalMcpActivityTargetToken({
+  globalUserId: 'user:diag',
+  platform: 'wechat',
+  conversationId: 'wx-diag',
+  senderId: 'wx-diag',
+}, { env });
+const activity = await callTool('mcp_start_activity', {
+  serverId: 'cedartoy-games',
+  globalUserId: 'ignored',
+  kind: 'game_play',
+  maxCalls: 1,
+  background: true,
+  activityTargetToken: token.token,
+  watchScope: 'game:diag',
+});
+assert.equal(activity.structuredContent.ok, true);
+assert.equal(activity.structuredContent.activity.sessionId, undefined);
+const activityCall = await callTool('mcp_call', {
+  serverId: 'cedartoy-games',
+  toolName: 'play',
+  activityId: activity.structuredContent.activity.activityId,
+  arguments: { action: 'look' },
+}, { executor: { call: executorImpl } });
+assert.equal(activityCall.structuredContent.ok, true);
+assert.equal(activityCall.structuredContent.evidence.watch_scope, 'game:diag');
 
 const ambiguous = await handleExternalMcpGatewayMcpRequest({
   method: 'tools/call',

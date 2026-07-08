@@ -35,6 +35,57 @@ OMBRE_BRAIN_MCP_EXTRA_URL="${OMBRE_BRAIN_MCP_EXTRA_URL:-http://$OMBRE_BRAIN_BIND
 OMBRE_BRAIN_HEALTH_URL="${OMBRE_BRAIN_HEALTH_URL:-http://$OMBRE_BRAIN_BIND_HOST:$OMBRE_BRAIN_PORT/health}"
 OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-compose.yml}"
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
+OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
+
+json_field() {
+  local file="$1"
+  local field="$2"
+  [ -f "$file" ] || return 1
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$field" <<'PY' || return 1
+import json, sys
+path, field = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+value = data.get(field, "")
+if value is None:
+    print("null")
+elif isinstance(value, bool):
+    print(str(value).lower())
+else:
+    print(value)
+PY
+    return 0
+  fi
+  tr '{},' '\n\n\n' < "$file" \
+    | grep -E "\"$field\"[[:space:]]*:" \
+    | head -n 1 \
+    | sed 's/^.*:[[:space:]]*//; s/[",]//g; s/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+json_nested_field() {
+  local file="$1"
+  local object="$2"
+  local field="$3"
+  [ -f "$file" ] || return 1
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file" "$object" "$field" <<'PY' || return 1
+import json, sys
+path, obj, field = sys.argv[1], sys.argv[2], sys.argv[3]
+with open(path, encoding="utf-8") as f:
+    data = json.load(f)
+value = data.get(obj, {}).get(field, "") if isinstance(data.get(obj), dict) else ""
+if value is None:
+    print("null")
+elif isinstance(value, bool):
+    print(str(value).lower())
+else:
+    print(value)
+PY
+    return 0
+  fi
+  json_field "$file" "$field"
+}
 
 toolset_has() {
   local file="$1"
@@ -66,6 +117,25 @@ echo "buckets: $OMBRE_BUCKETS_DIR"
 echo "health_url: $OMBRE_BRAIN_HEALTH_URL"
 echo "mcp_url: $OMBRE_BRAIN_MCP_URL"
 echo "mcp_extra_url: $OMBRE_BRAIN_MCP_EXTRA_URL"
+
+echo ""
+echo "=== Status ==="
+echo "status_file: $OMBRE_BRAIN_STATUS_FILE"
+if [ -f "$OMBRE_BRAIN_STATUS_FILE" ]; then
+  echo "deploy_ready: $(json_field "$OMBRE_BRAIN_STATUS_FILE" deploy_ready || echo UNKNOWN)"
+  echo "needs_update: $(json_field "$OMBRE_BRAIN_STATUS_FILE" needs_update || echo UNKNOWN)"
+  echo "repo_update: $(json_nested_field "$OMBRE_BRAIN_STATUS_FILE" repo update || echo UNKNOWN)"
+  echo "repo_after: $(json_nested_field "$OMBRE_BRAIN_STATUS_FILE" repo after || echo UNKNOWN)"
+  echo "repo_remote: $(json_nested_field "$OMBRE_BRAIN_STATUS_FILE" repo remote || echo UNKNOWN)"
+  echo "requirements_install: $(json_nested_field "$OMBRE_BRAIN_STATUS_FILE" requirements install || echo UNKNOWN)"
+  if grep -q '"warnings"[[:space:]]*:[[:space:]]*\[[^]]\{1,\}\]' "$OMBRE_BRAIN_STATUS_FILE"; then
+    echo "warnings: PRESENT"
+  else
+    echo "warnings: none"
+  fi
+else
+  echo "status: MISSING"
+fi
 
 if [ "$OMBRE_BRAIN_REPO_URL" != "https://github.com/P0luz/Ombre-Brain" ]; then
   echo "WARNING: Ombre Brain repo URL is not the canonical P0luz/Ombre-Brain upstream"

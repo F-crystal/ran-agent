@@ -12,6 +12,7 @@ const VALID_DELIVERABILITY = new Set(['silent_only', 'draft_allowed', 'notify_al
 const VALID_TIERS = new Set(['T0', 'T1', 'T2', 'T3']);
 const VALID_BUDGET_CLASSES = new Set(['external_mcp', 'reminder', 'digest', 'curiosity', 'maintenance']);
 const PROACTIVE_ROUTE_HINT = 'hermes_proactive_event';
+const DEFAULT_PROACTIVE_NOTIFY_MAX_CHARS = 700;
 
 export function normalizeProactiveEvent(input = {}, defaults = {}) {
   const eventId = sanitizeId(input.event_id || input.eventId || input.id || defaults.eventId || '');
@@ -140,7 +141,15 @@ export function parseHermesProactiveAction(replyText) {
   }
 }
 
-export function evaluateProactiveEgress({ event, replyText } = {}) {
+export function proactiveNotifyMaxChars(env = process.env) {
+  const parsed = Number.parseInt(String(env?.HERMES_PROACTIVE_NOTIFY_MAX_CHARS || ''), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_PROACTIVE_NOTIFY_MAX_CHARS;
+  }
+  return Math.min(Math.max(parsed, 200), 4000);
+}
+
+export function evaluateProactiveEgress({ event, replyText, env } = {}) {
   const parsed = parseHermesProactiveAction(replyText);
   if (!parsed.ok) {
     return { send: false, reason: parsed.reason };
@@ -159,7 +168,7 @@ export function evaluateProactiveEgress({ event, replyText } = {}) {
   if (!message) {
     return { send: false, reason: 'empty_message', action };
   }
-  if (message.length > 700) {
+  if (message.length > proactiveNotifyMaxChars(env)) {
     return { send: false, reason: 'message_too_long', action };
   }
   if (containsToolTrace(message)) {

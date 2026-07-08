@@ -10,8 +10,10 @@ import {
   mergeRequests,
   parseCheckinCommand,
   buildAgent,
+  isExternalMcpActivityRunnerEnabled,
   redactProxyUrlForLog,
   shouldRetryWeixinStartAttempt,
+  startExternalMcpActivityRunnerLoop,
 } from '../src/index.mjs';
 import {
   appendPendingOutboundMessage,
@@ -557,4 +559,49 @@ test('buildAgent does not flush pending proactive messages even if legacy proact
   assert.deepEqual(result, { text: '正常回复' });
   assert.equal(followUpSendCalled, false);
   assert.equal(drainPendingOutboundMessages(10, env).length, 1);
+});
+
+test('external MCP activity runner loop is gated and delivers through adapter callback', async () => {
+  assert.equal(isExternalMcpActivityRunnerEnabled({
+    EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED: 'false',
+  }), false);
+  assert.equal(isExternalMcpActivityRunnerEnabled({
+    HERMES_PROACTIVE_EVENTS_ENABLED: 'false',
+    EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED: 'true',
+    EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
+    HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
+  }), false);
+  assert.equal(isExternalMcpActivityRunnerEnabled({
+    HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
+    EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED: 'true',
+    EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
+    HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
+  }), true);
+
+  let invoked = 0;
+  const sent = [];
+  const loop = startExternalMcpActivityRunnerLoop({
+    env: {
+      HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
+      EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED: 'true',
+      EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
+      HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
+    },
+    logger: { warn() {}, log() {} },
+    intervalMs: 10_000,
+    runDueImpl: async ({ sendText }) => {
+      invoked += 1;
+      await sendText({ platform: 'wechat' }, 'done');
+      return { processed: 1, sent: 1 };
+    },
+    sendText: async (target, text) => {
+      sent.push({ target, text });
+    },
+  });
+
+  await loop.tick();
+  loop.stop();
+
+  assert.equal(invoked, 1);
+  assert.deepEqual(sent, [{ target: { platform: 'wechat' }, text: 'done' }]);
 });

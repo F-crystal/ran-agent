@@ -6,6 +6,9 @@ import test from 'node:test';
 import { promisify } from 'node:util';
 
 import {
+  createExternalMcpActivityTargetToken,
+} from '../src/externalMcp/activityRunner.mjs';
+import {
   buildExternalMcpGatewayTools,
   handleExternalMcpGatewayMcpRequest,
 } from '../src/externalMcp/gatewayMcpServer.mjs';
@@ -631,6 +634,73 @@ test('external MCP gateway activity calls require bounded activity grants and co
   assert.equal(first.structuredContent.evidence.trigger, 'activity');
   assert.equal(second.isError, true);
   assert.equal(second.structuredContent.error_code, 'EXTERNAL_MCP_ACTIVITY_BUDGET_EXHAUSTED');
+});
+
+test('background activity hides session id and lets activityId resolve calls', async (t) => {
+  const env = tempGatewayEnv(t);
+  await callTool('mcp_probe_server', {
+    serverId: 'cedartoy-games',
+    url: 'https://toy.cedarstar.org/mcp',
+    transport: 'streamable-http',
+    activityKind: 'game',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    lookupImpl: async () => [{ address: '203.0.113.32', family: 4 }],
+    executor: {
+      async probe() {
+        return {
+          ok: true,
+          manifest: {
+            id: 'cedartoy-games',
+            transport: 'streamable-http',
+            url: 'https://toy.cedarstar.org/mcp',
+            activityKind: 'game',
+            tools: [{ name: 'play', description: '执行游戏操作' }],
+          },
+        };
+      },
+    },
+  });
+  const token = createExternalMcpActivityTargetToken({
+    globalUserId: 'user:ran',
+    platform: 'wechat',
+    conversationId: 'wx-conv',
+    senderId: 'wx-sender',
+  }, { env });
+  const activity = await callTool('mcp_start_activity', {
+    globalUserId: 'ignored-by-token',
+    serverId: 'cedartoy-games',
+    kind: 'game_play',
+    maxMinutes: 30,
+    maxCalls: 1,
+    background: true,
+    activityTargetToken: token.token,
+    watchScope: 'game:cedartoy/slot-1',
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+  });
+  let callInput = null;
+  const result = await callTool('mcp_call', {
+    serverId: 'cedartoy-games',
+    toolName: 'play',
+    arguments: { action: 'look' },
+    activityId: activity.structuredContent.activity.activityId,
+  }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true', HERMES_PROFILE: 'ran-assistant' },
+    executor: {
+      async call(input) {
+        callInput = input;
+        return { ok: true, result: { content: [{ type: 'text', text: '继续探索' }] } };
+      },
+    },
+  });
+
+  assert.equal(activity.structuredContent.ok, true);
+  assert.equal(activity.structuredContent.activity.sessionId, undefined);
+  assert.equal(activity.structuredContent.activity.globalUserId, 'user:ran');
+  assert.equal(result.structuredContent.ok, true);
+  assert.match(callInput.sessionId, /^extmcp_/);
+  assert.equal(result.structuredContent.evidence.watch_scope, 'game:cedartoy/slot-1');
 });
 
 test('external MCP gateway stop interrupts activities by global user id', async (t) => {

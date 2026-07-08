@@ -26,6 +26,7 @@ import {
   markLiteResumeDigestConsumed,
 } from './hermesSessionMaintenance.mjs';
 import { resolveStateDir } from './runtimeState.mjs';
+import { createExternalMcpActivityTargetToken } from './externalMcp/activityRunner.mjs';
 
 const execFile = promisify(execFileCallback);
 const recentConversationStore = new Map();
@@ -488,23 +489,25 @@ async function sendChatToHermesApi(message, options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const endpoint = `${config.baseUrl}/chat/completions`;
   const recentMessages = Array.isArray(options.recentMessages) ? options.recentMessages : [];
+  const apiMessages = [
+    {
+      role: 'system',
+      content: buildHermesSystemInstruction(),
+    },
+    ...recentMessages,
+    {
+      role: 'user',
+      content: message,
+    },
+  ];
+  const clientPromptText = apiMessages.map((item) => String(item?.content || '')).join('\n');
   const response = await fetchImpl(endpoint, {
     method: 'POST',
     headers: buildHermesHeaders(config, options.sessionContext),
     signal: AbortSignal.timeout(config.timeoutSeconds * 1000),
     body: JSON.stringify({
       model: config.profile || 'ran-assistant',
-      messages: [
-        {
-          role: 'system',
-          content: buildHermesSystemInstruction(),
-        },
-        ...recentMessages,
-        {
-          role: 'user',
-          content: message,
-        },
-      ],
+      messages: apiMessages,
       stream: false,
     }),
   });
@@ -527,6 +530,9 @@ async function sendChatToHermesApi(message, options = {}) {
       payload: options.payload,
       softResetResume: options.softResetResume,
       dailyDigestChars: options.dailyDigestChars,
+      clientPromptChars: clientPromptText.length,
+      clientPromptEstimatedTokens: estimateTokens(clientPromptText),
+      clientMessageCount: apiMessages.length,
     });
   }
   return buildHermesReply(body, config);
@@ -604,6 +610,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     continuityNote,
     dailyDigestText,
     buildBridgeTemporalUserContext(payload),
+    buildActivityTargetAuthorization(payload, options),
     environmentContextText,
     mediaContextText,
     buildHermesInboundMediaInstruction(payload),
@@ -727,21 +734,36 @@ function estimateTokens(text = '') {
 
 function logProviderUsageTelemetry(body = {}, options = {}) {
   const usage = body && typeof body.usage === 'object' && !Array.isArray(body.usage) ? body.usage : {};
+  const requestId = options.requestId || createRequestId();
+  const inputTokens = nullableNumber(firstProvided(usage.input_tokens, usage.prompt_tokens));
+  const outputTokens = nullableNumber(firstProvided(usage.output_tokens, usage.completion_tokens));
+  const totalTokens = nullableNumber(usage.total_tokens);
   const hitTokens = nullableNumber(usage.prompt_cache_hit_tokens);
   const missTokens = nullableNumber(usage.prompt_cache_miss_tokens);
   const cacheDenominator = Number(hitTokens) + Number(missTokens);
   const cacheFriendlyHistory = options.cacheFriendlyHistory || {};
+  const clientPromptEstimatedTokens = nullableNumber(options.clientPromptEstimatedTokens);
+  const providerInputRatio = inputTokens !== null && clientPromptEstimatedTokens !== null && clientPromptEstimatedTokens > 0
+    ? Number((inputTokens / clientPromptEstimatedTokens).toFixed(3))
+    : null;
+  const possibleServerSessionAccumulation = inputTokens !== null && clientPromptEstimatedTokens !== null
+    && inputTokens > Math.max(10000, clientPromptEstimatedTokens * 10);
   options.logger?.log?.(`[hermes-provider-usage] ${JSON.stringify({
-    request_id: options.requestId || createRequestId(),
+    request_id: requestId,
     profile: options.config?.profile || '',
     channel: String(options.payload?.platform || options.payload?.channel || '').trim().toLowerCase() || '',
     session_id_hash: options.sessionContext?.sessionId ? sha256Hex(options.sessionContext.sessionId).slice(0, 16) : '',
     context_mode: options.contextBudget?.mode || options.config?.contextInjectionMode || 'auto',
     cache_strategy: options.config?.contextCacheStrategy || 'balanced',
     context_decision_reason: options.contextBudget?.decisionReason || '',
-    input_tokens: nullableNumber(firstProvided(usage.input_tokens, usage.prompt_tokens)),
-    output_tokens: nullableNumber(firstProvided(usage.output_tokens, usage.completion_tokens)),
-    total_tokens: nullableNumber(usage.total_tokens),
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    total_tokens: totalTokens,
+    client_prompt_chars: nullableNumber(options.clientPromptChars),
+    client_prompt_estimated_tokens: clientPromptEstimatedTokens,
+    client_message_count: nullableNumber(options.clientMessageCount),
+    provider_input_to_client_prompt_ratio: providerInputRatio,
+    possible_server_session_accumulation: possibleServerSessionAccumulation,
     prompt_cache_hit_tokens: hitTokens,
     prompt_cache_miss_tokens: missTokens,
     cache_hit_ratio: Number.isFinite(cacheDenominator) && cacheDenominator > 0
@@ -760,6 +782,16 @@ function logProviderUsageTelemetry(body = {}, options = {}) {
     soft_reset_resume: options.softResetResume === true,
     daily_digest_chars: nullableNumber(options.dailyDigestChars) ?? 0,
   })}`);
+  if (possibleServerSessionAccumulation) {
+    options.logger?.warn?.(`[hermes-provider-usage-warning] ${JSON.stringify({
+      request_id: requestId,
+      reason: 'possible_server_session_accumulation',
+      input_tokens: inputTokens,
+      client_prompt_estimated_tokens: clientPromptEstimatedTokens,
+      provider_input_to_client_prompt_ratio: providerInputRatio,
+      session_id_hash: options.sessionContext?.sessionId ? sha256Hex(options.sessionContext.sessionId).slice(0, 16) : '',
+    })}`);
+  }
 }
 
 function nullableNumber(value) {
@@ -1168,6 +1200,38 @@ function buildBridgeTemporalUserContext(payload = {}, now = new Date()) {
   return `【时间：${formatter.format(now)}】`;
 }
 
+function buildActivityTargetAuthorization(payload = {}, options = {}) {
+  if (!hasExplicitBackgroundActivityIntent(payload)) return '';
+  const token = createExternalMcpActivityTargetToken({
+    globalUserId: payload.global_user_id || payload.globalUserId || '',
+    platform: payload.platform || payload.channel || 'wechat',
+    channelType: payload.channel_type || payload.channelType || 'dm',
+    conversationId: payload.conversation_id || payload.conversationId || payload.sender_id || payload.senderId || '',
+    senderId: payload.sender_id || payload.senderId || payload.conversation_id || payload.conversationId || '',
+  }, {
+    env: options.env,
+  });
+  if (!token?.ok) return '';
+  return [
+    '【外部 MCP 后台活动授权（非用户原话，不要复述）】',
+    '用户明确授权你先继续处理，并在有结果后主动发送一次结果。',
+    '如果需要启动外部 MCP 后台活动，只能调用 mcp_start_activity，并使用这些字段：',
+    'background: true',
+    `activityTargetToken: ${token.token}`,
+    'globalUserId: from_activity_target_token',
+    'watchScope: 使用稳定、非敏感的活动范围，例如 game:cedartoy/<slot-or-topic>',
+    '后续工具调用优先使用 activityId；不要索要确认，不要输出或复述 token、会话、收件人或内部路径。',
+  ].join('\n');
+}
+
+function hasExplicitBackgroundActivityIntent(payload = {}) {
+  const text = buildHermesUserText(payload);
+  if (!text) return false;
+  const hasContinue = /你先|先继续|先进行|继续玩|继续探索|自己探索|主动探索|不用等我|别等我/.test(text);
+  const hasLaterResult = /回头.*(发|告诉|汇报).*结果|稍后.*(发|告诉|汇报)|有结果.*(发|告诉|汇报)|完成后.*(发|告诉|汇报)/.test(text);
+  return hasContinue && hasLaterResult;
+}
+
 function buildHermesSessionContext(payload = {}, config = {}) {
   if (config.sessionContinuityEnabled === false) {
     return { enabled: false, stableKey: '', sessionId: '', sessionKey: '' };
@@ -1471,6 +1535,8 @@ function sanitizeProviderVisibleHistoryTextWithMeta(value) {
     });
   };
   replaceWithReason(/data:[a-z0-9/+.-]+;base64,[a-z0-9+/=\s]+/ig, '[media data redacted]', 'token_like');
+  replaceWithReason(/\bactivityTargetToken:\s*acttarget_[a-f0-9]+/ig, 'activityTargetToken: [redacted]', 'token_like');
+  replaceWithReason(/\bacttarget_[a-f0-9]+/ig, '[redacted-activity-token]', 'token_like');
   replaceWithReason(/\b(token|cookie|authorization|xsec_token|api_key|apikey|key|signature|session)=([^\s&]+)/ig, (match, key) => `${key}=[redacted]`, 'token_like');
   replaceWithReason(/\/(?:Users|opt|private|var|tmp)\/[^\s"'，。；,）)]+/g, '[path]', 'absolute_path');
   const sanitized = text.trim();

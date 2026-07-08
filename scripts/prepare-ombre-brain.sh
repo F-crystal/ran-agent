@@ -18,12 +18,20 @@ OMBRE_BRAIN_PORT="${OMBRE_BRAIN_PORT:-18001}"
 OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-compose.yml}"
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
 OMBRE_BRAIN_ENV_EXAMPLE_FILE="${OMBRE_BRAIN_ENV_EXAMPLE_FILE:-$OMBRE_BRAIN_HOME/.env.example}"
+OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
 OMBRE_BRAIN_PULL_IMAGE="${OMBRE_BRAIN_PULL_IMAGE:-false}"
 OMBRE_BRAIN_UPDATE_SOURCE="${OMBRE_BRAIN_UPDATE_SOURCE:-true}"
 OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS="${OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS:-300}"
 
 FORCE_CONFIG=0
 FORCE_COMPOSE=0
+REPO_BEFORE=""
+REPO_AFTER=""
+REPO_REMOTE=""
+REPO_UPDATE="unknown"
+REQUIREMENTS_FINGERPRINT=""
+REQUIREMENTS_INSTALL="skipped_missing"
+WARNINGS=()
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -47,6 +55,109 @@ done
 log() {
   printf '[prepare-ombre-brain] %s\n' "$*"
 }
+
+json_escape() {
+  printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+json_bool() {
+  if [ "$1" = "true" ]; then
+    printf 'true'
+  else
+    printf 'false'
+  fi
+}
+
+status_deploy_ready() {
+  case "$OMBRE_BRAIN_RUNNER" in
+    source)
+      [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ] && [ -x "$OMBRE_BRAIN_VENV/bin/python" ]
+      ;;
+    docker)
+      command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [ -f "$OMBRE_BRAIN_COMPOSE_FILE" ]
+      ;;
+    external)
+      return 0
+      ;;
+    auto)
+      { [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ] && [ -x "$OMBRE_BRAIN_VENV/bin/python" ]; } \
+        || { command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [ -f "$OMBRE_BRAIN_COMPOSE_FILE" ]; }
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+repo_needs_update_json() {
+  if [ -n "$REPO_REMOTE" ] && [ -n "$REPO_AFTER" ]; then
+    if [ "$REPO_REMOTE" = "$REPO_AFTER" ]; then
+      printf 'false'
+    else
+      printf 'true'
+    fi
+  else
+    printf 'null'
+  fi
+}
+
+write_status() {
+  local ok="$1"
+  local deploy_ready="$2"
+  local tmp
+  tmp="$OMBRE_BRAIN_STATUS_FILE.tmp.$$"
+  mkdir -p "$(dirname "$OMBRE_BRAIN_STATUS_FILE")"
+  {
+    printf '{\n'
+    printf '  "schema_version": 1,\n'
+    printf '  "generated_at": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    printf '  "ok": %s,\n' "$(json_bool "$ok")"
+    printf '  "deploy_ready": %s,\n' "$(json_bool "$deploy_ready")"
+    printf '  "needs_update": %s,\n' "$(repo_needs_update_json)"
+    printf '  "runner": "%s",\n' "$(json_escape "$OMBRE_BRAIN_RUNNER")"
+    printf '  "repo": {\n'
+    printf '    "url": "%s",\n' "$(json_escape "$OMBRE_BRAIN_REPO_URL")"
+    printf '    "dir": "%s",\n' "$(json_escape "$OMBRE_BRAIN_SOURCE_DIR")"
+    printf '    "before": "%s",\n' "$(json_escape "$REPO_BEFORE")"
+    printf '    "after": "%s",\n' "$(json_escape "$REPO_AFTER")"
+    printf '    "remote": "%s",\n' "$(json_escape "$REPO_REMOTE")"
+    printf '    "update": "%s"\n' "$(json_escape "$REPO_UPDATE")"
+    printf '  },\n'
+    printf '  "source": {\n'
+    printf '    "server_py": %s,\n' "$(json_bool "$([ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ] && echo true || echo false)")"
+    printf '    "venv_python": %s\n' "$(json_bool "$([ -x "$OMBRE_BRAIN_VENV/bin/python" ] && echo true || echo false)")"
+    printf '  },\n'
+    printf '  "requirements": {\n'
+    printf '    "fingerprint": "%s",\n' "$(json_escape "$REQUIREMENTS_FINGERPRINT")"
+    printf '    "install": "%s"\n' "$(json_escape "$REQUIREMENTS_INSTALL")"
+    printf '  },\n'
+    printf '  "paths": {\n'
+    printf '    "home": "%s",\n' "$(json_escape "$OMBRE_BRAIN_HOME")"
+    printf '    "buckets": "%s",\n' "$(json_escape "$OMBRE_BUCKETS_DIR")"
+    printf '    "config": "%s",\n' "$(json_escape "$OMBRE_BRAIN_CONFIG_FILE")"
+    printf '    "compose": "%s"\n' "$(json_escape "$OMBRE_BRAIN_COMPOSE_FILE")"
+    printf '  },\n'
+    printf '  "warnings": ['
+    local warning_count="${#WARNINGS[@]}"
+    local warning_index
+    for ((warning_index = 0; warning_index < warning_count; warning_index += 1)); do
+      if [ "$warning_index" != 0 ]; then printf ', '; fi
+      printf '"%s"' "$(json_escape "${WARNINGS[$warning_index]}")"
+    done
+    printf ']\n'
+    printf '}\n'
+  } > "$tmp"
+  mv "$tmp" "$OMBRE_BRAIN_STATUS_FILE"
+}
+
+on_error() {
+  local code="$1"
+  WARNINGS+=("prepare_failed")
+  write_status false false || true
+  exit "$code"
+}
+
+trap 'on_error "$?"' ERR
 
 write_if_missing() {
   local path="$1"
@@ -73,15 +184,21 @@ requirements_fingerprint() {
 
 install_source_requirements_if_changed() {
   local requirements="$OMBRE_BRAIN_SOURCE_DIR/requirements.txt"
-  [ -f "$requirements" ] || return 0
+  if [ ! -f "$requirements" ]; then
+    REQUIREMENTS_INSTALL="skipped_missing"
+    return 0
+  fi
   local stamp="$OMBRE_BRAIN_VENV/.requirements.fingerprint"
   local current
   current="$(requirements_fingerprint "$requirements")"
+  REQUIREMENTS_FINGERPRINT="sha256:$current"
   if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$current" ]; then
     log "source requirements unchanged; skipping pip install"
+    REQUIREMENTS_INSTALL="skipped_unchanged"
     return 0
   fi
   log "installing source requirements"
+  REQUIREMENTS_INSTALL="installed"
   "$OMBRE_BRAIN_VENV/bin/python" -m pip install -r "$requirements"
   printf '%s\n' "$current" > "$stamp"
 }
@@ -98,11 +215,37 @@ prepare_source_runner() {
   if [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ]; then
     log "preserving existing source checkout $OMBRE_BRAIN_SOURCE_DIR"
     if [ -d "$OMBRE_BRAIN_SOURCE_DIR/.git" ] && [ "$OMBRE_BRAIN_UPDATE_SOURCE" != "false" ] && [ "$OMBRE_BRAIN_UPDATE_SOURCE" != "0" ]; then
+      REPO_BEFORE="$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
       if command -v timeout >/dev/null 2>&1; then
-        timeout "$OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS" git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only || log "WARNING: source update timed out or failed; preserving current checkout"
+        if timeout "$OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS" git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only; then
+          REPO_UPDATE="current"
+        else
+          code=$?
+          if [ "$code" = "124" ]; then
+            REPO_UPDATE="timeout"
+            WARNINGS+=("source_update_timeout")
+          else
+            REPO_UPDATE="failed"
+            WARNINGS+=("source_update_failed")
+          fi
+          log "WARNING: source update timed out or failed; preserving current checkout"
+        fi
       else
-        git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only || log "WARNING: source update failed; preserving current checkout"
+        if git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only; then
+          REPO_UPDATE="current"
+        else
+          REPO_UPDATE="failed"
+          WARNINGS+=("source_update_failed")
+          log "WARNING: source update failed; preserving current checkout"
+        fi
       fi
+      REPO_AFTER="$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
+      REPO_REMOTE="$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse '@{u}' 2>/dev/null || true)"
+      if [ "$REPO_UPDATE" = "current" ] && [ -n "$REPO_BEFORE" ] && [ -n "$REPO_AFTER" ] && [ "$REPO_BEFORE" != "$REPO_AFTER" ]; then
+        REPO_UPDATE="updated"
+      fi
+    else
+      REPO_UPDATE="skipped"
     fi
   else
     if ! command -v git >/dev/null 2>&1; then
@@ -112,6 +255,9 @@ prepare_source_runner() {
     mkdir -p "$(dirname "$OMBRE_BRAIN_SOURCE_DIR")"
     log "cloning $OMBRE_BRAIN_REPO_URL to $OMBRE_BRAIN_SOURCE_DIR"
     git clone --depth 1 "$OMBRE_BRAIN_REPO_URL" "$OMBRE_BRAIN_SOURCE_DIR"
+    REPO_UPDATE="cloned"
+    REPO_AFTER="$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
+    REPO_REMOTE="$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse '@{u}' 2>/dev/null || true)"
   fi
 
   if [ ! -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ]; then
@@ -211,5 +357,14 @@ if [ "$OMBRE_BRAIN_PULL_IMAGE" = "1" ] || [ "$OMBRE_BRAIN_PULL_IMAGE" = "true" ]
 fi
 
 prepare_source_runner
+
+if status_deploy_ready; then
+  write_status true true
+else
+  WARNINGS+=("runner_not_ready")
+  write_status false false
+  echo "ERROR: Ombre Brain runner is not deploy-ready" >&2
+  exit 1
+fi
 
 log "ready runner=$OMBRE_BRAIN_RUNNER home=$OMBRE_BRAIN_HOME source=$OMBRE_BRAIN_SOURCE_DIR buckets=$OMBRE_BUCKETS_DIR compose=$OMBRE_BRAIN_COMPOSE_FILE"

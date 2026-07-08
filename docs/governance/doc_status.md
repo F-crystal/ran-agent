@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-07)
+Status: CURRENT (2026-07-08)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -105,6 +105,11 @@ deployment notes belong under ignored `local_archive/`, not under
 - External MCP policy explain/call paths share trusted session context; compact
   aliases like `list_games`/`listgames` resolve only when unique, and private
   upstream session ids are reused without entering public evidence.
+- External MCP background activities use bridge-created target tokens, then
+  internal `activityId` session resolution; public activity prompts must not
+  expose target/session/upstream secrets.
 - Slow WeChat/Feishu replies use the managed reply-window contract:
-  `HERMES_REPLY_TIMEOUT_SECONDS`, quick ack, async final send, and distinct
-  Feishu ack/final idempotency keys.
+  `HERMES_REPLY_TIMEOUT_SECONDS`, default-off quick ack, authorized async final
+  send, and distinct Feishu ack/final idempotency keys.
+- Ombre Brain deploy readiness is recorded in `OMBRE_BRAIN_STATUS_FILE`; direct
+  full-profile Ombre MCP exposure is optional and gated by deploy-ready status.

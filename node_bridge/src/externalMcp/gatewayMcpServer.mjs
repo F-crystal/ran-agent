@@ -4,6 +4,7 @@ import readline from 'node:readline';
 import {
   buildExternalMcpActivitySyntheticTurn,
   consumeExternalMcpActivityCall,
+  getActiveExternalMcpActivity,
   getTrustedExternalMcpActivityGrant,
   registerExternalMcpAbortController,
   startExternalMcpActivity,
@@ -101,6 +102,9 @@ export function buildExternalMcpGatewayTools() {
       maxMinutes: int(1, 240),
       maxCalls: int(1, 500),
       maxShares: int(0, 50),
+      background: { type: 'boolean' },
+      activityTargetToken: str(),
+      watchScope: str(),
     }, ['globalUserId', 'serverId', 'kind']),
     tool('mcp_stop', 'MCP Stop', 'Stop external MCP activities for a global user and revoke their runtime grants.', {
       globalUserId: str(),
@@ -234,16 +238,30 @@ async function dispatchTool(name, args, options) {
     if (selected.errorCode) return errorResult('external MCP tool name is ambiguous', selected.errorCode);
     const selectedTool = selected.tool;
     if (!selectedTool) return errorResult('external MCP tool not found', 'EXTERNAL_MCP_TOOL_NOT_FOUND');
-    if (!args.sessionId) return errorResult('external MCP session is required', 'EXTERNAL_MCP_SESSION_REQUIRED');
-    const session = getExternalMcpSession(args.sessionId, {
+    const activity = args.activityId
+      ? getActiveExternalMcpActivity(args.activityId, {
+          ...options,
+          globalUserId: args.globalUserId,
+          serverId: server.id,
+          now: options.now,
+        })
+      : null;
+    const effectiveArgs = activity ? {
+      ...args,
+      sessionId: args.sessionId || activity.sessionId,
+      globalUserId: activity.globalUserId,
+      watchScope: args.watchScope || args.watch_scope || activity.watchScope,
+    } : args;
+    if (!effectiveArgs.sessionId) return errorResult('external MCP session is required', 'EXTERNAL_MCP_SESSION_REQUIRED');
+    const session = getExternalMcpSession(effectiveArgs.sessionId, {
       ...options,
-      globalUserId: args.globalUserId,
+      globalUserId: effectiveArgs.globalUserId,
       serverId: server.id,
     });
     if (!session) return errorResult('external MCP session not found or expired', 'EXTERNAL_MCP_SESSION_NOT_FOUND');
     const globalUserId = session.globalUserId;
     const sessionMode = session.mode;
-    const context = resolvePolicyContext({ args, server, selectedTool, options, session });
+    const context = resolvePolicyContext({ args: effectiveArgs, server, selectedTool, options, session });
     if (context.error) return errorResult(context.error, context.errorCode);
     const trigger = context.trigger;
     const scopedGrant = context.scopedGrant;
@@ -255,8 +273,8 @@ async function dispatchTool(name, args, options) {
         { policy }
       );
     }
-    if (args.activityId) {
-      const budget = consumeExternalMcpActivityCall(args.activityId, {
+    if (effectiveArgs.activityId) {
+      const budget = consumeExternalMcpActivityCall(effectiveArgs.activityId, {
         ...options,
         now: options.now,
       });
@@ -265,13 +283,13 @@ async function dispatchTool(name, args, options) {
       }
     }
     const manifest = findManifest(server.id, options);
-    const controller = args.activityId ? new AbortController() : null;
+    const controller = effectiveArgs.activityId ? new AbortController() : null;
     const unregisterAbort = controller
       ? registerExternalMcpAbortController({
           globalUserId,
           serverId: server.id,
-          activityId: args.activityId,
-          sessionId: args.sessionId,
+          activityId: effectiveArgs.activityId,
+          sessionId: effectiveArgs.sessionId,
         }, controller, options)
       : () => {};
     let call;
@@ -281,21 +299,21 @@ async function dispatchTool(name, args, options) {
         url: manifest?.url,
         transport: manifest?.transport || server.transport,
         toolName: selectedTool.name,
-        arguments: args.arguments || {},
-        sessionId: args.sessionId,
+        arguments: effectiveArgs.arguments || {},
+        sessionId: effectiveArgs.sessionId,
         upstreamSessionId: session.upstreamSessionId || '',
         globalUserId,
       }, controller ? { ...options, signal: controller.signal } : options);
     } finally {
       unregisterAbort();
     }
-    let activeSession = getExternalMcpSession(args.sessionId, {
+    let activeSession = getExternalMcpSession(effectiveArgs.sessionId, {
       ...options,
       globalUserId,
       serverId: server.id,
     });
     if (call?.upstreamSessionId && activeSession) {
-      activeSession = updateExternalMcpSession(args.sessionId, {
+      activeSession = updateExternalMcpSession(effectiveArgs.sessionId, {
         upstreamSessionId: call.upstreamSessionId,
       }, {
         ...options,
@@ -303,8 +321,8 @@ async function dispatchTool(name, args, options) {
         serverId: server.id,
       }) || activeSession;
     }
-    const activeGrant = args.activityId
-      ? getTrustedExternalMcpActivityGrant(args.activityId, {
+    const activeGrant = effectiveArgs.activityId
+      ? getTrustedExternalMcpActivityGrant(effectiveArgs.activityId, {
           ...options,
           globalUserId,
           serverId: server.id,
@@ -316,8 +334,8 @@ async function dispatchTool(name, args, options) {
       globalUserId,
       serverId: server.id,
       toolName: selectedTool.name,
-      watchScope: args.watchScope || args.watch_scope || args.topicKey || args.topic_key
-        || args.arguments?.watchScope || args.arguments?.watch_scope || args.arguments?.scope || '',
+      watchScope: effectiveArgs.watchScope || effectiveArgs.watch_scope || effectiveArgs.topicKey || effectiveArgs.topic_key
+        || effectiveArgs.arguments?.watchScope || effectiveArgs.arguments?.watch_scope || effectiveArgs.arguments?.scope || '',
       tier: selectedTool.tier,
       sessionMode,
       trigger,
@@ -340,6 +358,9 @@ async function dispatchTool(name, args, options) {
       maxMinutes: args.maxMinutes,
       maxCalls: args.maxCalls,
       maxShares: args.maxShares,
+      background: args.background,
+      activityTargetToken: args.activityTargetToken,
+      watchScope: args.watchScope,
       allowedToolPattern: activityToolPattern(server, args.kind),
       now: options.now,
     }, options);
@@ -496,18 +517,21 @@ function publicSession(session) {
 }
 
 function publicActivity(activity) {
-  return {
+  const publicValue = {
     activityId: activity.activityId,
     grantId: activity.grantId,
     globalUserId: activity.globalUserId,
     serverId: activity.serverId,
     kind: activity.kind,
     status: activity.status,
-    sessionId: activity.sessionId,
     sessionMode: activity.sessionMode,
     budget: activity.budget,
     expiresAt: activity.expiresAt,
   };
+  if (activity.background !== true) {
+    publicValue.sessionId = activity.sessionId;
+  }
+  return publicValue;
 }
 
 function activityToolPattern(server, kind) {

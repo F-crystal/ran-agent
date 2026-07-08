@@ -373,7 +373,7 @@ export async function handleProactiveEventRequest({
       logger,
       adapter: {
         async sendReply({ target: replyTarget, text, message: sourceMessage }) {
-          const egress = evaluateProactiveEgress({ event, replyText: text });
+          const egress = evaluateProactiveEgress({ event, replyText: text, env });
           egressReason = egress.reason;
           if (!egress.send) {
             return;
@@ -567,7 +567,7 @@ export async function handleExternalMcpSystemQueueRequest({
       logger,
       adapter: {
         async sendReply({ target: replyTarget, text, message: sourceMessage }) {
-          const egress = evaluateExternalMcpSystemQueueEgress({ event, replyText: text });
+          const egress = evaluateExternalMcpSystemQueueEgress({ event, replyText: text, env });
           egressReason = egress.reason;
           if (!notifyAllowed || !egress.send) {
             return;
