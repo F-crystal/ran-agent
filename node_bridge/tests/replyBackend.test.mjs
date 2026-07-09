@@ -347,9 +347,9 @@ test('createReplyBackend enforces safe rewrite before returning unsupported soci
     channel: 'wechat',
   }, { requestId: 'req-action-enforce' });
 
-  assert.equal(response.replyText, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
+  assert.equal(response.replyText, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
   assert.equal(response.source, 'bridge_action_gate');
-  assert.equal(ingestPayload?.reply_text, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
+  assert.equal(ingestPayload?.reply_text, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
   assert.equal(ingestPayload?.source, 'bridge_action_gate');
   assert.equal(String(ingestPayload?.reply_text || '').includes('旅行'), false);
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
@@ -388,7 +388,7 @@ test('createReplyBackend gates unsafe follow-up messages before they can be sent
   });
 
   assert.equal(response.replyText, '先说一句普通话。');
-  assert.deepEqual(response.followUpMessages, ['链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。']);
+  assert.deepEqual(response.followUpMessages, ['链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。']);
   assert.equal(response.source, 'bridge_action_gate');
 });
 
@@ -554,7 +554,7 @@ test('createReplyBackend repair mode safe rewrites when social repair fails', as
     channel: 'wechat',
   }, { requestId: 'req-action-repair-social-fail' });
 
-  assert.equal(response.replyText, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
+  assert.equal(response.replyText, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
   assert.equal(response.source, 'bridge_action_gate');
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
@@ -797,7 +797,7 @@ test('createReplyBackend repair mode does not fake generated media when repair h
     channel: 'wechat',
   });
 
-  assert.equal(response.replyText, '这次没有拿到可发送的生成结果，暂不能说已经生成完成。');
+  assert.equal(response.replyText, '生成结果尚未返回，已取消完成态表述。');
   assert.equal(response.source, 'bridge_action_gate');
   assert.equal(response.media, null);
 });
@@ -974,7 +974,7 @@ test('createReplyBackend repair mode respects max repair attempts', async () => 
   });
 
   assert.equal(repairCalled, false);
-  assert.equal(response.replyText, '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。');
+  assert.equal(response.replyText, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
   assert.equal(response.source, 'bridge_action_gate');
 });
 

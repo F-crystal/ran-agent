@@ -88,7 +88,7 @@ bash scripts/diagnose-ombre-memory.sh
   `HERMES_REPLY_TIMEOUT_SECONDS=1200`,
   `NODE_BRIDGE_QUICK_ACK_ENABLED=false`,
   `NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS=4500`,
-  `NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理，稍后发送结果。`,
+  `NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理。`,
   `FEISHU_SEND_TIMEOUT_SECONDS=30`, and
   `FEISHU_DOWNLOAD_TIMEOUT_SECONDS=30`.
 - `/opt/ran_agent` diagnostics run strict proactive env checks: `.env.local`,
@@ -217,8 +217,8 @@ OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra
 PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback
 PERSONAL_AGENT_OMBRE_MCP_URL=http://127.0.0.1:18001/mcp
 PERSONAL_AGENT_OMBRE_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra
-AI_DAILY_DIGEST_ENABLED=false
-AI_DAILY_DIGEST_HOUR=10
+AI_DAILY_DIGEST_ENABLED=true
+AI_DAILY_DIGEST_HOUR=8
 AI_DAILY_DIGEST_MINUTE=0
 HERMES_ACTION_GATE_ENABLED=true
 HERMES_ACTION_GATE_MODE=repair
@@ -228,7 +228,7 @@ HERMES_ACTION_PENDING_TTL_MINUTES=30
 HERMES_REPLY_TIMEOUT_SECONDS=1200
 NODE_BRIDGE_QUICK_ACK_ENABLED=false
 NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS=4500
-NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理，稍后发送结果。
+NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理。
 FEISHU_SEND_TIMEOUT_SECONDS=30
 FEISHU_DOWNLOAD_TIMEOUT_SECONDS=30
 HERMES_PROACTIVE_NOTIFY_MAX_CHARS=1600
@@ -259,6 +259,7 @@ bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-ombre-memory.sh
 bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-multi-frontend.sh
+bash scripts/diagnose-ai-daily-digest.sh
 bash scripts/diagnose-hermes-tools.sh
 bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-public-sidecar --smoke-social-tools
 ```
@@ -280,8 +281,9 @@ paste key-bearing curl commands into public docs.
 
 ## Scheduled AI Daily Digest
 
-- Enable only in local env with `AI_DAILY_DIGEST_ENABLED=true`; keep the default
-  disabled in public templates.
+- Public templates keep `AI_DAILY_DIGEST_ENABLED=false`; the managed server
+  deploy writes `AI_DAILY_DIGEST_ENABLED=true` and schedules it for 08:00
+  `Asia/Shanghai`.
 - The digest target is learned from the latest normal Feishu DM handled by
   `node_bridge/src/feishuBridge.mjs` and stored under runtime state. To bind it,
   send the bot any private Feishu message once after deployment.

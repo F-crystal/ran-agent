@@ -421,7 +421,7 @@ async function handlePendingActionBeforeHermes({
       finalAction: execution.ok ? 'executed_with_evidence' : 'execution_failed_safe_rewrite',
     }, logger);
     return {
-      replyText: execution.replyText || (execution.ok ? '已完成。' : '执行未成功，暂不能说已经完成。'),
+      replyText: execution.replyText || (execution.ok ? '已完成。' : '执行结果显示失败，已取消完成态表述。'),
       media: execution.media || null,
       source: 'bridge_pending_action',
     };
@@ -510,7 +510,7 @@ async function handlePendingConfirmation({
     finalAction: 'execution_failed_safe_rewrite',
   }, logger);
   return {
-    replyText: execution.replyText || '执行未成功，暂不能说已经完成。',
+    replyText: execution.replyText || '执行结果显示失败，已取消完成态表述。',
     source: 'bridge_pending_action',
   };
 }
@@ -639,7 +639,7 @@ async function executePendingAction(action, { options, env, message }) {
   } catch {
     return {
       ok: false,
-      replyText: '执行未成功，暂不能说已经完成。',
+      replyText: '执行结果显示失败，已取消完成态表述。',
       evidence: [{ type: resultEvidenceType(action.actionType), status: 'failure', error_code: 'PENDING_EXECUTION_EXCEPTION' }],
     };
   }
@@ -726,7 +726,7 @@ async function executeConfirmedAction(action, { env, message, runtimePayload } =
   }
   return {
     ok: false,
-    replyText: '该操作缺少明确的安全执行接口，未执行，也不能标记为已完成。',
+    replyText: '操作未完成，已取消完成态表述。',
     evidence: [{ type: resultEvidenceType(action.actionType), status: 'failure', error_code: 'PENDING_EXECUTOR_UNAVAILABLE' }],
   };
 }

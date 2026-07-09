@@ -56,9 +56,11 @@ test('external MCP gateway exposes one stable tool surface', () => {
     'mcp_explain_policy',
   ]);
   const callToolSchema = tools.find((tool) => tool.name === 'mcp_call')?.inputSchema;
+  const explainToolSchema = tools.find((tool) => tool.name === 'mcp_explain_policy')?.inputSchema;
   assert.ok(callToolSchema?.properties?.requestId);
   assert.ok(callToolSchema?.properties?.watchScope);
   assert.ok(callToolSchema?.properties?.topicKey);
+  assert.ok(explainToolSchema?.properties?.profile?.enum?.includes('life'));
 });
 
 test('external MCP gateway initialize works while source profile calls stay disabled by default', async () => {
@@ -101,6 +103,24 @@ test('external MCP gateway explains policy decisions without executing tools', a
   assert.equal(result.structuredContent.ok, true);
   assert.equal(result.structuredContent.policy.decision, 'confirmation_required');
   assert.equal(result.structuredContent.policy.requiresPendingAction, true);
+});
+
+test('external MCP explain accepts life as a non-security profile alias', async () => {
+  const result = await callTool('mcp_explain_policy', {
+    serverId: 'forum.example',
+    toolName: 'forum.read_thread',
+    profile: 'life',
+    sessionMode: 'observe',
+  }, {
+    env: { EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    registry: [safeManifest()],
+  });
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.context_source, 'hypothetical');
+  assert.equal(result.structuredContent.profile_alias, 'life');
+  assert.equal(result.structuredContent.policy.profile, 'lite');
+  assert.equal(result.structuredContent.policy.decision, 'allow');
 });
 
 test('external MCP gateway opens observe sessions through the stable surface', async () => {

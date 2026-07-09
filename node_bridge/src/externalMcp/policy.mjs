@@ -29,7 +29,24 @@ export function evaluateExternalMcpPolicy(input = {}) {
   const serverId = sanitizeShort(tool.serverId || tool.server_id || '');
   const toolName = sanitizeShort(tool.name || tool.toolName || '');
 
-  if (PROFILE_RANK[profile] < PROFILE_RANK[requiredProfile]) {
+  const grant = evaluateScopedGrant(input.scopedGrant, {
+    now: input.now,
+    serverId,
+    toolName,
+    sessionMode,
+    tier,
+    reason: tool.reason,
+  });
+  const scopedGameActivityAllowsLite = (
+    profile === 'lite'
+    && requiredProfile === 'full'
+    && trigger === 'activity'
+    && tier === 'T3'
+    && String(tool.reason || '') === 'sandbox_activity'
+    && grant.ok
+  );
+
+  if (PROFILE_RANK[profile] < PROFILE_RANK[requiredProfile] && !scopedGameActivityAllowsLite) {
     return deny('profile_scope_denied', { profile, requiredProfile, sessionMode, trigger, tier });
   }
 
@@ -43,14 +60,6 @@ export function evaluateExternalMcpPolicy(input = {}) {
     return deny('proactive_requires_watchlist', { profile, requiredProfile, sessionMode, trigger, tier });
   }
 
-  const grant = evaluateScopedGrant(input.scopedGrant, {
-    now: input.now,
-    serverId,
-    toolName,
-    sessionMode,
-    tier,
-    reason: tool.reason,
-  });
   if (grant.status === 'expired') {
     return deny('scoped_grant_expired', { profile, requiredProfile, sessionMode, trigger, tier });
   }

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import tempfile
+import urllib.error
 import unittest
 from datetime import datetime
 from pathlib import Path
@@ -12,6 +14,7 @@ from pathlib import Path
 from personal_agent.ai_daily_digest import (
     AI_DAILY_DIGEST_SENT_PREFIX,
     build_digest_prompt,
+    load_aihot_facts,
     run_ai_daily_digest,
 )
 from personal_agent.config import AppConfig
@@ -25,6 +28,20 @@ class StubDigestOutboundClient:
     def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
         self.sent_facts.append(facts)
         return {"ok": True}
+
+
+class StubHttpResponse:
+    def __init__(self, payload: str) -> None:
+        self.payload = payload.encode("utf-8")
+
+    def __enter__(self) -> "StubHttpResponse":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def read(self) -> bytes:
+        return self.payload
 
 
 class AiDailyDigestTest(unittest.TestCase):
@@ -93,6 +110,45 @@ class AiDailyDigestTest(unittest.TestCase):
             json.loads(self.database.get_handoff_value(sent_key) or "{}")["status"],
             "sent",
         )
+
+    def test_run_ai_daily_digest_skips_without_throwing_when_facts_unavailable(self) -> None:
+        outbound = StubDigestOutboundClient()
+
+        def failing_loader() -> str:
+            raise urllib.error.URLError("temporary DNS failure")
+
+        result = run_ai_daily_digest(
+            config=self.config,
+            database=self.database,
+            outbound_client=outbound,
+            logger=self.logger,
+            now_local=datetime(2026, 7, 9, 8, 0, 0),
+            facts_loader=failing_loader,
+        )
+
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["reason"], "facts_unavailable")
+        self.assertEqual(outbound.sent_facts, [])
+        sent_key = f"{AI_DAILY_DIGEST_SENT_PREFIX}2026-07-09"
+        self.assertIsNone(self.database.get_handoff_value(sent_key))
+
+    def test_load_aihot_facts_falls_back_after_daily_dns_failure(self) -> None:
+        calls: list[str] = []
+
+        def urlopen(request, timeout=20):
+            calls.append(request.full_url)
+            if request.full_url.endswith("/daily"):
+                raise urllib.error.URLError(socket.gaierror(-2, "Name or service not known"))
+            return StubHttpResponse(
+                '{"items":[{"title":"Model news","summary":"Short summary",'
+                '"source":"Lab","url":"https://example.test"}]}'
+            )
+
+        facts = load_aihot_facts(urlopen=urlopen)
+
+        self.assertEqual(len(calls), 3)
+        self.assertIn("Model news", facts)
+        self.assertIn("Short summary", facts)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@ import {
   getLiteSessionNonce,
   getPendingLiteResumeDigest,
   markLiteResumeDigestConsumed,
+  runHermesLiteSoftReset,
 } from './hermesSessionMaintenance.mjs';
 import { resolveStateDir } from './runtimeState.mjs';
 import { createExternalMcpActivityTargetToken } from './externalMcp/activityRunner.mjs';
@@ -453,6 +454,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       contextBudget,
       cacheFriendlyHistory,
       payload: effectivePayload,
+      env,
       softResetResume: Boolean(pendingResumeDigest),
       dailyDigestChars: buildDailyDigestContextText(effectivePayload).length,
     });
@@ -501,16 +503,22 @@ async function sendChatToHermesApi(message, options = {}) {
     },
   ];
   const clientPromptText = apiMessages.map((item) => String(item?.content || '')).join('\n');
-  const response = await fetchImpl(endpoint, {
-    method: 'POST',
-    headers: buildHermesHeaders(config, options.sessionContext),
-    signal: AbortSignal.timeout(config.timeoutSeconds * 1000),
-    body: JSON.stringify({
-      model: config.profile || 'ran-assistant',
-      messages: apiMessages,
-      stream: false,
-    }),
-  });
+  const timeout = createTimeoutAbortSignal(config.timeoutSeconds * 1000);
+  let response;
+  try {
+    response = await fetchImpl(endpoint, {
+      method: 'POST',
+      headers: buildHermesHeaders(config, options.sessionContext),
+      signal: timeout.signal,
+      body: JSON.stringify({
+        model: config.profile || 'ran-assistant',
+        messages: apiMessages,
+        stream: false,
+      }),
+    });
+  } finally {
+    timeout.clear();
+  }
 
   if (!response?.ok) {
     const status = response?.status || 'unknown';
@@ -520,7 +528,7 @@ async function sendChatToHermesApi(message, options = {}) {
 
   const body = await parseHermesJson(response);
   if (config.enableContextSizeLog || config.cacheTelemetryEnabled) {
-    logProviderUsageTelemetry(body, {
+    const usageTelemetry = logProviderUsageTelemetry(body, {
       config,
       sessionContext: options.sessionContext,
       logger: options.logger,
@@ -534,8 +542,59 @@ async function sendChatToHermesApi(message, options = {}) {
       clientPromptEstimatedTokens: estimateTokens(clientPromptText),
       clientMessageCount: apiMessages.length,
     });
+    maybeApplyLiteSoftResetAfterAccumulation(usageTelemetry, {
+      config,
+      env: options.env,
+      logger: options.logger,
+      requestId: options.requestId,
+      softResetResume: options.softResetResume,
+    });
   }
   return buildHermesReply(body, config);
+}
+
+function createTimeoutAbortSignal(timeoutMs) {
+  const controller = new AbortController();
+  const ms = Math.max(1, Number(timeoutMs) || 1);
+  const timer = setTimeout(() => {
+    controller.abort(new Error(`Hermes API request timeout after ${ms}ms`));
+  }, ms);
+  return {
+    signal: controller.signal,
+    clear: () => clearTimeout(timer),
+  };
+}
+
+function maybeApplyLiteSoftResetAfterAccumulation(usageTelemetry = {}, options = {}) {
+  const config = options.config || {};
+  if (usageTelemetry?.possible_server_session_accumulation !== true) return null;
+  if (options.softResetResume === true) return null;
+  if (config.profile !== config.liteProfile) return null;
+  if (config.softResetEnabled !== true) return null;
+  if (getPendingLiteResumeDigest(config)) return null;
+  try {
+    const result = runHermesLiteSoftReset({
+      action: 'apply',
+      env: options.env || process.env,
+      reason: 'provider_session_accumulation',
+    });
+    options.logger?.warn?.(`[hermes-lite-soft-reset-auto] ${JSON.stringify({
+      request_id: options.requestId || '',
+      ok: result.ok === true,
+      dry_run: result.dryRun === true,
+      reason: result.reason || 'provider_session_accumulation',
+      digest_id: result.digest?.digestId || '',
+    })}`);
+    return result;
+  } catch (error) {
+    options.logger?.warn?.(`[hermes-lite-soft-reset-auto] ${JSON.stringify({
+      request_id: options.requestId || '',
+      ok: false,
+      reason: 'auto_soft_reset_failed',
+      error: error instanceof Error ? error.message : String(error || ''),
+    })}`);
+    return null;
+  }
 }
 
 async function sendChatToHermesOneShot(message, options = {}) {
@@ -748,7 +807,7 @@ function logProviderUsageTelemetry(body = {}, options = {}) {
     : null;
   const possibleServerSessionAccumulation = inputTokens !== null && clientPromptEstimatedTokens !== null
     && inputTokens > Math.max(10000, clientPromptEstimatedTokens * 10);
-  options.logger?.log?.(`[hermes-provider-usage] ${JSON.stringify({
+  const payload = {
     request_id: requestId,
     profile: options.config?.profile || '',
     channel: String(options.payload?.platform || options.payload?.channel || '').trim().toLowerCase() || '',
@@ -781,7 +840,8 @@ function logProviderUsageTelemetry(body = {}, options = {}) {
     cache_exact_ratio: nullableNumber(cacheFriendlyHistory.cacheExactRatio),
     soft_reset_resume: options.softResetResume === true,
     daily_digest_chars: nullableNumber(options.dailyDigestChars) ?? 0,
-  })}`);
+  };
+  options.logger?.log?.(`[hermes-provider-usage] ${JSON.stringify(payload)}`);
   if (possibleServerSessionAccumulation) {
     options.logger?.warn?.(`[hermes-provider-usage-warning] ${JSON.stringify({
       request_id: requestId,
@@ -792,6 +852,7 @@ function logProviderUsageTelemetry(body = {}, options = {}) {
       session_id_hash: options.sessionContext?.sessionId ? sha256Hex(options.sessionContext.sessionId).slice(0, 16) : '',
     })}`);
   }
+  return payload;
 }
 
 function nullableNumber(value) {
@@ -1019,7 +1080,7 @@ export function applySocialLinkEvidenceGate(payload, replyText, evidenceReport, 
     rewrite = '只拿到标题/作者等元数据，未拿到正文内容。';
     rewriteReason = 'metadata_only';
   } else if (evidenceReport.link_resolution?.ok) {
-    rewrite = '只确认链接已解析，未拿到正文内容，不能说已经读到全文。';
+    rewrite = '只确认链接已解析，未拿到正文内容，已取消全文读取表述。';
     rewriteReason = 'link_resolution_only';
   } else {
     rewrite = '链接未成功解析，也未读到正文。';

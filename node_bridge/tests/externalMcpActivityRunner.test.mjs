@@ -42,7 +42,7 @@ test('activity runner creates a bounded trusted game_play grant for Hermes activ
   });
   const decision = evaluateExternalMcpPolicy({
     now: '2026-07-02T10:01:00Z',
-    profile: 'full',
+    profile: 'lite',
     trigger: 'activity',
     sessionMode: 'interactive',
     scopedGrant: grant,

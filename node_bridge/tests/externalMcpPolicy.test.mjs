@@ -309,6 +309,52 @@ test('policy requires scoped activity grants for autonomous sandbox game activit
   assert.equal(wrongTool.decision, 'confirmation_required');
 });
 
+test('policy allows lite scoped grants only for T3 sandbox game activity', () => {
+  const scopedGrant = trustExternalMcpScopedGrant({
+    grantId: 'grant-lite-game',
+    kind: 'game_play',
+    serverId: 'cedartoy-games',
+    mode: 'interactive',
+    allowedToolPattern: '^(listgames|getguide|play)$',
+    expiresAt: '2026-07-01T10:30:00Z',
+  });
+  const gameTool = decision({
+    profile: 'lite',
+    trigger: 'activity',
+    sessionMode: 'interactive',
+    tool: {
+      serverId: 'cedartoy-games',
+      name: 'play',
+      tier: 'T3',
+      profileScope: 'full',
+      proactiveAllowed: true,
+      confirmationRequired: false,
+      reason: 'sandbox_activity',
+    },
+    scopedGrant,
+  });
+  const accountTool = decision({
+    profile: 'lite',
+    trigger: 'activity',
+    sessionMode: 'interactive',
+    tool: {
+      serverId: 'cedartoy-games',
+      name: 'account',
+      tier: 'T5',
+      profileScope: 'owner_full',
+      proactiveAllowed: false,
+      confirmationRequired: true,
+      reason: 'account_boundary',
+    },
+    scopedGrant,
+  });
+
+  assert.equal(gameTool.allowed, true);
+  assert.equal(gameTool.scopedGrantId, 'grant-lite-game');
+  assert.equal(accountTool.allowed, false);
+  assert.equal(accountTool.reason, 'profile_scope_denied');
+});
+
 test('policy rejects spoofed or incomplete scoped grants', () => {
   const spoofed = decision({
     profile: 'owner_full',

@@ -2168,15 +2168,21 @@ test('provider usage telemetry records token and cache counters when present', a
 test('provider usage telemetry flags server-side session accumulation', async () => {
   const logs = [];
   const warns = [];
+  const stateDir = tempGatewayStateDir('hermes-gateway-auto-soft-reset-');
+  const env = {
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1',
+    RAN_AGENT_STATE_DIR: stateDir,
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  };
   await sendChatToHermesGateway(
     { text: 'hello', sender_id: 'usage-huge', conversation_id: 'usage-huge', channel: 'wechat' },
     {
-      config: getHermesGatewayConfig({
-        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-        HERMES_API_KEY: 'token',
-        HERMES_REPLY_MODE: 'api',
-        RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-      }),
+      env,
+      config: getHermesGatewayConfig(env),
       fetchImpl: async () => makeJsonResponse({
         choices: [{ message: { content: 'ok' } }],
         usage: {
@@ -2196,6 +2202,10 @@ test('provider usage telemetry flags server-side session accumulation', async ()
   assert.equal(payload.possible_server_session_accumulation, true);
   assert.ok(payload.provider_input_to_client_prompt_ratio > 10);
   assert.ok(warns.some((line) => line.includes('[hermes-provider-usage-warning]')));
+  assert.ok(warns.some((line) => line.includes('[hermes-lite-soft-reset-auto]') && line.includes('"ok":true')));
+  const maintenance = readHermesLiteMaintenanceState(getHermesLiteSoftResetConfig(env));
+  assert.ok(maintenance.pendingDigestId);
+  assert.equal(maintenance.lastReset.reason, 'provider_session_accumulation');
 });
 
 test('context injection rich mode preserves legacy-sized local history budget', async () => {

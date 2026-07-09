@@ -118,7 +118,7 @@ export function evaluateActionGate({
   } else if (failedOutboundSuccessClaim) {
     shouldRewrite = true;
     reasons.push('outbound_failed_success_claim');
-    rewrittenText = '发送没有成功，暂不能说已经发出。';
+    rewrittenText = '发送结果显示失败，已取消完成态表述。';
   } else if (!evidenceSatisfied && actionClaimed) {
     shouldRewrite = true;
     reasons.push('missing_required_evidence');
@@ -375,21 +375,21 @@ function missingEvidenceForIntent(intent, evidence = []) {
 function missingEvidenceRewriteForIntent(intent) {
   switch (intent) {
     case 'social_read':
-      return '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。';
+      return '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。';
     case 'media_read':
-      return '媒体内容未成功读取，暂不能描述其中内容。';
+      return '媒体内容未成功读取，未生成内容描述。';
     case 'sticker_send':
       return '收到这个表情包请求。';
     case 'media_generate':
-      return '这次没有拿到可发送的生成结果，暂不能说已经生成完成。';
+      return '生成结果尚未返回，已取消完成态表述。';
     case 'memory_write':
-      return '保存尚未完成，暂不能说已经保存。';
+      return '保存结果尚未返回，已取消完成态表述。';
     case 'external_send':
-      return '尚未确认发送成功，暂不能说已经发出。';
+      return '发送结果尚未确认，已取消完成态表述。';
     case 'external_mcp_read':
-      return '外部 MCP 内容未成功读取，暂不能判断其中内容。';
+      return '外部内容未成功读取，未生成内容判断。';
     case 'external_mcp_write':
-      return '尚未确认外部 MCP 操作成功，暂不能说已经执行完成。';
+      return '外部操作结果尚未确认，已取消完成态表述。';
     default:
       return '';
   }

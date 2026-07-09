@@ -19,6 +19,8 @@ AIHOT_USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
 )
+AIHOT_FETCH_RETRY_COUNT = 2
+AIHOT_FETCH_ERRORS = (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError, RuntimeError)
 
 
 class DigestOutboundClient(Protocol):
@@ -45,19 +47,25 @@ def load_aihot_facts(urlopen: Callable[..., object] | None = None) -> str:
     """Fetch a compact facts package from AIHOT public endpoints."""
 
     opener = urlopen or urllib.request.urlopen
+    last_error: Exception | None = None
     try:
         daily = _fetch_json("https://aihot.virxact.com/api/public/daily", opener)
         rendered = _render_daily(daily)
         if rendered:
             return rendered
-    except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError):
-        pass
+    except AIHOT_FETCH_ERRORS as error:
+        last_error = error
 
-    items = _fetch_json("https://aihot.virxact.com/api/public/items?mode=selected&take=30", opener)
-    rendered = _render_items(items)
-    if not rendered:
+    try:
+        items = _fetch_json("https://aihot.virxact.com/api/public/items?mode=selected&take=30", opener)
+        rendered = _render_items(items)
+        if rendered:
+            return rendered
         raise RuntimeError("AIHOT response did not contain digest facts")
-    return rendered
+    except AIHOT_FETCH_ERRORS as error:
+        last_error = error
+
+    raise RuntimeError("AIHOT facts unavailable") from last_error
 
 
 def run_ai_daily_digest(
@@ -82,7 +90,14 @@ def run_ai_daily_digest(
         logger.info("AI daily digest skipped because already sent date=%s", local_date)
         return {"sent": False, "reason": "already_sent", "date": local_date}
 
-    facts = facts_loader().strip()
+    try:
+        facts = facts_loader().strip()
+    except Exception as error:
+        logger.warning("AI daily digest facts unavailable error=%s", error)
+        return {"sent": False, "reason": "facts_unavailable", "date": local_date}
+    if not facts:
+        logger.warning("AI daily digest facts unavailable error=empty_facts")
+        return {"sent": False, "reason": "facts_unavailable", "date": local_date}
     prompt = build_digest_prompt(facts)
     bridge_result = outbound_client.send_ai_daily_digest(prompt)
     if bridge_result.get("skipped") is True:
@@ -112,13 +127,19 @@ def run_ai_daily_digest(
 
 
 def _fetch_json(url: str, opener: Callable[..., object]) -> dict[str, object]:
-    request = urllib.request.Request(url, headers={"User-Agent": AIHOT_USER_AGENT})
-    with opener(request, timeout=20) as response:
-        raw = response.read().decode("utf-8")
-    payload = json.loads(raw)
-    if not isinstance(payload, dict):
-        raise ValueError("AIHOT response must be an object")
-    return payload
+    last_error: Exception | None = None
+    for _attempt in range(AIHOT_FETCH_RETRY_COUNT):
+        try:
+            request = urllib.request.Request(url, headers={"User-Agent": AIHOT_USER_AGENT})
+            with opener(request, timeout=20) as response:
+                raw = response.read().decode("utf-8")
+            payload = json.loads(raw)
+            if not isinstance(payload, dict):
+                raise ValueError("AIHOT response must be an object")
+            return payload
+        except (OSError, urllib.error.URLError, ValueError, json.JSONDecodeError) as error:
+            last_error = error
+    raise RuntimeError("AIHOT fetch failed") from last_error
 
 
 def _render_daily(payload: dict[str, object]) -> str:

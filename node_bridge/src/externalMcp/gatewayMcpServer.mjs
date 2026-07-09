@@ -117,7 +117,7 @@ export function buildExternalMcpGatewayTools() {
       sessionId: str(),
       activityId: str(),
       globalUserId: str(),
-      profile: str(['lite', 'full', 'owner_full']),
+      profile: str(['lite', 'full', 'owner_full', 'life']),
       sessionMode: str(['observe', 'interactive', 'write']),
       trigger: str(['user_turn', 'proactive', 'activity']),
     }, ['serverId', 'toolName']),
@@ -177,7 +177,7 @@ async function dispatchTool(name, args, options) {
     const context = resolvePolicyContext({ args, server, selectedTool: selected.tool, options, allowHypothetical: true });
     if (context.error) return errorResult(context.error, context.errorCode);
     const policy = evaluateExternalMcpPolicy(context.input);
-    return result({ ok: true, context_source: context.source, policy });
+    return result({ ok: true, context_source: context.source, profile_alias: context.profileAlias || undefined, policy });
   }
   if (name === 'mcp_open_session') {
     const server = findServer(args.serverId, options);
@@ -442,6 +442,9 @@ function resolvePolicyContext({ args = {}, server, selectedTool, options = {}, s
   const globalUserId = liveSession?.globalUserId || String(args.globalUserId || '').trim();
   const trigger = args.activityId ? 'activity' : (liveSession ? 'user_turn' : (allowHypothetical ? args.trigger || 'user_turn' : 'user_turn'));
   const sessionMode = liveSession?.mode || (allowHypothetical ? args.sessionMode || 'observe' : 'observe');
+  const profileInput = liveSession
+    ? { profile: resolveGatewayProfile(options), alias: '' }
+    : normalizePolicyProfileAlias(allowHypothetical ? args.profile || 'lite' : resolveGatewayProfile(options));
   const scopedGrant = args.activityId
     ? getTrustedExternalMcpActivityGrant(args.activityId, {
         ...options,
@@ -452,11 +455,12 @@ function resolvePolicyContext({ args = {}, server, selectedTool, options = {}, s
     : null;
   return {
     source: liveSession ? 'session' : 'hypothetical',
+    profileAlias: profileInput.alias,
     trigger,
     sessionMode,
     scopedGrant,
     input: {
-      profile: liveSession ? resolveGatewayProfile(options) : (allowHypothetical ? args.profile || 'lite' : resolveGatewayProfile(options)),
+      profile: profileInput.profile,
       sessionMode,
       trigger,
       tool: { ...selectedTool, serverId: server.id },
@@ -573,6 +577,14 @@ function resolveGatewayProfile(options = {}) {
 function sanitizeProfile(value) {
   const normalized = String(value || '').trim().toLowerCase();
   return ['lite', 'full', 'owner_full'].includes(normalized) ? normalized : '';
+}
+
+function normalizePolicyProfileAlias(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  const profile = sanitizeProfile(normalized);
+  if (profile) return { profile, alias: '' };
+  if (normalized === 'life') return { profile: 'lite', alias: 'life' };
+  return { profile: 'lite', alias: '' };
 }
 
 function result(payload) {

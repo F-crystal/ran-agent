@@ -73,7 +73,7 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertFalse(config.reminder_delivery_enabled)
         self.assertFalse(config.proactive_reminders_enabled)
         self.assertFalse(config.ai_daily_digest_enabled)
-        self.assertEqual(config.ai_daily_digest_hour, 10)
+        self.assertEqual(config.ai_daily_digest_hour, 8)
         self.assertEqual(config.ai_daily_digest_minute, 0)
         self.assertEqual(config.brain_loop_interval_minutes, 120)
         self.assertEqual(config.proactive_check_interval_minutes, 90)
@@ -308,7 +308,7 @@ class ConfigLoadingTest(unittest.TestCase):
             os.environ,
             {
                 "AI_DAILY_DIGEST_ENABLED": "true",
-                "AI_DAILY_DIGEST_HOUR": "10",
+                "AI_DAILY_DIGEST_HOUR": "8",
                 "AI_DAILY_DIGEST_MINUTE": "0",
                 "PERSONAL_AGENT_PROACTIVE_ENABLED": "false",
             },
@@ -331,7 +331,7 @@ class ConfigLoadingTest(unittest.TestCase):
         job_map = {job["id"]: job for job in fake_scheduler.jobs}
         self.assertIn("ai_daily_digest", job_map)
         self.assertEqual(job_map["ai_daily_digest"]["func"], "ai_daily_digest_job")
-        self.assertEqual(job_map["ai_daily_digest"]["trigger"].fields[5].expressions[0].first, 10)
+        self.assertEqual(job_map["ai_daily_digest"]["trigger"].fields[5].expressions[0].first, 8)
         self.assertEqual(job_map["ai_daily_digest"]["trigger"].fields[6].expressions[0].first, 0)
 
     def test_scheduler_skips_reminder_check_when_reminder_delivery_disabled(self) -> None:

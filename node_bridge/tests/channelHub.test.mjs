@@ -289,7 +289,7 @@ test('channel hub enforce mode sends safe rewrite for unsupported action claims'
     },
   });
 
-  const rewritten = '链接内容未成功读取，暂不能判断正文。可以重试，或发送截图/正文。';
+  const rewritten = '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。';
   assert.equal(response.replyText, rewritten);
   assert.equal(sent.text, rewritten);
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));

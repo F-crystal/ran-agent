@@ -274,6 +274,10 @@ test('apply script writes Hermes context optimization defaults to Node env', () 
   assert.match(script, /HERMES_ACTION_PENDING_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTION_PENDING_ENABLED:-true\}"/);
   assert.match(script, /HERMES_ACTION_PENDING_TTL_MINUTES_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTION_PENDING_TTL_MINUTES:-30\}"/);
   assert.match(script, /NODE_BRIDGE_QUICK_ACK_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_NODE_BRIDGE_QUICK_ACK_ENABLED:-false\}"/);
+  assert.match(script, /NODE_BRIDGE_QUICK_ACK_TEXT_DEFAULT="\$\{RAN_AGENT_DEPLOY_NODE_BRIDGE_QUICK_ACK_TEXT:-收到，正在处理。\}"/);
+  assert.match(script, /AI_DAILY_DIGEST_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_ENABLED:-true\}"/);
+  assert.match(script, /AI_DAILY_DIGEST_HOUR_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_HOUR:-8\}"/);
+  assert.match(script, /AI_DAILY_DIGEST_MINUTE_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_MINUTE:-0\}"/);
   assert.match(script, /HERMES_PROACTIVE_NOTIFY_MAX_CHARS_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_PROACTIVE_NOTIFY_MAX_CHARS:-1600\}"/);
   assert.match(script, /EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED:-true\}"/);
   assert.match(script, /EXTERNAL_MCP_ACTIVITY_TICK_MS_DEFAULT="\$\{RAN_AGENT_DEPLOY_EXTERNAL_MCP_ACTIVITY_TICK_MS:-60000\}"/);
@@ -291,6 +295,10 @@ test('apply script writes Hermes context optimization defaults to Node env', () 
   assert.match(script, /"HERMES_PROACTIVE_NOTIFY_MAX_CHARS=\$HERMES_PROACTIVE_NOTIFY_MAX_CHARS_DEFAULT"/);
   assert.match(script, /"EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=\$EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED_DEFAULT"/);
   assert.match(script, /"EXTERNAL_MCP_ACTIVITY_TICK_MS=\$EXTERNAL_MCP_ACTIVITY_TICK_MS_DEFAULT"/);
+  assert.match(script, /"AI_DAILY_DIGEST_ENABLED=\$AI_DAILY_DIGEST_ENABLED_DEFAULT"/);
+  assert.match(script, /"AI_DAILY_DIGEST_HOUR=\$AI_DAILY_DIGEST_HOUR_DEFAULT"/);
+  assert.match(script, /"AI_DAILY_DIGEST_MINUTE=\$AI_DAILY_DIGEST_MINUTE_DEFAULT"/);
+  assert.match(script, /upsert_env_file "\$NODE_ENV_FILE"[\s\S]*"AI_DAILY_DIGEST_ENABLED=\$AI_DAILY_DIGEST_ENABLED_DEFAULT"[\s\S]*"AI_DAILY_DIGEST_HOUR=\$AI_DAILY_DIGEST_HOUR_DEFAULT"[\s\S]*"AI_DAILY_DIGEST_MINUTE=\$AI_DAILY_DIGEST_MINUTE_DEFAULT"/);
   assert.match(script, /upsert_env_file "\$NODE_BRIDGE_ENV_FILE"[\s\S]*"PERSONAL_AGENT_PROACTIVE_ENABLED=false"/);
   assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_TURNS=10"/);
   assert.doesNotMatch(script, /"HERMES_RECENT_TEXT_CHAR_BUDGET=6000"/);
@@ -403,6 +411,33 @@ test('soft reset timer installer writes 05:00 apply timer and enables Node runti
   assert.match(bridgeEnv, /KEEP_BRIDGE=yes/);
   assert.match(bridgeEnv, /HERMES_LITE_SOFT_RESET_ENABLED=true/);
   assert.match(bridgeEnv, /HERMES_LITE_SOFT_RESET_DRY_RUN=false/);
+});
+
+test('manual Hermes lite soft reset script loads managed env files', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-soft-reset-manual-env-'));
+  const nodeEnvFile = join(dir, '.env.local');
+  const nodeBridgeEnvFile = join(dir, 'node_bridge.env.local');
+  const fakeNode = join(dir, 'node');
+  writeFileSync(nodeEnvFile, [
+    'HERMES_LITE_SOFT_RESET_ENABLED=true',
+    'HERMES_LITE_SOFT_RESET_DRY_RUN=false',
+  ].join('\n'));
+  writeFileSync(nodeBridgeEnvFile, 'HERMES_LITE_SOFT_RESET_KEEP_LAST_N=7\n');
+  writeFileSync(fakeNode, '#!/bin/sh\nprintf "%s|%s|%s\\n" "$HERMES_LITE_SOFT_RESET_ENABLED" "$HERMES_LITE_SOFT_RESET_DRY_RUN" "$HERMES_LITE_SOFT_RESET_KEEP_LAST_N"\n');
+  chmodSync(fakeNode, 0o755);
+
+  const output = execFileSync('bash', ['scripts/hermes-lite-soft-reset.sh', '--status'], {
+    cwd: new URL('../..', import.meta.url).pathname,
+    env: {
+      ...process.env,
+      NODE_BIN: fakeNode,
+      RAN_AGENT_NODE_ENV_FILE: nodeEnvFile,
+      RAN_AGENT_NODE_BRIDGE_ENV_FILE: nodeBridgeEnvFile,
+    },
+    encoding: 'utf8',
+  }).trim();
+
+  assert.equal(output, 'true|false|7');
 });
 
 test('apply script wraps XHS generic fallback prepare with timeout and keeps failure non-blocking', () => {

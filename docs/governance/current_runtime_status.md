@@ -151,7 +151,7 @@ Core safety facts:
 
 ## Scheduled AI Daily Digest
 
-Enable with `AI_DAILY_DIGEST_ENABLED=true`; default time is `10:00`
+Enable with `AI_DAILY_DIGEST_ENABLED=true`; default time is `08:00`
 `Asia/Shanghai`. Delivery reuses the Feishu `ChannelHub -> replyBackend`
 path, so follow-up questions stay in the same timeline. If no Feishu DM target
 exists, the digest is skipped. Do not hard-code raw Feishu ids in public docs.

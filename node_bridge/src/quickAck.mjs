@@ -9,8 +9,8 @@ export function getQuickAckConfig(env = {}, platform = '') {
     platformKey ? env[platformKey] : undefined,
     parseIntegerEnv(env.NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS, 0)
   ));
-  const ackText = String(env.NODE_BRIDGE_QUICK_ACK_TEXT || '收到，正在处理，稍后发送结果。').trim()
-    || '收到，正在处理，稍后发送结果。';
+  const ackText = String(env.NODE_BRIDGE_QUICK_ACK_TEXT || '收到，正在处理。').trim()
+    || '收到，正在处理。';
   return {
     enabled: enabled && timeoutMs > 0,
     timeoutMs,

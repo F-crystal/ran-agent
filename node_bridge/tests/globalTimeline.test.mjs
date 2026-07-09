@@ -69,7 +69,7 @@ test('global timeline returns local and global recent history', () => {
 test('bridge notices are not replayed as Hermes assistant recent history', () => {
   const timelinePath = tempTimelinePath();
   appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'u', role: 'user', text: '帮我读一下链接', created_at: 1 });
-  appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'assistant', role: 'assistant', source: 'bridge_action_gate', text: '链接内容未成功读取，暂不能判断正文。', created_at: 2 });
+  appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'assistant', role: 'assistant', source: 'bridge_action_gate', text: '链接内容未成功读取，未生成正文判断。', created_at: 2 });
   appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'assistant', role: 'assistant', source: 'hermes', text: '可以把截图发来，我再看。', created_at: 3 });
 
   const local = getLocalRecentHistory({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', conversation_id: 'wx-a', limit: 10, charBudget: 1000 });
