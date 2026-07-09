@@ -118,7 +118,7 @@ export function evaluateActionGate({
   } else if (failedOutboundSuccessClaim) {
     shouldRewrite = true;
     reasons.push('outbound_failed_success_claim');
-    rewrittenText = '发送结果显示失败，已取消完成态表述。';
+    rewrittenText = '发送结果显示失败，未发送给外部对象。';
   } else if (!evidenceSatisfied && actionClaimed) {
     shouldRewrite = true;
     reasons.push('missing_required_evidence');
@@ -381,15 +381,15 @@ function missingEvidenceRewriteForIntent(intent) {
     case 'sticker_send':
       return '收到这个表情包请求。';
     case 'media_generate':
-      return '生成结果尚未返回，已取消完成态表述。';
+      return '生成结果尚未返回，暂未发送成品。';
     case 'memory_write':
-      return '保存结果尚未返回，已取消完成态表述。';
+      return '保存结果尚未返回，未写入长期记忆。';
     case 'external_send':
-      return '发送结果尚未确认，已取消完成态表述。';
+      return '发送结果尚未确认，未发送给外部对象。';
     case 'external_mcp_read':
       return '外部内容未成功读取，未生成内容判断。';
     case 'external_mcp_write':
-      return '外部操作结果尚未确认，已取消完成态表述。';
+      return '外部操作结果尚未确认，未执行外部写入。';
     default:
       return '';
   }

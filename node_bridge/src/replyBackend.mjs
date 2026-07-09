@@ -33,6 +33,7 @@ import {
 } from './stickerCatalog.mjs';
 
 const pendingActionRuntimePayloads = new Map();
+const DEFAULT_PENDING_EXECUTOR_ACTIONS = new Set(['sticker_save', 'sticker_delete', 'sticker_update']);
 
 export function getReplyBackendConfig(env = process.env) {
   return {
@@ -391,6 +392,9 @@ async function handlePendingActionBeforeHermes({
   if (!candidate) {
     return null;
   }
+  if (!canExecutePendingAction(candidate.actionType, options)) {
+    return null;
+  }
   const actionInput = buildPendingActionInput({
     candidate,
     message,
@@ -421,7 +425,7 @@ async function handlePendingActionBeforeHermes({
       finalAction: execution.ok ? 'executed_with_evidence' : 'execution_failed_safe_rewrite',
     }, logger);
     return {
-      replyText: execution.replyText || (execution.ok ? '已完成。' : '执行结果显示失败，已取消完成态表述。'),
+      replyText: execution.replyText || (execution.ok ? '已完成。' : '执行结果显示失败，未执行。'),
       media: execution.media || null,
       source: 'bridge_pending_action',
     };
@@ -510,7 +514,7 @@ async function handlePendingConfirmation({
     finalAction: 'execution_failed_safe_rewrite',
   }, logger);
   return {
-    replyText: execution.replyText || '执行结果显示失败，已取消完成态表述。',
+    replyText: execution.replyText || '执行结果显示失败，未执行。',
     source: 'bridge_pending_action',
   };
 }
@@ -567,6 +571,11 @@ function detectPendingActionCandidate(message = {}) {
     };
   }
   return null;
+}
+
+function canExecutePendingAction(actionType, options = {}) {
+  if (typeof options.pendingActionExecutorImpl === 'function') return true;
+  return DEFAULT_PENDING_EXECUTOR_ACTIONS.has(actionType);
 }
 
 function buildPendingActionInput({ candidate, requestId, channel, conversationId, profile }) {
@@ -639,7 +648,7 @@ async function executePendingAction(action, { options, env, message }) {
   } catch {
     return {
       ok: false,
-      replyText: '执行结果显示失败，已取消完成态表述。',
+      replyText: '执行结果显示失败，未执行。',
       evidence: [{ type: resultEvidenceType(action.actionType), status: 'failure', error_code: 'PENDING_EXECUTION_EXCEPTION' }],
     };
   }
@@ -726,7 +735,7 @@ async function executeConfirmedAction(action, { env, message, runtimePayload } =
   }
   return {
     ok: false,
-    replyText: '操作未完成，已取消完成态表述。',
+    replyText: '没有可用执行通道，未执行。',
     evidence: [{ type: resultEvidenceType(action.actionType), status: 'failure', error_code: 'PENDING_EXECUTOR_UNAVAILABLE' }],
   };
 }
@@ -784,7 +793,7 @@ function confirmationPromptForAction(action = {}) {
     return '是否保存这张图到表情包库？回复“确认保存”即可。';
   }
   if (action.actionType === 'external_send') {
-    return '是否现在发送这条内容？回复“确认发送”即可。';
+    return '这会向外部对象发送内容。回复“确认发送”后执行，回复“取消”不发送。';
   }
   if (action.actionType === 'sticker_delete') {
     return '是否删除这个表情包？回复“确认删除”即可。';

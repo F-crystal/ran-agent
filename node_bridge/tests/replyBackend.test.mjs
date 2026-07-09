@@ -797,7 +797,7 @@ test('createReplyBackend repair mode does not fake generated media when repair h
     channel: 'wechat',
   });
 
-  assert.equal(response.replyText, '生成结果尚未返回，已取消完成态表述。');
+  assert.equal(response.replyText, '生成结果尚未返回，暂未发送成品。');
   assert.equal(response.source, 'bridge_action_gate');
   assert.equal(response.media, null);
 });
@@ -871,6 +871,41 @@ test('createReplyBackend repair mode routes explicit memory writes through pendi
   assert.equal(payload.pending_action_type, 'memory_write');
   assert.equal(payload.execution_status, 'success');
   assert.equal(payload.final_action, 'executed_with_evidence');
+});
+
+test('createReplyBackend lets Hermes handle high risk text when no pending executor exists', async () => {
+  for (const { text, reply } of [
+    { text: '现在发送给张三', reply: '我可以帮你整理内容，但没有发送。' },
+    { text: '记住这个偏好', reply: '我会留意这个偏好。' },
+  ]) {
+    const env = tempStateEnv();
+    let hermesCalled = false;
+    const backend = createReplyBackend({
+      env,
+      hermesImpl: async () => {
+        hermesCalled = true;
+        return {
+          reply_text: reply,
+          follow_up_messages: [],
+          media: null,
+          model: 'deepseek-v4-flash',
+        };
+      },
+      ingestImpl: async () => ({ ok: true }),
+      logger: { log() {}, warn() {} },
+    });
+
+    const response = await backend.getReply({
+      text,
+      sender_id: `conv-no-pending-executor-${text.length}`,
+      channel: 'wechat',
+    });
+
+    assert.equal(hermesCalled, true);
+    assert.equal(response.replyText, reply);
+    assert.equal(response.source, 'hermes');
+    assert.equal(listPendingActions({ env }).length, 0);
+  }
 });
 
 test('createReplyBackend repair mode creates pending for external sends without direct confirmation', async () => {

@@ -377,7 +377,7 @@ test('action gate rewrites unsupported external MCP side-effect success claims',
   assert.deepEqual(contract.required_evidence, ['authorization', 'external_mcp_tool_result']);
   assert.ok(contract.final_claims.includes('external_mcp_action_done'));
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '外部操作结果尚未确认，已取消完成态表述。');
+  assert.equal(gate.rewrittenText, '外部操作结果尚未确认，未执行外部写入。');
 });
 
 test('action gate config defaults to enabled observe mode', () => {
@@ -564,7 +564,7 @@ test('enforce mode rewrites media generation claims without marker or artifact',
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '生成结果尚未返回，已取消完成态表述。');
+  assert.equal(gate.rewrittenText, '生成结果尚未返回，暂未发送成品。');
 });
 
 test('enforce mode preserves WECHAT_MEDIA generation evidence', () => {
@@ -601,7 +601,7 @@ test('enforce mode rewrites memory write claims without save result', () => {
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '保存结果尚未返回，已取消完成态表述。');
+  assert.equal(gate.rewrittenText, '保存结果尚未返回，未写入长期记忆。');
 });
 
 test('action gate safe rewrites are neutral bridge notices', () => {
@@ -675,7 +675,7 @@ test('enforce mode rewrites external send claims without outbound success', () =
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '发送结果尚未确认，已取消完成态表述。');
+  assert.equal(gate.rewrittenText, '发送结果尚未确认，未发送给外部对象。');
 });
 
 test('enforce mode rewrites failed outbound success claims', () => {
@@ -693,7 +693,7 @@ test('enforce mode rewrites failed outbound success claims', () => {
   });
 
   assert.equal(gate.shouldRewrite, true);
-  assert.equal(gate.rewrittenText, '发送结果显示失败，已取消完成态表述。');
+  assert.equal(gate.rewrittenText, '发送结果显示失败，未发送给外部对象。');
 });
 
 test('enforce mode leaves ordinary chat unchanged', () => {

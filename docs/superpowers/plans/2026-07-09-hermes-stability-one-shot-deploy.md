@@ -304,7 +304,7 @@ Check:
 In `node_bridge/tests/actionContract.test.mjs`, update the memory write expectation:
 
 ```js
-assert.equal(gate.rewrittenText, '保存结果尚未返回，已取消完成态表述。');
+assert.equal(gate.rewrittenText, '保存结果尚未返回，未写入长期记忆。');
 assert.doesNotMatch(gate.rewrittenText, /我|臣|不能说|已经保存/);
 ```
 
@@ -328,13 +328,13 @@ In `node_bridge/src/actionContract.mjs`, change only `missingEvidenceRewriteForI
 
 ```js
 case 'media_generate':
-  return '生成结果尚未返回，已取消完成态表述。';
+  return '生成结果尚未返回，暂未发送成品。';
 case 'memory_write':
-  return '保存结果尚未返回，已取消完成态表述。';
+  return '保存结果尚未返回，未写入长期记忆。';
 case 'external_send':
-  return '发送结果尚未确认，已取消完成态表述。';
+  return '发送结果尚未确认，未发送给外部对象。';
 case 'external_mcp_write':
-  return '外部操作结果尚未确认，已取消完成态表述。';
+  return '外部操作结果尚未确认，未执行外部写入。';
 ```
 
 Keep the invariant: no evidence means no completion claim.
