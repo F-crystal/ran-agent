@@ -4,7 +4,6 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { handleIncomingMessage } from './channelHub.mjs';
 import { shortHash } from './identityMap.mjs';
-import { getQuickAckConfig, quickAckDelay } from './quickAck.mjs';
 import { resolveStateDir, setFeishuHomeDmTarget } from './runtimeState.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
 
@@ -173,7 +172,13 @@ export function startFeishuBridge(options = {}) {
     child = (options.spawnImpl || spawn)(bin, ['event', 'consume', eventName, '--as', identity], { stdio: ['pipe', 'pipe', 'pipe'] });
     child.stdout?.on('data', (chunk) => {
       for (const line of String(chunk || '').split('\n').filter(Boolean)) {
-        handleFeishuEventLine(line, { state, logger, env, channelHub: options.channelHub }).catch((error) => {
+        handleFeishuEventLine(line, {
+          state,
+          logger,
+          env,
+          channelHub: options.channelHub,
+          outbox: options.outbox,
+        }).catch((error) => {
           logger.error?.('[feishu-bridge] error', redactError(error));
         });
       }
@@ -202,7 +207,7 @@ export function startFeishuBridge(options = {}) {
   };
 }
 
-export async function handleFeishuEventLine(line, { state, logger, env, channelHub, execFileImpl }) {
+export async function handleFeishuEventLine(line, { state, logger, env, channelHub, execFileImpl, outbox }) {
   const parsed = parseFeishuEvent(line);
   const normalized = normalizeFeishuMessage(parsed);
   const effectiveExecFileImpl = typeof execFileImpl === 'function'
@@ -220,10 +225,6 @@ export async function handleFeishuEventLine(line, { state, logger, env, channelH
     }
   }
   const handler = channelHub || handleIncomingMessage;
-  const quickAckConfig = getQuickAckConfig(env, 'feishu');
-  let gateFinalSend = false;
-  let releaseFinalSend = () => {};
-  let finalSendGate = Promise.resolve();
   const processMessage = async () => {
     normalized.media = await downloadFeishuInboundMedia(normalized, {
       env,
@@ -239,62 +240,39 @@ export async function handleFeishuEventLine(line, { state, logger, env, channelH
     await handler(normalized, {
       env,
       logger,
+      outbox,
       adapter: {
         async sendReply({ target, text, media, message }) {
-          if (gateFinalSend) {
-            await finalSendGate;
-          }
           const sendOptions = {
             target: { ...target, source_message_id: message?.id || message?.message_id },
             text,
             env,
             execFileImpl: effectiveExecFileImpl,
           };
+          const result = media
+            ? await sendFeishuMediaReply({ ...sendOptions, media })
+            : await sendFeishuReply(sendOptions);
           if (media) {
-            await sendFeishuMediaReply({ ...sendOptions, media });
+            logger.log?.('[feishu-bridge] reply_sent', JSON.stringify({
+              conversation_id_hash: shortHash(target.conversation_id),
+              media_sent: Boolean(result?.media_sent),
+            }));
           } else {
-            await sendFeishuReply(sendOptions);
+            logger.log?.('[feishu-bridge] reply_sent', JSON.stringify({
+              conversation_id_hash: shortHash(target.conversation_id),
+              media_sent: false,
+            }));
           }
-          logger.log?.('[feishu-bridge] reply_sent', JSON.stringify({
-            conversation_id_hash: shortHash(target.conversation_id),
-            media_sent: Boolean(media),
-          }));
+          return {
+            textStatus: String(text || '').trim() ? 'sent' : 'not_requested',
+            attachments: [],
+            adapterReceiptRef: `feishu:${shortHash(message?.id || message?.message_id || target.conversation_id)}`,
+          };
         },
       },
     });
   };
-  if (!quickAckConfig.enabled) {
-    await processMessage();
-    return;
-  }
-  const processPromise = processMessage();
-  const winner = await Promise.race([
-    processPromise.then(() => 'done'),
-    quickAckDelay(quickAckConfig.timeoutMs).then(() => 'timeout'),
-  ]);
-  if (winner === 'done') return;
-  finalSendGate = new Promise((resolve) => {
-    releaseFinalSend = resolve;
-  });
-  gateFinalSend = true;
-  processPromise.catch((error) => {
-    logger.warn?.('[feishu-bridge] async final reply failed', redactError(error));
-  });
-  try {
-    await sendFeishuReply({
-      target: {
-        channel_type: normalized.channel_type,
-        conversation_id: normalized.conversation_id,
-        sender_id: normalized.sender_id,
-        source_message_id: `${normalized.id || normalized.message_id || Date.now()}:quick_ack`,
-      },
-      text: quickAckConfig.ackText,
-      env,
-      execFileImpl: effectiveExecFileImpl,
-    });
-  } finally {
-    releaseFinalSend();
-  }
+  await processMessage();
 }
 
 export function isUnsupportedFeishuIdentityError(error) {

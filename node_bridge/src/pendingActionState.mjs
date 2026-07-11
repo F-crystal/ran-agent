@@ -1,10 +1,14 @@
 import { createHash, randomUUID } from 'node:crypto';
-import fs from 'node:fs';
 import path from 'node:path';
 
+import { appendJsonLine, readJsonState, writeJsonAtomic } from './atomicState.mjs';
 import { resolveStateDir } from './runtimeState.mjs';
 
 const VALID_STATUSES = new Set(['pending', 'confirmed', 'cancelled', 'expired', 'executed', 'failed']);
+const VALID_TRANSITIONS = new Map([
+  ['pending', new Set(['confirmed', 'cancelled', 'expired'])],
+  ['confirmed', new Set(['executed', 'failed'])],
+]);
 
 export function getPendingActionConfig(env = process.env) {
   return {
@@ -17,21 +21,36 @@ export function createPendingAction(input = {}, options = {}) {
   const env = options.env || process.env;
   const now = normalizeDate(options.now) || new Date();
   const ttlMinutes = normalizePositiveInt(options.ttlMinutes, getPendingActionConfig(env).ttlMinutes);
+  const sanitizedPayload = sanitizePayload(input.sanitizedPayload || {});
+  const actorContext = sanitizeActorContext(options.actorContext, input);
   const action = {
+    schemaVersion: 2,
     actionId: sanitizeId(input.actionId || `act_${randomUUID().replace(/-/g, '').slice(0, 18)}`),
     requestId: sanitizeId(input.requestId || ''),
     channel: sanitizeShort(input.channel || ''),
     conversationIdHash: hashShort(input.conversationId || input.conversation_id || ''),
     profile: sanitizeShort(input.profile || ''),
+    actorKey: actorContext.actorKey,
+    owner: actorContext.owner,
+    platform: actorContext.platform,
+    conversationKey: actorContext.conversationKey,
     actionType: sanitizeShort(input.actionType || ''),
     summary: sanitizeSummary(input.summary || ''),
     status: 'pending',
     requiredConfirmation: input.requiredConfirmation !== false,
     createdAt: now.toISOString(),
+    updatedAt: now.toISOString(),
     expiresAt: new Date(now.getTime() + ttlMinutes * 60 * 1000).toISOString(),
-    sanitizedPayload: sanitizePayload(input.sanitizedPayload || {}),
+    revision: 1,
+    sanitizedPayload,
     evidence: sanitizeEvidence(input.evidence || []),
   };
+  action.actionDigest = hashShort(JSON.stringify([
+    action.actionType,
+    action.sanitizedPayload,
+    action.channel,
+    action.conversationIdHash,
+  ]));
   appendActionEvent(action, env);
   writeIndex(upsertAction(readIndex(env), action), env);
   return action;
@@ -51,6 +70,7 @@ export function findLatestPendingAction({ channel = '', conversationId = '' } = 
     .filter((item) => item.status === 'pending')
     .filter((item) => item.channel === sanitizeShort(channel))
     .filter((item) => item.conversationIdHash === conversationIdHash)
+    .filter((item) => matchesActor(item, options.actorContext))
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   return matches[0] || null;
 }
@@ -64,6 +84,7 @@ export function findPendingActionsForConversation({ channel = '', conversationId
     .filter((item) => item.status === 'pending')
     .filter((item) => item.channel === sanitizeShort(channel))
     .filter((item) => item.conversationIdHash === conversationIdHash)
+    .filter((item) => matchesActor(item, options.actorContext))
     .sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
 }
 
@@ -93,7 +114,12 @@ export function expirePendingActions(options = {}) {
     const expiresMs = Date.parse(action.expiresAt);
     if (Number.isFinite(expiresMs) && expiresMs <= now.getTime()) {
       changed = true;
-      const expired = { ...action, status: 'expired' };
+      const expired = {
+        ...action,
+        status: 'expired',
+        revision: normalizeRevision(action.revision) + 1,
+        updatedAt: now.toISOString(),
+      };
       appendActionEvent(expired, env);
       return expired;
     }
@@ -110,11 +136,22 @@ function updatePendingActionStatus(actionId, status, options = {}) {
   const actions = readIndex(env);
   const index = actions.findIndex((item) => item.actionId === sanitizeId(actionId));
   if (index < 0) return null;
+  const current = actions[index];
+  if (options.expectedRevision !== undefined && Number(options.expectedRevision) !== normalizeRevision(current.revision)) {
+    throw pendingActionError('PENDING_ACTION_STALE_REVISION', 'pending action revision changed');
+  }
+  if (!matchesActor(current, options.actorContext)) {
+    throw pendingActionError('PENDING_ACTION_ACTOR_MISMATCH', 'pending action belongs to another actor');
+  }
+  if (!VALID_TRANSITIONS.get(current.status)?.has(status)) {
+    throw pendingActionError('PENDING_ACTION_INVALID_TRANSITION', `cannot transition ${current.status} to ${status}`);
+  }
   const updated = {
-    ...actions[index],
+    ...current,
     status,
     updatedAt: now.toISOString(),
-    evidence: sanitizeEvidence(options.evidence || actions[index].evidence || []),
+    revision: normalizeRevision(current.revision) + 1,
+    evidence: sanitizeEvidence(options.evidence || current.evidence || []),
   };
   actions[index] = updated;
   appendActionEvent(updated, env);
@@ -132,24 +169,37 @@ function paths(env) {
 }
 
 function readIndex(env) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(paths(env).index, 'utf8'));
-    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object') : [];
-  } catch {
-    return [];
-  }
+  return readJsonState(paths(env).index, {
+    validate: isPendingActionIndex,
+    missingValue: [],
+    critical: true,
+  });
 }
 
 function writeIndex(actions, env) {
-  const target = paths(env).index;
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, `${JSON.stringify(actions, null, 2)}\n`, 'utf8');
+  writeJsonAtomic(paths(env).index, actions, { validate: isPendingActionIndex });
 }
 
 function appendActionEvent(action, env) {
-  const target = paths(env).jsonl;
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.appendFileSync(target, `${JSON.stringify(action)}\n`, 'utf8');
+  appendJsonLine(paths(env).jsonl, action, { validate: isPendingActionRecord });
+}
+
+function isPendingActionIndex(value) {
+  return Array.isArray(value) && value.every(isPendingActionRecord);
+}
+
+function isPendingActionRecord(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (!sanitizeId(value.actionId) || !VALID_STATUSES.has(String(value.status || ''))) return false;
+  if (value.schemaVersion === undefined) return true;
+  return value.schemaVersion === 2
+    && Boolean(sanitizeShort(value.actorKey))
+    && typeof value.owner === 'boolean'
+    && Boolean(sanitizeShort(value.platform))
+    && Boolean(sanitizeShort(value.conversationKey))
+    && /^[a-f0-9]{16}$/.test(String(value.actionDigest || ''))
+    && Number.isInteger(value.revision)
+    && value.revision >= 1;
 }
 
 function upsertAction(actions, action) {
@@ -196,6 +246,35 @@ function sanitizePayload(payload) {
   if (payload.recipient) sanitized.recipientHash = hashShort(payload.recipient);
   if (payload.contentRef) sanitized.contentRefHash = hashShort(payload.contentRef);
   return sanitized;
+}
+
+function sanitizeActorContext(context, input) {
+  if (context && typeof context === 'object' && !Array.isArray(context)) {
+    const actorKey = sanitizeShort(context.actorKey);
+    const platform = sanitizeShort(context.platform || input.channel).toLowerCase();
+    const conversationKey = sanitizeShort(context.conversationKey);
+    if (actorKey && platform && conversationKey) {
+      return { actorKey, owner: context.owner === true, platform, conversationKey };
+    }
+  }
+  const platform = sanitizeShort(input.channel || 'unknown').toLowerCase() || 'unknown';
+  const conversationHash = hashShort(input.conversationId || input.conversation_id || '');
+  return {
+    actorKey: `legacy:${platform}:${conversationHash}`,
+    owner: false,
+    platform,
+    conversationKey: `${platform}:legacy:${conversationHash}`,
+  };
+}
+
+function matchesActor(action, actorContext) {
+  if (!actorContext) return true;
+  const actorKey = sanitizeShort(actorContext.actorKey);
+  return Boolean(actorKey && action.actorKey && action.actorKey === actorKey);
+}
+
+function normalizeRevision(value) {
+  return Number.isInteger(value) && value >= 1 ? value : 1;
 }
 
 function normalizeMediaRefs(items) {
@@ -264,4 +343,10 @@ function normalizeDate(value) {
     if (Number.isFinite(parsed)) return new Date(parsed);
   }
   return null;
+}
+
+function pendingActionError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }

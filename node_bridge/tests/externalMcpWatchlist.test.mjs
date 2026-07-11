@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 import {
   addExternalMcpWatch,
@@ -15,18 +15,7 @@ import {
 } from '../src/externalMcp/watchlist.mjs';
 
 function tempEnv(t) {
-  const base = path.join(process.cwd(), '.tmp-test-external-mcp-watchlist');
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, 'case-'));
-  t.after(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-    try {
-      fs.rmdirSync(base);
-    } catch {
-      // Other tests may still own sibling temp dirs.
-    }
-  });
-  return { RAN_AGENT_STATE_DIR: root };
+  return createIsolatedTestEnv(t, {}, 'external-mcp-watchlist-');
 }
 
 test('watchlist adds lists and removes normalized watch scopes', (t) => {
@@ -60,6 +49,19 @@ test('watchlist rejects malformed or unsafe scopes fail-closed', (t) => {
   assert.equal(result.ok, false);
   assert.equal(result.error_code, 'EXTERNAL_MCP_INVALID_WATCH_SCOPE');
   assert.deepEqual(listExternalMcpWatches({ env }), []);
+});
+
+test('watchlist keeps a configured embodied MCP watch instead of treating its domain as invalid', (t) => {
+  const env = tempEnv(t);
+  const watch = addExternalMcpWatch({
+    globalUserId: 'user:ran',
+    serverId: 'robot.example',
+    kind: 'embodied',
+    scope: 'device:robot.example/unit-1',
+  }, { env, now: '2026-07-01T10:00:00Z' });
+
+  assert.equal(watch.ok, true);
+  assert.equal(listExternalMcpWatches({ env })[0].kind, 'embodied');
 });
 
 test('rate budget enforces one global notification per day', (t) => {
@@ -165,4 +167,26 @@ test('notification reservations block concurrent budget checks until committed o
   assert.equal(committed.status, 'sent');
   assert.equal(afterCommit.allowed, false);
   assert.equal(afterCommit.reason, 'global_daily_budget_exhausted');
+});
+
+test('watch and notification corruption are quarantined instead of resetting rate limits', (t) => {
+  const env = tempEnv(t);
+  const directory = `${env.RAN_AGENT_STATE_DIR}/external_mcp`;
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(`${directory}/watchlist.json`, '{', 'utf8');
+
+  assert.throws(
+    () => listExternalMcpWatches({ env }),
+    (error) => error?.code === 'RAN_AGENT_STATE_CORRUPT',
+  );
+  assert.equal(fs.readdirSync(directory).some((entry) => entry.startsWith('watchlist.json.corrupt-')), true);
+
+  fs.writeFileSync(`${directory}/notification-events.json`, '{', 'utf8');
+  assert.throws(
+    () => checkExternalMcpRateBudget({
+      globalUserId: 'user:ran', serverId: 'forum.example', topicKey: 'thread:1',
+    }, { env }),
+    (error) => error?.code === 'RAN_AGENT_STATE_CORRUPT',
+  );
+  assert.equal(fs.readdirSync(directory).some((entry) => entry.startsWith('notification-events.json.corrupt-')), true);
 });

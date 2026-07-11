@@ -1,0 +1,202 @@
+{
+  "schemaVersion": 1,
+  "status": "CURRENT_SOURCE_BASELINE",
+  "reservedMcpNames": [
+    "search_hub",
+    "social_reader",
+    "media_reader",
+    "personal_memory",
+    "obsidian_memory",
+    "ombre_memory",
+    "ombre_memory_extra",
+    "co_reading",
+    "sticker_catalog",
+    "media_generation",
+    "time",
+    "playwright"
+  ],
+  "profiles": {
+    "lite": {
+      "requiredToolsets": [
+        "web",
+        "skills",
+        "memory",
+        "safe",
+        "mcp-time",
+        "mcp-social_reader",
+        "mcp-media_reader",
+        "mcp-search_hub",
+        "mcp-sticker_catalog",
+        "mcp-personal_memory"
+      ],
+      "conditionalToolsets": {
+        "mcp-obsidian_memory": "OBSIDIAN_MEMORY_MCP_ENABLED",
+        "mcp-external_mcp_gateway": "EXTERNAL_MCP_GATEWAY_ENABLED"
+      },
+      "forbiddenToolsets": [
+        "terminal",
+        "file",
+        "session_search",
+        "mcp-co_reading",
+        "mcp-media_generation",
+        "mcp-playwright",
+        "mcp-ombre_memory",
+        "mcp-ombre_memory_extra"
+      ],
+      "sourceToolsets": [
+        "web",
+        "skills",
+        "memory",
+        "safe",
+        "mcp-time",
+        "mcp-social_reader",
+        "mcp-media_reader",
+        "mcp-search_hub",
+        "mcp-sticker_catalog",
+        "mcp-personal_memory",
+        "mcp-obsidian_memory",
+        "mcp-external_mcp_gateway"
+      ],
+      "sourceMcpServers": [
+        "time",
+        "social_reader",
+        "media_reader",
+        "sticker_catalog",
+        "search_hub",
+        "personal_memory",
+        "obsidian_memory",
+        "external_mcp_gateway",
+        "tavily"
+      ]
+    },
+    "full": {
+      "requiredToolsets": [
+        "web",
+        "terminal",
+        "file",
+        "skills",
+        "memory",
+        "session_search",
+        "safe",
+        "mcp-time",
+        "mcp-social_reader",
+        "mcp-media_reader",
+        "mcp-search_hub",
+        "mcp-co_reading",
+        "mcp-sticker_catalog",
+        "mcp-media_generation",
+        "mcp-personal_memory",
+        "mcp-playwright"
+      ],
+      "conditionalToolsets": {
+        "mcp-obsidian_memory": "OBSIDIAN_MEMORY_MCP_ENABLED",
+        "mcp-ombre_memory": "OMBRE_BRAIN_DEPLOY_READY",
+        "mcp-ombre_memory_extra": "OMBRE_BRAIN_DEPLOY_READY",
+        "mcp-external_mcp_gateway": "EXTERNAL_MCP_GATEWAY_ENABLED"
+      },
+      "forbiddenToolsets": [],
+      "sourceToolsets": [
+        "web",
+        "terminal",
+        "file",
+        "skills",
+        "memory",
+        "session_search",
+        "safe",
+        "mcp-time",
+        "mcp-social_reader",
+        "mcp-media_reader",
+        "mcp-search_hub",
+        "mcp-co_reading",
+        "mcp-sticker_catalog",
+        "mcp-media_generation",
+        "mcp-personal_memory",
+        "mcp-obsidian_memory",
+        "mcp-ombre_memory",
+        "mcp-ombre_memory_extra",
+        "mcp-playwright",
+        "mcp-external_mcp_gateway"
+      ],
+      "sourceMcpServers": [
+        "time",
+        "media_generation",
+        "sticker_catalog",
+        "media_reader",
+        "social_reader",
+        "obsidian_memory",
+        "personal_memory",
+        "ombre_memory",
+        "ombre_memory_extra",
+        "search_hub",
+        "co_reading",
+        "playwright",
+        "external_mcp_gateway"
+      ]
+    }
+  },
+  "locallyOwnedServers": {
+    "search_hub": {
+      "toolNames": ["search", "read", "research"]
+    },
+    "social_reader": {
+      "toolNames": ["resolve_social_url", "read_social_post", "read_social_post_deep", "read_music_share"]
+    },
+    "media_reader": {
+      "toolNames": ["extract_media_assets", "analyze_image", "resolve_platform_media", "transcribe_audio", "analyze_video", "analyze_media_batch", "search_media_artifacts"]
+    },
+    "personal_memory": {
+      "toolNames": ["check_personal_memory_backend", "recall_personal_memory", "surface_relevant_context"]
+    },
+    "co_reading": {
+      "toolNames": [
+        "reading_list_books",
+        "reading_list_chunks",
+        "reading_get_progress",
+        "reading_continue",
+        "reading_read_chunk",
+        "reading_get_context_window",
+        "reading_search",
+        "reading_list_annotations",
+        "reading_read_thread",
+        "reading_get_storage_stats",
+        "reading_list_events",
+        "reading_import_book",
+        "reading_import_pasted_text",
+        "reading_add_annotation",
+        "reading_share_annotation",
+        "reading_reply_to_annotation",
+        "reading_mark_progress",
+        "reading_archive_book",
+        "reading_restore_book",
+        "reading_delete_book",
+        "reading_cleanup_trash"
+      ]
+    },
+    "sticker_catalog_lite": {
+      "toolNames": ["sticker_tags", "sticker_pick", "sticker_attach", "sticker_save_from_inbox"]
+    },
+    "sticker_catalog_full": {
+      "toolNames": ["sticker_tags", "sticker_pick", "sticker_attach", "sticker_save_from_inbox", "sticker_update", "sticker_delete", "sticker_list"]
+    },
+    "media_generation": {
+      "toolNames": ["generate_image", "generate_speech"]
+    }
+  },
+  "dataOwners": {
+    "personal_memory": "Python backend SQLite/Ombre",
+    "obsidian_memory": "read-only vault with derived DuckDB index",
+    "knowledge_agent": "Python KnowledgeAgent and vault_runner",
+    "co_reading": "Node co-reading store under CO_READING_ROOT_DIR",
+    "sticker_catalog": "Node sticker catalog under RAN_AGENT_STATE_DIR/stickers",
+    "social_media": "dedicated social/media readers and their bounded caches",
+    "ombre_memory": "Ombre service and OMBRE_BUCKETS_DIR",
+    "external_mcp": "Node External registry under RAN_AGENT_STATE_DIR/external_mcp"
+  },
+  "liveFingerprintOnly": [
+    "ombre_memory",
+    "ombre_memory_extra",
+    "obsidian_memory",
+    "time",
+    "playwright"
+  ]
+}

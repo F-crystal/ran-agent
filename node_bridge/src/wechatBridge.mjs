@@ -91,14 +91,18 @@ export async function handleWeChatTextMessage(message, options = {}) {
     return '';
   }
   const mergedPayload = buffered.payload;
+  const outbox = options.outbox || options.env?.durableOutbox;
 
   try {
     const mediaMerged = Array.isArray(mergedPayload.media) ? mergedPayload.media.length : 0;
     logger.info?.(`handling wechat message sender_id=${mergedPayload.sender_id} channel=${mergedPayload.channel} media_merged=${mediaMerged}`);
-    const response = await handleIncomingMessage(normalizeWechatMessage(mergedPayload), {
+    const channelHub = options.channelHub || handleIncomingMessage;
+    const response = await channelHub(normalizeWechatMessage(mergedPayload), {
       env: options.env,
       logger,
       replyBackend: backend,
+      outbox,
+      ...(outbox ? { adapter: createWeChatSdkResponseAdapter() } : {}),
       fetchImpl: options.fetchImpl,
       mediaContextOptions: options.mediaContextOptions,
     });
@@ -117,8 +121,49 @@ export async function handleWeChatTextMessage(message, options = {}) {
   } catch (error) {
     const messageText = error instanceof Error ? error.message : String(error);
     logger.error?.(`reply backend failed: ${messageText}`);
-    return options.fallbackText || '暂时无法连接到 personal agent，请稍后再试。';
+    const fallbackText = options.fallbackText || '暂时无法连接到 personal agent，请稍后再试。';
+    return await recordWechatFallback({ outbox, payload: mergedPayload, fallbackText, logger });
   }
+}
+
+async function recordWechatFallback({ outbox, payload, fallbackText, logger }) {
+  if (!outbox || typeof outbox.deliver !== 'function') {
+    logger.warn?.('wechat fallback suppressed because durable outbox is unavailable');
+    return '';
+  }
+  const conversationId = String(payload?.conversation_id || payload?.sender_id || 'unknown').trim() || 'unknown';
+  const messageId = String(payload?.id || payload?.message_id || `${conversationId}:${payload?.text || ''}`).trim();
+  const digest = crypto.createHash('sha256').update(messageId).digest('hex').slice(0, 32);
+  try {
+    await outbox.deliver({
+      operationKey: `channel-fallback:wechat:${digest}`,
+      route: { adapterKey: 'wechat', destinationRef: `conversation:${crypto.createHash('sha256').update(conversationId).digest('hex').slice(0, 32)}` },
+      text: fallbackText,
+      attachments: [],
+      idempotent: false,
+      maxAttempts: 1,
+    }, {
+      send: async () => await createWeChatSdkResponseAdapter().sendReply({ text: fallbackText }),
+    });
+    return fallbackText;
+  } catch (error) {
+    logger.error?.(`wechat fallback outbox failed: ${error instanceof Error ? error.message : String(error)}`);
+    return '';
+  }
+}
+
+function createWeChatSdkResponseAdapter() {
+  return {
+    async sendReply() {
+      // The vendor SDK emits the returned chat response after this bridge call
+      // returns; that handoff has no receipt callback, so never claim sent.
+      return {
+        textStatus: 'ambiguous',
+        attachments: [],
+        adapterReceiptRef: 'wechat:sdk-response-boundary',
+      };
+    },
+  };
 }
 
 export function normalizeWechatMessage(payload = {}) {

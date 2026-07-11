@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -27,11 +28,36 @@ function assertWithinProject(absolutePath) {
   }
 }
 
+function isWithin(rootPath, targetPath) {
+  return targetPath === rootPath || targetPath.startsWith(`${rootPath}${path.sep}`);
+}
+
+function assertTestStateDir(absolutePath, env) {
+  if (String(env.RAN_AGENT_ALLOW_TEST_STATE_DIR || '') !== '1') {
+    throw new Error('external test state requires the explicit test state guard');
+  }
+  let canonicalTarget;
+  let canonicalTmp;
+  try {
+    canonicalTarget = fs.realpathSync(absolutePath);
+    canonicalTmp = fs.realpathSync(os.tmpdir());
+  } catch {
+    throw new Error('external test state must already exist under the OS temporary directory');
+  }
+  if (!isWithin(canonicalTmp, canonicalTarget)) {
+    throw new Error(`external test state must stay inside the OS temporary directory: ${canonicalTmp}`);
+  }
+  return canonicalTarget;
+}
+
 export function resolveStateDir(env = process.env) {
   const rawStateDir = (env.RAN_AGENT_STATE_DIR || env.CLAWDBOT_STATE_DIR || DEFAULT_STATE_DIR).trim();
   const resolvedStateDir = path.isAbsolute(rawStateDir)
     ? path.resolve(rawStateDir)
     : path.resolve(PROJECT_ROOT, rawStateDir);
+  if (String(env.NODE_ENV || '') === 'test') {
+    return assertTestStateDir(resolvedStateDir, env);
+  }
   assertWithinProject(resolvedStateDir);
   return resolvedStateDir;
 }

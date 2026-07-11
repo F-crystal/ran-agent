@@ -90,19 +90,29 @@ def run_ai_daily_digest(
         logger.info("AI daily digest skipped because already sent date=%s", local_date)
         return {"sent": False, "reason": "already_sent", "date": local_date}
 
+    partial = False
     try:
         facts = facts_loader().strip()
     except Exception as error:
         logger.warning("AI daily digest facts unavailable error=%s", error)
-        return {"sent": False, "reason": "facts_unavailable", "date": local_date}
+        facts = "事实材料暂时不可用。本期只报告来源获取失败，不补写或猜测新闻内容。"
+        partial = True
     if not facts:
         logger.warning("AI daily digest facts unavailable error=empty_facts")
-        return {"sent": False, "reason": "facts_unavailable", "date": local_date}
+        facts = "事实材料暂时不可用。本期只报告来源返回为空，不补写或猜测新闻内容。"
+        partial = True
     prompt = build_digest_prompt(facts)
     bridge_result = outbound_client.send_ai_daily_digest(prompt)
     if bridge_result.get("skipped") is True:
         logger.warning("AI daily digest skipped by Node bridge reason=%s", bridge_result.get("reason"))
         return {"sent": False, "reason": str(bridge_result.get("reason") or "bridge_skipped"), "date": local_date}
+    delivery_status = str(
+        bridge_result.get("delivery_status") or bridge_result.get("outbox_status") or ""
+    ).strip()
+    outbox_id = str(bridge_result.get("outbox_id") or bridge_result.get("outboxId") or "").strip()
+    if delivery_status != "sent" or not outbox_id:
+        logger.warning("AI daily digest delivery was not committed")
+        return {"sent": False, "reason": "delivery_unconfirmed", "date": local_date}
 
     database.set_handoff_value(
         sent_key,
@@ -110,7 +120,8 @@ def run_ai_daily_digest(
             {
                 "status": "sent",
                 "sent_at": now.isoformat(),
-                "bridge_result": bridge_result,
+                "outbox_id": outbox_id,
+                "partial": partial,
             },
             ensure_ascii=False,
         ),
@@ -123,7 +134,12 @@ def run_ai_daily_digest(
         importance=1,
     )
     logger.info("AI daily digest sent date=%s", local_date)
-    return {"sent": True, "date": local_date, "bridge_result": bridge_result}
+    return {
+        "sent": True,
+        "date": local_date,
+        "partial": partial,
+        "bridge_result": bridge_result,
+    }
 
 
 def _fetch_json(url: str, opener: Callable[..., object]) -> dict[str, object]:

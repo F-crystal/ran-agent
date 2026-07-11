@@ -9,6 +9,7 @@ from pathlib import Path
 
 from personal_agent.config import AppConfig
 from personal_agent.db import Database
+from personal_agent.personal_learning import PersonalLearningStore
 from personal_agent.reflection_specialist import generate_reflection_report
 
 
@@ -179,6 +180,43 @@ class SelfReflectionTest(unittest.TestCase):
         self.assertIn("support manual tuning and future adaptive reviewer inputs", report.report_text)
         self.assertTrue(any(item.key.startswith("opening:") for item in report.preference_profile.emerging_patterns))
         self.assertTrue(any(item.key.startswith("context:") for item in report.preference_profile.contextual_risks))
+
+    def test_reflection_promotes_only_repeated_safe_review_rules_through_personal_learning(self) -> None:
+        for sender_id in ("u1", "u2"):
+            self.database.record_reply_review_observation(
+                channel="wechat",
+                sender_id=sender_id,
+                route="text_chat",
+                response_mode="emotional_support",
+                current_topic="聊天",
+                intimacy_level=0,
+                recent_turn_summary="短摘要",
+                time_of_day="evening",
+                user_message="我有点烦",
+                first_draft="这说明你最近压力很大。",
+                final_reply="听着确实挺烦。",
+                review_triggered=True,
+                review_reasons='["recent_state_over_inference"]',
+                retry_performed=True,
+                retry_success=True,
+                false_positive_candidate=False,
+                user_dissatisfaction_signal=True,
+            )
+
+        generate_reflection_report(self.database, self.config, limit=20)
+
+        records = PersonalLearningStore(database=self.database, config=self.config).list_active()
+        self.assertEqual(
+            [(record.kind, record.source, record.subject_key, record.statement) for record in records],
+            [
+                (
+                    "operating_lesson",
+                    "repeated_observation",
+                    "reply_rule:recent_state_over_inference",
+                    "用户刚表达即时状态时，回复不要推断长期原因",
+                )
+            ],
+        )
 
 
 if __name__ == "__main__":

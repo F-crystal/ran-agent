@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 import {
   createExternalMcpActivityTargetToken,
@@ -18,8 +17,6 @@ import {
   closeExternalMcpSession,
   getExternalMcpSession,
 } from '../src/externalMcp/sessionManager.mjs';
-
-const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
 test('activity runner creates a bounded trusted game_play grant for Hermes activity turns', (t) => {
   const env = tempEnv(t);
@@ -368,7 +365,7 @@ function delay(ms) {
 }
 
 function tempEnv(t) {
-  const root = fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'test-external-mcp-activity-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  return { RAN_AGENT_STATE_DIR: root, HERMES_PROACTIVE_EVENTS_ENABLED: 'true' };
+  return createIsolatedTestEnv(t, {
+    HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
+  }, 'external-mcp-activity-');
 }

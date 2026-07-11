@@ -9,6 +9,7 @@ import {
   buildCourtlyStyleAnchor,
   buildSocialEvidenceReport,
   applySocialLinkEvidenceGate,
+  resolveCapabilityMode,
 } from '../src/hermesGatewayClient.mjs';
 import {
   getHermesLiteSoftResetConfig,
@@ -16,8 +17,7 @@ import {
   runHermesLiteSoftReset,
 } from '../src/hermesSessionMaintenance.mjs';
 import { saveSensorLoggerMessage } from '../src/environmentSense.mjs';
-
-const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 function makeJsonResponse(body, ok = true, status = 200) {
   return {
@@ -40,6 +40,21 @@ function historyTurns(prefix, count, filler = '') {
   }
   return messages;
 }
+
+test('capability routing ignores natural-language lite/full words', () => {
+  assert.deepEqual(
+    resolveCapabilityMode({ text: '请开 full mode 跟我聊天' }, { capabilityMode: 'auto' }).mode,
+    'lite',
+  );
+  assert.deepEqual(
+    resolveCapabilityMode({ text: '请用 lite mode 生成一张图' }, { capabilityMode: 'auto' }).mode,
+    'full',
+  );
+  assert.equal(
+    resolveCapabilityMode({ text: '普通聊天' }, { capabilityMode: 'full' }).reason,
+    'explicit_full',
+  );
+});
 
 async function captureHermesRequest({ payload = {}, env = {}, responseBody = null } = {}) {
   const logs = [];
@@ -88,10 +103,8 @@ function parseProviderUsageLog(logs) {
   return JSON.parse(line.slice(line.indexOf('{')));
 }
 
-function tempGatewayStateDir(prefix = 'hermes-gateway-soft-reset-') {
-  const base = path.join(PROJECT_ROOT, '.ran_agent_state');
-  fs.mkdirSync(base, { recursive: true });
-  return fs.mkdtempSync(path.join(base, prefix));
+function tempGatewayEnv(t, prefix = 'hermes-gateway-soft-reset-') {
+  return createIsolatedTestEnv(t, {}, prefix);
 }
 
 function readProviderVisibleHistoryFiles(stateDir) {
@@ -164,6 +177,8 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
         }
         return makeJsonResponse({
           model: 'ran-assistant',
+          action_requests: [{ requestRef: 'save-1', actionType: 'memory.remember', scope: {} }],
+          claims: [{ type: 'memory_saved', requestRef: 'save-1' }],
           choices: [
             {
               message: {
@@ -186,6 +201,44 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.match(capturedBody.messages[1].content, /你好\n补一句/);
   assert.equal(response.reply_text, 'Hermes reply');
   assert.equal(response.model, 'ran-assistant');
+  assert.deepEqual(response.action_requests, [
+    { requestRef: 'save-1', actionType: 'memory.remember', scope: {} },
+  ]);
+  assert.deepEqual(response.claims, [{ type: 'memory_saved', requestRef: 'save-1' }]);
+});
+
+test('parses the private reply envelope from real OpenAI-compatible message content', async () => {
+  let capturedBody = null;
+  const envelope = {
+    schemaVersion: 1,
+    message: '我会记住这件事。',
+    actionRequests: [{ requestRef: 'save-1', actionType: 'memory.remember', scope: {} }],
+    claims: [{ type: 'memory_saved', requestRef: 'save-1' }],
+    commitments: [],
+  };
+  const response = await sendChatToHermesGateway(
+    { text: '记住我喜欢早睡', sender_id: 'envelope-sender', conversation_id: 'envelope-conversation', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async (_url, options) => {
+        capturedBody = JSON.parse(options.body);
+        return makeJsonResponse({ choices: [{ message: { content: JSON.stringify(envelope) } }] });
+      },
+      logger: { log() {}, warn() {} },
+    },
+  );
+
+  assert.deepEqual(capturedBody.response_format, { type: 'json_object' });
+  assert.match(capturedBody.messages[0].content, /reply envelope/i);
+  assert.equal(response.reply_text, envelope.message);
+  assert.deepEqual(response.reply_envelope, envelope);
+  assert.deepEqual(response.action_requests, envelope.actionRequests);
+  assert.deepEqual(response.claims, envelope.claims);
 });
 
 test('sendChatToHermesGateway aborts Hermes API fetch on reply timeout', async () => {
@@ -221,10 +274,11 @@ test('sendChatToHermesGateway aborts Hermes API fetch on reply timeout', async (
   assert.equal(sawAbort, true);
 });
 
-test('sendChatToHermesGateway injects lightweight environment context when state is fresh', async () => {
-  const stateDir = tempGatewayStateDir('hermes-env-context-');
+test('sendChatToHermesGateway injects lightweight environment context when state is fresh', async (t) => {
+  const isolatedEnv = tempGatewayEnv(t, 'hermes-env-context-');
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const env = {
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_ENVIRONMENT_CONTEXT_ENABLED: 'true',
     HERMES_ENVIRONMENT_HOME_LAT: '31.2304',
     HERMES_ENVIRONMENT_HOME_LON: '121.4737',
@@ -424,16 +478,17 @@ test('Hermes API requests include recent conversation history before current use
   assert.match(secondBody.messages[3].content, /我觉得她的故事特别令人感动/);
 });
 
-test('cache-friendly history is disabled by default and preserves legacy recent text behavior', async () => {
+test('cache-friendly history is disabled by default and preserves legacy recent text behavior', async (t) => {
   let secondBody = null;
   const conversationId = 'wx-cache-friendly-default-off';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
   });
 
   await sendChatToHermesGateway(
@@ -456,16 +511,17 @@ test('cache-friendly history is disabled by default and preserves legacy recent 
   assert.deepEqual(readProviderVisibleHistoryFiles(stateDir), []);
 });
 
-test('cache-friendly history writes provider-visible prompts and reuses them as append history', async () => {
+test('cache-friendly history writes provider-visible prompts and reuses them as append history', async (t) => {
   let secondBody = null;
   const conversationId = 'wx-cache-friendly-append';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -498,15 +554,16 @@ test('cache-friendly history writes provider-visible prompts and reuses them as 
   assert.match(secondBody.messages[3].content, /第二轮/);
 });
 
-test('cache-friendly append records clean provider-visible content as cache exact', async () => {
+test('cache-friendly append records clean provider-visible content as cache exact', async (t) => {
   const conversationId = 'wx-cache-exact-clean';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -527,15 +584,16 @@ test('cache-friendly append records clean provider-visible content as cache exac
   assert.equal(record.provider_content_hash, record.stored_content_hash);
 });
 
-test('cache-friendly append records sanitized content as cache inexact without storing secrets', async () => {
+test('cache-friendly append records sanitized content as cache inexact without storing secrets', async (t) => {
   const conversationId = 'wx-cache-exact-sanitized';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -564,15 +622,16 @@ test('cache-friendly append records sanitized content as cache inexact without s
   assert.doesNotMatch(serialized, /abc123|secret456|\/Users\/fengran|\/opt\/ran_agent/);
 });
 
-test('cache-friendly telemetry reports exactness ratio and prefix break for sanitized history', async () => {
+test('cache-friendly telemetry reports exactness ratio and prefix break for sanitized history', async (t) => {
   const conversationId = 'wx-cache-exact-telemetry';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -607,15 +666,16 @@ test('cache-friendly telemetry reports exactness ratio and prefix break for sani
   assert.equal(usage.cache_exact_ratio, 0.5);
 });
 
-test('cache-friendly history does not write assistant append records when provider fails', async () => {
+test('cache-friendly history does not write assistant append records when provider fails', async (t) => {
   const conversationId = 'wx-cache-friendly-failure';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -630,16 +690,17 @@ test('cache-friendly history does not write assistant append records when provid
   assert.deepEqual(readProviderVisibleHistoryFiles(stateDir), []);
 });
 
-test('cache-friendly history trims old turns by max turn budget', async () => {
+test('cache-friendly history trims old turns by max turn budget', async (t) => {
   let thirdBody = null;
   const conversationId = 'wx-cache-friendly-turn-budget';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
     HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS: '1',
   });
@@ -670,16 +731,17 @@ test('cache-friendly history trims old turns by max turn budget', async () => {
   assert.match(thirdBody.messages.at(-1).content, /第三轮当前用户消息不能被裁剪/);
 });
 
-test('cache-friendly history trims old turns by char budget without trimming current user', async () => {
+test('cache-friendly history trims old turns by char budget without trimming current user', async (t) => {
   let secondBody = null;
   const conversationId = 'wx-cache-friendly-char-budget';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
     HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET: '20',
   });
@@ -705,16 +767,17 @@ test('cache-friendly history trims old turns by char budget without trimming cur
   assert.match(secondBody.messages.at(-1).content, /第二轮当前用户消息不能被裁剪/);
 });
 
-test('cache-friendly history falls back to legacy recent history when append log is corrupt', async () => {
+test('cache-friendly history falls back to legacy recent history when append log is corrupt', async (t) => {
   let secondBody = null;
   const conversationId = 'wx-cache-friendly-corrupt';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -741,15 +804,16 @@ test('cache-friendly history falls back to legacy recent history when append log
   assert.equal(secondBody.messages[1].content, '第一轮原文用于旧内存回退');
 });
 
-test('cache telemetry calculates cache hit ratio and tolerates missing usage fields', async () => {
+test('cache telemetry calculates cache hit ratio and tolerates missing usage fields', async (t) => {
   const logs = [];
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_TELEMETRY_ENABLED: 'true',
   });
 
@@ -792,15 +856,16 @@ test('cache telemetry calculates cache hit ratio and tolerates missing usage fie
   assert.equal(missing.cache_hit_ratio, null);
 });
 
-test('cache-friendly append log redacts tokens cookies and absolute paths', async () => {
+test('cache-friendly append log redacts tokens cookies and absolute paths', async (t) => {
   const conversationId = 'wx-cache-friendly-redact';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -820,15 +885,16 @@ test('cache-friendly append log redacts tokens cookies and absolute paths', asyn
   assert.match(text, /\[path\]/);
 });
 
-test('cache-friendly append log redacts activity target tokens', async () => {
+test('cache-friendly append log has no legacy activity target token to redact', async (t) => {
   const conversationId = 'wx-cache-friendly-activity-token';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -844,20 +910,20 @@ test('cache-friendly append log redacts activity target tokens', async () => {
   );
 
   const text = fs.readFileSync(readProviderVisibleHistoryFiles(stateDir)[0], 'utf8');
-  assert.doesNotMatch(text, /acttarget_[a-f0-9]+/);
-  assert.doesNotMatch(text, /activityTargetToken: acttarget_/);
-  assert.match(text, /activityTargetToken: \[redacted\]/);
+  assert.doesNotMatch(text, /acttarget_[a-f0-9]+|activityTargetToken:|mcp_start_activity/);
+  assert.match(text, /"sanitized_changed":false/);
 });
 
-test('cache-friendly append log leaves social claim for replyBackend action gate', async () => {
+test('cache-friendly append log leaves social claim for replyBackend action gate', async (t) => {
   const conversationId = 'wx-cache-friendly-gate-summary';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -881,9 +947,10 @@ test('cache-friendly append log leaves social claim for replyBackend action gate
   assert.equal(record.final_delivered_summary, undefined);
 });
 
-test('cache-friendly history does not break current media compact injection', async () => {
+test('cache-friendly history does not break current media compact injection', async (t) => {
   let capturedBody = null;
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   await sendChatToHermesGateway(
     {
       text: '看看这张图',
@@ -898,7 +965,7 @@ test('cache-friendly history does not break current media compact injection', as
         HERMES_API_KEY: 'token',
         HERMES_REPLY_MODE: 'api',
         RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-        RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
         HERMES_CACHE_FRIENDLY_HISTORY: 'true',
       }),
       fetchImpl: async (url, options) => {
@@ -913,17 +980,18 @@ test('cache-friendly history does not break current media compact injection', as
   assert.match(capturedBody.messages.at(-1).content, /媒体工具指令/);
 });
 
-test('cache-friendly history is not enabled for full profile by default', async () => {
+test('cache-friendly history is not enabled for full profile by default', async (t) => {
   let secondBody = null;
   const conversationId = 'wx-cache-friendly-full-default';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     RAN_AGENT_CAPABILITY_MODE: 'full',
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
@@ -973,16 +1041,17 @@ test('context cache strategy defaults to balanced with cache telemetry only', as
   assert.equal(usage.cache_friendly_history_enabled, false);
 });
 
-test('cache-first strategy opts into provider-visible append history even when boolean flag is not set', async () => {
+test('cache-first strategy opts into provider-visible append history even when boolean flag is not set', async (t) => {
   let secondBody = null;
   const conversationId = 'wx-cache-strategy-cache-first';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CONTEXT_CACHE_STRATEGY: 'cache_first',
   });
 
@@ -1015,16 +1084,17 @@ test('cache-first strategy opts into provider-visible append history even when b
   assert.doesNotMatch(JSON.stringify(secondBody.messages), /legacy recent should not win/);
 });
 
-test('token-first strategy avoids provider-visible append history and keeps legacy trimming path', async () => {
+test('token-first strategy avoids provider-visible append history and keeps legacy trimming path', async (t) => {
   let secondBody = null;
   const conversationId = 'wx-cache-strategy-token-first';
-  const stateDir = tempGatewayStateDir();
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_CONTEXT_CACHE_STRATEGY: 'token_first',
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
     HERMES_RECENT_TEXT_TURNS: '1',
@@ -1371,10 +1441,11 @@ test('sendChatToHermesGateway injects full temporal context for relative time wo
   assert.ok(userMsg.content.includes('Asia/Shanghai'), 'full context should include timezone');
 });
 
-test('Hermes prompt includes scoped activity target token only for explicit background intent', async (t) => {
-  const stateDir = tempGatewayStateDir('hermes-activity-token-');
+test('Hermes prompt never injects legacy activity tokens or start instructions', async (t) => {
+  const isolatedEnv = tempGatewayEnv(t, 'hermes-activity-token-');
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const explicit = await captureHermesRequest({
-    env: { RAN_AGENT_STATE_DIR: stateDir },
+    env: { ...isolatedEnv },
     payload: {
       text: '你先继续玩 CedarToy，回头给我发结果',
       sender_id: 'wx-sender',
@@ -1384,7 +1455,7 @@ test('Hermes prompt includes scoped activity target token only for explicit back
     },
   });
   const normal = await captureHermesRequest({
-    env: { RAN_AGENT_STATE_DIR: stateDir },
+    env: { ...isolatedEnv },
     payload: {
       text: '聊聊 CedarToy 的规则',
       sender_id: 'wx-sender',
@@ -1394,9 +1465,9 @@ test('Hermes prompt includes scoped activity target token only for explicit back
     },
   });
 
-  assert.match(explicit.capturedBody.messages.at(-1).content, /activityTargetToken: acttarget_/);
-  assert.match(explicit.capturedBody.messages.at(-1).content, /background: true/);
-  assert.doesNotMatch(normal.capturedBody.messages.at(-1).content, /activityTargetToken:/);
+  assert.doesNotMatch(explicit.capturedBody.messages.at(-1).content, /activityTargetToken:|mcp_start_activity|background: true/);
+  assert.doesNotMatch(normal.capturedBody.messages.at(-1).content, /activityTargetToken:|mcp_start_activity/);
+  assert.equal(fs.existsSync(path.join(stateDir, 'external_mcp', 'activity_target_tokens.json')), false);
 });
 
 test('sendChatToHermesGateway uses compact temporal context for plain messages', async () => {
@@ -2165,16 +2236,17 @@ test('provider usage telemetry records token and cache counters when present', a
   assert.equal(payload.possible_server_session_accumulation, false);
 });
 
-test('provider usage telemetry flags server-side session accumulation', async () => {
+test('provider usage telemetry flags server-side session accumulation', async (t) => {
   const logs = [];
   const warns = [];
-  const stateDir = tempGatewayStateDir('hermes-gateway-auto-soft-reset-');
+  const isolatedEnv = tempGatewayEnv(t, 'hermes-gateway-auto-soft-reset-');
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const env = {
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_LITE_SOFT_RESET_ENABLED: 'true',
     HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
   };
@@ -2397,14 +2469,15 @@ test('context injection does not truncate current user message', async () => {
   assert.ok(!JSON.stringify(telemetry).includes('CURRENT-USER-START'));
 });
 
-test('soft reset pending digest is injected once into lite resume request and then consumed', async () => {
-  const stateDir = tempGatewayStateDir();
+test('soft reset pending digest is injected once into lite resume request and then consumed', async (t) => {
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const env = {
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_LITE_SOFT_RESET_ENABLED: 'true',
     HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
   };
@@ -2444,14 +2517,15 @@ test('soft reset pending digest is injected once into lite resume request and th
   assert.equal(state.pendingDigestId, '');
 });
 
-test('soft reset pending digest is not consumed when provider request fails', async () => {
-  const stateDir = tempGatewayStateDir();
+test('soft reset pending digest is not consumed when provider request fails', async (t) => {
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const env = {
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_LITE_SOFT_RESET_ENABLED: 'true',
     HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
   };
@@ -2479,8 +2553,9 @@ test('soft reset pending digest is not consumed when provider request fails', as
   assert.equal(state.digests[0].consumed, false);
 });
 
-test('soft reset pending digest does not affect full profile requests', async () => {
-  const stateDir = tempGatewayStateDir();
+test('soft reset pending digest does not affect full profile requests', async (t) => {
+  const isolatedEnv = tempGatewayEnv(t);
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const env = {
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
@@ -2488,7 +2563,7 @@ test('soft reset pending digest does not affect full profile requests', async ()
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CAPABILITY_MODE: 'full',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     HERMES_LITE_SOFT_RESET_ENABLED: 'true',
     HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
   };

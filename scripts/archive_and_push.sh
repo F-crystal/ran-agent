@@ -131,7 +131,7 @@ parse_args() {
 }
 
 repo_has_git() {
-  [ -d "$ROOT_DIR/.git" ]
+  git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1
 }
 
 ensure_git_repo() {
@@ -161,7 +161,7 @@ current_branch_name() {
 
 ensure_clean_worktree_for_checkout() {
   local status
-  status="$(git -C "$ROOT_DIR" status --porcelain)"
+  status="$(git -C "$ROOT_DIR" status --porcelain --untracked-files=all | awk '$2 !~ /^\.agents\/task-locks\//')"
   [ -z "$status" ] || die "working tree still has unstaged/untracked changes; commit or clean them before switching branches"
 }
 

@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 import {
   createExternalMcpActivityTargetToken,
@@ -15,6 +16,14 @@ import {
 
 const execFileAsync = promisify(execFile);
 const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
+const TRUSTED_RUNTIME_TOOL_NAMES = new Set([
+  'mcp_call',
+  'mcp_open_session',
+  'mcp_close_session',
+  'mcp_start_activity',
+  'mcp_stop',
+  'mcp_explain_policy',
+]);
 
 function safeManifest() {
   return {
@@ -37,7 +46,10 @@ async function callTool(name, args = {}, options = {}) {
   return await handleExternalMcpGatewayMcpRequest({
     method: 'tools/call',
     params: { name, arguments: args },
-  }, options);
+  }, {
+    ...options,
+    ...(TRUSTED_RUNTIME_TOOL_NAMES.has(name) ? { diagnosticMode: true } : {}),
+  });
 }
 
 test('external MCP gateway exposes one stable tool surface', () => {
@@ -48,19 +60,32 @@ test('external MCP gateway exposes one stable tool surface', () => {
     'mcp_enable_server',
     'mcp_list_enabled',
     'mcp_list_tools',
-    'mcp_call',
-    'mcp_open_session',
-    'mcp_close_session',
-    'mcp_start_activity',
-    'mcp_stop',
-    'mcp_explain_policy',
   ]);
-  const callToolSchema = tools.find((tool) => tool.name === 'mcp_call')?.inputSchema;
-  const explainToolSchema = tools.find((tool) => tool.name === 'mcp_explain_policy')?.inputSchema;
+  assert.deepEqual(
+    buildExternalMcpGatewayTools({ diagnosticMode: true }).map((tool) => tool.name),
+    [
+      'mcp_catalog_search',
+      'mcp_probe_server',
+      'mcp_enable_server',
+      'mcp_list_enabled',
+      'mcp_list_tools',
+      'mcp_call',
+      'mcp_open_session',
+      'mcp_close_session',
+      'mcp_start_activity',
+      'mcp_stop',
+      'mcp_explain_policy',
+    ],
+  );
+  const diagnosticTools = buildExternalMcpGatewayTools({ diagnosticMode: true });
+  const callToolSchema = diagnosticTools.find((tool) => tool.name === 'mcp_call')?.inputSchema;
+  const explainToolSchema = diagnosticTools.find((tool) => tool.name === 'mcp_explain_policy')?.inputSchema;
   assert.ok(callToolSchema?.properties?.requestId);
   assert.ok(callToolSchema?.properties?.watchScope);
   assert.ok(callToolSchema?.properties?.topicKey);
   assert.ok(explainToolSchema?.properties?.profile?.enum?.includes('life'));
+  const probeToolSchema = diagnosticTools.find((tool) => tool.name === 'mcp_probe_server')?.inputSchema;
+  assert.deepEqual(probeToolSchema?.properties?.activityKind?.enum, ['game', 'forum', 'browser', 'api', 'embodied', 'other']);
 });
 
 test('external MCP gateway initialize works while source profile calls stay disabled by default', async () => {
@@ -69,9 +94,41 @@ test('external MCP gateway initialize works while source profile calls stay disa
   const denied = await callTool('mcp_list_enabled', {}, { env: {} });
 
   assert.equal(init.serverInfo.name, 'ran-agent-external-mcp-gateway');
-  assert.equal(tools.tools.length, 11);
+  assert.equal(tools.tools.length, 5);
   assert.equal(denied.isError, true);
   assert.equal(denied.structuredContent.error_code, 'EXTERNAL_MCP_GATEWAY_DISABLED');
+});
+
+test('normal Hermes tool discovery exposes only discovery and inventory, never raw trusted runtime controls', async (t) => {
+  const env = tempGatewayEnv(t);
+  const listed = await handleExternalMcpGatewayMcpRequest({ method: 'tools/list', params: {} }, {
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+  });
+  assert.deepEqual(listed.tools.map((tool) => tool.name), [
+    'mcp_catalog_search',
+    'mcp_probe_server',
+    'mcp_enable_server',
+    'mcp_list_enabled',
+    'mcp_list_tools',
+  ]);
+  for (const name of TRUSTED_RUNTIME_TOOL_NAMES) {
+    const denied = await handleExternalMcpGatewayMcpRequest({
+      method: 'tools/call',
+      params: {
+        name,
+        diagnosticMode: true,
+        arguments: {
+          globalUserId: 'forged-user',
+          sessionId: 'forged-session',
+          activityId: 'forged-activity',
+          profile: 'owner_full',
+        },
+      },
+    }, { env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' } });
+    assert.equal(denied.isError, true, name);
+    assert.equal(denied.structuredContent.error_code, 'EXTERNAL_MCP_TRUSTED_RUNTIME_REQUIRED', name);
+  }
+  assert.deepEqual(fs.readdirSync(env.RAN_AGENT_STATE_DIR), []);
 });
 
 test('external MCP gateway lists normalized enabled registry entries only when enabled', async () => {
@@ -123,13 +180,14 @@ test('external MCP explain accepts life as a non-security profile alias', async 
   assert.equal(result.structuredContent.policy.decision, 'allow');
 });
 
-test('external MCP gateway opens observe sessions through the stable surface', async () => {
+test('external MCP gateway opens observe sessions through the stable surface', async (t) => {
+  const env = tempGatewayEnv(t);
   const result = await callTool('mcp_open_session', {
     globalUserId: 'user:ran',
     serverId: 'forum.example',
     mode: 'observe',
   }, {
-    env: { EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
+    env: { ...env, EXTERNAL_MCP_GATEWAY_ENABLED: 'true' },
     registry: [safeManifest()],
   });
 
@@ -756,7 +814,16 @@ test('start_external_mcp_gateway.sh initialize exits after one response', async 
   const { stdout } = await execFileAsync(
     'bash',
     ['scripts/start_external_mcp_gateway.sh', 'initialize'],
-    { cwd: PROJECT_ROOT, timeout: 1500 }
+    {
+      cwd: PROJECT_ROOT,
+      timeout: 1500,
+      env: {
+        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        NODE_ENV: 'test',
+        RAN_AGENT_SKIP_ENV_FILE_LOAD: '1',
+        EXTERNAL_MCP_GATEWAY_NODE_BIN: process.execPath,
+      },
+    }
   );
 
   const response = JSON.parse(stdout.trim());
@@ -771,7 +838,10 @@ test('start_external_mcp_gateway.sh keeps tool calls disabled despite stale env 
       cwd: PROJECT_ROOT,
       timeout: 1500,
       env: {
-        ...process.env,
+        PATH: `${path.dirname(process.execPath)}:/usr/bin:/bin`,
+        NODE_ENV: 'test',
+        RAN_AGENT_SKIP_ENV_FILE_LOAD: '1',
+        EXTERNAL_MCP_GATEWAY_NODE_BIN: process.execPath,
         EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
         EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
         EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE: '',
@@ -786,7 +856,5 @@ test('start_external_mcp_gateway.sh keeps tool calls disabled despite stale env 
 });
 
 function tempGatewayEnv(t) {
-  const root = fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'test-external-mcp-gateway-'));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  return { RAN_AGENT_STATE_DIR: root };
+  return createIsolatedTestEnv(t, {}, 'external-mcp-gateway-');
 }

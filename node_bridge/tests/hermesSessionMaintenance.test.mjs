@@ -9,20 +9,13 @@ import {
   readHermesLiteMaintenanceState,
   runHermesLiteSoftReset,
 } from '../src/hermesSessionMaintenance.mjs';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
-const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
-
-function tempStateDir(prefix = 'hermes-maintenance-') {
-  const base = path.join(PROJECT_ROOT, '.ran_agent_state');
-  fs.mkdirSync(base, { recursive: true });
-  return fs.mkdtempSync(path.join(base, prefix));
-}
-
-function maintenanceEnv(overrides = {}) {
+function maintenanceEnv(t, overrides = {}) {
+  const env = createIsolatedTestEnv(t, overrides, 'ran-agent-hermes-maintenance-');
   return {
-    ...process.env,
-    RAN_AGENT_STATE_DIR: tempStateDir(),
-    RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(tempStateDir('timeline-'), 'global.jsonl'),
+    ...env,
+    RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(env.RAN_AGENT_STATE_DIR, 'global.jsonl'),
     HERMES_LITE_SOFT_RESET_ENABLED: 'true',
     HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
     ...overrides,
@@ -37,8 +30,8 @@ const sampleRecords = [
   { role: 'user', text: '已结束：不要继续携带小红书旧链接调试上下文', created_at: 5 },
 ];
 
-test('soft reset disabled is a no-op and does not create state file', () => {
-  const env = maintenanceEnv({ HERMES_LITE_SOFT_RESET_ENABLED: 'false' });
+test('soft reset disabled is a no-op and does not create state file', (t) => {
+  const env = maintenanceEnv(t, { HERMES_LITE_SOFT_RESET_ENABLED: 'false' });
   const result = runHermesLiteSoftReset({ action: 'apply', env, timelineRecords: sampleRecords, now: new Date('2026-06-14T00:00:00Z') });
 
   assert.equal(result.ok, true);
@@ -47,8 +40,8 @@ test('soft reset disabled is a no-op and does not create state file', () => {
   assert.equal(fs.existsSync(getHermesLiteSoftResetConfig(env).stateFile), false);
 });
 
-test('dry-run reports planned rotation without writing session pointer', () => {
-  const env = maintenanceEnv({ HERMES_LITE_SOFT_RESET_DRY_RUN: 'true' });
+test('dry-run reports planned rotation without writing session pointer', (t) => {
+  const env = maintenanceEnv(t, { HERMES_LITE_SOFT_RESET_DRY_RUN: 'true' });
   const result = runHermesLiteSoftReset({ action: 'apply', env, timelineRecords: sampleRecords, now: new Date('2026-06-14T00:00:00Z') });
 
   assert.equal(result.ok, true);
@@ -58,8 +51,8 @@ test('dry-run reports planned rotation without writing session pointer', () => {
   assert.match(result.digest.digestId, /^[a-f0-9]{16}$/);
 });
 
-test('apply writes bounded digest and new lite session pointer', () => {
-  const env = maintenanceEnv();
+test('apply writes bounded digest and new lite session pointer', (t) => {
+  const env = maintenanceEnv(t);
   const result = runHermesLiteSoftReset({ action: 'apply', env, timelineRecords: sampleRecords, now: new Date('2026-06-14T00:00:00Z'), reason: 'nightly' });
   const config = getHermesLiteSoftResetConfig(env);
   const state = readHermesLiteMaintenanceState(config);
@@ -94,8 +87,8 @@ test('digest is bounded, structured, and avoids large raw user text', () => {
   assert.equal(JSON.stringify(digest).includes('敏感原文'.repeat(20)), false);
 });
 
-test('rollback-last restores previous lite session pointer without deleting digest', () => {
-  const env = maintenanceEnv();
+test('rollback-last restores previous lite session pointer without deleting digest', (t) => {
+  const env = maintenanceEnv(t);
   const first = runHermesLiteSoftReset({ action: 'apply', env, timelineRecords: sampleRecords, now: new Date('2026-06-14T00:00:00Z') });
   const second = runHermesLiteSoftReset({ action: 'apply', env, timelineRecords: sampleRecords, now: new Date('2026-06-15T00:00:00Z') });
   const config = getHermesLiteSoftResetConfig(env);
@@ -108,4 +101,55 @@ test('rollback-last restores previous lite session pointer without deleting dige
   assert.equal(rollback.rolledBack, true);
   assert.equal(state.currentSessionNonce, first.newSessionNonce);
   assert.equal(fs.existsSync(secondDigestPath), true);
+});
+
+test('soft reset revisions reject stale compare-and-swap without changing state', (t) => {
+  const env = maintenanceEnv(t);
+  const first = runHermesLiteSoftReset({
+    action: 'apply',
+    expectedRevision: 0,
+    env,
+    timelineRecords: sampleRecords,
+    now: new Date('2026-06-14T00:00:00Z'),
+  });
+  assert.equal(first.revision, 1);
+
+  const stale = runHermesLiteSoftReset({
+    action: 'apply',
+    expectedRevision: 0,
+    env,
+    timelineRecords: sampleRecords,
+    now: new Date('2026-06-15T00:00:00Z'),
+  });
+  assert.deepEqual(stale, {
+    ok: false,
+    error: 'stale_revision',
+    expectedRevision: 0,
+    currentRevision: 1,
+  });
+  assert.equal(readHermesLiteMaintenanceState(env).revision, 1);
+});
+
+test('legacy maintenance state without revision remains compatible and upgrades on write', (t) => {
+  const env = maintenanceEnv(t);
+  const config = getHermesLiteSoftResetConfig(env);
+  fs.mkdirSync(path.dirname(config.stateFile), { recursive: true });
+  fs.writeFileSync(config.stateFile, JSON.stringify({
+    version: 1,
+    profile: 'lite',
+    currentSessionNonce: 'legacy-lite-session',
+    digests: [],
+    rollbackStack: [],
+  }));
+
+  assert.equal(readHermesLiteMaintenanceState(config).revision, 0);
+  const result = runHermesLiteSoftReset({
+    action: 'apply',
+    expectedRevision: 0,
+    env,
+    timelineRecords: sampleRecords,
+    now: new Date('2026-06-14T00:00:00Z'),
+  });
+  assert.equal(result.revision, 1);
+  assert.equal(readHermesLiteMaintenanceState(config).revision, 1);
 });

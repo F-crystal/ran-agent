@@ -6,7 +6,7 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
 
-if [[ "${EXTERNAL_MCP_GATEWAY_SKIP_ENV_FILES:-false}" != "true" ]]; then
+if [[ ( "${NODE_ENV:-}" != "test" || "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ) && "${EXTERNAL_MCP_GATEWAY_SKIP_ENV_FILES:-false}" != "true" ]]; then
   if [ -f "$ENV_FILE" ]; then
     set -a
     # shellcheck disable=SC1090

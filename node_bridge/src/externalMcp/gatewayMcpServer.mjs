@@ -48,8 +48,18 @@ const TOOL_NAMES = [
   'mcp_stop',
   'mcp_explain_policy',
 ];
+// These controls receive identity, session, activity, or policy authority from
+// the trusted bridge/runtime. They are diagnostic-only; a model cannot mint it.
+const TRUSTED_RUNTIME_TOOL_NAMES = new Set([
+  'mcp_call',
+  'mcp_open_session',
+  'mcp_close_session',
+  'mcp_start_activity',
+  'mcp_stop',
+  'mcp_explain_policy',
+]);
 
-export function buildExternalMcpGatewayTools() {
+export function buildExternalMcpGatewayTools({ diagnosticMode = false } = {}) {
   return [
     tool('mcp_catalog_search', 'MCP Catalog Search', 'Search reviewed external MCP registry entries. Does not execute external MCP tools.', {
       query: str(),
@@ -60,14 +70,14 @@ export function buildExternalMcpGatewayTools() {
       title: str(),
       url: str(),
       transport: str(['streamable-http', 'http', 'sse']),
-      activityKind: str(['game', 'forum', 'browser', 'api']),
+      activityKind: str(['game', 'forum', 'browser', 'api', 'embodied', 'other']),
       source: str(),
     }, ['serverId', 'url']),
     tool('mcp_enable_server', 'MCP Enable Server', 'Run the admission state machine for a probed candidate. Unknown MCPs are never permanently enabled by this tool alone.', {
       serverId: str(),
       url: str(),
       transport: str(['streamable-http', 'http', 'sse']),
-      activityKind: str(['game', 'forum', 'browser', 'api']),
+      activityKind: str(['game', 'forum', 'browser', 'api', 'embodied', 'other']),
     }),
     tool('mcp_list_enabled', 'MCP List Enabled', 'List enabled external MCP servers with normalized safe tool summaries.', {}),
     tool('mcp_list_tools', 'MCP List Tools', 'List normalized tools for one enabled external MCP server.', {
@@ -121,7 +131,7 @@ export function buildExternalMcpGatewayTools() {
       sessionMode: str(['observe', 'interactive', 'write']),
       trigger: str(['user_turn', 'proactive', 'activity']),
     }, ['serverId', 'toolName']),
-  ];
+  ].filter((item) => diagnosticMode === true || !TRUSTED_RUNTIME_TOOL_NAMES.has(item.name));
 }
 
 export async function handleExternalMcpGatewayMcpRequest(request, options = {}) {
@@ -134,13 +144,16 @@ export async function handleExternalMcpGatewayMcpRequest(request, options = {}) 
     };
   }
   if (method === 'tools/list') {
-    return { tools: buildExternalMcpGatewayTools() };
+    return { tools: buildExternalMcpGatewayTools({ diagnosticMode: options.diagnosticMode === true }) };
   }
   if (method === 'tools/call') {
     const params = request?.params || {};
     const name = String(params.name || '');
     const args = params.arguments || {};
     if (!TOOL_NAMES.includes(name)) return errorResult('unknown external MCP gateway tool', 'EXTERNAL_MCP_UNKNOWN_TOOL');
+    if (TRUSTED_RUNTIME_TOOL_NAMES.has(name) && options.diagnosticMode !== true) {
+      return errorResult('external MCP runtime authority is supplied only by the trusted bridge', 'EXTERNAL_MCP_TRUSTED_RUNTIME_REQUIRED');
+    }
     if (!isGatewayEnabled(options.env || process.env)) return errorResult('external MCP gateway is disabled', 'EXTERNAL_MCP_GATEWAY_DISABLED');
     try {
       return await dispatchTool(name, args, options);

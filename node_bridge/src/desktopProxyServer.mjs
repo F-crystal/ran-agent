@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { handleIncomingMessage } from './channelHub.mjs';
 
 export function getDesktopProxyConfig(env = process.env) {
@@ -16,6 +17,9 @@ export function createDesktopProxyServer(options = {}) {
   const config = { ...getDesktopProxyConfig(env), ...(options.config || {}) };
   const channelHub = options.channelHub || handleIncomingMessage;
   async function handleRequest(req) {
+    if (!hasValidBinding(config)) {
+      return jsonResponse(config.apiKey ? 403 : 401, { error: { message: config.apiKey ? 'Desktop proxy binding is not allowed' : 'Authentication is required', type: 'authentication_error' } });
+    }
     if (!isAuthorized(req, config)) {
       return jsonResponse(401, { error: { message: 'Unauthorized', type: 'authentication_error' } });
     }
@@ -35,8 +39,7 @@ export function createDesktopProxyServer(options = {}) {
       if (body.stream === true) {
         return jsonResponse(400, { error: { message: 'stream=true is not supported by ran-agent desktop proxy yet', type: 'invalid_request_error' } });
       }
-      const clientId = firstHeader(req.headers, 'x-ran-agent-client-id') || config.defaultClientId;
-      const conversationId = firstHeader(req.headers, 'x-ran-agent-conversation-id') || clientId;
+      const identity = authenticatedDesktopIdentity(config);
       const messages = Array.isArray(body.messages) ? body.messages : [];
       const lastUserIndex = messages.map((message) => message.role).lastIndexOf('user');
       const current = lastUserIndex >= 0 ? messages[lastUserIndex] : messages.at(-1);
@@ -45,8 +48,8 @@ export function createDesktopProxyServer(options = {}) {
         id: firstHeader(req.headers, 'x-request-id') || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         platform: 'desktop',
         channel_type: 'desktop',
-        conversation_id: conversationId,
-        sender_id: clientId,
+        conversation_id: identity,
+        sender_id: identity,
         text: extractOpenAiText(current?.content),
         prior_messages: priorMessages.map((message) => ({ role: message.role, content: extractOpenAiText(message.content) })).filter((message) => message.content),
         raw_event_meta: {
@@ -55,7 +58,12 @@ export function createDesktopProxyServer(options = {}) {
         },
         created_at: Date.now(),
       };
-      const reply = await channelHub(normalized, { env, logger: options.logger || console });
+      const reply = await channelHub(normalized, {
+        env,
+        logger: options.logger || console,
+        outbox: options.outbox,
+        ...(options.outbox ? { adapter: createDesktopResponseAdapter() } : {}),
+      });
       return jsonResponse(200, openAiResponseFromReply(reply, { model: body.model || 'ran-agent' }));
     }
     return jsonResponse(404, { error: { message: 'Not found', type: 'invalid_request_error' } });
@@ -69,6 +77,10 @@ export function startDesktopProxyServer(options = {}) {
   const logger = options.logger || console;
   if (!config.enabled) {
     logger.info?.('[desktop-proxy] disabled');
+    return null;
+  }
+  if (!hasValidBinding(config)) {
+    logger.error?.('[desktop-proxy] refused invalid authentication binding');
     return null;
   }
   const app = createDesktopProxyServer({ ...options, config });
@@ -113,9 +125,39 @@ function jsonResponse(status, body) {
 }
 
 function isAuthorized(req, config) {
-  if (!config.apiKey) return true;
+  if (!config.apiKey) return false;
   const header = firstHeader(req.headers, 'authorization');
-  return header === `Bearer ${config.apiKey}`;
+  const expected = Buffer.from(`Bearer ${config.apiKey}`);
+  const actual = Buffer.from(header);
+  return actual.length === expected.length && timingSafeEqual(actual, expected);
+}
+
+function hasValidBinding(config) {
+  if (!config.apiKey) return false;
+  return isLoopbackHost(config.host) || Buffer.byteLength(config.apiKey, 'utf8') >= 32;
+}
+
+function isLoopbackHost(host) {
+  const value = String(host || '').trim().toLowerCase();
+  return value === 'localhost' || value === '::1' || value === '127.0.0.1' || value.startsWith('127.');
+}
+
+function authenticatedDesktopIdentity(config) {
+  return `desktop:${createHash('sha256').update(config.apiKey, 'utf8').digest('hex').slice(0, 32)}`;
+}
+
+function createDesktopResponseAdapter() {
+  return {
+    async sendReply() {
+      // HTTP bytes are written only after ChannelHub returns.  Without a finish
+      // callback we retain an honest ambiguous delivery instead of a false sent.
+      return {
+        textStatus: 'ambiguous',
+        attachments: [],
+        adapterReceiptRef: 'desktop:http-response-boundary',
+      };
+    },
+  };
 }
 
 async function readJsonBody(req) {

@@ -5,16 +5,57 @@ from __future__ import annotations
 import json
 import logging
 from datetime import datetime, timedelta
+from collections.abc import Callable
 
 from personal_agent.ai_daily_digest import run_ai_daily_digest
 from personal_agent.config import AppConfig
 from personal_agent.db import Database
+from personal_agent.durable_jobs import DurableJobDispatcher, DurableJobOutcome, DurableJobRecord
 from personal_agent.knowledge_agent import KnowledgeAgent
 from personal_agent.life_loop import LifeLoop, serialize_opportunities
 from personal_agent.night_cycle import NightCycle
 from personal_agent.reflection_specialist import ReflectionSpecialist
 from personal_agent.service import PersonalAgentService
 from personal_agent.todo_manager import TodoManager
+
+
+def durable_job_dispatch_job(dispatcher: DurableJobDispatcher) -> list[DurableJobRecord]:
+    """Wake the SQLite-backed durable dispatcher without owning job truth."""
+
+    return dispatcher.dispatch_due()
+
+
+def core_durable_job_kind_handlers(
+    *,
+    message_service: PersonalAgentService,
+) -> dict[str, Callable[[DurableJobRecord], DurableJobOutcome]]:
+    """Return the small, restart-safe set of Core jobs that can be accepted.
+
+    Every handler owns a real local effect.  Unsupported future work is not
+    represented by a job, so the reply gate has no receipt to turn into a
+    promise.
+    """
+
+    def memory_maintenance(_record: DurableJobRecord) -> DurableJobOutcome:
+        message_service.get_memory_specialist().execute_background_maintenance()
+        return DurableJobOutcome.terminal("completed", "job:memory-maintenance")
+
+    def reflection(_record: DurableJobRecord) -> DurableJobOutcome:
+        message_service.run_reflection()
+        return DurableJobOutcome.terminal("completed", "job:reflection")
+
+    def night_cycle(_record: DurableJobRecord) -> DurableJobOutcome:
+        result = message_service.run_night_cycle_state()
+        summary_date = str(result.get("summary_date") or "").strip()
+        if not summary_date:
+            return DurableJobOutcome.terminal("blocked", "job:night-cycle-unconfirmed")
+        return DurableJobOutcome.terminal("completed", f"job:night-cycle:{summary_date}")
+
+    return {
+        "core.memory-maintenance": memory_maintenance,
+        "core.reflection": reflection,
+        "core.night-cycle": night_cycle,
+    }
 
 
 def brain_loop_job(database: Database, logger: logging.Logger) -> None:

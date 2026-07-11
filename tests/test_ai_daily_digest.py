@@ -27,7 +27,7 @@ class StubDigestOutboundClient:
 
     def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
         self.sent_facts.append(facts)
-        return {"ok": True}
+        return {"ok": True, "delivery_status": "sent", "outbox_id": "outbox:test-digest"}
 
 
 class StubHttpResponse:
@@ -111,7 +111,7 @@ class AiDailyDigestTest(unittest.TestCase):
             "sent",
         )
 
-    def test_run_ai_daily_digest_skips_without_throwing_when_facts_unavailable(self) -> None:
+    def test_run_ai_daily_digest_sends_an_honest_partial_when_facts_unavailable(self) -> None:
         outbound = StubDigestOutboundClient()
 
         def failing_loader() -> str:
@@ -126,11 +126,35 @@ class AiDailyDigestTest(unittest.TestCase):
             facts_loader=failing_loader,
         )
 
-        self.assertFalse(result["sent"])
-        self.assertEqual(result["reason"], "facts_unavailable")
-        self.assertEqual(outbound.sent_facts, [])
+        self.assertTrue(result["sent"])
+        self.assertTrue(result["partial"])
+        self.assertIn("事实材料暂时不可用", outbound.sent_facts[0])
         sent_key = f"{AI_DAILY_DIGEST_SENT_PREFIX}2026-07-09"
-        self.assertIsNone(self.database.get_handoff_value(sent_key))
+        self.assertEqual(
+            json.loads(self.database.get_handoff_value(sent_key) or "{}")["status"],
+            "sent",
+        )
+
+    def test_run_ai_daily_digest_does_not_mark_sent_without_delivery_commit(self) -> None:
+        class UnconfirmedOutbound:
+            def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
+                del facts
+                return {"ok": True}
+
+        result = run_ai_daily_digest(
+            config=self.config,
+            database=self.database,
+            outbound_client=UnconfirmedOutbound(),
+            logger=self.logger,
+            now_local=datetime(2026, 7, 10, 8, 0, 0),
+            facts_loader=lambda: "facts",
+        )
+
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["reason"], "delivery_unconfirmed")
+        self.assertIsNone(
+            self.database.get_handoff_value(f"{AI_DAILY_DIGEST_SENT_PREFIX}2026-07-10")
+        )
 
     def test_load_aihot_facts_falls_back_after_daily_dns_failure(self) -> None:
         calls: list[str] = []

@@ -9,7 +9,7 @@ import dataclasses
 from datetime import datetime
 from pathlib import Path
 
-from personal_agent.config import AppConfig
+from conftest import make_test_config
 from personal_agent.db import Database
 from personal_agent.interfaces.chat import IncomingMessage, OutgoingMessage
 from personal_agent.interfaces.model import ModelRequest, ModelResponse, PlaceholderModelClient
@@ -103,14 +103,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base_dir = Path(self.temp_dir.name)
-        self.config = AppConfig(
-            base_dir=base_dir,
-            data_dir=base_dir / "data",
-            logs_dir=base_dir / "logs",
-            vault_dir=base_dir / "vault",
-            database_path=base_dir / "data" / "personal_agent.db",
-            log_file_path=base_dir / "logs" / "personal_agent.log",
-        )
+        self.config = make_test_config(base_dir)
         self.logger = build_test_logger()
         self.database = Database(self.config, self.logger)
         self.database.initialize()
@@ -798,13 +791,8 @@ class PersonalAgentServiceTest(unittest.TestCase):
         self.assertEqual(len(model_client.requests), 2)
 
     def test_reviewer_can_be_disabled_without_breaking_main_flow(self) -> None:
-        disabled_config = AppConfig(
-            base_dir=self.config.base_dir,
-            data_dir=self.config.data_dir,
-            logs_dir=self.config.logs_dir,
-            vault_dir=self.config.vault_dir,
-            database_path=self.config.database_path,
-            log_file_path=self.config.log_file_path,
+        disabled_config = dataclasses.replace(
+            self.config,
             reviewer_enabled=False,
         )
         model_client = SequentialModelClient(

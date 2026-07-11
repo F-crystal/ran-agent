@@ -91,6 +91,11 @@ class NightCycle:
             trigger="night_cycle",
             now_local=current_local,
         )
+        knowledge_inbox_path = _resolve_final_knowledge_note_path(
+            vault_dir=self._config.vault_dir,
+            original_path=knowledge_inbox_path,
+            logger=self._logger,
+        )
         summary_output_path = _write_night_cycle_artifact(
             output_dir=self._config.night_cycles_dir,
             summary_date=summary_date,
@@ -128,6 +133,39 @@ class NightCycle:
             knowledge_status=knowledge_result.status,
             persona_proposal_path=str(persona_result.proposal_json_path) if persona_result else "",
         )
+
+
+def _resolve_final_knowledge_note_path(
+    *,
+    vault_dir: Path,
+    original_path: str,
+    logger: logging.Logger,
+) -> str:
+    """Resolve one post-KnowledgeAgent note path without trusting moved or linked paths."""
+
+    canonical_vault = vault_dir.resolve()
+    basename = Path(original_path).name
+    candidates: list[Path] = []
+
+    for candidate in canonical_vault.rglob(basename):
+        if candidate.is_symlink() or not candidate.is_file():
+            continue
+        relative = candidate.relative_to(canonical_vault)
+        if any((canonical_vault / parent).is_symlink() for parent in relative.parents):
+            continue
+        resolved = candidate.resolve()
+        if resolved.is_relative_to(canonical_vault):
+            candidates.append(resolved)
+
+    if len(candidates) == 1:
+        return str(candidates[0])
+
+    logger.warning(
+        "Knowledge note %s resolved to %d candidates inside canonical vault; storing empty path",
+        basename,
+        len(candidates),
+    )
+    return ""
 
 
 def _build_daily_summary(summary_date: str, rows: list[object]) -> str:

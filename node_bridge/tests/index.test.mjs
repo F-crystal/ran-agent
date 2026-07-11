@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import {
   InboundMergeCoordinator,
+  createExternalMcpRuntimeTransport,
   formatPendingMessagesForReply,
   isTransientWeixinStartError,
   mergeRequests,
@@ -12,6 +13,7 @@ import {
   buildAgent,
   isExternalMcpActivityRunnerEnabled,
   redactProxyUrlForLog,
+  submitExternalMcpCheckpoint,
   shouldRetryWeixinStartAttempt,
   startExternalMcpActivityRunnerLoop,
 } from '../src/index.mjs';
@@ -19,8 +21,104 @@ import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
 } from '../src/runtimeState.mjs';
+import { createDurableOutbox } from '../src/durableOutbox.mjs';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
-const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
+const INDEX_SOURCE = fs.readFileSync(new URL('../src/index.mjs', import.meta.url), 'utf8');
+
+test('main injects the shared runtime env into the outbound control server', () => {
+  assert.match(INDEX_SOURCE, /createOutboundServer\(\{\s*bot: proactiveBot,\s*logger: console,\s*env: runtimeEnv,?\s*\}\)/);
+});
+
+test('main creates and recovers one shared durable outbox before wiring live channel entries', () => {
+  assert.match(INDEX_SOURCE, /const durableOutbox = createDurableOutbox\(\{ env: runtimeEnv \}\)/);
+  assert.match(INDEX_SOURCE, /runtimeEnv\.durableOutbox = durableOutbox/);
+  assert.match(INDEX_SOURCE, /await durableOutbox\.recover\(\)/);
+  assert.match(INDEX_SOURCE, /startFeishuBridge\(\{ env: process\.env, logger: console, outbox: durableOutbox \}\)/);
+  assert.match(INDEX_SOURCE, /startDesktopProxyServer\(\{ env: process\.env, logger: console, outbox: durableOutbox \}\)/);
+});
+
+test('main starts the v2 external MCP runtime instead of the legacy activity runner loop', () => {
+  assert.match(INDEX_SOURCE, /createExternalMcpAutonomyRuntime\(\{\s*env: runtimeEnv,/);
+  assert.match(INDEX_SOURCE, /transport: createExternalMcpRuntimeTransport\(\{ env: runtimeEnv \}\)/);
+  assert.match(INDEX_SOURCE, /await externalMcpRuntime\.start\(\)/);
+  assert.match(INDEX_SOURCE, /externalMcpRuntime\.stop\(\)/);
+  assert.doesNotMatch(INDEX_SOURCE, /const activityRunner = startExternalMcpActivityRunnerLoop\(/);
+});
+
+test('runtime provider transport forwards only the selected manifest tool call after the bridge has authorized it', async () => {
+  let received = null;
+  const transport = createExternalMcpRuntimeTransport({
+    env: { TEST_ONLY: '1' },
+    executor: async (input, options) => {
+      received = { input, options };
+      return { ok: true, result: { content: [{ type: 'text', text: 'ok' }] } };
+    },
+  });
+
+  const result = await transport.call({
+    manifest: { id: 'configured-safe-mcp', transport: 'streamable-http', url: 'https://mcp.example.test/rpc' },
+    toolName: 'advance',
+    arguments: { step: 'north' },
+    upstreamSessionId: 'bridge-private-upstream-session',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(received.input.toolName, 'advance');
+  assert.deepEqual(received.input.arguments, { step: 'north' });
+  assert.equal(received.input.upstreamSessionId, 'bridge-private-upstream-session');
+  assert.equal(received.options.env.TEST_ONLY, '1');
+});
+
+test('runtime provider transport forwards the activity abort signal to the real executor', async () => {
+  let received = null;
+  const controller = new AbortController();
+  const transport = createExternalMcpRuntimeTransport({
+    executor: async (_input, options) => {
+      received = options;
+      return { ok: true };
+    },
+  });
+
+  await transport.call({
+    manifest: { id: 'configured-safe-mcp', transport: 'streamable-http', url: 'https://mcp.example.test/rpc' },
+    toolName: 'advance',
+    arguments: {},
+    signal: controller.signal,
+  });
+
+  assert.equal(received.signal, controller.signal);
+});
+
+test('external checkpoint uses the reply release gate before one durable outbox delivery', async () => {
+  const deliveries = [];
+  const result = await submitExternalMcpCheckpoint({
+    candidate: { status: 'ready' },
+    context: {
+      activityId: 'autonomy_checkpoint_1', checkpointDigest: 'a'.repeat(64), revision: 2,
+      notifyTarget: { platform: 'feishu', channelType: 'dm', conversationId: 'conversation-1', senderId: 'sender-1' },
+    },
+    replyBackend: {
+      async releaseExternalCheckpoint(input) {
+        assert.equal(input.context.activityId, 'autonomy_checkpoint_1');
+        return { replyText: 'A verified checkpoint.', suppressSend: false };
+      },
+    },
+    outbox: {
+      async deliver(input, options) {
+        deliveries.push(input);
+        assert.deepEqual(await options.send(), {
+          textStatus: 'sent', attachments: [], adapterReceiptRef: 'feishu:checkpoint',
+        });
+        return { delivery: 'sent' };
+      },
+    },
+    sendFeishu: async () => ({ adapterReceiptRef: 'feishu:checkpoint' }),
+  });
+
+  assert.equal(result.delivery, 'sent');
+  assert.equal(deliveries.length, 1);
+  assert.equal(deliveries[0].operationKey, `external-checkpoint:autonomy_checkpoint_1:${'a'.repeat(64)}`);
+});
 
 test('shouldRetryWeixinStartAttempt treats non-positive max retries as infinite', () => {
   assert.equal(shouldRetryWeixinStartAttempt(1, 0), true);
@@ -261,8 +359,9 @@ test('buildAgent extracts trusted audio media marker at WeChat SDK boundary', as
   });
 });
 
-test('buildAgent resolves sticker catalog media to WeChat SDK image payload', async () => {
-  const stateDir = fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'wechat-sticker-send-'));
+test('buildAgent resolves sticker catalog media to WeChat SDK image payload', async (t) => {
+  const isolatedEnv = createIsolatedTestEnv(t, {}, 'wechat-sticker-send-');
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const assetsDir = path.join(stateDir, 'stickers', 'assets');
   fs.mkdirSync(assetsDir, { recursive: true });
   fs.writeFileSync(path.join(assetsDir, 'stk_001.png'), 'fake png bytes');
@@ -281,7 +380,7 @@ test('buildAgent resolves sticker catalog media to WeChat SDK image payload', as
   const agent = buildAgent({
     logger: { log() {}, warn() {}, error() {} },
     env: {
-      RAN_AGENT_STATE_DIR: stateDir,
+      ...isolatedEnv,
       NODE_BRIDGE_MERGE_WINDOW_MS: '10',
       async handleWeChatTextMessage() {
         return {
@@ -315,8 +414,9 @@ test('buildAgent resolves sticker catalog media to WeChat SDK image payload', as
   });
 });
 
-test('buildAgent extracts RAN_MEDIA sticker marker at WeChat SDK boundary', async () => {
-  const stateDir = fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'wechat-sticker-marker-'));
+test('buildAgent extracts RAN_MEDIA sticker marker at WeChat SDK boundary', async (t) => {
+  const isolatedEnv = createIsolatedTestEnv(t, {}, 'wechat-sticker-marker-');
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const assetsDir = path.join(stateDir, 'stickers', 'assets');
   fs.mkdirSync(assetsDir, { recursive: true });
   fs.writeFileSync(path.join(assetsDir, 'stk_001.jpg'), 'fake jpg bytes');
@@ -335,7 +435,7 @@ test('buildAgent extracts RAN_MEDIA sticker marker at WeChat SDK boundary', asyn
   const agent = buildAgent({
     logger: { log() {}, warn() {}, error() {} },
     env: {
-      RAN_AGENT_STATE_DIR: stateDir,
+      ...isolatedEnv,
       NODE_BRIDGE_MERGE_WINDOW_MS: '10',
       async handleWeChatTextMessage() {
         return {
@@ -362,8 +462,9 @@ test('buildAgent extracts RAN_MEDIA sticker marker at WeChat SDK boundary', asyn
   });
 });
 
-test('buildAgent safely drops unresolved sticker media without exposing local paths', async () => {
+test('buildAgent safely drops unresolved sticker media without exposing local paths', async (t) => {
   const logs = [];
+  const isolatedEnv = createIsolatedTestEnv(t, {}, 'wechat-sticker-missing-');
   const agent = buildAgent({
     logger: {
       log(...args) { logs.push(args.join(' ')); },
@@ -371,7 +472,7 @@ test('buildAgent safely drops unresolved sticker media without exposing local pa
       error(...args) { logs.push(args.join(' ')); },
     },
     env: {
-      RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'wechat-sticker-missing-')),
+      ...isolatedEnv,
       NODE_BRIDGE_MERGE_WINDOW_MS: '10',
       async handleWeChatTextMessage() {
         return {
@@ -459,7 +560,35 @@ test('buildAgent keeps paragraph-separated replies in the synchronous response',
   assert.deepEqual(followUps, null);
 });
 
-test('buildAgent quick-acks slow replies and sends final text asynchronously', async () => {
+test('buildAgent routes WeChat follow-ups through the shared outbox as ambiguous when the SDK has no receipt contract', async (t) => {
+  const env = createIsolatedTestEnv(t, { NODE_BRIDGE_MERGE_WINDOW_MS: '0', NODE_BRIDGE_FOLLOW_UP_DELAY_MS: '0' }, 'follow-up-outbox-');
+  const outbox = createDurableOutbox({ env });
+  const sent = [];
+  const agent = buildAgent({
+    logger: { log() {}, warn() {}, error() {} },
+    env: {
+      ...env,
+      durableOutbox: outbox,
+      async handleWeChatTextMessage() {
+        return { replyText: '主回复', followUpMessages: ['后续消息'] };
+      },
+      async sendFollowUpMessages(messages) {
+        sent.push(...messages);
+      },
+    },
+  });
+
+  const response = await agent.chat({ text: 'hello', conversationId: 'wx-follow-up' });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+
+  assert.deepEqual(response, { text: '主回复' });
+  assert.deepEqual(sent, ['后续消息']);
+  assert.equal(outbox.list().length, 1);
+  assert.equal(outbox.list()[0].delivery, 'ambiguous');
+  assert.equal(outbox.list()[0].timelineProjection, 'pending');
+});
+
+test('buildAgent waits for a durable final reply instead of racing a quick ack', async () => {
   let resolveReply;
   const finalMessages = [];
   const agent = buildAgent({
@@ -478,16 +607,26 @@ test('buildAgent quick-acks slow replies and sends final text asynchronously', a
     },
   });
 
-  const result = await agent.chat({
+  let settled = false;
+  const resultPromise = agent.chat({
     text: '需要很久',
     conversationId: 'wx-slow-ack',
+    media: [{ filePath: '/tmp/test.png', type: 'image', mimeType: 'image/png' }],
+  }).then((value) => {
+    settled = true;
+    return value;
   });
-  assert.deepEqual(result, { text: '处理中，稍后发结果。' });
+  for (let attempt = 0; attempt < 30 && typeof resolveReply !== 'function'; attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.equal(typeof resolveReply, 'function');
+  assert.equal(settled, false);
 
   resolveReply({ replyText: '最终结果', followUpMessages: [] });
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  const result = await resultPromise;
 
-  assert.deepEqual(finalMessages, ['最终结果']);
+  assert.deepEqual(result, { text: '最终结果' });
+  assert.deepEqual(finalMessages, []);
 });
 
 test('buildAgent does not quick-ack fast replies', async () => {
@@ -517,12 +656,10 @@ test('buildAgent does not quick-ack fast replies', async () => {
   assert.deepEqual(finalMessages, []);
 });
 
-test('buildAgent does not flush pending proactive messages even if legacy proactive delivery is enabled', async () => {
-  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
-  fs.mkdirSync(stateBaseDir, { recursive: true });
-  const stateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-pending-disabled-'));
+test('buildAgent does not flush pending proactive messages even if legacy proactive delivery is enabled', async (t) => {
+  const isolatedEnv = createIsolatedTestEnv(t, {}, 'node-bridge-pending-disabled-');
   const env = {
-    RAN_AGENT_STATE_DIR: stateDir,
+    ...isolatedEnv,
     PERSONAL_AGENT_PROACTIVE_ENABLED: 'true',
     NODE_BRIDGE_MERGE_WINDOW_MS: '10',
     async handleWeChatTextMessage() {

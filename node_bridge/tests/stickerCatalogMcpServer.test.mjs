@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { promisify } from 'node:util';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 import { saveStickersFromInbox } from '../src/stickerCatalog.mjs';
 import {
@@ -22,20 +23,10 @@ function pngBytes() {
 }
 
 function tempEnv(t) {
-  const base = path.join(process.cwd(), '.tmp-test-sticker-mcp');
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, 'case-'));
-  t.after(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-    try {
-      fs.rmdirSync(base);
-    } catch {
-      // Other tests may still own sibling temp dirs.
-    }
-  });
+  const env = createIsolatedTestEnv(t, {}, 'sticker-catalog-mcp-', '.ran_agent_state');
   return {
-    RAN_AGENT_ROOT: root,
-    RAN_AGENT_STATE_DIR: path.join(root, '.ran_agent_state'),
+    ...env,
+    RAN_AGENT_ROOT: path.dirname(env.RAN_AGENT_STATE_DIR),
   };
 }
 

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import datetime
 from time import perf_counter
@@ -31,9 +33,11 @@ from personal_agent.knowledge_agent import KnowledgeAgent, load_knowledge_state
 from personal_agent.knowledge_retriever import KnowledgeRetriever
 from personal_agent.life_loop import LifeLoop, LifeOpportunity
 from personal_agent.memory_specialist import DisabledMemoryExtractor, MemorySpecialist
+from personal_agent.memory import extract_repeated_learning_candidates
 from personal_agent.night_cycle import NightCycle
 from personal_agent.orchestrator_agent import OrchestratorAgent
 from personal_agent.outbound_channel import NodeBridgeOutboundClient
+from personal_agent.personal_learning import PersonalLearningRecord, PersonalLearningStore
 from personal_agent.reflection_specialist import ReflectionSpecialist
 
 
@@ -152,6 +156,7 @@ class PersonalAgentService:
             config=self._config,
             memory_extractor=self._memory_extractor,
         )
+        self._personal_learning = PersonalLearningStore(database=database, config=self._config)
         self._reflection_specialist = ReflectionSpecialist(
             database=database,
             config=self._config,
@@ -248,7 +253,16 @@ class PersonalAgentService:
             response_mode=response_mode,
             session_support=session_support,
         )
-        memory_context = self._memory_specialist.build_memory_context(recall_result)
+        legacy_memory_context = self._memory_specialist.build_memory_context(recall_result)
+        personal_learning_context = self._recall_personal_learning_context(message.text)
+        memory_context = trim_context(
+            "\n".join(
+                part
+                for part in (personal_learning_context, legacy_memory_context)
+                if part.strip()
+            ),
+            self._config.memory_context_max_chars,
+        )
         daily_context = self._load_daily_context()
         reflection_context = self._load_reflection_context()
         continuity_context = self._build_continuity_context(
@@ -644,6 +658,68 @@ class PersonalAgentService:
             "fallback_used": result.fallback_used,
         }
 
+    def observe_personal_learning(
+        self,
+        *,
+        kind: str,
+        subject_key: str,
+        statement: str,
+        source: str,
+        evidence_digests: list[str] | tuple[str, ...],
+        confidence: float,
+    ) -> dict[str, object]:
+        """Record one sanitized learning observation through the sole lifecycle."""
+
+        record = self._personal_learning.observe(
+            kind=kind,
+            subject_key=subject_key,
+            statement=statement,
+            source=source,
+            evidence_digests=evidence_digests,
+            confidence=confidence,
+        )
+        if record.status == "active":
+            self._project_personal_learning_best_effort()
+        return _personal_learning_payload(record)
+
+    def query_personal_learning(
+        self,
+        *,
+        subject_prefix: str = "",
+        limit: int = 50,
+    ) -> list[dict[str, object]]:
+        """Return only active learning records, bounded for private callers."""
+
+        return [
+            _personal_learning_payload(record)
+            for record in self._personal_learning.list_active(
+                subject_prefix=subject_prefix,
+                limit=limit,
+            )
+        ]
+
+    def _recall_personal_learning_context(self, user_text: str) -> str:
+        records = self._personal_learning.recall_relevant(user_text, limit=5)
+        if not records:
+            return ""
+        return "\n".join(
+            ["[已确认的个人偏好]", *(f"- {record.statement}" for record in records)]
+        )
+
+    def forget_personal_learning(self, subject_key: str) -> dict[str, int]:
+        """Forget active/candidate learning without mutating legacy memory."""
+
+        forgotten_count = self._personal_learning.forget(subject_key)
+        if forgotten_count:
+            self._project_personal_learning_best_effort()
+        return {"forgotten_count": forgotten_count}
+
+    def _project_personal_learning_best_effort(self) -> None:
+        try:
+            self._personal_learning.project_compatibility_views()
+        except (OSError, ValueError, TypeError):
+            self._logger.exception("personal learning compatibility projection failed")
+
     def store_exploration_memory(
         self,
         *,
@@ -728,36 +804,47 @@ class PersonalAgentService:
         reply_text: str,
         source: str,
         media_refs: tuple[str, ...] = (),
-    ) -> None:
+        event_id: str = "",
+    ) -> str:
         """Store a user/agent exchange generated outside Python frontend path."""
 
         self._logger.info(
-            "recording external exchange source=%s channel=%s sender_id=%s",
-            source,
-            channel,
-            sender_id,
+            "recording external exchange source_hash=%s channel_hash=%s sender_hash=%s",
+            _private_log_digest(source),
+            _private_log_digest(channel),
+            _private_log_digest(sender_id),
         )
-        user_event_id = self._database.record_timeline_event(
-            source=channel,
-            event_type="user_message",
-            content=user_text,
-            tags=f"message,user,{source}",
-            importance=1,
-        )
-        reply_event_id = self._database.record_timeline_event(
-            source="agent",
-            event_type="agent_reply",
-            content=reply_text,
-            tags=f"message,reply,{channel},{source}",
-            importance=1,
-        )
-        self._logger.info(
-            "external exchange stored user_timeline_event_id=%s reply_timeline_event_id=%s",
-            user_event_id,
-            reply_event_id,
-        )
+        if event_id:
+            outcome = self._database.record_external_exchange_once(
+                event_id=event_id,
+                channel=channel,
+                sender_id=sender_id,
+                user_text=user_text,
+                reply_text=reply_text,
+                source=source,
+                media_refs=media_refs,
+            )
+            if outcome != "stored":
+                self._logger.info("external exchange durable projection outcome=%s", outcome)
+                return outcome
+        else:
+            self._database.record_timeline_event(
+                source=channel,
+                event_type="user_message",
+                content=user_text,
+                tags=f"message,user,{source}",
+                importance=1,
+            )
+            self._database.record_timeline_event(
+                source="agent",
+                event_type="agent_reply",
+                content=reply_text,
+                tags=f"message,reply,{channel},{source}",
+                importance=1,
+            )
+            outcome = "stored"
         try:
-            note_path = write_external_exchange_to_inbox(
+            write_external_exchange_to_inbox(
                 config=self._config,
                 channel=channel,
                 sender_id=sender_id,
@@ -767,44 +854,67 @@ class PersonalAgentService:
                 media_refs=media_refs,
                 dedup_service=self._dedup_service,
             )
-            self._logger.info(
-                "external exchange synced to vault inbox path=%s",
-                note_path,
-            )
+            self._logger.info("external exchange synced to vault inbox")
         except Exception:
-            self._logger.exception(
-                "external exchange inbox sync failed channel=%s sender_id=%s source=%s",
-                channel,
-                sender_id,
-                source,
+            self._logger.warning(
+                "external exchange inbox sync failed channel_hash=%s sender_hash=%s source_hash=%s",
+                _private_log_digest(channel),
+                _private_log_digest(sender_id),
+                _private_log_digest(source),
             )
-        self._schedule_post_reply_memory_update(channel=channel, sender_id=sender_id, user_text=user_text)
+        self._schedule_post_reply_memory_update(
+            channel=channel,
+            sender_id=sender_id,
+            user_text=user_text,
+            evidence_seed=event_id,
+        )
+        return outcome
 
-    def _schedule_post_reply_memory_update(self, *, channel: str, sender_id: str, user_text: str) -> None:
+    def _schedule_post_reply_memory_update(
+        self,
+        *,
+        channel: str,
+        sender_id: str,
+        user_text: str,
+        evidence_seed: str = "",
+    ) -> None:
         if not user_text.strip():
             return
         if isinstance(self._model_client, PlaceholderModelClient):
-            self._run_deferred_memory_pipeline(channel, sender_id, user_text)
+            self._run_deferred_memory_pipeline(channel, sender_id, user_text, evidence_seed)
             return
-        self._post_reply_executor.submit(self._run_deferred_memory_pipeline, channel, sender_id, user_text)
-
-    def _run_deferred_memory_pipeline(self, channel: str, sender_id: str, user_text: str) -> None:
-        started = perf_counter()
-        self._logger.info(
-            "memory async extraction started channel=%s sender_id=%s",
+        self._post_reply_executor.submit(
+            self._run_deferred_memory_pipeline,
             channel,
             sender_id,
+            user_text,
+            evidence_seed,
+        )
+
+    def _run_deferred_memory_pipeline(
+        self,
+        channel: str,
+        sender_id: str,
+        user_text: str,
+        evidence_seed: str = "",
+    ) -> None:
+        started = perf_counter()
+        self._logger.info(
+            "memory async extraction started channel=%s sender_hash=%s",
+            channel,
+            _private_log_digest(sender_id),
         )
         try:
+            self._observe_repeated_personal_learning(user_text, evidence_seed=evidence_seed)
             update_result = self._memory_specialist.update_from_user_turn(user_text)
             promotion_action = "skip"
             if update_result.long_term_candidate is not None:
                 core_decision = self._memory_specialist.maybe_store_core(update_result.long_term_candidate)
                 promotion_action = core_decision.action
             self._logger.info(
-                "memory async extraction finished channel=%s sender_id=%s elapsed_seconds=%.3f working_written=%s profile_written=%s fallback_used=%s deferred_promotion=%s",
+                "memory async extraction finished channel=%s sender_hash=%s elapsed_seconds=%.3f working_written=%s profile_written=%s fallback_used=%s deferred_promotion=%s",
                 channel,
-                sender_id,
+                _private_log_digest(sender_id),
                 perf_counter() - started,
                 update_result.working_written,
                 update_result.profile_written,
@@ -813,10 +923,47 @@ class PersonalAgentService:
             )
         except Exception:
             self._logger.exception(
-                "memory async extraction failed channel=%s sender_id=%s",
+                "memory async extraction failed channel=%s sender_hash=%s",
                 channel,
-                sender_id,
+                _private_log_digest(sender_id),
             )
+
+    def _observe_repeated_personal_learning(self, user_text: str, *, evidence_seed: str = "") -> None:
+        """Feed deterministic user-authored candidates without touching legacy memory."""
+
+        for candidate in extract_repeated_learning_candidates(user_text, evidence_seed=evidence_seed):
+            try:
+                record = self._personal_learning.observe(
+                    kind=candidate["kind"],
+                    subject_key=candidate["subject_key"],
+                    statement=candidate["statement"],
+                    source="repeated_observation",
+                    evidence_digests=[candidate["evidence_digest"]],
+                    confidence=0.8,
+                )
+                if record.status == "active":
+                    self._project_personal_learning_best_effort()
+            except (TypeError, ValueError):
+                self._logger.info("personal learning candidate rejected by safety validation")
+
+    def record_verified_delivery_outcome(self, *, outcome: str, event_id: str) -> dict[str, object]:
+        """Persist a fixed, non-executable lesson for a verified ambiguous delivery."""
+
+        if str(outcome).strip().lower() != "ambiguous":
+            raise ValueError("unsupported verified delivery outcome")
+        normalized_event_id = str(event_id).strip()
+        if not re.fullmatch(r"outbox_[a-f0-9]{32}", normalized_event_id):
+            raise ValueError("invalid verified delivery outcome")
+        record = self._personal_learning.observe(
+            kind="operating_lesson",
+            subject_key="operating:ambiguous-delivery",
+            statement="不确定的外发结果不得盲目重发",
+            source="verified_outcome",
+            evidence_digests=[hashlib.sha256(normalized_event_id.encode("utf-8")).hexdigest()],
+            confidence=1.0,
+        )
+        self._project_personal_learning_best_effort()
+        return _personal_learning_payload(record)
 
     def send_proactive_message(
         self,
@@ -868,6 +1015,14 @@ class PersonalAgentService:
                 "error": str(e),
             }
         success = bridge_result.get("notified") is True or bridge_result.get("status") == "sent"
+        delivery_state = str(
+            bridge_result.get("delivery_status") or bridge_result.get("outbox_status") or ""
+        ).strip().lower()
+        if delivery_state == "ambiguous" and re.fullmatch(r"outbox_[a-f0-9]{32}", event_id):
+            try:
+                self.record_verified_delivery_outcome(outcome="ambiguous", event_id=event_id)
+            except (TypeError, ValueError, OSError):
+                self._logger.warning("verified delivery lesson was not persisted")
         if success:
             self._database.record_timeline_event(
                 source="agent",
@@ -1105,8 +1260,32 @@ class PersonalAgentService:
                 self._reviewer_stats[stat_key] += 1
 
 
+def _personal_learning_payload(record: PersonalLearningRecord) -> dict[str, object]:
+    return {
+        "learning_id": record.learning_id,
+        "kind": record.kind,
+        "subject_key": record.subject_key,
+        "statement": record.statement,
+        "source": record.source,
+        "evidence_digests": list(record.evidence_digests),
+        "confidence": record.confidence,
+        "status": record.status,
+        "observation_count": record.observation_count,
+        "created_at": record.created_at,
+        "last_observed_at": record.last_observed_at,
+        "last_confirmed_at": record.last_confirmed_at,
+        "superseded_by": record.superseded_by,
+    }
+
+
 def _build_proactive_tags(channel: str, seed: str) -> str:
     tags = ["message", "proactive", channel]
     if seed:
         tags.append(f"seed:{seed}")
     return ",".join(tags)
+
+
+def _private_log_digest(value: str) -> str:
+    """Stable correlation token for logs that must not expose an identity."""
+
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:24]

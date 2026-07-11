@@ -1,5 +1,4 @@
 export function getQuickAckConfig(env = {}, platform = '') {
-  const enabled = isTruthy(env.NODE_BRIDGE_QUICK_ACK_ENABLED);
   const platformKey = String(platform || '').trim().toLowerCase() === 'feishu'
     ? 'FEISHU_QUICK_ACK_TIMEOUT_MS'
     : String(platform || '').trim().toLowerCase() === 'wechat'
@@ -12,7 +11,7 @@ export function getQuickAckConfig(env = {}, platform = '') {
   const ackText = String(env.NODE_BRIDGE_QUICK_ACK_TEXT || '收到，正在处理。').trim()
     || '收到，正在处理。';
   return {
-    enabled: enabled && timeoutMs > 0,
+    enabled: false,
     timeoutMs,
     ackText,
   };
@@ -20,10 +19,6 @@ export function getQuickAckConfig(env = {}, platform = '') {
 
 export function quickAckDelay(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
-}
-
-function isTruthy(value) {
-  return /^(1|true|yes|on)$/i.test(String(value || '').trim());
 }
 
 function parseIntegerEnv(value, fallback) {

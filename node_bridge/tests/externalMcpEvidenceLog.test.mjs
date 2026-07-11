@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 import {
   appendExternalMcpEvidence,
@@ -11,18 +11,7 @@ import {
 } from '../src/externalMcp/evidenceLog.mjs';
 
 function tempEnv(t) {
-  const base = path.join(process.cwd(), '.tmp-test-external-mcp-evidence');
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, 'case-'));
-  t.after(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-    try {
-      fs.rmdirSync(base);
-    } catch {
-      // Other tests may still own sibling temp dirs.
-    }
-  });
-  return { RAN_AGENT_STATE_DIR: root };
+  return createIsolatedTestEnv(t, {}, 'external-mcp-evidence-');
 }
 
 function rawEvent(overrides = {}) {
@@ -164,4 +153,29 @@ test('evidence verifier accepts only trusted matching evidence refs', (t) => {
   assert.equal(missingTierScope.reason, 'evidence_tier_scope_required');
   assert.equal(wrongTier.ok, false);
   assert.equal(wrongTier.reason, 'evidence_tier_not_allowed');
+});
+
+test('evidence tolerates only an incomplete final JSONL tail and repairs it before append', (t) => {
+  const env = tempEnv(t);
+  const first = appendExternalMcpEvidence(rawEvent({ requestId: 'req-complete' }), { env, now: '2026-07-01T10:00:00Z' });
+  const target = `${env.RAN_AGENT_STATE_DIR}/external_mcp/evidence.jsonl`;
+  fs.appendFileSync(target, '{"timestamp":"2026-07-01T10:01:00.000Z"');
+
+  assert.deepEqual(listExternalMcpEvidence({ env }).map((item) => item.evidence_ref), [first.evidence_ref]);
+  const second = appendExternalMcpEvidence(rawEvent({ requestId: 'req-repaired' }), { env, now: '2026-07-01T10:02:00Z' });
+  assert.deepEqual(listExternalMcpEvidence({ env }).map((item) => item.evidence_ref), [first.evidence_ref, second.evidence_ref]);
+});
+
+test('evidence corruption before the final JSONL tail is quarantined and fails closed', (t) => {
+  const env = tempEnv(t);
+  const target = `${env.RAN_AGENT_STATE_DIR}/external_mcp/evidence.jsonl`;
+  fs.mkdirSync(`${env.RAN_AGENT_STATE_DIR}/external_mcp`, { recursive: true });
+  fs.writeFileSync(target, '{"not":"an evidence record"}\n{', 'utf8');
+
+  assert.throws(
+    () => listExternalMcpEvidence({ env }),
+    (error) => error?.code === 'RAN_AGENT_STATE_CORRUPT',
+  );
+  assert.equal(fs.existsSync(target), false);
+  assert.equal(fs.readdirSync(`${env.RAN_AGENT_STATE_DIR}/external_mcp`).some((entry) => entry.startsWith('evidence.jsonl.corrupt-')), true);
 });

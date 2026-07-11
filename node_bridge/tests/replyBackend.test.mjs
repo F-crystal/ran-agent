@@ -1,28 +1,28 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+
+// This suite uses deterministic local Hermes doubles; it explicitly opts out
+// of the network verifier so assertions can isolate reply-pipeline behavior.
+process.env.HERMES_SEMANTIC_VERIFIER_TEST_BYPASS = 'true';
 import fs from 'node:fs';
 import path from 'node:path';
 
 import { createReplyBackend, getReplyBackendConfig } from '../src/replyBackend.mjs';
-import {
-  getTrustedExternalMcpActivityGrant,
-  startExternalMcpActivity,
-} from '../src/externalMcp/activityRunner.mjs';
 import { getEnvironmentPrivacyMode } from '../src/environmentSense.mjs';
 import { createPendingAction, listPendingActions } from '../src/pendingActionState.mjs';
+import { createOperationLedger } from '../src/operationLedger.mjs';
+import { createTrustedExecutorAdapters } from '../src/trustedExecutorAdapters.mjs';
 import { listStickers, saveStickersFromInbox } from '../src/stickerCatalog.mjs';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
-function tempStateEnv(extra = {}) {
-  const base = path.join(process.cwd(), '.ran_agent_state', 'test-reply-pending');
-  fs.mkdirSync(base, { recursive: true });
-  return {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(base, 'case-')),
+function tempStateEnv(t, extra = {}) {
+  return createIsolatedTestEnv(t, {
     HERMES_ACTION_GATE_ENABLED: 'true',
     HERMES_ACTION_GATE_MODE: 'repair',
     HERMES_ACTION_PENDING_ENABLED: 'true',
     HERMES_ACTION_PENDING_TTL_MINUTES: '30',
     ...extra,
-  };
+  }, 'reply-backend-');
 }
 
 function pngBytes() {
@@ -82,6 +82,314 @@ test('createReplyBackend defaults to Hermes reply backend', async () => {
   assert.equal(ingestPayload?.source, 'hermes');
   assert.equal(response.replyText, 'hermes reply');
   assert.equal(response.source, 'hermes');
+});
+
+test('createReplyBackend defers backend ingest until a durable outbox projection supplies its event id', async () => {
+  const ingested = [];
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({ reply_text: 'durable reply', follow_up_messages: [], media: null }),
+    ingestImpl: async (payload) => {
+      ingested.push(payload);
+      return { ok: true };
+    },
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: 'hello',
+    sender_id: 'sender-1',
+    conversation_id: 'conversation-1',
+    platform: 'wechat',
+  }, { deferIngest: true });
+
+  assert.deepEqual(ingested, []);
+  assert.equal(typeof response.backendProjection, 'function');
+  await response.backendProjection({
+    outboxId: 'outbox_0123456789abcdef0123456789abcdef',
+    replyText: 'persisted durable reply',
+  });
+  assert.equal(ingested.length, 1);
+  assert.equal(ingested[0].event_id, 'outbox_0123456789abcdef0123456789abcdef');
+  assert.equal(ingested[0].reply_text, 'persisted durable reply');
+});
+
+test('createReplyBackend commits an envelope activity request through the bridge-owned facade', async () => {
+  const calls = [];
+  const backend = createReplyBackend({
+    activityFacade: {
+      async handle(request, actorContext) {
+        calls.push({ request, actorContext });
+        return {
+          ok: true,
+          requestRef: request.requestRef,
+          action: 'started',
+          receipt: {
+            jobId: 'job_external_1',
+            actorKey: actorContext.actorKey,
+            goalDigest: 'a'.repeat(64),
+            status: 'active',
+          },
+        };
+      },
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1,
+        message: '好的，我会继续推进。',
+        actionRequests: [],
+        activityRequest: {
+          requestRef: 'activity-1',
+          command: 'start_or_resume',
+          goal: '继续玩这个游戏直到第一关结束',
+          environmentHint: 'game',
+          preferences: { cadence: 'milestone' },
+        },
+        claims: [],
+        commitments: [],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  await backend.getReply({
+    text: '继续玩这个游戏直到第一关结束',
+    sender_id: 'activity-owner',
+    channel: 'wechat',
+    trusted_actor_context: {
+      actorKey: 'actor:owner',
+      owner: true,
+      platform: 'wechat',
+      conversationKey: 'conversation:owner',
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].request.requestRef, 'activity-1');
+  assert.equal(calls[0].actorContext.actorKey, 'actor:owner');
+  assert.equal(calls[0].actorContext.owner, true);
+});
+
+test('createReplyBackend binds a started activity to the bridge-derived reply destination', async () => {
+  const bindings = [];
+  const backend = createReplyBackend({
+    activityFacade: {
+      async handle(_request, actorContext) {
+        return {
+          receipt: { jobId: 'autonomy_checkpoint_1', actorKey: actorContext.actorKey, goalDigest: 'a'.repeat(64), status: 'active' },
+        };
+      },
+      async bindNotifyTarget(input) { bindings.push(input); return { ok: true }; },
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1, message: '我会继续。', actionRequests: [],
+        activityRequest: { requestRef: 'checkpoint-target', command: 'start_or_resume', goal: '继续玩这个游戏', environmentHint: 'game' },
+        claims: [], commitments: [],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  await backend.getReply({
+    text: '继续玩这个游戏', sender_id: 'sender-1', conversation_id: 'conversation-1', channel_type: 'dm', platform: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'wechat', conversationKey: 'conversation:owner' },
+  });
+
+  assert.deepEqual(bindings, [{
+    receipt: { jobId: 'autonomy_checkpoint_1', actorKey: 'actor:owner', goalDigest: 'a'.repeat(64), status: 'active' },
+    actorContext: { actorKey: 'actor:owner', owner: true, platform: 'wechat', conversationKey: 'conversation:owner' },
+    target: { platform: 'wechat', channelType: 'dm', conversationId: 'conversation-1', senderId: 'sender-1' },
+  }]);
+});
+
+test('createReplyBackend releases an external checkpoint through semantic verification and privacy before delivery', async () => {
+  const verifierInputs = [];
+  const backend = createReplyBackend({
+    semanticVerifierImpl: async (input) => {
+      verifierInputs.push(input);
+      return { supported: false, unsupportedClaims: ['claim:completed'], rewrite: '我已记录这次进展。' };
+    },
+  });
+
+  const result = await backend.releaseExternalCheckpoint({
+    candidate: {
+      kind: 'core_external_activity_narration_candidate', status: 'ready', claim: 'completed',
+      facts: [{ summary: 'Reached the next safe checkpoint.' }],
+      receipts: [{ effect: 'terminal', outcome: 'completed', terminal: true, summary: 'Reached the next safe checkpoint.' }],
+    },
+    context: { activityId: 'autonomy_checkpoint_1', checkpointDigest: 'a'.repeat(64), notifyTarget: { platform: 'wechat', channelType: 'dm', conversationId: 'conversation-1', senderId: 'sender-1' }, revision: 2 },
+  }, { semanticVerifierConfig: { enabled: true, timeoutMs: 100, maxRewriteChars: 600 } });
+
+  assert.equal(verifierInputs.length, 1);
+  assert.equal(result.replyText, '我已记录这次进展。');
+  assert.equal(result.source, 'external_checkpoint');
+  assert.equal(result.suppressSend, false);
+});
+
+test('createReplyBackend removes a declared future commitment when no durable activity receipt exists', async () => {
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1, message: '我会继续推进。', actionRequests: [], activityRequest: null,
+        claims: [], commitments: [{ type: 'external_continue' }],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({ text: '继续吧', sender_id: 'owner', conversation_id: 'owner', channel: 'wechat' });
+
+  assert.equal(result.replyText, '这项后续工作尚未启动。');
+  assert.equal(result.source, 'bridge_commitment_guard');
+});
+
+test('createReplyBackend performs one bounded bridge-side external start repair only through an existing standing-consent facade', async () => {
+  const repairs = [];
+  const backend = createReplyBackend({
+    activityFacade: {
+      async repairStart(input) {
+        repairs.push(input);
+        return {
+          receipt: {
+            jobId: 'job_external_repair_1', actorKey: input.actorContext.actorKey,
+            goalDigest: 'a'.repeat(64), status: 'active', nextRunAt: '2026-07-11T00:00:00.000Z',
+            terminalStates: ['completed', 'blocked', 'stopped', 'expired'],
+          },
+        };
+      },
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1, message: '我会继续推进。', actionRequests: [], activityRequest: null,
+        claims: [], commitments: [{ type: 'external_continue', requestRef: 'external-repair-1' }],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '把当前已经授权的游戏继续完成', sender_id: 'owner', conversation_id: 'owner-conversation', channel: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
+  });
+
+  assert.equal(repairs.length, 1);
+  assert.equal(repairs[0].requestRef, 'external-repair-1');
+  assert.equal(repairs[0].commitment.type, 'external_continue');
+  assert.equal(repairs[0].currentMessage.text, '把当前已经授权的游戏继续完成');
+  assert.equal(result.replyText, '我会继续推进。');
+  assert.equal(result.source, 'hermes');
+});
+
+test('createReplyBackend does not repair a future external commitment without a standing-consent facade', async () => {
+  const backend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1, message: '我会继续推进。', actionRequests: [], activityRequest: null,
+        claims: [], commitments: [{ type: 'external_continue', requestRef: 'external-no-consent' }],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+  const result = await backend.getReply({
+    text: '继续吧', sender_id: 'owner', conversation_id: 'owner', channel: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
+  });
+  assert.equal(result.source, 'bridge_commitment_guard');
+  assert.equal(result.replyText, '这项后续工作尚未启动。');
+});
+
+test('createReplyBackend runs only an allowlisted Core durable request before releasing its matching commitment', async () => {
+  const calls = [];
+  const backend = createReplyBackend({
+    coreDurableJobExecutor: {
+      supports: (actionType) => actionType === 'core.reflection',
+      async execute({ request, actorContext }) {
+        calls.push({ request, actorContext });
+        return {
+          ok: true,
+          receipt: {
+            requestRef: request.requestRef, actionType: request.actionType,
+            jobId: 'job_1234567890abcdef', actorKey: actorContext.actorKey,
+            goalDigest: 'a'.repeat(64), status: 'active', nextRunAt: '2026-07-11T00:00:00.000Z',
+          },
+        };
+      },
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1, message: '我会在之后复盘这次聊天。', activityRequest: null,
+        actionRequests: [{ requestRef: 'core-reflect-1', actionType: 'core.reflection', scope: {} }],
+        claims: [], commitments: [{ type: 'continue_later', requestRef: 'core-reflect-1' }],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '之后帮我复盘一下', sender_id: 'owner', conversation_id: 'owner-conversation', channel: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].request.actionType, 'core.reflection');
+  assert.equal(result.replyText, '已安排聊天复盘。');
+  assert.equal(result.source, 'bridge_core_job_ack');
+});
+
+test('createReplyBackend does not release a commitment for a forged or cross-reference durable receipt', async () => {
+  const backend = createReplyBackend({
+    activityFacade: {
+      async handle(_request, actorContext) {
+        return { receipt: { jobId: 'job_external_1', actorKey: actorContext.actorKey, goalDigest: 'a'.repeat(64), status: 'active' } };
+      },
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1, message: '我会继续推进。', actionRequests: [],
+        activityRequest: { requestRef: 'external-real', command: 'start_or_resume', goal: '继续玩这个游戏', environmentHint: 'game' },
+        claims: [], commitments: [{ type: 'continue_later', requestRef: 'external-forged' }],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '继续玩', sender_id: 'owner', conversation_id: 'owner-conversation', channel: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
+  });
+
+  assert.equal(result.replyText, '这项后续工作尚未启动。');
+  assert.equal(result.source, 'bridge_commitment_guard');
+});
+
+test('createReplyBackend never promises a Core job after its private client fails', async () => {
+  let calls = 0;
+  const backend = createReplyBackend({
+    coreDurableJobExecutor: {
+      supports: (actionType) => actionType === 'core.night-cycle',
+      async execute() { calls += 1; return { ok: false, reason: 'CORE_JOB_CREATE_FAILED', receipt: null }; },
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1, message: '我明天会整理好。', activityRequest: null,
+        actionRequests: [{ requestRef: 'core-night-1', actionType: 'core.night-cycle', scope: {} }],
+        claims: [], commitments: [{ type: 'continue_later', requestRef: 'core-night-1' }],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '明天再整理', sender_id: 'owner', conversation_id: 'owner-conversation', channel: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
+  });
+
+  assert.equal(calls, 1);
+  assert.equal(result.replyText, '这项后续工作尚未启动。');
+  assert.equal(result.source, 'bridge_commitment_guard');
 });
 
 test('createReplyBackend suppresses silent external MCP synthetic turns', async () => {
@@ -192,8 +500,8 @@ test('createReplyBackend forwards stale continuity context to Hermes', async () 
   assert.equal(hermesPayload?.stale_context, '我换了新电脑，正在迁移资料');
 });
 
-test('createReplyBackend handles explicit environment privacy mode toggles before Hermes', async () => {
-  const env = tempStateEnv({ HERMES_ENVIRONMENT_CONTEXT_ENABLED: 'true' });
+test('createReplyBackend handles explicit environment privacy mode toggles before Hermes', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ENVIRONMENT_CONTEXT_ENABLED: 'true' });
   let hermesCalled = false;
   const backend = createReplyBackend({
     env,
@@ -227,27 +535,23 @@ test('createReplyBackend handles explicit environment privacy mode toggles befor
   assert.equal(getEnvironmentPrivacyMode(env).enabled, false);
 });
 
-test('createReplyBackend stops external MCP activities by global user before asking Hermes to summarize', async () => {
-  const env = tempStateEnv();
-  const activity = startExternalMcpActivity({
-    globalUserId: 'user:ran',
-    serverId: 'cedartoy-games',
-    kind: 'game_play',
-    now: '2026-07-02T10:00:00Z',
-  }, { env });
-  let hermesPayload = null;
+test('createReplyBackend routes a natural stop command only through the v2 activity facade', async (t) => {
+  const env = tempStateEnv(t);
+  let hermesCalled = false;
+  const calls = [];
   const backend = createReplyBackend({
     env,
-    hermesImpl: async (payload) => {
-      hermesPayload = payload;
-      return {
-        reply_text: '好，我已经停下这局了。',
-        follow_up_messages: [],
-        media: null,
-      };
+    hermesImpl: async () => {
+      hermesCalled = true;
+      return { reply_text: 'should not run', follow_up_messages: [], media: null };
+    },
+    activityFacade: {
+      async handle(request, actor) {
+        calls.push({ request, actor });
+        return { action: 'stopped', receipt: { status: 'stopped' } };
+      },
     },
     ingestImpl: async () => ({ ok: true }),
-    nowImpl: () => new Date('2026-07-02T10:05:00Z'),
     logger: { log() {}, warn() {} },
   });
 
@@ -257,19 +561,18 @@ test('createReplyBackend stops external MCP activities by global user before ask
     conversation_id: 'conv-stop-mcp',
     channel: 'wechat',
     platform: 'wechat',
-    global_user_id: 'user:ran',
+    trusted_actor_context: {
+      actorKey: 'actor:owner:stop', conversationKey: 'conversation:wechat:stop', platform: 'wechat', owner: true,
+    },
   });
 
-  assert.equal(response.replyText, '好，我已经停下这局了。');
-  assert.equal(hermesPayload.route_hint, 'external_mcp_stop');
-  assert.match(hermesPayload.text, /stopped_activity_ids:/);
-  assert.match(hermesPayload.text, new RegExp(activity.activityId));
-  assert.equal(getTrustedExternalMcpActivityGrant(activity.activityId, {
-    env,
-    globalUserId: 'user:ran',
-    serverId: 'cedartoy-games',
-    now: '2026-07-02T10:06:00Z',
-  }), null);
+  assert.equal(response.replyText, '已经停止这项外部活动。');
+  assert.equal(response.source, 'bridge_external_activity_stop');
+  assert.equal(hermesCalled, false);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].request.command, 'stop');
+  assert.equal(calls[0].request.goal, '停下这局');
+  assert.equal(Object.hasOwn(calls[0].request, 'globalUserId'), false);
 });
 
 test('createReplyBackend logs action contract telemetry in observe mode without changing reply', async () => {
@@ -364,7 +667,7 @@ test('createReplyBackend enforces safe rewrite before returning unsupported soci
   assert.equal(line.includes('旅行'), false);
 });
 
-test('createReplyBackend gates unsafe follow-up messages before they can be sent', async () => {
+test('createReplyBackend collapses fragments and gates them as one coherent reply', async () => {
   const backend = createReplyBackend({
     env: {
       HERMES_ACTION_GATE_ENABLED: 'true',
@@ -387,8 +690,8 @@ test('createReplyBackend gates unsafe follow-up messages before they can be sent
     channel: 'wechat',
   });
 
-  assert.equal(response.replyText, '先说一句普通话。');
-  assert.deepEqual(response.followUpMessages, ['链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。']);
+  assert.equal(response.replyText, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
+  assert.deepEqual(response.followUpMessages, []);
   assert.equal(response.source, 'bridge_action_gate');
 });
 
@@ -475,19 +778,18 @@ test('createReplyBackend repair mode repairs social read evidence once and keeps
   assert.equal(line.includes('social-artifact-private'), false);
 });
 
-test('createReplyBackend repair mode can repair social claims returned through Hermes gateway client', async () => {
+test('createReplyBackend repair mode can repair social claims returned through Hermes gateway client', async (t) => {
   const repairCalls = [];
+  const env = tempStateEnv(t, {
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
+    XHS_TOKEN_CACHE_PATH: '/tmp/missing-xhs-cache-for-repair-gateway.json',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+  });
   const backend = createReplyBackend({
-    env: {
-      HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-      HERMES_API_KEY: 'token',
-      HERMES_REPLY_MODE: 'api',
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-      XHS_TOKEN_CACHE_PATH: '/tmp/missing-xhs-cache-for-repair-gateway.json',
-      RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-    },
+    env,
     actionRepairImpl: async (plan) => {
       repairCalls.push(plan);
       return {
@@ -873,12 +1175,196 @@ test('createReplyBackend repair mode routes explicit memory writes through pendi
   assert.equal(payload.final_action, 'executed_with_evidence');
 });
 
-test('createReplyBackend lets Hermes handle high risk text when no pending executor exists', async () => {
+test('createReplyBackend issues and verifies a real receipt before preserving a save claim', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
+  const ledger = createOperationLedger({ env });
+  let executedOperationId = '';
+  const executors = createTrustedExecutorAdapters({
+    ledger,
+    adapters: [{
+      issuer: 'bridge:python-personal-learning',
+      actionTypes: ['memory.remember'],
+      evidenceType: 'personal_learning_result',
+      boundary: 'authenticated_private',
+      async execute({ operation }) {
+        executedOperationId = operation.operationId;
+        return {
+          authenticated: true,
+          operationId: operation.operationId,
+          ok: true,
+          effectId: 'learning:reply:tone',
+        };
+      },
+      validateResult: (result, operation) => (
+        result?.authenticated === true
+        && result.operationId === operation.operationId
+        && typeof result.effectId === 'string'
+      ),
+      normalizeResult: (result) => ({ status: result.ok ? 'succeeded' : 'failed', effectId: result.effectId }),
+    }],
+  });
+  const backend = createReplyBackend({
+    env,
+    operationLedger: ledger,
+    trustedActionExecutors: executors,
+    hermesImpl: async () => ({
+      reply_text: '已经替你保存好了。',
+      action_requests: [{
+        requestRef: 'remember-1',
+        actionType: 'memory.remember',
+        scope: { subject_key: 'reply:tone', statement: '先说结论' },
+      }],
+      claims: [{ type: 'memory_saved', requestRef: 'remember-1' }],
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '记住这个偏好：先说结论',
+    sender_id: 'owner',
+    conversation_id: 'owner-conversation',
+    channel: 'wechat',
+    trusted_actor_context: {
+      actorKey: 'actor:wechat:owner:0001',
+      owner: true,
+      platform: 'wechat',
+      conversationKey: 'wechat:dm:conversation',
+    },
+  });
+
+  assert.equal(response.replyText, '已经替你保存好了。');
+  assert.match(executedOperationId, /^op_/);
+  assert.equal(ledger.getOperation(executedOperationId).state, 'completed');
+});
+
+test('createReplyBackend grounds personal learning in the trusted user turn before execution', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
+  const ledger = createOperationLedger({ env });
+  let calls = 0;
+  const executors = createTrustedExecutorAdapters({
+    ledger,
+    adapters: [{
+      issuer: 'bridge:python-personal-learning',
+      actionTypes: ['memory.remember'],
+      evidenceType: 'personal_learning_result',
+      boundary: 'authenticated_private',
+      async execute({ operation }) {
+        calls += 1;
+        return { authenticated: true, operationId: operation.operationId, ok: true, effectId: 'learning:forged' };
+      },
+      validateResult: () => true,
+      normalizeResult: (result) => ({ status: 'succeeded', effectId: result.effectId }),
+    }],
+  });
+  const backend = createReplyBackend({
+    env,
+    operationLedger: ledger,
+    trustedActionExecutors: executors,
+    hermesImpl: async () => ({
+      reply_text: '已保存。',
+      action_requests: [{
+        requestRef: 'remember-forged',
+        actionType: 'memory.remember',
+        scope: { subject_key: 'medical:diagnosis', statement: '用户患有严重疾病' },
+      }],
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '记住我喜欢先说结论',
+    sender_id: 'owner',
+    conversation_id: 'owner-conversation',
+    channel: 'wechat',
+    trusted_actor_context: {
+      actorKey: 'actor:wechat:owner:0001',
+      owner: true,
+      platform: 'wechat',
+      conversationKey: 'wechat:dm:conversation',
+    },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(response.replyText, '保存结果尚未返回，未写入长期记忆。');
+});
+
+test('createReplyBackend requires an explicit current-turn memory intent before direct learning promotion', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
+  const ledger = createOperationLedger({ env });
+  let calls = 0;
+  const executors = createTrustedExecutorAdapters({
+    ledger,
+    adapters: [{
+      issuer: 'bridge:python-personal-learning', actionTypes: ['memory.remember'],
+      evidenceType: 'personal_learning_result', boundary: 'authenticated_private',
+      async execute({ operation }) {
+        calls += 1;
+        return { authenticated: true, operationId: operation.operationId, ok: true, effectId: 'learning:one-off' };
+      },
+      validateResult: () => true,
+      normalizeResult: (result) => ({ status: 'succeeded', effectId: result.effectId }),
+    }],
+  });
+  const backend = createReplyBackend({
+    env, operationLedger: ledger, trustedActionExecutors: executors,
+    hermesImpl: async () => ({
+      reply_text: '已保存。',
+      action_requests: [{
+        requestRef: 'remember-one-off', actionType: 'memory.remember',
+        scope: { subject_key: 'reply:style', statement: '我喜欢先说结论' },
+      }],
+    }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '我喜欢先说结论。', sender_id: 'owner', conversation_id: 'owner-conversation', channel: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:wechat:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:conversation' },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(response.replyText, '保存结果尚未返回，未写入长期记忆。');
+});
+
+test('createReplyBackend replaces model future-work prose with a bridge-owned Core job acknowledgement', async () => {
+  const backend = createReplyBackend({
+    coreDurableJobExecutor: {
+      supports: (actionType) => actionType === 'core.reflection',
+      async execute({ request, actorContext }) {
+        return { ok: true, receipt: {
+          requestRef: request.requestRef, actionType: request.actionType,
+          jobId: 'job_1234567890abcdef', actorKey: actorContext.actorKey,
+          goalDigest: 'a'.repeat(64), status: 'active', nextRunAt: '2026-07-11T00:00:00.000Z',
+        } };
+      },
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1, message: '我会在你睡着后把所有问题都解决。', activityRequest: null,
+        actionRequests: [{ requestRef: 'core-ack-1', actionType: 'core.reflection', scope: {} }],
+        claims: [], commitments: [{ type: 'continue_later', requestRef: 'core-ack-1' }],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '之后复盘一下', sender_id: 'owner', conversation_id: 'owner-conversation', channel: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
+  });
+
+  assert.equal(result.replyText, '已安排聊天复盘。');
+  assert.equal(result.source, 'bridge_core_job_ack');
+});
+
+test('createReplyBackend lets Hermes handle high risk text when no pending executor exists', async (t) => {
   for (const { text, reply } of [
     { text: '现在发送给张三', reply: '我可以帮你整理内容，但没有发送。' },
     { text: '记住这个偏好', reply: '我会留意这个偏好。' },
   ]) {
-    const env = tempStateEnv();
+    const env = tempStateEnv(t);
     let hermesCalled = false;
     const backend = createReplyBackend({
       env,
@@ -908,15 +1394,12 @@ test('createReplyBackend lets Hermes handle high risk text when no pending execu
   }
 });
 
-test('createReplyBackend repair mode creates pending for external sends without direct confirmation', async () => {
+test('createReplyBackend repair mode creates pending for external sends without direct confirmation', async (t) => {
   const logs = [];
   let executed = false;
+  const env = tempStateEnv(t, { HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1' });
   const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
+    env,
     hermesImpl: async () => ({
       reply_text: '已经发送成功。',
       follow_up_messages: [],
@@ -1013,8 +1496,8 @@ test('createReplyBackend repair mode respects max repair attempts', async () => 
   assert.equal(response.source, 'bridge_action_gate');
 });
 
-test('createReplyBackend directly executes explicitly authorized sticker save', async () => {
-  const env = tempStateEnv();
+test('createReplyBackend directly executes explicitly authorized sticker save', async (t) => {
+  const env = tempStateEnv(t);
   const executions = [];
   let hermesCalled = false;
   const backend = createReplyBackend({
@@ -1051,8 +1534,8 @@ test('createReplyBackend directly executes explicitly authorized sticker save', 
   assert.equal(response.replyText, '已保存到表情包库。');
 });
 
-test('createReplyBackend default executor saves explicit trusted sticker media', async () => {
-  const env = tempStateEnv();
+test('createReplyBackend default executor saves explicit trusted sticker media', async (t) => {
+  const env = tempStateEnv(t);
   const filePath = writeTrustedInboxFile(env);
   const backend = createReplyBackend({
     env,
@@ -1076,8 +1559,8 @@ test('createReplyBackend default executor saves explicit trusted sticker media',
   assert.equal(JSON.stringify(listPendingActions({ env })).includes(filePath), false);
 });
 
-test('createReplyBackend default executor deletes explicit sticker id only', async () => {
-  const env = tempStateEnv();
+test('createReplyBackend default executor deletes explicit sticker id only', async (t) => {
+  const env = tempStateEnv(t);
   const filePath = writeTrustedInboxFile(env, 'delete-me.png');
   await saveStickersFromInbox({ items: [{ filePath, tags: ['旧'] }] }, { env });
   assert.equal(listStickers({}, { env }).length, 1);
@@ -1104,8 +1587,8 @@ test('createReplyBackend default executor deletes explicit sticker id only', asy
   assert.equal(listStickers({}, { env }).length, 0);
 });
 
-test('createReplyBackend refuses sticker delete without a clear sticker id', async () => {
-  const env = tempStateEnv();
+test('createReplyBackend refuses sticker delete without a clear sticker id', async (t) => {
+  const env = tempStateEnv(t);
   let executed = false;
   const backend = createReplyBackend({
     env,
@@ -1130,8 +1613,8 @@ test('createReplyBackend refuses sticker delete without a clear sticker id', asy
   assert.equal(listPendingActions({ env })[0].actionType, 'sticker_delete');
 });
 
-test('createReplyBackend creates pending action for ambiguous sticker save', async () => {
-  const env = tempStateEnv();
+test('createReplyBackend creates pending action for ambiguous sticker save', async (t) => {
+  const env = tempStateEnv(t);
   let executed = false;
   const backend = createReplyBackend({
     env,
@@ -1161,8 +1644,8 @@ test('createReplyBackend creates pending action for ambiguous sticker save', asy
   assert.equal(JSON.stringify(actions).includes('/tmp/private.png'), false);
 });
 
-test('createReplyBackend confirms pending action in same conversation and executes once', async () => {
-  const env = tempStateEnv();
+test('createReplyBackend confirms pending action in same conversation and executes once', async (t) => {
+  const env = tempStateEnv(t);
   const pending = createPendingAction({
     requestId: 'req-existing-pending',
     channel: 'wechat',
@@ -1202,8 +1685,8 @@ test('createReplyBackend confirms pending action in same conversation and execut
   assert.equal(listPendingActions({ env }).find((item) => item.actionId === pending.actionId).status, 'executed');
 });
 
-test('createReplyBackend cancels pending action without executing', async () => {
-  const env = tempStateEnv();
+test('createReplyBackend cancels pending action without executing', async (t) => {
+  const env = tempStateEnv(t);
   const pending = createPendingAction({
     requestId: 'req-cancel-pending',
     channel: 'wechat',
@@ -1235,8 +1718,8 @@ test('createReplyBackend cancels pending action without executing', async () => 
   assert.equal(listPendingActions({ env }).find((item) => item.actionId === pending.actionId).status, 'cancelled');
 });
 
-test('createReplyBackend refuses expired and multiple pending confirmations', async () => {
-  const env = tempStateEnv({ HERMES_ACTION_PENDING_TTL_MINUTES: '1' });
+test('createReplyBackend refuses expired and multiple pending confirmations', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ACTION_PENDING_TTL_MINUTES: '1' });
   createPendingAction({
     requestId: 'req-expired',
     channel: 'wechat',
@@ -1289,9 +1772,9 @@ test('createReplyBackend refuses expired and multiple pending confirmations', as
   assert.match(multi.replyText, /存在多个待确认操作/);
 });
 
-test('createReplyBackend does not execute high risk actions in observe or enforce modes', async () => {
+test('createReplyBackend does not execute high risk actions in observe or enforce modes', async (t) => {
   for (const mode of ['observe', 'enforce']) {
-    const env = tempStateEnv({ HERMES_ACTION_GATE_MODE: mode });
+    const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: mode });
     let executed = false;
     const backend = createReplyBackend({
       env,
@@ -1314,9 +1797,9 @@ test('createReplyBackend does not execute high risk actions in observe or enforc
   }
 });
 
-test('createReplyBackend does not execute existing pending confirmations in observe or enforce modes', async () => {
+test('createReplyBackend does not execute existing pending confirmations in observe or enforce modes', async (t) => {
   for (const mode of ['observe', 'enforce']) {
-    const env = tempStateEnv({ HERMES_ACTION_GATE_MODE: mode });
+    const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: mode });
     createPendingAction({
       requestId: `req-existing-${mode}`,
       channel: 'wechat',
@@ -1388,8 +1871,8 @@ test('createReplyBackend passes route_hint and media to Hermes', async () => {
     ],
   });
 
-  assert.equal(response.replyText, 'hermes reply');
-  assert.deepEqual(response.followUpMessages, ['第二条']);
+  assert.equal(response.replyText, 'hermes reply\n\n第二条');
+  assert.deepEqual(response.followUpMessages, []);
   assert.deepEqual(response.media, {
     type: 'image',
     url: 'https://example.com/out.png',

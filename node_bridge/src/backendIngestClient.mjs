@@ -17,14 +17,18 @@ export async function ingestExchangeToBackend(payload, options = {}) {
   }
 
   const fetchImpl = options.fetchImpl || fetch;
+  const eventId = normalizeDurableEventId(payload?.event_id);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), config.timeoutMs);
   let response;
   try {
     response = await fetchImpl(`${config.baseUrl}/ingest`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      headers: {
+        'Content-Type': 'application/json',
+        ...(eventId ? { 'X-Ran-Agent-Event-Id': eventId } : {}),
+      },
+      body: JSON.stringify(eventId ? { ...payload, event_id: eventId } : payload),
       signal: controller.signal,
     });
   } catch (error) {
@@ -47,6 +51,11 @@ export async function ingestExchangeToBackend(payload, options = {}) {
   }
 
   return body;
+}
+
+function normalizeDurableEventId(value) {
+  const eventId = String(value || '').trim();
+  return /^outbox_[a-f0-9]{32}$/.test(eventId) ? eventId : '';
 }
 
 function parsePositiveInt(value, fallback) {

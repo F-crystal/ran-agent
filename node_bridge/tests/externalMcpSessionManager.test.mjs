@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import path from 'node:path';
 import test from 'node:test';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 import {
   closeExternalMcpSession,
@@ -12,20 +12,7 @@ import {
 } from '../src/externalMcp/sessionManager.mjs';
 
 function tempEnv(t) {
-  const base = path.join(process.cwd(), '.tmp-test-external-mcp-session');
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, 'case-'));
-  t.after(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-    try {
-      fs.rmdirSync(base);
-    } catch {
-      // Other tests may still own sibling temp dirs.
-    }
-  });
-  return {
-    RAN_AGENT_STATE_DIR: root,
-  };
+  return createIsolatedTestEnv(t, {}, 'external-mcp-session-');
 }
 
 test('session manager opens user-bound observe sessions with random ids', (t) => {
@@ -163,4 +150,18 @@ test('session manager stores upstream MCP session ids privately', (t) => {
 
   assert.equal(updated.upstreamSessionId, 'remote-session-1');
   assert.equal(loaded.upstreamSessionId, 'remote-session-1');
+});
+
+test('session corruption is quarantined instead of being treated as no active sessions', (t) => {
+  const env = tempEnv(t);
+  const directory = `${env.RAN_AGENT_STATE_DIR}/external_mcp`;
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(`${directory}/sessions.json`, '{', 'utf8');
+
+  assert.throws(
+    () => listExternalMcpSessions({ env }),
+    (error) => error?.code === 'RAN_AGENT_STATE_CORRUPT',
+  );
+  assert.equal(fs.existsSync(`${directory}/sessions.json`), false);
+  assert.equal(fs.readdirSync(directory).some((entry) => entry.startsWith('sessions.json.corrupt-')), true);
 });

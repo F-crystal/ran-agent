@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 
 import { createDesktopProxyServer, openAiResponseFromReply } from '../src/desktopProxyServer.mjs';
+import { createDurableOutbox } from '../src/durableOutbox.mjs';
+import { handleIncomingMessage } from '../src/channelHub.mjs';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 function request(method, url, body, headers = {}) {
   return {
@@ -17,16 +21,28 @@ function request(method, url, body, headers = {}) {
 test('desktop proxy /v1/models returns ran-agent models', async () => {
   const server = createDesktopProxyServer({ channelHub: async () => ({ replyText: '' }) });
   const response = await server.handleRequest(request('GET', '/v1/models'));
-  assert.equal(response.status, 200);
-  assert.equal(response.body.data.some((model) => model.id === 'ran-agent'), true);
+  assert.equal(response.status, 401);
+});
+
+test('desktop proxy requires a configured credential even on loopback', async () => {
+  const server = createDesktopProxyServer({
+    env: { DESKTOP_PROXY_API_KEY: 'a'.repeat(32) },
+    channelHub: async () => ({ replyText: '' }),
+  });
+  const response = await server.handleRequest(request('GET', '/v1/models'));
+  assert.equal(response.status, 401);
 });
 
 test('desktop proxy chat completions routes through channelHub', async () => {
   let normalized = null;
+  let channelOptions = null;
+  const outbox = { name: 'shared-outbox' };
   const server = createDesktopProxyServer({
-    env: { DESKTOP_PROXY_DEFAULT_CLIENT_ID: 'desktop-local' },
-    channelHub: async (message) => {
+    env: { DESKTOP_PROXY_API_KEY: 'a'.repeat(32) },
+    outbox,
+    channelHub: async (message, options) => {
       normalized = message;
+      channelOptions = options;
       return { replyText: '桌面回复' };
     },
   });
@@ -39,27 +55,89 @@ test('desktop proxy chat completions routes through channelHub', async () => {
       { role: 'user', content: '她的故事很感动' },
     ],
   }, {
+    authorization: `Bearer ${'a'.repeat(32)}`,
     'x-ran-agent-client-id': 'desktop-client',
     'x-ran-agent-conversation-id': 'desktop-thread',
   }));
 
   assert.equal(response.status, 200);
   assert.equal(normalized.platform, 'desktop');
-  assert.equal(normalized.conversation_id, 'desktop-thread');
-  assert.equal(normalized.sender_id, 'desktop-client');
+  assert.match(normalized.conversation_id, /^desktop:[a-f0-9]{32}$/);
+  assert.equal(normalized.conversation_id, normalized.sender_id);
+  assert.notEqual(normalized.conversation_id, 'desktop-thread');
+  assert.notEqual(normalized.sender_id, 'desktop-client');
   assert.equal(normalized.text, '她的故事很感动');
   assert.equal(normalized.raw_event_meta.model, 'ran-agent');
   assert.equal(normalized.prior_messages.length, 2);
+  assert.equal(channelOptions.outbox, outbox);
+  assert.equal(typeof channelOptions.adapter?.sendReply, 'function');
+  assert.deepEqual(
+    await channelOptions.adapter.sendReply({ text: '桌面回复' }),
+    {
+      textStatus: 'ambiguous',
+      attachments: [],
+      adapterReceiptRef: 'desktop:http-response-boundary',
+    },
+  );
   assert.equal(response.body.choices[0].message.content, '桌面回复');
 });
 
+test('desktop proxy denies non-loopback binding without a strong credential', async () => {
+  const server = createDesktopProxyServer({
+    env: {
+      DESKTOP_PROXY_HOST: '0.0.0.0',
+      DESKTOP_PROXY_API_KEY: 'short',
+    },
+    channelHub: async () => ({ replyText: '' }),
+  });
+  const response = await server.handleRequest(request('GET', '/v1/models', undefined, {
+    authorization: 'Bearer short',
+  }));
+  assert.equal(response.status, 403);
+});
+
+test('desktop HTTP response delivery is durably ambiguous until the response boundary is observable', async (t) => {
+  const baseEnv = createIsolatedTestEnv(t, { DESKTOP_PROXY_API_KEY: 'a'.repeat(32) }, 'desktop-outbox-');
+  const env = {
+    ...baseEnv,
+    RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(baseEnv.RAN_AGENT_STATE_DIR, 'timeline.jsonl'),
+  };
+  const outbox = createDurableOutbox({ env });
+  const server = createDesktopProxyServer({
+    env,
+    outbox,
+    logger: { log() {}, warn() {}, error() {}, info() {} },
+    channelHub: (message, options) => handleIncomingMessage(message, {
+      ...options,
+      replyBackend: {
+        async getReply() {
+          return { replyText: '等 HTTP 写入', followUpMessages: [], media: null };
+        },
+      },
+    }),
+  });
+  const response = await server.handleRequest(request('POST', '/v1/chat/completions', {
+    model: 'ran-agent',
+    messages: [{ role: 'user', content: 'hello' }],
+  }, { authorization: `Bearer ${'a'.repeat(32)}` }));
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.choices[0].message.content, '等 HTTP 写入');
+  assert.equal(outbox.list().length, 1);
+  assert.equal(outbox.list()[0].delivery, 'ambiguous');
+  assert.equal(outbox.list()[0].timelineProjection, 'pending');
+});
+
 test('desktop proxy stream=true returns clear unsupported error', async () => {
-  const server = createDesktopProxyServer({ channelHub: async () => ({ replyText: '' }) });
+  const server = createDesktopProxyServer({
+    env: { DESKTOP_PROXY_API_KEY: 'a'.repeat(32) },
+    channelHub: async () => ({ replyText: '' }),
+  });
   const response = await server.handleRequest(request('POST', '/v1/chat/completions', {
     model: 'ran-agent',
     stream: true,
     messages: [{ role: 'user', content: 'hi' }],
-  }));
+  }, { authorization: `Bearer ${'a'.repeat(32)}` }));
   assert.equal(response.status, 400);
   assert.match(response.body.error.message, /stream/);
 });

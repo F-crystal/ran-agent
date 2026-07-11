@@ -44,3 +44,24 @@ test('ingestExchangeToBackend returns ok payload', async () => {
 
   assert.equal(response.ok, true);
 });
+
+test('ingestExchangeToBackend forwards the durable event id as an idempotency header', async () => {
+  let request = null;
+  await ingestExchangeToBackend({
+    channel: 'wechat',
+    sender_id: 'user-1',
+    user_text: '你好',
+    reply_text: '收到',
+    source: 'hermes',
+    event_id: 'outbox_0123456789abcdef0123456789abcdef',
+  }, {
+    config: { enabled: true, baseUrl: 'http://127.0.0.1:8787', timeoutMs: 5000 },
+    fetchImpl: async (_url, options) => {
+      request = options;
+      return { ok: true, status: 200, async json() { return { ok: true }; } };
+    },
+  });
+
+  assert.equal(request.headers['X-Ran-Agent-Event-Id'], 'outbox_0123456789abcdef0123456789abcdef');
+  assert.equal(JSON.parse(request.body).event_id, 'outbox_0123456789abcdef0123456789abcdef');
+});

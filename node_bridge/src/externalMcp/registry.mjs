@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 
+import { readJsonState, writeJsonAtomic } from '../atomicState.mjs';
 import { resolveStateDir } from '../runtimeState.mjs';
+import {
+  isProtectedCapabilityName,
+  isProtectedCapabilityToolPrefix,
+  PROTECTED_CAPABILITY_COLLISION_CODE,
+} from './protectedCapabilities.mjs';
 
 const MAX_TEXT = 360;
 const MAX_SCHEMA_FIELDS = 64;
@@ -11,6 +17,7 @@ const LEGACY_SCHEMA_SUMMARY_FIELDS = 32;
 const MAX_SCHEMA_SCAN_NODES = 512;
 const MAX_SCHEMA_SCAN_DEPTH = 32;
 const SAFE_TRANSPORTS = new Set(['stdio', 'http', 'streamable-http', 'sse', 'websocket']);
+const REGISTRY_SCHEMA_VERSION = 1;
 const WRITE_WORDS = /\b(post|submit|send|reply|comment|like|react|follow|dm|message|move|act|trade|save|write|update|create)\b/i;
 const DESTRUCTIVE_WORDS = /\b(delete|remove|destroy|purchase|buy|transfer|report|bulk|spend|irreversible|sudo|shell|exec)\b/i;
 const READ_WORDS = /\b(read|search|list|get|fetch|observe|watch|mentions|profile|thread|summarize|summary)\b/i;
@@ -18,6 +25,9 @@ const ACCOUNT_BOUNDARY_WORDS = /(?:\b(?:oauth|authorization|bearer|api[ _.-]?key
 
 export function validateManifest(input = {}, options = {}) {
   const errors = [];
+  if (hasProtectedCapabilityCollision(input)) {
+    errors.push(PROTECTED_CAPABILITY_COLLISION_CODE);
+  }
   const findings = scanForForbiddenSecrets(input);
   for (const finding of findings) {
     errors.push(`${finding.reason}:${finding.path}`);
@@ -118,10 +128,11 @@ export async function admitExternalMcpCandidate(input = {}, options = {}) {
   const now = normalizeDate(options.now || input.now) || new Date();
   const validated = validateManifest(input, options);
   if (!validated.ok) {
+    const protectedCollision = validated.errors.includes(PROTECTED_CAPABILITY_COLLISION_CODE);
     const entry = writeRegistryEntry({
       state: 'denied',
       enabled: false,
-      reason: 'manifest_validation_failed',
+      reason: protectedCollision ? PROTECTED_CAPABILITY_COLLISION_CODE : 'manifest_validation_failed',
       errors: validated.errors,
       manifest: null,
       candidateId: sanitizeId(input.id || ''),
@@ -130,10 +141,16 @@ export async function admitExternalMcpCandidate(input = {}, options = {}) {
     return { ok: false, state: 'denied', entry, errors: validated.errors };
   }
 
-  const decision = await classifyAdmission(validated.manifest, options);
+  // Rechecking a server the owner already configured must not turn a transport
+  // or effect classification into a provider ban.  The generic adapter keeps
+  // it connected; per-tool policy still stops at the first missing boundary.
+  const existing = getExternalMcpRegistryEntry(validated.manifest.id, { env });
+  const decision = isExplicitlyConfiguredEntry(existing)
+    ? { state: 'needs_boundary', reason: 'configured_effect_boundary', manifest: validated.manifest }
+    : await classifyAdmission(validated.manifest, options);
   const entry = writeRegistryEntry({
     state: decision.state,
-    enabled: decision.state === 'auto_admitted',
+    enabled: decision.state === 'auto_admitted' || decision.state === 'needs_boundary',
     reason: decision.reason,
     errors: [],
     manifest: decision.manifest || validated.manifest,
@@ -142,6 +159,16 @@ export async function admitExternalMcpCandidate(input = {}, options = {}) {
     now,
   }, env);
   return { ok: true, state: decision.state, entry };
+}
+
+function isExplicitlyConfiguredEntry(entry) {
+  return entry?.enabled === true && ['configured', 'active', 'constrained', 'needs_boundary'].includes(String(entry.state || ''));
+}
+
+function hasProtectedCapabilityCollision(input = {}) {
+  if (isProtectedCapabilityName(input?.id)) return true;
+  const tools = Array.isArray(input?.tools) ? input.tools : [];
+  return tools.some((tool) => isProtectedCapabilityToolPrefix(tool?.name));
 }
 
 export function listExternalMcpRegistryEntries(options = {}) {
@@ -484,7 +511,7 @@ function normalizeTransport(value) {
 
 function normalizeActivityKind(value) {
   const normalized = sanitizeShort(value).toLowerCase();
-  return ['game', 'forum', 'browser', 'api'].includes(normalized) ? normalized : '';
+  return ['game', 'forum', 'browser', 'api', 'embodied', 'other'].includes(normalized) ? normalized : '';
 }
 
 function sanitizeProfileScope(value) {
@@ -551,37 +578,150 @@ function paths(env) {
   };
 }
 
-function readRegistry(env) {
+function writeRegistryEntry({ state, enabled, reason, errors, manifest, excludedTools, candidateId, now }, env) {
+  return mutateRegistry(env, (entries) => {
+    const serverId = sanitizeId(manifest?.id || candidateId || '');
+    const previous = entries.find((entry) => entry.serverId === serverId);
+    const entry = {
+      serverId,
+      state,
+      enabled,
+      reason,
+      errors: Array.isArray(errors) ? errors : [],
+      manifest,
+      excludedTools: Array.isArray(excludedTools) ? excludedTools : [],
+      createdAt: previous?.createdAt || now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    return { entries: [...entries.filter((item) => item.serverId !== serverId), entry], result: entry };
+  });
+}
+
+function readRegistry(env, options = {}) {
+  const target = paths(env).registry;
+  assertNoUnrecoveredQuarantine(target);
+  const state = readJsonState(target, {
+    validate: (value) => isRegistryState(value) || isLegacyRegistry(value),
+    missingValue: emptyRegistryState(),
+    critical: true,
+  });
+  if (!Array.isArray(state)) return state.entries;
+  if (options.lockHeld === true) {
+    const migrated = registryState(state.map(normalizeLegacyRegistryEntry), 1);
+    writeJsonAtomic(target, migrated, { validate: isRegistryState });
+    return migrated.entries;
+  }
+  const lock = acquireMutationLock(target);
+  if (!lock) throw storeBusy('external MCP registry is busy');
   try {
-    const parsed = JSON.parse(fs.readFileSync(paths(env).registry, 'utf8'));
-    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object') : [];
-  } catch {
-    return [];
+    return readRegistry(env, { lockHeld: true });
+  } finally {
+    releaseMutationLock(lock);
   }
 }
 
-function writeRegistry(entries, env) {
+function mutateRegistry(env, mutator) {
   const target = paths(env).registry;
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, `${JSON.stringify(entries, null, 2)}\n`, 'utf8');
+  const lock = acquireMutationLock(target);
+  if (!lock) throw storeBusy('external MCP registry is busy');
+  try {
+    const entries = readRegistry(env, { lockHeld: true });
+    const mutation = mutator(entries);
+    const next = registryState(mutation.entries, Date.now());
+    writeJsonAtomic(target, next, { validate: isRegistryState });
+    return mutation.result;
+  } finally {
+    releaseMutationLock(lock);
+  }
 }
 
-function writeRegistryEntry({ state, enabled, reason, errors, manifest, excludedTools, candidateId, now }, env) {
-  const serverId = sanitizeId(manifest?.id || candidateId || '');
-  const previous = readRegistry(env).find((entry) => entry.serverId === serverId);
-  const entry = {
-    serverId,
-    state,
-    enabled,
-    reason,
-    errors: Array.isArray(errors) ? errors : [],
-    manifest,
-    excludedTools: Array.isArray(excludedTools) ? excludedTools : [],
-    createdAt: previous?.createdAt || now.toISOString(),
-    updatedAt: now.toISOString(),
+function emptyRegistryState() {
+  return registryState([], 0);
+}
+
+function registryState(entries, revision) {
+  return {
+    schemaVersion: REGISTRY_SCHEMA_VERSION,
+    revision: Number.isInteger(revision) && revision >= 0 ? revision : 0,
+    entries: Array.isArray(entries) ? entries : [],
   };
-  writeRegistry([...readRegistry(env).filter((item) => item.serverId !== serverId), entry], env);
-  return entry;
+}
+
+function isRegistryState(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && value.schemaVersion === REGISTRY_SCHEMA_VERSION
+    && Number.isInteger(value.revision) && value.revision >= 0
+    && Array.isArray(value.entries) && value.entries.every(isRegistryEntry);
+}
+
+function isLegacyRegistry(value) {
+  return Array.isArray(value) && value.every((entry) => (
+    entry && typeof entry === 'object' && !Array.isArray(entry)
+    && typeof entry.serverId === 'string' && Boolean(entry.serverId)
+    && typeof entry.state === 'string' && typeof entry.enabled === 'boolean'
+    && typeof entry.reason === 'string' && Array.isArray(entry.errors)
+    && (entry.manifest === null || (entry.manifest && typeof entry.manifest === 'object' && !Array.isArray(entry.manifest)))
+    && typeof entry.createdAt === 'string' && typeof entry.updatedAt === 'string'
+  ));
+}
+
+function normalizeLegacyRegistryEntry(entry) {
+  return {
+    ...entry,
+    excludedTools: Array.isArray(entry.excludedTools) ? entry.excludedTools : [],
+  };
+}
+
+function isRegistryEntry(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && typeof value.serverId === 'string' && Boolean(value.serverId)
+    && typeof value.state === 'string' && typeof value.enabled === 'boolean'
+    && typeof value.reason === 'string' && Array.isArray(value.errors)
+    && (value.manifest === null || (value.manifest && typeof value.manifest === 'object' && !Array.isArray(value.manifest)))
+    && Array.isArray(value.excludedTools)
+    && typeof value.createdAt === 'string' && typeof value.updatedAt === 'string';
+}
+
+function assertNoUnrecoveredQuarantine(target) {
+  if (fs.existsSync(target)) return;
+  let entries;
+  try { entries = fs.readdirSync(path.dirname(target)); } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  if (!entries.some((entry) => entry.startsWith(`${path.basename(target)}.corrupt-`))) return;
+  const error = new Error('external MCP registry is quarantined and requires recovery');
+  error.code = 'RAN_AGENT_STATE_CORRUPT';
+  throw error;
+}
+
+function acquireMutationLock(target) {
+  const lockPath = `${target}.lock`;
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  let descriptor;
+  try {
+    descriptor = fs.openSync(lockPath, 'wx', 0o600);
+    fs.writeFileSync(descriptor, `${process.pid}\n`, 'utf8');
+    fs.fsyncSync(descriptor);
+    return { descriptor, lockPath };
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { fs.closeSync(descriptor); } catch {}
+      try { fs.rmSync(lockPath, { force: true }); } catch {}
+    }
+    if (error?.code === 'EEXIST') return null;
+    throw error;
+  }
+}
+
+function releaseMutationLock(lock) {
+  try { fs.closeSync(lock.descriptor); } finally { fs.rmSync(lock.lockPath, { force: true }); }
+}
+
+function storeBusy(message) {
+  const error = new Error(message);
+  error.code = 'EXTERNAL_MCP_REGISTRY_BUSY';
+  return error;
 }
 
 function isBlockedHostname(hostname) {

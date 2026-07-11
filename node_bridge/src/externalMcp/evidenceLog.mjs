@@ -2,11 +2,19 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+  appendJsonLine,
+  quarantineCorruptState,
+  writeFileAtomic,
+} from '../atomicState.mjs';
 import { resolveStateDir } from '../runtimeState.mjs';
+
+const EVIDENCE_SCHEMA_VERSION = 1;
 
 export function sanitizeExternalMcpEvidence(input = {}, options = {}) {
   const now = normalizeDate(options.now || input.now) || new Date();
   const event = {
+    schema_version: EVIDENCE_SCHEMA_VERSION,
     timestamp: now.toISOString(),
     request_id: sanitizeId(input.requestId || input.request_id || ''),
     global_user_id: sanitizeIdentity(input.globalUserId || input.global_user_id || ''),
@@ -31,23 +39,26 @@ export function appendExternalMcpEvidence(input = {}, options = {}) {
   const env = options.env || process.env;
   const event = sanitizeExternalMcpEvidence(input, options);
   const target = evidencePath(env);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.appendFileSync(target, `${JSON.stringify(event)}\n`, 'utf8');
-  return event;
+  const lock = acquireMutationLock(target);
+  if (!lock) throw evidenceError('external MCP evidence log is busy', 'EXTERNAL_MCP_EVIDENCE_STORE_BUSY');
+  try {
+    assertNoUnrecoveredQuarantine(target);
+    const existing = readEvidenceFile(target);
+    if (existing.incompleteTail) {
+      writeFileAtomic(target, existing.validText);
+    }
+    appendJsonLine(target, event, { validate: isEvidenceEvent });
+    return event;
+  } finally {
+    releaseMutationLock(lock);
+  }
 }
 
 export function listExternalMcpEvidence(options = {}) {
   const env = options.env || process.env;
-  try {
-    return fs.readFileSync(evidencePath(env), 'utf8')
-      .split('\n')
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => JSON.parse(line))
-      .filter((item) => item && typeof item === 'object');
-  } catch {
-    return [];
-  }
+  const target = evidencePath(env);
+  assertNoUnrecoveredQuarantine(target);
+  return readEvidenceFile(target).events;
 }
 
 export function verifyExternalMcpEvidenceRefs(input = {}, options = {}) {
@@ -107,6 +118,118 @@ export function verifyExternalMcpEvidenceRefs(input = {}, options = {}) {
 
 function evidencePath(env) {
   return path.join(resolveStateDir(env), 'external_mcp', 'evidence.jsonl');
+}
+
+function readEvidenceFile(target) {
+  let text;
+  try {
+    text = fs.readFileSync(target, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return { events: [], validText: '', incompleteTail: false };
+    throw error;
+  }
+  if (!text) return { events: [], validText: '', incompleteTail: false };
+  const hasFinalNewline = text.endsWith('\n');
+  const lines = text.split('\n');
+  if (hasFinalNewline) lines.pop();
+  const events = [];
+  const validLines = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) return quarantineEvidence(target, 'blank-jsonl-line');
+    try {
+      const value = JSON.parse(line);
+      if (!isEvidenceEvent(value)) return quarantineEvidence(target, 'invalid-evidence-record');
+      events.push(value);
+      validLines.push(line);
+    } catch (error) {
+      const finalTail = index === lines.length - 1 && !hasFinalNewline && isIncompleteJsonTail(line, error);
+      if (finalTail) {
+        return {
+          events,
+          validText: validLines.length > 0 ? `${validLines.join('\n')}\n` : '',
+          incompleteTail: true,
+        };
+      }
+      return quarantineEvidence(target, 'invalid-jsonl');
+    }
+  }
+  return { events, validText: text, incompleteTail: false };
+}
+
+function isIncompleteJsonTail(line, error) {
+  if (!String(line || '').trimStart().startsWith('{')) return false;
+  const message = String(error?.message || '');
+  if (/unexpected end|end of json input/i.test(message)) return true;
+  const match = message.match(/position\s+(\d+)/i);
+  return Boolean(match) && Number(match[1]) >= String(line).length - 1;
+}
+
+function quarantineEvidence(target, reason) {
+  try {
+    quarantineCorruptState(target, reason);
+  } catch (cause) {
+    throw evidenceError('external MCP evidence log is invalid and could not be quarantined', 'RAN_AGENT_STATE_CORRUPT', cause);
+  }
+  throw evidenceError('external MCP evidence log is invalid and was quarantined', 'RAN_AGENT_STATE_CORRUPT');
+}
+
+function isEvidenceEvent(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (Object.hasOwn(value, 'schema_version') && value.schema_version !== EVIDENCE_SCHEMA_VERSION) return false;
+  const stringFields = [
+    'timestamp', 'request_id', 'global_user_id', 'server_id', 'tool_id', 'watch_scope',
+    'tier', 'session_mode', 'trigger', 'decision', 'status', 'result_id_hash', 'error_code', 'evidence_ref',
+  ];
+  if (!stringFields.every((key) => typeof value[key] === 'string')) return false;
+  if (!Number.isFinite(Date.parse(value.timestamp))) return false;
+  if (value.tier && !/^T[0-5]$/.test(value.tier)) return false;
+  if (value.session_mode && !['observe', 'interactive', 'write'].includes(value.session_mode)) return false;
+  if (!['user_turn', 'proactive', 'activity', 'pending_confirmation', 'repair'].includes(value.trigger)) return false;
+  if (value.decision && !['allowed', 'allow', 'denied', 'deny', 'confirmation_required', 'failed', 'timed_out'].includes(value.decision)) return false;
+  if (value.status && !['success', 'partial_success', 'failed', 'timed_out', 'denied'].includes(value.status)) return false;
+  if (value.result_id_hash && !/^[a-f0-9]{16}$/.test(value.result_id_hash)) return false;
+  return value.evidence_ref === buildExternalMcpEvidenceRef(value);
+}
+
+function assertNoUnrecoveredQuarantine(target) {
+  if (fs.existsSync(target)) return;
+  let entries;
+  try { entries = fs.readdirSync(path.dirname(target)); } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  if (!entries.some((entry) => entry.startsWith(`${path.basename(target)}.corrupt-`))) return;
+  throw evidenceError('external MCP evidence log is quarantined and requires recovery', 'RAN_AGENT_STATE_CORRUPT');
+}
+
+function acquireMutationLock(target) {
+  const lockPath = `${target}.lock`;
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  let descriptor;
+  try {
+    descriptor = fs.openSync(lockPath, 'wx', 0o600);
+    fs.writeFileSync(descriptor, `${process.pid}\n`, 'utf8');
+    fs.fsyncSync(descriptor);
+    return { descriptor, lockPath };
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { fs.closeSync(descriptor); } catch {}
+      try { fs.rmSync(lockPath, { force: true }); } catch {}
+    }
+    if (error?.code === 'EEXIST') return null;
+    throw error;
+  }
+}
+
+function releaseMutationLock(lock) {
+  try { fs.closeSync(lock.descriptor); } finally { fs.rmSync(lock.lockPath, { force: true }); }
+}
+
+function evidenceError(message, code, cause) {
+  const error = new Error(message, cause ? { cause } : undefined);
+  error.code = code;
+  return error;
 }
 
 function buildExternalMcpEvidenceRef(event = {}) {

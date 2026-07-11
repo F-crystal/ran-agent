@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from typing import Any, Dict, Iterable
 
@@ -39,6 +40,49 @@ PROFILE_PATTERNS = (
 )
 
 MemoryPayload = Dict[str, Any]
+
+
+def extract_repeated_learning_candidates(
+    user_text: str,
+    *,
+    evidence_seed: str = "",
+) -> tuple[dict[str, str], ...]:
+    """Return only deterministic, user-authored stable-fact candidates.
+
+    This deliberately reuses the legacy profile parser but does not write legacy
+    memory or promote anything itself.  The personal-learning lifecycle remains
+    the sole authority for candidate/active transitions.
+    """
+
+    normalized = _normalize_text(user_text)
+    if not normalized:
+        return ()
+    evidence_digest = hashlib.sha256(
+        (str(evidence_seed).strip() or normalized).encode("utf-8")
+    ).hexdigest()
+    candidates: list[dict[str, str]] = []
+    for item in _extract_profile_candidates(normalized):
+        category = str(item.get("category", "")).strip()
+        trait = str(item.get("trait", "")).strip()
+        statement = str(item.get("summary", "")).strip()
+        if category in {"preference", "dislike"}:
+            kind = "preference"
+        elif category == "habit":
+            kind = "routine"
+        else:
+            continue
+        if not trait or not statement:
+            continue
+        semantic_key = hashlib.sha256(f"{kind}:{category}:{trait}".encode("utf-8")).hexdigest()[:24]
+        candidates.append(
+            {
+                "kind": kind,
+                "subject_key": f"{kind}:{semantic_key}",
+                "statement": statement,
+                "evidence_digest": evidence_digest,
+            }
+        )
+    return tuple(candidates)
 
 
 def build_memory_context(

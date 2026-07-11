@@ -14,9 +14,11 @@ import {
   sendFeishuReply,
   startFeishuBridge,
 } from '../src/feishuBridge.mjs';
+import { handleIncomingMessage } from '../src/channelHub.mjs';
+import { createDurableOutbox } from '../src/durableOutbox.mjs';
+import { readTimelineRecords } from '../src/globalTimeline.mjs';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 import { getFeishuHomeDmTarget } from '../src/runtimeState.mjs';
-
-const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
 test('parseFeishuEvent parses lark-cli NDJSON event line', () => {
   const event = parseFeishuEvent('{"schema":"2.0","event":{"message":{"message_id":"om_1","chat_id":"oc_1","chat_type":"p2p","content":"{\\"text\\":\\"你是谁\\"}"},"sender":{"sender_id":{"open_id":"ou_1","user_id":"u_1"}}}}');
@@ -134,35 +136,26 @@ test('feishu bridge state dedupes message ids', () => {
   assert.equal(state.markSeen('om-1'), false);
 });
 
-test('handleFeishuEventLine records latest DM target for scheduled digests', async () => {
-  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
-  const tempStateDir = await fs.promises.mkdtemp(path.join(PROJECT_ROOT, '.ran_agent_state', 'feishu-target-'));
-  process.env.RAN_AGENT_STATE_DIR = tempStateDir;
-
-  try {
+test('handleFeishuEventLine records latest DM target for scheduled digests', async (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'feishu-target-');
+  {
     const state = createFeishuBridgeState();
     await handleFeishuEventLine(
       '{"schema":"2.0","event":{"message":{"message_id":"om-dm-target","chat_id":"oc-dm-target","chat_type":"p2p","content":"{\\"text\\":\\"绑定日报\\"}"},"sender":{"sender_id":{"open_id":"ou-target"}}}}',
       {
         state,
         logger: { log() {}, warn() {}, error() {} },
-        env: process.env,
+        env,
         channelHub: async () => ({ replyText: 'ok' }),
       }
     );
 
-    assert.deepEqual(getFeishuHomeDmTarget(process.env), {
+    assert.deepEqual(getFeishuHomeDmTarget(env), {
       platform: 'feishu',
       channel_type: 'dm',
       conversation_id: 'oc-dm-target',
       sender_id: 'ou-target',
     });
-  } finally {
-    if (previousStateDir === undefined) {
-      delete process.env.RAN_AGENT_STATE_DIR;
-    } else {
-      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
-    }
   }
 });
 
@@ -205,8 +198,9 @@ test('sendFeishuReply sends group replies by chat id with explicit idempotency k
   assert.equal(calls[0].args.at(calls[0].args.indexOf('--idempotency-key') + 1), 'reply-once');
 });
 
-function createTempStickerCatalog(name, entry = {}) {
-  const stateDir = fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', name));
+function createTempStickerCatalog(t, name, entry = {}) {
+  const env = createIsolatedTestEnv(t, {}, name);
+  const stateDir = env.RAN_AGENT_STATE_DIR;
   const assetsDir = path.join(stateDir, 'stickers', 'assets');
   fs.mkdirSync(assetsDir, { recursive: true });
   const fileName = entry.fileName || 'stk_001.png';
@@ -222,11 +216,11 @@ function createTempStickerCatalog(name, entry = {}) {
   }));
   fs.writeFileSync(path.join(stateDir, 'stickers', 'tags.json'), '{}');
   fs.writeFileSync(path.join(stateDir, 'stickers', 'hashes.json'), '{}');
-  return { stateDir, assetsDir, filePath: path.join(assetsDir, fileName), fileName };
+  return { env, stateDir, assetsDir, filePath: path.join(assetsDir, fileName), fileName };
 }
 
-test('sendFeishuMediaReply sends text first and image sticker with lark-cli image flag', async () => {
-  const catalog = createTempStickerCatalog('feishu-sticker-image-');
+test('sendFeishuMediaReply sends text first and image sticker with lark-cli image flag', async (t) => {
+  const catalog = createTempStickerCatalog(t, 'feishu-sticker-image-');
   const calls = [];
 
   const result = await sendFeishuMediaReply({
@@ -243,7 +237,7 @@ test('sendFeishuMediaReply sends text first and image sticker with lark-cli imag
       return { stdout: '{"ok":true}' };
     },
     env: {
-      RAN_AGENT_STATE_DIR: catalog.stateDir,
+      ...catalog.env,
       FEISHU_LARK_CLI_BIN: 'lark-cli',
       FEISHU_LARK_CLI_IDENTITY: 'bot',
     },
@@ -265,8 +259,8 @@ test('sendFeishuMediaReply sends text first and image sticker with lark-cli imag
   assert.equal(path.isAbsolute(calls[1].args.at(calls[1].args.indexOf('--image') + 1)), false);
 });
 
-test('sendFeishuMediaReply falls back to file when image send fails', async () => {
-  const catalog = createTempStickerCatalog('feishu-sticker-fallback-');
+test('sendFeishuMediaReply falls back to file when image send fails', async (t) => {
+  const catalog = createTempStickerCatalog(t, 'feishu-sticker-fallback-');
   const calls = [];
 
   const result = await sendFeishuMediaReply({
@@ -283,7 +277,7 @@ test('sendFeishuMediaReply falls back to file when image send fails', async () =
       }
       return { stdout: '{"ok":true}' };
     },
-    env: { RAN_AGENT_STATE_DIR: catalog.stateDir, FEISHU_LARK_CLI_BIN: 'lark-cli' },
+    env: { ...catalog.env, FEISHU_LARK_CLI_BIN: 'lark-cli' },
   });
 
   assert.equal(result.ok, true);
@@ -320,8 +314,9 @@ test('sendFeishuMediaReply returns text-only result without media command when m
   assert.equal(calls[0].args.includes('--file'), false);
 });
 
-test('sendFeishuMediaReply sanitizes sticker resolve failures', async () => {
+test('sendFeishuMediaReply sanitizes sticker resolve failures', async (t) => {
   const secretPath = '/private/secret/sticker.png';
+  const env = createIsolatedTestEnv(t, {}, 'feishu-sticker-missing-');
 
   await assert.rejects(
     () => sendFeishuMediaReply({
@@ -335,7 +330,7 @@ test('sendFeishuMediaReply sanitizes sticker resolve failures', async () => {
       execFileImpl: async () => {
         throw new Error('should not send unresolved sticker');
       },
-      env: { RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'feishu-sticker-missing-')) },
+      env,
     }),
     (error) => {
       assert.equal(String(error.message).includes(secretPath), false);
@@ -345,13 +340,11 @@ test('sendFeishuMediaReply sanitizes sticker resolve failures', async () => {
   );
 });
 
-test('handleFeishuEventLine sends media replies through media sender', async () => {
-  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
-  const catalog = createTempStickerCatalog('feishu-event-sticker-');
-  process.env.RAN_AGENT_STATE_DIR = catalog.stateDir;
+test('handleFeishuEventLine sends media replies through media sender', async (t) => {
+  const catalog = createTempStickerCatalog(t, 'feishu-event-sticker-');
   const calls = [];
 
-  try {
+  {
     const state = createFeishuBridgeState();
     await handleFeishuEventLine(
       '{"schema":"2.0","event":{"message":{"message_id":"om-media-event","chat_id":"oc-media-event","chat_type":"p2p","content":"{\\"text\\":\\"贴纸\\"}"},"sender":{"sender_id":{"open_id":"ou-media-event"}}}}',
@@ -359,7 +352,7 @@ test('handleFeishuEventLine sends media replies through media sender', async () 
         state,
         logger: { log() {}, warn() {}, error() {} },
         env: {
-          ...process.env,
+          ...catalog.env,
           FEISHU_LARK_CLI_BIN: 'lark-cli',
           execFileImpl: async (bin, args) => {
             calls.push({ bin, args });
@@ -388,31 +381,129 @@ test('handleFeishuEventLine sends media replies through media sender', async () 
     assert.equal(calls.length, 2);
     assert.equal(calls[0].args.includes('--text'), true);
     assert.equal(calls[1].args.includes('--image'), true);
-  } finally {
-    if (previousStateDir === undefined) {
-      delete process.env.RAN_AGENT_STATE_DIR;
-    } else {
-      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
-    }
   }
 });
 
-test('handleFeishuEventLine quick-acks slow replies and sends final with a distinct idempotency key', async () => {
-  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
-  const stateDir = await fs.promises.mkdtemp(path.join(PROJECT_ROOT, '.ran_agent_state', 'feishu-quick-ack-'));
-  process.env.RAN_AGENT_STATE_DIR = stateDir;
+test('handleFeishuEventLine injects the shared outbox and returns a typed receipt for a successful text send', async (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'feishu-outbox-entry-');
+  const outbox = { name: 'shared-outbox' };
+  let receivedOutbox = null;
+  let receipt = null;
+  await handleFeishuEventLine(
+    '{"schema":"2.0","event":{"message":{"message_id":"om-outbox-entry","chat_id":"oc-outbox-entry","chat_type":"p2p","content":"{\\"text\\":\\"hello\\"}"},"sender":{"sender_id":{"open_id":"ou-outbox-entry"}}}}',
+    {
+      state: createFeishuBridgeState(),
+      logger: { log() {}, warn() {}, error() {} },
+      env: { ...env, FEISHU_LARK_CLI_BIN: 'lark-cli' },
+      outbox,
+      execFileImpl: async () => ({ stdout: '{"ok":true}' }),
+      channelHub: async (normalized, options) => {
+        receivedOutbox = options.outbox;
+        receipt = await options.adapter.sendReply({
+          target: { conversation_id: normalized.conversation_id, sender_id: normalized.sender_id },
+          text: '已送达',
+          media: null,
+          message: normalized,
+        });
+      },
+    },
+  );
+
+  assert.equal(receivedOutbox, outbox);
+  assert.equal(receipt.textStatus, 'sent');
+  assert.deepEqual(receipt.attachments, []);
+  assert.match(receipt.adapterReceiptRef, /^feishu:/);
+});
+
+test('Feishu text entry commits timeline and backend ingest only after its real CLI send succeeds', async (t) => {
+  const isolated = createIsolatedTestEnv(t, { FEISHU_LARK_CLI_BIN: 'lark-cli' }, 'feishu-outbox-live-');
+  const env = { ...isolated, RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(isolated.RAN_AGENT_STATE_DIR, 'timeline.jsonl') };
+  const outbox = createDurableOutbox({ env });
+  const ingested = [];
+  await handleFeishuEventLine(
+    '{"schema":"2.0","event":{"message":{"message_id":"om-outbox-live","chat_id":"oc-outbox-live","chat_type":"p2p","content":"{\\"text\\":\\"hello\\"}"},"sender":{"sender_id":{"open_id":"ou-outbox-live"}}}}',
+    {
+      state: createFeishuBridgeState(),
+      logger: { log() {}, warn() {}, error() {} },
+      env,
+      outbox,
+      execFileImpl: async () => ({ stdout: '{"ok":true}' }),
+      channelHub: (message, options) => handleIncomingMessage(message, {
+        ...options,
+        replyBackend: {
+          async getReply(_message, backendOptions) {
+            assert.equal(backendOptions.deferIngest, true);
+            return {
+              replyText: '已送达',
+              followUpMessages: [],
+              media: null,
+              backendProjection: async ({ outboxId }) => ingested.push(outboxId),
+            };
+          },
+        },
+      }),
+    },
+  );
+
+  const [item] = outbox.list();
+  assert.equal(item.delivery, 'sent');
+  assert.equal(item.timelineProjection, 'committed');
+  assert.equal(item.backendProjection, 'committed');
+  assert.deepEqual(ingested, [item.outboxId]);
+  assert.deepEqual(readTimelineRecords({ timelinePath: env.RAN_AGENT_GLOBAL_TIMELINE_PATH }).map((entry) => entry.role), ['user', 'assistant']);
+});
+
+test('Feishu text entry leaves delivery ambiguous and projects nothing when the CLI send faults', async (t) => {
+  const isolated = createIsolatedTestEnv(t, { FEISHU_LARK_CLI_BIN: 'lark-cli' }, 'feishu-outbox-fault-');
+  const env = { ...isolated, RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(isolated.RAN_AGENT_STATE_DIR, 'timeline.jsonl') };
+  const outbox = createDurableOutbox({ env });
+  let ingested = false;
+  await assert.rejects(handleFeishuEventLine(
+    '{"schema":"2.0","event":{"message":{"message_id":"om-outbox-fault","chat_id":"oc-outbox-fault","chat_type":"p2p","content":"{\\"text\\":\\"hello\\"}"},"sender":{"sender_id":{"open_id":"ou-outbox-fault"}}}}',
+    {
+      state: createFeishuBridgeState(),
+      logger: { log() {}, warn() {}, error() {} },
+      env,
+      outbox,
+      execFileImpl: async () => { throw new Error('cli unavailable'); },
+      channelHub: (message, options) => handleIncomingMessage(message, {
+        ...options,
+        replyBackend: {
+          async getReply() {
+            return {
+              replyText: '不会伪造送达',
+              followUpMessages: [],
+              media: null,
+              backendProjection: async () => { ingested = true; },
+            };
+          },
+        },
+      }),
+    },
+  ));
+  await outbox.recover();
+
+  assert.equal(outbox.list()[0].delivery, 'ambiguous');
+  assert.equal(outbox.list()[0].timelineProjection, 'pending');
+  assert.equal(outbox.list()[0].backendProjection, 'pending');
+  assert.equal(ingested, false);
+  assert.deepEqual(readTimelineRecords({ timelinePath: env.RAN_AGENT_GLOBAL_TIMELINE_PATH }).map((entry) => entry.role), ['user']);
+});
+
+test('handleFeishuEventLine waits for the final reply without a timeout ack race', async (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'feishu-quick-ack-');
   let resolveBackend;
   const calls = [];
 
-  try {
+  {
     const state = createFeishuBridgeState();
-    await handleFeishuEventLine(
+    const processing = handleFeishuEventLine(
       '{"schema":"2.0","event":{"message":{"message_id":"om-quick-ack","chat_id":"oc-quick-ack","chat_type":"p2p","content":"{\\"text\\":\\"慢任务\\"}"},"sender":{"sender_id":{"open_id":"ou-quick-ack"}}}}',
       {
         state,
         logger: { log() {}, warn() {}, error() {} },
         env: {
-          ...process.env,
+          ...env,
           FEISHU_LARK_CLI_BIN: 'lark-cli',
           NODE_BRIDGE_QUICK_ACK_ENABLED: 'true',
           NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS: '20',
@@ -439,41 +530,31 @@ test('handleFeishuEventLine quick-acks slow replies and sends final with a disti
       }
     );
 
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].args.includes('处理中，稍后发结果。'), true);
-    resolveBackend();
     await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(calls.length, 0);
+    resolveBackend();
+    await processing;
 
-    assert.equal(calls.length, 2);
-    assert.equal(calls[1].args.includes('最终结果'), true);
-    const firstKey = calls[0].args.at(calls[0].args.indexOf('--idempotency-key') + 1);
-    const secondKey = calls[1].args.at(calls[1].args.indexOf('--idempotency-key') + 1);
-    assert.notEqual(firstKey, secondKey);
-  } finally {
-    if (previousStateDir === undefined) {
-      delete process.env.RAN_AGENT_STATE_DIR;
-    } else {
-      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
-    }
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].args.includes('最终结果'), true);
+    const idempotencyKey = calls[0].args.at(calls[0].args.indexOf('--idempotency-key') + 1);
+    assert.match(idempotencyKey, /^ran-agent-feishu-/);
   }
 });
 
 test('handleFeishuEventLine downloads inbound image resources and injects save candidates', async (t) => {
-  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
-  const stateDir = await fs.promises.mkdtemp(path.join(PROJECT_ROOT, '.ran_agent_state', 'feishu-inbound-'));
-  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
-  process.env.RAN_AGENT_STATE_DIR = stateDir;
+  const env = createIsolatedTestEnv(t, {}, 'feishu-inbound-');
   const calls = [];
   let received;
 
-  try {
+  {
     const state = createFeishuBridgeState();
     await handleFeishuEventLine(
       '{"schema":"2.0","event":{"message":{"message_id":"om-inbound-image","chat_id":"oc-inbound-image","chat_type":"p2p","message_type":"image","content":"{\\"image_key\\":\\"img_v3_secret\\"}"},"sender":{"sender_id":{"open_id":"ou-inbound-image"}}}}',
       {
         state,
         logger: { log() {}, warn() {}, error() {} },
-        env: { ...process.env, FEISHU_LARK_CLI_BIN: 'lark-cli', FEISHU_LARK_CLI_IDENTITY: 'bot' },
+        env: { ...env, FEISHU_LARK_CLI_BIN: 'lark-cli', FEISHU_LARK_CLI_IDENTITY: 'bot' },
         execFileImpl: async (bin, args, options) => {
           calls.push({ bin, args, options });
           fs.writeFileSync(path.join(options.cwd, args.at(args.indexOf('--output') + 1)), Buffer.from([1, 2, 3]));
@@ -499,31 +580,22 @@ test('handleFeishuEventLine downloads inbound image resources and injects save c
     assert.equal(received.media[0].type, 'image');
     assert.match(received.media[0].filePath, /feishu\/inbound/);
     assert.equal(JSON.stringify(received.raw_event_meta).includes(received.media[0].filePath), false);
-  } finally {
-    if (previousStateDir === undefined) {
-      delete process.env.RAN_AGENT_STATE_DIR;
-    } else {
-      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
-    }
   }
 });
 
 test('handleFeishuEventLine warns when inbound media download fails without hiding text events', async (t) => {
-  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
-  const stateDir = await fs.promises.mkdtemp(path.join(PROJECT_ROOT, '.ran_agent_state', 'feishu-inbound-fail-'));
-  t.after(() => fs.rmSync(stateDir, { recursive: true, force: true }));
-  process.env.RAN_AGENT_STATE_DIR = stateDir;
+  const env = createIsolatedTestEnv(t, {}, 'feishu-inbound-fail-');
   const warnings = [];
   let received;
 
-  try {
+  {
     const state = createFeishuBridgeState();
     await handleFeishuEventLine(
       '{"schema":"2.0","event":{"message":{"message_id":"om-inbound-fail","chat_id":"oc-inbound-fail","chat_type":"p2p","message_type":"file","content":"{\\"file_key\\":\\"file_v3_secret\\",\\"file_name\\":\\"notes.txt\\"}"},"sender":{"sender_id":{"open_id":"ou-inbound-fail"}}}}',
       {
         state,
         logger: { log() {}, warn(message, meta) { warnings.push({ message, meta }); }, error() {} },
-        env: { ...process.env, FEISHU_LARK_CLI_BIN: 'lark-cli' },
+        env: { ...env, FEISHU_LARK_CLI_BIN: 'lark-cli' },
         execFileImpl: async () => {
           throw new Error('/private/token/path failed');
         },
@@ -538,12 +610,6 @@ test('handleFeishuEventLine warns when inbound media download fails without hidi
     assert.equal(JSON.stringify(received.raw_event_meta).includes('/private/token/path'), false);
     assert.equal(warnings.length, 1);
     assert.equal(JSON.stringify(warnings).includes('/private/token/path'), false);
-  } finally {
-    if (previousStateDir === undefined) {
-      delete process.env.RAN_AGENT_STATE_DIR;
-    } else {
-      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
-    }
   }
 });
 

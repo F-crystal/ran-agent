@@ -14,12 +14,27 @@ ROOT_DIR = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT_DIR / "scripts" / "start_time_mcp.sh"
 
 
+def _sandbox_env(env: dict[str, str]) -> dict[str, str]:
+    sandbox_root = Path(
+        env.get("TMPDIR") or env.get("HOME") or str(env["PATH"]).split(os.pathsep, 1)[0]
+    ).resolve()
+    return {
+        "PATH": f"{env['PATH']}:/usr/bin:/bin",
+        "HOME": env.get("HOME", str(sandbox_root)),
+        "TMPDIR": env.get("TMPDIR", str(sandbox_root)),
+        "XDG_CACHE_HOME": env.get("XDG_CACHE_HOME", str(sandbox_root / "xdg-cache")),
+        "UV_CACHE_DIR": env.get("UV_CACHE_DIR", str(sandbox_root / "uv-cache")),
+        "UV_TOOL_DIR": env.get("UV_TOOL_DIR", str(sandbox_root / "uv-tools")),
+        "NODE_ENV": "test",
+        "RAN_AGENT_SKIP_ENV_FILE_LOAD": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+
+
 class StartTimeMcpScriptTest(unittest.TestCase):
     def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        clean_env = {
-            "PATH": f"{env['PATH']}:/usr/bin:/bin",
-            "HOME": env.get("HOME", tempfile.gettempdir()),
-        }
+        clean_env = _sandbox_env(env)
         for key in (
             "LOCAL_TIMEZONE",
             "TIME_MCP_PYTHON",
@@ -63,6 +78,9 @@ class StartTimeMcpScriptTest(unittest.TestCase):
                       exit 0
                     fi
                     printf '%s\\n' "$*" > "{log_path}"
+                    printf 'guard=%s\\n' "${{RAN_AGENT_SKIP_ENV_FILE_LOAD:-}}" >> "{log_path}"
+                    printf 'tmpdir=%s\\n' "${{TMPDIR:-}}" >> "{log_path}"
+                    printf 'uv_cache=%s\\n' "${{UV_CACHE_DIR:-}}" >> "{log_path}"
                     exit 0
                     """
                 ),
@@ -85,10 +103,10 @@ class StartTimeMcpScriptTest(unittest.TestCase):
             logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(
-            logged_argv,
-            "-m mcp_server_time --local-timezone Asia/Shanghai",
-        )
+        self.assertIn("-m mcp_server_time --local-timezone Asia/Shanghai", logged_argv)
+        self.assertIn("guard=1", logged_argv)
+        self.assertIn(f"tmpdir={temp_path.resolve()}", logged_argv)
+        self.assertIn(f"uv_cache={temp_path.resolve() / 'uv-cache'}", logged_argv)
 
     def test_uvx_fallback_passes_local_timezone_argument(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -119,10 +137,7 @@ class StartTimeMcpScriptTest(unittest.TestCase):
 
 class StartPlaywrightMcpScriptTest(unittest.TestCase):
     def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        clean_env = {
-            "PATH": f"{env['PATH']}:/usr/bin:/bin",
-            "HOME": env.get("HOME", tempfile.gettempdir()),
-        }
+        clean_env = _sandbox_env(env)
         for key in (
             "PLAYWRIGHT_MCP_HEADLESS",
             "PLAYWRIGHT_MCP_PORT",
@@ -262,10 +277,7 @@ class StartPlaywrightMcpScriptTest(unittest.TestCase):
 
 class StartSocialReaderMcpScriptTest(unittest.TestCase):
     def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        clean_env = {
-            "PATH": f"{env['PATH']}:/usr/bin:/bin",
-            "HOME": env.get("HOME", tempfile.gettempdir()),
-        }
+        clean_env = _sandbox_env(env)
         for key in (
             "XHS_COOKIE",
             "XHS_MCP_COMMAND",
@@ -322,10 +334,7 @@ class StartSocialReaderMcpScriptTest(unittest.TestCase):
 
 class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
     def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
-        clean_env = {
-            "PATH": f"{env['PATH']}:/usr/bin:/bin",
-            "HOME": env.get("HOME", tempfile.gettempdir()),
-        }
+        clean_env = _sandbox_env(env)
         for key in (
             "OBSIDIAN_MEMORY_MCP_PROVIDER",
             "OBSIDIAN_MEMORY_VAULT_DIR",
@@ -339,6 +348,12 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
         ):
             if key in env:
                 clean_env[key] = env[key]
+        sandbox_root = Path(clean_env["TMPDIR"])
+        clean_env.setdefault("OBSIDIAN_MEMORY_VAULT_DIR", str(sandbox_root / "vault"))
+        clean_env.setdefault(
+            "OBSIDIAN_MEMORY_INDEX_PATH",
+            str(sandbox_root / "data" / "obsidian-memory-index.duckdb"),
+        )
 
         return subprocess.run(
             ["/bin/bash", str(ROOT_DIR / "scripts" / "start_obsidian_memory_mcp.sh")],

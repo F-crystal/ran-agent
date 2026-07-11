@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { createIsolatedTestEnv, registerTestCleanup } from './helpers/isolatedState.mjs';
 import {
   assertStickerFileAllowed,
   atomicWriteJson,
@@ -34,21 +35,10 @@ const webpBytes = () => Buffer.concat([
 ]);
 
 function tempEnv(t, extra = {}) {
-  const base = path.join(process.cwd(), '.tmp-test-stickers');
-  fs.mkdirSync(base, { recursive: true });
-  const root = fs.mkdtempSync(path.join(base, 'case-'));
-  t.after(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-    try {
-      fs.rmdirSync(base);
-    } catch {
-      // Other tests may still own sibling temp dirs.
-    }
-  });
+  const env = createIsolatedTestEnv(t, extra, 'sticker-catalog-', '.ran_agent_state');
   return {
-    RAN_AGENT_ROOT: root,
-    RAN_AGENT_STATE_DIR: path.join(root, '.ran_agent_state'),
-    ...extra,
+    ...env,
+    RAN_AGENT_ROOT: path.dirname(env.RAN_AGENT_STATE_DIR),
   };
 }
 
@@ -149,7 +139,7 @@ test('saves explicitly requested stickers from Feishu inbound media', async (t) 
 
 test('saves WeChat SDK inbound .bin images by sniffing content from tmp media dir', async (t) => {
   const externalRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'weixin-agent-media-'));
-  t.after(() => fs.rmSync(externalRoot, { recursive: true, force: true }));
+  registerTestCleanup(t, () => fs.rmSync(externalRoot, { recursive: true, force: true }));
   const inboundDir = path.join(externalRoot, 'inbound');
   fs.mkdirSync(inboundDir, { recursive: true });
   const sourcePath = path.join(inboundDir, 'wechat-upload.bin');

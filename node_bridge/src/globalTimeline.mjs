@@ -1,6 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
+import { randomUUID } from 'node:crypto';
+import {
+  appendJsonLine,
+  quarantineCorruptState,
+  writeFileAtomic,
+  writeJsonAtomic,
+} from './atomicState.mjs';
 import { shortHash } from './identityMap.mjs';
 
 const DEFAULT_TIMELINE_PATH = '/opt/ran_agent/.ran_agent_state/global-timeline.jsonl';
@@ -34,6 +41,14 @@ export function appendTurn(turn = {}) {
   const timelinePath = turn.timelinePath || config.timelinePath;
   const preparedText = prepareTimelineText(turn.text || turn.text_summary || '');
   const text = preparedText.text;
+  const eventKey = sanitizeTimelineEventKey(turn.event_key || turn.eventKey || turn.outbox_id || turn.outboxId || '');
+  const existingRecords = fs.existsSync(timelinePath)
+    ? readTimelineRecords({ timelinePath, limit: Number.MAX_SAFE_INTEGER })
+    : [];
+  if (eventKey) {
+    const existing = existingRecords.find((item) => item.event_key === eventKey);
+    if (existing) return existing;
+  }
   const record = {
     id: String(turn.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
     global_user_id: String(turn.global_user_id || 'user:ran'),
@@ -45,6 +60,7 @@ export function appendTurn(turn = {}) {
     text,
     created_at: Number(turn.created_at || Date.now()),
   };
+  if (eventKey) record.event_key = eventKey;
   if (turn.text_summary) record.text_summary = sanitizeTimelineText(turn.text_summary, 800);
   if (!record.text_summary && preparedText.text_summary) record.text_summary = preparedText.text_summary;
   if (turn.media_summary) record.media_summary = sanitizeTimelineText(turn.media_summary, 800);
@@ -53,8 +69,7 @@ export function appendTurn(turn = {}) {
   const tags = normalizeTags(turn.tags, text);
   if (tags.length > 0) record.tags = tags;
 
-  fs.mkdirSync(path.dirname(timelinePath), { recursive: true });
-  fs.appendFileSync(timelinePath, `${JSON.stringify(record)}\n`, 'utf8');
+  appendJsonLine(timelinePath, record, { validate: isTimelineRecord });
   if (config.compactEnabled) {
     try {
       const archiveDir = turn.archiveDir || (turn.timelinePath ? path.join(path.dirname(timelinePath), 'timeline_archive') : config.archiveDir);
@@ -106,22 +121,22 @@ export function compactTimeline({
 
   fs.mkdirSync(archiveDir, { recursive: true });
   const archivePath = path.join(archiveDir, `global-timeline-${new Date(now).toISOString().replace(/[:.]/g, '-')}.jsonl.gz`);
-  fs.writeFileSync(archivePath, gzipSync(fs.readFileSync(timelinePath)));
+  writeFileAtomic(archivePath, gzipSync(fs.readFileSync(timelinePath)));
 
   const rewritten = [...summaryRecords, ...recentRecords]
     .map((record) => JSON.stringify(record))
     .join('\n');
-  fs.writeFileSync(timelinePath, rewritten ? `${rewritten}\n` : '', 'utf8');
+  writeFileAtomic(timelinePath, rewritten ? `${rewritten}\n` : '');
 
   const metaPath = path.join(archiveDir, 'last_compact.json');
-  fs.writeFileSync(metaPath, JSON.stringify({
+  writeJsonAtomic(metaPath, {
     compacted_at: new Date(now).toISOString(),
     archive_path: archivePath,
     original_turns: records.length,
     summary_turns: summaryRecords.length,
     retained_turns: recentRecords.length,
     original_bytes: stat.size,
-  }, null, 2), 'utf8');
+  }, { validate: isJsonObject });
 
   return {
     compacted: true,
@@ -134,14 +149,51 @@ export function compactTimeline({
 
 export function readTimelineRecords({ timelinePath = getGlobalTimelineConfig().timelinePath, limit = 1000 } = {}) {
   if (!fs.existsSync(timelinePath)) return [];
-  const lines = fs.readFileSync(timelinePath, 'utf8').split('\n').filter(Boolean);
-  return lines.slice(-Math.max(1, Number(limit) || 1000)).map((line) => {
+  const text = fs.readFileSync(timelinePath, 'utf8');
+  const lines = text.split('\n');
+  const records = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line) continue;
     try {
-      return JSON.parse(line);
-    } catch {
-      return null;
+      const record = JSON.parse(line);
+      if (!isTimelineRecord(record)) throw new Error('invalid timeline record');
+      records.push(record);
+    } catch (cause) {
+      const isIncompleteTail = index === lines.length - 1
+        && !text.endsWith('\n')
+        && cause instanceof SyntaxError;
+      if (isIncompleteTail) {
+        const tailPath = `${timelinePath}.corrupt-tail-${Date.now()}-${randomUUID().slice(0, 8)}`;
+        writeFileAtomic(tailPath, line);
+        writeFileAtomic(timelinePath, records.length > 0
+          ? `${records.map((record) => JSON.stringify(record)).join('\n')}\n`
+          : '');
+        break;
+      }
+      try {
+        quarantineCorruptState(timelinePath, 'timeline');
+      } catch {}
+      const error = new Error('global timeline contains invalid state', { cause });
+      error.code = 'RAN_AGENT_TIMELINE_CORRUPT';
+      throw error;
     }
-  }).filter(Boolean);
+  }
+  return records.slice(-Math.max(1, Number(limit) || 1000));
+}
+
+function isTimelineRecord(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+    && String(value.id || '').trim()
+    && Number.isFinite(Number(value.created_at)));
+}
+
+function isJsonObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function sanitizeTimelineEventKey(value) {
+  return String(value || '').trim().replace(/[\r\n\t]/g, ' ').slice(0, 180);
 }
 
 export function getLocalRecentHistory({

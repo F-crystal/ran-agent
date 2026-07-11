@@ -1,5 +1,6 @@
 import { createReplyBackend } from './replyBackend.mjs';
 import {
+  deriveTrustedActorContext,
   getGlobalUserId,
   getHermesSessionId,
   getHermesSessionKey,
@@ -20,6 +21,10 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
   const logger = options.logger || console;
   const message = normalizeIncomingMessage(normalizedMessage);
   const globalUserId = getGlobalUserId(message, { env });
+  const trustedActorContext = deriveTrustedActorContext(message, {
+    env,
+    receivedAt: new Date(Number(message.created_at || Date.now())),
+  });
   const timelineConfig = getGlobalTimelineConfig(env);
   const timelineNow = Number(message.created_at || Date.now());
   const localRecent = getLocalRecentHistory({
@@ -100,15 +105,80 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     active_topic: activeTopic,
     stale_context: staleContext,
     continuity_note: continuityNote,
+    trusted_actor_context: trustedActorContext,
   };
   const response = await backend.getReply(backendMessage, {
     fetchImpl: options.fetchImpl,
     execFileImpl: options.execFileImpl,
     mediaContextOptions: options.mediaContextOptions,
+    deferIngest: Boolean(options.outbox),
   });
 
-  safeAppendTurn({
-    timelinePath: timelineConfig.timelinePath,
+  const durableOperationKey = `channel-reply:${message.platform}:${shortHash(message.id)}`;
+  const priorDurableDelivery = findDurableDelivery(options.outbox, durableOperationKey);
+  const deliveredResponse = priorDurableDelivery?.delivery === 'sent'
+    ? { ...response, replyText: priorDurableDelivery.text, media: null, followUpMessages: [] }
+    : response;
+  const assistantTurn = buildAssistantTurn({ message, response: deliveredResponse, globalUserId, timelinePath: timelineConfig.timelinePath });
+  if (shouldUseDurableTextDelivery({ response: deliveredResponse, options })) {
+    await options.outbox.deliver({
+      operationKey: durableOperationKey,
+      route: {
+        adapterKey: message.platform,
+        destinationRef: `conversation:${shortHash(message.conversation_id)}`,
+      },
+      text: deliveredResponse.replyText.trim(),
+      attachments: [],
+      idempotent: false,
+      maxAttempts: 1,
+    }, {
+      send: async () => options.adapter.sendReply({
+        target: buildReplyTarget(message),
+        text: deliveredResponse.replyText,
+        media: null,
+        message,
+      }),
+      timeline: async () => {
+        if (deliveredResponse.excludeFromHistory !== true) appendTurn(assistantTurn);
+      },
+      backend: typeof deliveredResponse.backendProjection === 'function'
+        ? async ({ outboxId, text }) => deliveredResponse.backendProjection({ outboxId, replyText: text })
+        : undefined,
+    });
+  } else {
+    if (!options.outbox && deliveredResponse.excludeFromHistory !== true) safeAppendTurn(assistantTurn, logger);
+    if (options.adapter?.sendReply && deliveredResponse.suppressSend !== true) {
+      await options.adapter.sendReply({
+        target: buildReplyTarget(message),
+        text: deliveredResponse.replyText || '',
+        media: deliveredResponse.media || null,
+        message,
+      });
+    }
+  }
+  return deliveredResponse;
+}
+
+function shouldUseDurableTextDelivery({ response, options }) {
+  return Boolean(
+    options.outbox
+    && typeof options.outbox.deliver === 'function'
+    && typeof options.adapter?.sendReply === 'function'
+    && response.suppressSend !== true
+    && !response.media
+    && typeof response.replyText === 'string'
+    && response.replyText.trim(),
+  );
+}
+
+function findDurableDelivery(outbox, operationKey) {
+  if (typeof outbox?.list !== 'function') return null;
+  return outbox.list().find((item) => item.operationKey === operationKey) || null;
+}
+
+function buildAssistantTurn({ message, response, globalUserId, timelinePath }) {
+  return {
+    timelinePath,
     id: `${message.id || Date.now()}-assistant`,
     global_user_id: globalUserId,
     platform: message.platform,
@@ -122,17 +192,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     source_message_id: message.id,
     created_at: Date.now(),
     tags: inferTags(message),
-  }, logger);
-
-  if (options.adapter?.sendReply && response.suppressSend !== true) {
-    await options.adapter.sendReply({
-      target: buildReplyTarget(message),
-      text: response.replyText || '',
-      media: response.media || null,
-      message,
-    });
-  }
-  return response;
+  };
 }
 
 function safeAppendTurn(turn, logger) {

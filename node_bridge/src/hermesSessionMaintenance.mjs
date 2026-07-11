@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { readJsonState, writeJsonAtomic } from './atomicState.mjs';
 import { resolveStateDir } from './runtimeState.mjs';
 import { readTimelineRecords, sanitizeTimelineText } from './globalTimeline.mjs';
 
@@ -31,6 +32,7 @@ export function getHermesLiteSoftResetConfig(env = process.env) {
 
 export function runHermesLiteSoftReset({
   action = 'status',
+  expectedRevision,
   env = process.env,
   timelineRecords,
   now = new Date(),
@@ -38,20 +40,24 @@ export function runHermesLiteSoftReset({
 } = {}) {
   const config = getHermesLiteSoftResetConfig(env);
   const normalizedAction = String(action || 'status').trim().toLowerCase();
+  const state = readHermesLiteMaintenanceState(config);
   if (!config.enabled) {
-    return { ok: true, skipped: true, reason: 'disabled', action: normalizedAction };
+    return { ok: true, skipped: true, reason: 'disabled', action: normalizedAction, revision: state.revision };
   }
   if (normalizedAction === 'status') {
-    return buildStatusResult(config);
+    return buildStatusResult(config, state);
   }
   if (normalizedAction === 'rollback-last') {
-    return rollbackLastLiteSession({ config, now });
+    const conflict = compareRevision(state.revision, expectedRevision);
+    if (conflict) return conflict;
+    return rollbackLastLiteSession({ config, state, now });
   }
   if (normalizedAction !== 'apply' && normalizedAction !== 'dry-run') {
     return { ok: false, error: 'unknown_action', action: normalizedAction };
   }
 
-  const state = readHermesLiteMaintenanceState(config);
+  const conflict = compareRevision(state.revision, expectedRevision);
+  if (conflict) return conflict;
   const records = Array.isArray(timelineRecords)
     ? timelineRecords
     : readTimelineRecords({ timelinePath: config.timelinePath, limit: Math.max(1, config.keepLastN * 4) });
@@ -83,6 +89,7 @@ export function runHermesLiteSoftReset({
   writeJsonFile(path.join(config.digestDir, `${digest.digestId}.json`), digest);
   const nextState = {
     version: 1,
+    revision: state.revision + 1,
     profile: 'lite',
     currentSessionNonce: newSessionNonce,
     previousSessionNonce: state.currentSessionNonce || '',
@@ -114,7 +121,7 @@ export function runHermesLiteSoftReset({
       ...normalizeRollbackStack(state.rollbackStack).slice(0, 9),
     ],
   };
-  writeJsonFile(config.stateFile, nextState);
+  writeJsonFile(config.stateFile, nextState, { validate: isMaintenanceState });
   return {
     ok: true,
     applied: true,
@@ -123,6 +130,7 @@ export function runHermesLiteSoftReset({
     newSessionIdHash,
     newSessionNonce,
     resetAt,
+    revision: nextState.revision,
   };
 }
 
@@ -159,9 +167,13 @@ export function buildHermesLiteContinuityDigest({
 
 export function readHermesLiteMaintenanceState(configOrEnv = process.env) {
   const config = configOrEnv.stateFile ? configOrEnv : getHermesLiteSoftResetConfig(configOrEnv);
-  const payload = readJsonFile(config.stateFile, {});
+  const payload = readJsonFile(config.stateFile, {}, {
+    critical: true,
+    validate: isMaintenanceState,
+  });
   return {
     version: Number(payload.version) || 1,
+    revision: normalizeRevision(payload.revision),
     profile: payload.profile === 'lite' ? 'lite' : 'lite',
     currentSessionNonce: String(payload.currentSessionNonce || ''),
     previousSessionNonce: String(payload.previousSessionNonce || ''),
@@ -216,9 +228,10 @@ export function markLiteResumeDigestConsumed(config = {}, digestId = '', now = n
   if (!changed) return false;
   writeJsonFile(stateConfig.stateFile, {
     ...state,
+    revision: state.revision + 1,
     pendingDigestId: state.pendingDigestId === digestId ? '' : state.pendingDigestId,
     digests,
-  });
+  }, { validate: isMaintenanceState });
   return true;
 }
 
@@ -232,8 +245,7 @@ export function buildDigestPromptText(digest = {}, maxChars = DEFAULT_MAX_DIGEST
   return clipText(`daily_digest: ${JSON.stringify(safeDigest)}`, maxChars);
 }
 
-function rollbackLastLiteSession({ config, now = new Date() } = {}) {
-  const state = readHermesLiteMaintenanceState(config);
+function rollbackLastLiteSession({ config, state = readHermesLiteMaintenanceState(config), now = new Date() } = {}) {
   const [last, ...rest] = state.rollbackStack;
   if (!last) {
     return { ok: true, rolledBack: false, reason: 'no_rollback_entry' };
@@ -249,6 +261,7 @@ function rollbackLastLiteSession({ config, now = new Date() } = {}) {
   }
   const nextState = {
     ...state,
+    revision: state.revision + 1,
     currentSessionNonce: String(last.toSessionNonce || ''),
     previousSessionNonce: '',
     rollbackStack: rest,
@@ -259,20 +272,21 @@ function rollbackLastLiteSession({ config, now = new Date() } = {}) {
       digestId: String(last.digestId || ''),
     },
   };
-  writeJsonFile(config.stateFile, nextState);
+  writeJsonFile(config.stateFile, nextState, { validate: isMaintenanceState });
   return {
     ok: true,
     rolledBack: true,
     restoredSessionIdHash: nextState.lastRollback.restoredSessionIdHash,
+    revision: nextState.revision,
   };
 }
 
-function buildStatusResult(config = {}) {
-  const state = readHermesLiteMaintenanceState(config);
+function buildStatusResult(config = {}, state = readHermesLiteMaintenanceState(config)) {
   return {
     ok: true,
     enabled: true,
     dryRun: config.dryRun,
+    revision: state.revision,
     currentSessionIdHash: hashShort(state.currentSessionNonce || 'default-lite-session'),
     pendingDigestId: state.pendingDigestId || '',
     pendingDigestConsumed: state.pendingDigestId
@@ -362,18 +376,45 @@ function resolveStatePath(rawValue, fallback, stateDir) {
   return normalizedTarget;
 }
 
-function readJsonFile(filePath, fallbackValue) {
-  if (!filePath || !fs.existsSync(filePath)) return fallbackValue;
-  try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
-  } catch {
-    return fallbackValue;
-  }
+function readJsonFile(filePath, fallbackValue, options = {}) {
+  if (!filePath) return fallbackValue;
+  return readJsonState(filePath, {
+    missingValue: fallbackValue,
+    critical: options.critical === true,
+    validate: options.validate || isJsonObject,
+  });
 }
 
-function writeJsonFile(filePath, payload) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, JSON.stringify(payload, null, 2), 'utf-8');
+function writeJsonFile(filePath, payload, options = {}) {
+  writeJsonAtomic(filePath, payload, { validate: options.validate || isJsonObject });
+}
+
+function isJsonObject(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+function isMaintenanceState(value) {
+  return isJsonObject(value)
+    && Number(value.version) === 1
+    && (value.revision === undefined || (Number.isInteger(value.revision) && value.revision >= 0))
+    && String(value.profile || '') === 'lite'
+    && Array.isArray(value.digests || [])
+    && Array.isArray(value.rollbackStack || []);
+}
+
+function compareRevision(currentRevision, expectedRevision) {
+  if (expectedRevision === undefined || expectedRevision === null || expectedRevision === '') return null;
+  if (!Number.isInteger(expectedRevision) || expectedRevision < 0) {
+    return { ok: false, error: 'invalid_revision', currentRevision };
+  }
+  if (expectedRevision !== currentRevision) {
+    return { ok: false, error: 'stale_revision', expectedRevision, currentRevision };
+  }
+  return null;
+}
+
+function normalizeRevision(value) {
+  return Number.isInteger(value) && value >= 0 ? value : 0;
 }
 
 function buildSessionNonce({ now, oldSessionNonce = '', digestId = '', reason = '' } = {}) {

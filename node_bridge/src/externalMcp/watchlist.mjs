@@ -2,7 +2,11 @@ import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { readJsonState, writeJsonAtomic } from '../atomicState.mjs';
 import { resolveStateDir } from '../runtimeState.mjs';
+
+const WATCH_SCHEMA_VERSION = 1;
+const EVENT_SCHEMA_VERSION = 1;
 
 export function addExternalMcpWatch(input = {}, options = {}) {
   const env = options.env || process.env;
@@ -24,8 +28,10 @@ export function addExternalMcpWatch(input = {}, options = {}) {
     notify: input.notify !== false,
     createdAt: now.toISOString(),
   };
-  writeJson(paths(env).watches, upsertById(readWatches(env), watch, 'watchId'));
-  return watch;
+  return mutateWatches(env, (watches) => ({
+    watches: upsertById(watches, watch, 'watchId'),
+    result: watch,
+  }));
 }
 
 export function listExternalMcpWatches(options = {}) {
@@ -35,10 +41,13 @@ export function listExternalMcpWatches(options = {}) {
 export function removeExternalMcpWatch(watchId, options = {}) {
   const env = options.env || process.env;
   const id = sanitizeIdentity(watchId);
-  const watches = readWatches(env);
-  const next = watches.filter((item) => item.watchId !== id);
-  writeJson(paths(env).watches, next);
-  return { ok: next.length !== watches.length, watchId: id };
+  return mutateWatches(env, (watches) => {
+    const next = watches.filter((item) => item.watchId !== id);
+    return {
+      watches: next,
+      result: { ok: next.length !== watches.length, watchId: id },
+    };
+  });
 }
 
 export function checkExternalMcpRateBudget(input = {}, options = {}) {
@@ -51,6 +60,10 @@ export function checkExternalMcpRateBudget(input = {}, options = {}) {
     return { allowed: false, reason: 'invalid_rate_scope' };
   }
   const events = readActiveEvents(env, now);
+  return rateBudgetForEvents(events, { globalUserId, serverId, topicKey, now });
+}
+
+function rateBudgetForEvents(events, { globalUserId, serverId, topicKey, now }) {
   const sameUserEvents = events.filter((item) => item.globalUserId === globalUserId);
   const sameDay = dayKey(now);
   if (sameUserEvents.some((item) => dayKey(item.createdAt) === sameDay)) {
@@ -80,59 +93,62 @@ export function recordExternalMcpNotification(input = {}, options = {}) {
     createdAt: now.toISOString(),
     status: 'sent',
   };
-  writeJson(paths(env).events, [...readEvents(env), event].slice(-500));
-  return event;
+  return mutateEvents(env, (events) => ({
+    events: [...events, event].slice(-500),
+    result: event,
+  }));
 }
 
 export function reserveExternalMcpNotification(input = {}, options = {}) {
   const env = options.env || process.env;
   const now = normalizeDate(input.now || options.now) || new Date();
-  const budget = checkExternalMcpRateBudget({ ...input, now }, { env });
-  if (!budget.allowed) {
-    return budget;
-  }
-  const event = {
-    eventId: `notify_${hashShort(`${input.globalUserId}:${input.serverId}:${input.topicKey}:${now.toISOString()}`)}`,
-    reservationId: `reservation_${hashShort(`${input.globalUserId}:${input.serverId}:${input.topicKey}:${now.toISOString()}:reserved`)}`,
-    globalUserId: sanitizeIdentity(input.globalUserId || input.global_user_id || ''),
-    serverId: sanitizeIdentity(input.serverId || input.server_id || ''),
-    topicKey: sanitizeScope(input.topicKey || input.topic_key || ''),
-    createdAt: now.toISOString(),
-    reserveExpiresAt: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
-    status: 'reserved',
-  };
-  writeJson(paths(env).events, [...readEvents(env), event].slice(-500));
-  return { allowed: true, reason: 'budget_reserved', event };
+  const globalUserId = sanitizeIdentity(input.globalUserId || input.global_user_id || '');
+  const serverId = sanitizeIdentity(input.serverId || input.server_id || '');
+  const topicKey = sanitizeScope(input.topicKey || input.topic_key || '');
+  if (!globalUserId || !serverId || !topicKey) return { allowed: false, reason: 'invalid_rate_scope' };
+  return mutateEvents(env, (events) => {
+    const budget = rateBudgetForEvents(readActiveEventsFrom(events, now), { globalUserId, serverId, topicKey, now });
+    if (!budget.allowed) return { events, result: budget, changed: false };
+    const event = {
+      eventId: `notify_${hashShort(`${globalUserId}:${serverId}:${topicKey}:${now.toISOString()}`)}`,
+      reservationId: `reservation_${hashShort(`${globalUserId}:${serverId}:${topicKey}:${now.toISOString()}:reserved`)}`,
+      globalUserId,
+      serverId,
+      topicKey,
+      createdAt: now.toISOString(),
+      reserveExpiresAt: new Date(now.getTime() + 10 * 60 * 1000).toISOString(),
+      status: 'reserved',
+    };
+    return { events: [...events, event].slice(-500), result: { allowed: true, reason: 'budget_reserved', event } };
+  });
 }
 
 export function commitExternalMcpNotificationReservation(reservationId, options = {}) {
   const env = options.env || process.env;
   const now = normalizeDate(options.now) || new Date();
   const id = sanitizeIdentity(reservationId);
-  const events = readEvents(env);
-  let committed = null;
-  const next = events.map((item) => {
-    if (item?.reservationId !== id && item?.eventId !== id) return item;
-    committed = {
-      ...item,
-      status: 'sent',
-      sentAt: now.toISOString(),
-    };
-    return committed;
+  return mutateEvents(env, (events) => {
+    let committed = null;
+    const next = events.map((item) => {
+      if (item?.reservationId !== id && item?.eventId !== id) return item;
+      committed = { ...item, status: 'sent', sentAt: now.toISOString() };
+      return committed;
+    });
+    return { events: next.slice(-500), result: committed, changed: Boolean(committed) };
   });
-  writeJson(paths(env).events, next.slice(-500));
-  return committed;
 }
 
 export function releaseExternalMcpNotificationReservation(reservationId, options = {}) {
   const env = options.env || process.env;
   const id = sanitizeIdentity(reservationId);
-  const events = readEvents(env);
-  const next = events.filter((item) => (
-    item?.reservationId !== id && item?.eventId !== id
-  ));
-  writeJson(paths(env).events, next.slice(-500));
-  return { ok: next.length !== events.length, reservationId: id };
+  return mutateEvents(env, (events) => {
+    const next = events.filter((item) => item?.reservationId !== id && item?.eventId !== id);
+    return {
+      events: next.slice(-500),
+      result: { ok: next.length !== events.length, reservationId: id },
+      changed: next.length !== events.length,
+    };
+  });
 }
 
 function paths(env) {
@@ -145,16 +161,20 @@ function paths(env) {
 }
 
 function readWatches(env) {
-  return readJson(paths(env).watches);
+  return readCollection(paths(env).watches, 'watches', isWatchState, isLegacyWatches, watchState, env);
 }
 
 function readEvents(env) {
-  return readJson(paths(env).events);
+  return readCollection(paths(env).events, 'events', isEventState, isLegacyEvents, eventState, env);
 }
 
 function readActiveEvents(env, now) {
+  return readActiveEventsFrom(readEvents(env), now);
+}
+
+function readActiveEventsFrom(events, now) {
   const nowMs = now.getTime();
-  return readEvents(env).filter((item) => {
+  return events.filter((item) => {
     const status = String(item.status || 'sent').trim().toLowerCase();
     if (status === 'released' || status === 'failed') return false;
     if (status === 'reserved') {
@@ -165,18 +185,139 @@ function readActiveEvents(env, now) {
   });
 }
 
-function readJson(filePath) {
+function readCollection(filePath, key, validateState, validateLegacy, makeState, env, options = {}) {
+  assertNoUnrecoveredQuarantine(filePath);
+  const state = readJsonState(filePath, {
+    validate: (value) => validateState(value) || validateLegacy(value),
+    missingValue: makeState([], 0),
+    critical: true,
+  });
+  if (!Array.isArray(state)) return state[key];
+  if (options.lockHeld === true) {
+    const migrated = makeState(state, 1);
+    writeJsonAtomic(filePath, migrated, { validate: validateState });
+    return migrated[key];
+  }
+  const lock = acquireMutationLock(filePath);
+  if (!lock) throw watchStoreError('external MCP state is busy', 'EXTERNAL_MCP_WATCH_STORE_BUSY');
   try {
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object') : [];
-  } catch {
-    return [];
+    return readCollection(filePath, key, validateState, validateLegacy, makeState, env, { lockHeld: true });
+  } finally {
+    releaseMutationLock(lock);
   }
 }
 
-function writeJson(filePath, payload) {
-  fs.mkdirSync(path.dirname(filePath), { recursive: true });
-  fs.writeFileSync(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
+function mutateWatches(env, mutator) {
+  return mutateCollection(paths(env).watches, 'watches', isWatchState, isLegacyWatches, watchState, env, mutator);
+}
+
+function mutateEvents(env, mutator) {
+  return mutateCollection(paths(env).events, 'events', isEventState, isLegacyEvents, eventState, env, mutator);
+}
+
+function mutateCollection(filePath, key, validateState, validateLegacy, makeState, env, mutator) {
+  const lock = acquireMutationLock(filePath);
+  if (!lock) throw watchStoreError('external MCP state is busy', 'EXTERNAL_MCP_WATCH_STORE_BUSY');
+  try {
+    const values = readCollection(filePath, key, validateState, validateLegacy, makeState, env, { lockHeld: true });
+    const mutation = mutator(values);
+    if (mutation.changed !== false) {
+      writeJsonAtomic(filePath, makeState(mutation[key], Date.now()), { validate: validateState });
+    }
+    return mutation.result;
+  } finally {
+    releaseMutationLock(lock);
+  }
+}
+
+function watchState(watches, revision) {
+  return { schemaVersion: WATCH_SCHEMA_VERSION, revision: validRevision(revision), watches: Array.isArray(watches) ? watches : [] };
+}
+
+function eventState(events, revision) {
+  return { schemaVersion: EVENT_SCHEMA_VERSION, revision: validRevision(revision), events: Array.isArray(events) ? events : [] };
+}
+
+function validRevision(value) {
+  return Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function isWatchState(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && value.schemaVersion === WATCH_SCHEMA_VERSION && validRevision(value.revision) === value.revision
+    && Array.isArray(value.watches) && value.watches.every(isWatch);
+}
+
+function isEventState(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && value.schemaVersion === EVENT_SCHEMA_VERSION && validRevision(value.revision) === value.revision
+    && Array.isArray(value.events) && value.events.every(isNotificationEvent);
+}
+
+function isLegacyWatches(value) { return Array.isArray(value) && value.every(isWatch); }
+function isLegacyEvents(value) { return Array.isArray(value) && value.every(isNotificationEvent); }
+
+function isWatch(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && /^watch_[a-f0-9]{16}$/.test(String(value.watchId || ''))
+    && typeof value.globalUserId === 'string' && Boolean(value.globalUserId)
+    && typeof value.serverId === 'string' && Boolean(value.serverId)
+    && ['forum', 'game', 'browser', 'api', 'embodied', 'other'].includes(value.kind)
+    && typeof value.scope === 'string' && isSafeScope(value.scope)
+    && typeof value.notify === 'boolean' && Number.isFinite(Date.parse(String(value.createdAt || '')));
+}
+
+function isNotificationEvent(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    && /^notify_[a-f0-9]{16}$/.test(String(value.eventId || ''))
+    && /^reservation_[a-f0-9]{16}$/.test(String(value.reservationId || ''))
+    && typeof value.globalUserId === 'string' && Boolean(value.globalUserId)
+    && typeof value.serverId === 'string' && Boolean(value.serverId)
+    && typeof value.topicKey === 'string' && Boolean(value.topicKey)
+    && Number.isFinite(Date.parse(String(value.createdAt || '')))
+    && ['reserved', 'sent', 'released', 'failed'].includes(String(value.status || ''))
+    && (!Object.hasOwn(value, 'reserveExpiresAt') || Number.isFinite(Date.parse(String(value.reserveExpiresAt))))
+    && (!Object.hasOwn(value, 'sentAt') || Number.isFinite(Date.parse(String(value.sentAt))));
+}
+
+function assertNoUnrecoveredQuarantine(target) {
+  if (fs.existsSync(target)) return;
+  let entries;
+  try { entries = fs.readdirSync(path.dirname(target)); } catch (error) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  if (!entries.some((entry) => entry.startsWith(`${path.basename(target)}.corrupt-`))) return;
+  throw watchStoreError('external MCP state is quarantined and requires recovery', 'RAN_AGENT_STATE_CORRUPT');
+}
+
+function acquireMutationLock(target) {
+  const lockPath = `${target}.lock`;
+  fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  let descriptor;
+  try {
+    descriptor = fs.openSync(lockPath, 'wx', 0o600);
+    fs.writeFileSync(descriptor, `${process.pid}\n`, 'utf8');
+    fs.fsyncSync(descriptor);
+    return { descriptor, lockPath };
+  } catch (error) {
+    if (descriptor !== undefined) {
+      try { fs.closeSync(descriptor); } catch {}
+      try { fs.rmSync(lockPath, { force: true }); } catch {}
+    }
+    if (error?.code === 'EEXIST') return null;
+    throw error;
+  }
+}
+
+function releaseMutationLock(lock) {
+  try { fs.closeSync(lock.descriptor); } finally { fs.rmSync(lock.lockPath, { force: true }); }
+}
+
+function watchStoreError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }
 
 function upsertById(items, item, key) {
@@ -190,7 +331,7 @@ function isSafeScope(scope) {
 
 function sanitizeKind(value) {
   const text = String(value || '').trim().toLowerCase();
-  return ['forum', 'game', 'browser', 'api'].includes(text) ? text : '';
+  return ['forum', 'game', 'browser', 'api', 'embodied', 'other'].includes(text) ? text : '';
 }
 
 function sanitizeScope(value) {

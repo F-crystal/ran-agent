@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import os
+from collections.abc import Mapping
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -10,10 +12,13 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from personal_agent.config import AppConfig
 from personal_agent.db import Database
+from personal_agent.durable_jobs import DurableJobDispatcher, DurableJobHandler, DurableJobStore
 from personal_agent.jobs import (
     ai_daily_digest_job,
     brain_loop_job,
     daily_carryover_job,
+    durable_job_dispatch_job,
+    core_durable_job_kind_handlers,
     hermes_bounded_context_job,
     knowledge_agent_job,
     life_loop_job,
@@ -29,10 +34,32 @@ def create_scheduler(
     database: Database,
     message_service: PersonalAgentService,
     logger: logging.Logger,
+    *,
+    durable_job_handlers: Mapping[str, DurableJobHandler] | None = None,
+    durable_job_kind_handlers: Mapping[str, DurableJobHandler] | None = None,
+    durable_worker_id: str | None = None,
 ) -> BackgroundScheduler:
     """Create a scheduler with lightweight recurring maintenance and candidate jobs."""
 
     scheduler = BackgroundScheduler(timezone=config.scheduler_timezone)
+    durable_dispatcher = DurableJobDispatcher(
+        DurableJobStore(database),
+        handlers=durable_job_handlers or {},
+        kind_handlers=durable_job_kind_handlers or core_durable_job_kind_handlers(
+            message_service=message_service,
+        ),
+        worker_id=durable_worker_id or f"durable-python-{os.getpid()}",
+        logger=logger,
+    )
+    durable_job_dispatch_job(durable_dispatcher)
+    scheduler.add_job(
+        durable_job_dispatch_job,
+        trigger=IntervalTrigger(seconds=30),
+        id="durable_job_dispatch",
+        name="durable_job_dispatch",
+        replace_existing=True,
+        kwargs={"dispatcher": durable_dispatcher},
+    )
     scheduler.add_job(
         brain_loop_job,
         trigger=IntervalTrigger(minutes=config.brain_loop_interval_minutes),

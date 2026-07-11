@@ -273,7 +273,9 @@ test('apply script writes Hermes context optimization defaults to Node env', () 
   assert.match(script, /HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS:-1\}"/);
   assert.match(script, /HERMES_ACTION_PENDING_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTION_PENDING_ENABLED:-true\}"/);
   assert.match(script, /HERMES_ACTION_PENDING_TTL_MINUTES_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_ACTION_PENDING_TTL_MINUTES:-30\}"/);
-  assert.match(script, /NODE_BRIDGE_QUICK_ACK_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_NODE_BRIDGE_QUICK_ACK_ENABLED:-false\}"/);
+  assert.match(script, /NODE_BRIDGE_QUICK_ACK_ENABLED_DEFAULT=false/);
+  assert.match(script, /internal_control_secret="\$\(openssl rand -hex 32\)"/);
+  assert.match(script, /"RAN_AGENT_INTERNAL_CONTROL_SECRET=\$internal_control_secret"/);
   assert.match(script, /NODE_BRIDGE_QUICK_ACK_TEXT_DEFAULT="\$\{RAN_AGENT_DEPLOY_NODE_BRIDGE_QUICK_ACK_TEXT:-收到，正在处理。\}"/);
   assert.match(script, /AI_DAILY_DIGEST_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_ENABLED:-true\}"/);
   assert.match(script, /AI_DAILY_DIGEST_HOUR_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_HOUR:-8\}"/);
@@ -413,31 +415,52 @@ test('soft reset timer installer writes 05:00 apply timer and enables Node runti
   assert.match(bridgeEnv, /HERMES_LITE_SOFT_RESET_DRY_RUN=false/);
 });
 
-test('manual Hermes lite soft reset script loads managed env files', () => {
+test('manual Hermes lite soft reset script calls the authenticated loopback endpoint with CAS', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hermes-soft-reset-manual-env-'));
   const nodeEnvFile = join(dir, '.env.local');
   const nodeBridgeEnvFile = join(dir, 'node_bridge.env.local');
-  const fakeNode = join(dir, 'node');
+  const fakeCurl = join(dir, 'curl');
+  const callsFile = join(dir, 'curl.calls');
   writeFileSync(nodeEnvFile, [
     'HERMES_LITE_SOFT_RESET_ENABLED=true',
     'HERMES_LITE_SOFT_RESET_DRY_RUN=false',
+    'RAN_AGENT_INTERNAL_CONTROL_SECRET=owner-control-secret',
   ].join('\n'));
-  writeFileSync(nodeBridgeEnvFile, 'HERMES_LITE_SOFT_RESET_KEEP_LAST_N=7\n');
-  writeFileSync(fakeNode, '#!/bin/sh\nprintf "%s|%s|%s\\n" "$HERMES_LITE_SOFT_RESET_ENABLED" "$HERMES_LITE_SOFT_RESET_DRY_RUN" "$HERMES_LITE_SOFT_RESET_KEEP_LAST_N"\n');
-  chmodSync(fakeNode, 0o755);
+  writeFileSync(nodeBridgeEnvFile, 'NODE_BRIDGE_OUTBOUND_HOST=127.0.0.2\nNODE_BRIDGE_OUTBOUND_PORT=9901\n');
+  writeFileSync(fakeCurl, [
+    '#!/bin/sh',
+    `printf '%s\\n' "$*" >> ${JSON.stringify(callsFile)}`,
+    'case "$*" in',
+    '  *\\"action\\":\\"status\\"*) printf \'{"ok":true,"revision":7}\\n\' ;;',
+    '  *) printf \'{"ok":true,"applied":true,"revision":8}\\n\' ;;',
+    'esac',
+  ].join('\n'));
+  chmodSync(fakeCurl, 0o755);
 
-  const output = execFileSync('bash', ['scripts/hermes-lite-soft-reset.sh', '--status'], {
+  const output = execFileSync('bash', ['scripts/hermes-lite-soft-reset.sh', '--apply'], {
     cwd: new URL('../..', import.meta.url).pathname,
     env: {
       ...process.env,
-      NODE_BIN: fakeNode,
+      RAN_AGENT_SKIP_ENV_FILE_LOAD: '',
+      CURL_BIN: fakeCurl,
       RAN_AGENT_NODE_ENV_FILE: nodeEnvFile,
       RAN_AGENT_NODE_BRIDGE_ENV_FILE: nodeBridgeEnvFile,
     },
     encoding: 'utf8',
   }).trim();
 
-  assert.equal(output, 'true|false|7');
+  assert.equal(output, '{"ok":true,"applied":true,"revision":8}');
+  const calls = readFileSync(callsFile, 'utf8');
+  assert.match(calls, /http:\/\/127\.0\.0\.2:9901\/control\/hermes-lite-soft-reset/);
+  assert.match(calls, /Authorization: Bearer owner-control-secret/);
+  assert.match(calls, /"action":"status"/);
+  assert.match(calls, /"action":"apply","expectedRevision":7/);
+  const script = readFileSync(new URL('../../scripts/hermes-lite-soft-reset.sh', import.meta.url), 'utf8');
+  assert.doesNotMatch(script, /hermes-lite-soft-reset\.mjs/);
+  assert.doesNotMatch(script, /127\.\*|localhost/);
+  const retiredDirectWriter = readFileSync(new URL('../../scripts/hermes-lite-soft-reset.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(retiredDirectWriter, /runHermesLiteSoftReset|hermesSessionMaintenance/);
+  assert.match(retiredDirectWriter, /direct_soft_reset_writer_retired/);
 });
 
 test('apply script wraps XHS generic fallback prepare with timeout and keeps failure non-blocking', () => {
@@ -1080,4 +1103,94 @@ test('apply script systemd units include OBSIDIAN_MEMORY_MCP_ENABLED=false', () 
 
   assert.match(liteUnit, /Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false/);
   assert.match(fullUnit, /Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false/);
+});
+
+test('Hermes release gate requires Node 22.13.0 or newer', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-release-old-node-'));
+  const fakeNode = join(dir, 'node');
+  writeFileSync(fakeNode, [
+    '#!/usr/bin/env bash',
+    'if [ "$1" = "-p" ]; then echo 22.12.0; exit 0; fi',
+    'exit 0',
+  ].join('\n'));
+  chmodSync(fakeNode, 0o755);
+
+  assert.throws(
+    () => execFileSync('bash', ['scripts/hermes-release-gate.sh', '--preflight-only'], {
+      cwd: new URL('../..', import.meta.url).pathname,
+      env: { PATH: '/usr/bin:/bin', RAN_AGENT_NODE_BIN: fakeNode },
+      stdio: 'pipe',
+    }),
+    /Command failed/
+  );
+});
+
+test('Hermes release gate probes node:sqlite with a real query', () => {
+  const gatePath = new URL('../../scripts/hermes-release-gate.sh', import.meta.url).pathname;
+  const script = readFileSync(gatePath, 'utf8');
+
+  assert.match(script, /node:sqlite/);
+  assert.match(script, /DatabaseSync/);
+  assert.match(script, /SELECT 1/);
+  assert.match(script, /env -i/);
+  assert.doesNotMatch(script, /source .*\.env/);
+});
+
+test('Hermes release gate isolates probes and tests in a read-only source snapshot', () => {
+  const gatePath = new URL('../../scripts/hermes-release-gate.sh', import.meta.url).pathname;
+  const script = readFileSync(gatePath, 'utf8');
+
+  assert.match(script, /git .*ls-files -co --exclude-standard -z/);
+  assert.match(script, /chmod -R a-w/);
+  assert.match(script, /source_env_file_present/);
+  assert.match(script, /source_symlink_present/);
+  assert.match(script, /source_sitecustomize_present/);
+  assert.match(script, /run_clean/);
+  assert.match(script, /RAN_AGENT_SKIP_ENV_FILE_LOAD=1/);
+  assert.match(script, /-p no:cacheprovider/);
+  assert.match(script, /PYTHONPATH=.*SOURCE_ROOT\/src/);
+  assert.match(script, /node-test-/);
+  assert.ok(script.indexOf('SANDBOX_ROOT=') < script.indexOf('NODE_VERSION='));
+});
+
+test('release-tested launchers honor the generic env-file test guard', () => {
+  const root = new URL('../..', import.meta.url).pathname;
+  for (const relativePath of [
+    'scripts/start_time_mcp.sh',
+    'scripts/start_playwright_mcp.sh',
+    'scripts/start_obsidian_memory_mcp.sh',
+    'scripts/start_sticker_catalog_mcp.sh',
+    'scripts/start_external_mcp_gateway.sh',
+    'scripts/start_ombre_brain_service.sh',
+  ]) {
+    const script = readFileSync(join(root, relativePath), 'utf8');
+    assert.match(script, /NODE_ENV[^\n]*test[^\n]*RAN_AGENT_SKIP_ENV_FILE_LOAD/, relativePath);
+  }
+});
+
+test('generic launcher env guard skips files only for explicit test mode', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'launcher-env-guard-'));
+  const scriptsDir = join(dir, 'scripts');
+  mkdirSync(scriptsDir, { recursive: true });
+  const launcher = join(scriptsDir, 'start_external_mcp_gateway.sh');
+  const sourceLauncher = new URL('../../scripts/start_external_mcp_gateway.sh', import.meta.url).pathname;
+  writeFileSync(launcher, readFileSync(sourceLauncher));
+  chmodSync(launcher, 0o755);
+  writeFileSync(join(dir, '.env.local'), 'SENTINEL_ENV=loaded\n');
+  const fakeNode = join(dir, 'fake-node');
+  writeFileSync(fakeNode, '#!/bin/sh\nprintf "%s\\n" "${SENTINEL_ENV-unset}"\n');
+  chmodSync(fakeNode, 0o755);
+
+  const run = (extraEnv) => execFileSync('bash', [launcher, 'disabled-call'], {
+    env: {
+      PATH: '/usr/bin:/bin',
+      EXTERNAL_MCP_GATEWAY_NODE_BIN: fakeNode,
+      ...extraEnv,
+    },
+    encoding: 'utf8',
+  }).trim();
+
+  assert.equal(run({}), 'loaded');
+  assert.equal(run({ NODE_ENV: 'production', RAN_AGENT_SKIP_ENV_FILE_LOAD: '1' }), 'loaded');
+  assert.equal(run({ NODE_ENV: 'test', RAN_AGENT_SKIP_ENV_FILE_LOAD: '1' }), 'unset');
 });

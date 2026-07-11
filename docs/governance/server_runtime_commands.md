@@ -115,6 +115,26 @@ For the Hermes cache-friendly context package, the same deploy command writes
 the conservative defaults and restarts the Node bridge. No manual env edits are
 required for the default rollout.
 
+### One-time owner binding
+
+The release preflight intentionally stops with `owner_binding_required` until
+an operator supplies one explicit owner identity. Do not use the legacy
+`user:ran` fallback, an ordinary chat payload, or model output as that source.
+Obtain the identity JSON only from the authenticated bridge or a verified
+platform-operator export, place it in an owner-only (`0600`) local file, then
+run the repo-managed command:
+
+```bash
+node scripts/bootstrap-owner-binding.mjs --identity-file /secure/path/owner-binding.json
+```
+
+The JSON must explicitly contain `platform` (`wechat`, `feishu`, or `desktop`),
+`senderId`, `globalUserId`, and `provenance`. The command accepts no fallback
+identity, writes only the sender hash to the runtime map, emits only a binding
+count, and refuses to replace an existing owner binding. Remove the temporary
+identity file according to the server's local secret-handling policy after the
+command succeeds.
+
 After deploy, observe cache and context telemetry:
 
 ```bash

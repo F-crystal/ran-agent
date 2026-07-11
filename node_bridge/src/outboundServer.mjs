@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { handleIncomingMessage } from './channelHub.mjs';
@@ -21,6 +22,8 @@ import {
 } from './externalMcp/watchlist.mjs';
 import { verifyExternalMcpEvidenceRefs } from './externalMcp/evidenceLog.mjs';
 import { sendFeishuReply } from './feishuBridge.mjs';
+import { runHermesLiteSoftReset } from './hermesSessionMaintenance.mjs';
+import { createDurableOutbox } from './durableOutbox.mjs';
 import {
   commitProactiveEventDelivery,
   releaseProactiveEventDelivery,
@@ -44,6 +47,7 @@ const AI_DAILY_DIGEST_TEMPLATE_PATH = path.join(
   PROJECT_ROOT,
   'src/personal_agent/prompts/ai_daily_digest_report.md'
 );
+const HERMES_LITE_SOFT_RESET_CONTROL_ROUTE = '/control/hermes-lite-soft-reset';
 
 function normalizeAccountId(raw) {
   return String(raw).trim().toLowerCase().replace(/[@.]/g, '-');
@@ -116,6 +120,62 @@ async function loadWeixinSdk() {
 export async function createProactiveBot(env = process.env) {
   const { Bot } = await loadWeixinSdk();
   return new Bot(resolveWeixinAccountConfig(env));
+}
+
+export async function handleHermesLiteSoftResetControlRequest({
+  env = process.env,
+  method,
+  url,
+  headers = {},
+  remoteAddress = '',
+  bodyText = '',
+} = {}) {
+  if (method !== 'POST' || url !== HERMES_LITE_SOFT_RESET_CONTROL_ROUTE) {
+    return { status: 404, payload: { error: 'route not found' } };
+  }
+  if (!isLoopbackAddress(remoteAddress)) {
+    return { status: 403, payload: { ok: false, error: 'loopback_required' } };
+  }
+  const expectedSecret = String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '');
+  if (!expectedSecret) {
+    return { status: 503, payload: { ok: false, error: 'control_secret_unavailable' } };
+  }
+  const suppliedSecret = bearerToken(firstHeader(headers, 'authorization'));
+  if (!safeEqual(suppliedSecret, expectedSecret)) {
+    return { status: 401, payload: { ok: false, error: 'unauthorized' } };
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(bodyText);
+  } catch {
+    return { status: 400, payload: { ok: false, error: 'invalid_json' } };
+  }
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+    return { status: 400, payload: { ok: false, error: 'invalid_request' } };
+  }
+  const action = String(payload.action || '').trim().toLowerCase();
+  if (!['status', 'apply', 'dry-run', 'rollback-last'].includes(action)) {
+    return { status: 400, payload: { ok: false, error: 'unknown_action' } };
+  }
+  if (['apply', 'rollback-last'].includes(action)
+    && (!Number.isInteger(payload.expectedRevision) || payload.expectedRevision < 0)) {
+    return { status: 428, payload: { ok: false, error: 'revision_required' } };
+  }
+
+  try {
+    const result = runHermesLiteSoftReset({
+      action,
+      expectedRevision: payload.expectedRevision,
+      env,
+      reason: sanitizeControlReason(payload.reason || action),
+    });
+    if (result.error === 'stale_revision') return { status: 409, payload: result };
+    if (result.ok === false) return { status: 400, payload: result };
+    return { status: 200, payload: result };
+  } catch {
+    return { status: 500, payload: { ok: false, error: 'soft_reset_state_unavailable' } };
+  }
 }
 
 export async function handleOutboundRequest({ bot, logger = console, method, url, bodyText }) {
@@ -253,7 +313,8 @@ export async function handleScheduledAiDigestRequest({
     };
   }
 
-  const idempotencyKey = `ran-agent-ai-daily-digest-${new Date().toISOString().slice(0, 10)}`;
+  const runtimeNow = typeof nowImpl === 'function' ? nowImpl() : new Date();
+  const idempotencyKey = `ran-agent-ai-daily-digest-${runtimeNow.toISOString().slice(0, 10)}`;
   const message = {
     id: idempotencyKey,
     message_id: idempotencyKey,
@@ -264,30 +325,56 @@ export async function handleScheduledAiDigestRequest({
     route_hint: 'scheduled_ai_daily_digest',
     text: buildScheduledAiDigestPrompt(facts),
     media: [],
-    created_at: Date.now(),
+    created_at: runtimeNow.getTime(),
   };
 
   const response = await channelHub(message, {
     env,
     logger,
-    adapter: {
-      async sendReply({ target: replyTarget, text, message: sourceMessage }) {
-        await sendFeishuReply({
-          target: {
-            ...replyTarget,
-            source_message_id: sourceMessage?.id || sourceMessage?.message_id || idempotencyKey,
-          },
-          text,
-          env,
-          execFileImpl,
-        });
-      },
+  });
+  const replyText = String(response?.replyText || '').trim();
+  if (!replyText) {
+    return { status: 503, payload: { ok: false, reason: 'digest_reply_empty' } };
+  }
+  const outbox = createDurableOutbox({ env, now: () => runtimeNow });
+  const outboxItem = await outbox.deliver({
+    operationKey: `scheduled:${idempotencyKey}`,
+    jobResultKey: `job-result:${idempotencyKey}`,
+    route: {
+      adapterKey: 'feishu',
+      destinationRef: `conversation:${createHash('sha256').update(String(target.conversation_id)).digest('hex').slice(0, 16)}`,
+    },
+    text: replyText,
+    attachments: [],
+    idempotent: true,
+    maxAttempts: 2,
+  }, {
+    send: async ({ outboxId }) => {
+      await sendFeishuReply({
+        target: {
+          ...target,
+          source_message_id: outboxId,
+        },
+        text: replyText,
+        env,
+        execFileImpl,
+      });
+      return {
+        textStatus: 'sent',
+        attachments: [],
+        adapterReceiptRef: `feishu:${createHash('sha256').update(outboxId).digest('hex').slice(0, 24)}`,
+      };
     },
   });
 
   return {
     status: 200,
-    payload: { ok: true, reply_length: String(response?.replyText || '').length },
+    payload: {
+      ok: true,
+      reply_length: replyText.length,
+      delivery_status: outboxItem.delivery,
+      outbox_id: outboxItem.outboxId,
+    },
   };
 }
 
@@ -676,7 +763,7 @@ function normalizeOutboundMediaPayload(media) {
   return fileName ? { type, url, fileName } : { type, url };
 }
 
-export function createOutboundServer({ bot, logger = console } = {}) {
+export function createOutboundServer({ bot, logger = console, env = process.env } = {}) {
   return http.createServer(async (request, response) => {
     let rawBody = '';
     request.on('data', (chunk) => {
@@ -685,15 +772,24 @@ export function createOutboundServer({ bot, logger = console } = {}) {
 
     request.on('end', async () => {
       let result;
-      if (request.method === 'POST' && request.url === '/scheduled/ai-daily-digest') {
-        result = await handleScheduledAiDigestRequest({ logger, env: process.env, bodyText: rawBody });
+      if (request.method === 'POST' && request.url === HERMES_LITE_SOFT_RESET_CONTROL_ROUTE) {
+        result = await handleHermesLiteSoftResetControlRequest({
+          env,
+          method: request.method,
+          url: request.url,
+          headers: request.headers,
+          remoteAddress: request.socket.remoteAddress,
+          bodyText: rawBody,
+        });
+      } else if (request.method === 'POST' && request.url === '/scheduled/ai-daily-digest') {
+        result = await handleScheduledAiDigestRequest({ logger, env, bodyText: rawBody });
       } else if (request.method === 'POST' && request.url === '/proactive/event') {
-        result = await handleProactiveEventRequest({ logger, env: process.env, bodyText: rawBody });
+        result = await handleProactiveEventRequest({ logger, env, bodyText: rawBody });
       } else if (request.method === 'POST' && request.url === '/external-mcp/system-queue') {
-        result = await handleExternalMcpSystemQueueRequest({ logger, env: process.env, bodyText: rawBody });
+        result = await handleExternalMcpSystemQueueRequest({ logger, env, bodyText: rawBody });
       } else if (String(request.url || '').startsWith('/environment/sensorlogger/')) {
         result = await handleEnvironmentSensorRequest({
-          env: process.env,
+          env,
           method: request.method,
           url: request.url,
           bodyText: rawBody,
@@ -711,6 +807,34 @@ export function createOutboundServer({ bot, logger = console } = {}) {
       response.end(JSON.stringify(result.payload));
     });
   });
+}
+
+function firstHeader(headers, name) {
+  const value = headers?.[name] ?? headers?.[String(name).toLowerCase()];
+  return Array.isArray(value) ? String(value[0] || '') : String(value || '');
+}
+
+function bearerToken(value) {
+  const match = String(value || '').match(/^Bearer ([^\s]+)$/);
+  return match ? match[1] : '';
+}
+
+function safeEqual(left, right) {
+  const leftBuffer = Buffer.from(String(left || ''));
+  const rightBuffer = Buffer.from(String(right || ''));
+  return leftBuffer.length === rightBuffer.length && timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+function isLoopbackAddress(value) {
+  const address = String(value || '').trim().toLowerCase().split('%')[0];
+  if (address === '::1') return true;
+  const ipv4 = address.startsWith('::ffff:') ? address.slice(7) : address;
+  return /^127(?:\.\d{1,3}){3}$/.test(ipv4)
+    && ipv4.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
+}
+
+function sanitizeControlReason(value) {
+  return String(value || '').trim().replace(/[\r\n\t]/g, ' ').slice(0, 80) || 'control';
 }
 
 function normalizeExternalMcpDeliverability(value) {

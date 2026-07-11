@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 from collections import Counter
 from dataclasses import dataclass
@@ -11,6 +12,16 @@ from pathlib import Path
 
 from personal_agent.config import AppConfig
 from personal_agent.db import Database
+from personal_agent.personal_learning import PersonalLearningStore
+
+
+_SAFE_REVIEW_LESSONS = {
+    "blacklisted_opening": "回复不要使用已知模板化开场",
+    "recent_state_over_inference": "用户刚表达即时状态时，回复不要推断长期原因",
+    "casual_became_advisory": "普通聊天不要过早转成建议或说明",
+    "intimate_or_emotional_became_meta": "情绪或亲密场景不要转成分析腔",
+    "off_topic": "回复要贴近当前话题和用户意图",
+}
 
 
 @dataclass(frozen=True)
@@ -115,6 +126,7 @@ class ReflectionSpecialist:
         
         # Build preference signals and profile (this updates preference_profile.json!)
         preference_signals = _build_preference_signals(rows, metrics.rule_counts)
+        _observe_reflection_learning(rows, database=self._database, config=self._config)
         preference_profile = _build_preference_profile(rows, preference_signals, self._config)
         
         # Store reflection summary in database for future reference
@@ -162,6 +174,7 @@ class ReflectionSpecialist:
         possible_false_positive_rules = _build_false_positive_findings(rows, metrics.rule_counts)
         continuity_or_mode_findings = _build_continuity_findings(rows, metrics.rule_counts)
         preference_signals = _build_preference_signals(rows, metrics.rule_counts)
+        _observe_reflection_learning(rows, database=self._database, config=self._config)
         preference_profile = _build_preference_profile(rows, preference_signals, self._config)
         suggested_experiments = _build_suggested_experiments(metrics.rule_counts, preference_signals)
         report_text = _render_report(
@@ -201,6 +214,35 @@ def generate_reflection_report(
 
     effective_logger = logger or logging.getLogger("personal_agent.reflection_specialist")
     return ReflectionSpecialist(database=database, config=config, logger=effective_logger).generate_report(limit=limit)
+
+
+def _observe_reflection_learning(rows: list[object], *, database: Database, config: AppConfig) -> None:
+    """Feed only repeated canonical review rules into the shared lifecycle."""
+
+    store = PersonalLearningStore(database=database, config=config)
+    changed = False
+    for rule, statement in _SAFE_REVIEW_LESSONS.items():
+        matching_rows = [row for row in rows if rule in set(_parse_reasons(str(row["review_reasons"])))]
+        if len(matching_rows) < 2:
+            continue
+        for row in matching_rows:
+            evidence_digest = hashlib.sha256(
+                f"review-rule:{rule}:{int(row['id'])}".encode("utf-8")
+            ).hexdigest()
+            try:
+                record = store.observe(
+                    kind="operating_lesson",
+                    subject_key=f"reply_rule:{rule}",
+                    statement=statement,
+                    source="repeated_observation",
+                    evidence_digests=[evidence_digest],
+                    confidence=0.8,
+                )
+            except ValueError:
+                continue
+            changed = changed or record.status == "active"
+    if changed:
+        store.project_compatibility_views()
 
 
 def _build_metrics(rows: list[object]) -> ReflectionMetrics:

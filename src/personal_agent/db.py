@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import sqlite3
 from contextlib import contextmanager
@@ -114,6 +116,71 @@ SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS idx_media_dedup_refs_sha256 
     ON media_dedup_refs(sha256)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS personal_learning_records (
+        learning_id TEXT PRIMARY KEY,
+        kind TEXT NOT NULL,
+        subject_key TEXT NOT NULL,
+        statement TEXT NOT NULL,
+        source TEXT NOT NULL,
+        evidence_digests TEXT NOT NULL DEFAULT '[]',
+        confidence REAL NOT NULL,
+        status TEXT NOT NULL,
+        observation_count INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        last_observed_at TEXT NOT NULL,
+        last_confirmed_at TEXT NOT NULL DEFAULT '',
+        superseded_by TEXT NOT NULL DEFAULT ''
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_personal_learning_subject_status
+    ON personal_learning_records(subject_key, status, last_observed_at)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS durable_jobs (
+        job_id TEXT PRIMARY KEY,
+        actor_key TEXT NOT NULL,
+        goal_digest TEXT NOT NULL,
+        job_kind TEXT NOT NULL DEFAULT 'legacy',
+        payload_ref TEXT NOT NULL DEFAULT '',
+        state TEXT NOT NULL,
+        next_run_at TEXT NOT NULL,
+        lease_owner TEXT NOT NULL DEFAULT '',
+        lease_until TEXT NOT NULL DEFAULT '',
+        revision INTEGER NOT NULL DEFAULT 0,
+        terminal_state TEXT NOT NULL DEFAULT '',
+        result_ref TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        CHECK (revision >= 0),
+        CHECK (state IN ('active', 'leased', 'terminal')),
+        CHECK (
+            (state = 'terminal' AND terminal_state IN ('completed', 'blocked', 'stopped', 'expired'))
+            OR (state != 'terminal' AND terminal_state = '')
+        ),
+        CHECK (
+            (state = 'leased' AND lease_owner != '' AND lease_until != '')
+            OR (state != 'leased' AND lease_owner = '' AND lease_until = '')
+        )
+    )
+    """,
+    """
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_durable_jobs_active_goal
+    ON durable_jobs(actor_key, goal_digest)
+    WHERE state != 'terminal'
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_durable_jobs_due
+    ON durable_jobs(state, next_run_at, lease_until)
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS ingest_event_receipts (
+        event_id TEXT PRIMARY KEY,
+        payload_digest TEXT NOT NULL,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 )
 
 
@@ -139,6 +206,7 @@ class Database:
                 conn.execute(statement)
             self._ensure_memories_schema(conn)
             self._ensure_todos_schema(conn)
+            self._ensure_durable_jobs_schema(conn)
             conn.commit()
         self._logger.info("database initialized at %s", self._config.database_path)
 
@@ -172,13 +240,71 @@ class Database:
                 (source, event_type, content, tags, importance),
             )
             conn.commit()
-        self._logger.info(
-            "timeline event recorded source=%s event_type=%s importance=%s",
-            source,
-            event_type,
-            importance,
-        )
+        self._logger.info("timeline event recorded event_type=%s importance=%s", event_type, importance)
         return int(cursor.lastrowid)
+
+    def record_external_exchange_once(
+        self,
+        *,
+        event_id: str,
+        channel: str,
+        sender_id: str,
+        user_text: str,
+        reply_text: str,
+        source: str,
+        media_refs: tuple[str, ...] = (),
+    ) -> str:
+        """Atomically persist an externally delivered exchange once per durable event.
+
+        The event identifier is intentionally never written to logs.  A digest of
+        the complete projection detects accidental identifier reuse without
+        retaining a duplicate payload in the receipt table.
+        """
+
+        payload_digest = hashlib.sha256(
+            json.dumps(
+                {
+                    "channel": channel,
+                    "sender_id": sender_id,
+                    "user_text": user_text,
+                    "reply_text": reply_text,
+                    "source": source,
+                    "media_refs": list(media_refs),
+                },
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+        with self.connection() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            existing = conn.execute(
+                "SELECT payload_digest FROM ingest_event_receipts WHERE event_id = ?",
+                (event_id,),
+            ).fetchone()
+            if existing is not None:
+                return "duplicate" if str(existing["payload_digest"]) == payload_digest else "conflict"
+
+            conn.execute(
+                """
+                INSERT INTO timeline_events (source, event_type, content, tags, importance)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                (channel, "user_message", user_text, f"message,user,{source}", 1),
+            )
+            conn.execute(
+                """
+                INSERT INTO timeline_events (source, event_type, content, tags, importance)
+                VALUES (?, ?, ?, ?, ?)
+                """,
+                ("agent", "agent_reply", reply_text, f"message,reply,{channel},{source}", 1),
+            )
+            conn.execute(
+                "INSERT INTO ingest_event_receipts (event_id, payload_digest) VALUES (?, ?)",
+                (event_id, payload_digest),
+            )
+            conn.commit()
+        return "stored"
 
     def fetch_timeline_events(self) -> list[sqlite3.Row]:
         """Return timeline events in insertion order for verification and debugging."""
@@ -677,6 +803,18 @@ class Database:
             return
         if "last_reminded_at" not in columns:
             conn.execute("ALTER TABLE todos ADD COLUMN last_reminded_at TEXT")
+
+    def _ensure_durable_jobs_schema(self, conn: sqlite3.Connection) -> None:
+        """Add typed durable-job metadata without rewriting existing job truth."""
+
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(durable_jobs)").fetchall()
+        }
+        if "job_kind" not in columns:
+            conn.execute("ALTER TABLE durable_jobs ADD COLUMN job_kind TEXT NOT NULL DEFAULT 'legacy'")
+        if "payload_ref" not in columns:
+            conn.execute("ALTER TABLE durable_jobs ADD COLUMN payload_ref TEXT NOT NULL DEFAULT ''")
 
     # Todo / Reminder methods
 

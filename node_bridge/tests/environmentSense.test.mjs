@@ -1,7 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 import {
   buildEnvironmentContext,
@@ -11,18 +10,15 @@ import {
   setEnvironmentPrivacyMode,
 } from '../src/environmentSense.mjs';
 
-function tempEnv(extra = {}) {
-  const base = path.join(process.cwd(), '.ran_agent_state', 'test-environment-sense');
-  fs.mkdirSync(base, { recursive: true });
-  return {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(base, 'case-')),
+function tempEnv(t, extra = {}) {
+  return createIsolatedTestEnv(t, {
     HERMES_ENVIRONMENT_CONTEXT_ENABLED: 'true',
     HERMES_ENVIRONMENT_HOME_LAT: '31.2304',
     HERMES_ENVIRONMENT_HOME_LON: '121.4737',
     HERMES_ENVIRONMENT_HOME_RADIUS_M: '250',
     HERMES_ENVIRONMENT_CITY_LABEL: '上海',
     ...extra,
-  };
+  }, 'environment-sense-');
 }
 
 function sensorLoggerPayload() {
@@ -96,8 +92,8 @@ function weatherFetch() {
   };
 }
 
-test('saveSensorLoggerMessage stores sanitized latest state and builds a short context', async () => {
-  const env = tempEnv();
+test('saveSensorLoggerMessage stores sanitized latest state and builds a short context', async (t) => {
+  const env = tempEnv(t);
   const saved = saveSensorLoggerMessage(sensorLoggerPayload(), {
     env,
     now: new Date('2026-06-25T06:00:00.000Z'),
@@ -131,8 +127,8 @@ test('saveSensorLoggerMessage stores sanitized latest state and builds a short c
   assert.ok(context.length < 320);
 });
 
-test('privacy mode suppresses environment context until disabled', async () => {
-  const env = tempEnv();
+test('privacy mode suppresses environment context until disabled', async (t) => {
+  const env = tempEnv(t);
   saveSensorLoggerMessage(sensorLoggerPayload(), {
     env,
     now: new Date('2026-06-25T06:00:00.000Z'),

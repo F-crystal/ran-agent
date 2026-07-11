@@ -6,26 +6,29 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
 
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
+if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
+  if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+  fi
 
-if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$NODE_BRIDGE_ENV_FILE"
-  set +a
-fi
+  if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$NODE_BRIDGE_ENV_FILE"
+    set +a
+  fi
 
-if [ -f "$ROOT_DIR/.venv/bin/activate" ]; then
-  # shellcheck disable=SC1091
-  source "$ROOT_DIR/.venv/bin/activate"
+  if [ -f "$ROOT_DIR/.venv/bin/activate" ]; then
+    # shellcheck disable=SC1091
+    source "$ROOT_DIR/.venv/bin/activate"
+  fi
+  export PATH="$ROOT_DIR/.venv/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+else
+  export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 fi
-
-export PATH="$ROOT_DIR/.venv/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
 
 # Stabilize uv/uvx: fixed cache and tool dirs prevent repeated multi-G archive builds
 export UV_CACHE_DIR="${UV_CACHE_DIR:-/opt/ran_agent/.ran_agent_state/uv-cache}"

@@ -11,6 +11,14 @@ export function trustExternalMcpAuthorizationEvidence(result = {}) {
   return markTrustedActionEvidence({ type: 'authorization', ...result }, 'external_mcp_authorization');
 }
 
+export function trustActionReceiptEvidence(result = {}) {
+  const type = String(result?.type || '').trim();
+  if (!['save_result', 'outbound_result'].includes(type)) {
+    throw new Error('trusted action receipt evidence type is invalid');
+  }
+  return markTrustedActionEvidence({ ...result, type }, 'action_receipt_result');
+}
+
 export function getActionGateConfig(env = process.env) {
   const mode = String(env.HERMES_ACTION_GATE_MODE || 'observe').trim().toLowerCase();
   return {
@@ -244,10 +252,10 @@ function collectObservedEvidence({ response = {}, toolResults = [] } = {}) {
   if (response.media && typeof response.media === 'object' && !Array.isArray(response.media)) {
     evidence.push(summarizeMediaEvidence(response.media));
   }
-  if (response.save_result && typeof response.save_result === 'object' && !Array.isArray(response.save_result)) {
+  if (response.save_result?.[TRUSTED_ACTION_EVIDENCE] === 'action_receipt_result') {
     evidence.push(summarizeStateResult('save_result', response.save_result));
   }
-  if (response.outbound_result && typeof response.outbound_result === 'object' && !Array.isArray(response.outbound_result)) {
+  if (response.outbound_result?.[TRUSTED_ACTION_EVIDENCE] === 'action_receipt_result') {
     evidence.push(summarizeStateResult('outbound_result', response.outbound_result));
   }
   for (const toolResult of Array.isArray(toolResults) ? toolResults : []) {
@@ -452,6 +460,10 @@ function summarizeMediaEvidence(media = {}) {
 
 function summarizeToolResult(result = {}) {
   if (!result || typeof result !== 'object' || Array.isArray(result)) return null;
+  if (['save_result', 'outbound_result'].includes(result.type)) {
+    if (result[TRUSTED_ACTION_EVIDENCE] !== 'action_receipt_result') return null;
+    return summarizeStateResult(result.type, result);
+  }
   if (result.type === 'authorization') {
     return summarizeTrustedAuthorization(result);
   }

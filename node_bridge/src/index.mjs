@@ -3,6 +3,7 @@
  */
 
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -16,12 +17,14 @@ import { startCoReadingWebServer } from './coReading/webServer.mjs';
 import { sendFeishuReply, startFeishuBridge } from './feishuBridge.mjs';
 import { handleIncomingMessage } from './channelHub.mjs';
 import { runDueExternalMcpActivities } from './externalMcp/activityRunner.mjs';
+import { callExternalMcpTool } from './externalMcp/executor.mjs';
+import { createExternalMcpAutonomyRuntime } from './externalMcp/runtime.mjs';
+import { createReplyBackend } from './replyBackend.mjs';
+import { createDurableOutbox } from './durableOutbox.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
-import { getQuickAckConfig, quickAckDelay } from './quickAck.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
 import {
-  appendPendingOutboundMessage,
   resolveStateDir,
   setCheckinRange,
 } from './runtimeState.mjs';
@@ -53,6 +56,7 @@ function normalizeIncomingRequest(request) {
     payload: request.payload,
     content: request.content,
     conversation: request.conversation,
+    id: request.id || request.messageId || request.message?.id || request.payload?.id || '',
   };
 }
 
@@ -350,6 +354,70 @@ export function isExternalMcpActivityRunnerEnabled(env = process.env) {
   return true;
 }
 
+// The autonomy runtime owns sessions, capabilities, policy and receipts. This
+// adapter is deliberately only the final provider call boundary.
+export function createExternalMcpRuntimeTransport({ env = process.env, executor = callExternalMcpTool } = {}) {
+  return Object.freeze({
+    async call(request = {}) {
+      const manifest = request.manifest && typeof request.manifest === 'object' ? request.manifest : null;
+      const toolName = String(request.toolName || '').trim();
+      if (!manifest || !toolName) {
+        return { ok: false, error_code: 'EXTERNAL_MCP_RUNTIME_TRANSPORT_INVALID' };
+      }
+      return await executor({
+        ...manifest,
+        toolName,
+        arguments: request.arguments && typeof request.arguments === 'object' ? request.arguments : {},
+        upstreamSessionId: String(request.upstreamSessionId || ''),
+      }, { env, signal: request.signal });
+    },
+  });
+}
+
+// Checkpoints are already receipt-backed by the supervisor; this is only the
+// shared reply-release and durable-delivery boundary. It never re-invokes an
+// MCP tool or treats an adapter handoff as a confirmed send without a receipt.
+export async function submitExternalMcpCheckpoint({
+  candidate,
+  context,
+  replyBackend,
+  outbox,
+  sendWechat,
+  sendFeishu = sendFeishuReply,
+  env = process.env,
+} = {}) {
+  if (!replyBackend || typeof replyBackend.releaseExternalCheckpoint !== 'function'
+    || !outbox || typeof outbox.deliver !== 'function' || !context?.notifyTarget) return { skipped: true };
+  const released = await replyBackend.releaseExternalCheckpoint({ candidate, context });
+  const target = context.notifyTarget;
+  const text = String(released?.replyText || '').trim();
+  if (!text || released?.suppressSend === true) return { skipped: true };
+  const operationKey = `external-checkpoint:${context.activityId}:${context.checkpointDigest}`;
+  return await outbox.deliver({
+    operationKey,
+    jobResultKey: `external-job:${context.activityId}:${context.checkpointDigest}`,
+    route: { adapterKey: target.platform, destinationRef: `conversation:${shortDigest(target.conversationId)}` },
+    text,
+    attachments: [],
+    idempotent: false,
+    maxAttempts: 1,
+  }, {
+    send: async () => {
+      if (target.platform === 'feishu') {
+        const receipt = await sendFeishu({
+          target: { conversation_id: target.conversationId, sender_id: target.senderId }, text, env,
+        });
+        return { textStatus: 'sent', attachments: [], adapterReceiptRef: receipt?.adapterReceiptRef || 'feishu:checkpoint' };
+      }
+      if (target.platform === 'wechat' && typeof sendWechat === 'function') {
+        await sendWechat(text);
+        return { textStatus: 'ambiguous', attachments: [], adapterReceiptRef: `wechat:checkpoint-${shortDigest(operationKey)}` };
+      }
+      return { textStatus: 'failed', attachments: [], adapterReceiptRef: `checkpoint:unsupported-${shortDigest(operationKey)}`, knownFailure: true };
+    },
+  });
+}
+
 export function startExternalMcpActivityRunnerLoop({
   env = process.env,
   logger = console,
@@ -421,27 +489,44 @@ export function buildAgent({ logger, env }) {
   const sendFollowUpMessages = typeof env.sendFollowUpMessages === 'function'
     ? env.sendFollowUpMessages
     : null;
-  const sendStructuredMessage = typeof env.sendStructuredMessage === 'function'
-    ? env.sendStructuredMessage
-    : null;
   const handleMessageImpl = typeof env.handleWeChatTextMessage === 'function'
     ? env.handleWeChatTextMessage
     : handleWeChatTextMessage;
-  const quickAckConfig = getQuickAckConfig(env, 'wechat');
 
-  async function deliverQueuedMessages(messages) {
+  async function deliverQueuedMessages(messages, request) {
     const normalizedMessages = normalizeFollowUpTexts(messages);
-    if (!sendFollowUpMessages || normalizedMessages.length === 0) {
+    if (normalizedMessages.length === 0) {
       return;
     }
-    try {
-      await sendFollowUpMessages(normalizedMessages);
-    } catch (error) {
-      for (const text of normalizedMessages) {
-        appendPendingOutboundMessage({ text, reason: 'chat_follow_up_send_failed' }, env);
+    if (!sendFollowUpMessages || !env.durableOutbox || typeof env.durableOutbox.deliver !== 'function') {
+      logger.warn?.('[node-bridge] follow-up skipped because a durable WeChat delivery boundary is unavailable');
+      return;
+    }
+    for (const [index, text] of normalizedMessages.entries()) {
+      const operationKey = stableFollowUpOperationKey(request, index, text);
+      const destinationRef = `conversation:${shortDigest(request?.conversationId || request?.conversation_id || '')}`;
+      try {
+        await env.durableOutbox.deliver({
+          operationKey,
+          route: { adapterKey: 'wechat', destinationRef },
+          text,
+          attachments: [],
+          idempotent: false,
+          maxAttempts: 1,
+        }, {
+          send: async () => {
+            await sendFollowUpMessages([text]);
+            return {
+              textStatus: 'ambiguous',
+              attachments: [],
+              adapterReceiptRef: `wechat:unknown-${shortDigest(operationKey)}`,
+            };
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        logger.warn?.(`[node-bridge] durable follow-up send failed: ${message}`);
       }
-      const message = error instanceof Error ? error.message : String(error);
-      logger.warn?.(`[node-bridge] failed to send queued follow-up messages: ${message}`);
     }
   }
 
@@ -453,16 +538,17 @@ export function buildAgent({ logger, env }) {
     return normalizeChatReplyResult(await handleMessageImpl(mergedRequest, {
       logger,
       env,
+      backend: env.replyBackend,
       returnResult: true,
     }), { env, logger });
   }
 
-  function scheduleFollowUps(followUps) {
+  function scheduleFollowUps(followUps, request) {
     setTimeout(() => {
       flushPendingOutboundQueue().catch(() => {});
       if (followUps.length > 0) {
         setTimeout(() => {
-          deliverQueuedMessages(followUps).catch(() => {});
+          deliverQueuedMessages(followUps, request).catch(() => {});
         }, Math.max(0, followUpDelayMs));
       }
     }, 0);
@@ -478,20 +564,6 @@ export function buildAgent({ logger, env }) {
       responsePayload.media = replyResult.media;
     }
     return responsePayload;
-  }
-
-  async function sendAsyncFinal(replyResult) {
-    const payload = buildResponsePayload(replyResult);
-    const messages = [];
-    if (payload.text) messages.push(payload.text);
-    if (payload.media && sendStructuredMessage) {
-      await sendStructuredMessage(payload);
-      if (replyResult.followUpMessages.length > 0) {
-        await deliverQueuedMessages(replyResult.followUpMessages);
-      }
-      return;
-    }
-    await deliverQueuedMessages([...messages, ...replyResult.followUpMessages]);
   }
 
   return {
@@ -513,32 +585,27 @@ export function buildAgent({ logger, env }) {
       }
 
       return mergeCoordinator.enqueue(normalizedRequest, async (mergedRequest) => {
-        const replyPromise = buildReplyResult(mergedRequest);
-        if (quickAckConfig.enabled) {
-          const winner = await Promise.race([
-            replyPromise.then((replyResult) => ({ type: 'reply', replyResult })),
-            quickAckDelay(quickAckConfig.timeoutMs).then(() => ({ type: 'timeout' })),
-          ]);
-          if (winner.type === 'timeout') {
-            setTimeout(() => {
-              replyPromise
-                .then((replyResult) => sendAsyncFinal(replyResult))
-                .catch((error) => {
-                  const message = error instanceof Error ? error.message : String(error);
-                  logger.warn?.(`[node-bridge] async final reply failed: ${message}`);
-                });
-            }, 0);
-            return { text: quickAckConfig.ackText };
-          }
-          scheduleFollowUps(winner.replyResult.followUpMessages);
-          return buildResponsePayload(winner.replyResult);
-        }
-        const replyResult = await replyPromise;
-        scheduleFollowUps(replyResult.followUpMessages);
+        const replyResult = await buildReplyResult(mergedRequest);
+        scheduleFollowUps(replyResult.followUpMessages, mergedRequest);
         return buildResponsePayload(replyResult);
       });
     },
   };
+}
+
+function stableFollowUpOperationKey(request = {}, index, text) {
+  const source = String(
+    request.id
+    || request.messageId
+    || request.message?.id
+    || request.payload?.id
+    || `${request.conversationId || request.conversation_id || ''}:${request.text || ''}`,
+  );
+  return `follow-up:wechat:${shortDigest(`${source}:${index}:${text}`)}`;
+}
+
+function shortDigest(value) {
+  return createHash('sha256').update(String(value || ''), 'utf8').digest('hex').slice(0, 32);
 }
 
 function sleep(ms) {
@@ -746,16 +813,37 @@ async function main() {
       }
     },
   };
+  const durableOutbox = createDurableOutbox({ env: runtimeEnv });
+  runtimeEnv.durableOutbox = durableOutbox;
+  await durableOutbox.recover();
+  const externalMcpRuntime = createExternalMcpAutonomyRuntime({
+    env: runtimeEnv,
+    logger: console,
+    transport: createExternalMcpRuntimeTransport({ env: runtimeEnv }),
+    submitCandidate: (candidate, context) => submitExternalMcpCheckpoint({
+      candidate,
+      context,
+      replyBackend: runtimeEnv.replyBackend,
+      outbox: durableOutbox,
+      sendWechat: (text) => proactiveBot.sendMessage(text),
+      env: runtimeEnv,
+    }),
+  });
+  runtimeEnv.replyBackend = createReplyBackend({
+    env: runtimeEnv,
+    logger: console,
+    activityFacade: externalMcpRuntime.facade,
+  });
   const agent = buildAgent({
     logger: console,
     env: runtimeEnv,
   });
   const outboundConfig = getOutboundServerConfig(process.env);
-  const outboundServer = createOutboundServer({ bot: proactiveBot, logger: console });
-  const feishuBridge = startFeishuBridge({ env: process.env, logger: console });
-  const desktopProxyServer = startDesktopProxyServer({ env: process.env, logger: console });
+  const outboundServer = createOutboundServer({ bot: proactiveBot, logger: console, env: runtimeEnv });
+  const feishuBridge = startFeishuBridge({ env: process.env, logger: console, outbox: durableOutbox });
+  const desktopProxyServer = startDesktopProxyServer({ env: process.env, logger: console, outbox: durableOutbox });
   const coReadingWebServer = startCoReadingWebServer({ env: process.env, logger: console });
-  const activityRunner = startExternalMcpActivityRunnerLoop({ env: runtimeEnv, logger: console });
+  await externalMcpRuntime.start();
 
   await new Promise((resolve, reject) => {
     outboundServer.once('error', reject);
@@ -768,7 +856,7 @@ async function main() {
   try {
     await startWithRetry(agent, weixinAccountConfig);
   } finally {
-    activityRunner.stop();
+    externalMcpRuntime.stop();
     feishuBridge?.stop?.();
     await new Promise((resolve) => coReadingWebServer?.close ? coReadingWebServer.close(resolve) : resolve());
     await new Promise((resolve) => desktopProxyServer?.close ? desktopProxyServer.close(resolve) : resolve());

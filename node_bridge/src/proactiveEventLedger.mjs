@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import fs from 'node:fs';
 import path from 'node:path';
 
+import { readJsonState, writeJsonAtomic } from './atomicState.mjs';
 import { resolveStateDir } from './runtimeState.mjs';
 
 const LEDGER_FILE = 'proactive-events.json';
@@ -74,18 +74,25 @@ function ledgerPath(env) {
 }
 
 function readLedger(env) {
-  try {
-    const parsed = JSON.parse(fs.readFileSync(ledgerPath(env), 'utf8'));
-    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object') : [];
-  } catch {
-    return [];
-  }
+  return readJsonState(ledgerPath(env), {
+    validate: isLedger,
+    missingValue: [],
+    critical: true,
+  });
 }
 
 function writeLedger(env, records) {
-  const target = ledgerPath(env);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, `${JSON.stringify(records, null, 2)}\n`, 'utf8');
+  writeJsonAtomic(ledgerPath(env), records, { validate: isLedger });
+}
+
+function isLedger(value) {
+  return Array.isArray(value) && value.every((record) => Boolean(
+    record && typeof record === 'object' && !Array.isArray(record)
+    && sanitizeId(record.reservationId)
+    && sanitizeId(record.eventId)
+    && sanitizeScope(record.dedupeKey)
+    && ['reserved', 'sent'].includes(String(record.status || '')),
+  ));
 }
 
 function activeRecords(records, now) {

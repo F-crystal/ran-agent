@@ -2,8 +2,9 @@
  * Reply backend selector for Hermes chat mainline.
  */
 
+import { createHash } from 'node:crypto';
+
 import { getBackendIngestConfig, ingestExchangeToBackend } from './backendIngestClient.mjs';
-import { stopExternalMcpActivitiesByUser } from './externalMcp/activityRunner.mjs';
 import { shouldSuppressSystemQueueReply } from './externalMcp/systemQueue.mjs';
 import {
   applyActionGateTelemetry,
@@ -11,10 +12,12 @@ import {
   evaluateActionGate,
   getActionGateConfig,
   logActionContract,
+  trustActionReceiptEvidence,
 } from './actionContract.mjs';
 import { repairActionContract } from './actionRepair.mjs';
 import { getHermesGatewayConfig, sendChatToHermesGateway } from './hermesGatewayClient.mjs';
 import { detectEnvironmentPrivacyCommand, privacyConfirmation } from './environmentSense.mjs';
+import { applyEgressPrivacyGate } from './egressPrivacyGate.mjs';
 import {
   cancelPendingAction,
   confirmPendingAction,
@@ -25,6 +28,12 @@ import {
   markPendingActionFailed,
 } from './pendingActionState.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
+import { normalizeReplyEnvelope } from './replyEnvelope.mjs';
+import { getSemanticVerifierConfig, verifySemanticClaims } from './semanticClaimVerifier.mjs';
+import { createOperationLedger } from './operationLedger.mjs';
+import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
+import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
+import { createPersonalLearningExecutorAdapter } from './personalLearningClient.mjs';
 import {
   deleteStickers,
   resolveStickerAsset,
@@ -45,6 +54,26 @@ export function getReplyBackendConfig(env = process.env) {
 export function createReplyBackend(options = {}) {
   const env = options.env || process.env;
   const config = getReplyBackendConfig(env);
+  const operationLedger = options.operationLedger || createOperationLedger({ env });
+  const configuredExecutorAdapters = Array.isArray(options.trustedExecutorAdapterConfigs)
+    ? [...options.trustedExecutorAdapterConfigs]
+    : [];
+  if (!options.trustedActionExecutors && String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '').trim()) {
+    configuredExecutorAdapters.push(createPersonalLearningExecutorAdapter({
+      env,
+      fetchImpl: options.fetchImpl || globalThis.fetch,
+    }));
+  }
+  const trustedActionExecutors = options.trustedActionExecutors || createTrustedExecutorAdapters({
+    ledger: operationLedger,
+    adapters: configuredExecutorAdapters,
+  });
+  const coreDurableJobExecutor = options.coreDurableJobExecutor || createCoreDurableJobExecutor({
+    env,
+    fetchImpl: options.fetchImpl || globalThis.fetch,
+    createJob: options.createDurableJobImpl,
+  });
+  const activityFacade = options.activityFacade || null;
 
   return {
     async getReply(message, backendOptions = {}) {
@@ -61,19 +90,20 @@ export function createReplyBackend(options = {}) {
         };
       }
       if (detectExternalMcpStopCommand(message.text)) {
-        const stopped = stopExternalMcpActivitiesByUser(message.global_user_id || '', {
-          env,
-          now: typeof options.nowImpl === 'function' ? options.nowImpl() : new Date(),
-          reason: 'user_stop_command',
+        const stopped = await stopAutonomyActivityFromNaturalCommand({
+          text: message.text,
+          requestId,
+          actorContext: trustedActorContext(message.trusted_actor_context),
+          activityFacade,
         });
-        message = {
-          ...message,
-          route_hint: 'external_mcp_stop',
-          text: buildExternalMcpStopPrompt({
-            originalText: message.text,
-            stoppedActivityIds: stopped.stoppedActivityIds,
-          }),
-        };
+        if (stopped) {
+          return {
+            replyText: stopped,
+            followUpMessages: [],
+            media: null,
+            source: 'bridge_external_activity_stop',
+          };
+        }
       }
       const actionGateConfig = getActionGateConfig(env);
       const pendingConfig = getPendingActionConfig(env);
@@ -96,7 +126,7 @@ export function createReplyBackend(options = {}) {
           source: pendingOutcome.source || 'bridge_pending_action',
         };
       }
-      const response = await chatImpl(
+      let response = await chatImpl(
         {
           text: message.text,
           sender_id: message.sender_id,
@@ -130,6 +160,68 @@ export function createReplyBackend(options = {}) {
         }
       );
 
+      let replyEnvelope;
+      let excludeFromHistory = false;
+      try {
+        replyEnvelope = normalizeReplyEnvelope(response);
+        response = {
+          ...response,
+          reply_text: replyEnvelope.message,
+          follow_up_messages: [],
+        };
+      } catch (error) {
+        loggerFor(options).warn?.(`reply envelope rejected code=${String(error?.code || 'REPLY_ENVELOPE_INVALID')}`);
+        replyEnvelope = normalizeReplyEnvelope({ reply_text: '回复格式校验失败，请稍后重试。' });
+        response = {
+          ...response,
+          reply_text: replyEnvelope.message,
+          follow_up_messages: [],
+          media: null,
+        };
+        excludeFromHistory = true;
+      }
+
+      const actionExecution = await executeEnvelopeActionRequests({
+        actionRequests: replyEnvelope.actionRequests,
+        actorContext: trustedActorContext(message.trusted_actor_context),
+        currentMessage: message,
+        operationLedger,
+        trustedActionExecutors,
+        coreDurableJobExecutor,
+      });
+      let activityExecution = await executeEnvelopeActivityRequest({
+        activityRequest: replyEnvelope.activityRequest,
+        actorContext: trustedActorContext(message.trusted_actor_context),
+        activityFacade,
+        currentMessage: message,
+      });
+      if (!replyEnvelope.activityRequest) {
+        activityExecution = await repairMissingExternalActivityCommitment({
+          commitments: replyEnvelope.commitments,
+          actorContext: trustedActorContext(message.trusted_actor_context),
+          activityFacade,
+          currentMessage: message,
+          fallback: activityExecution,
+        });
+      }
+      const durableReceiptSummaries = [...actionExecution.receiptSummaries, ...activityExecution.receiptSummaries];
+      const commitmentBlocked = replyEnvelope.commitments.length > 0
+        && !commitmentsHaveMatchingActiveReceipts(replyEnvelope.commitments, durableReceiptSummaries);
+      const learningPromotionDenied = actionExecution.receiptSummaries.some((receipt) => (
+        ['memory.remember', 'memory.correct'].includes(receipt?.actionType)
+        && receipt?.errorCode === 'ACTION_NOT_GROUNDED'
+      ));
+      const coreAcknowledgement = commitmentBlocked
+        ? ''
+        : bridgeOwnedCoreAcknowledgement(replyEnvelope.commitments, durableReceiptSummaries);
+      if (commitmentBlocked) {
+        response = { ...response, reply_text: '这项后续工作尚未启动。', follow_up_messages: [] };
+      } else if (learningPromotionDenied) {
+        response = { ...response, reply_text: '保存结果尚未返回，未写入长期记忆。', follow_up_messages: [] };
+      } else if (coreAcknowledgement) {
+        response = { ...response, reply_text: coreAcknowledgement, follow_up_messages: [] };
+      }
+
       const logger = options.logger || console;
       const mediaFromMarker = extractTrustedMediaMarker(response.reply_text, {
         resolveStickerAssetImpl: options.resolveStickerAssetImpl || resolveStickerAsset,
@@ -145,7 +237,13 @@ export function createReplyBackend(options = {}) {
 
       let finalReplyText = responseText;
       let finalResponseMedia = responseMedia;
-      let responseSource = 'hermes';
+      let responseSource = commitmentBlocked
+        ? 'bridge_commitment_guard'
+        : learningPromotionDenied
+          ? 'bridge_learning_intent_guard'
+        : coreAcknowledgement
+          ? 'bridge_core_job_ack'
+          : 'hermes';
       if (actionGateConfig.enabled) {
         let rawContractReplyText = response.reply_text;
         let contract = evaluateActionContract({
@@ -155,6 +253,7 @@ export function createReplyBackend(options = {}) {
           profile: gatewayConfig.profile || response.profile || response.model || '',
           message,
           response: { ...response, media: finalResponseMedia, reply_text: rawContractReplyText },
+          toolResults: actionExecution.evidence,
           config: actionGateConfig,
         });
         let gate = evaluateActionGate({
@@ -192,7 +291,7 @@ export function createReplyBackend(options = {}) {
               profile: gatewayConfig.profile || response.profile || response.model || '',
               message,
               response: { ...response, media: contractRepairMedia, reply_text: rawContractReplyText },
-              toolResults: repair.toolResults,
+              toolResults: [...actionExecution.evidence, ...repair.toolResults],
               config: actionGateConfig,
             });
             gate = evaluateActionGate({
@@ -235,6 +334,7 @@ export function createReplyBackend(options = {}) {
             profile: gatewayConfig.profile || response.profile || response.model || '',
             message,
             response: { ...response, media: finalResponseMedia, reply_text: followUpText },
+            toolResults: actionExecution.evidence,
             config: actionGateConfig,
           });
           const followGate = evaluateActionGate({
@@ -253,6 +353,29 @@ export function createReplyBackend(options = {}) {
         finalFollowUpMessages = gatedFollowUps;
       }
 
+      const semanticResult = await verifySemanticClaims({
+        // A rejected commitment is removed before the semantic observer sees
+        // the reply.  The observer may detect prose, but it never receives a
+        // declaration which the bridge declined to bind to a durable receipt.
+        envelope: {
+          ...replyEnvelope,
+          message: finalReplyText,
+          commitments: commitmentBlocked ? [] : replyEnvelope.commitments,
+        },
+        receiptSummaries: durableReceiptSummaries,
+        config: backendOptions.semanticVerifierConfig || getSemanticVerifierConfig(env),
+        verifierImpl: options.semanticVerifierImpl,
+        fetchImpl: backendOptions.fetchImpl,
+      });
+      finalReplyText = semanticResult.releaseText;
+      excludeFromHistory = excludeFromHistory || semanticResult.excludeFromHistory === true;
+
+      const privacyResult = applyEgressPrivacyGate(finalReplyText, {
+        technicalDiagnostics: backendOptions.technicalDiagnostics === true,
+      });
+      finalReplyText = privacyResult.text;
+      excludeFromHistory = excludeFromHistory || privacyResult.excludeFromHistory === true;
+
       const suppression = shouldSuppressSystemQueueReply({
         routeHint: message.route_hint || '',
         replyText: finalReplyText,
@@ -261,19 +384,28 @@ export function createReplyBackend(options = {}) {
       const visibleFollowUpMessages = suppression.suppress ? [] : finalFollowUpMessages;
       const visibleMedia = suppression.suppress ? null : finalResponseMedia;
 
-      await ingestVisibleExchange({
-        message,
-        replyText: visibleReplyText,
-        source: responseSource,
-        media: normalizeMediaItems(message.media),
-        imageUrls: Array.isArray(message.image_urls)
-          ? message.image_urls.filter((item) => typeof item === 'string' && item.trim())
-          : [],
-        ingestConfig: backendOptions.ingestConfig || getBackendIngestConfig(env),
-        ingestImpl: options.ingestImpl || ingestExchangeToBackend,
-        fetchImpl: backendOptions.fetchImpl,
-        logger,
-      });
+      let backendProjection = null;
+      if (!excludeFromHistory && !suppression.suppress) {
+        const projectIngest = async ({ outboxId = '', replyText = '' } = {}) => ingestVisibleExchange({
+          message,
+          replyText: String(replyText || visibleReplyText),
+          source: responseSource,
+          media: normalizeMediaItems(message.media),
+          imageUrls: Array.isArray(message.image_urls)
+            ? message.image_urls.filter((item) => typeof item === 'string' && item.trim())
+            : [],
+          ingestConfig: backendOptions.ingestConfig || getBackendIngestConfig(env),
+          ingestImpl: options.ingestImpl || ingestExchangeToBackend,
+          fetchImpl: backendOptions.fetchImpl,
+          logger,
+          eventId: outboxId,
+        });
+        if (backendOptions.deferIngest === true) {
+          backendProjection = projectIngest;
+        } else {
+          await projectIngest();
+        }
+      }
 
       return {
         replyText: visibleReplyText,
@@ -282,10 +414,431 @@ export function createReplyBackend(options = {}) {
         source: responseSource,
         suppressSend: suppression.suppress,
         suppressReason: suppression.reason,
+        excludeFromHistory,
+        backendProjection,
+      };
+    },
+    async releaseExternalCheckpoint({ candidate, context } = {}, backendOptions = {}) {
+      const message = checkpointCandidateText(candidate);
+      if (!message || !context?.notifyTarget) {
+        return { replyText: '', followUpMessages: [], media: null, source: 'external_checkpoint', suppressSend: true, excludeFromHistory: true };
+      }
+      const semanticResult = await verifySemanticClaims({
+        envelope: {
+          message,
+          claims: candidate?.claim ? [{ type: String(candidate.claim) }] : [],
+          commitments: [],
+        },
+        receiptSummaries: (Array.isArray(candidate?.receipts) ? candidate.receipts : []).map((receipt) => ({
+          actionType: 'external.checkpoint',
+          outcome: String(receipt?.outcome || ''),
+          status: String(receipt?.outcome || ''),
+        })),
+        config: backendOptions.semanticVerifierConfig || getSemanticVerifierConfig(env),
+        verifierImpl: options.semanticVerifierImpl,
+        fetchImpl: backendOptions.fetchImpl,
+      });
+      const privacyResult = applyEgressPrivacyGate(semanticResult.releaseText, {
+        technicalDiagnostics: backendOptions.technicalDiagnostics === true,
+      });
+      return {
+        replyText: privacyResult.text,
+        followUpMessages: [],
+        media: null,
+        source: 'external_checkpoint',
+        suppressSend: false,
+        excludeFromHistory: semanticResult.excludeFromHistory === true || privacyResult.excludeFromHistory === true,
       };
     },
     config,
   };
+}
+
+function checkpointCandidateText(candidate) {
+  if (candidate?.kind !== 'core_external_activity_narration_candidate' || candidate.status !== 'ready') return '';
+  return (Array.isArray(candidate.facts) ? candidate.facts : [])
+    .map((fact) => String(fact?.summary || '').trim())
+    .filter(Boolean)
+    .slice(0, 3)
+    .join('\n');
+}
+
+function loggerFor(options = {}) {
+  return options.logger || console;
+}
+
+function trustedActorContext(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const actorKey = String(value.actorKey || '').trim();
+  const platform = String(value.platform || '').trim();
+  const conversationKey = String(value.conversationKey || '').trim();
+  if (!actorKey || !platform || !conversationKey) return null;
+  return Object.freeze({
+    actorKey,
+    owner: value.owner === true,
+    platform,
+    conversationKey,
+  });
+}
+
+async function executeEnvelopeActionRequests({
+  actionRequests = [],
+  actorContext,
+  currentMessage,
+  operationLedger,
+  trustedActionExecutors,
+  coreDurableJobExecutor,
+}) {
+  const receiptSummaries = [];
+  const evidence = [];
+  for (const request of actionRequests) {
+    if (coreDurableJobExecutor?.supports?.(request.actionType)) {
+      const result = await executeCoreDurableJobRequest({
+        request,
+        actorContext,
+        currentMessage,
+        coreDurableJobExecutor,
+      });
+      receiptSummaries.push(result.receiptSummary);
+      continue;
+    }
+    if (!actorContext?.owner) {
+      receiptSummaries.push({
+        requestRef: request.requestRef,
+        actionType: request.actionType,
+        outcome: 'denied',
+        status: 'failed',
+        errorCode: 'ACTOR_NOT_AUTHORIZED',
+      });
+      continue;
+    }
+    let groundedRequest;
+    try {
+      groundedRequest = groundActionRequest(request, currentMessage);
+    } catch (error) {
+      receiptSummaries.push({
+        requestRef: request.requestRef,
+        actionType: request.actionType,
+        outcome: 'denied',
+        status: 'failed',
+        errorCode: sanitizeExecutionCode(error?.code || 'ACTION_NOT_GROUNDED'),
+      });
+      continue;
+    }
+    if (!trustedActionExecutors.supports(groundedRequest.actionType)) {
+      receiptSummaries.push({
+        requestRef: request.requestRef,
+        actionType: request.actionType,
+        outcome: 'unsupported',
+        status: 'failed',
+        errorCode: 'EXECUTOR_UNSUPPORTED',
+      });
+      continue;
+    }
+    try {
+      const operation = operationLedger.mint({ request: groundedRequest, actorContext });
+      const receipt = await trustedActionExecutors.execute(operation);
+      const verified = trustedActionExecutors.verifyReceipt(receipt, {
+        operationId: operation.operationId,
+        actorKey: operation.actorKey,
+        actionType: operation.actionType,
+        scopeDigest: operation.scopeDigest,
+        issuer: receipt.issuer,
+        status: receipt.status,
+        evidenceType: receipt.evidenceType,
+      });
+      if (verified.ok !== true) throw actionExecutionError('RECEIPT_VERIFICATION_FAILED');
+      const succeeded = receipt.status === 'succeeded';
+      receiptSummaries.push({
+        requestRef: request.requestRef,
+        actionType: request.actionType,
+        outcome: succeeded ? 'applied' : receipt.status,
+        status: receipt.status,
+        effectDigest: receipt.effectDigest,
+      });
+      evidence.push(trustActionReceiptEvidence({
+        type: actionEvidenceType(request.actionType),
+        ok: succeeded,
+        status: succeeded ? 'success' : 'failure',
+        action_id: receipt.operationId,
+        error_code: succeeded ? '' : `EXECUTOR_${receipt.status.toUpperCase()}`,
+      }));
+    } catch (error) {
+      receiptSummaries.push({
+        requestRef: request.requestRef,
+        actionType: request.actionType,
+        outcome: 'failed',
+        status: 'failed',
+        errorCode: sanitizeExecutionCode(error?.code || 'EXECUTOR_FAILED'),
+      });
+    }
+  }
+  return Object.freeze({
+    receiptSummaries: Object.freeze(receiptSummaries.map((item) => Object.freeze(item))),
+    evidence: Object.freeze(evidence),
+  });
+}
+
+async function executeCoreDurableJobRequest({ request, actorContext, currentMessage, coreDurableJobExecutor }) {
+  if (!actorContext?.owner) {
+    return {
+      receiptSummary: {
+        requestRef: request.requestRef,
+        actionType: request.actionType,
+        outcome: 'denied',
+        status: 'failed',
+        errorCode: 'ACTOR_NOT_AUTHORIZED',
+      },
+    };
+  }
+  try {
+    const result = await coreDurableJobExecutor.execute({ request, actorContext, currentMessage });
+    const receipt = result?.receipt;
+    if (result?.ok !== true || !isActiveDurableReceipt(receipt, { requestRef: request.requestRef, actionType: request.actionType, actorKey: actorContext.actorKey })) {
+      return {
+        receiptSummary: {
+          requestRef: request.requestRef,
+          actionType: request.actionType,
+          outcome: 'failed',
+          status: 'failed',
+          errorCode: sanitizeExecutionCode(result?.reason || 'CORE_JOB_RECEIPT_INVALID'),
+        },
+      };
+    }
+    return {
+      receiptSummary: {
+        requestRef: request.requestRef,
+        actionType: request.actionType,
+        outcome: 'applied',
+        status: 'active',
+        effectDigest: receipt.goalDigest,
+        durableActive: true,
+      },
+    };
+  } catch {
+    return {
+      receiptSummary: {
+        requestRef: request.requestRef,
+        actionType: request.actionType,
+        outcome: 'failed',
+        status: 'failed',
+        errorCode: 'CORE_JOB_CREATE_FAILED',
+      },
+    };
+  }
+}
+
+async function executeEnvelopeActivityRequest({ activityRequest, actorContext, activityFacade, currentMessage = {} }) {
+  if (!activityRequest) return Object.freeze({ receiptSummaries: Object.freeze([]) });
+  const requestRef = String(activityRequest.requestRef || '').trim();
+  if (!actorContext?.owner) {
+    return Object.freeze({ receiptSummaries: Object.freeze([Object.freeze({
+      requestRef,
+      actionType: 'external.activity',
+      outcome: 'denied',
+      status: 'failed',
+      errorCode: 'ACTOR_NOT_AUTHORIZED',
+    })]) });
+  }
+  if (!activityFacade || typeof activityFacade.handle !== 'function') {
+    return Object.freeze({ receiptSummaries: Object.freeze([Object.freeze({
+      requestRef,
+      actionType: 'external.activity',
+      outcome: 'unsupported',
+      status: 'failed',
+      errorCode: 'EXTERNAL_ACTIVITY_UNAVAILABLE',
+    })]) });
+  }
+  try {
+    const result = await activityFacade.handle(activityRequest, actorContext);
+    const receipt = result?.receipt;
+    if (receipt && typeof activityFacade.bindNotifyTarget === 'function') {
+      await activityFacade.bindNotifyTarget({
+        receipt,
+        actorContext,
+        target: {
+          platform: String(currentMessage.platform || currentMessage.channel || '').trim(),
+          channelType: String(currentMessage.channel_type || currentMessage.channelType || 'dm').trim(),
+          conversationId: String(currentMessage.conversation_id || currentMessage.conversationId || currentMessage.sender_id || '').trim(),
+          senderId: String(currentMessage.sender_id || currentMessage.senderId || '').trim(),
+        },
+      });
+    }
+    return Object.freeze({ receiptSummaries: Object.freeze([Object.freeze({
+      requestRef,
+      actionType: 'external.activity',
+      outcome: receipt ? 'applied' : String(result?.action || 'noop'),
+      status: receipt && isActiveDurableReceipt(receipt, { actorKey: actorContext.actorKey }) ? 'active' : 'noop',
+      effectDigest: receipt?.goalDigest || '',
+      ...(receipt && isActiveDurableReceipt(receipt, { actorKey: actorContext.actorKey }) ? { durableActive: true } : {}),
+    })]) });
+  } catch (error) {
+    return Object.freeze({ receiptSummaries: Object.freeze([Object.freeze({
+      requestRef,
+      actionType: 'external.activity',
+      outcome: 'failed',
+      status: 'failed',
+      errorCode: sanitizeExecutionCode(error?.code || 'EXTERNAL_ACTIVITY_FAILED'),
+    })]) });
+  }
+}
+
+async function repairMissingExternalActivityCommitment({ commitments, actorContext, activityFacade, currentMessage = {}, fallback }) {
+  const matching = (Array.isArray(commitments) ? commitments : [])
+    .filter((commitment) => commitment?.type === 'external_continue' && String(commitment?.requestRef || '').trim());
+  if (matching.length !== 1 || !actorContext?.owner || typeof activityFacade?.repairStart !== 'function') return fallback;
+  const commitment = matching[0];
+  const requestRef = String(commitment.requestRef).trim();
+  try {
+    const result = await activityFacade.repairStart({
+      requestRef,
+      commitment: Object.freeze({ type: commitment.type, requestRef }),
+      actorContext,
+      currentMessage: Object.freeze({ text: String(currentMessage.text || '') }),
+    });
+    const receipt = result?.receipt;
+    return Object.freeze({ receiptSummaries: Object.freeze([Object.freeze({
+      requestRef,
+      actionType: 'external.activity',
+      outcome: receipt ? 'applied' : String(result?.action || 'noop'),
+      status: receipt && isActiveDurableReceipt(receipt, { actorKey: actorContext.actorKey }) ? 'active' : 'noop',
+      effectDigest: receipt?.goalDigest || '',
+      ...(receipt && isActiveDurableReceipt(receipt, { actorKey: actorContext.actorKey }) ? { durableActive: true } : {}),
+    })]) });
+  } catch (error) {
+    return Object.freeze({ receiptSummaries: Object.freeze([Object.freeze({
+      requestRef,
+      actionType: 'external.activity',
+      outcome: 'failed',
+      status: 'failed',
+      errorCode: sanitizeExecutionCode(error?.code || 'EXTERNAL_ACTIVITY_REPAIR_FAILED'),
+    })]) });
+  }
+}
+
+function commitmentsHaveMatchingActiveReceipts(commitments, receiptSummaries) {
+  return commitments.every((commitment) => {
+    const requestRef = String(commitment?.requestRef || '').trim();
+    return requestRef.length > 0 && receiptSummaries.some((receipt) => (
+      receipt?.durableActive === true
+      && receipt.requestRef === requestRef
+      && receipt.outcome === 'applied'
+      && receipt.status === 'active'
+    ));
+  });
+}
+
+function bridgeOwnedCoreAcknowledgement(commitments, receiptSummaries) {
+  const acknowledgements = {
+    'core.memory-maintenance': '已安排记忆维护。',
+    'core.reflection': '已安排聊天复盘。',
+    'core.night-cycle': '已安排夜间整理。',
+  };
+  for (const commitment of commitments) {
+    const requestRef = String(commitment?.requestRef || '').trim();
+    const receipt = receiptSummaries.find((item) => (
+      item?.requestRef === requestRef
+      && item?.durableActive === true
+      && item?.outcome === 'applied'
+      && item?.status === 'active'
+      && Object.hasOwn(acknowledgements, item?.actionType)
+    ));
+    if (receipt) return acknowledgements[receipt.actionType];
+  }
+  return '';
+}
+
+function isActiveDurableReceipt(receipt, expected = {}) {
+  if (!receipt || typeof receipt !== 'object') return false;
+  if (String(receipt.status || '') !== 'active'
+    || !/^[A-Za-z0-9_.:-]{8,160}$/.test(String(receipt.jobId || ''))
+    || !/^[a-f0-9]{32,128}$/.test(String(receipt.goalDigest || ''))) return false;
+  return Object.entries(expected).every(([field, value]) => value === undefined || receipt[field] === value);
+}
+
+function groundActionRequest(request, message = {}) {
+  const actionType = String(request.actionType || '');
+  if (!actionType.startsWith('memory.')) return request;
+  const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope)
+    ? request.scope
+    : {};
+  const userText = String(message.text || '');
+  if (['memory.remember', 'memory.correct'].includes(actionType)) {
+    if (!hasExplicitMemoryIntent(userText, actionType)) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    const statement = String(scope.statement || '').trim();
+    const normalizedStatement = normalizeGroundingText(statement);
+    const normalizedUserText = normalizeGroundingText(userText);
+    if (normalizedStatement.length < 2 || !normalizedUserText.includes(normalizedStatement)) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    const kind = actionType === 'memory.correct'
+      ? 'correction'
+      : ['preference', 'relationship', 'routine', 'operating_lesson'].includes(String(scope.kind || ''))
+        ? String(scope.kind)
+        : 'preference';
+    return {
+      ...request,
+      scope: {
+        kind,
+        subject_key: String(scope.subject_key || scope.subjectKey || '').trim(),
+        statement,
+        evidence_digest: createHash('sha256').update(userText, 'utf8').digest('hex'),
+        confidence: 1,
+      },
+    };
+  }
+  if (actionType === 'memory.forget') {
+    if (!/(?:忘记|别再记|不要记|删除).*(?:记忆|偏好|这个|它)?|forget/i.test(userText)) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    return {
+      ...request,
+      scope: { subject_key: String(scope.subject_key || scope.subjectKey || '').trim() },
+    };
+  }
+  if (actionType === 'memory.query') {
+    if (!/(?:记得|记住了什么|你.*(?:记忆|了解)|remember)/i.test(userText)) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    return {
+      ...request,
+      scope: {
+        subject_prefix: String(scope.subject_prefix || scope.subjectPrefix || '').trim(),
+        limit: Math.max(1, Math.min(20, Number.parseInt(String(scope.limit || 5), 10) || 5)),
+      },
+    };
+  }
+  throw actionExecutionError('ACTION_NOT_GROUNDED');
+}
+
+function hasExplicitMemoryIntent(userText, actionType) {
+  const text = String(userText || '');
+  if (actionType === 'memory.correct') {
+    return /(?:更正|纠正|改正|修正|改成|correct)/i.test(text);
+  }
+  return /(?:记住|记下|记录|保存|存下|存起来|remember|save)/i.test(text);
+}
+
+function normalizeGroundingText(value) {
+  return String(value || '').toLowerCase().replace(/[\s，。！？、；：,.!?;:'"“”‘’（）()\[\]{}]/g, '');
+}
+
+function actionEvidenceType(actionType) {
+  return /(?:^|[._:-])(?:send|post|submit|publish|reply)(?:$|[._:-])/i.test(String(actionType || ''))
+    ? 'outbound_result'
+    : 'save_result';
+}
+
+function sanitizeExecutionCode(value) {
+  return String(value || 'EXECUTOR_FAILED').toUpperCase().replace(/[^A-Z0-9_]/g, '_').slice(0, 80);
+}
+
+function actionExecutionError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
 }
 
 function normalizeFollowUpMessages(items) {
@@ -304,6 +857,7 @@ async function ingestVisibleExchange({
   ingestImpl,
   fetchImpl,
   logger,
+  eventId = '',
 }) {
   const ingestPayload = {
     channel: message.platform || message.channel || 'wechat',
@@ -315,6 +869,7 @@ async function ingestVisibleExchange({
     source,
     image_urls: Array.isArray(imageUrls) ? imageUrls : [],
     media: normalizeMediaItems(media),
+    event_id: String(eventId || '').trim(),
   };
   logger.log?.(`[ingest] sender_id_hash=${hashForLog(ingestPayload.sender_id)} text_length=${ingestPayload.user_text?.length || 0} image_urls_count=${ingestPayload.image_urls?.length || 0} media_count=${ingestPayload.media?.length || 0}`);
   if (ingestPayload.media?.length > 0) {
@@ -346,8 +901,12 @@ async function handlePendingActionBeforeHermes({
   const conversationId = message.conversation_id || message.conversationId || message.sender_id;
   const logger = options.logger || console;
   const now = typeof options.nowImpl === 'function' ? options.nowImpl() : new Date();
+  const actorContext = trustedActorContext(message.trusted_actor_context);
   const confirmation = detectConfirmationCommand(message.text);
-  const pendingActions = findPendingActionsForConversation({ channel, conversationId }, { env, now });
+  const pendingActions = findPendingActionsForConversation(
+    { channel, conversationId },
+    { env, now, ...(actorContext ? { actorContext } : {}) },
+  );
 
   if (confirmation && pendingActions.length === 0) {
     return { replyText: '确认项已过期或已处理，未执行。', source: 'bridge_pending_action' };
@@ -382,6 +941,7 @@ async function handlePendingActionBeforeHermes({
       env,
       now,
       logger,
+      actorContext,
     });
   }
 
@@ -391,6 +951,9 @@ async function handlePendingActionBeforeHermes({
   const candidate = detectPendingActionCandidate(message);
   if (!candidate) {
     return null;
+  }
+  if (actorContext && actorContext.owner !== true) {
+    return { replyText: '当前身份未获授权执行这项操作，操作未执行。', source: 'bridge_pending_action' };
   }
   if (!canExecutePendingAction(candidate.actionType, options)) {
     return null;
@@ -431,7 +994,12 @@ async function handlePendingActionBeforeHermes({
     };
   }
 
-  const pending = createPendingAction(actionInput, { env, now, ttlMinutes: pendingConfig.ttlMinutes });
+  const pending = createPendingAction(actionInput, {
+    env,
+    now,
+    ttlMinutes: pendingConfig.ttlMinutes,
+    ...(actorContext ? { actorContext } : {}),
+  });
   rememberRuntimePendingPayload(pending.actionId, candidate.sanitizedPayload);
   logPendingActionTelemetry({
     requestId,
@@ -459,9 +1027,15 @@ async function handlePendingConfirmation({
   env,
   now,
   logger,
+  actorContext,
 }) {
   if (confirmation === 'cancel') {
-    const cancelled = cancelPendingAction(action.actionId, { env, now });
+    const cancelled = cancelPendingAction(action.actionId, {
+      env,
+      now,
+      expectedRevision: action.revision,
+      ...(actorContext ? { actorContext } : {}),
+    });
     logPendingActionTelemetry({
       requestId,
       channel,
@@ -476,10 +1050,20 @@ async function handlePendingConfirmation({
     return { replyText: '已取消，操作未执行。', source: 'bridge_pending_action' };
   }
 
-  const confirmed = confirmPendingAction(action.actionId, { env, now });
+  const confirmed = confirmPendingAction(action.actionId, {
+    env,
+    now,
+    expectedRevision: action.revision,
+    ...(actorContext ? { actorContext } : {}),
+  });
   const execution = await executePendingAction(confirmed || action, { options, env, message });
   if (execution.ok) {
-    markPendingActionExecuted(action.actionId, execution.evidence, { env, now });
+    markPendingActionExecuted(action.actionId, execution.evidence, {
+      env,
+      now,
+      expectedRevision: confirmed?.revision,
+      ...(actorContext ? { actorContext } : {}),
+    });
     logPendingActionTelemetry({
       requestId,
       channel,
@@ -499,7 +1083,12 @@ async function handlePendingConfirmation({
       source: 'bridge_pending_action',
     };
   }
-  markPendingActionFailed(action.actionId, execution.evidence, { env, now });
+  markPendingActionFailed(action.actionId, execution.evidence, {
+    env,
+    now,
+    expectedRevision: confirmed?.revision,
+    ...(actorContext ? { actorContext } : {}),
+  });
   logPendingActionTelemetry({
     requestId,
     channel,
@@ -816,13 +1405,21 @@ function detectExternalMcpStopCommand(text = '') {
   return /^(停下这局|别玩了|结束\s*MCP\s*活动|停止\s*MCP|结束游戏|停下游戏|不要继续玩|stop\s+mcp|stop\s+this\s+game)$/i.test(normalized);
 }
 
-function buildExternalMcpStopPrompt({ originalText = '', stoppedActivityIds = [] } = {}) {
-  return [
-    '[External MCP stop event]',
-    `user_text: ${String(originalText || '').trim().slice(0, 120)}`,
-    `stopped_activity_ids: ${(Array.isArray(stoppedActivityIds) ? stoppedActivityIds : []).join(',') || 'none'}`,
-    'Hermes must not continue playing or browsing external MCP now. Briefly acknowledge the stop and summarize what changed if the activity context is available.',
-  ].join('\n');
+async function stopAutonomyActivityFromNaturalCommand({ text, requestId, actorContext, activityFacade }) {
+  if (!actorContext?.owner || !activityFacade || typeof activityFacade.handle !== 'function') return null;
+  try {
+    const result = await activityFacade.handle({
+      requestRef: `stop_${String(requestId || '').replace(/[^a-zA-Z0-9_.:-]/g, '').slice(0, 64) || 'activity'}`,
+      command: 'stop',
+      goal: String(text || '').trim(),
+    }, actorContext);
+    if (result?.action === 'clarify') return String(result.message || '我找到了多个进行中的目标，请说明要停止哪一个。');
+    if (result?.action === 'stopped' || result?.action === 'stopped_all') return '已经停止这项外部活动。';
+    if (result?.action === 'noop') return '当前没有可停止的外部活动。';
+  } catch {
+    return '外部活动未能停止，已保持原状。';
+  }
+  return null;
 }
 
 function isScheduledOrDigestMessage(message = {}) {

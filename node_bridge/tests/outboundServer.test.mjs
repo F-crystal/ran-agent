@@ -1,64 +1,47 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 
 import {
+  createOutboundServer,
   getOutboundServerConfig,
   handleEnvironmentSensorRequest,
   handleExternalMcpSystemQueueRequest,
+  handleHermesLiteSoftResetControlRequest,
   handleOutboundRequest,
   handleProactiveEventRequest,
   handleScheduledAiDigestRequest,
   resolveStateDir,
 } from '../src/outboundServer.mjs';
+import { runHermesLiteSoftReset } from '../src/hermesSessionMaintenance.mjs';
 import {
   addExternalMcpWatch,
   recordExternalMcpNotification,
 } from '../src/externalMcp/watchlist.mjs';
 import { appendExternalMcpEvidence } from '../src/externalMcp/evidenceLog.mjs';
+import { registerTestCleanup } from './helpers/isolatedState.mjs';
 import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
   setFeishuHomeDmTarget,
   setProactiveDispatchState,
 } from '../src/runtimeState.mjs';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
-const ORIGINAL_PROACTIVE_ENABLED = process.env.PERSONAL_AGENT_PROACTIVE_ENABLED;
-const ORIGINAL_PROACTIVE_EVENTS_ENABLED = process.env.HERMES_PROACTIVE_EVENTS_ENABLED;
-const ORIGINAL_PROACTIVE_REMINDERS_ENABLED = process.env.HERMES_PROACTIVE_REMINDERS_ENABLED;
-const ORIGINAL_PROACTIVE_EXTERNAL_MCP_ENABLED = process.env.HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED;
 
-test.beforeEach(() => {
-  process.env.PERSONAL_AGENT_PROACTIVE_ENABLED = 'true';
-  process.env.HERMES_PROACTIVE_EVENTS_ENABLED = 'true';
-  process.env.HERMES_PROACTIVE_REMINDERS_ENABLED = 'true';
-  process.env.HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED = 'true';
-});
-
-test.afterEach(() => {
-  if (ORIGINAL_PROACTIVE_ENABLED === undefined) {
-    delete process.env.PERSONAL_AGENT_PROACTIVE_ENABLED;
-  } else {
-    process.env.PERSONAL_AGENT_PROACTIVE_ENABLED = ORIGINAL_PROACTIVE_ENABLED;
-  }
-  if (ORIGINAL_PROACTIVE_EVENTS_ENABLED === undefined) {
-    delete process.env.HERMES_PROACTIVE_EVENTS_ENABLED;
-  } else {
-    process.env.HERMES_PROACTIVE_EVENTS_ENABLED = ORIGINAL_PROACTIVE_EVENTS_ENABLED;
-  }
-  if (ORIGINAL_PROACTIVE_REMINDERS_ENABLED === undefined) {
-    delete process.env.HERMES_PROACTIVE_REMINDERS_ENABLED;
-  } else {
-    process.env.HERMES_PROACTIVE_REMINDERS_ENABLED = ORIGINAL_PROACTIVE_REMINDERS_ENABLED;
-  }
-  if (ORIGINAL_PROACTIVE_EXTERNAL_MCP_ENABLED === undefined) {
-    delete process.env.HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED;
-  } else {
-    process.env.HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED = ORIGINAL_PROACTIVE_EXTERNAL_MCP_ENABLED;
-  }
-});
+function tempEnv(t, extra = {}, prefix = 'outbound-server-') {
+  return createIsolatedTestEnv(t, {
+    PERSONAL_AGENT_PROACTIVE_ENABLED: 'true',
+    HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
+    HERMES_PROACTIVE_REMINDERS_ENABLED: 'true',
+    HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
+    ...extra,
+  }, prefix);
+}
 
 test('getOutboundServerConfig reads host and port from environment', () => {
   const config = getOutboundServerConfig({
@@ -72,11 +55,89 @@ test('getOutboundServerConfig reads host and port from environment', () => {
   assert.equal(config.accountId, 'personal_agent');
 });
 
-test('handleEnvironmentSensorRequest accepts Sensor Logger payload with path token', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'test-env-ingest-')),
-    ENVIRONMENT_SENSOR_INGEST_TOKEN: 'secret-token',
+test('Hermes lite reset control route is exact, loopback-only, and bearer-authenticated', async (t) => {
+  const env = tempEnv(t, {
+    RAN_AGENT_INTERNAL_CONTROL_SECRET: 'owner-control-secret',
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  }, 'soft-reset-control-auth-');
+  const base = {
+    env,
+    method: 'POST',
+    url: '/control/hermes-lite-soft-reset',
+    headers: { authorization: 'Bearer owner-control-secret' },
+    remoteAddress: '127.0.0.1',
+    bodyText: JSON.stringify({ action: 'status' }),
   };
+
+  assert.equal((await handleHermesLiteSoftResetControlRequest({ ...base, url: '/control/hermes-lite-soft-reset/' })).status, 404);
+  assert.equal((await handleHermesLiteSoftResetControlRequest({ ...base, method: 'GET' })).status, 404);
+  assert.equal((await handleHermesLiteSoftResetControlRequest({ ...base, remoteAddress: '192.0.2.8' })).status, 403);
+  assert.equal((await handleHermesLiteSoftResetControlRequest({ ...base, headers: {} })).status, 401);
+  assert.equal((await handleHermesLiteSoftResetControlRequest({
+    ...base,
+    headers: { authorization: 'Bearer wrong-secret' },
+  })).status, 401);
+
+  const accepted = await handleHermesLiteSoftResetControlRequest(base);
+  assert.equal(accepted.status, 200);
+  assert.equal(accepted.payload.ok, true);
+  assert.equal(accepted.payload.revision, 0);
+});
+
+test('Hermes lite reset control route requires revision and maps stale CAS to conflict', async (t) => {
+  const env = tempEnv(t, {
+    RAN_AGENT_INTERNAL_CONTROL_SECRET: 'owner-control-secret',
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  }, 'soft-reset-control-cas-');
+  const request = (payload) => handleHermesLiteSoftResetControlRequest({
+    env,
+    method: 'POST',
+    url: '/control/hermes-lite-soft-reset',
+    headers: { authorization: 'Bearer owner-control-secret' },
+    remoteAddress: '::ffff:127.0.0.1',
+    bodyText: JSON.stringify(payload),
+  });
+
+  assert.equal((await request({ action: 'apply' })).status, 428);
+  runHermesLiteSoftReset({ action: 'apply', expectedRevision: 0, env, timelineRecords: [], now: new Date('2026-06-14T00:00:00Z') });
+  const stale = await request({ action: 'rollback-last', expectedRevision: 0 });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.payload.error, 'stale_revision');
+  assert.equal(stale.payload.currentRevision, 1);
+});
+
+test('createOutboundServer wires the exact reset route with its injected runtime env', async (t) => {
+  const env = tempEnv(t, {
+    RAN_AGENT_INTERNAL_CONTROL_SECRET: 'wired-control-secret',
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  }, 'soft-reset-control-wiring-');
+  const server = createOutboundServer({ bot: {}, logger: { error() {} }, env });
+  const request = new EventEmitter();
+  request.method = 'POST';
+  request.url = '/control/hermes-lite-soft-reset';
+  request.headers = { authorization: 'Bearer wired-control-secret' };
+  request.socket = { remoteAddress: '127.0.0.1' };
+  const result = await new Promise((resolve) => {
+    const response = {
+      status: 0,
+      writeHead(status) { this.status = status; },
+      end(body) { resolve({ status: this.status, payload: JSON.parse(body) }); },
+    };
+    server.emit('request', request, response);
+    request.emit('data', JSON.stringify({ action: 'status' }));
+    request.emit('end');
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.payload.revision, 0);
+});
+
+test('handleEnvironmentSensorRequest accepts Sensor Logger payload with path token', async (t) => {
+  const env = tempEnv(t, {
+    ENVIRONMENT_SENSOR_INGEST_TOKEN: 'secret-token',
+  }, 'environment-ingest-');
   const result = await handleEnvironmentSensorRequest({
     env,
     method: 'POST',
@@ -104,11 +165,10 @@ test('handleEnvironmentSensorRequest accepts Sensor Logger payload with path tok
   assert.equal(latest.battery.state, 'charging');
 });
 
-test('handleEnvironmentSensorRequest rejects missing or wrong token', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'test-env-ingest-')),
+test('handleEnvironmentSensorRequest rejects missing or wrong token', async (t) => {
+  const env = tempEnv(t, {
     ENVIRONMENT_SENSOR_INGEST_TOKEN: 'secret-token',
-  };
+  }, 'environment-ingest-');
   const result = await handleEnvironmentSensorRequest({
     env,
     method: 'POST',
@@ -145,19 +205,14 @@ test('handleOutboundRequest rejects retired text-only proactive messages', async
   assert.equal(sendCalled, false);
 });
 
-test('handleScheduledAiDigestRequest routes digest through existing Feishu DM flow', async () => {
+test('handleScheduledAiDigestRequest routes digest through existing Feishu DM flow', async (t) => {
   const templatePath = path.join(PROJECT_ROOT, 'src/personal_agent/prompts/ai_daily_digest_report.md');
   assert.equal(fs.existsSync(templatePath), true);
 
-  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
-  fs.mkdirSync(stateBaseDir, { recursive: true });
-  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'scheduled-digest-'));
-  const env = {
-    ...process.env,
-    RAN_AGENT_STATE_DIR: tempStateDir,
+  const env = tempEnv(t, {
     FEISHU_LARK_CLI_BIN: 'lark-cli',
     FEISHU_LARK_CLI_IDENTITY: 'bot',
-  };
+  }, 'scheduled-digest-');
   setFeishuHomeDmTarget(
     {
       platform: 'feishu',
@@ -174,17 +229,8 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
     logger: { info() {}, warn() {}, error() {}, log() {} },
     env,
     bodyText: JSON.stringify({ facts: '今日 AI 事实材料' }),
-    channelHub: async (message, options) => {
+    channelHub: async (message) => {
       channelMessage = message;
-      await options.adapter.sendReply({
-        target: {
-          channel_type: 'dm',
-          conversation_id: message.conversation_id,
-          sender_id: message.sender_id,
-        },
-        text: '给陛下呈上今日 AI 日报',
-        message,
-      });
       return { replyText: '给陛下呈上今日 AI 日报' };
     },
     execFileImpl: async (bin, args) => {
@@ -195,6 +241,8 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
 
   assert.equal(result.status, 200);
   assert.equal(result.payload.ok, true);
+  assert.equal(result.payload.delivery_status, 'sent');
+  assert.match(result.payload.outbox_id, /^outbox_[a-f0-9]{32}$/);
   assert.equal(channelMessage.platform, 'feishu');
   assert.equal(channelMessage.channel_type, 'dm');
   assert.equal(channelMessage.conversation_id, 'oc-home');
@@ -262,14 +310,13 @@ test('handleExternalMcpSystemQueueRequest requires the external MCP gateway gate
   assert.equal(channelCalled, false);
 });
 
-test('handleExternalMcpSystemQueueRequest drops unregistered watch scopes', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+test('handleExternalMcpSystemQueueRequest drops unregistered watch scopes', async (t) => {
+  const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
     HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
     EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
     EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
-  };
+  }, 'external-mcp-queue-');
   setFeishuHomeDmTarget({
     platform: 'feishu',
     channel_type: 'dm',
@@ -300,16 +347,15 @@ test('handleExternalMcpSystemQueueRequest drops unregistered watch scopes', asyn
   assert.equal(channelCalled, false);
 });
 
-test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic Hermes turns', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic Hermes turns', async (t) => {
+  const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
     HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
     EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
     EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
     FEISHU_LARK_CLI_BIN: 'lark-cli',
     FEISHU_LARK_CLI_IDENTITY: 'bot',
-  };
+  }, 'external-mcp-queue-');
   setFeishuHomeDmTarget({
     platform: 'feishu',
     channel_type: 'dm',
@@ -398,14 +444,13 @@ test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic
   assert.equal(calls[0].args.includes('ou-home'), true);
 });
 
-test('handleExternalMcpSystemQueueRequest rejects caller-supplied untrusted evidence refs', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+test('handleExternalMcpSystemQueueRequest rejects caller-supplied untrusted evidence refs', async (t) => {
+  const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
     HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
     EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
     EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
-  };
+  }, 'external-mcp-queue-');
   setFeishuHomeDmTarget({
     platform: 'feishu',
     channel_type: 'dm',
@@ -445,14 +490,13 @@ test('handleExternalMcpSystemQueueRequest rejects caller-supplied untrusted evid
   assert.equal(channelCalled, false);
 });
 
-test('handleExternalMcpSystemQueueRequest rate limits notify events before Hermes is called', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+test('handleExternalMcpSystemQueueRequest rate limits notify events before Hermes is called', async (t) => {
+  const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
     HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
     EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
     EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
-  };
+  }, 'external-mcp-queue-');
   setFeishuHomeDmTarget({
     platform: 'feishu',
     channel_type: 'dm',
@@ -510,14 +554,13 @@ test('handleExternalMcpSystemQueueRequest rate limits notify events before Herme
   assert.equal(channelCalled, false);
 });
 
-test('handleExternalMcpSystemQueueRequest ignores caller-supplied time and topic for budgets', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'external-mcp-queue-')),
+test('handleExternalMcpSystemQueueRequest ignores caller-supplied time and topic for budgets', async (t) => {
+  const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
     HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
     EXTERNAL_MCP_GATEWAY_ENABLED: 'true',
     EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: 'true',
-  };
+  }, 'external-mcp-queue-');
   setFeishuHomeDmTarget({
     platform: 'feishu',
     channel_type: 'dm',
@@ -576,7 +619,6 @@ test('handleExternalMcpSystemQueueRequest ignores caller-supplied time and topic
 });
 
 test('handleOutboundRequest rejects checkin even when legacy proactive delivery is disabled', async () => {
-  process.env.PERSONAL_AGENT_PROACTIVE_ENABLED = 'false';
   let sendCalled = false;
   const result = await handleOutboundRequest({
     bot: {
@@ -664,15 +706,7 @@ test('handleOutboundRequest rejects audio media payloads through the retired rou
 });
 
 test('handleOutboundRequest rejects paragraph-delimited media captions through the retired route', async () => {
-  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
-  fs.mkdirSync(stateBaseDir, { recursive: true });
-  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-outbound-'));
-  const previousDelay = process.env.NODE_BRIDGE_OUTBOUND_SEGMENT_DELAY_MS;
-  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
-  process.env.NODE_BRIDGE_OUTBOUND_SEGMENT_DELAY_MS = '0';
-  process.env.RAN_AGENT_STATE_DIR = tempStateDir;
-
-  try {
+  {
     const sentPayloads = [];
     const result = await handleOutboundRequest({
       bot: {
@@ -701,17 +735,6 @@ test('handleOutboundRequest rejects paragraph-delimited media captions through t
     assert.equal(result.payload.dropped, true);
     assert.equal(result.payload.reason, 'legacy_checkin_route_retired');
     assert.deepEqual(sentPayloads, []);
-  } finally {
-    if (previousDelay === undefined) {
-      delete process.env.NODE_BRIDGE_OUTBOUND_SEGMENT_DELAY_MS;
-    } else {
-      process.env.NODE_BRIDGE_OUTBOUND_SEGMENT_DELAY_MS = previousDelay;
-    }
-    if (previousStateDir === undefined) {
-      delete process.env.RAN_AGENT_STATE_DIR;
-    } else {
-      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
-    }
   }
 });
 
@@ -769,14 +792,13 @@ test('handleOutboundRequest rejects low-value proactive text through the retired
   assert.equal(sendCalled, false);
 });
 
-test('handleProactiveEventRequest sends reminder events through Hermes egress', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'proactive-event-')),
+test('handleProactiveEventRequest sends reminder events through Hermes egress', async (t) => {
+  const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
     HERMES_PROACTIVE_REMINDERS_ENABLED: 'true',
     FEISHU_LARK_CLI_BIN: 'lark-cli',
     FEISHU_LARK_CLI_IDENTITY: 'bot',
-  };
+  }, 'proactive-event-');
   setFeishuHomeDmTarget({
     platform: 'feishu',
     channel_type: 'dm',
@@ -879,12 +901,11 @@ test('handleProactiveEventRequest sends reminder events through Hermes egress', 
   assert.equal(secondChannelCalled, false);
 });
 
-test('handleProactiveEventRequest drops reminder events when reminder delivery is disabled', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'proactive-event-')),
+test('handleProactiveEventRequest drops reminder events when reminder delivery is disabled', async (t) => {
+  const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
     HERMES_PROACTIVE_REMINDERS_ENABLED: 'false',
-  };
+  }, 'proactive-event-');
   setFeishuHomeDmTarget({
     platform: 'feishu',
     channel_type: 'dm',
@@ -923,12 +944,11 @@ test('handleProactiveEventRequest drops reminder events when reminder delivery i
   assert.equal(channelCalled, false);
 });
 
-test('handleProactiveEventRequest rejects external events without the dedicated trusted queue', async () => {
-  const env = {
-    RAN_AGENT_STATE_DIR: fs.mkdtempSync(path.join(PROJECT_ROOT, '.ran_agent_state', 'proactive-event-')),
+test('handleProactiveEventRequest rejects external events without the dedicated trusted queue', async (t) => {
+  const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
     HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED: 'true',
-  };
+  }, 'proactive-event-');
   setFeishuHomeDmTarget({
     platform: 'feishu',
     channel_type: 'dm',
@@ -966,17 +986,11 @@ test('handleProactiveEventRequest rejects external events without the dedicated 
   assert.equal(channelCalled, false);
 });
 
-test('handleOutboundRequest does not drain stale pending proactive messages during retired media route calls', async () => {
-  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
-  fs.mkdirSync(stateBaseDir, { recursive: true });
-  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-outbound-'));
-  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
-  const previousReminderDelivery = process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED;
-  process.env.RAN_AGENT_STATE_DIR = tempStateDir;
-  process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED = 'false';
-  appendPendingOutboundMessage({ text: '提醒一下：交房租', reason: 'send_failed:context expired' }, process.env);
+test('handleOutboundRequest does not drain stale pending proactive messages during retired media route calls', async (t) => {
+  const env = tempEnv(t, { PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED: 'false' });
+  appendPendingOutboundMessage({ text: '提醒一下：交房租', reason: 'send_failed:context expired' }, env);
 
-  try {
+  {
     const sentPayloads = [];
     const result = await handleOutboundRequest({
       bot: {
@@ -1003,36 +1017,17 @@ test('handleOutboundRequest does not drain stale pending proactive messages duri
     assert.equal(result.payload.dropped, true);
     assert.equal(result.payload.reason, 'legacy_checkin_route_retired');
     assert.deepEqual(sentPayloads, []);
-    assert.equal(drainPendingOutboundMessages(10, process.env).length, 1);
-  } finally {
-    if (previousStateDir === undefined) {
-      delete process.env.RAN_AGENT_STATE_DIR;
-    } else {
-      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
-    }
-    if (previousReminderDelivery === undefined) {
-      delete process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED;
-    } else {
-      process.env.PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED = previousReminderDelivery;
-    }
+    assert.equal(drainPendingOutboundMessages(10, env).length, 1);
   }
 });
 
-test('handleOutboundRequest does not queue retired text proactive messages when cooldown is active', async () => {
-  const stateBaseDir = path.join(PROJECT_ROOT, '.ran_agent_state');
-  fs.mkdirSync(stateBaseDir, { recursive: true });
-  const tempStateDir = fs.mkdtempSync(path.join(stateBaseDir, 'node-bridge-outbound-'));
-  const env = {
-    RAN_AGENT_STATE_DIR: tempStateDir,
+test('handleOutboundRequest does not queue retired text proactive messages when cooldown is active', async (t) => {
+  const env = tempEnv(t, {
     NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS: '1000',
-  };
-  const previousStateDir = process.env.RAN_AGENT_STATE_DIR;
-  const previousRetryDelay = process.env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS;
-  process.env.RAN_AGENT_STATE_DIR = env.RAN_AGENT_STATE_DIR;
-  process.env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS = env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS;
+  });
   setProactiveDispatchState({ nextAllowedAt: '2999-01-01T00:00:00.000Z' }, env);
 
-  try {
+  {
     const result = await handleOutboundRequest({
       bot: {
         async sendMessage() {
@@ -1057,17 +1052,6 @@ test('handleOutboundRequest does not queue retired text proactive messages when 
 
     const lateDrain = drainPendingOutboundMessages(10, env, Date.parse('3000-01-01T00:00:00.000Z'));
     assert.equal(lateDrain.length, 0);
-  } finally {
-    if (previousStateDir === undefined) {
-      delete process.env.RAN_AGENT_STATE_DIR;
-    } else {
-      process.env.RAN_AGENT_STATE_DIR = previousStateDir;
-    }
-    if (previousRetryDelay === undefined) {
-      delete process.env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS;
-    } else {
-      process.env.NODE_BRIDGE_OUTBOUND_RETRY_DELAY_MS = previousRetryDelay;
-    }
   }
 });
 
@@ -1080,5 +1064,57 @@ test('resolveStateDir rejects paths outside project workspace', () => {
   assert.throws(
     () => resolveStateDir({ RAN_AGENT_STATE_DIR: path.dirname(PROJECT_ROOT) }),
     /must stay inside project workspace/
+  );
+});
+
+test('resolveStateDir accepts an external test root only with all three guards', (t) => {
+  const externalStateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ran-agent-state-guard-'));
+  registerTestCleanup(t, () => fs.rmSync(externalStateDir, { recursive: true, force: true }));
+
+  assert.equal(resolveStateDir({
+    NODE_ENV: 'test',
+    RAN_AGENT_ALLOW_TEST_STATE_DIR: '1',
+    RAN_AGENT_STATE_DIR: externalStateDir,
+  }), fs.realpathSync(externalStateDir));
+
+  assert.throws(
+    () => resolveStateDir({
+      RAN_AGENT_ALLOW_TEST_STATE_DIR: '1',
+      RAN_AGENT_STATE_DIR: externalStateDir,
+    }),
+    /must stay inside project workspace/
+  );
+  assert.throws(
+    () => resolveStateDir({
+      NODE_ENV: 'test',
+      RAN_AGENT_STATE_DIR: externalStateDir,
+    }),
+    /test state guard/
+  );
+});
+
+test('resolveStateDir rejects checkout and symlink escapes in test mode', (t) => {
+  const testRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ran-agent-state-escape-'));
+  const linkedStateDir = path.join(testRoot, 'linked-state');
+  fs.symlinkSync(PROJECT_ROOT, linkedStateDir, 'dir');
+  registerTestCleanup(t, () => fs.rmSync(testRoot, { recursive: true, force: true }));
+  const guardedEnv = {
+    NODE_ENV: 'test',
+    RAN_AGENT_ALLOW_TEST_STATE_DIR: '1',
+  };
+
+  assert.throws(
+    () => resolveStateDir({
+      ...guardedEnv,
+      RAN_AGENT_STATE_DIR: path.join(PROJECT_ROOT, '.ran_agent_state'),
+    }),
+    /OS temporary directory/
+  );
+  assert.throws(
+    () => resolveStateDir({
+      ...guardedEnv,
+      RAN_AGENT_STATE_DIR: linkedStateDir,
+    }),
+    /OS temporary directory/
   );
 });

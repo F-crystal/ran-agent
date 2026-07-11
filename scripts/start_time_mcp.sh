@@ -5,18 +5,20 @@ ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
 
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
+if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
+  if [ -f "$ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$ENV_FILE"
+    set +a
+  fi
 
-if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$NODE_BRIDGE_ENV_FILE"
-  set +a
+  if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
+    set -a
+    # shellcheck disable=SC1090
+    source "$NODE_BRIDGE_ENV_FILE"
+    set +a
+  fi
 fi
 
 export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
@@ -49,7 +51,12 @@ select_time_mcp_python() {
   fi
 
   local candidate
-  for candidate in "$ROOT_DIR/.venv/bin/python" "$(command -v python3 || true)" "$(command -v python || true)"; do
+  local candidates=()
+  if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
+    candidates+=("$ROOT_DIR/.venv/bin/python")
+  fi
+  candidates+=("$(command -v python3 || true)" "$(command -v python || true)")
+  for candidate in "${candidates[@]}"; do
     if [ -n "$candidate" ] && [ -x "$candidate" ] && python_has_time_module "$candidate"; then
       printf '%s\n' "$candidate"
       return 0

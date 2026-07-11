@@ -11,14 +11,8 @@ import {
   sanitizeReplyText,
   summarizeWeChatRequestShape,
 } from '../src/wechatBridge.mjs';
-
-const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
-
-function tempProjectStateDir(prefix = 'test-wechat-inbound-') {
-  const base = path.join(PROJECT_ROOT, '.ran_agent_state');
-  fs.mkdirSync(base, { recursive: true });
-  return fs.mkdtempSync(path.join(base, prefix));
-}
+import { createDurableOutbox } from '../src/durableOutbox.mjs';
+import { createIsolatedTestEnv, registerTestCleanup } from './helpers/isolatedState.mjs';
 
 function pngBytes() {
   return Buffer.from([
@@ -146,11 +140,13 @@ test('mapWeChatMessageToBridgeRequest treats video media as vision input', () =>
   assert.equal(payload.route_hint, 'vision_understand');
 });
 
-test('handleWeChatTextMessage copies Weixin SDK temp inbound media into trusted state dir', async () => {
+test('handleWeChatTextMessage copies Weixin SDK temp inbound media into trusted state dir', async (t) => {
   const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'weixin-agent-media-inbound-'));
+  registerTestCleanup(t, () => fs.rmSync(sourceDir, { recursive: true, force: true }));
   const sourcePath = path.join(sourceDir, '1781414034446-9e518805.bin');
   fs.writeFileSync(sourcePath, pngBytes());
-  const stateDir = tempProjectStateDir();
+  const isolatedEnv = createIsolatedTestEnv(t, {}, 'wechat-inbound-');
+  const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   let receivedPayload = null;
 
   const reply = await handleWeChatTextMessage(
@@ -165,7 +161,7 @@ test('handleWeChatTextMessage copies Weixin SDK temp inbound media into trusted 
     },
     {
       env: {
-        RAN_AGENT_STATE_DIR: stateDir,
+        ...isolatedEnv,
         WEIXIN_SDK_INBOUND_MEDIA_DIRS: sourceDir,
       },
       logger: { info() {}, warn() {}, error() {}, log() {} },
@@ -264,6 +260,84 @@ test('handleWeChatTextMessage can return structured reply metadata', async () =>
       url: 'https://example.com/out.png',
     },
   });
+});
+
+test('handleWeChatTextMessage injects the shared runtime outbox into the channel path', async () => {
+  const outbox = { name: 'shared-outbox' };
+  let channelOptions = null;
+  const result = await handleWeChatTextMessage({ text: 'hello', conversationId: 'wx-outbox' }, {
+    env: { NODE_BRIDGE_SANITIZE_META_LEAK: 'true', durableOutbox: outbox },
+    logger: { info() {}, warn() {}, error() {} },
+    channelHub: async (_message, options) => {
+      channelOptions = options;
+      return { replyText: '正常回复', followUpMessages: [], media: null };
+    },
+    returnResult: true,
+  });
+
+  assert.equal(channelOptions.outbox, outbox);
+  assert.equal(typeof channelOptions.adapter?.sendReply, 'function');
+  assert.deepEqual(
+    await channelOptions.adapter.sendReply({ text: '正常回复' }),
+    {
+      textStatus: 'ambiguous',
+      attachments: [],
+      adapterReceiptRef: 'wechat:sdk-response-boundary',
+    },
+  );
+  assert.equal(result.replyText, '正常回复');
+});
+
+test('WeChat SDK response delivery is durably recorded as ambiguous without a send bypass', async (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'wechat-outbox-');
+  const outbox = createDurableOutbox({ env });
+  const result = await handleWeChatTextMessage({ text: 'hello', conversationId: 'wx-durable' }, {
+    env: { ...env, durableOutbox: outbox },
+    buffer: createInboundMessageBuffer(),
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    backend: {
+      async getReply() {
+        return { replyText: '等 SDK 发出', followUpMessages: [], media: null };
+      },
+    },
+    returnResult: true,
+  });
+
+  assert.equal(result.replyText, '等 SDK 发出');
+  assert.equal(outbox.list().length, 1);
+  assert.equal(outbox.list()[0].delivery, 'ambiguous');
+  assert.equal(outbox.list()[0].timelineProjection, 'pending');
+});
+
+test('a valid WeChat inbound fallback is recorded by the outbox instead of escaping through a direct send', async (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'wechat-fallback-outbox-');
+  const outbox = createDurableOutbox({ env });
+  const reply = await handleWeChatTextMessage({ text: 'hello', conversationId: 'wx-fallback' }, {
+    env: { ...env, durableOutbox: outbox },
+    buffer: createInboundMessageBuffer(),
+    fallbackText: '桥接失败，请稍后再试。',
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    backend: { async getReply() { throw new Error('backend unavailable'); } },
+  });
+
+  assert.equal(reply, '桥接失败，请稍后再试。');
+  assert.equal(outbox.list().length, 1);
+  assert.equal(outbox.list()[0].text, reply);
+  assert.equal(outbox.list()[0].delivery, 'ambiguous');
+  assert.equal(outbox.list()[0].timelineProjection, 'pending');
+});
+
+test('a valid WeChat fallback refuses delivery when the runtime outbox is absent', async () => {
+  let backendCalled = false;
+  const reply = await handleWeChatTextMessage({ text: 'hello', conversationId: 'wx-no-outbox' }, {
+    buffer: createInboundMessageBuffer(),
+    fallbackText: '桥接失败，请稍后再试。',
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    backend: { async getReply() { backendCalled = true; throw new Error('backend unavailable'); } },
+  });
+
+  assert.equal(reply, '');
+  assert.equal(backendCalled, true);
 });
 
 test('handleWeChatTextMessage holds image-only message in buffer', async () => {
@@ -395,13 +469,17 @@ test('handleWeChatTextMessage holds audio-only message in buffer', async () => {
   buffer.clear();
 });
 
-test('handleWeChatTextMessage returns fallback when python call fails', async () => {
+test('handleWeChatTextMessage returns a durably recorded fallback when python call fails', async (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'wechat-python-fallback-');
+  const outbox = createDurableOutbox({ env });
   const reply = await handleWeChatTextMessage(
     {
       text: '你好',
       conversationId: 'wx-user-3',
     },
     {
+      env: { ...env, durableOutbox: outbox },
+      buffer: createInboundMessageBuffer(),
       fallbackText: '桥接失败，请稍后再试。',
       logger: {
         info() {},
@@ -417,6 +495,7 @@ test('handleWeChatTextMessage returns fallback when python call fails', async ()
   );
 
   assert.equal(reply, '桥接失败，请稍后再试。');
+  assert.equal(outbox.list()[0].delivery, 'ambiguous');
 });
 
 test('handleWeChatTextMessage ignores fully empty payload', async () => {

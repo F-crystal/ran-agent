@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 import {
   admitExternalMcpCandidate,
@@ -307,6 +308,51 @@ test('enabled auto-admitted registry entries are pruned when read back', async (
   assert.deepEqual(enabled[0].tools.map((tool) => tool.name), ['list_games', 'play']);
 });
 
+test('registry corruption is quarantined and cannot silently erase configured MCPs', (t) => {
+  const env = tempRegistryEnv(t);
+  const directory = `${env.RAN_AGENT_STATE_DIR}/external_mcp`;
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(`${directory}/registry.json`, '{not-json\n', 'utf8');
+
+  assert.throws(
+    () => listExternalMcpRegistryEntries({ env }),
+    (error) => error?.code === 'RAN_AGENT_STATE_CORRUPT',
+  );
+  assert.equal(fs.existsSync(`${directory}/registry.json`), false);
+  assert.equal(fs.readdirSync(directory).some((entry) => entry.startsWith('registry.json.corrupt-')), true);
+  assert.throws(
+    () => listEnabledExternalMcpManifests({ env }),
+    (error) => error?.code === 'RAN_AGENT_STATE_CORRUPT',
+  );
+});
+
+test('an already enabled weak-schema MCP stays connected and constrained', (t) => {
+  const env = tempRegistryEnv(t);
+  const directory = `${env.RAN_AGENT_STATE_DIR}/external_mcp`;
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(`${directory}/registry.json`, `${JSON.stringify([{
+    serverId: 'robot.example',
+    state: 'configured',
+    enabled: true,
+    reason: 'owner_configured',
+    errors: [],
+    manifest: normalizeManifest({
+      id: 'robot.example',
+      transport: 'streamable-http',
+      url: 'https://robot.example/mcp',
+      activityKind: 'embodied',
+      tools: [{ name: 'do_anything', description: '' }],
+    }),
+    createdAt: '2026-07-03T10:00:00.000Z',
+    updatedAt: '2026-07-03T10:00:00.000Z',
+  }], null, 2)}\n`, 'utf8');
+
+  const [manifest] = listEnabledExternalMcpManifests({ env });
+  assert.equal(manifest.id, 'robot.example');
+  assert.equal(manifest.tools[0].tier, 'T5');
+  assert.equal(manifest.tools[0].confirmationRequired, true);
+});
+
 test('enabled auto-admitted registry readback honors stored schema summaries', async (t) => {
   const env = tempRegistryEnv(t);
   fs.mkdirSync(`${env.RAN_AGENT_STATE_DIR}/external_mcp`, { recursive: true });
@@ -595,6 +641,39 @@ test('admission never lets Hermes self-enable local executable MCP candidates', 
   assert.deepEqual(result.entry.manifest.args, ['@example/game-mcp']);
 });
 
+
+test('revalidating explicitly configured local, account, opaque, and embodied MCPs keeps them connectable at a boundary', async (t) => {
+  const env = tempRegistryEnv(t);
+  fs.mkdirSync(`${env.RAN_AGENT_STATE_DIR}/external_mcp`, { recursive: true });
+  const configured = [
+    normalizeManifest({ id: 'cedar-toy', transport: 'stdio', command: 'node', args: ['cedar.mjs'], activityKind: 'game', tools: [{ name: 'play', description: 'Play configured sandbox game.' }] }),
+    normalizeManifest({ id: 'owner-forum', transport: 'sse', url: 'https://forum.example/mcp', requiredEnv: ['FORUM_TOKEN'], activityKind: 'forum', tools: [{ name: 'forum.post', description: 'Post a reply.' }] }),
+    normalizeManifest({ id: 'embodied-lab', transport: 'streamable-http', url: 'https://robot.example/mcp', activityKind: 'embodied', tools: [{ name: 'robot.move', description: 'Move the robot.' }] }),
+  ];
+  fs.writeFileSync(`${env.RAN_AGENT_STATE_DIR}/external_mcp/registry.json`, `${JSON.stringify(configured.map((manifest) => ({
+    serverId: manifest.id, state: 'configured', enabled: true, reason: 'owner_configured', errors: [], manifest,
+    createdAt: '2026-07-11T00:00:00.000Z', updatedAt: '2026-07-11T00:00:00.000Z',
+  })))}\n`, 'utf8');
+  const results = await Promise.all([
+    admitExternalMcpCandidate({
+      id: 'cedar-toy', transport: 'stdio', command: 'node', args: ['cedar.mjs'], activityKind: 'game',
+      tools: [{ name: 'play', description: 'Play configured sandbox game.' }],
+    }, { env }),
+    admitExternalMcpCandidate({
+      id: 'owner-forum', transport: 'sse', url: 'https://forum.example/mcp', requiredEnv: ['FORUM_TOKEN'], activityKind: 'forum',
+      tools: [{ name: 'forum.post', description: 'Post a reply.' }],
+    }, { env, lookupImpl: async () => [{ address: '203.0.113.20', family: 4 }] }),
+    admitExternalMcpCandidate({
+      id: 'embodied-lab', transport: 'streamable-http', url: 'https://robot.example/mcp', activityKind: 'embodied',
+      tools: [{ name: 'robot.move', description: 'Move the robot.' }],
+    }, { env, lookupImpl: async () => [{ address: '203.0.113.21', family: 4 }] }),
+  ]);
+
+  assert.deepEqual(results.map((item) => item.state), ['needs_boundary', 'needs_boundary', 'needs_boundary']);
+  assert.equal(results.every((item) => item.entry.enabled === true), true);
+  assert.deepEqual(listEnabledExternalMcpManifests({ env }).map((item) => item.id).sort(), ['cedar-toy', 'embodied-lab', 'owner-forum']);
+});
+
 test('admission denies unsafe remote candidates before they become enabled', async (t) => {
   const env = tempRegistryEnv(t);
   const plainHttp = await admitExternalMcpCandidate({
@@ -636,10 +715,5 @@ test('admission denies unsafe remote candidates before they become enabled', asy
 });
 
 function tempRegistryEnv(t) {
-  const base = new URL('../.tmp-test-external-mcp-registry/', import.meta.url).pathname;
-  const root = `${base}${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  t.after(() => {
-    fs.rmSync(root, { recursive: true, force: true });
-  });
-  return { RAN_AGENT_STATE_DIR: root };
+  return createIsolatedTestEnv(t, {}, 'external-mcp-registry-');
 }

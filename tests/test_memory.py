@@ -9,7 +9,7 @@ import unittest
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from personal_agent.config import AppConfig
+from conftest import make_test_config
 from personal_agent.db import Database
 from personal_agent.interfaces.chat import IncomingMessage
 from personal_agent.interfaces.model import ModelRequest, ModelResponse, PlaceholderModelClient
@@ -48,13 +48,8 @@ class MemoryFlowTest(unittest.TestCase):
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
         base_dir = Path(self.temp_dir.name)
-        self.config = AppConfig(
-            base_dir=base_dir,
-            data_dir=base_dir / "data",
-            logs_dir=base_dir / "logs",
-            vault_dir=base_dir / "vault",
-            database_path=base_dir / "data" / "personal_agent.db",
-            log_file_path=base_dir / "logs" / "personal_agent.log",
+        self.config = make_test_config(
+            base_dir,
             working_memory_retention_limit=2,
             profile_memory_history_limit=10,
             profile_memory_repeat_threshold=2,

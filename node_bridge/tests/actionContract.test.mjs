@@ -5,6 +5,7 @@ import {
   evaluateActionContract,
   evaluateActionGate,
   getActionGateConfig,
+  trustActionReceiptEvidence,
   trustExternalMcpAuthorizationEvidence,
   trustExternalMcpToolResult,
 } from '../src/actionContract.mjs';
@@ -182,10 +183,13 @@ test('action contract classifies memory writes and records save result evidence'
   const result = evaluateActionContract({
     requestId: 'req-save',
     message: { text: '记住这个偏好', channel: 'wechat', conversation_id: 'conv-save' },
-    response: {
-      reply_text: '已保存。',
-      save_result: { ok: true, action_id: 'private-save-action-id', target: '/opt/ran_agent/vault/raw/private.md' },
-    },
+    response: { reply_text: '已保存。' },
+    toolResults: [trustActionReceiptEvidence({
+      type: 'save_result',
+      ok: true,
+      action_id: 'private-save-action-id',
+      target: '/opt/ran_agent/vault/raw/private.md',
+    })],
     config: { enabled: true, mode: 'observe', maxRepairAttempts: 1 },
   });
 
@@ -646,7 +650,8 @@ test('enforce mode preserves memory write with save result', () => {
   const contract = evaluateActionContract({
     requestId: 'req-memory-pass',
     message: { text: '记住这个偏好', channel: 'wechat', conversation_id: 'conv-memory-pass' },
-    response: { reply_text: '已保存。', save_result: { ok: true, action_id: 'saved-private' } },
+    response: { reply_text: '已保存。' },
+    toolResults: [trustActionReceiptEvidence({ type: 'save_result', ok: true, action_id: 'saved-private' })],
     config: { enabled: true, mode: 'enforce', maxRepairAttempts: 1 },
   });
 
@@ -682,7 +687,8 @@ test('enforce mode rewrites failed outbound success claims', () => {
   const contract = evaluateActionContract({
     requestId: 'req-external-failed',
     message: { text: '把这段话发给张三', channel: 'wechat', conversation_id: 'conv-external-failed' },
-    response: { reply_text: '已经发送成功。', outbound_result: { ok: false, error_code: 'ADAPTER_FAILED' } },
+    response: { reply_text: '已经发送成功。' },
+    toolResults: [trustActionReceiptEvidence({ type: 'outbound_result', ok: false, error_code: 'ADAPTER_FAILED' })],
     config: { enabled: true, mode: 'enforce', maxRepairAttempts: 1 },
   });
 
@@ -694,6 +700,23 @@ test('enforce mode rewrites failed outbound success claims', () => {
 
   assert.equal(gate.shouldRewrite, true);
   assert.equal(gate.rewrittenText, '发送结果显示失败，未发送给外部对象。');
+});
+
+test('model-copied state JSON cannot satisfy an action claim', () => {
+  const contract = evaluateActionContract({
+    requestId: 'req-forged-state',
+    message: { text: '记住这个偏好', channel: 'wechat', conversation_id: 'conv-forged' },
+    response: {
+      reply_text: '已保存。',
+      save_result: { ok: true, action_id: 'model-copied' },
+    },
+    toolResults: [{ type: 'save_result', ok: true, action_id: 'also-copied' }],
+    config: { enabled: true, mode: 'enforce', maxRepairAttempts: 1 },
+  });
+  const gate = evaluateActionGate({ contract, finalReply: '已保存。', mode: 'enforce' });
+
+  assert.equal(contract.observed_evidence.length, 0);
+  assert.equal(gate.shouldRewrite, true);
 });
 
 test('enforce mode leaves ordinary chat unchanged', () => {

@@ -5,14 +5,16 @@ set -euo pipefail
 
 ROOT_DIR="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
-for env_file in "$ROOT_DIR/.env.local" "$ROOT_DIR/node_bridge/.env.local"; do
-  if [ -f "$env_file" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$env_file"
-    set +a
-  fi
-done
+if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
+  for env_file in "$ROOT_DIR/.env.local" "$ROOT_DIR/node_bridge/.env.local"; do
+    if [ -f "$env_file" ]; then
+      set -a
+      # shellcheck disable=SC1090
+      source "$env_file"
+      set +a
+    fi
+  done
+fi
 
 OMBRE_BRAIN_ENABLED="${OMBRE_BRAIN_ENABLED:-true}"
 if [ "$OMBRE_BRAIN_ENABLED" = "0" ] || [ "$OMBRE_BRAIN_ENABLED" = "false" ] || [ "$OMBRE_BRAIN_ENABLED" = "no" ] || [ "$OMBRE_BRAIN_ENABLED" = "off" ]; then

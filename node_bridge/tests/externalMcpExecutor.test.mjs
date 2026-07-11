@@ -3,9 +3,11 @@ import { EventEmitter } from 'node:events';
 import https from 'node:https';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
+import { registerTestCleanup } from './helpers/isolatedState.mjs';
 
 import {
   callExternalMcpTool,
+  discoverExternalMcpServer,
   probeExternalMcpServer,
 } from '../src/externalMcp/executor.mjs';
 
@@ -57,7 +59,7 @@ test('safe fetch pinned lookup honors Node all-address lookup requests', async (
     };
     return request;
   };
-  t.after(() => {
+  registerTestCleanup(t, () => {
     https.request = originalRequest;
   });
 
@@ -177,6 +179,47 @@ test('streamable HTTP executor initializes, lists tools, and calls tools', async
   ]);
   assert.equal(requests[2].headers['mcp-session-id'], 'upstream-session-1');
   assert.match(requests[2].headers.accept, /text\/event-stream/);
+});
+
+test('live discovery follows tools/list pagination and keeps raw schemas only in its return value', async () => {
+  const requests = [];
+  const fetchImpl = async (_url, request) => {
+    const body = JSON.parse(String(request.body || '{}'));
+    requests.push(body);
+    if (body.method === 'initialize') {
+      return rpc(body.id, {
+        protocolVersion: '2025-06-18',
+        capabilities: { tools: { listChanged: true } },
+        serverInfo: { name: 'generic-game', version: '1' },
+      }, { 'mcp-session-id': 'live-session' });
+    }
+    if (body.method === 'notifications/initialized') return new Response('', { status: 202 });
+    if (body.method === 'tools/list') {
+      if (!body.params.cursor) {
+        return rpc(body.id, {
+          tools: [{ name: 'play', inputSchema: {
+            type: 'object', properties: { game_id: { type: 'string' }, action: { type: 'string' } },
+            required: ['game_id', 'action'], additionalProperties: false,
+          } }],
+          nextCursor: 'page-2',
+        });
+      }
+      return rpc(body.id, { tools: [{ name: 'status', inputSchema: { type: 'object' } }] });
+    }
+    return new Response('', { status: 500 });
+  };
+
+  const result = await discoverExternalMcpServer({
+    id: 'already-enabled-game', url: 'http://127.0.0.1:38888/mcp', transport: 'streamable-http',
+  }, { skipUrlSafety: true, fetchImpl });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.initializeResult.capabilities.tools.listChanged, true);
+  assert.deepEqual(result.toolsResult.tools.map((tool) => tool.name), ['play', 'status']);
+  assert.deepEqual(result.toolsResult.tools[0].inputSchema.required, ['game_id', 'action']);
+  assert.deepEqual(requests.filter((request) => request.method === 'tools/list').map((request) => request.params), [
+    {}, { cursor: 'page-2' },
+  ]);
 });
 
 test('streamable HTTP executor reuses upstream session id for tool calls', async () => {
@@ -322,3 +365,10 @@ test('legacy SSE executor resolves endpoint without waiting for an endless strea
     ['POST', 'https://legacy.example/messages'],
   ]);
 });
+
+function rpc(id, result, headers = {}) {
+  return new Response(JSON.stringify({ jsonrpc: '2.0', id, result }), {
+    status: 200,
+    headers: { 'content-type': 'application/json', ...headers },
+  });
+}

@@ -9,27 +9,48 @@ const DEFAULT_PROTOCOL_VERSION = '2025-06-18';
 const DEFAULT_TIMEOUT_MS = 15_000;
 
 export async function probeExternalMcpServer(input = {}, options = {}) {
-  if (options.signal?.aborted) return abortedResult();
+  const discovery = await discoverExternalMcpServer(input, options);
+  if (!discovery.ok) return discovery;
   try {
-    const client = await createMcpHttpClient(input, options);
-    const init = await client.initialize();
-    await client.initialized();
-    const listed = await client.listTools();
     return {
       ok: true,
-      protocolVersion: init.protocolVersion,
-      upstreamSessionId: client.sessionId,
-      notifications: client.notifications,
+      protocolVersion: discovery.protocolVersion,
+      upstreamSessionId: discovery.upstreamSessionId,
+      notifications: discovery.notifications,
       manifest: normalizeManifest({
         id: input.serverId || input.id,
-        title: input.title || init.serverInfo?.name || input.serverId || input.id,
+        title: input.title || discovery.initializeResult.serverInfo?.name || input.serverId || input.id,
         source: input.source || '',
-        version: input.version || init.serverInfo?.version || '',
+        version: input.version || discovery.initializeResult.serverInfo?.version || '',
         transport: normalizeTransport(input.transport),
         url: input.url,
         activityKind: input.activityKind || input.activity_kind || input.kind || '',
-        tools: listed.tools || [],
+        tools: discovery.toolsResult.tools || [],
       }),
+    };
+  } catch (error) {
+    return errorResult(error);
+  }
+}
+
+// Discovery is deliberately separate from admission: callers retain the raw
+// schemas only in process memory, while registry persistence keeps its safe
+// summary.  This lets a configured server drift without a provider-specific
+// driver or exposing native arguments to the model.
+export async function discoverExternalMcpServer(input = {}, options = {}) {
+  if (options.signal?.aborted) return abortedResult();
+  try {
+    const client = await createMcpHttpClient(input, options);
+    const initializeResult = await client.initialize();
+    await client.initialized();
+    const toolsResult = await client.listTools();
+    return {
+      ok: true,
+      protocolVersion: initializeResult.protocolVersion,
+      initializeResult,
+      toolsResult,
+      upstreamSessionId: client.sessionId,
+      notifications: client.notifications,
     };
   } catch (error) {
     return errorResult(error);
@@ -52,22 +73,6 @@ export async function callExternalMcpTool(input = {}, options = {}) {
       notifications: client.notifications,
     };
   } catch (error) {
-    if (error?.code === 'EXTERNAL_MCP_SESSION_LOST' && (input.upstreamSessionId || input.upstream_session_id)) {
-      try {
-        const client = await createMcpHttpClient({ ...input, upstreamSessionId: '', upstream_session_id: '' }, options);
-        await client.initialize();
-        await client.initialized();
-        const result = await client.callTool(input.toolName || input.tool_name, input.arguments || {});
-        return {
-          ok: true,
-          result,
-          upstreamSessionId: client.sessionId,
-          notifications: client.notifications,
-        };
-      } catch (retryError) {
-        return errorResult(retryError);
-      }
-    }
     return errorResult(error);
   }
 }
@@ -114,7 +119,24 @@ class McpHttpClient {
   }
 
   async listTools() {
-    return await this.post('tools/list', {});
+    const first = await this.post('tools/list', {});
+    const tools = Array.isArray(first?.tools) ? [...first.tools] : [];
+    let cursor = nextCursor(first);
+    const seen = new Set();
+    let pages = 1;
+    while (cursor) {
+      if (seen.has(cursor) || pages >= 100) {
+        const error = new Error('external MCP tools/list pagination is invalid');
+        error.code = 'EXTERNAL_MCP_DISCOVERY_PAGINATION_INVALID';
+        throw error;
+      }
+      seen.add(cursor);
+      const page = await this.post('tools/list', { cursor });
+      if (Array.isArray(page?.tools)) tools.push(...page.tools);
+      cursor = nextCursor(page);
+      pages += 1;
+    }
+    return { ...first, tools };
   }
 
   async callTool(name, args) {
@@ -208,6 +230,11 @@ function parseJsonMessage(text) {
   } catch {
     return null;
   }
+}
+
+function nextCursor(value) {
+  const cursor = String(value?.nextCursor || value?.next_cursor || '').trim();
+  return cursor && cursor.length <= 4_096 ? cursor : '';
 }
 
 async function resolveLegacySseEndpoint(url, options = {}) {

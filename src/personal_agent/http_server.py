@@ -2,13 +2,23 @@
 
 from __future__ import annotations
 
+import ipaddress
+import hashlib
 import json
 import logging
+import os
+import re
+import secrets
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 from personal_agent.config import AppConfig
+from personal_agent.durable_jobs import (
+    DurableJobReceipt,
+    DurableJobStore,
+    is_registered_core_job_kind,
+)
 from personal_agent.service import PersonalAgentService
 from personal_agent.todo_manager import TodoManager
 
@@ -23,12 +33,17 @@ class BackendHttpController:
         self._logger = logger
         self._config = config
 
-    def handle_ingest(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+    def handle_ingest(
+        self,
+        payload: dict[str, Any],
+        *,
+        event_id_header: str = "",
+    ) -> tuple[int, dict[str, Any]]:
         # Validate required string fields (channel, sender_id, source must be non-empty)
         for field_name in ("channel", "sender_id", "source"):
             value = payload.get(field_name)
             if not isinstance(value, str) or not value.strip():
-                self._logger.warning("[ingest] validation failed: field '%s' is missing or empty, value=%r", field_name, value)
+                self._logger.warning("[ingest] validation failed: field '%s' is missing or empty", field_name)
                 return HTTPStatus.BAD_REQUEST, {"error": f"field '{field_name}' must be a non-empty string"}
         
         # user_text and reply_text can be empty if there is media content
@@ -51,26 +66,28 @@ class BackendHttpController:
             _normalize_media_refs(image_urls_raw),
             _normalize_media_items(media_raw),
         )
-        # Debug log for multimedia sync
+        event_id = _trusted_ingest_event_id(payload.get("event_id"), event_id_header)
         self._logger.info(
-            "[ingest] sender_id=%s text_length=%s image_urls_count=%s media_count=%s media_refs_count=%s",
-            payload.get("sender_id"),
+            "[ingest] sender_hash=%s text_length=%s image_urls_count=%s media_count=%s media_refs_count=%s durable=%s",
+            _short_private_digest(str(payload["sender_id"])),
             len(user_text),
             len(image_urls_raw) if isinstance(image_urls_raw, list) else 0,
             len(media_raw) if isinstance(media_raw, list) else 0,
             len(media_refs),
+            bool(event_id),
         )
-        if media_refs:
-            self._logger.info("[ingest] media_refs: %s", media_refs)
 
-        self._message_service.record_external_exchange(
+        outcome = self._message_service.record_external_exchange(
             channel=str(payload["channel"]),
             sender_id=str(payload["sender_id"]),
             user_text=user_text,
             reply_text=reply_text,
             source=str(payload["source"]),
             media_refs=media_refs,
+            event_id=event_id,
         )
+        if outcome == "conflict":
+            return HTTPStatus.CONFLICT, {"error": "durable event conflicts with prior request"}
         return HTTPStatus.OK, {"ok": True}
 
     def handle_tools(self, path: str, payload: dict[str, Any] | None) -> tuple[int, dict[str, Any]]:
@@ -168,6 +185,113 @@ class BackendHttpController:
             return self._handle_exploration_store(body)
 
         return HTTPStatus.NOT_FOUND, {"error": "tool route not found"}
+
+    def handle_durable_job_create(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if set(payload) != {"actorKey", "goalDigest", "jobKind", "payloadRef", "nextRunAt"}:
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid durable job request"}
+        try:
+            if not is_registered_core_job_kind(str(payload["jobKind"])):
+                raise ValueError("unregistered durable job kind")
+            record = DurableJobStore(self._message_service._database).create_job(
+                actor_key=payload["actorKey"],
+                goal_digest=payload["goalDigest"],
+                job_kind=payload["jobKind"],
+                payload_ref=payload["payloadRef"],
+                next_run_at=payload["nextRunAt"],
+            )
+        except ValueError:
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid durable job request"}
+        except Exception:
+            self._logger.exception("private durable job create failed")
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "durable job unavailable"}
+        return HTTPStatus.OK, {"ok": True, "receipt": _serialize_durable_job_receipt(record.receipt())}
+
+    def handle_durable_job_get(self, job_id: str) -> tuple[int, dict[str, Any]]:
+        try:
+            record = DurableJobStore(self._message_service._database).get_job(job_id)
+        except ValueError:
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid durable job request"}
+        except Exception:
+            self._logger.exception("private durable job query failed")
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "durable job unavailable"}
+        if record is None:
+            return HTTPStatus.NOT_FOUND, {"ok": False, "error": "durable job not found"}
+        return HTTPStatus.OK, {"ok": True, "receipt": _serialize_durable_job_receipt(record.receipt())}
+
+    def handle_durable_job_terminal(self, job_id: str, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        if set(payload) != {"terminalState", "resultRef"}:
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid durable job request"}
+        try:
+            record = DurableJobStore(self._message_service._database).terminalize_external_job(
+                job_id,
+                terminal_state=payload["terminalState"],
+                result_ref=payload["resultRef"],
+            )
+        except (ValueError, KeyError):
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid durable job request"}
+        except Exception:
+            self._logger.exception("private durable job terminal failed")
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "durable job unavailable"}
+        return HTTPStatus.OK, {"ok": True, "receipt": _serialize_durable_job_receipt(record.receipt())}
+
+    def handle_personal_learning_action(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        try:
+            if set(payload) != {"operationId", "actionType", "scope"}:
+                raise ValueError("invalid request fields")
+            operation_id = str(payload["operationId"])
+            action_type = str(payload["actionType"])
+            scope = payload["scope"]
+            if not re.fullmatch(r"op_[a-f0-9]{32}", operation_id):
+                raise ValueError("invalid operation")
+            if not isinstance(scope, dict):
+                raise ValueError("invalid scope")
+
+            if action_type in {"memory.remember", "memory.correct"}:
+                expected = {"kind", "subject_key", "statement", "evidence_digest", "confidence"}
+                if set(scope) != expected or not re.fullmatch(r"[a-f0-9]{64}", str(scope["evidence_digest"])):
+                    raise ValueError("invalid learning scope")
+                record = self._message_service.observe_personal_learning(
+                    kind="correction" if action_type == "memory.correct" else str(scope["kind"]),
+                    subject_key=str(scope["subject_key"]),
+                    statement=str(scope["statement"]),
+                    source="explicit_user",
+                    evidence_digests=[str(scope["evidence_digest"])],
+                    confidence=float(scope["confidence"]),
+                )
+                result: dict[str, Any] = record
+                effect_id = f"learning:{record['learning_id']}"
+            elif action_type == "memory.forget":
+                if set(scope) != {"subject_key"}:
+                    raise ValueError("invalid forget scope")
+                result = self._message_service.forget_personal_learning(str(scope["subject_key"]))
+                effect_id = "learning-forget:" + _short_private_digest(
+                    f"{scope['subject_key']}:{result['forgotten_count']}"
+                )
+            elif action_type == "memory.query":
+                if not set(scope).issubset({"subject_prefix", "limit"}):
+                    raise ValueError("invalid query scope")
+                records = self._message_service.query_personal_learning(
+                    subject_prefix=str(scope.get("subject_prefix", "")),
+                    limit=int(scope.get("limit", 50)),
+                )
+                result = {"records": records}
+                effect_id = "learning-query:" + _short_private_digest(
+                    json.dumps([item["learning_id"] for item in records], sort_keys=True)
+                )
+            else:
+                raise ValueError("unsupported personal learning action")
+        except (TypeError, ValueError, KeyError):
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid personal learning request"}
+        except Exception:
+            self._logger.exception("private personal learning action failed")
+            return HTTPStatus.INTERNAL_SERVER_ERROR, {"ok": False, "error": "personal learning unavailable"}
+        return HTTPStatus.OK, {
+            "ok": True,
+            "authenticated": True,
+            "operationId": operation_id,
+            "effectId": effect_id,
+            "result": result,
+        }
 
     def _handle_todo_create(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """Create a new todo from text."""
@@ -364,6 +488,60 @@ class PersonalAgentHttpServer:
                     )
                     return
 
+                if self.path == "/internal/durable-jobs":
+                    denied = self._private_access_denial()
+                    if denied is not None:
+                        self._write_json(*denied)
+                        return
+                    try:
+                        payload = self._read_json_body()
+                    except ValueError:
+                        self._write_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {"ok": False, "error": "invalid durable job request"},
+                        )
+                        return
+                    status_code, response_payload = controller.handle_durable_job_create(payload)
+                    self._write_json(status_code, response_payload)
+                    return
+
+                durable_terminal_match = re.fullmatch(
+                    r"/internal/durable-jobs/([A-Za-z0-9_.:-]{8,160})/terminal",
+                    self.path,
+                )
+                if durable_terminal_match is not None:
+                    denied = self._private_access_denial()
+                    if denied is not None:
+                        self._write_json(*denied)
+                        return
+                    try:
+                        payload = self._read_json_body()
+                    except ValueError:
+                        self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid durable job request"})
+                        return
+                    status_code, response_payload = controller.handle_durable_job_terminal(
+                        durable_terminal_match.group(1), payload
+                    )
+                    self._write_json(status_code, response_payload)
+                    return
+
+                if self.path == "/internal/personal-learning/actions":
+                    denied = self._private_access_denial()
+                    if denied is not None:
+                        self._write_json(*denied)
+                        return
+                    try:
+                        payload = self._read_json_body()
+                    except ValueError:
+                        self._write_json(
+                            HTTPStatus.BAD_REQUEST,
+                            {"ok": False, "error": "invalid personal learning request"},
+                        )
+                        return
+                    status_code, response_payload = controller.handle_personal_learning_action(payload)
+                    self._write_json(status_code, response_payload)
+                    return
+
                 try:
                     payload = self._read_json_body()
                 except ValueError as exc:
@@ -373,7 +551,10 @@ class PersonalAgentHttpServer:
 
                 try:
                     if self.path == "/ingest":
-                        status_code, response_payload = controller.handle_ingest(payload)
+                        status_code, response_payload = controller.handle_ingest(
+                            payload,
+                            event_id_header=self.headers.get("X-Ran-Agent-Event-Id", ""),
+                        )
                     else:
                         status_code, response_payload = controller.handle_tools(self.path, payload)
                 except Exception:
@@ -389,6 +570,21 @@ class PersonalAgentHttpServer:
             def do_GET(self) -> None:  # noqa: N802
                 if self.path == "/health":
                     self._write_json(HTTPStatus.OK, {"status": "ok"})
+                    return
+
+                durable_job_match = re.fullmatch(
+                    r"/internal/durable-jobs/([A-Za-z0-9_.:-]{8,160})",
+                    self.path,
+                )
+                if durable_job_match is not None:
+                    denied = self._private_access_denial()
+                    if denied is not None:
+                        self._write_json(*denied)
+                        return
+                    status_code, response_payload = controller.handle_durable_job_get(
+                        durable_job_match.group(1)
+                    )
+                    self._write_json(status_code, response_payload)
                     return
 
                 if self.path == "/tools/knowledge/state":
@@ -429,6 +625,21 @@ class PersonalAgentHttpServer:
                     raise ValueError("request body must be a JSON object")
 
                 return parsed_body
+
+            def _private_access_denial(self) -> tuple[int, dict[str, Any]] | None:
+                secret = os.getenv("RAN_AGENT_INTERNAL_CONTROL_SECRET", "")
+                if not secret:
+                    return HTTPStatus.SERVICE_UNAVAILABLE, {
+                        "ok": False,
+                        "error": "private control unavailable",
+                    }
+                if not _is_loopback_client(self.client_address[0]):
+                    return HTTPStatus.FORBIDDEN, {"ok": False, "error": "loopback required"}
+                supplied = self.headers.get("Authorization", "")
+                expected = f"Bearer {secret}"
+                if not secrets.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8")):
+                    return HTTPStatus.UNAUTHORIZED, {"ok": False, "error": "unauthorized"}
+                return None
 
             def _write_json(self, status_code: int, payload: dict[str, Any]) -> None:
                 encoded_body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -508,3 +719,47 @@ def _merge_media_refs(*groups: tuple[str, ...]) -> tuple[str, ...]:
             if cleaned and cleaned not in merged:
                 merged.append(cleaned)
     return tuple(merged)
+
+
+def _serialize_durable_job_receipt(receipt: DurableJobReceipt) -> dict[str, Any]:
+    return {
+        "jobId": receipt.job_id,
+        "actorKey": receipt.actor_key,
+        "goalDigest": receipt.goal_digest,
+        "status": receipt.status,
+        "nextRunAt": receipt.next_run_at,
+        "terminalStates": list(receipt.terminal_states),
+    }
+
+
+def _is_loopback_client(value: str) -> bool:
+    try:
+        address = ipaddress.ip_address(str(value).split("%", 1)[0])
+    except ValueError:
+        return False
+    if address.is_loopback:
+        return True
+    return bool(address.version == 6 and address.ipv4_mapped and address.ipv4_mapped.is_loopback)
+
+
+def _short_private_digest(value: str) -> str:
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:24]
+
+
+def _trusted_ingest_event_id(body_value: Any, header_value: Any) -> str:
+    """Return an idempotency key only when the supplied durable identifier is trusted.
+
+    Missing and malformed values deliberately remain on the legacy path.  When
+    both the Node body and header are present, they must agree exactly before
+    this endpoint makes an idempotency claim.
+    """
+
+    body = str(body_value).strip() if isinstance(body_value, str) else ""
+    header = str(header_value).strip() if isinstance(header_value, str) else ""
+    supplied = tuple(value for value in (body, header) if value)
+    if len(set(supplied)) > 1:
+        return ""
+    candidate = body or header
+    if re.fullmatch(r"outbox_[a-f0-9]{32}", candidate):
+        return candidate
+    return ""
