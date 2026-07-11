@@ -10,7 +10,9 @@ fail() {
   exit 1
 }
 
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
+REPO_ROOT="${RAN_AGENT_RELEASE_CONTROL_ROOT:-$SCRIPT_ROOT}"
+REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)"
 SERVER_ROOT="/opt/ran_agent"
 cd "$REPO_ROOT"
 MODE="${1:---refuse-mutation}"
@@ -23,7 +25,11 @@ esac
 
 if [[ "${EUID}" -eq 0 ]]; then SUDO=(); else command -v sudo >/dev/null 2>&1 || fail sudo_required; SUDO=(sudo); fi
 
-NODE_BIN="${RAN_AGENT_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
+if [[ -n "${RAN_AGENT_NODE_BIN:-}" ]]; then
+  NODE_BIN="$(RAN_AGENT_NODE_BIN="$RAN_AGENT_NODE_BIN" bash "$SCRIPT_ROOT/scripts/resolve-hermes-service-node.sh")" || fail node_service_path_unavailable
+else
+  NODE_BIN="$("${SUDO[@]}" env RAN_AGENT_SYSTEMCTL_BIN="${RAN_AGENT_SYSTEMCTL_BIN:-}" bash "$SCRIPT_ROOT/scripts/resolve-hermes-service-node.sh")" || fail node_service_path_unavailable
+fi
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-$REPO_ROOT/.venv/bin/python}"
 STATE_DIR="${RAN_AGENT_RELEASE_STATE_DIR:-$REPO_ROOT/.ran_agent_state}"
 # Kept outside STATE_DIR: snapshots must never archive their own transaction.
@@ -73,6 +79,7 @@ inside_path() {
 
 require_artifact_layout() {
   [[ "$ARTIFACT_ROOT" == /* && "$STATE_DIR" == /* ]] || fail artifact_root_absolute_required
+  ! inside_path "$ARTIFACT_ROOT" "$REPO_ROOT" || fail artifact_root_inside_repo
   ! inside_path "$ARTIFACT_ROOT" "$STATE_DIR" || fail artifact_root_inside_state_dir
   ! inside_path "$STATE_DIR" "$ARTIFACT_ROOT" || fail state_dir_inside_artifact_root
   "${SUDO[@]}" install -d -m 700 "$SNAPSHOT_ROOT" "$STAGE_ROOT" "$ARCHIVE_ROOT" || fail artifact_root_unavailable

@@ -17,6 +17,34 @@ clean` as a pre-deploy action in `/opt/ran_agent`.
 managed optional service briefly. Every other step below is read-only except
 `git fetch`, which updates local remote tracking objects only.
 
+## 0. First Enablement Bootstrap
+
+Use this section exactly once when the active checkout predates the deployment
+entry scripts. It extracts a small, verified framework from the already-fetched
+candidate into a private temporary directory; it does not add files to
+`/opt/ran_agent`, switch HEAD, or make the production worktree dirty. All
+later releases use the normal main/candidate entries below.
+
+| Purpose | Command | Expected result / stop condition |
+|---|---|---|
+| Enter the checkout | `cd /opt/ran_agent` | Stop if this is not the active production checkout. |
+| Activate the managed Python environment | `source /opt/ran_agent/.venv/bin/activate` | The command succeeds. |
+| Confirm the old checkout is clean | `git status --short` | No output. Any output stops bootstrap. |
+| Fetch only the reviewed candidate object | `git fetch --no-tags origin codex/hermes-dual-spec-implementation` | Fetch succeeds; production HEAD and files remain unchanged. |
+| Resolve its immutable SHA | `git rev-parse --verify refs/remotes/origin/codex/hermes-dual-spec-implementation^{commit}` | Record the full SHA as `CANDIDATE`; stop on failure. |
+| Extract the bootstrap source outside the checkout | `git show CANDIDATE:scripts/bootstrap-hermes-release.sh > /tmp/ran-agent-bootstrap.sh` | Replace `CANDIDATE` with the recorded SHA. Only `/tmp` changes. |
+| Verify bootstrap source digest | `printf '%s  %s\n' '073ddecae4336e9be457f6e9c1aef14d2877d9f35e14045a12eedacf424d14c6' /tmp/ran-agent-bootstrap.sh | sha256sum -c -` | Expect `OK`. Stop on any mismatch; do not execute the file. |
+| Make the temporary file owner-only | `chmod 700 /tmp/ran-agent-bootstrap.sh` | Succeeds. |
+| Validate the staged framework without service interruption | `bash /tmp/ran-agent-bootstrap.sh --dry-run CANDIDATE` | Prints `bootstrap-ok candidate=…`; stop on failure. |
+| Apply through the common transaction (**service interruption**) | `bash /tmp/ran-agent-bootstrap.sh --apply CANDIDATE` | Prints the ordinary transaction result and then `bootstrap-ok`. Retain its snapshot path; any failure auto-rolls back once snapshotting begins. |
+
+The bootstrap validates the exact SHA, rejects every dirty worktree, obtains
+only `bootstrap-hermes-release.sh`, `deploy-hermes-release.sh`, and
+`resolve-hermes-service-node.sh` from that commit, and checks each source
+against `docs/governance/hermes_release_bootstrap.v1.sha256` in the candidate.
+It invokes the same `deploy-hermes-release.sh` transaction as normal releases;
+there is no second persistent deployment mechanism.
+
 ## 1. Deployment Preflight
 
 Run these one at a time from the server. Stop on an unexpected result; do not
@@ -28,7 +56,8 @@ repair the checkout with a Git reset.
 | Record active revision | `git rev-parse HEAD` | One SHA. Keep it with the release record. |
 | Record active symbolic ref | `git symbolic-ref -q HEAD || true` | A branch ref or no output for detached HEAD; both are valid observations. |
 | Check worktree | `git status --short` | No output. Any output stops the release. |
-| Check Node | `node --version` | Node 22.13 or later. Stop otherwise. |
+| Resolve the service Node | `bash scripts/resolve-hermes-service-node.sh` | Prints an absolute Node path from `ran-agent-node.service`; do not substitute interactive-shell `node`. |
+| Check the resolved Node | `ABSOLUTE_NODE_PATH --version` | **Need server confirmation:** replace `ABSOLUTE_NODE_PATH` with the previous result; Node must be 22.13 or later. |
 | Check Python runtime | `/opt/ran_agent/.venv/bin/python --version` | Python 3.10 or later. Stop otherwise. |
 | Check core services | `systemctl is-active ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service` | Each line says `active`. Stop and investigate otherwise. |
 | Check filesystem capacity | `df -h /opt /opt/ran_agent /opt/ran_agent-release` | Enough space for a full state snapshot plus candidate archive. Stop if any target is unavailable or space is insufficient. |
@@ -68,10 +97,10 @@ Only use this after the intended code is merged to `origin/main`.
 
 | Purpose | Command | Expected result / stop condition |
 |---|---|---|
-| Validate main candidate without moving production | `bash scripts/deploy-hermes-main.sh --dry-run` | Prints the resolved SHA and succeeds. A failure leaves `/opt/ran_agent` unchanged; stop. |
-| Apply main (**service interruption**) | `bash scripts/deploy-hermes-main.sh --apply` | Prints `apply-ok candidate=SHA snapshot=SNAPSHOT_DIR`. Any failure triggers automatic rollback; retain the printed snapshot and stop. |
+| Validate main candidate without moving production | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-main.sh --dry-run` | Prints the resolved SHA and succeeds. A failure leaves `/opt/ran_agent` unchanged; stop. |
+| Apply main (**service interruption**) | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-main.sh --apply` | Prints `apply-ok candidate=SHA snapshot=SNAPSHOT_DIR`. Any failure triggers automatic rollback; retain the printed snapshot and stop. |
 | Confirm active SHA | `git rev-parse HEAD` | Equals the `candidate` SHA from apply output. Stop and use rollback if different. |
-| Confirm blocking production acceptance | `bash scripts/verify-hermes-release.sh --release` | Prints `blocking-ok`. Failure is a release failure; run explicit rollback. |
+| Confirm blocking production acceptance | `source /opt/ran_agent/.venv/bin/activate && bash scripts/verify-hermes-release.sh --release` | Prints `blocking-ok`. Failure is a release failure; run explicit rollback. |
 
 The main wrapper runs `git fetch --no-tags origin main`, resolves
 `refs/remotes/origin/main` once, and passes that SHA to the common transaction.
@@ -84,10 +113,10 @@ production source.
 
 | Purpose | Command | Expected result / stop condition |
 |---|---|---|
-| Discover a remote candidate branch | `bash scripts/deploy-hermes-candidate.sh --branch codex/example-candidate --dry-run` | Prints one candidate SHA; the active checkout remains unchanged. Stop on failure. |
-| Apply that SHA (**service interruption**) | `bash scripts/deploy-hermes-candidate.sh --branch codex/example-candidate --apply` | Prints candidate and snapshot. Failure auto-rolls back; stop. |
-| Apply a specifically reviewed SHA | `bash scripts/deploy-hermes-candidate.sh --commit 0123456789abcdef0123456789abcdef01234567 --apply` | Use only the real reviewed SHA; same transaction and stop rules. |
-| Run optional specialty diagnostics | `bash scripts/verify-hermes-release.sh --specialized` | Prints only `specialized-ok` or non-blocking `specialized-warning`; warnings do not change release status but must be recorded. |
+| Discover a remote candidate branch | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --branch codex/example-candidate --dry-run` | Prints one candidate SHA; the active checkout remains unchanged. Stop on failure. |
+| Apply that SHA (**service interruption**) | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --branch codex/example-candidate --apply` | Prints candidate and snapshot. Failure auto-rolls back; stop. |
+| Apply a specifically reviewed SHA | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --commit 0123456789abcdef0123456789abcdef01234567 --apply` | Use only the real reviewed SHA; same transaction and stop rules. |
+| Run optional specialty diagnostics | `source /opt/ran_agent/.venv/bin/activate && bash scripts/verify-hermes-release.sh --specialized` | Prints only `specialized-ok` or non-blocking `specialized-warning`; warnings do not change release status but must be recorded. |
 
 The blocking acceptance is `accept-hermes-release.sh` plus strict
 `diagnose-proactive-events.sh`: service health, owner binding, bridge paths,
@@ -140,3 +169,19 @@ commit changes them.
 
 If main deployment fails, use its own printed snapshot rather than reusing the
 candidate snapshot. A snapshot belongs to exactly one deployment transaction.
+
+## Server-Site Confirmation Required
+
+The repository test suite uses mock `systemctl` output; it does not claim the
+server's unit has been inspected. Before first apply, confirm on the server:
+
+- whether `systemctl show --property=ExecStart --value ran-agent-node.service`
+  exposes an absolute `…/node` executable, or `systemctl cat` has a direct
+  `ExecStart=/absolute/path/node …` form;
+- if neither form exists (for example the unit launches `bash` and resolves
+  Node dynamically), provide the service's actual absolute executable only for
+  that command: `RAN_AGENT_NODE_BIN=/absolute/path/node bash …`; do not use
+  `command -v node` from an interactive shell;
+- that the selected executable reports Node 22.13+ and supports `node:sqlite`;
+- that the candidate SHA and the bootstrap SHA-256 above are the reviewed
+  release values before executing `/tmp/ran-agent-bootstrap.sh`.

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -24,6 +25,52 @@ function run(script, args = [], extraEnv = {}) {
     stdio: 'pipe',
     encoding: 'utf8',
   });
+}
+
+function sha256(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function makeBootstrapFixture({ corruptManifest = false } = {}) {
+  const repo = mkdtempSync(join(tmpdir(), 'ran-agent-bootstrap-'));
+  const runGit = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
+  runGit(['init']);
+  runGit(['config', 'user.email', 'release-test@example.invalid']);
+  runGit(['config', 'user.name', 'release test']);
+  mkdirSync(join(repo, 'node_bridge'), { recursive: true });
+  mkdirSync(join(repo, 'src', 'personal_agent'), { recursive: true });
+  writeFileSync(join(repo, 'node_bridge', 'package.json'), '{"name":"fixture"}\n');
+  writeFileSync(join(repo, 'src', 'personal_agent', 'service.py'), '# fixture\n');
+  writeFileSync(join(repo, 'README.md'), 'production checkout without release entry\n');
+  runGit(['add', '.']);
+  runGit(['commit', '-m', 'old production']);
+  const prior = runGit(['rev-parse', 'HEAD']).trim();
+
+  mkdirSync(join(repo, 'scripts'), { recursive: true });
+  mkdirSync(join(repo, 'docs', 'governance'), { recursive: true });
+  const frameworkFiles = ['bootstrap-hermes-release.sh', 'deploy-hermes-release.sh', 'resolve-hermes-service-node.sh'];
+  for (const file of frameworkFiles) {
+    copyFileSync(join(root, 'scripts', file), join(repo, 'scripts', file));
+    chmodSync(join(repo, 'scripts', file), 0o755);
+  }
+  const manifest = frameworkFiles.map((file) => {
+    const contents = readFileSync(join(repo, 'scripts', file));
+    return `${corruptManifest ? '0'.repeat(64) : sha256(contents)}  scripts/${file}`;
+  }).join('\n');
+  writeFileSync(join(repo, 'docs', 'governance', 'hermes_release_bootstrap.v1.sha256'), `${manifest}\n`);
+  runGit(['add', '.']);
+  runGit(['commit', '-m', 'candidate framework']);
+  const candidateSha = runGit(['rev-parse', 'HEAD']).trim();
+  runGit(['checkout', '--detach', prior]);
+  return { repo, prior, candidateSha, runGit };
+}
+
+function makeSystemctlFixture({ show = '', cat = '' } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-systemctl-'));
+  const path = join(dir, 'systemctl');
+  writeFileSync(path, `#!/bin/sh\ncase "$1" in\n  show) printf '%s\\n' '${show}' ;;\n  cat) printf '%s\\n' '${cat}' ;;\n  *) exit 1 ;;\nesac\n`);
+  chmodSync(path, 0o755);
+  return { dir, path };
 }
 
 test('release scripts expose fixture-safe dry-run transactions and require an explicit apply transaction', () => {
@@ -281,4 +328,94 @@ test('unified verification makes release acceptance blocking and keeps optional 
   assert.match(verify, /diagnose-lite-full\.sh diagnose-external-mcp-gateway\.sh diagnose-ombre-memory\.sh/);
   assert.match(verify, /specialized-warning/);
   assert.match(verify, />\/dev\/null 2>&1/);
+});
+
+test('first-release bootstrap runs an extracted immutable framework while the production checkout stays on its prior commit', () => {
+  const fixture = makeBootstrapFixture();
+  const extracted = join(fixture.repo, '..', `bootstrap-${fixture.candidateSha}.sh`);
+  try {
+    assert.equal(existsSync(join(fixture.repo, 'scripts', 'deploy-hermes-release.sh')), false);
+    writeFileSync(extracted, execFileSync('git', ['show', `${fixture.candidateSha}:scripts/bootstrap-hermes-release.sh`], { cwd: fixture.repo, encoding: 'utf8' }));
+    chmodSync(extracted, 0o755);
+    const output = execFileSync('bash', [extracted, '--dry-run', fixture.candidateSha], {
+      cwd: fixture.repo,
+      env: {
+        PATH: '/usr/bin:/bin',
+        RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+        RAN_AGENT_NODE_BIN: nodeBin,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(fixture.repo, '..', 'release-artifacts'),
+      },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    assert.match(output, /bootstrap-ok candidate=[a-f0-9]{40}/);
+    assert.equal(fixture.runGit(['rev-parse', 'HEAD']).trim(), fixture.prior);
+    assert.equal(fixture.runGit(['status', '--short']).trim(), '');
+    assert.doesNotThrow(() => fixture.runGit(['diff', '--quiet']));
+  } finally {
+    rmSync(extracted, { force: true });
+    rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap fails closed for an invalid candidate, digest mismatch, and a dirty production checkout', () => {
+  const invalid = makeBootstrapFixture();
+  const mismatch = makeBootstrapFixture({ corruptManifest: true });
+  const dirty = makeBootstrapFixture();
+  const bootstrap = join(root, 'scripts', 'bootstrap-hermes-release.sh');
+  const runBootstrap = (fixture, sha) => execFileSync('bash', [bootstrap, '--dry-run', sha], {
+    cwd: fixture.repo,
+    env: {
+      PATH: '/usr/bin:/bin',
+      RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+      RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(fixture.repo, '..', 'release-artifacts'),
+    },
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  try {
+    assert.throws(() => runBootstrap(invalid, 'not-a-commit'), /Command failed/);
+    assert.throws(() => runBootstrap(mismatch, mismatch.candidateSha), /Command failed/);
+    writeFileSync(join(dirty.repo, 'README.md'), 'dirty\n');
+    assert.throws(() => runBootstrap(dirty, dirty.candidateSha), /Command failed/);
+    assert.equal(dirty.runGit(['rev-parse', 'HEAD']).trim(), dirty.prior);
+  } finally {
+    for (const fixture of [invalid, mismatch, dirty]) rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
+test('release node resolver uses explicit input, systemctl show, systemctl cat, and fails closed without an absolute node executable', () => {
+  const resolver = join(root, 'scripts', 'resolve-hermes-service-node.sh');
+  const byShow = makeSystemctlFixture({ show: `{ path=${nodeBin} ; argv[]=${nodeBin} /opt/ran_agent/node_bridge/src/index.mjs ; }` });
+  const byCat = makeSystemctlFixture({ cat: `ExecStart=${nodeBin} /opt/ran_agent/node_bridge/src/index.mjs` });
+  const unresolved = makeSystemctlFixture({ show: '{ path=/usr/bin/env ; argv[]=/usr/bin/env bash -lc node ; }', cat: 'ExecStart=/usr/bin/env bash -lc node' });
+  const runResolver = (env) => execFileSync('bash', [resolver], {
+    env: { PATH: '/usr/bin:/bin', ...env }, encoding: 'utf8', stdio: 'pipe',
+  }).trim();
+  try {
+    assert.equal(runResolver({ RAN_AGENT_NODE_BIN: nodeBin, RAN_AGENT_SYSTEMCTL_BIN: '/missing/systemctl' }), nodeBin);
+    assert.equal(runResolver({ RAN_AGENT_SYSTEMCTL_BIN: byShow.path }), nodeBin);
+    assert.equal(runResolver({ RAN_AGENT_SYSTEMCTL_BIN: byCat.path }), nodeBin);
+    assert.throws(() => runResolver({ RAN_AGENT_SYSTEMCTL_BIN: unresolved.path }), /Command failed/);
+  } finally {
+    for (const fixture of [byShow, byCat, unresolved]) rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('bootstrap manifest pins the exact candidate framework sources', () => {
+  const manifest = readFileSync(join(root, 'docs', 'governance', 'hermes_release_bootstrap.v1.sha256'), 'utf8');
+  const entries = new Map(manifest.trim().split('\n').map((line) => {
+    const [digest, path] = line.split(/\s{2,}/);
+    return [path, digest];
+  }));
+
+  for (const path of [
+    'scripts/bootstrap-hermes-release.sh',
+    'scripts/deploy-hermes-release.sh',
+    'scripts/resolve-hermes-service-node.sh',
+  ]) {
+    assert.match(entries.get(path) || '', /^[0-9a-f]{64}$/);
+    assert.equal(entries.get(path), sha256(readFileSync(join(root, path))));
+  }
 });

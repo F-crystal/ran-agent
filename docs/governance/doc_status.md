@@ -19,6 +19,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/hermes_release_deployment.md` | Immutable-SHA Hermes deployment, acceptance, rollback, and RC-to-main closure |
+| `docs/governance/hermes_release_bootstrap.v1.sha256` | Bootstrap framework source-digest manifest |
 | `docs/governance/phase_status.md` | Historical phase closure status |
 | `docs/governance/constraints.md` | Runtime and implementation constraints |
 | `docs/governance/co-reading.md` | Co Reading storage, import, MCP, privacy, and API contract |
