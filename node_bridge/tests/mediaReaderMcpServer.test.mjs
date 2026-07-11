@@ -81,6 +81,10 @@ test('media reader schemas expose trusted local media file_path inputs', () => {
 });
 
 test('analyze_image returns structured OCR failure when OCR provider is unavailable and VLM is unavailable', async () => {
+  let ocrCalls = 0;
+  let visionCalls = 0;
+  let fetchCalls = 0;
+  let subprocessCalls = 0;
   const result = await handleMediaReaderMcpRequest(
     {
       method: 'tools/call',
@@ -90,19 +94,51 @@ test('analyze_image returns structured OCR failure when OCR provider is unavaila
       },
     },
     {
-      env: tempCacheEnv(),
-      fetchImpl: async (url) => responseFromBytes({
-        url,
-        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
-        bytes: pngBytes(),
-      }),
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_OCR_PROVIDER: 'mock',
+        PERSONAL_AGENT_VISION_PROVIDER: 'mock',
+      },
+      fetchImpl: async (url) => {
+        fetchCalls += 1;
+        assert.equal(url, 'https://cdn.example.com/pic.png');
+        return responseFromBytes({
+          url,
+          headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+          bytes: pngBytes(),
+        });
+      },
       resolveHostnameImpl: async () => ['93.184.216.34'],
+      execFileImpl: async () => {
+        subprocessCalls += 1;
+        throw new Error('real OCR subprocess must not run in unavailable-provider test');
+      },
+      ocrProvider: {
+        analyzeImage: async () => {
+          ocrCalls += 1;
+          const error = new Error('DEPENDENCY_MISSING: OCR provider unavailable');
+          error.error_code = 'DEPENDENCY_MISSING';
+          throw error;
+        },
+      },
+      visionProvider: {
+        analyzeImage: async () => {
+          visionCalls += 1;
+          const error = new Error('DEPENDENCY_MISSING: VLM provider unavailable');
+          error.error_code = 'DEPENDENCY_MISSING';
+          throw error;
+        },
+      },
     }
   );
 
   assert.equal(result.isError, true);
   assert.equal(result.structuredContent.ok, false);
   assert.equal(result.structuredContent.error_code, 'OCR_FAILED');
+  assert.equal(ocrCalls, 1);
+  assert.equal(visionCalls, 1);
+  assert.equal(fetchCalls, 1);
+  assert.equal(subprocessCalls, 0);
 });
 
 test('analyze_image uses content-hash based analysis cache', async () => {
