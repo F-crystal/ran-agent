@@ -45,6 +45,15 @@ against `docs/governance/hermes_release_bootstrap.v1.sha256` in the candidate.
 It invokes the same `deploy-hermes-release.sh` transaction as normal releases;
 there is no second persistent deployment mechanism.
 
+Before either bootstrap or normal apply snapshots/switches production, the
+complete candidate archive provides `hermes-release-candidate-preflight.mjs`.
+That stage-local code imports the candidate `identityMap.mjs`, not the active
+checkout. On a real server dry-run it also reads the identity-map path from the
+existing Node service EnvironmentFile and performs the owner-binding check
+without printing the path, identity, hash, or secret. A missing owner binding
+or incompatible candidate module therefore fails dry-run before service,
+state, code, or checkout mutation.
+
 ## 1. Deployment Preflight
 
 Run these one at a time from the server. Stop on an unexpected result; do not

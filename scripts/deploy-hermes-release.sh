@@ -24,6 +24,7 @@ case "$MODE" in
 esac
 
 if [[ "${EUID}" -eq 0 ]]; then SUDO=(); else command -v sudo >/dev/null 2>&1 || fail sudo_required; SUDO=(sudo); fi
+STAGE_SUDO=("${SUDO[@]}")
 
 if [[ -n "${RAN_AGENT_NODE_BIN:-}" ]]; then
   NODE_BIN="$(RAN_AGENT_NODE_BIN="$RAN_AGENT_NODE_BIN" bash "$SCRIPT_ROOT/scripts/resolve-hermes-service-node.sh")" || fail node_service_path_unavailable
@@ -120,19 +121,19 @@ require_service_environment() {
   service_env_has_nonempty_key RAN_AGENT_INTERNAL_CONTROL_SECRET || fail RAN_AGENT_INTERNAL_CONTROL_SECRET_required
 }
 
-require_owner_binding() {
-  local identity_map
+candidate_stage_preflight() {
+  local mode="$1" identity_map=''
+  "${STAGE_SUDO[@]}" test -x "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" || fail candidate_preflight_missing
+  "${STAGE_SUDO[@]}" env "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --module-only >/dev/null \
+    || fail candidate_preflight_incompatible
+  [[ "$mode" == owner ]] || return 0
   identity_map="$(service_env_value RAN_AGENT_IDENTITY_MAP_PATH || true)"
   if [[ -n "$identity_map" ]]; then
-    RAN_AGENT_IDENTITY_MAP_PATH="$identity_map" "$NODE_BIN" --input-type=module -e '
-      import { validateOwnerBindingPreflight } from "./node_bridge/src/identityMap.mjs";
-      if (!validateOwnerBindingPreflight().ok) process.exit(1);
-    ' >/dev/null || fail owner_binding_required
+    "${STAGE_SUDO[@]}" env RAN_AGENT_IDENTITY_MAP_PATH="$identity_map" "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --owner-binding >/dev/null \
+      || fail owner_binding_required
   else
-    "$NODE_BIN" --input-type=module -e '
-      import { validateOwnerBindingPreflight } from "./node_bridge/src/identityMap.mjs";
-      if (!validateOwnerBindingPreflight().ok) process.exit(1);
-    ' >/dev/null || fail owner_binding_required
+    "${STAGE_SUDO[@]}" env "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --owner-binding >/dev/null \
+      || fail owner_binding_required
   fi
 }
 
@@ -150,7 +151,16 @@ require_plan_prerequisites() {
   git -C "$REPO_ROOT" archive --format=tar "$CANDIDATE" | tar -xf - -C "$probe" || fail candidate_plan_archive_failed
   [[ -f "$probe/node_bridge/package.json" && -f "$probe/src/personal_agent/service.py" ]] || fail candidate_plan_incomplete
   find "$probe" -type l -print -quit | grep -q . && fail candidate_plan_symlink
+  STAGE_DIR="$probe"
+  STAGE_SUDO=()
+  candidate_stage_preflight module
+  if [[ "$REPO_ROOT" == "$SERVER_ROOT" ]]; then
+    require_service_environment
+    candidate_stage_preflight owner
+  fi
   rm -rf "$probe"
+  STAGE_DIR=''
+  STAGE_SUDO=("${SUDO[@]}")
   trap - RETURN
 }
 
@@ -164,7 +174,6 @@ require_apply_prerequisites() {
   require_python_runtime
   require_artifact_layout
   require_service_environment
-  require_owner_binding
   require_atomic_state
 }
 
@@ -192,6 +201,7 @@ stage_candidate() {
   "${SUDO[@]}" tar -xf "$CANDIDATE_ARCHIVE" -C "$STAGE_DIR" || fail candidate_stage_failed
   "${SUDO[@]}" test -x "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" || fail candidate_stage_incomplete
   "${SUDO[@]}" test -x "$STAGE_DIR/scripts/verify-hermes-release.sh" || fail candidate_stage_incomplete
+  "${SUDO[@]}" test -x "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" || fail candidate_stage_incomplete
   local digest
   digest="$("${SUDO[@]}" sha256sum "$CANDIDATE_ARCHIVE" | awk '{ print $1 }')" || fail candidate_stage_digest_unavailable
   printf '%s %s\n' "$CANDIDATE" "$digest" | "${SUDO[@]}" tee "$STAGE_DIR/candidate" >/dev/null
@@ -394,6 +404,7 @@ require_apply_prerequisites
 report_release_delta
 stage_candidate
 verify_stage_candidate
+candidate_stage_preflight owner
 # Gate runs in immutable stage before any checkout/config/runtime mutation.
 "${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" bash "$STAGE_DIR/scripts/hermes-release-gate.sh" --all
 snapshot_runtime_state

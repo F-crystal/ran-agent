@@ -53,6 +53,15 @@ function makeBootstrapFixture({ corruptManifest = false } = {}) {
     copyFileSync(join(root, 'scripts', file), join(repo, 'scripts', file));
     chmodSync(join(repo, 'scripts', file), 0o755);
   }
+  mkdirSync(join(repo, 'node_bridge', 'src'), { recursive: true });
+  writeFileSync(join(repo, 'node_bridge', 'src', 'identityMap.mjs'), [
+    'export function validateOwnerBindingPreflight() {',
+    "  return { ok: process.env.TEST_OWNER_OK === '1' };",
+    '}',
+    '',
+  ].join('\n'));
+  copyFileSync(join(root, 'scripts', 'hermes-release-candidate-preflight.mjs'), join(repo, 'scripts', 'hermes-release-candidate-preflight.mjs'));
+  chmodSync(join(repo, 'scripts', 'hermes-release-candidate-preflight.mjs'), 0o755);
   const manifest = frameworkFiles.map((file) => {
     const contents = readFileSync(join(repo, 'scripts', file));
     return `${corruptManifest ? '0'.repeat(64) : sha256(contents)}  scripts/${file}`;
@@ -418,4 +427,41 @@ test('bootstrap manifest pins the exact candidate framework sources', () => {
     assert.match(entries.get(path) || '', /^[0-9a-f]{64}$/);
     assert.equal(entries.get(path), sha256(readFileSync(join(root, path))));
   }
+});
+
+test('candidate owner preflight imports the immutable stage module, never a missing or incompatible old checkout module', () => {
+  const fixture = makeBootstrapFixture();
+  const stage = mkdtempSync(join(tmpdir(), 'ran-agent-candidate-stage-'));
+  try {
+    const oldModule = join(fixture.repo, 'node_bridge', 'src', 'identityMap.mjs');
+    assert.equal(existsSync(oldModule), false);
+    for (const path of [
+      'node_bridge/src/identityMap.mjs',
+      'scripts/hermes-release-candidate-preflight.mjs',
+    ]) {
+      const target = join(stage, path);
+      mkdirSync(join(target, '..'), { recursive: true });
+      writeFileSync(target, execFileSync('git', ['show', `${fixture.candidateSha}:${path}`], { cwd: fixture.repo, encoding: 'utf8' }));
+    }
+    const preflight = join(stage, 'scripts', 'hermes-release-candidate-preflight.mjs');
+    const output = execFileSync(nodeBin, [preflight, '--module-only'], { env: { TEST_OWNER_OK: '0' }, encoding: 'utf8' });
+    assert.match(output, /candidate-preflight-ok mode=module/);
+    assert.throws(
+      () => execFileSync(nodeBin, [preflight, '--owner-binding'], { env: { TEST_OWNER_OK: '0' }, stdio: 'pipe' }),
+      /Command failed/,
+    );
+    assert.match(execFileSync(nodeBin, [preflight, '--owner-binding'], { env: { TEST_OWNER_OK: '1' }, encoding: 'utf8' }), /candidate-preflight-ok mode=owner/);
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+    rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
+test('deploy invokes candidate-only preflight from the verified stage for dry-run and apply prerequisites', () => {
+  const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+
+  assert.match(deploy, /\$STAGE_DIR\/scripts\/hermes-release-candidate-preflight\.mjs/);
+  assert.match(deploy, /--module-only/);
+  assert.match(deploy, /--owner-binding/);
+  assert.doesNotMatch(deploy, /from "\.\/node_bridge\/src\/identityMap\.mjs"/);
 });
