@@ -24,7 +24,11 @@ case "$MODE" in
 esac
 
 if [[ "${EUID}" -eq 0 ]]; then SUDO=(); else command -v sudo >/dev/null 2>&1 || fail sudo_required; SUDO=(sudo); fi
-STAGE_SUDO=("${SUDO[@]}")
+STAGE_USE_SUDO=1
+
+stage_run() {
+  if [[ "$STAGE_USE_SUDO" == 1 ]]; then "${SUDO[@]}" "$@"; else "$@"; fi
+}
 
 if [[ -n "${RAN_AGENT_NODE_BIN:-}" ]]; then
   NODE_BIN="$(RAN_AGENT_NODE_BIN="$RAN_AGENT_NODE_BIN" bash "$SCRIPT_ROOT/scripts/resolve-hermes-service-node.sh")" || fail node_service_path_unavailable
@@ -123,16 +127,16 @@ require_service_environment() {
 
 candidate_stage_preflight() {
   local mode="$1" identity_map=''
-  "${STAGE_SUDO[@]}" test -x "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" || fail candidate_preflight_missing
-  "${STAGE_SUDO[@]}" env "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --module-only >/dev/null \
+  stage_run test -x "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" || fail candidate_preflight_missing
+  stage_run env "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --module-only >/dev/null \
     || fail candidate_preflight_incompatible
   [[ "$mode" == owner ]] || return 0
   identity_map="$(service_env_value RAN_AGENT_IDENTITY_MAP_PATH || true)"
   if [[ -n "$identity_map" ]]; then
-    "${STAGE_SUDO[@]}" env RAN_AGENT_IDENTITY_MAP_PATH="$identity_map" "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --owner-binding >/dev/null \
+    stage_run env RAN_AGENT_IDENTITY_MAP_PATH="$identity_map" "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --owner-binding >/dev/null \
       || fail owner_binding_required
   else
-    "${STAGE_SUDO[@]}" env "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --owner-binding >/dev/null \
+    stage_run env "$NODE_BIN" "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" --owner-binding >/dev/null \
       || fail owner_binding_required
   fi
 }
@@ -152,7 +156,7 @@ require_plan_prerequisites() {
   [[ -f "$probe/node_bridge/package.json" && -f "$probe/src/personal_agent/service.py" ]] || fail candidate_plan_incomplete
   find "$probe" -type l -print -quit | grep -q . && fail candidate_plan_symlink
   STAGE_DIR="$probe"
-  STAGE_SUDO=()
+  STAGE_USE_SUDO=0
   candidate_stage_preflight module
   if [[ "$REPO_ROOT" == "$SERVER_ROOT" ]]; then
     require_service_environment
@@ -160,7 +164,7 @@ require_plan_prerequisites() {
   fi
   rm -rf "$probe"
   STAGE_DIR=''
-  STAGE_SUDO=("${SUDO[@]}")
+  STAGE_USE_SUDO=1
   trap - RETURN
 }
 
