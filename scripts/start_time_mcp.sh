@@ -21,7 +21,9 @@ if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1"
   fi
 fi
 
-export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
+  export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+fi
 
 LOCAL_TIMEZONE="${LOCAL_TIMEZONE:-Asia/Shanghai}"
 # TIME_MCP_PYTHON/MCP_SERVER_TIME_PYTHON can point at a preinstalled

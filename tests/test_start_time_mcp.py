@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import tempfile
 import textwrap
@@ -12,6 +13,7 @@ from pathlib import Path
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT_DIR / "scripts" / "start_time_mcp.sh"
+LAUNCHER_TIMEOUT_SECONDS = 5
 
 
 def _sandbox_env(env: dict[str, str]) -> dict[str, str]:
@@ -32,9 +34,55 @@ def _sandbox_env(env: dict[str, str]) -> dict[str, str]:
     }
 
 
+def _run_launcher(
+    command: list[str], *, cwd: Path, env: dict[str, str], timeout_seconds: float = LAUNCHER_TIMEOUT_SECONDS
+) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(
+        command,
+        cwd=cwd,
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as error:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        process.communicate()
+        raise AssertionError(
+            f"launcher timed out after {timeout_seconds}s; terminated its process group"
+        ) from error
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.write_text(content, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def _time_test_bin(temp_path: Path, probe_log: Path | None = None) -> Path:
+    bin_dir = temp_path
+    _write_executable(
+        bin_dir / "dirname",
+        "#!/bin/sh\ncase \"$1\" in */*) printf '%s\\n' \"${1%/*}\" ;; *) printf '.\\n' ;; esac\n",
+    )
+    probe_line = f"printf 'probe=%s argv=%s\\n' \"$0\" \"$*\" >> \"{probe_log}\"\n" if probe_log else ""
+    for name in ("python3", "python"):
+        _write_executable(bin_dir / name, f"#!/bin/sh\n{probe_line}exit 1\n")
+    return bin_dir
+
+
 class StartTimeMcpScriptTest(unittest.TestCase):
-    def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    def run_script(
+        self, env: dict[str, str], timeout_seconds: float = LAUNCHER_TIMEOUT_SECONDS
+    ) -> subprocess.CompletedProcess[str]:
         clean_env = _sandbox_env(env)
+        clean_env["PATH"] = env["PATH"]
         for key in (
             "LOCAL_TIMEZONE",
             "TIME_MCP_PYTHON",
@@ -44,32 +92,34 @@ class StartTimeMcpScriptTest(unittest.TestCase):
             if key in env:
                 clean_env[key] = env[key]
 
-        return subprocess.run(
+        return _run_launcher(
             ["/bin/bash", str(SCRIPT)],
             cwd=ROOT_DIR,
             env=clean_env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
+            timeout_seconds=timeout_seconds,
         )
 
     def test_missing_uvx_errors_when_python_module_is_not_available(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
-            bin_dir = Path(temp_dir) / "bin"
-            bin_dir.mkdir()
+            temp_path = Path(temp_dir)
+            probe_log = temp_path / "probes.log"
+            bin_dir = _time_test_bin(temp_path, probe_log)
 
             result = self.run_script({"PATH": str(bin_dir)})
+            probes = probe_log.read_text(encoding="utf-8") if probe_log.exists() else ""
 
         self.assertEqual(result.returncode, 127)
         self.assertIn("uvx is required", result.stderr)
+        self.assertIn(f"probe={bin_dir / 'python3'}", probes)
+        self.assertIn(f"probe={bin_dir / 'python'}", probes)
 
     def test_env_python_with_preinstalled_module_is_used_before_uvx(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             log_path = temp_path / "argv.log"
-            fake_python = temp_path / "python"
-            fake_uvx = temp_path / "uvx"
+            bin_dir = _time_test_bin(temp_path)
+            fake_python = temp_path / "time-python"
+            fake_uvx = bin_dir / "uvx"
             fake_python.write_text(
                 textwrap.dedent(
                     f"""\
@@ -86,16 +136,15 @@ class StartTimeMcpScriptTest(unittest.TestCase):
                 ),
                 encoding="utf-8",
             )
-            fake_uvx.write_text(
+            _write_executable(
+                fake_uvx,
                 "#!/bin/sh\nprintf 'uvx should not run\\n' >&2\nexit 42\n",
-                encoding="utf-8",
             )
             fake_python.chmod(0o755)
-            fake_uvx.chmod(0o755)
 
             result = self.run_script(
                 {
-                    "PATH": temp_dir,
+                    "PATH": str(bin_dir),
                     "TIME_MCP_PYTHON": str(fake_python),
                     "LOCAL_TIMEZONE": "Asia/Shanghai",
                 }
@@ -112,7 +161,9 @@ class StartTimeMcpScriptTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             log_path = temp_path / "argv.log"
-            fake_uvx = temp_path / "uvx"
+            probe_log = temp_path / "probes.log"
+            bin_dir = _time_test_bin(temp_path, probe_log)
+            fake_uvx = bin_dir / "uvx"
             fake_uvx.write_text(
                 textwrap.dedent(
                     f"""\
@@ -125,14 +176,33 @@ class StartTimeMcpScriptTest(unittest.TestCase):
             )
             fake_uvx.chmod(0o755)
 
-            result = self.run_script({"PATH": temp_dir, "LOCAL_TIMEZONE": "Asia/Shanghai"})
+            result = self.run_script({"PATH": str(bin_dir), "LOCAL_TIMEZONE": "Asia/Shanghai"})
             logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
+            probes = probe_log.read_text(encoding="utf-8") if probe_log.exists() else ""
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             logged_argv,
             "mcp-server-time --local-timezone Asia/Shanghai",
         )
+        self.assertIn(f"probe={bin_dir / 'python3'}", probes)
+        self.assertIn(f"probe={bin_dir / 'python'}", probes)
+
+    def test_timeout_terminates_the_time_launcher_process_group(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            bin_dir = _time_test_bin(temp_path)
+            fake_python = temp_path / "hanging-python"
+            _write_executable(
+                fake_python,
+                "#!/bin/sh\nif [ \"$1\" = \"-c\" ]; then exit 0; fi\n(/bin/sleep 30) &\nwait\n",
+            )
+
+            with self.assertRaisesRegex(AssertionError, "terminated its process group"):
+                self.run_script(
+                    {"PATH": str(bin_dir), "TIME_MCP_PYTHON": str(fake_python)},
+                    timeout_seconds=0.2,
+                )
 
 
 class StartPlaywrightMcpScriptTest(unittest.TestCase):
@@ -153,14 +223,10 @@ class StartPlaywrightMcpScriptTest(unittest.TestCase):
             if key in env:
                 clean_env[key] = env[key]
 
-        return subprocess.run(
+        return _run_launcher(
             ["/bin/bash", str(ROOT_DIR / "scripts" / "start_playwright_mcp.sh")],
             cwd=ROOT_DIR,
             env=clean_env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
         )
 
     def test_stdio_mode_ignores_port_unless_http_transport_is_explicit(self) -> None:
@@ -188,6 +254,10 @@ class StartPlaywrightMcpScriptTest(unittest.TestCase):
         self.assertNotIn("--port", logged_argv)
         self.assertIn("env_port=", logged_argv)
         self.assertNotIn("env_port=8931", logged_argv)
+        self.assertNotIn(
+            "export PATH",
+            (ROOT_DIR / "scripts" / "start_playwright_mcp.sh").read_text(encoding="utf-8"),
+        )
 
     def test_official_executable_path_env_is_forwarded(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -290,14 +360,10 @@ class StartSocialReaderMcpScriptTest(unittest.TestCase):
             if key in env:
                 clean_env[key] = env[key]
 
-        return subprocess.run(
+        return _run_launcher(
             ["/bin/bash", str(ROOT_DIR / "scripts" / "start_social_reader_mcp.sh")],
             cwd=ROOT_DIR,
             env=clean_env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
         )
 
     def test_social_reader_wrapper_runs_node_facade(self) -> None:
@@ -355,14 +421,10 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
             str(sandbox_root / "data" / "obsidian-memory-index.duckdb"),
         )
 
-        return subprocess.run(
+        return _run_launcher(
             ["/bin/bash", str(ROOT_DIR / "scripts" / "start_obsidian_memory_mcp.sh")],
             cwd=ROOT_DIR,
             env=clean_env,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
         )
 
     def test_obsidian_index_defaults_to_cpu_without_reindex_or_watch(self) -> None:
