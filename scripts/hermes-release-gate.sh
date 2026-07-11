@@ -139,6 +139,7 @@ run_node_test() {
       RAN_AGENT_STATE_DIR="$case_root/tmp/state" \
       RAN_AGENT_SKIP_ENV_FILE_LOAD=1 \
       RAN_AGENT_NODE_BIN="$NODE_BIN" \
+      RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
       SOCIAL_READER_NODE_BIN="$NODE_BIN" \
       EXTERNAL_MCP_GATEWAY_NODE_BIN="$NODE_BIN" \
       RAN_AGENT_GLOBAL_TIMELINE_PATH="$case_root/tmp/state/global-timeline.jsonl" \

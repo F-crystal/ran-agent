@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -29,6 +29,27 @@ function run(script, args = [], extraEnv = {}) {
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function requiredGatePython() {
+  const pythonBin = process.env.RAN_AGENT_PYTHON_BIN || '';
+  assert.match(
+    pythonBin,
+    /^\//,
+    'RAN_AGENT_PYTHON_BIN test prerequisite missing: pass the parent gate-validated absolute Python path',
+  );
+  assert.doesNotThrow(
+    () => accessSync(pythonBin, constants.X_OK),
+    'RAN_AGENT_PYTHON_BIN test prerequisite invalid: path must be executable',
+  );
+  assert.doesNotThrow(
+    () => execFileSync(pythonBin, ['-I', '-c', 'import pytest'], {
+      env: { PATH: '/usr/bin:/bin' },
+      stdio: 'pipe',
+    }),
+    'RAN_AGENT_PYTHON_BIN test prerequisite invalid: pytest must import with the isolated PATH',
+  );
+  return pythonBin;
 }
 
 function makeBootstrapFixture({ corruptManifest = false } = {}) {
@@ -248,10 +269,12 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /--core\|--all\|--preflight-only/);
   assert.match(source, /hermes-release-smoke\.mjs/);
   assert.match(source, /--all/);
+  assert.match(source, /RAN_AGENT_PYTHON_BIN="\$PYTHON_BIN"/);
   assert.ok(source.indexOf('chmod -R a-w') < source.indexOf('hermes-release-smoke.mjs'));
 });
 
 test('release gate executes a git-less staged candidate from its explicit immutable source root', () => {
+  const pythonBin = requiredGatePython();
   const stage = mkdtempSync(join(tmpdir(), 'ran-agent-gitless-stage-'));
   try {
     mkdirSync(join(stage, 'scripts'), { recursive: true });
@@ -272,7 +295,7 @@ test('release gate executes a git-less staged candidate from its explicit immuta
       env: {
         PATH: '/usr/bin:/bin',
         RAN_AGENT_NODE_BIN: nodeBin,
-        RAN_AGENT_PYTHON_BIN: '/Users/fengran/anaconda3/bin/python',
+        RAN_AGENT_PYTHON_BIN: pythonBin,
         RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
         RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
       },
@@ -280,6 +303,22 @@ test('release gate executes a git-less staged candidate from its explicit immuta
       stdio: 'pipe',
     });
     assert.match(output, /hermes-release-gate: ok/);
+    assert.throws(
+      () => execFileSync('bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--core'], {
+        cwd: stage,
+        env: {
+          PATH: '/usr/bin:/bin',
+          RAN_AGENT_NODE_BIN: nodeBin,
+          RAN_AGENT_PYTHON_BIN: '/definitely/missing/ran-agent-python',
+          RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
+          RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
+        },
+        encoding: 'utf8',
+        stdio: 'pipe',
+      }),
+      /Command failed/,
+      'git-less stage must fail closed for an invalid absolute Python path',
+    );
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
