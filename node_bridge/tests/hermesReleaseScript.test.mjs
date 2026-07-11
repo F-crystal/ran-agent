@@ -459,9 +459,14 @@ test('candidate owner preflight imports the immutable stage module, never a miss
 
 test('deploy invokes candidate-only preflight from the verified stage for dry-run and apply prerequisites', () => {
   const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+  const dryRun = deploy.match(/require_plan_prerequisites\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  const apply = deploy.match(/require_apply_prerequisites\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 
   assert.match(deploy, /\$STAGE_DIR\/scripts\/hermes-release-candidate-preflight\.mjs/);
   assert.match(deploy, /--module-only/);
   assert.match(deploy, /--owner-binding/);
+  assert.match(dryRun, /candidate_stage_preflight module/);
+  assert.match(dryRun, /require_service_environment[\s\S]*candidate_stage_preflight owner/);
+  assert.doesNotMatch(apply, /identityMap\.mjs|require_owner_binding/);
   assert.doesNotMatch(deploy, /from "\.\/node_bridge\/src\/identityMap\.mjs"/);
 });
