@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-08)
+Status: CURRENT (2026-07-11)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -33,6 +33,8 @@ manual systemd or env edits.
   `bash scripts/prepare-xhs-public-sidecar.sh`
 - Clean UV cache safely:
   `bash scripts/clean-uv-cache-safe.sh`
+- Immutable Hermes release transaction and rollback:
+  `docs/governance/hermes_release_deployment.md`
 
 Do not publish one-off pasteable repair blocks in this file. If a repeated
 operation is needed, turn it into a script and reference it here.
@@ -50,20 +52,12 @@ Hermes configuration prerequisites:
 - Use `scripts/apply-hermes-runtime-split.sh` as the unified Hermes runtime
   configuration script; do not hand-edit systemd or env as the normal path.
 
-Run from the server checkout:
-
-```bash
-cd /opt/ran_agent
-source /opt/ran_agent/.venv/bin/activate
-git pull --ff-only
-bash scripts/apply-hermes-runtime-split.sh
-bash scripts/diagnose-proactive-events.sh
-bash scripts/diagnose-lite-full.sh
-bash scripts/diagnose-external-mcp-gateway.sh
-bash scripts/diagnose-multi-frontend.sh
-bash scripts/diagnose-hermes-continuity.sh
-bash scripts/diagnose-ombre-memory.sh
-```
+Code releases use the immutable-SHA transaction in
+`docs/governance/hermes_release_deployment.md`. Do not run `git pull`, `git
+switch`, or `git checkout` in `/opt/ran_agent` as a pre-deploy step. The
+transaction fetches a source ref only to resolve one SHA, gates an immutable
+stage, snapshots the active runtime, then changes the checkout only inside the
+apply transaction.
 
 `apply-hermes-runtime-split.sh` owns:
 

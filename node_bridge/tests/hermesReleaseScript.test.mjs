@@ -49,7 +49,7 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.match(deploy, /--dry-run\|--apply/);
   assert.match(accept, /--dry-run\|--apply/);
   assert.match(deploy, /\/opt\/ran_agent/);
-  assert.match(deploy, /candidate_not_checked_out/);
+  assert.doesNotMatch(deploy, /candidate_not_checked_out/);
   assert.match(deploy, /snapshot_runtime_state/);
   assert.match(deploy, /stage_candidate/);
   assert.match(deploy, /git -C .* archive/);
@@ -64,13 +64,13 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.match(deploy, /RAN_AGENT_PYTHON_BIN="\$PYTHON_BIN"/);
   assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*RAN_AGENT_RELEASE_STAGED_CANDIDATE=1[\s\S]*\$STAGE_DIR\/scripts\/hermes-release-gate\.sh/);
   assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*\$STAGE_DIR\/scripts\/apply-hermes-runtime-split\.sh/);
-  assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*\$STAGE_DIR\/scripts\/accept-hermes-release\.sh/);
+  assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*\$STAGE_DIR\/scripts\/verify-hermes-release\.sh/);
   assert.match(deploy, /read -r expected_candidate expected_digest < <\("\$\{SUDO\[@\]\}" cat "\$STAGE_DIR\/candidate"\)/);
   assert.match(deploy, /"\$\{SUDO\[@\]\}" sha256sum "\$manifest"/);
   assert.match(deploy, /tee -a "\$SNAPSHOT_DIR\/manifest"/);
   assert.match(deploy, /done < <\("\$\{SUDO\[@\]\}" cat "\$SNAPSHOT_DIR\/manifest"\)/);
   assert.match(deploy, /\$STAGE_DIR\/scripts\/apply-hermes-runtime-split\.sh/);
-  assert.match(deploy, /\$STAGE_DIR\/scripts\/accept-hermes-release\.sh/);
+  assert.match(deploy, /\$STAGE_DIR\/scripts\/verify-hermes-release\.sh/);
   assert.match(deploy, /ran-agent-ombre-brain\.service/);
   assert.match(deploy, /ran-agent-xhs-browse\.service/);
   assert.match(deploy, /ran-agent-xhs-public-sidecar\.service/);
@@ -127,7 +127,7 @@ test('preserve mode cannot rewrite profiles or environment, or remove unrelated 
   assert.match(apply, /if \[ "\$PRESERVE_RUNTIME_SHAPE" != "1" \]; then\n    cleanup_stale_lite_dropins/);
   assert.match(apply, /if \[ "\$PRESERVE_RUNTIME_SHAPE" != "1" \]; then\n    "\$\{SUDO\[@\]\}" rm -f "\$XHS_BROWSE_SERVICE"/);
   assert.match(deploy, /CORE_RUNTIME_UNITS=\(ran-agent-python\.service ran-agent-node\.service ran-agent-hermes\.service ran-agent-hermes-full\.service\)/);
-  assert.match(deploy, /for unit in "\$\{CORE_RUNTIME_UNITS\[@\]\}"; do/);
+  assert.match(deploy, /for unit in "\$\{ALL_RUNTIME_UNITS\[@\]\}"; do/);
 });
 
 test('release transaction keeps a redacted protected-capability evidence trail across snapshot, apply, and rollback', () => {
@@ -227,4 +227,58 @@ test('release gate executes a git-less staged candidate from its explicit immuta
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }
+});
+
+test('release transaction snapshots the live production checkout before activating an immutable candidate', () => {
+  const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+
+  assert.match(deploy, /CANDIDATE.*\^\[0-9a-f\]\{40\}\$/);
+  assert.doesNotMatch(deploy, /candidate_not_checked_out/);
+  assert.match(deploy, /snapshot_node_durable_state/);
+  assert.match(deploy, /snapshot_path "\$REPO_ROOT\/data" 901/);
+  assert.match(deploy, /RAN_AGENT_RELEASE_ARTIFACT_ROOT/);
+  assert.match(deploy, /activate_candidate_checkout/);
+  assert.ok(deploy.indexOf('snapshot_runtime_state') < deploy.indexOf('activate_candidate_checkout'));
+  assert.ok(deploy.indexOf('snapshot_state_migrations') < deploy.indexOf('activate_candidate_checkout'));
+  assert.ok(deploy.indexOf('hermes-release-gate.sh" --all') < deploy.lastIndexOf('snapshot_runtime_state'));
+  assert.ok(deploy.indexOf('snapshot_code_revision') < deploy.lastIndexOf('activate_candidate_checkout'));
+  assert.match(deploy, /--rollback/);
+  assert.match(deploy, /rollback-ok snapshot=/);
+  assert.match(deploy, /trap 'rollback_transaction \$\?' EXIT/);
+  assert.ok(deploy.indexOf('restore_code_revision || true') < deploy.indexOf('restore_runtime_files || true'));
+  assert.ok(deploy.indexOf('restore_runtime_files || true') < deploy.indexOf('restore_state_migrations || true'));
+  assert.ok(deploy.indexOf('restore_state_migrations || true') < deploy.indexOf('restore_service_state || true'));
+  assert.match(deploy, /service_env_source_unavailable/);
+  assert.match(deploy, /RAN_AGENT_INTERNAL_CONTROL_SECRET/);
+  assert.match(deploy, /git -C "\$REPO_ROOT" diff --name-status "\$PRODUCTION_HEAD" "\$CANDIDATE"/);
+  assert.doesNotMatch(deploy, /diff --name-status[^\n]*CANDIDATE\^/);
+});
+
+test('main and release-candidate entry points resolve remote refs to immutable commits without moving production first', () => {
+  const main = readFileSync(join(root, 'scripts', 'deploy-hermes-main.sh'), 'utf8');
+  const candidateEntry = readFileSync(join(root, 'scripts', 'deploy-hermes-candidate.sh'), 'utf8');
+
+  assert.match(main, /git fetch --no-tags origin main/);
+  assert.match(main, /refs\/remotes\/origin\/main/);
+  assert.match(main, /RAN_AGENT_RELEASE_CANDIDATE="\$CANDIDATE"/);
+  assert.match(main, /worktree_dirty/);
+  assert.doesNotMatch(main, /git pull|git checkout|git switch/);
+  assert.match(candidateEntry, /--branch\)[\s\S]*--commit\)/);
+  assert.match(candidateEntry, /git fetch --no-tags origin/);
+  assert.match(candidateEntry, /git check-ref-format --branch/);
+  assert.match(candidateEntry, /RAN_AGENT_RELEASE_CANDIDATE="\$CANDIDATE"/);
+  assert.match(candidateEntry, /worktree_dirty/);
+  assert.doesNotMatch(candidateEntry, /git pull|git checkout|git switch/);
+});
+
+test('unified verification makes release acceptance blocking and keeps optional diagnostics non-blocking', () => {
+  const verify = readFileSync(join(root, 'scripts', 'verify-hermes-release.sh'), 'utf8');
+
+  assert.match(verify, /--release\|--specialized\|--all/);
+  assert.match(verify, /accept-hermes-release\.sh" --apply/);
+  assert.match(verify, /RAN_AGENT_PROACTIVE_DIAG_STRICT_ENV=1/);
+  assert.match(verify, /diagnose-proactive-events\.sh/);
+  assert.match(verify, /diagnose-lite-full\.sh diagnose-external-mcp-gateway\.sh diagnose-ombre-memory\.sh/);
+  assert.match(verify, /specialized-warning/);
+  assert.match(verify, />\/dev\/null 2>&1/);
 });
