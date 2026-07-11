@@ -5,22 +5,12 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
+source "$ROOT_DIR/scripts/launcher_test_isolation.sh"
 
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
-
-if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$NODE_BRIDGE_ENV_FILE"
-  set +a
-fi
+launcher_load_env_file "$ENV_FILE"
+launcher_load_env_file "$NODE_BRIDGE_ENV_FILE"
 
 export PYTHON_BACKEND_BASE_URL="${PYTHON_BACKEND_BASE_URL:-http://127.0.0.1:8787}"
-export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+launcher_prepend_path "/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 exec node "$ROOT_DIR/node_bridge/src/personalMemoryMcpServer.mjs"

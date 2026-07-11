@@ -4,26 +4,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
+source "$ROOT_DIR/scripts/launcher_test_isolation.sh"
 
-if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
-  if [ -f "$ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
-  fi
-
-  if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$NODE_BRIDGE_ENV_FILE"
-    set +a
-  fi
-fi
-
-if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
-  export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
-fi
+launcher_load_env_file "$ENV_FILE"
+launcher_load_env_file "$NODE_BRIDGE_ENV_FILE"
+launcher_prepend_path "/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 LOCAL_TIMEZONE="${LOCAL_TIMEZONE:-Asia/Shanghai}"
 # TIME_MCP_PYTHON/MCP_SERVER_TIME_PYTHON can point at a preinstalled
@@ -54,10 +39,10 @@ select_time_mcp_python() {
 
   local candidate
   local candidates=()
-  if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
+  if ! launcher_test_isolation_active; then
     candidates+=("$ROOT_DIR/.venv/bin/python")
   fi
-  candidates+=("$(command -v python3 || true)" "$(command -v python || true)")
+  candidates+=("$(launcher_resolve_command python3 || true)" "$(launcher_resolve_command python || true)")
   for candidate in "${candidates[@]}"; do
     if [ -n "$candidate" ] && [ -x "$candidate" ] && python_has_time_module "$candidate"; then
       printf '%s\n' "$candidate"
@@ -85,7 +70,7 @@ if [ "$TIME_MCP_PYTHON_STATUS" -ne 1 ]; then
   exit "$TIME_MCP_PYTHON_STATUS"
 fi
 
-if ! UVX_BIN="$(command -v uvx)"; then
+if ! UVX_BIN="$(launcher_resolve_command uvx)"; then
   echo "uvx is required to start mcp-server-time. Install uv from https://docs.astral.sh/uv/ first." >&2
   exit 127
 fi

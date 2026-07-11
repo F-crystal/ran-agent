@@ -5,23 +5,13 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
+source "$ROOT_DIR/scripts/launcher_test_isolation.sh"
 
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$ENV_FILE"
-  set +a
-fi
+launcher_load_env_file "$ENV_FILE"
+launcher_load_env_file "$NODE_BRIDGE_ENV_FILE"
 
-if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090
-  source "$NODE_BRIDGE_ENV_FILE"
-  set +a
-fi
-
-DEFAULT_NODE_BIN="$(command -v node)"
-export PATH="/opt/nodejs/node-v22.22.2-linux-x64/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+DEFAULT_NODE_BIN="$(launcher_resolve_command node)"
+launcher_prepend_path "/opt/nodejs/node-v22.22.2-linux-x64/bin:/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
 export CO_READING_ROOT_DIR="${CO_READING_ROOT_DIR:-$ROOT_DIR/.ran_agent_state/co_reading}"
 
 NODE_BIN="${CO_READING_NODE_BIN:-$DEFAULT_NODE_BIN}"

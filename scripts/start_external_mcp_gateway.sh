@@ -5,21 +5,11 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
+source "$ROOT_DIR/scripts/launcher_test_isolation.sh"
 
-if [[ ( "${NODE_ENV:-}" != "test" || "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ) && "${EXTERNAL_MCP_GATEWAY_SKIP_ENV_FILES:-false}" != "true" ]]; then
-  if [ -f "$ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
-  fi
-
-  if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$NODE_BRIDGE_ENV_FILE"
-    set +a
-  fi
+if [[ "${EXTERNAL_MCP_GATEWAY_SKIP_ENV_FILES:-false}" != "true" ]]; then
+  launcher_load_env_file "$ENV_FILE"
+  launcher_load_env_file "$NODE_BRIDGE_ENV_FILE"
 fi
 
 if [[ "${EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE:-false}" != "true" ]]; then
@@ -27,7 +17,7 @@ if [[ "${EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE:-false}" != "true" ]]; then
   export EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false
 fi
 
-export PATH="/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin:$PATH"
+launcher_prepend_path "/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
 NODE_BIN="${EXTERNAL_MCP_GATEWAY_NODE_BIN:-node}"
 
 if [ "${1:-}" = "initialize" ]; then

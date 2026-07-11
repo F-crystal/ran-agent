@@ -77,6 +77,26 @@ def _time_test_bin(temp_path: Path, probe_log: Path | None = None) -> Path:
     return bin_dir
 
 
+def _obsidian_test_bin(temp_path: Path) -> Path:
+    bin_dir = _time_test_bin(temp_path)
+    _write_executable(bin_dir / "mkdir", "#!/bin/sh\nexec /bin/mkdir \"$@\"\n")
+    return bin_dir
+
+
+def _write_obsidian_uvx(path: Path, log_path: Path) -> None:
+    _write_executable(
+        path,
+        textwrap.dedent(
+            f"""\
+            #!/bin/sh
+            printf 'argv=%s\\n' "$*" >> "{log_path}"
+            printf 'device=%s\\n' "${{OBSIDIAN_INDEX_DEVICE:-}}" >> "{log_path}"
+            exit 0
+            """
+        ),
+    )
+
+
 class StartTimeMcpScriptTest(unittest.TestCase):
     def run_script(
         self, env: dict[str, str], timeout_seconds: float = LAUNCHER_TIMEOUT_SECONDS
@@ -401,6 +421,7 @@ class StartSocialReaderMcpScriptTest(unittest.TestCase):
 class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
     def run_script(self, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         clean_env = _sandbox_env(env)
+        clean_env["PATH"] = env["PATH"]
         for key in (
             "OBSIDIAN_MEMORY_MCP_PROVIDER",
             "OBSIDIAN_MEMORY_VAULT_DIR",
@@ -431,94 +452,126 @@ class StartObsidianMemoryMcpScriptTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             log_path = temp_path / "argv.log"
-            fake_uvx = temp_path / "uvx"
-            fake_uvx.write_text(
-                textwrap.dedent(
-                    f"""\
-                    #!/bin/sh
-                    printf '%s\\n' "$*" > "{log_path}"
-                    printf 'device=%s\\n' "${{OBSIDIAN_INDEX_DEVICE:-}}" >> "{log_path}"
-                    exit 0
-                    """
-                ),
-                encoding="utf-8",
-            )
-            fake_uvx.chmod(0o755)
+            bin_dir = _obsidian_test_bin(temp_path)
+            _write_obsidian_uvx(bin_dir / "uvx", log_path)
 
             result = self.run_script(
                 {
-                    "PATH": temp_dir,
+                    "PATH": str(bin_dir),
                     "OBSIDIAN_MEMORY_VAULT_DIR": str(temp_path / "vault"),
                     "OBSIDIAN_MEMORY_INDEX_PATH": str(temp_path / "data" / "obsidian-memory-index.duckdb"),
                 }
             )
-            logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
+            logged_calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--from iflow-mcp-tcsavage-obsidian-index python", logged_argv)
-        self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", logged_argv)
-        self.assertIn(f"--vault {temp_path / 'vault'}", logged_argv)
-        self.assertIn(f"--database {temp_path / 'data' / 'obsidian-memory-index.duckdb'}", logged_argv)
-        self.assertIn("device=cpu", logged_argv)
-        self.assertNotIn("--reindex", logged_argv)
-        self.assertNotIn("--watch", logged_argv)
+        self.assertEqual(
+            logged_calls,
+            [
+                "argv=--from iflow-mcp-tcsavage-obsidian-index python -c pass",
+                "device=cpu",
+                f"argv=--from iflow-mcp-tcsavage-obsidian-index python {ROOT_DIR / 'scripts' / 'obsidian_index_mcp_launcher.py'} mcp --vault {temp_path / 'vault'} --database {temp_path / 'data' / 'obsidian-memory-index.duckdb'}",
+                "device=cpu",
+            ],
+        )
 
     def test_obsidian_index_reindex_and_watch_are_opt_in(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
             log_path = temp_path / "argv.log"
-            fake_uvx = temp_path / "uvx"
-            fake_uvx.write_text(
-                textwrap.dedent(
-                    f"""\
-                    #!/bin/sh
-                    printf '%s\\n' "$*" > "{log_path}"
-                    printf 'device=%s\\n' "${{OBSIDIAN_INDEX_DEVICE:-}}" >> "{log_path}"
-                    exit 0
-                    """
-                ),
-                encoding="utf-8",
-            )
-            fake_uvx.chmod(0o755)
+            bin_dir = _obsidian_test_bin(temp_path)
+            _write_obsidian_uvx(bin_dir / "uvx", log_path)
 
             result = self.run_script(
                 {
-                    "PATH": temp_dir,
+                    "PATH": str(bin_dir),
                     "OBSIDIAN_MEMORY_REINDEX": "1",
                     "OBSIDIAN_MEMORY_WATCH": "true",
                     "OBSIDIAN_INDEX_DEVICE": "cuda",
                 }
             )
-            logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
+            logged_calls = log_path.read_text(encoding="utf-8").splitlines() if log_path.exists() else []
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--reindex", logged_argv)
-        self.assertIn("--watch", logged_argv)
-        self.assertIn("device=cuda", logged_argv)
+        self.assertEqual(logged_calls[0], "argv=--from iflow-mcp-tcsavage-obsidian-index python -c pass")
+        self.assertEqual(logged_calls[1], "device=cuda")
+        self.assertIn("--reindex --watch", logged_calls[2])
+        self.assertEqual(logged_calls[3], "device=cuda")
 
     def test_obsidian_index_uses_configurable_uvx_binary(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             temp_path = Path(temp_dir)
-            log_path = temp_path / "argv.log"
+            custom_log_path = temp_path / "custom-argv.log"
+            path_log_path = temp_path / "path-argv.log"
+            bin_dir = _obsidian_test_bin(temp_path)
             fake_uvx = temp_path / "custom-uvx"
-            fake_uvx.write_text(
-                textwrap.dedent(
-                    f"""\
-                    #!/bin/sh
-                    printf '%s\\n' "$*" > "{log_path}"
-                    exit 0
-                    """
-                ),
-                encoding="utf-8",
-            )
-            fake_uvx.chmod(0o755)
+            _write_obsidian_uvx(fake_uvx, custom_log_path)
+            _write_obsidian_uvx(bin_dir / "uvx", path_log_path)
 
-            result = self.run_script({"PATH": temp_dir, "OBSIDIAN_MEMORY_UVX_BIN": str(fake_uvx)})
-            logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
+            result = self.run_script({"PATH": str(bin_dir), "OBSIDIAN_MEMORY_UVX_BIN": str(fake_uvx)})
+            custom_calls = custom_log_path.read_text(encoding="utf-8").splitlines() if custom_log_path.exists() else []
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("--from iflow-mcp-tcsavage-obsidian-index python", logged_argv)
-        self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", logged_argv)
+        self.assertEqual(custom_calls[0], "argv=--from iflow-mcp-tcsavage-obsidian-index python -c pass")
+        self.assertIn("scripts/obsidian_index_mcp_launcher.py mcp", custom_calls[2])
+        self.assertFalse(path_log_path.exists())
+
+
+class LauncherIsolationAuditTest(unittest.TestCase):
+    def test_shared_helper_preserves_test_path_and_blocks_env_and_venv(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            env_file = temp_path / ".env.local"
+            activate_file = temp_path / "activate"
+            env_file.write_text("FROM_ENV=loaded\n", encoding="utf-8")
+            activate_file.write_text("FROM_VENV=loaded\n", encoding="utf-8")
+            helper = ROOT_DIR / "scripts" / "launcher_test_isolation.sh"
+            command = (
+                f'source "{helper}"; '
+                f'launcher_load_env_file "{env_file}"; '
+                f'launcher_activate_venv "{activate_file}"; '
+                'launcher_prepend_path "/host-bin"; '
+                'printf "%s|%s|%s\\n" "$PATH" "${FROM_ENV:-unset}" "${FROM_VENV:-unset}"'
+            )
+            isolated_env = _sandbox_env({"PATH": str(temp_path)})
+            isolated_env["PATH"] = str(temp_path)
+            isolated = _run_launcher(["/bin/bash", "-c", command], cwd=ROOT_DIR, env=isolated_env)
+            production_env = dict(isolated_env)
+            production_env["NODE_ENV"] = "production"
+            production = _run_launcher(["/bin/bash", "-c", command], cwd=ROOT_DIR, env=production_env)
+
+        self.assertEqual(isolated.stdout.strip(), f"{temp_path}|unset|unset")
+        self.assertEqual(production.stdout.strip(), f"/host-bin:{temp_path}|loaded|loaded")
+
+    def test_release_gate_mcp_launchers_keep_test_isolation_guards(self) -> None:
+        expected = {
+            "start_co_reading_mcp.sh",
+            "start_external_mcp_gateway.sh",
+            "start_media_generation_mcp.sh",
+            "start_media_reader_mcp.sh",
+            "start_obsidian_memory_mcp.sh",
+            "start_personal_memory_mcp.sh",
+            "start_playwright_mcp.sh",
+            "start_search_hub_mcp.sh",
+            "start_social_reader_mcp.sh",
+            "start_sticker_catalog_mcp.sh",
+            "start_time_mcp.sh",
+        }
+        launchers = {path.name for path in (ROOT_DIR / "scripts").glob("start_*mcp*.sh")}
+        self.assertEqual(launchers, expected)
+
+        for name in sorted(launchers):
+            source = (ROOT_DIR / "scripts" / name).read_text(encoding="utf-8")
+            self.assertIn('source "$ROOT_DIR/scripts/launcher_test_isolation.sh"', source, name)
+            self.assertNotIn('export PATH=', source, name)
+            self.assertNotIn('source "$ENV_FILE"', source, name)
+            self.assertNotIn('source "$NODE_BRIDGE_ENV_FILE"', source, name)
+            self.assertNotIn('source "$ROOT_DIR/.venv/bin/activate"', source, name)
+            self.assertNotIn('command -v ', source, name)
+
+        helper = (ROOT_DIR / "scripts" / "launcher_test_isolation.sh").read_text(encoding="utf-8")
+        self.assertIn('[ "${NODE_ENV:-}" = "test" ] && [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" = "1" ]', helper)
+        self.assertIn('launcher_test_isolation_active && return 0', helper)
 
 
 if __name__ == "__main__":

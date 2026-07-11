@@ -5,22 +5,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
 NODE_BRIDGE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
+source "$ROOT_DIR/scripts/launcher_test_isolation.sh"
 
-if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
-  if [ -f "$ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$ENV_FILE"
-    set +a
-  fi
-
-  if [ -f "$NODE_BRIDGE_ENV_FILE" ]; then
-    set -a
-    # shellcheck disable=SC1090
-    source "$NODE_BRIDGE_ENV_FILE"
-    set +a
-  fi
-fi
+launcher_load_env_file "$ENV_FILE"
+launcher_load_env_file "$NODE_BRIDGE_ENV_FILE"
 
 HEADLESS="${PLAYWRIGHT_MCP_HEADLESS:-true}"
 HOST="${PLAYWRIGHT_MCP_HOST:-127.0.0.1}"

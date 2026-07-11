@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { execFileSync } from 'node:child_process';
@@ -1153,7 +1153,7 @@ test('Hermes release gate isolates probes and tests in a read-only source snapsh
   assert.ok(script.indexOf('SANDBOX_ROOT=') < script.indexOf('NODE_VERSION='));
 });
 
-test('release-tested launchers honor the generic env-file test guard', () => {
+test('release-tested launchers honor the shared env-file test guard', () => {
   const root = new URL('../..', import.meta.url).pathname;
   for (const relativePath of [
     'scripts/start_time_mcp.sh',
@@ -1164,7 +1164,11 @@ test('release-tested launchers honor the generic env-file test guard', () => {
     'scripts/start_ombre_brain_service.sh',
   ]) {
     const script = readFileSync(join(root, relativePath), 'utf8');
-    assert.match(script, /NODE_ENV[^\n]*test[^\n]*RAN_AGENT_SKIP_ENV_FILE_LOAD/, relativePath);
+    if (relativePath === 'scripts/start_ombre_brain_service.sh') {
+      assert.match(script, /NODE_ENV[^\n]*test[^\n]*RAN_AGENT_SKIP_ENV_FILE_LOAD/, relativePath);
+    } else {
+      assert.match(script, /source "\$ROOT_DIR\/scripts\/launcher_test_isolation\.sh"/, relativePath);
+    }
   }
 });
 
@@ -1175,6 +1179,10 @@ test('generic launcher env guard skips files only for explicit test mode', () =>
   const launcher = join(scriptsDir, 'start_external_mcp_gateway.sh');
   const sourceLauncher = new URL('../../scripts/start_external_mcp_gateway.sh', import.meta.url).pathname;
   writeFileSync(launcher, readFileSync(sourceLauncher));
+  copyFileSync(
+    new URL('../../scripts/launcher_test_isolation.sh', import.meta.url),
+    join(scriptsDir, 'launcher_test_isolation.sh'),
+  );
   chmodSync(launcher, 0o755);
   writeFileSync(join(dir, '.env.local'), 'SENTINEL_ENV=loaded\n');
   const fakeNode = join(dir, 'fake-node');
