@@ -254,11 +254,30 @@ snapshot_path() {
   fi
 }
 
+service_load_state() {
+  local unit="$1" load_state
+  load_state="$("${SUDO[@]}" systemctl show "$unit" --property=LoadState --value 2>/dev/null)" || return 1
+  [[ -n "$load_state" ]] || return 1
+  printf '%s' "$load_state"
+}
+
+optional_runtime_unit() {
+  case "$1" in
+    ran-agent-ombre-brain.service|ran-agent-xhs-browse.service|ran-agent-xhs-public-sidecar.service) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+optional_unit_absent() {
+  printf 'deploy-hermes-release: optional unit absent; %s skipped unit=%s\n' "${2:-restore}" "$1" >&2
+}
+
 snapshot_service_state() {
-  local unit="$1" active enabled
+  local unit="$1" active enabled load_state
+  load_state="$(service_load_state "$unit")" || fail service_load_state_unavailable
   if "${SUDO[@]}" systemctl is-active --quiet "$unit"; then active=active; else active=inactive; fi
   enabled="$("${SUDO[@]}" systemctl is-enabled "$unit" 2>/dev/null || true)"
-  printf '%s\t%s\t%s\n' "$unit" "$active" "$enabled" | "${SUDO[@]}" tee -a "$SNAPSHOT_DIR/services" >/dev/null
+  printf '%s\t%s\t%s\t%s\n' "$unit" "$active" "$enabled" "$load_state" | "${SUDO[@]}" tee -a "$SNAPSHOT_DIR/services" >/dev/null
 }
 
 snapshot_code_revision() {
@@ -291,11 +310,22 @@ snapshot_runtime_state() {
 
 quiesce_runtime_services() {
   [[ -n "$SNAPSHOT_DIR" ]] && "${SUDO[@]}" test -f "$SNAPSHOT_DIR/services" || return 0
-  local unit
-  for unit in "${ALL_RUNTIME_UNITS[@]}"; do
-    "${SUDO[@]}" awk -F '\t' -v unit="$unit" '$1 == unit && $2 == "active" { found=1 } END { exit !found }' "$SNAPSHOT_DIR/services" || continue
+  local unit active enabled snapshot_load_state current_load_state
+  while IFS=$'\t' read -r unit active enabled snapshot_load_state; do
+    [[ "$active" == active ]] || continue
+    if [[ "$snapshot_load_state" == not-found ]]; then
+      optional_runtime_unit "$unit" && { optional_unit_absent "$unit" quiesce; continue; }
+      return 1
+    fi
+    if [[ -z "$snapshot_load_state" ]]; then
+      current_load_state="$(service_load_state "$unit")" || return 1
+      if [[ "$current_load_state" == not-found ]]; then
+        optional_runtime_unit "$unit" && { optional_unit_absent "$unit" quiesce; continue; }
+        return 1
+      fi
+    fi
     "${SUDO[@]}" systemctl stop "$unit" || return 1
-  done
+  done < <("${SUDO[@]}" cat "$SNAPSHOT_DIR/services")
 }
 
 # Node uses JSON/JSONL durable files under state; snapshot the complete state
@@ -359,9 +389,28 @@ restore_state_migrations() {
 restore_service_state() {
   [[ -n "$SNAPSHOT_DIR" ]] && "${SUDO[@]}" test -f "$SNAPSHOT_DIR/services" || return 1
   "${SUDO[@]}" systemctl daemon-reload
-  local unit active enabled
-  while IFS=$'\t' read -r unit active enabled; do
-    case "$enabled" in enabled|enabled-runtime) "${SUDO[@]}" systemctl enable "$unit" >/dev/null ;; disabled|masked) "${SUDO[@]}" systemctl disable "$unit" >/dev/null ;; esac
+  local unit active enabled snapshot_load_state current_load_state
+  while IFS=$'\t' read -r unit active enabled snapshot_load_state; do
+    if [[ "$snapshot_load_state" == not-found ]]; then
+      optional_runtime_unit "$unit" && { optional_unit_absent "$unit"; continue; }
+      return 1
+    fi
+    current_load_state="$(service_load_state "$unit")" || return 1
+    if [[ "$current_load_state" == not-found ]]; then
+      optional_runtime_unit "$unit" && { optional_unit_absent "$unit"; continue; }
+      return 1
+    fi
+    if [[ "$enabled" == masked ]]; then
+      "${SUDO[@]}" systemctl stop "$unit"
+      "${SUDO[@]}" systemctl mask "$unit" >/dev/null
+      continue
+    fi
+    "${SUDO[@]}" systemctl unmask "$unit" >/dev/null 2>&1 || true
+    case "$enabled" in
+      enabled) "${SUDO[@]}" systemctl enable "$unit" >/dev/null ;;
+      enabled-runtime) "${SUDO[@]}" systemctl enable --runtime "$unit" >/dev/null ;;
+      disabled) "${SUDO[@]}" systemctl disable "$unit" >/dev/null ;;
+    esac
     if [[ "$active" == active ]]; then "${SUDO[@]}" systemctl restart "$unit"; else "${SUDO[@]}" systemctl stop "$unit"; fi
   done < <("${SUDO[@]}" cat "$SNAPSHOT_DIR/services")
 }

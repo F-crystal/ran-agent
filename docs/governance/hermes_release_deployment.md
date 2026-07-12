@@ -1,6 +1,6 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-07-11)
+Status: CURRENT (2026-07-12)
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable
@@ -44,6 +44,13 @@ only `bootstrap-hermes-release.sh`, `deploy-hermes-release.sh`, and
 against `docs/governance/hermes_release_bootstrap.v1.sha256` in the candidate.
 It invokes the same `deploy-hermes-release.sh` transaction as normal releases;
 there is no second persistent deployment mechanism.
+
+During candidate apply the staged `apply-hermes-runtime-split.sh
+--preserve-runtime-shape` path checks `systemctl` and restarts only the four
+existing core units. It deliberately does not invoke or require an interactive
+shell `hermes` executable: the staged gate and later verification remain the
+release checks, while the ordinary non-preserve drift-repair path still
+requires Hermes because it installs profiles and writes Hermes units.
 
 Before either bootstrap or normal apply snapshots/switches production, the
 complete candidate archive provides `hermes-release-candidate-preflight.mjs`.
@@ -90,6 +97,14 @@ The apply transaction creates one owner-only snapshot under
 - service active/enabled state;
 - the complete Node durable state directory after managed services stop;
 - SQLite/WAL/SHM migration files under `/opt/ran_agent/data`.
+
+The services manifest additionally records each unit's systemd load state.
+Retired optional units such as `ran-agent-xhs-browse.service` may therefore be
+recorded as `not-found`. Rollback and quiescing skip an optional unit that was
+absent at snapshot time (including legacy three-column manifests after a
+current load-state check), rather than attempting to create, enable, stop, or
+restart it. This preserves the public-only XHS sidecar/fallback topology and
+does not restore the retired account-backed browse service.
 
 `/opt/ran_agent-release` is deliberately outside `STATE_DIR`; do not set
 `RAN_AGENT_RELEASE_ARTIFACT_ROOT` or any manual `BACKUP_DIR` beneath the state

@@ -633,9 +633,9 @@ test("social repair is forbidden when Hermes omitted a trusted result", async ()
   assert.equal(repaired, false);
 });
 
-test("gateway-originated claim does not create a repair request", async () => {
+test("gateway-originated claim does not create a repair request", async (t) => {
   let repaired = false;
-  const backend = createReplyBackend({ env: { HERMES_API_BASE_URL: "http://127.0.0.1:8642/v1", HERMES_API_KEY: "token", HERMES_REPLY_MODE: "api", HERMES_ACTION_GATE_ENABLED: "true", HERMES_ACTION_GATE_MODE: "repair" }, actionRepairImpl: async () => { repaired = true; return { ok: true, status: "success" }; }, ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} } });
+  const backend = createReplyBackend({ env: tempStateEnv(t, { HERMES_API_BASE_URL: "http://127.0.0.1:8642/v1", HERMES_API_KEY: "token", HERMES_REPLY_MODE: "api", HERMES_ACTION_GATE_ENABLED: "true", HERMES_ACTION_GATE_MODE: "repair" }), actionRepairImpl: async () => { repaired = true; return { ok: true, status: "success" }; }, ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} } });
   await backend.getReply({ text: "读链接", sender_id: "gateway-claim", channel: "wechat" }, { fetchImpl: async () => ({ ok: true, status: 200, async json() { return { choices: [{ message: { content: "我已经完整读完了。" } }] }; }, async text() { return ""; } }) });
   assert.equal(repaired, false);
 });

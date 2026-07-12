@@ -1724,6 +1724,17 @@ main() {
     --preserve-runtime-shape) PRESERVE_RUNTIME_SHAPE=1 ;;
     *) echo "ERROR: invalid runtime split mode" >&2; exit 1 ;;
   esac
+
+  # Candidate release mode changes code only.  Existing profile membership,
+  # opaque MCP config, env files, and units stay owned by the operator.
+  if [ "$PRESERVE_RUNTIME_SHAPE" = "1" ]; then
+    require_command systemctl
+    restart_services
+    return 0
+  fi
+
+  # Drift repair installs profiles and generates units which directly invoke
+  # Hermes.  Candidate release mode above only restarts existing units.
   require_command "$HERMES_BIN"
   require_command systemctl
   require_command journalctl
@@ -1732,13 +1743,6 @@ main() {
   require_command openssl
 
   ensure_runtime_dirs
-
-  # Candidate release mode changes code only.  Existing profile membership,
-  # opaque MCP config, env files, and units stay owned by the operator.
-  if [ "$PRESERVE_RUNTIME_SHAPE" = "1" ]; then
-    restart_services
-    return 0
-  fi
 
   if [ "$PRESERVE_RUNTIME_SHAPE" != "1" ]; then
     backup_env_file full_home_env "$FULL_HOME/.env"

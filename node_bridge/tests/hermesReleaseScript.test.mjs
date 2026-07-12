@@ -103,6 +103,92 @@ function makeSystemctlFixture({ show = '', cat = '' } = {}) {
   return { dir, path };
 }
 
+function makeDeployServiceFixture(initialStates = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-release-services-'));
+  const repo = join(dir, 'repo');
+  const scripts = join(repo, 'scripts');
+  const bin = join(dir, 'bin');
+  const state = join(dir, 'systemctl-state');
+  const log = join(dir, 'systemctl.log');
+  const snapshot = join(dir, 'snapshot');
+  mkdirSync(scripts, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(state, { recursive: true });
+  mkdirSync(snapshot, { recursive: true });
+
+  const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+  const footer = deploy.lastIndexOf('if [[ "$MODE" == --rollback ]]');
+  assert.ok(footer > 0, 'deploy function harness requires the transaction footer');
+  writeFileSync(join(scripts, 'deploy-hermes-release.sh'), deploy.slice(0, footer));
+  copyFileSync(join(root, 'scripts', 'resolve-hermes-service-node.sh'), join(scripts, 'resolve-hermes-service-node.sh'));
+  chmodSync(join(scripts, 'resolve-hermes-service-node.sh'), 0o755);
+
+  for (const [unit, values] of Object.entries(initialStates)) {
+    writeFileSync(join(state, `${unit}.load`), `${values.load}\n`);
+    writeFileSync(join(state, `${unit}.active`), `${values.active}\n`);
+    writeFileSync(join(state, `${unit}.enabled`), `${values.enabled}\n`);
+  }
+  writeFileSync(join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n');
+  writeFileSync(join(bin, 'systemctl'), [
+    '#!/bin/sh',
+    'set -eu',
+    'printf "%s\\n" "$*" >> "$SYSTEMCTL_LOG"',
+    'unit=""',
+    'for arg in "$@"; do unit="$arg"; done',
+    'load_state() { cat "$SYSTEMCTL_STATE/$1.load" 2>/dev/null || printf "%s\\n" not-found; }',
+    'require_loaded() {',
+    '  [ "$(load_state "$1")" != not-found ] || { printf "Unit %s not loaded\\n" "$1" >&2; exit 5; }',
+    '}',
+    'case "$1" in',
+    '  show) load_state "$2" ;;',
+    '  is-active)',
+    '    [ "$(cat "$SYSTEMCTL_STATE/$unit.active" 2>/dev/null || printf inactive)" = active ]',
+    '    ;;',
+    '  is-enabled) cat "$SYSTEMCTL_STATE/$unit.enabled" 2>/dev/null || printf "%s\\n" disabled ;;',
+    '  daemon-reload) ;;',
+    '  stop|restart|enable|disable|mask|unmask)',
+    '    require_loaded "$unit"',
+    '    case "$1" in',
+    '      stop) printf "%s\\n" inactive > "$SYSTEMCTL_STATE/$unit.active" ;;',
+    '      restart) printf "%s\\n" active > "$SYSTEMCTL_STATE/$unit.active" ;;',
+    '      enable) printf "%s\\n" enabled > "$SYSTEMCTL_STATE/$unit.enabled" ;;',
+    '      disable) printf "%s\\n" disabled > "$SYSTEMCTL_STATE/$unit.enabled" ;;',
+    '      mask) printf "%s\\n" masked > "$SYSTEMCTL_STATE/$unit.enabled" ;;',
+    '      unmask) printf "%s\\n" disabled > "$SYSTEMCTL_STATE/$unit.enabled" ;;',
+    '    esac',
+    '    ;;',
+    '  *) exit 1 ;;',
+    'esac',
+    '',
+  ].join('\n'));
+  chmodSync(join(bin, 'sudo'), 0o755);
+  chmodSync(join(bin, 'systemctl'), 0o755);
+  return { dir, repo, bin, state, log, snapshot };
+}
+
+function runDeployServiceFixture(fixture, commands) {
+  return execFileSync('bash', ['-c', [
+    'set -euo pipefail',
+    'set -- --rollback fixture-snapshot',
+    `source ${JSON.stringify(join(fixture.repo, 'scripts', 'deploy-hermes-release.sh'))}`,
+    `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
+    'for unit in "${ALL_RUNTIME_UNITS[@]}"; do snapshot_service_state "$unit"; done',
+    commands,
+  ].join('\n')], {
+    cwd: fixture.repo,
+    env: {
+      PATH: `${fixture.bin}:/usr/bin:/bin`,
+      RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+      RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(fixture.dir, 'artifacts'),
+      SYSTEMCTL_LOG: fixture.log,
+      SYSTEMCTL_STATE: fixture.state,
+    },
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+}
+
 test('release scripts expose fixture-safe dry-run transactions and require an explicit apply transaction', () => {
   // The release gate deliberately executes copied sources without `.git`.
   // Candidate resolution is validated by this fixture in a real checkout; the
@@ -211,6 +297,212 @@ test('preserve mode cannot rewrite profiles or environment, or remove unrelated 
   assert.match(apply, /if \[ "\$PRESERVE_RUNTIME_SHAPE" != "1" \]; then\n    "\$\{SUDO\[@\]\}" rm -f "\$XHS_BROWSE_SERVICE"/);
   assert.match(deploy, /CORE_RUNTIME_UNITS=\(ran-agent-python\.service ran-agent-node\.service ran-agent-hermes\.service ran-agent-hermes-full\.service\)/);
   assert.match(deploy, /for unit in "\$\{ALL_RUNTIME_UNITS\[@\]\}"; do/);
+});
+
+test('preserve runtime shape restarts only core services when Hermes is absent from PATH', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-preserve-no-cli-'));
+  const bin = join(dir, 'bin');
+  const trace = join(dir, 'systemctl.log');
+  const state = join(dir, 'state');
+  const debug = join(dir, 'debug');
+  const config = join(dir, 'config.yaml');
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(config, 'operator-owned-config\n');
+  writeFileSync(join(bin, 'systemctl'), [
+    '#!/bin/sh',
+    'printf "%s\\n" "$*" >> "$SYSTEMCTL_TRACE"',
+    'case "$1" in',
+    '  show) printf "%s\\n" loaded ;;',
+    '  is-failed) exit 1 ;;',
+    'esac',
+    '',
+  ].join('\n'));
+  for (const command of ['journalctl', 'pgrep', 'ss', 'openssl', 'sleep']) {
+    writeFileSync(join(bin, command), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(bin, command), 0o755);
+  }
+  chmodSync(join(bin, 'systemctl'), 0o755);
+
+  try {
+    assert.doesNotThrow(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
+      cwd: root,
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        RAN_AGENT_NO_SUDO: '1',
+        RAN_AGENT_REPO_ROOT: root,
+        RAN_AGENT_DEPLOY_STATE_DIR: state,
+        RAN_AGENT_DEPLOY_DEBUG_DIR: debug,
+        HERMES_HOME: join(dir, 'hermes-home'),
+        HERMES_LITE_HOME: join(dir, 'hermes-home', 'lite'),
+        SYSTEMCTL_TRACE: trace,
+      },
+      stdio: 'pipe',
+    }));
+    const log = readFileSync(trace, 'utf8');
+    for (const unit of ['ran-agent-python.service', 'ran-agent-node.service', 'ran-agent-hermes.service', 'ran-agent-hermes-full.service']) {
+      assert.match(log, new RegExp(`restart ${unit.replace('.', '\\.')}`));
+    }
+    assert.doesNotMatch(log, /ran-agent-ombre|ran-agent-xhs|\b(enable|disable)\b/);
+    assert.equal(readFileSync(config, 'utf8'), 'operator-owned-config\n');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('non-preserve runtime split fails before mutation when Hermes is absent from PATH', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'hermes-full-no-cli-'));
+  const bin = join(dir, 'bin');
+  const state = join(dir, 'state');
+  const trace = join(dir, 'systemctl.log');
+  mkdirSync(bin, { recursive: true });
+  try {
+    assert.throws(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh')], {
+      cwd: root,
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        RAN_AGENT_NO_SUDO: '1',
+        RAN_AGENT_REPO_ROOT: root,
+        RAN_AGENT_DEPLOY_STATE_DIR: state,
+        RAN_AGENT_DEPLOY_DEBUG_DIR: join(dir, 'debug'),
+        SYSTEMCTL_TRACE: trace,
+      },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }), /required command not found: hermes/);
+    assert.equal(existsSync(state), false, 'missing Hermes must fail before runtime directories are changed');
+    assert.equal(existsSync(trace), false, 'missing Hermes must fail before systemd mutation');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('optional unit absent before apply is recorded and skipped through rollback without systemctl errors', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-python.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-node.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-hermes.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-hermes-full.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-ombre-brain.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    // Deliberately inconsistent to prove quiesce follows LoadState, not an
+    // accidental active probe for an absent optional unit.
+    'ran-agent-xhs-browse.service': { load: 'not-found', active: 'active', enabled: 'disabled' },
+    'ran-agent-xhs-public-sidecar.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+  });
+  try {
+    const output = runDeployServiceFixture(fixture, 'quiesce_runtime_services 2>&1\nrestore_service_state 2>&1');
+    const services = readFileSync(join(fixture.snapshot, 'services'), 'utf8');
+    const log = readFileSync(fixture.log, 'utf8');
+    assert.match(services, /^ran-agent-xhs-browse\.service\tactive\tdisabled\tnot-found$/m);
+    assert.match(output, /optional unit absent; restore skipped/);
+    assert.doesNotMatch(log, /(?:stop|restart|enable|disable|mask|unmask) ran-agent-xhs-browse\.service/);
+    assert.doesNotMatch(output, /Unit .*not (?:found|loaded)/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('rollback restores present optional units to their snapshotted active and enabled states', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-python.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-node.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-hermes.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-hermes-full.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-ombre-brain.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-xhs-browse.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-xhs-public-sidecar.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+  });
+  try {
+    runDeployServiceFixture(fixture, [
+      'quiesce_runtime_services',
+      'systemctl disable ran-agent-ombre-brain.service',
+      'restore_service_state 2>&1',
+    ].join('\n'));
+    const log = readFileSync(fixture.log, 'utf8');
+    assert.equal(readFileSync(join(fixture.state, 'ran-agent-ombre-brain.service.active'), 'utf8').trim(), 'active');
+    assert.equal(readFileSync(join(fixture.state, 'ran-agent-ombre-brain.service.enabled'), 'utf8').trim(), 'enabled');
+    assert.match(log, /restart ran-agent-ombre-brain\.service/);
+    assert.match(log, /enable ran-agent-ombre-brain\.service/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('rollback keeps a present optional inactive disabled without starting it', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-python.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-node.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-hermes.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-hermes-full.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-ombre-brain.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-xhs-browse.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-xhs-public-sidecar.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+  });
+  try {
+    runDeployServiceFixture(fixture, 'restore_service_state');
+    const log = readFileSync(fixture.log, 'utf8');
+    assert.equal(readFileSync(join(fixture.state, 'ran-agent-xhs-public-sidecar.service.active'), 'utf8').trim(), 'inactive');
+    assert.equal(readFileSync(join(fixture.state, 'ran-agent-xhs-public-sidecar.service.enabled'), 'utf8').trim(), 'disabled');
+    assert.match(log, /disable ran-agent-xhs-public-sidecar\.service/);
+    assert.match(log, /stop ran-agent-xhs-public-sidecar\.service/);
+    assert.doesNotMatch(log, /restart ran-agent-xhs-public-sidecar\.service/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('rollback restores a present optional masked unit as masked and inactive', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-python.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-node.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-hermes.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-hermes-full.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-ombre-brain.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+    'ran-agent-xhs-browse.service': { load: 'loaded', active: 'inactive', enabled: 'masked' },
+    'ran-agent-xhs-public-sidecar.service': { load: 'loaded', active: 'inactive', enabled: 'disabled' },
+  });
+  try {
+    runDeployServiceFixture(fixture, 'restore_service_state');
+    const log = readFileSync(fixture.log, 'utf8');
+    assert.equal(readFileSync(join(fixture.state, 'ran-agent-xhs-browse.service.active'), 'utf8').trim(), 'inactive');
+    assert.equal(readFileSync(join(fixture.state, 'ran-agent-xhs-browse.service.enabled'), 'utf8').trim(), 'masked');
+    assert.match(log, /mask ran-agent-xhs-browse\.service/);
+    assert.doesNotMatch(log, /restart ran-agent-xhs-browse\.service/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('legacy three-column optional snapshot skips a currently absent retired unit', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-xhs-browse.service': { load: 'not-found', active: 'inactive', enabled: 'disabled' },
+  });
+  try {
+    writeFileSync(join(fixture.snapshot, 'services'), 'ran-agent-xhs-browse.service\tinactive\tdisabled\n');
+    const output = execFileSync('bash', ['-c', [
+      'set -euo pipefail',
+      'set -- --rollback fixture-snapshot',
+      `source ${JSON.stringify(join(fixture.repo, 'scripts', 'deploy-hermes-release.sh'))}`,
+      `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
+      'restore_service_state 2>&1',
+    ].join('\n')], {
+      cwd: fixture.repo,
+      env: {
+        PATH: `${fixture.bin}:/usr/bin:/bin`,
+        RAN_AGENT_NODE_BIN: nodeBin,
+        RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(fixture.dir, 'artifacts'),
+        SYSTEMCTL_LOG: fixture.log,
+        SYSTEMCTL_STATE: fixture.state,
+      },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    const log = readFileSync(fixture.log, 'utf8');
+    assert.match(output, /optional unit absent; restore skipped/);
+    assert.doesNotMatch(log, /(?:stop|restart|enable|disable|mask|unmask) ran-agent-xhs-browse\.service/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
 });
 
 test('release transaction keeps a redacted protected-capability evidence trail across snapshot, apply, and rollback', () => {
