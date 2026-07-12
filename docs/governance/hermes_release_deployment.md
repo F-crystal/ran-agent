@@ -152,6 +152,19 @@ Their detailed output is suppressed by the wrapper to avoid copying local
 configuration or credentials into release logs; run an individual diagnostic
 only under the server's restricted incident-log policy.
 
+Before the broker journey, blocking acceptance waits independently for the
+lite and full Hermes `/v1/models` gateways. Each bounded attempt verifies the
+unit remains active, reads that unit's current MainPID environment, prefers
+`HERMES_API_KEY` and falls back only to `API_SERVER_KEY`, then requires an
+authenticated HTTP 200. Connection failures and 5xx responses retry for at
+most 120 seconds (two-second interval by default); 401/403, a missing key, an
+invalid MainPID, or an inactive unit fails closed immediately. The bearer value
+is written only to an owner-only temporary header file passed by filename to
+curl, then removed on success, failure, or signal; it is never printed or put
+in curl argv. `RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS` and
+`RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS` provide bounded operator
+overrides.
+
 ## 5. Difference Record And Acceptance Evidence
 
 Before the staged gate, apply writes an owner-only difference record at

@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -189,6 +190,75 @@ function runDeployServiceFixture(fixture, commands) {
   });
 }
 
+function makeAcceptanceReadinessFixture({ liteEnv = 'HERMES_API_KEY=lite-key', fullEnv = 'HERMES_API_KEY=full-key' } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-accept-readiness-'));
+  const repo = join(dir, 'repo');
+  const scripts = join(repo, 'scripts');
+  const bin = join(dir, 'bin');
+  const state = join(dir, 'state');
+  const envDir = join(dir, 'environ');
+  const trace = join(dir, 'trace');
+  const tmp = join(dir, 'tmp');
+  mkdirSync(scripts, { recursive: true });
+  mkdirSync(bin, { recursive: true });
+  mkdirSync(state, { recursive: true });
+  mkdirSync(envDir, { recursive: true });
+  mkdirSync(trace, { recursive: true });
+  mkdirSync(tmp, { recursive: true });
+  const git = (args) => execFileSync('git', args, { cwd: repo, stdio: 'pipe' });
+  writeFileSync(join(repo, 'README.md'), 'fixture\n');
+  git(['init']); git(['config', 'user.email', 'release-test@example.invalid']); git(['config', 'user.name', 'release test']); git(['add', '.']); git(['commit', '-m', 'fixture']);
+  const accept = readFileSync(join(root, 'scripts', 'accept-hermes-release.sh'), 'utf8');
+  const footer = accept.indexOf('if [[ "$MODE" == "--dry-run" ]]');
+  assert.ok(footer > 0, 'acceptance readiness fixture requires the acceptance footer');
+  writeFileSync(join(scripts, 'accept-hermes-release.sh'), accept.slice(0, footer));
+  writeFileSync(join(envDir, '111'), Buffer.from(`${liteEnv}\0`));
+  writeFileSync(join(envDir, '222'), Buffer.from(`${fullEnv}\0`));
+  for (const [unit, pid] of [['ran-agent-hermes.service', '111'], ['ran-agent-hermes-full.service', '222']]) {
+    writeFileSync(join(state, `${unit}.active`), 'active\n');
+    writeFileSync(join(state, `${unit}.pid`), `${pid}\n`);
+  }
+  writeFileSync(join(bin, 'sudo'), '#!/bin/sh\nexec "$@"\n');
+  writeFileSync(join(bin, 'systemctl'), [
+    '#!/bin/sh', 'set -eu', 'printf "%s\\n" "$*" >> "$MOCK_TRACE/systemctl"', 'unit=""; for arg in "$@"; do unit="$arg"; done',
+    'case "$1" in',
+    '  is-active) [ "$(cat "$MOCK_STATE/$unit.active")" = active ] ;;',
+    '  show) cat "$MOCK_STATE/$2.pid" ;;',
+    '  *) exit 1 ;;', 'esac', '',
+  ].join('\n'));
+  writeFileSync(join(bin, 'cat'), '#!/bin/sh\ncase "$1" in /proc/*/environ) pid=${1#/proc/}; pid=${pid%/environ}; exec /bin/cat "$MOCK_ENV/$pid" ;; esac\nexec /bin/cat "$@"\n');
+  writeFileSync(join(bin, 'curl'), [
+    '#!/bin/sh', 'set -eu', 'printf "%s\\n" "$*" >> "$MOCK_TRACE/curl"', 'header=""; target=""',
+    'while [ "$#" -gt 0 ]; do case "$1" in --header) header=${2#@}; shift 2;; *) target=$1; shift;; esac; done',
+    'case "$target" in *:8642/*) name=lite; expected=${MOCK_EXPECTED_LITE_KEY:-};; *:8643/*) name=full; expected=${MOCK_EXPECTED_FULL_KEY:-};; *) exit 2;; esac',
+    'if [ -n "$expected" ] && ! grep -Fqx "Authorization: Bearer $expected" "$header"; then printf 401; exit 0; fi',
+    'if [ "${MOCK_BLOCK_CURL:-0}" = 1 ]; then /bin/sleep 30; exit 28; fi',
+    'count_file="$MOCK_STATE/$name.count"; count=$(cat "$count_file" 2>/dev/null || printf 0); count=$((count + 1)); printf "%s\\n" "$count" > "$count_file"',
+    'if [ "${MOCK_DROP_LITE_AFTER_CURL:-0}" = 1 ] && [ "$name" = lite ]; then printf inactive > "$MOCK_STATE/ran-agent-hermes.service.active"; fi',
+    'if [ "$name" = lite ]; then sequence=${MOCK_lite_SEQUENCE:-200}; else sequence=${MOCK_full_SEQUENCE:-200}; fi; value=$(printf "%s" "$sequence" | cut -d, -f"$count"); [ -n "$value" ] || value=$(printf "%s" "$sequence" | awk -F, "{print \\$NF}")',
+    'case "$value" in refused) exit 7;; timeout) exit 28;; *) printf "%s" "$value";; esac', '',
+  ].join('\n'));
+  for (const file of ['sudo', 'systemctl', 'cat', 'curl']) chmodSync(join(bin, file), 0o755);
+  return { dir, repo, bin, state, envDir, trace };
+}
+
+function runAcceptanceReadiness(fixture, extraEnv = {}) {
+  return execFileSync('bash', ['-c', [
+    'set -euo pipefail', 'set -- --apply',
+    `source ${JSON.stringify(join(fixture.repo, 'scripts', 'accept-hermes-release.sh'))}`,
+    'release_bridge_synthetic_paths',
+  ].join('\n')], {
+    cwd: fixture.repo,
+    env: {
+      PATH: `${fixture.bin}:/usr/bin:/bin`, RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo, TMPDIR: join(fixture.dir, 'tmp'),
+      MOCK_STATE: fixture.state, MOCK_ENV: fixture.envDir, MOCK_TRACE: fixture.trace,
+      RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '4', RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS: '1',
+      ...extraEnv,
+    }, encoding: 'utf8', stdio: 'pipe',
+  });
+}
+
 test('release scripts expose fixture-safe dry-run transactions and require an explicit apply transaction', () => {
   // The release gate deliberately executes copied sources without `.git`.
   // Candidate resolution is validated by this fixture in a real checkout; the
@@ -297,6 +367,82 @@ test('preserve mode cannot rewrite profiles or environment, or remove unrelated 
   assert.match(apply, /if \[ "\$PRESERVE_RUNTIME_SHAPE" != "1" \]; then\n    "\$\{SUDO\[@\]\}" rm -f "\$XHS_BROWSE_SERVICE"/);
   assert.match(deploy, /CORE_RUNTIME_UNITS=\(ran-agent-python\.service ran-agent-node\.service ran-agent-hermes\.service ran-agent-hermes-full\.service\)/);
   assert.match(deploy, /for unit in "\$\{ALL_RUNTIME_UNITS\[@\]\}"; do/);
+});
+
+test('acceptance waits for independently delayed authenticated lite and full gateways without leaking the key', () => {
+  const fixture = makeAcceptanceReadinessFixture({
+    liteEnv: 'HERMES_API_KEY=preferred-lite\0API_SERVER_KEY=wrong-lite',
+    fullEnv: 'API_SERVER_KEY=fallback-full',
+  });
+  const secret = 'preferred-lite';
+  try {
+    assert.doesNotThrow(() => runAcceptanceReadiness(fixture, {
+      MOCK_EXPECTED_LITE_KEY: secret,
+      MOCK_EXPECTED_FULL_KEY: 'fallback-full',
+      MOCK_lite_SEQUENCE: 'refused,200',
+      MOCK_full_SEQUENCE: 'refused,200',
+    }));
+    const trace = `${readFileSync(join(fixture.trace, 'curl'), 'utf8')}${readFileSync(join(fixture.trace, 'systemctl'), 'utf8')}`;
+    assert.doesNotMatch(trace, new RegExp(secret));
+    assert.doesNotMatch(readdirSync(join(fixture.dir, 'tmp')).join('\n'), /ran-agent-release-gateway/, 'readiness headers must be removed after success');
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('acceptance readiness fails closed for authentication, missing keys, service exit, and bounded timeout', () => {
+  const cases = [
+    { name: 'authentication', env: 'HERMES_API_KEY=secret-auth', extra: { MOCK_EXPECTED_LITE_KEY: 'different', MOCK_EXPECTED_FULL_KEY: 'full-key' }, expected: 'lite_bridge_authentication_failed' },
+    { name: 'forbidden', env: 'HERMES_API_KEY=secret-forbidden', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-forbidden', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_lite_SEQUENCE: '403' }, expected: 'lite_bridge_authentication_failed' },
+    { name: 'missing-key', env: 'UNRELATED=value', extra: { MOCK_EXPECTED_FULL_KEY: 'full-key' }, expected: 'lite_bridge_auth_key_missing' },
+    { name: 'service-exit', env: 'HERMES_API_KEY=secret-exit', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-exit', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_DROP_LITE_AFTER_CURL: '1', MOCK_lite_SEQUENCE: 'refused' }, expected: 'lite_bridge_service_inactive' },
+    { name: 'timeout', env: 'HERMES_API_KEY=secret-timeout', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-timeout', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_lite_SEQUENCE: '503', RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '1' }, expected: 'lite_bridge_ready_timeout' },
+  ];
+  for (const item of cases) {
+    const fixture = makeAcceptanceReadinessFixture({ liteEnv: item.env, fullEnv: 'HERMES_API_KEY=full-key' });
+    try {
+      const started = Date.now();
+      assert.throws(() => runAcceptanceReadiness(fixture, item.extra), new RegExp(item.expected));
+      assert.ok(Date.now() - started < 4000, `${item.name} must be bounded`);
+      const curlTrace = existsSync(join(fixture.trace, 'curl')) ? readFileSync(join(fixture.trace, 'curl'), 'utf8') : '';
+      assert.doesNotMatch(curlTrace, /secret-(?:auth|exit|timeout)/);
+      if (item.name === 'missing-key') assert.equal(curlTrace, '', 'missing key must not send an unauthenticated request');
+      assert.doesNotMatch(readdirSync(join(fixture.dir, 'tmp')).join('\n'), /ran-agent-release-gateway/, `${item.name} must remove temporary headers`);
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('acceptance removes an in-flight authenticated header when terminated', async () => {
+  const fixture = makeAcceptanceReadinessFixture();
+  const child = spawn('bash', ['-c', [
+    'set -euo pipefail', 'set -- --apply',
+    `source ${JSON.stringify(join(fixture.repo, 'scripts', 'accept-hermes-release.sh'))}`,
+    'release_bridge_synthetic_paths',
+  ].join('\n')], {
+    cwd: fixture.repo,
+    detached: true,
+    env: {
+      PATH: `${fixture.bin}:/usr/bin:/bin`, RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo, TMPDIR: join(fixture.dir, 'tmp'),
+      MOCK_STATE: fixture.state, MOCK_ENV: fixture.envDir, MOCK_TRACE: fixture.trace,
+      MOCK_EXPECTED_LITE_KEY: 'lite-key', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_BLOCK_CURL: '1',
+      RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '4', RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS: '1',
+    }, stdio: 'ignore',
+  });
+  try {
+    for (let attempt = 0; attempt < 250 && !existsSync(join(fixture.trace, 'curl')); attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    assert.equal(existsSync(join(fixture.trace, 'curl')), true, 'fixture must reach the authenticated curl call');
+    process.kill(-child.pid, 'SIGTERM');
+    await once(child, 'exit');
+    assert.doesNotMatch(readdirSync(join(fixture.dir, 'tmp')).join('\n'), /ran-agent-release-gateway/);
+  } finally {
+    if (child.exitCode === null) process.kill(-child.pid, 'SIGKILL');
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
 });
 
 test('preserve runtime shape restarts only core services when Hermes is absent from PATH', () => {
