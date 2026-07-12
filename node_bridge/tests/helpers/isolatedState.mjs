@@ -17,6 +17,8 @@ export function createIsolatedTestEnv(t, overrides = {}, prefix = 'ran-agent-tes
     RAN_AGENT_ALLOW_TEST_STATE_DIR: '1',
     HERMES_SEMANTIC_VERIFIER_TEST_BYPASS: 'true',
     RAN_AGENT_STATE_DIR: stateDir,
+    RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(stateDir, 'global-timeline.jsonl'),
+    RAN_AGENT_TIMELINE_ARCHIVE_DIR: path.join(stateDir, 'timeline_archive'),
   };
 }
 

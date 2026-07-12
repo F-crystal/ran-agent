@@ -11,13 +11,34 @@ import {
   getActiveTopic,
   getActiveTopicContext,
   getGlobalRecentHistory,
+  getGlobalTimelineConfig,
   getLocalRecentHistory,
   readTimelineRecords,
 } from '../src/globalTimeline.mjs';
+import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 function tempTimelinePath() {
   return path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'ran-agent-timeline-')), 'timeline.jsonl');
 }
+
+test('test-state timeline config derives both paths and never falls back to production', (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'timeline-config-');
+  const config = getGlobalTimelineConfig({ NODE_ENV: 'test', RAN_AGENT_ALLOW_TEST_STATE_DIR: '1', RAN_AGENT_STATE_DIR: env.RAN_AGENT_STATE_DIR });
+  assert.equal(config.timelinePath, path.join(env.RAN_AGENT_STATE_DIR, 'global-timeline.jsonl'));
+  assert.equal(config.archiveDir, path.join(env.RAN_AGENT_STATE_DIR, 'timeline_archive'));
+  assert.ok(config.timelinePath.startsWith(env.RAN_AGENT_STATE_DIR));
+  assert.ok(config.archiveDir.startsWith(env.RAN_AGENT_STATE_DIR));
+  assert.throws(() => getGlobalTimelineConfig({ NODE_ENV: 'test', RAN_AGENT_ALLOW_TEST_STATE_DIR: '1' }), /production state/);
+  assert.throws(() => getGlobalTimelineConfig({ NODE_ENV: 'test', RAN_AGENT_ALLOW_TEST_STATE_DIR: '1', RAN_AGENT_STATE_DIR: env.RAN_AGENT_STATE_DIR, RAN_AGENT_GLOBAL_TIMELINE_PATH: '/opt/ran_agent/.ran_agent_state/global-timeline.jsonl' }), /production state/);
+  assert.throws(() => getGlobalTimelineConfig({ NODE_ENV: 'test', RAN_AGENT_ALLOW_TEST_STATE_DIR: '1', RAN_AGENT_STATE_DIR: env.RAN_AGENT_STATE_DIR, RAN_AGENT_TIMELINE_ARCHIVE_DIR: '/opt/ran_agent/.ran_agent_state/timeline_archive' }), /production state/);
+  assert.throws(() => getGlobalTimelineConfig({ NODE_ENV: 'test', RAN_AGENT_ALLOW_TEST_STATE_DIR: '1', RAN_AGENT_GLOBAL_TIMELINE_PATH: '/opt/ran_agent/.ran_agent_state/global-timeline.jsonl', RAN_AGENT_TIMELINE_ARCHIVE_DIR: '/opt/ran_agent/.ran_agent_state/timeline_archive' }), /production state/);
+});
+
+test('isolated state helper owns both timeline paths', (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'timeline-helper-');
+  assert.equal(env.RAN_AGENT_GLOBAL_TIMELINE_PATH, path.join(env.RAN_AGENT_STATE_DIR, 'global-timeline.jsonl'));
+  assert.equal(env.RAN_AGENT_TIMELINE_ARCHIVE_DIR, path.join(env.RAN_AGENT_STATE_DIR, 'timeline_archive'));
+});
 
 test('global timeline appends user and assistant turns with hashed ids', () => {
   const timelinePath = tempTimelinePath();
@@ -276,6 +297,7 @@ test('compactTimeline archives old file and preserves recent local history', () 
     maxTurns: 4,
     maxBytes: 1024 * 1024,
     retainRecentTurns: 3,
+    retentionDays: 0,
   });
 
   assert.equal(result.compacted, true);
@@ -285,6 +307,40 @@ test('compactTimeline archives old file and preserves recent local history', () 
   const local = getLocalRecentHistory({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', conversation_id: 'wx-compact', limit: 10, charBudget: 2000 });
   assert.equal(local.some((item) => item.content.includes('最近内莉·布莱话题')), true);
   assert.equal(local.some((item) => item.content.includes('旧话题 0')), false);
+});
+
+test('retention compaction removes expired raw records once without re-compacting summaries', () => {
+  const timelinePath = tempTimelinePath();
+  const archiveDir = path.join(path.dirname(timelinePath), 'archive');
+  const now = Date.UTC(2026, 6, 12, 12, 0, 0);
+  const cutoff = now - 24 * 60 * 60 * 1000;
+  for (const [id, text, created_at] of [
+    ['expired-1', 'expired raw record one', now - 3 * 24 * 60 * 60 * 1000],
+    ['expired-2', 'expired raw record two', now - 2 * 24 * 60 * 60 * 1000],
+    ['fresh-1', 'fresh raw record', now - 60 * 60 * 1000],
+  ]) {
+    appendTurn({
+      timelinePath,
+      id,
+      global_user_id: 'user:ran',
+      platform: 'wechat',
+      channel_type: 'dm',
+      conversation_id: 'wx-retention',
+      sender_id: 'u',
+      role: 'user',
+      text,
+      created_at,
+    });
+  }
+
+  const first = compactTimeline({ timelinePath, archiveDir, maxTurns: 10, maxBytes: 1024 * 1024, retentionDays: 1, now });
+  assert.equal(first.compacted, true);
+  assert.equal(fs.readdirSync(archiveDir).filter((entry) => entry.endsWith('.jsonl.gz')).length, 1);
+  assert.equal(readTimelineRecords({ timelinePath, limit: 10 }).filter((record) => !record.compacted).every((record) => record.created_at >= cutoff), true);
+
+  const second = compactTimeline({ timelinePath, archiveDir, maxTurns: 10, maxBytes: 1024 * 1024, retentionDays: 1, now });
+  assert.equal(second.compacted, false);
+  assert.equal(fs.readdirSync(archiveDir).filter((entry) => entry.endsWith('.jsonl.gz')).length, 1);
 });
 
 test('compactTimeline keeps active topic through summary records', () => {

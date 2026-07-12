@@ -40,6 +40,15 @@ export function writeFileAtomic(target, content, options = {}) {
   const mode = Number.isInteger(options.mode) ? options.mode : DEFAULT_MODE;
   const directory = path.dirname(target);
   fsImpl.mkdirSync(directory, { recursive: true, mode: DIRECTORY_MODE });
+  let ownership;
+  try {
+    const existing = fsImpl.statSync(target);
+    ownership = { uid: existing.uid, gid: existing.gid, mode: existing.mode & 0o777 };
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+    const parent = fsImpl.statSync(directory);
+    ownership = { uid: parent.uid, gid: parent.gid, mode };
+  }
   const temporary = path.join(
     directory,
     `.${path.basename(target)}.tmp-${process.pid}-${crypto.randomUUID()}`,
@@ -51,7 +60,8 @@ export function writeFileAtomic(target, content, options = {}) {
     fsImpl.fsyncSync(descriptor);
     fsImpl.closeSync(descriptor);
     descriptor = undefined;
-    fsImpl.chmodSync(temporary, mode);
+    fsImpl.chmodSync(temporary, ownership.mode);
+    fsImpl.chownSync(temporary, ownership.uid, ownership.gid);
     fsImpl.renameSync(temporary, target);
     fsyncDirectory(directory, fsImpl);
   } catch (error) {

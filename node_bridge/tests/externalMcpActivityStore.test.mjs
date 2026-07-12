@@ -123,7 +123,7 @@ test('rejects internally inconsistent terminal records at creation', (t) => {
 });
 
 
-test('migrates a legacy array once into paused constrained records without granting authority', (t) => {
+test('migrates a legacy read-only array while preserving its mode and later atomic updates', (t) => {
   const { store, target } = fixture(t);
   fs.writeFileSync(target, JSON.stringify([
     {
@@ -159,7 +159,16 @@ test('migrates a legacy array once into paused constrained records without grant
   assert.equal(activities[0].nextWake, null);
   assert.equal(activities[1].status, 'stopped');
   assert.equal(JSON.parse(fs.readFileSync(target, 'utf8')).schemaVersion, 1);
-  assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  assert.equal(fs.statSync(target).mode & 0o777, 0o400);
+
+  const updated = store.compareAndSwap('legacy-active', {
+    expectedRevision: 1,
+    patch: { nextWake: '2026-07-10T12:00:00.000Z' },
+    now: '2026-07-10T11:01:00.000Z',
+  });
+  assert.equal(updated.ok, true);
+  assert.equal(store.get('legacy-active').nextWake, '2026-07-10T12:00:00.000Z');
+  assert.equal(fs.statSync(target).mode & 0o777, 0o400);
 });
 
 

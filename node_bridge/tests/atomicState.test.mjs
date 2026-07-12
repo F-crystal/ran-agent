@@ -90,15 +90,32 @@ test('writeJsonAtomic keeps the old target when rename fails and removes temp st
   assert.equal(fs.readdirSync(dir).some((entry) => entry.includes('.tmp-')), false);
 });
 
-test('writeJsonAtomic replaces a read-only old target with the requested restrictive mode', (t) => {
+test('writeJsonAtomic preserves existing uid gid and restrictive mode across replacement', (t) => {
   const dir = tempDir(t);
   const target = path.join(dir, 'state.json');
   fs.writeFileSync(target, '{"schemaVersion":1,"items":["old"]}\n', { mode: 0o400 });
+  const before = fs.statSync(target);
 
   writeJsonAtomic(target, { schemaVersion: 1, items: ['new'] }, { validate: validState });
 
+  const after = fs.statSync(target);
   assert.deepEqual(JSON.parse(fs.readFileSync(target, 'utf8')), { schemaVersion: 1, items: ['new'] });
-  assert.equal(fs.statSync(target).mode & 0o777, 0o600);
+  assert.equal(after.uid, before.uid);
+  assert.equal(after.gid, before.gid);
+  assert.equal(after.mode & 0o777, 0o400);
+});
+
+test('writeJsonAtomic creates a new state file with parent ownership and mode 0600', (t) => {
+  const dir = tempDir(t);
+  const target = path.join(dir, 'state.json');
+  const parent = fs.statSync(dir);
+
+  writeJsonAtomic(target, { schemaVersion: 1, items: ['new'] }, { validate: validState });
+
+  const created = fs.statSync(target);
+  assert.equal(created.uid, parent.uid);
+  assert.equal(created.gid, parent.gid);
+  assert.equal(created.mode & 0o777, 0o600);
 });
 
 test('writeJsonAtomic preserves the old target when file flush fails', (t) => {

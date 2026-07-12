@@ -376,12 +376,15 @@ test('acceptance waits for independently delayed authenticated lite and full gat
   });
   const secret = 'preferred-lite';
   try {
+    const started = Date.now();
     assert.doesNotThrow(() => runAcceptanceReadiness(fixture, {
       MOCK_EXPECTED_LITE_KEY: secret,
       MOCK_EXPECTED_FULL_KEY: 'fallback-full',
       MOCK_lite_SEQUENCE: 'refused,200',
       MOCK_full_SEQUENCE: 'refused,200',
+      RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '12',
     }));
+    assert.ok(Date.now() - started < 15_000, 'delayed readiness success must remain bounded');
     const trace = `${readFileSync(join(fixture.trace, 'curl'), 'utf8')}${readFileSync(join(fixture.trace, 'systemctl'), 'utf8')}`;
     assert.doesNotMatch(trace, new RegExp(secret));
     assert.doesNotMatch(readdirSync(join(fixture.dir, 'tmp')).join('\n'), /ran-agent-release-gateway/, 'readiness headers must be removed after success');
@@ -715,6 +718,10 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /--all/);
   assert.match(source, /RAN_AGENT_PYTHON_BIN="\$PYTHON_BIN"/);
   assert.ok(source.indexOf('chmod -R a-w') < source.indexOf('hermes-release-smoke.mjs'));
+  for (const name of ['RAN_AGENT_STATE_DIR', 'RAN_AGENT_GLOBAL_TIMELINE_PATH', 'RAN_AGENT_TIMELINE_ARCHIVE_DIR']) {
+    assert.match(source.match(/run_node_test\(\)[\s\S]*?\n\}/)?.[0] || '', new RegExp(name));
+    assert.match(source.match(/run_node_smoke\(\)[\s\S]*?\n\}/)?.[0] || '', new RegExp(name));
+  }
 });
 
 test('release gate executes a git-less staged candidate from its explicit immutable source root', () => {

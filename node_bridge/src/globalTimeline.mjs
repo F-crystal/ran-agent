@@ -16,9 +16,16 @@ const DEFAULT_MAX_TEXT_CHARS = 2000;
 const DEFAULT_CONTINUITY_FRESHNESS_HOURS = 24;
 
 export function getGlobalTimelineConfig(env = process.env) {
+  const stateDir = String(env.RAN_AGENT_STATE_DIR || '').trim();
+  const timelinePath = String(env.RAN_AGENT_GLOBAL_TIMELINE_PATH || (stateDir && path.join(stateDir, 'global-timeline.jsonl')) || DEFAULT_TIMELINE_PATH).trim() || DEFAULT_TIMELINE_PATH;
+  const archiveDir = String(env.RAN_AGENT_TIMELINE_ARCHIVE_DIR || (stateDir && path.join(stateDir, 'timeline_archive')) || DEFAULT_ARCHIVE_DIR).trim() || DEFAULT_ARCHIVE_DIR;
+  if ((env.RAN_AGENT_ALLOW_TEST_STATE_DIR === '1' || env.NODE_ENV === 'test')
+    && (timelinePath === DEFAULT_TIMELINE_PATH || archiveDir === DEFAULT_ARCHIVE_DIR)) {
+    throw new Error('test timeline path resolves to production state');
+  }
   return {
-    timelinePath: String(env.RAN_AGENT_GLOBAL_TIMELINE_PATH || DEFAULT_TIMELINE_PATH).trim() || DEFAULT_TIMELINE_PATH,
-    archiveDir: String(env.RAN_AGENT_TIMELINE_ARCHIVE_DIR || DEFAULT_ARCHIVE_DIR).trim() || DEFAULT_ARCHIVE_DIR,
+    timelinePath,
+    archiveDir,
     maxBytes: Math.max(1, parseIntegerEnv(env.RAN_AGENT_TIMELINE_MAX_BYTES, 52428800)),
     maxTurns: Math.max(1, parseIntegerEnv(env.RAN_AGENT_TIMELINE_MAX_TURNS, 5000)),
     retentionDays: Math.max(0, parseIntegerEnv(env.RAN_AGENT_TIMELINE_RETENTION_DAYS, 30)),
@@ -37,7 +44,7 @@ function parseIntegerEnv(value, fallback) {
 }
 
 export function appendTurn(turn = {}) {
-  const config = getGlobalTimelineConfig(turn.env);
+  const config = getGlobalTimelineConfig(turn.env || (turn.timelinePath ? { RAN_AGENT_TIMELINE_RETENTION_DAYS: '0' } : undefined));
   const timelinePath = turn.timelinePath || config.timelinePath;
   const preparedText = prepareTimelineText(turn.text || turn.text_summary || '');
   const text = preparedText.text;
@@ -102,7 +109,10 @@ export function compactTimeline({
   const stat = fs.statSync(timelinePath);
   const records = readTimelineRecords({ timelinePath, limit: Number.MAX_SAFE_INTEGER });
   const cutoff = retentionDays > 0 ? now - retentionDays * 24 * 60 * 60 * 1000 : 0;
-  const hasExpiredRecords = cutoff > 0 && records.some((record) => Number(record.created_at || 0) < cutoff);
+  const isExpiredRawRecord = (record) => cutoff > 0
+    && record.compacted !== true
+    && Number(record.created_at || 0) < cutoff;
+  const hasExpiredRecords = records.some(isExpiredRawRecord);
   const shouldCompact = stat.size > Number(maxBytes) || records.length > Number(maxTurns) || hasExpiredRecords;
   if (!shouldCompact) {
     return { compacted: false, bytes: stat.size, turns: records.length };
@@ -114,7 +124,10 @@ export function compactTimeline({
       ? Number(retainRecentTurns)
       : Math.min(records.length, Math.max(100, Math.floor(Number(maxTurns || 5000) * 0.6)))
   );
-  const recentRecords = records.slice(-keepCount);
+  const retainedByAge = cutoff > 0
+    ? records.filter((record) => !isExpiredRawRecord(record))
+    : records;
+  const recentRecords = retainedByAge.slice(-keepCount);
   const recentIds = new Set(recentRecords.map((record) => record.id));
   const oldRecords = records.filter((record) => !recentIds.has(record.id));
   const summaryRecords = buildCompactSummaryRecords(oldRecords, now);
