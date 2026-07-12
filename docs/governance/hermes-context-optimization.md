@@ -27,6 +27,16 @@ facts/template only, no local/global conversation history, no provider-visible
 append history, and no lite soft-reset digest. It neither writes ordinary
 recent/global history nor rotates a normal conversation session.
 
+The closed task-route registry is `node_bridge/src/hermesTaskScope.mjs` and is
+shared by `channelHub` and `hermesGatewayClient`. It additionally covers
+`hermes_proactive_event` and `external_mcp_system_queue`. Before any ordinary
+timeline/history read, ChannelHub clears task history, active topic, continuity,
+and normal session keys; it also suppresses ordinary timeline and backend-ingest
+projection. Gateway repeats that clearing defensively, including caller-supplied
+provider-visible/cache/soft-reset fields. Task token anomalies remain visible in
+telemetry but carry `soft_reset_skipped_reason=task_scoped` and cannot rotate a
+normal lite session.
+
 Manual daily-digest understanding remains an ordinary lightweight chat turn:
 only the trusted `ai_daily_digest.send` executor switches to the isolated
 generation/delivery task. AI daily digests and lite soft-reset continuity

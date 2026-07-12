@@ -27,6 +27,7 @@ import {
   runHermesLiteSoftReset,
 } from './hermesSessionMaintenance.mjs';
 import { resolveStateDir } from './runtimeState.mjs';
+import { isHermesTaskScopedRoute, normalizeHermesTaskKind } from './hermesTaskScope.mjs';
 
 const execFile = promisify(execFileCallback);
 const recentConversationStore = new Map();
@@ -317,9 +318,11 @@ export async function sendChatToHermesGateway(payload, options = {}) {
   const config = options.config || getHermesGatewayConfig(env);
   const logger = options.logger || console;
   const requestId = options.requestId || createRequestId();
+  const taskScoped = isHermesTaskScopedRoute(payload.route_hint);
+  const taskEffectivePayload = taskScoped ? isolateTaskPayload(payload) : payload;
 
   // Determine capability mode and select base URL + profile
-  const capResult = resolveCapabilityMode(payload, config);
+  const capResult = resolveCapabilityMode(taskEffectivePayload, config);
   let selectedBaseUrl = capResult.mode === 'lite' ? config.liteBaseUrl : config.fullBaseUrl;
   let selectedProfile = capResult.mode === 'lite' ? config.liteProfile : config.fullProfile;
   let fallbackReason = '';
@@ -357,34 +360,33 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     request_id: requestId,
     fallback_reason: fallbackReason || undefined,
   }));
-  logSocialLinkRouting(payload, logger, requestId);
+  logSocialLinkRouting(taskEffectivePayload, logger, requestId);
 
   const selectedConfig = { ...config, baseUrl: selectedBaseUrl, profile: selectedProfile };
-  const taskScoped = isTaskScopedRoute(payload);
   const sessionContext = taskScoped
-    ? buildTaskHermesSessionContext(payload, selectedConfig)
-    : buildHermesSessionContext(payload, selectedConfig);
+    ? buildTaskHermesSessionContext(taskEffectivePayload, selectedConfig)
+    : buildHermesSessionContext(taskEffectivePayload, selectedConfig);
   const isLiteProfile = selectedConfig.profile === selectedConfig.liteProfile;
   const pendingResumeDigest = !taskScoped && isLiteProfile ? getPendingLiteResumeDigest(selectedConfig) : null;
   const effectivePayload = pendingResumeDigest
-    ? { ...payload, daily_digest_context: pendingResumeDigest.text }
-    : payload;
-  const hasExternalLocalRecent = Array.isArray(payload.recent_local_history) && payload.recent_local_history.length > 0;
-  const hasStoredLocalRecent = sessionContext.enabled === true
+    ? { ...taskEffectivePayload, daily_digest_context: pendingResumeDigest.text }
+    : taskEffectivePayload;
+  const hasExternalLocalRecent = Array.isArray(effectivePayload.recent_local_history) && effectivePayload.recent_local_history.length > 0;
+  const hasStoredLocalRecent = !taskScoped && sessionContext.enabled === true
     && Boolean(sessionContext.stableKey)
     && (recentConversationStore.get(sessionContext.stableKey) || []).length > 0;
-  const hasGlobalRecent = Array.isArray(payload.recent_global_history) && payload.recent_global_history.length > 0;
-  const hasStaleContext = Boolean(String(payload.stale_context || '').trim());
+  const hasGlobalRecent = Array.isArray(effectivePayload.recent_global_history) && effectivePayload.recent_global_history.length > 0;
+  const hasStaleContext = Boolean(String(effectivePayload.stale_context || '').trim());
   const contextBudget = resolveHermesContextBudget({
     mode: pendingResumeDigest ? 'resume' : selectedConfig.contextInjectionMode,
     config: selectedConfig,
     continuityState: {
-      hasLocalRecent: hasExternalLocalRecent || (!Array.isArray(payload.recent_local_history) && hasStoredLocalRecent),
+      hasLocalRecent: hasExternalLocalRecent || (!Array.isArray(effectivePayload.recent_local_history) && hasStoredLocalRecent),
       hasGlobalRecent,
-      hasContinuityNote: Boolean(String(payload.continuity_note || '').trim()) || hasStaleContext,
+      hasContinuityNote: Boolean(String(effectivePayload.continuity_note || '').trim()) || hasStaleContext,
     },
-    channel: payload.platform || payload.channel,
-    conversationId: firstNonEmptyString(payload.conversation_id, payload.conversationId, payload.sender_id, payload.senderId),
+    channel: effectivePayload.platform || effectivePayload.channel,
+    conversationId: firstNonEmptyString(effectivePayload.conversation_id, effectivePayload.conversationId, effectivePayload.sender_id, effectivePayload.senderId),
     sessionId: sessionContext.sessionId,
     hasMedia: capResult.hasMedia,
   });
@@ -396,17 +398,19 @@ export async function sendChatToHermesGateway(payload, options = {}) {
   }
   const budgetedConfig = applyContextBudgetToConfig(selectedConfig, contextBudget.budgets, contextBudget.mode);
   const externalRecentMessages = limitHistoryMessages(
-    normalizeHistoryMessages(payload.recent_local_history, budgetedConfig),
+    normalizeHistoryMessages(effectivePayload.recent_local_history, budgetedConfig),
     contextBudget.budgets.recentLocalTurns,
     contextBudget.budgets.recentLocalChars
   );
-  const cacheFriendlyHistory = loadCacheFriendlyHistory(sessionContext, budgetedConfig, logger);
+  const cacheFriendlyHistory = taskScoped
+    ? emptyCacheFriendlyHistoryStats(budgetedConfig)
+    : loadCacheFriendlyHistory(sessionContext, budgetedConfig, logger);
   const recentMessages = cacheFriendlyHistory.available === true && cacheFriendlyHistory.corrupt !== true
     ? cacheFriendlyHistory.messages
     : externalRecentMessages.length > 0
       ? externalRecentMessages
       : buildRecentHistoryMessages(sessionContext, budgetedConfig);
-  const globalRecentMessages = limitHistoryMessages(normalizeHistoryMessages(payload.recent_global_history, {
+  const globalRecentMessages = limitHistoryMessages(normalizeHistoryMessages(effectivePayload.recent_global_history, {
     ...budgetedConfig,
     recentTextMaxUserChars: 900,
     recentTextMaxAssistantChars: 900,
@@ -423,6 +427,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     globalHistoryMessages: globalRecentMessages,
     contextBudget,
     requestId,
+    taskScoped,
   });
   logHermesSessionContinuity({
     logger,
@@ -441,8 +446,8 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       execFileImpl: options.execFileImpl,
     });
     if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
-    recordRecentConversationTurn(sessionContext, payload, response, budgetedConfig);
-    return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
+    if (!taskScoped) recordRecentConversationTurn(sessionContext, effectivePayload, response, budgetedConfig);
+    return applyEvidenceGateToResponse(effectivePayload, response, env, logger, requestId);
   }
 
   try {
@@ -460,11 +465,13 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       softResetResume: Boolean(pendingResumeDigest),
       taskScoped,
       dailyDigestChars: buildDailyDigestContextText(effectivePayload).length,
+      localHistoryInjectedTurns: countHistoryTurns(recentMessages),
+      globalHistoryInjectedTurns: countHistoryTurns(globalRecentMessages),
     });
     if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
-    recordRecentConversationTurn(sessionContext, payload, response, budgetedConfig);
-    const finalResponse = applyEvidenceGateToResponse(payload, response, env, logger, requestId);
-    appendCacheFriendlyHistoryTurn({
+    if (!taskScoped) recordRecentConversationTurn(sessionContext, effectivePayload, response, budgetedConfig);
+    const finalResponse = applyEvidenceGateToResponse(effectivePayload, response, env, logger, requestId);
+    if (!taskScoped) appendCacheFriendlyHistoryTurn({
       config: budgetedConfig,
       sessionContext,
       payload: effectivePayload,
@@ -484,8 +491,8 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       execFileImpl: options.execFileImpl,
     });
     if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
-    recordRecentConversationTurn(sessionContext, payload, response, budgetedConfig);
-    return applyEvidenceGateToResponse(payload, response, env, logger, requestId);
+    if (!taskScoped) recordRecentConversationTurn(sessionContext, effectivePayload, response, budgetedConfig);
+    return applyEvidenceGateToResponse(effectivePayload, response, env, logger, requestId);
   }
 }
 
@@ -546,6 +553,8 @@ async function sendChatToHermesApi(message, options = {}) {
       clientPromptChars: clientPromptText.length,
       clientPromptEstimatedTokens: estimateTokens(clientPromptText),
       clientMessageCount: apiMessages.length,
+      localHistoryInjectedTurns: options.localHistoryInjectedTurns,
+      globalHistoryInjectedTurns: options.globalHistoryInjectedTurns,
     });
     maybeApplyLiteSoftResetAfterAccumulation(usageTelemetry, {
       config,
@@ -553,6 +562,7 @@ async function sendChatToHermesApi(message, options = {}) {
       logger: options.logger,
       requestId: options.requestId,
       softResetResume: options.softResetResume,
+      taskScoped: options.taskScoped,
     });
   }
   return buildHermesReply(body, config);
@@ -573,6 +583,7 @@ function createTimeoutAbortSignal(timeoutMs) {
 function maybeApplyLiteSoftResetAfterAccumulation(usageTelemetry = {}, options = {}) {
   const config = options.config || {};
   if (usageTelemetry?.possible_server_session_accumulation !== true) return null;
+  if (options.taskScoped === true) return null;
   if (options.softResetResume === true) return null;
   if (config.profile !== config.liteProfile) return null;
   if (config.softResetEnabled !== true) return null;
@@ -627,17 +638,18 @@ async function sendChatToHermesOneShot(message, options = {}) {
 
 async function buildHermesUserMessage(payload = {}, options = {}) {
   const config = options.config || getHermesGatewayConfig(options.env);
-  const mediaContext = await ensureConversationMediaContext(payload, {
+  const taskScoped = options.taskScoped === true;
+  const mediaContext = taskScoped ? { artifacts: [] } : await ensureConversationMediaContext(payload, {
     env: options.env,
     logger: options.logger,
     ...(options.mediaContextOptions || {}),
   });
-  const mediaContextText = buildHermesMediaContextText(mediaContext, config);
-  const hasMedia = normalizeMediaItems(payload.media).length > 0
+  const mediaContextText = taskScoped ? '' : buildHermesMediaContextText(mediaContext, config);
+  const hasMedia = !taskScoped && (normalizeMediaItems(payload.media).length > 0
     || (Array.isArray(payload.image_urls) && payload.image_urls.some((u) => typeof u === 'string' && u.trim()))
-    || (Array.isArray(mediaContext.artifacts) && mediaContext.artifacts.length > 0);
+    || (Array.isArray(mediaContext.artifacts) && mediaContext.artifacts.length > 0));
   const courtlyAnchor = buildCourtlyStyleAnchor(payload);
-  const socialRoutingHint = buildSocialLinkRoutingHint(payload);
+  const socialRoutingHint = taskScoped ? '' : buildSocialLinkRoutingHint(payload);
   const recentHistoryMessages = Array.isArray(options.recentHistoryMessages) ? options.recentHistoryMessages : [];
   const globalHistoryMessages = Array.isArray(options.globalHistoryMessages) ? options.globalHistoryMessages : [];
   const contextBudget = options.contextBudget || {
@@ -660,7 +672,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     ? clipText(String(payload.stale_context || '').trim(), contextBudget.budgets.activeTopicChars)
     : '';
   const dailyDigestText = buildDailyDigestContextText(payload);
-  const environmentContextText = await buildEnvironmentContext({
+  const environmentContextText = taskScoped ? '' : await buildEnvironmentContext({
     env: options.env,
     fetchImpl: options.fetchImpl || globalThis.fetch,
   });
@@ -668,15 +680,15 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
   const message = [
     courtlyAnchor,
     socialRoutingHint,
-    buildSocialMediaRetryHint(payload, recentHistoryMessages),
+    taskScoped ? '' : buildSocialMediaRetryHint(payload, recentHistoryMessages),
     hasMedia ? buildHermesMediaGenerationInstruction() : '',
-    buildGlobalActiveTopicNote({ ...payload, active_topic: activeTopic, stale_context: staleContext }, globalHistoryMessages, config),
-    continuityNote,
-    dailyDigestText,
+    taskScoped ? '' : buildGlobalActiveTopicNote({ ...payload, active_topic: activeTopic, stale_context: staleContext }, globalHistoryMessages, config),
+    taskScoped ? '' : continuityNote,
+    taskScoped ? '' : dailyDigestText,
     buildBridgeTemporalUserContext(payload),
     environmentContextText,
     mediaContextText,
-    buildHermesInboundMediaInstruction(payload),
+    taskScoped ? '' : buildHermesInboundMediaInstruction(payload),
     currentUserMessage,
   ].filter(Boolean).join('\n\n');
 
@@ -845,9 +857,15 @@ function logProviderUsageTelemetry(body = {}, options = {}) {
     soft_reset_resume: options.softResetResume === true,
     session_scope: options.taskScoped === true ? 'task' : 'conversation',
     task_kind: options.taskScoped === true ? String(options.payload?.route_hint || '') : '',
-    history_injected_turns: options.taskScoped === true ? 0 : Math.floor((options.clientMessageCount || 1) / 2),
+    local_history_injected_turns: normalizeNonNegativeTelemetryCount(options.localHistoryInjectedTurns),
+    global_history_injected_turns: normalizeNonNegativeTelemetryCount(options.globalHistoryInjectedTurns),
+    history_injected_turns: normalizeNonNegativeTelemetryCount(options.localHistoryInjectedTurns)
+      + normalizeNonNegativeTelemetryCount(options.globalHistoryInjectedTurns),
     provider_visible_history_used: options.taskScoped !== true && cacheFriendlyHistory.enabled === true,
+    continuity_digest_used: options.softResetResume === true,
+    ordinary_timeline_projection: options.taskScoped !== true,
     soft_reset_eligible: options.taskScoped !== true && options.config?.profile === options.config?.liteProfile,
+    soft_reset_skipped_reason: options.taskScoped === true && possibleServerSessionAccumulation ? 'task_scoped' : '',
     daily_digest_chars: nullableNumber(options.dailyDigestChars) ?? 0,
   };
   options.logger?.log?.(`[hermes-provider-usage] ${JSON.stringify(payload)}`);
@@ -1307,20 +1325,8 @@ function buildHermesSessionContext(payload = {}, config = {}) {
   }, config);
 }
 
-function isTaskScopedRoute(payload = {}) {
-  return [
-    'scheduled_ai_daily_digest',
-    'manual_ai_daily_digest',
-    'action_gate_repair',
-    'release_runtime_journey',
-    'hermes_proactive_event',
-    'external_mcp_system_queue',
-  ]
-    .includes(String(payload.route_hint || '').trim());
-}
-
 function buildTaskHermesSessionContext(payload = {}, config = {}) {
-  const kind = String(payload.route_hint || 'one_shot').trim();
+  const kind = normalizeHermesTaskKind(payload.route_hint) || 'one_shot';
   const key = `${kind}:${String(payload.message_id || payload.id || '').trim() || sha256Hex(String(payload.text || '')).slice(0, 16)}`;
   const digest = sha256Hex(key).slice(0, 16);
   return {
@@ -1332,6 +1338,35 @@ function buildTaskHermesSessionContext(payload = {}, config = {}) {
     platform: String(payload.platform || payload.channel || ''),
     taskKind: kind,
   };
+}
+
+function isolateTaskPayload(payload = {}) {
+  return {
+    ...payload,
+    recent_local_history: [],
+    recent_global_history: [],
+    prior_messages: [],
+    active_topic: '',
+    stale_context: '',
+    continuity_note: '',
+    daily_digest: '',
+    daily_digest_context: '',
+    media: [],
+    image_urls: [],
+    message_batch: [],
+    hermes_session_id: '',
+    hermes_session_key: '',
+    stable_conversation_key: '',
+  };
+}
+
+function countHistoryTurns(messages = []) {
+  return Math.ceil((Array.isArray(messages) ? messages.length : 0) / 2);
+}
+
+function normalizeNonNegativeTelemetryCount(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? Math.floor(numeric) : 0;
 }
 
 function applyLiteSessionNonce(sessionContext = {}, config = {}) {

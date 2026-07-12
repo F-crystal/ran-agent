@@ -15,11 +15,13 @@ import {
   getGlobalTimelineConfig,
   getLocalRecentHistory,
 } from './globalTimeline.mjs';
+import { isHermesTaskScopedRoute } from './hermesTaskScope.mjs';
 
 export async function handleIncomingMessage(normalizedMessage = {}, options = {}) {
   const env = options.env || process.env;
   const logger = options.logger || console;
   const message = normalizeIncomingMessage(normalizedMessage);
+  const taskScoped = isHermesTaskScopedRoute(message.route_hint);
   const globalUserId = getGlobalUserId(message, { env });
   const trustedActorContext = deriveTrustedActorContext(message, {
     env,
@@ -27,7 +29,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
   });
   const timelineConfig = getGlobalTimelineConfig(env);
   const timelineNow = Number(message.created_at || Date.now());
-  const localRecent = getLocalRecentHistory({
+  const localRecent = taskScoped ? [] : getLocalRecentHistory({
     timelinePath: timelineConfig.timelinePath,
     platform: message.platform,
     conversation_id: message.conversation_id,
@@ -37,10 +39,10 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     now: timelineNow,
     maxAgeHours: timelineConfig.continuityFreshnessHours,
   });
-  const requestPriorMessages = normalizePriorMessages(message.prior_messages);
+  const requestPriorMessages = taskScoped ? [] : normalizePriorMessages(message.prior_messages);
   const localRecentForHermes = [...localRecent, ...requestPriorMessages]
     .slice(-Math.max(2, Number(env.HERMES_RECENT_TEXT_TURNS || 10) * 2));
-  const globalRecent = getGlobalRecentHistory({
+  const globalRecent = taskScoped ? [] : getGlobalRecentHistory({
     timelinePath: timelineConfig.timelinePath,
     global_user_id: globalUserId,
     limit: Number(env.HERMES_GLOBAL_RECENT_TURNS || timelineConfig.globalRecentTurns) * 2,
@@ -48,7 +50,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     now: timelineNow,
     maxAgeHours: timelineConfig.continuityFreshnessHours,
   });
-  const activeTopicContext = getActiveTopicContext({
+  const activeTopicContext = taskScoped ? { activeTopic: '', staleContext: '' } : getActiveTopicContext({
     timelinePath: timelineConfig.timelinePath,
     global_user_id: globalUserId,
     charBudget: Number(env.HERMES_ACTIVE_TOPIC_CHAR_BUDGET || timelineConfig.activeTopicCharBudget),
@@ -57,9 +59,9 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
   });
   const activeTopic = activeTopicContext.activeTopic;
   const staleContext = activeTopicContext.staleContext;
-  const continuityNote = buildContinuityNote({ message, localRecent: localRecentForHermes, globalRecent, activeTopic, staleContext });
+  const continuityNote = taskScoped ? '' : buildContinuityNote({ message, localRecent: localRecentForHermes, globalRecent, activeTopic, staleContext });
 
-  safeAppendTurn({
+  if (!taskScoped) safeAppendTurn({
     timelinePath: timelineConfig.timelinePath,
     id: message.id,
     global_user_id: globalUserId,
@@ -97,9 +99,10 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
   const backendMessage = {
     ...message,
     global_user_id: globalUserId,
-    stable_conversation_key: getStableConversationKey(message),
-    hermes_session_id: getHermesSessionId(message),
-    hermes_session_key: getHermesSessionKey(globalUserId),
+    stable_conversation_key: taskScoped ? '' : getStableConversationKey(message),
+    hermes_session_id: taskScoped ? '' : getHermesSessionId(message),
+    hermes_session_key: taskScoped ? '' : getHermesSessionKey(globalUserId),
+    prior_messages: taskScoped ? [] : requestPriorMessages,
     recent_local_history: localRecentForHermes,
     recent_global_history: globalRecent,
     active_topic: activeTopic,
@@ -139,14 +142,14 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
         message,
       }),
       timeline: async () => {
-        if (deliveredResponse.excludeFromHistory !== true) appendTurn(assistantTurn);
+        if (!taskScoped && deliveredResponse.excludeFromHistory !== true) appendTurn(assistantTurn);
       },
-      backend: typeof deliveredResponse.backendProjection === 'function'
+      backend: !taskScoped && typeof deliveredResponse.backendProjection === 'function'
         ? async ({ outboxId, text }) => deliveredResponse.backendProjection({ outboxId, replyText: text })
         : undefined,
     });
   } else {
-    if (!options.outbox && deliveredResponse.excludeFromHistory !== true) safeAppendTurn(assistantTurn, logger);
+    if (!taskScoped && !options.outbox && deliveredResponse.excludeFromHistory !== true) safeAppendTurn(assistantTurn, logger);
     if (options.adapter?.sendReply && deliveredResponse.suppressSend !== true) {
       await options.adapter.sendReply({
         target: buildReplyTarget(message),

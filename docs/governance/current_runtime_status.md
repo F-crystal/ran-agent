@@ -42,6 +42,9 @@ External MCP candidates
 - Manual and scheduled AI-digest generation run in a task-scoped Hermes
   session and deliver through the durable outbox. They do not consume or write
   ordinary conversation/cache/soft-reset history.
+- The same closed task scope also applies to action repair, release journey,
+  proactive events, and external-MCP system-queue turns; their audit state stays
+  in their existing receipts/ledgers/outboxes, never the ordinary timeline.
 
 ## Lite/Full Runtime
 

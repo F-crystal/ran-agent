@@ -18,6 +18,7 @@ import {
 } from '../src/hermesSessionMaintenance.mjs';
 import { saveSensorLoggerMessage } from '../src/environmentSense.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
+import { listHermesTaskScopedRoutes } from '../src/hermesTaskScope.mjs';
 
 function makeJsonResponse(body, ok = true, status = 200) {
   return {
@@ -117,27 +118,50 @@ function tempGatewayEnv(t, prefix = 'hermes-gateway-soft-reset-') {
 
 test('AI digest task route uses a separate session and never writes provider-visible conversation history', async (t) => {
   const env = tempGatewayEnv(t, 'hermes-task-digest-');
-  const { capturedHeaders, logs } = await captureHermesRequest({
-    payload: { route_hint: 'manual_ai_daily_digest', message_id: 'digest-task-1', recent_local_history: historyTurns('chat', 3) },
+  const { capturedBody, capturedHeaders, logs } = await captureHermesRequest({
+    payload: {
+      route_hint: 'manual_ai_daily_digest', message_id: 'digest-task-1', recent_local_history: historyTurns('ORDINARY-LOCAL-HISTORY-SENTINEL', 3),
+      recent_global_history: historyTurns('ORDINARY-GLOBAL-HISTORY-SENTINEL', 2),
+      prior_messages: historyTurns('ORDINARY-PRIOR-HISTORY-SENTINEL', 1),
+      active_topic: 'ORDINARY-ACTIVE-TOPIC-SENTINEL',
+      stale_context: 'ORDINARY-STALE-CONTEXT-SENTINEL',
+      continuity_note: 'ORDINARY-CONTINUITY-SENTINEL',
+      daily_digest_context: 'ORDINARY-CONTINUITY-DIGEST-SENTINEL',
+      hermes_session_id: 'ordinary-session', hermes_session_key: 'ordinary-key', stable_conversation_key: 'ordinary-stable',
+      image_urls: ['https://example.test/ORDINARY-MEDIA-SENTINEL.png'],
+      message_batch: [{ text: 'ORDINARY-BATCH-SENTINEL' }],
+    },
     env: { ...env, HERMES_CONTEXT_CACHE_STRATEGY: 'cache_first' },
   });
   assert.match(String(capturedHeaders['X-Hermes-Session-Id'] || capturedHeaders['x-hermes-session-id']), /-task-/);
+  for (const sentinel of [
+    'ORDINARY-LOCAL-HISTORY-SENTINEL', 'ORDINARY-GLOBAL-HISTORY-SENTINEL', 'ORDINARY-PRIOR-HISTORY-SENTINEL',
+    'ORDINARY-ACTIVE-TOPIC-SENTINEL', 'ORDINARY-STALE-CONTEXT-SENTINEL', 'ORDINARY-CONTINUITY-SENTINEL',
+    'ORDINARY-CONTINUITY-DIGEST-SENTINEL', 'ORDINARY-MEDIA-SENTINEL', 'ORDINARY-BATCH-SENTINEL',
+  ]) assert.doesNotMatch(JSON.stringify(capturedBody.messages), new RegExp(sentinel));
   assert.equal(readProviderVisibleHistoryFiles(env.RAN_AGENT_STATE_DIR).length, 0);
   const telemetry = parseProviderUsageLog(logs);
   assert.equal(telemetry.session_scope, 'task');
   assert.equal(telemetry.history_injected_turns, 0);
+  assert.equal(telemetry.local_history_injected_turns, 0);
+  assert.equal(telemetry.global_history_injected_turns, 0);
   assert.equal(telemetry.provider_visible_history_used, false);
+  assert.equal(telemetry.continuity_digest_used, false);
+  assert.equal(telemetry.ordinary_timeline_projection, false);
   assert.equal(telemetry.soft_reset_eligible, false);
 });
 
-test('proactive and external MCP synthetic routes use the same isolated task session', async (t) => {
+test('every registered task route has a distinct task session and no injected ordinary history', async (t) => {
   const env = tempGatewayEnv(t, 'hermes-task-synthetic-');
-  for (const routeHint of ['hermes_proactive_event', 'external_mcp_system_queue']) {
-    const { capturedHeaders, logs } = await captureHermesRequest({
+  for (const routeHint of listHermesTaskScopedRoutes()) {
+    const { capturedBody, capturedHeaders, logs } = await captureHermesRequest({
       payload: {
         route_hint: routeHint,
         message_id: `synthetic-${routeHint}`,
-        recent_local_history: historyTurns('ordinary', 2),
+        text: `BOUNDED-TASK-PAYLOAD-${routeHint}`,
+        recent_local_history: historyTurns('ORDINARY-LOCAL-HISTORY-SENTINEL', 2),
+        recent_global_history: historyTurns('ORDINARY-GLOBAL-HISTORY-SENTINEL', 2),
+        active_topic: 'ORDINARY-ACTIVE-TOPIC-SENTINEL', continuity_note: 'ORDINARY-CONTINUITY-SENTINEL',
       },
       env: { ...env, HERMES_CONTEXT_CACHE_STRATEGY: 'cache_first' },
     });
@@ -146,7 +170,11 @@ test('proactive and external MCP synthetic routes use the same isolated task ses
     assert.equal(telemetry.session_scope, 'task');
     assert.equal(telemetry.task_kind, routeHint);
     assert.equal(telemetry.history_injected_turns, 0);
+    assert.equal(telemetry.local_history_injected_turns, 0);
+    assert.equal(telemetry.global_history_injected_turns, 0);
     assert.equal(telemetry.provider_visible_history_used, false);
+    assert.match(JSON.stringify(capturedBody.messages), new RegExp(`BOUNDED-TASK-PAYLOAD-${routeHint}`));
+    assert.doesNotMatch(JSON.stringify(capturedBody.messages), /ORDINARY-(?:LOCAL|GLOBAL|ACTIVE|CONTINUITY)-HISTORY?-?SENTINEL|ORDINARY-ACTIVE-TOPIC-SENTINEL|ORDINARY-CONTINUITY-SENTINEL/);
   }
   assert.equal(readProviderVisibleHistoryFiles(env.RAN_AGENT_STATE_DIR).length, 0);
 });
@@ -2322,6 +2350,33 @@ test('provider usage telemetry flags server-side session accumulation', async (t
   const maintenance = readHermesLiteMaintenanceState(getHermesLiteSoftResetConfig(env));
   assert.ok(maintenance.pendingDigestId);
   assert.equal(maintenance.lastReset.reason, 'provider_session_accumulation');
+});
+
+test('task-scoped token accumulation remains visible but cannot rotate the ordinary lite session', async (t) => {
+  const logs = [];
+  const isolatedEnv = tempGatewayEnv(t, 'hermes-task-no-soft-reset-');
+  const env = {
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1', HERMES_API_KEY: 'token', HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '1', ...isolatedEnv,
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true', HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  };
+  await sendChatToHermesGateway({
+    text: 'BOUNDED-TASK-PAYLOAD', route_hint: 'scheduled_ai_daily_digest', message_id: 'task-token-1',
+    sender_id: 'ordinary-sender', conversation_id: 'ordinary-conversation', channel: 'wechat',
+  }, {
+    env, config: getHermesGatewayConfig(env),
+    fetchImpl: async () => makeJsonResponse({
+      choices: [{ message: { content: 'ok' } }],
+      usage: { prompt_tokens: 350000, completion_tokens: 1, total_tokens: 350001 },
+    }),
+    logger: { log(message) { logs.push(String(message)); }, warn() {} },
+  });
+  const telemetry = parseProviderUsageLog(logs);
+  const maintenance = readHermesLiteMaintenanceState(getHermesLiteSoftResetConfig(env));
+  assert.equal(telemetry.possible_server_session_accumulation, true);
+  assert.equal(telemetry.soft_reset_skipped_reason, 'task_scoped');
+  assert.equal(maintenance.revision, 0);
+  assert.equal(maintenance.pendingDigestId, '');
 });
 
 test('context injection rich mode preserves legacy-sized local history budget', async () => {

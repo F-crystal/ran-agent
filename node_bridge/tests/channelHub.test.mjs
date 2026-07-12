@@ -1,14 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { writeFileSync } from 'node:fs';
+import fs, { writeFileSync } from 'node:fs';
 
 import { handleIncomingMessage } from '../src/channelHub.mjs';
-import { readTimelineRecords } from '../src/globalTimeline.mjs';
+import { appendTurn, readTimelineRecords } from '../src/globalTimeline.mjs';
 import { createDurableOutbox } from '../src/durableOutbox.mjs';
 import { createPendingAction, listPendingActions } from '../src/pendingActionState.mjs';
 import { getAccountBindingKey } from '../src/identityMap.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
+import { listHermesTaskScopedRoutes } from '../src/hermesTaskScope.mjs';
 
 function tempEnv(t) {
   const env = createIsolatedTestEnv(t, {}, 'ran-agent-channel-hub-');
@@ -78,6 +79,70 @@ test('channel hub routes normalized WeChat message through replyBackend and time
   const records = readTimelineRecords({ timelinePath: env.RAN_AGENT_GLOBAL_TIMELINE_PATH });
   assert.equal(records.length, 2);
   assert.deepEqual(records.map((item) => item.role), ['user', 'assistant']);
+});
+
+test('every task-scoped route clears caller history and leaves the ordinary timeline and backend projection untouched', async (t) => {
+  const env = tempEnv(t);
+  const timelinePath = env.RAN_AGENT_GLOBAL_TIMELINE_PATH;
+  appendTurn({
+    timelinePath,
+    id: 'ordinary-user', global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm',
+    conversation_id: 'ordinary-conversation', sender_id: 'ordinary-user', role: 'user',
+    text: 'ORDINARY-LOCAL-HISTORY-SENTINEL ORDINARY-GLOBAL-HISTORY-SENTINEL', created_at: 1,
+  });
+  appendTurn({
+    timelinePath,
+    id: 'ordinary-assistant', global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm',
+    conversation_id: 'ordinary-conversation', sender_id: 'assistant', role: 'assistant',
+    text: 'ORDINARY-ACTIVE-TOPIC-SENTINEL', created_at: 2,
+  });
+  const before = fs.readFileSync(timelinePath, 'utf8');
+  const beforeInode = fs.statSync(timelinePath).ino;
+  const outbox = createDurableOutbox({ env, now: () => new Date('2026-07-12T00:00:00.000Z') });
+  let backendProjectionCalls = 0;
+
+  for (const routeHint of listHermesTaskScopedRoutes()) {
+    let backendMessage = null;
+    await handleIncomingMessage({
+      id: `task-${routeHint}`,
+      platform: 'feishu', channel_type: 'dm', conversation_id: 'task-conversation', sender_id: 'task-owner',
+      route_hint: routeHint,
+      text: `BOUNDED-TASK-PAYLOAD-${routeHint}`,
+      prior_messages: [{ role: 'user', content: 'ORDINARY-LOCAL-HISTORY-SENTINEL' }],
+      created_at: 3,
+    }, {
+      env,
+      outbox,
+      logger: { log() {}, warn() {}, error() {}, info() {} },
+      replyBackend: {
+        async getReply(message) {
+          backendMessage = message;
+          return {
+            replyText: `TASK-RESULT-${routeHint}`,
+            followUpMessages: [], media: null,
+            backendProjection: async () => { backendProjectionCalls += 1; },
+          };
+        },
+      },
+      adapter: { async sendReply() { return { textStatus: 'sent', attachments: [], adapterReceiptRef: 'task:test' }; } },
+    });
+
+    assert.equal(backendMessage.text, `BOUNDED-TASK-PAYLOAD-${routeHint}`);
+    assert.deepEqual(backendMessage.recent_local_history, []);
+    assert.deepEqual(backendMessage.recent_global_history, []);
+    assert.deepEqual(backendMessage.prior_messages, []);
+    assert.equal(backendMessage.active_topic, '');
+    assert.equal(backendMessage.stale_context, '');
+    assert.equal(backendMessage.continuity_note, '');
+    assert.equal(backendMessage.stable_conversation_key, '');
+    assert.equal(backendMessage.hermes_session_id, '');
+    assert.equal(backendMessage.hermes_session_key, '');
+  }
+
+  assert.equal(backendProjectionCalls, 0);
+  assert.equal(fs.readFileSync(timelinePath, 'utf8'), before);
+  assert.equal(fs.statSync(timelinePath).ino, beforeInode);
+  assert.equal(readTimelineRecords({ timelinePath }).length, 2);
 });
 
 test('channel hub projects a text-only assistant turn only after the durable adapter receipt is sent', async (t) => {
