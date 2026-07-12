@@ -45,12 +45,12 @@ class NodeBridgeOutboundClient:
             raise RuntimeError("node bridge proactive event response missing ok=true")
         return payload
 
-    def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
+    def send_ai_daily_digest(self, facts: str, *, mode: str = "scheduled", operation_id: str = "") -> dict[str, object]:
         """Send one scheduled AI digest trigger through the local Node bridge."""
 
         request = urllib.request.Request(
             url=f"{self._config.node_bridge_outbound_base_url}/scheduled/ai-daily-digest",
-            data=json.dumps({"facts": facts}).encode("utf-8"),
+            data=json.dumps({"facts": facts, "mode": mode, "operation_id": operation_id}).encode("utf-8"),
             headers={"Content-Type": "application/json"},
             method="POST",
         )

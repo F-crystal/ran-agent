@@ -52,6 +52,25 @@ test('getReplyBackendConfig returns hermes config', () => {
   assert.equal(getReplyBackendConfig({}).replyBackend, 'hermes');
 });
 
+test('manual AI daily digest uses a typed owner action and never enters media compatibility', async (t) => {
+  const env = tempStateEnv(t, { RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret', PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787' });
+  const requests = [];
+  const backend = createReplyBackend({
+    env,
+    fetchImpl: async (_url, init) => {
+      requests.push(JSON.parse(init.body));
+      return { ok: true, status: 200, async json() { return { ok: true, authenticated: true, operationId: requests[0].operationId, effectId: 'ai-daily-digest:outbox-1', result: { delivery_status: 'sent' } }; } };
+    },
+    hermesImpl: async () => ({ reply_envelope: { schemaVersion: 1, message: '正在补发。', actionRequests: [{ requestRef: 'digest-1', actionType: 'ai_daily_digest.send', scope: { mode: 'manual', date: 'current_local_date' } }], activityRequest: null, claims: [], commitments: [] } }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+  const result = await backend.getReply({ text: '请重新发送今日日报', sender_id: 'owner', conversation_id: 'home', platform: 'feishu', trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' } });
+  assert.equal(result.replyText, '今日日报已补发。');
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].actionType, 'ai_daily_digest.send');
+  assert.deepEqual(requests[0].scope, { mode: 'manual', date: 'current_local_date' });
+});
+
 test('createReplyBackend defaults to Hermes reply backend', async () => {
   let ingestPayload = null;
   let hermesPayload = null;
@@ -575,564 +594,98 @@ test('createReplyBackend routes a natural stop command only through the v2 activ
   assert.equal(Object.hasOwn(calls[0].request, 'globalUserId'), false);
 });
 
-test('createReplyBackend logs action contract telemetry in observe mode without changing reply', async () => {
-  const logs = [];
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'observe',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '我读到了，这篇小红书主要说旅行。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log(message) { logs.push(String(message)); }, warn() {} },
+function unverifiedClaimBackend(replyText, options = {}) {
+  return createReplyBackend({
+    env: { HERMES_ACTION_GATE_ENABLED: "true", HERMES_ACTION_GATE_MODE: options.mode || "enforce" },
+    hermesImpl: async () => ({ reply_text: replyText, follow_up_messages: options.followUps || [], media: options.media || null, model: "test" }),
+    actionRepairImpl: options.actionRepairImpl,
+    resolveStickerAssetImpl: options.resolveStickerAssetImpl,
+    ingestImpl: async () => ({ ok: true }), logger: options.logger || { log() {}, warn() {} },
   });
+}
 
-  const response = await backend.getReply({
-    text: '帮我读一下 http://xhslink.com/o/abc123',
-    sender_id: 'conv-action-contract',
-    conversation_id: 'conv-action-contract',
-    channel: 'wechat',
-  }, { requestId: 'req-action-contract' });
-
-  assert.equal(response.replyText, '我读到了，这篇小红书主要说旅行。');
-  const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
-  assert.ok(line, 'expected action contract log line');
-  const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
-  assert.equal(payload.request_id, 'req-action-contract');
-  assert.equal(payload.channel, 'wechat');
-  assert.match(payload.conversation_id_hash, /^[a-f0-9]{16}$/);
-  assert.equal(payload.gate_mode, 'observe');
-  assert.equal(payload.intent, 'social_read');
-  assert.deepEqual(payload.required_evidence, ['tool_result']);
-  assert.deepEqual(payload.observed_evidence, []);
-  assert.deepEqual(payload.final_claims, ['read_complete']);
-  assert.equal(payload.gate_decision, 'observe_only');
-  assert.equal(payload.evidence_satisfied, false);
-  assert.deepEqual(payload.missing_evidence, ['tool_result']);
-  assert.equal(payload.repair_attempted, false);
-  assert.equal(payload.final_action, 'observe_only');
-  assert.equal(line.includes('abc123'), false);
-  assert.equal(line.includes('旅行'), false);
+test("replyBackend records a claim-only gate without assigning an action type", async () => {
+  const logs = [];
+  const response = await unverifiedClaimBackend("我已经完整读完了。", { mode: "observe", logger: { log(value) { logs.push(String(value)); }, warn() {} } }).getReply({ text: "普通聊天", sender_id: "claim-log", channel: "wechat" });
+  assert.equal(response.replyText, "我已经完整读完了。");
+  const payload = JSON.parse(logs.find((line) => line.startsWith("[hermes-action-contract] ")).replace("[hermes-action-contract] ", ""));
+  assert.equal(payload.contract_source, "no_action");
+  assert.equal(payload.intent, "none");
 });
 
-test('createReplyBackend enforces safe rewrite before returning unsupported social read claims', async () => {
-  const logs = [];
-  let ingestPayload = null;
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'enforce',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '我已经完整读完了，这篇小红书主要说旅行。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    ingestImpl: async (payload) => {
-      ingestPayload = payload;
-      return { ok: true };
-    },
-    logger: { log(message) { logs.push(String(message)); }, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '帮我读一下 http://xhslink.com/o/abc123',
-    sender_id: 'conv-action-enforce',
-    conversation_id: 'conv-action-enforce',
-    channel: 'wechat',
-  }, { requestId: 'req-action-enforce' });
-
-  assert.equal(response.replyText, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
-  assert.equal(response.source, 'bridge_action_gate');
-  assert.equal(ingestPayload?.reply_text, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
-  assert.equal(ingestPayload?.source, 'bridge_action_gate');
-  assert.equal(String(ingestPayload?.reply_text || '').includes('旅行'), false);
-  const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
-  assert.ok(line, 'expected action contract log line');
-  const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
-  assert.equal(payload.gate_mode, 'enforce');
-  assert.equal(payload.gate_decision, 'rewrite');
-  assert.equal(payload.final_action, 'safe_rewrite');
-  assert.equal(payload.rewrite_reason, 'missing_required_evidence');
-  assert.deepEqual(payload.original_claim_types, ['read_complete']);
-  assert.equal(line.includes('abc123'), false);
-  assert.equal(line.includes('旅行'), false);
+test("URL prose is claim-only and is safely rewritten without a social repair", async () => {
+  let repaired = false;
+  const response = await unverifiedClaimBackend("我已经完整读完链接了。", { mode: "repair", actionRepairImpl: async () => { repaired = true; return { ok: true, status: "success" }; } }).getReply({ text: "https://xhslink.com/o/a", sender_id: "claim-url", channel: "wechat" });
+  assert.equal(repaired, false);
+  assert.equal(response.replyText, "尚未收到可验证的执行结果，暂不确认已完成。");
 });
 
-test('createReplyBackend collapses fragments and gates them as one coherent reply', async () => {
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'enforce',
-    },
-    hermesImpl: async () => ({
-      reply_text: '先说一句普通话。',
-      follow_up_messages: ['第二条：已经完整读完链接了，内容是旅行攻略。'],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '帮我读一下 http://xhslink.com/o/abc123',
-    sender_id: 'conv-action-follow-up',
-    conversation_id: 'conv-action-follow-up',
-    channel: 'wechat',
-  });
-
-  assert.equal(response.replyText, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
+test("collapsed fragments remain one claim-only assistant turn", async () => {
+  const backend = createReplyBackend({ env: { HERMES_ACTION_GATE_ENABLED: "true", HERMES_ACTION_GATE_MODE: "enforce" }, hermesImpl: async () => ({ reply_text: "普通说明", follow_up_messages: ["已经完整读完链接了。"] }), ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} } });
+  const response = await backend.getReply({ text: "链接", sender_id: "claim-fragment", channel: "wechat" });
+  assert.equal(response.replyText, "尚未收到可验证的执行结果，暂不确认已完成。");
   assert.deepEqual(response.followUpMessages, []);
-  assert.equal(response.source, 'bridge_action_gate');
 });
 
-test('createReplyBackend suppresses follow-ups for silent external MCP synthetic turns', async () => {
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'enforce',
-    },
-    hermesImpl: async () => ({
-      reply_text: 'silent',
-      follow_up_messages: ['这个 follow-up 不应该发出'],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: 'system wake',
-    sender_id: 'conv-silent-follow-up',
-    conversation_id: 'conv-silent-follow-up',
-    channel: 'feishu',
-    route_hint: 'external_mcp_system_queue',
-  });
-
-  assert.equal(response.replyText, '');
-  assert.deepEqual(response.followUpMessages, []);
-  assert.equal(response.suppressSend, true);
+test("social repair is forbidden when Hermes omitted a trusted result", async () => {
+  let repaired = false;
+  await unverifiedClaimBackend("我已经完整读完了。", { mode: "repair", actionRepairImpl: async () => { repaired = true; return { ok: true, status: "success" }; } }).getReply({ text: "读这个链接", sender_id: "no-social-repair", channel: "wechat" });
+  assert.equal(repaired, false);
 });
 
-test('createReplyBackend repair mode repairs social read evidence once and keeps repaired reply', async () => {
-  const logs = [];
-  const repairCalls = [];
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '我已经完整读完了，这篇小红书主要说旅行。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async (plan) => {
-      repairCalls.push(plan);
-      return {
-        ok: true,
-        status: 'success',
-        repairedReply: '链接内容已读取：它在讲旅行规划。',
-        toolResult: {
-          toolName: 'mcp_social_reader_read_social_post_deep',
-          ok: true,
-          artifact_id: 'social-artifact-private',
-        },
-      };
-    },
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log(message) { logs.push(String(message)); }, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '帮我读一下 http://xhslink.com/o/abc123',
-    sender_id: 'conv-action-repair-social',
-    conversation_id: 'conv-action-repair-social',
-    channel: 'wechat',
-  }, { requestId: 'req-action-repair-social' });
-
-  assert.equal(repairCalls.length, 1);
-  assert.equal(repairCalls[0].repairType, 'social_read');
-  assert.equal(response.replyText, '链接内容已读取：它在讲旅行规划。');
-  const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
-  const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
-  assert.equal(payload.gate_mode, 'repair');
-  assert.equal(payload.repair_attempted, true);
-  assert.equal(payload.repair_type, 'social_read');
-  assert.equal(payload.repair_status, 'success');
-  assert.equal(payload.final_action, 'repair_success');
-  assert.equal(payload.evidence_satisfied, true);
-  assert.equal(line.includes('abc123'), false);
-  assert.equal(line.includes('social-artifact-private'), false);
+test("gateway-originated claim does not create a repair request", async () => {
+  let repaired = false;
+  const backend = createReplyBackend({ env: { HERMES_API_BASE_URL: "http://127.0.0.1:8642/v1", HERMES_API_KEY: "token", HERMES_REPLY_MODE: "api", HERMES_ACTION_GATE_ENABLED: "true", HERMES_ACTION_GATE_MODE: "repair" }, actionRepairImpl: async () => { repaired = true; return { ok: true, status: "success" }; }, ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} } });
+  await backend.getReply({ text: "读链接", sender_id: "gateway-claim", channel: "wechat" }, { fetchImpl: async () => ({ ok: true, status: 200, async json() { return { choices: [{ message: { content: "我已经完整读完了。" } }] }; }, async text() { return ""; } }) });
+  assert.equal(repaired, false);
 });
 
-test('createReplyBackend repair mode can repair social claims returned through Hermes gateway client', async (t) => {
-  const repairCalls = [];
-  const env = tempStateEnv(t, {
-    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-    HERMES_API_KEY: 'token',
-    HERMES_REPLY_MODE: 'api',
-    HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    XHS_TOKEN_CACHE_PATH: '/tmp/missing-xhs-cache-for-repair-gateway.json',
-    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-  });
-  const backend = createReplyBackend({
-    env,
-    actionRepairImpl: async (plan) => {
-      repairCalls.push(plan);
-      return {
-        ok: true,
-        status: 'success',
-        repairedReply: '链接内容已读取：它在讲旅行规划。',
-        toolResult: {
-          toolName: 'mcp_social_reader_read_social_post_deep',
-          ok: true,
-          artifact_id: 'social-artifact-private',
-        },
-      };
-    },
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '帮我读一下 http://xhslink.com/o/abc123',
-    sender_id: 'conv-action-repair-social-gateway',
-    conversation_id: 'conv-action-repair-social-gateway',
-    channel: 'wechat',
-  }, {
-    requestId: 'req-action-repair-social-gateway',
-    fetchImpl: async () => ({
-      ok: true,
-      status: 200,
-      async json() {
-        return { choices: [{ message: { content: '我已经完整读完了，这篇小红书主要说旅行。' } }] };
-      },
-      async text() {
-        return '';
-      },
-    }),
-  });
-
-  assert.equal(repairCalls.length, 1);
-  assert.equal(repairCalls[0].repairType, 'social_read');
-  assert.equal(response.replyText, '链接内容已读取：它在讲旅行规划。');
+test("claim-only failures do not invoke a default social reader", async () => {
+  const response = await unverifiedClaimBackend("我已经完整读完了。", { mode: "repair" }).getReply({ text: "https://xhslink.com/o/b", sender_id: "no-default-reader", channel: "wechat" });
+  assert.equal(response.source, "bridge_action_gate");
 });
 
-test('createReplyBackend repair mode safe rewrites when social repair fails', async () => {
-  const logs = [];
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '我已经完整读完了，这篇小红书主要说旅行。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async () => ({ ok: false, status: 'failed', error_code: 'READER_FAILED' }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log(message) { logs.push(String(message)); }, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '帮我读一下 http://xhslink.com/o/abc123',
-    sender_id: 'conv-action-repair-social-fail',
-    channel: 'wechat',
-  }, { requestId: 'req-action-repair-social-fail' });
-
-  assert.equal(response.replyText, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
-  assert.equal(response.source, 'bridge_action_gate');
-  const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
-  const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
-  assert.equal(payload.repair_attempted, true);
-  assert.equal(payload.repair_status, 'failed');
-  assert.equal(payload.repair_error_code, 'READER_FAILED');
-  assert.equal(payload.final_action, 'repair_failed_safe_rewrite');
+test("partial social wording is not upgraded to a complete claim", async () => {
+  const response = await unverifiedClaimBackend("只读取到部分内容。", { mode: "enforce" }).getReply({ text: "链接", sender_id: "partial-social", channel: "wechat" });
+  assert.equal(response.replyText, "只读取到部分内容。");
 });
 
-test('createReplyBackend repair mode keeps partial social repair honest', async () => {
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '我已经完整读完了，这篇小红书主要说旅行。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async () => ({
-      ok: true,
-      status: 'partial_success',
-      toolResult: {
-        toolName: 'mcp_social_reader_read_social_post_deep',
-        partial_success: true,
-        error_code: 'XHS_PARTIAL',
-        media_analysis: { merged_summary: '前三张图已经读到：图中展示了路线、预算和注意事项。' },
-      },
-    }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '帮我读一下 http://xhslink.com/o/abc123',
-    sender_id: 'conv-action-repair-social-partial',
-    channel: 'wechat',
-  });
-
-  assert.equal(response.replyText, '已读取到部分内容：前三张图已经读到：图中展示了路线、预算和注意事项。但有些媒体或细节没有成功获取。');
+test("trusted compatibility partial handling stays in action-contract evidence tests", async () => {
+  const response = await unverifiedClaimBackend("有些内容没有成功获取。", { mode: "enforce" }).getReply({ text: "链接", sender_id: "partial-evidence", channel: "wechat" });
+  assert.equal(response.replyText, "有些内容没有成功获取。");
 });
 
-test('createReplyBackend repair mode downgrades complete reply when repaired XHS media coverage is partial', async () => {
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '我已经完整读完了，这篇小红书主要说旅行。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async () => ({
-      ok: true,
-      status: 'success',
-      repairedReply: '我已经完整读完了，五张图都看完了。',
-      toolResult: {
-        toolName: 'mcp_social_reader_read_social_post_deep',
-        ok: true,
-        total_media_count: 5,
-        analyzed_media_count: 5,
-        successful_media_count: 1,
-        media_analysis: { partial: true, items: [{}], partial_failures: [{ asset_id: 'xhs-2', error_code: 'DOWNLOAD_TIMEOUT' }] },
-      },
-    }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '帮我读一下 http://xhslink.com/o/abc123',
-    sender_id: 'conv-action-repair-social-partial-coverage',
-    channel: 'wechat',
-  });
-
-  assert.equal(response.replyText, '已读取到部分内容，但有些媒体或细节没有成功获取。');
-  assert.equal(response.source, 'bridge_action_gate');
+test("media prose without a trusted result is claim-only", async () => {
+  const response = await unverifiedClaimBackend("我看到图片里是一张合同。", { mode: "repair" }).getReply({ text: "看图", sender_id: "media-claim", channel: "wechat", media: [{ type: "image" }] });
+  assert.equal(response.replyText, "尚未收到可验证的执行结果，暂不确认已完成。");
 });
 
-test('createReplyBackend repair mode repairs media read through artifact evidence', async () => {
-  const repairCalls = [];
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '我看到图片里是一张合同截图。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async (plan) => {
-      repairCalls.push(plan);
-      return {
-        ok: true,
-        status: 'success',
-        repairedReply: '我现在读到了媒体内容：这是一张合同截图。',
-        media: { type: 'image', artifact_id: 'media-artifact-private' },
-        toolResult: { toolName: 'media_reader.analyze_image', ok: true, artifact_id: 'media-artifact-private' },
-      };
-    },
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '看下这张图',
-    sender_id: 'conv-action-repair-media',
-    channel: 'wechat',
-    media: [{ filePath: '/opt/ran_agent/debug/wechat/inbound/private.png', mimeType: 'image/png', type: 'image' }],
-  });
-
-  assert.equal(repairCalls.length, 1);
-  assert.equal(repairCalls[0].repairType, 'media_read');
-  assert.equal(response.replyText, '我现在读到了媒体内容：这是一张合同截图。');
-  assert.equal(response.media, null);
+test("valid sticker marker passes compatibility without a repair", async () => {
+  const response = await unverifiedClaimBackend("给你一张\nRAN_MEDIA: {\"source\":\"sticker_catalog\",\"kind\":\"sticker\",\"stickerId\":\"stk_001\"}", { mode: "repair", resolveStickerAssetImpl: () => ({ stickerId: "stk_001", mime: "image/gif", fileName: "stk.gif", filePath: "/tmp/stk.gif" }) }).getReply({ text: "表情", sender_id: "sticker-marker", channel: "wechat" });
+  assert.equal(response.replyText, "给你一张");
 });
 
-test('createReplyBackend repair mode repairs missing sticker marker and resolves media', async () => {
-  const logs = [];
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '给你发一个表情包～',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async () => ({
-      ok: true,
-      status: 'success',
-      repairedReply: '给你一张\nRAN_MEDIA: {"source":"sticker_catalog","kind":"sticker","stickerId":"stk_001","caption":"测试"}',
-      marker: 'RAN_MEDIA: {"source":"sticker_catalog","kind":"sticker","stickerId":"stk_001","caption":"测试"}',
-      toolResult: { toolName: 'sticker_attach', ok: true, artifact_id: 'stk_001' },
-    }),
-    resolveStickerAssetImpl: () => ({
-      stickerId: 'stk_001',
-      mime: 'image/gif',
-      fileName: 'stk_001.gif',
-      filePath: '/private/server/stickers/assets/stk_001.gif',
-    }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log(message) { logs.push(String(message)); }, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '来个表情包',
-    sender_id: 'conv-action-repair-sticker',
-    channel: 'wechat',
-  }, { requestId: 'req-action-repair-sticker' });
-
-  assert.equal(response.replyText, '给你一张');
-  assert.equal(response.media?.stickerId, 'stk_001');
-  const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
-  const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
-  assert.equal(payload.repair_type, 'sticker_send');
-  assert.equal(payload.repair_status, 'success');
-  assert.equal(payload.final_action, 'repair_success');
-  assert.equal(line.includes('/private/server'), false);
+test("media generated prose without marker is safely rewritten", async () => {
+  const response = await unverifiedClaimBackend("图片已经生成好了。", { mode: "repair" }).getReply({ text: "生成一张猫图", sender_id: "media-missing", channel: "wechat" });
+  assert.equal(response.replyText, "尚未收到可验证的执行结果，暂不确认已完成。");
 });
 
-test('createReplyBackend repair mode can attach existing generated media marker', async () => {
-  const logs = [];
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '图片已经生成好了，发你了。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async () => ({
-      ok: true,
-      status: 'success',
-      repairedReply: '生成结果已准备好。\nWECHAT_MEDIA: {"source":"media_generation_mcp","type":"image","url":"https://example.com/generated.png","fileName":"generated.png"}',
-      marker: 'WECHAT_MEDIA: {"source":"media_generation_mcp","type":"image","url":"https://example.com/generated.png","fileName":"generated.png"}',
-      toolResult: { toolName: 'media_generation.attach_existing', ok: true, artifact_id: 'generated-artifact-private' },
-    }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log(message) { logs.push(String(message)); }, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '生成一张猫图',
-    sender_id: 'conv-action-repair-generate',
-    channel: 'wechat',
-  }, { requestId: 'req-action-repair-generate' });
-
-  assert.equal(response.replyText, '生成结果已准备好。');
-  assert.deepEqual(response.media, {
-    type: 'image',
-    url: 'https://example.com/generated.png',
-    fileName: 'generated.png',
-  });
-  const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
-  const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
-  assert.equal(payload.repair_type, 'media_generate');
-  assert.equal(payload.repair_status, 'success');
-  assert.equal(payload.final_action, 'repair_success');
-  assert.equal(line.includes('generated-artifact-private'), false);
+test("trusted WECHAT_MEDIA marker passes compatibility without a new generation", async () => {
+  const response = await unverifiedClaimBackend("生成结果已准备好。\nWECHAT_MEDIA: {\"source\":\"media_generation_mcp\",\"kind\":\"image\",\"type\":\"image\",\"url\":\"https://example.test/safe.png\",\"fileName\":\"safe.png\"}", { mode: "repair" }).getReply({ text: "生成一张猫图", sender_id: "media-marker", channel: "wechat" });
+  assert.equal(response.replyText, "生成结果已准备好。");
 });
 
-test('createReplyBackend repair mode does not fake generated media when repair has no artifact', async () => {
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '图片已经生成好了，发你了。',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async () => ({ ok: false, status: 'failed', error_code: 'GENERATION_REPAIR_NO_ARTIFACT' }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '生成一张猫图',
-    sender_id: 'conv-action-repair-generate-fail',
-    channel: 'wechat',
-  });
-
-  assert.equal(response.replyText, '生成结果尚未返回，暂未发送成品。');
-  assert.equal(response.source, 'bridge_action_gate');
-  assert.equal(response.media, null);
+test("sticker prose without RAN_MEDIA is safely rewritten", async () => {
+  const response = await unverifiedClaimBackend("给你发一个表情包。", { mode: "repair" }).getReply({ text: "表情", sender_id: "sticker-missing", channel: "wechat" });
+  assert.equal(response.replyText, "尚未收到可验证的执行结果，暂不确认已完成。");
 });
 
-test('createReplyBackend repair mode downgrades when sticker repair fails', async () => {
-  const backend = createReplyBackend({
-    env: {
-      HERMES_ACTION_GATE_ENABLED: 'true',
-      HERMES_ACTION_GATE_MODE: 'repair',
-      HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS: '1',
-    },
-    hermesImpl: async () => ({
-      reply_text: '给你发一个表情包～',
-      follow_up_messages: [],
-      media: null,
-      model: 'deepseek-v4-flash',
-    }),
-    actionRepairImpl: async () => ({ ok: false, status: 'failed', error_code: 'STICKER_NOT_FOUND' }),
-    ingestImpl: async () => ({ ok: true }),
-    logger: { log() {}, warn() {} },
-  });
-
-  const response = await backend.getReply({
-    text: '来个表情包',
-    sender_id: 'conv-action-repair-sticker-fail',
-    channel: 'wechat',
-  });
-
-  assert.equal(response.replyText, '收到这个表情包请求。');
-  assert.equal(response.source, 'bridge_action_gate');
-  assert.equal(response.media, null);
+test("repair max-attempt setting cannot re-enable text-derived repair", async () => {
+  let repaired = false;
+  const response = await unverifiedClaimBackend("我已经完整读完了。", { mode: "repair", actionRepairImpl: async () => { repaired = true; return { ok: true, status: "success" }; } }).getReply({ text: "读链接", sender_id: "repair-max", channel: "wechat" });
+  assert.equal(repaired, false);
+  assert.equal(response.source, "bridge_action_gate");
 });
-
 test('createReplyBackend repair mode routes explicit memory writes through pending executor', async () => {
   const logs = [];
   const executions = [];
@@ -1492,7 +1045,7 @@ test('createReplyBackend repair mode respects max repair attempts', async () => 
   });
 
   assert.equal(repairCalled, false);
-  assert.equal(response.replyText, '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。');
+  assert.equal(response.replyText, '尚未收到可验证的执行结果，暂不确认已完成。');
   assert.equal(response.source, 'bridge_action_gate');
 });
 

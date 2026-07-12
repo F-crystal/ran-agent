@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: CURRENT (2026-07-07)
+Status: CURRENT (2026-07-12)
 
 ## Why Not Prompt Only
 
@@ -8,33 +8,39 @@ Hermes can produce action hallucinations: the reply says an action was completed
 but the runtime has no matching tool result, media marker, artifact, save result,
 or outbound send result. Prompt rules are useful hints, but they are not runtime
 evidence. The Node bridge therefore records an action contract for each reply
-before the final response leaves the reply backend. In `enforce` mode, the
-bridge can replace unsupported action claims with a short, honest fallback. In
-`repair` mode, the bridge may make one low-risk repair attempt before falling
-back to the same safe rewrite.
+before the final response leaves the reply backend. It audits model declarations
+and protected runtime evidence; it never selects an MCP action from user or
+reply prose. In `enforce` mode, the bridge can replace unsupported action claims
+with a short, honest fallback. In `repair` mode, only an explicitly injected,
+bounded retry for an already declared trusted action may run before the same
+safe rewrite.
 
 ## Action-Bearing Responses
 
-An action-bearing response is any response that claims or implies an external
-operation, including reading a link, reading media, sending a sticker, generating
-media, saving state, deleting/updating state, reading an external MCP, writing
-through an external MCP, or sending something to an external destination.
-Ordinary chat remains `intent=none`.
+The semantic action source is one of: a `replyEnvelope.actionRequests`
+declaration, a protected compatibility signal from an existing bridge/tool path,
+or no action. Ordinary user text, URLs, images, emoji, and final reply wording
+never select a tool or create an action intent. Natural-language success-claim
+detection is defensive only: without a declaration or protected signal it can
+downgrade an unverified completion claim, but cannot execute or retry an action.
 
 ## Contract Shape
 
 Each contract records:
 
-- `intent`: one of `none`, `social_read`, `media_read`, `sticker_send`,
-  `media_generate`, `memory_write`, `external_mcp_read`,
+- `intent`: one of `none`, `typed_action`, `social_read`, `media_read`,
+  `sticker_send`, `media_generate`, `memory_write`, `external_mcp_read`,
   `external_mcp_write`, or `external_send`.
 - `required_evidence`: marker, artifact, tool result, save result,
   authorization, or outbound result expected for the intent.
 - `observed_evidence`: sanitized runtime evidence visible to Node.
 - `final_claims`: sanitized claim categories detected in the final reply.
+- `contract_source`: `typed_action_request`, `protected_compatibility`, or
+  `no_action`; `declared_action_types` remains separate from compatibility.
 - `gate_decision`: `observe_only`, `pass`, `rewrite`, or `disabled`.
 - `rewrite_reason`: sanitized reason categories such as
-  `missing_required_evidence`, `partial_success_claim_mismatch`, or
+  `missing_required_evidence`, `unverified_success_claim`,
+  `partial_success_claim_mismatch`, or
   `outbound_failed_success_claim`.
 - `original_claim_types`: sanitized claim categories detected before any
   rewrite.
@@ -52,6 +58,12 @@ Each contract records:
   `blocked_high_risk`, or `max_attempts_exceeded`.
 - `repair_evidence_added`: sanitized evidence categories added by repair.
 - `repair_error_code`: sanitized error code if repair did not succeed.
+- `repair_trigger_source`: `typed_action_failure`,
+  `typed_claim_missing_request`, `trusted_compatibility_partial`,
+  `trusted_delivery_retry`, or `none`.
+- `repair_session_scope`: `task` for bounded repair work, otherwise `none`.
+- `repair_attempt_count` and `repair_recursive_blocked`: bounded retry
+  telemetry; recursive model/repair loops are forbidden.
 - `pending_action_id`: pending action id when a confirmation flow is active.
 - `pending_action_type`: sanitized action type such as `sticker_save`.
 - `pending_action_status`: `pending`, `cancelled`, `executed`, `failed`, or
@@ -86,9 +98,10 @@ HERMES_ACTION_PENDING_TTL_MINUTES=30
 
 - `observe`: log contracts only; do not rewrite replies and do not retry tools.
 - `enforce`: rewrite clearly inconsistent replies safely before sending.
-- `repair`: if evidence is missing for a low-risk action claim, make at most one
-  repair attempt, update the evidence ledger, then re-run the gate. Failure uses
-  the same safe downgrade as `enforce`.
+- `repair`: a missing-evidence claim is safely rewritten unless an existing
+  typed/protected contract supplies one explicit bounded retry implementation.
+  The bridge never guesses a tool, media object, marker, or action type from
+  text. Failure uses the same safe downgrade as `enforce`.
 
 Temporary disable:
 
@@ -130,25 +143,23 @@ Bridge-authored notices use `bridge_*` sources such as `bridge_action_gate`,
 user, but they are filtered out of Hermes recent/global assistant history so
 Hermes does not later replay bridge safety text as its own personality.
 
-## Automatic Repair Scope
+## Bounded Repair Scope
 
-Repair runs automatically inside the reply backend. The user does not run a
-daily or per-message script. Each reply can attempt repair at most once, as
-limited by `HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS`.
+Each reply has at most one repair attempt, controlled by
+`HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS`. A repair plan is allowed only when
+the action contract is already `typed_action_request` or
+`protected_compatibility`, carries a completion claim, is not high risk, and a
+caller injects the retry implementation. The plan retains the original
+operation/idempotency scope; it is task-scoped and must not append ordinary
+conversation/provider history or trigger a recursive repair.
 
-Allowed low-risk repair intents:
-
-- `social_read`: call the existing social reader path once, usually
-  `read_social_post_deep`, then add a sanitized tool result. Partial success is
-  accepted as evidence, but the final reply must say it was partial.
-- `media_read`: call the existing media context/media reader path once, then
-  add artifact or tool-result evidence. The analysis artifact is evidence only;
-  it is not sent as outbound WeChat media.
-- `sticker_send`: call public sticker catalog tools only (`sticker_pick` and
-  `sticker_attach`). It never calls save/update/delete and never sends more than
-  one sticker.
-- `media_generate`: only reattaches an existing generated media artifact or
-  marker. It does not start a new expensive generation if no artifact exists.
+Allowed compatibility normalization is intentionally narrow: attach an existing
+bridge-owned media object through an existing trusted adapter when its transport
+marker is missing; retry an interrupted delivery only inside its existing
+idempotent outbox scope; or rewrite a complete claim as partial when a trusted
+tool result is partial. Neither the bridge nor repair may fetch a URL, analyze
+an image, pick a sticker, start media generation, or synthesize a marker merely
+because a user or Hermes message contains related text.
 
 Forbidden repair intents:
 

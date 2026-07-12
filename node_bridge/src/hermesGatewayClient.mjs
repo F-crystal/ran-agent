@@ -290,7 +290,7 @@ function normalizePositiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-const GENERATION_INTENT_PATTERN = /画|生成|头像|壁纸|海报|语音|朗读|读出来|tts|画图|生图|配图/;
+const GENERATION_INTENT_PATTERN = /(?:生成|画|制作)(?:一?[张幅个]?\s*)?(?:[\u4e00-\u9fff]{0,12})?(?:图片|图像|海报|头像|壁纸|配图|插画|图)|(?:生成|合成|朗读)(?:一?[段条]?\s*)?(?:[\u4e00-\u9fff]{0,12})?(?:语音|音频)|(?:画图|生图|tts)/i;
 const DEBUG_INTENT_PATTERN = /调试|debug|执行命令|运行命令|看文件|查看文件|查看日志|看日志|服务端|systemd|systemctl|journalctl|lark-cli|playwright|重启服务|部署|git\s+(push|pull|commit|log|diff|status)|npm\s+(install|run|test|exec)|pip\s+install|curl\s+/;
 export function resolveCapabilityMode(payload, config) {
   const mode = config.capabilityMode || 'auto';
@@ -360,9 +360,12 @@ export async function sendChatToHermesGateway(payload, options = {}) {
   logSocialLinkRouting(payload, logger, requestId);
 
   const selectedConfig = { ...config, baseUrl: selectedBaseUrl, profile: selectedProfile };
-  const sessionContext = buildHermesSessionContext(payload, selectedConfig);
+  const taskScoped = isTaskScopedRoute(payload);
+  const sessionContext = taskScoped
+    ? buildTaskHermesSessionContext(payload, selectedConfig)
+    : buildHermesSessionContext(payload, selectedConfig);
   const isLiteProfile = selectedConfig.profile === selectedConfig.liteProfile;
-  const pendingResumeDigest = isLiteProfile ? getPendingLiteResumeDigest(selectedConfig) : null;
+  const pendingResumeDigest = !taskScoped && isLiteProfile ? getPendingLiteResumeDigest(selectedConfig) : null;
   const effectivePayload = pendingResumeDigest
     ? { ...payload, daily_digest_context: pendingResumeDigest.text }
     : payload;
@@ -455,6 +458,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       payload: effectivePayload,
       env,
       softResetResume: Boolean(pendingResumeDigest),
+      taskScoped,
       dailyDigestChars: buildDailyDigestContextText(effectivePayload).length,
     });
     if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
@@ -537,6 +541,7 @@ async function sendChatToHermesApi(message, options = {}) {
       cacheFriendlyHistory: options.cacheFriendlyHistory,
       payload: options.payload,
       softResetResume: options.softResetResume,
+      taskScoped: options.taskScoped,
       dailyDigestChars: options.dailyDigestChars,
       clientPromptChars: clientPromptText.length,
       clientPromptEstimatedTokens: estimateTokens(clientPromptText),
@@ -838,6 +843,11 @@ function logProviderUsageTelemetry(body = {}, options = {}) {
     sanitized_changed: cacheFriendlyHistory.sanitizedChanged === true,
     cache_exact_ratio: nullableNumber(cacheFriendlyHistory.cacheExactRatio),
     soft_reset_resume: options.softResetResume === true,
+    session_scope: options.taskScoped === true ? 'task' : 'conversation',
+    task_kind: options.taskScoped === true ? String(options.payload?.route_hint || '') : '',
+    history_injected_turns: options.taskScoped === true ? 0 : Math.floor((options.clientMessageCount || 1) / 2),
+    provider_visible_history_used: options.taskScoped !== true && cacheFriendlyHistory.enabled === true,
+    soft_reset_eligible: options.taskScoped !== true && options.config?.profile === options.config?.liteProfile,
     daily_digest_chars: nullableNumber(options.dailyDigestChars) ?? 0,
   };
   options.logger?.log?.(`[hermes-provider-usage] ${JSON.stringify(payload)}`);
@@ -1295,6 +1305,33 @@ function buildHermesSessionContext(payload = {}, config = {}) {
     globalUserId: String(payload.global_user_id || ''),
     platform: channel,
   }, config);
+}
+
+function isTaskScopedRoute(payload = {}) {
+  return [
+    'scheduled_ai_daily_digest',
+    'manual_ai_daily_digest',
+    'action_gate_repair',
+    'release_runtime_journey',
+    'hermes_proactive_event',
+    'external_mcp_system_queue',
+  ]
+    .includes(String(payload.route_hint || '').trim());
+}
+
+function buildTaskHermesSessionContext(payload = {}, config = {}) {
+  const kind = String(payload.route_hint || 'one_shot').trim();
+  const key = `${kind}:${String(payload.message_id || payload.id || '').trim() || sha256Hex(String(payload.text || '')).slice(0, 16)}`;
+  const digest = sha256Hex(key).slice(0, 16);
+  return {
+    enabled: false,
+    stableKey: '',
+    sessionId: `${config.sessionIdPrefix || 'ran-agent-task'}-task-${digest}`,
+    sessionKey: `${config.sessionKeyPrefix || 'ran-agent-task'}-task-${digest}`,
+    globalUserId: '',
+    platform: String(payload.platform || payload.channel || ''),
+    taskKind: kind,
+  };
 }
 
 function applyLiteSessionNonce(sessionContext = {}, config = {}) {

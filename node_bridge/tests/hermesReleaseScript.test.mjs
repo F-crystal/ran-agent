@@ -119,6 +119,12 @@ test('release scripts expose fixture-safe dry-run transactions and require an ex
   }
 });
 
+test('dry-run executes the protected manifest digest under set -u without touching runtime state', () => {
+  if (!existsSync(join(root, '.git'))) return;
+  const output = run('deploy-hermes-release.sh', ['--dry-run']);
+  assert.match(output, /deploy-hermes-release: dry-run-ok candidate=[a-f0-9]{40}/);
+});
+
 test('release apply is a server-only, rollback-capable transaction that preserves runtime shape', () => {
   const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
   const accept = readFileSync(join(root, 'scripts', 'accept-hermes-release.sh'), 'utf8');
@@ -143,7 +149,7 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*\$STAGE_DIR\/scripts\/apply-hermes-runtime-split\.sh/);
   assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*\$STAGE_DIR\/scripts\/verify-hermes-release\.sh/);
   assert.match(deploy, /read -r expected_candidate expected_digest < <\("\$\{SUDO\[@\]\}" cat "\$STAGE_DIR\/candidate"\)/);
-  assert.match(deploy, /"\$\{SUDO\[@\]\}" sha256sum "\$manifest"/);
+  assert.match(deploy, /protected_manifest_digest/);
   assert.match(deploy, /tee -a "\$SNAPSHOT_DIR\/manifest"/);
   assert.match(deploy, /done < <\("\$\{SUDO\[@\]\}" cat "\$SNAPSHOT_DIR\/manifest"\)/);
   assert.match(deploy, /\$STAGE_DIR\/scripts\/apply-hermes-runtime-split\.sh/);

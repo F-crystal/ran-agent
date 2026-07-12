@@ -142,9 +142,9 @@ candidate_stage_preflight() {
 }
 
 require_atomic_state() {
-  "${SUDO[@]}" install -d -m 700 "$STATE_DIR" || fail state_dir_unavailable
-  local probe="$STATE_DIR/.release-atomic-probe.$$"
-  "${SUDO[@]}" sh -c ': > "$1" && mv "$1" "$1.done" && rm -f "$1.done"' sh "$probe" || fail atomic_state_unavailable
+  # A root atomic probe would rename a root-owned file into live runtime state.
+  # State creation and writes stay with the service user after the transaction.
+  "${SUDO[@]}" test -d "$STATE_DIR" || fail state_dir_unavailable
 }
 
 require_plan_prerequisites() {
@@ -157,6 +157,7 @@ require_plan_prerequisites() {
   find "$probe" -type l -print -quit | grep -q . && fail candidate_plan_symlink
   STAGE_DIR="$probe"
   STAGE_USE_SUDO=0
+  protected_manifest_digest "$probe" >/dev/null || fail candidate_protected_manifest_unavailable
   candidate_stage_preflight module
   if [[ "$REPO_ROOT" == "$SERVER_ROOT" ]]; then
     require_service_environment
@@ -221,8 +222,17 @@ verify_stage_candidate() {
 }
 
 protected_manifest_digest() {
-  local root="$1" manifest="$root/docs/governance/hermes_protected_capabilities.v1.json"
-  if "${SUDO[@]}" test -f "$manifest"; then "${SUDO[@]}" sha256sum "$manifest" | awk '{ print $1 }'; else printf 'absent\n'; fi
+  local root manifest
+  root="$1"
+  manifest="$root/docs/governance/hermes_protected_capabilities.v1.json"
+  if ! stage_run test -f "$manifest"; then printf 'absent\n'; return 0; fi
+  if command -v sha256sum >/dev/null 2>&1; then
+    stage_run sha256sum "$manifest" | awk '{ print $1 }'
+  elif command -v shasum >/dev/null 2>&1; then
+    stage_run shasum -a 256 "$manifest" | awk '{ print $1 }'
+  else
+    return 1
+  fi
 }
 
 record_protected_capability_evidence() {

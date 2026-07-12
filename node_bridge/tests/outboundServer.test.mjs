@@ -260,6 +260,48 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   assert.equal(calls[0].args.includes('ou-home'), true);
 });
 
+test('manual AI digest uses its operation scope to send one digest body exactly once', async (t) => {
+  const env = tempEnv(t, {
+    FEISHU_LARK_CLI_BIN: 'lark-cli',
+    FEISHU_LARK_CLI_IDENTITY: 'bot',
+  }, 'manual-digest-once-');
+  setFeishuHomeDmTarget({
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: 'oc-home',
+    sender_id: 'ou-home',
+  }, env);
+  const operationId = `op_${'a'.repeat(32)}`;
+  let taskGenerations = 0;
+  const sends = [];
+  const input = {
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    env,
+    bodyText: JSON.stringify({ facts: '仅用于手动补发的已验证事实', mode: 'manual', operation_id: operationId }),
+    channelHub: async (message) => {
+      taskGenerations += 1;
+      assert.equal(message.route_hint, 'manual_ai_daily_digest');
+      return { replyText: '日报正文只发送一次' };
+    },
+    execFileImpl: async (bin, args) => {
+      sends.push({ bin, args });
+      return { stdout: '{"ok":true}' };
+    },
+    nowImpl: () => new Date('2026-07-12T09:00:00.000Z'),
+  };
+
+  const first = await handleScheduledAiDigestRequest(input);
+  const second = await handleScheduledAiDigestRequest(input);
+
+  assert.equal(first.status, 200);
+  assert.equal(second.status, 200);
+  assert.equal(first.payload.delivery_status, 'sent');
+  assert.equal(second.payload.delivery_status, 'sent');
+  assert.equal(first.payload.outbox_id, second.payload.outbox_id);
+  assert.equal(sends.length, 1);
+  assert.equal(taskGenerations, 2);
+});
+
 test('handleExternalMcpSystemQueueRequest is disabled by default and does not call Hermes', async () => {
   let channelCalled = false;
   const result = await handleExternalMcpSystemQueueRequest({

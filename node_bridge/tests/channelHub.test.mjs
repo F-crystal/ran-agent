@@ -457,7 +457,7 @@ test('channel hub does not persist sticker filePath in assistant media summary',
   assert.match(assistant.media_summary, /"stickerId":"stk_001"/);
 });
 
-test('channel hub reply pipeline emits action contract telemetry automatically', async (t) => {
+test('channel hub records claim-only telemetry without assigning a social action from a URL', async (t) => {
   const env = {
     ...tempEnv(t),
     HERMES_ACTION_GATE_ENABLED: 'true',
@@ -490,10 +490,11 @@ test('channel hub reply pipeline emits action contract telemetry automatically',
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
   assert.ok(line);
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
-  assert.equal(payload.intent, 'social_read');
+  assert.equal(payload.intent, 'none');
+  assert.equal(payload.contract_source, 'no_action');
   assert.equal(payload.gate_mode, 'observe');
   assert.equal(payload.gate_decision, 'observe_only');
-  assert.equal(payload.evidence_satisfied, false);
+  assert.equal(payload.evidence_satisfied, true);
   assert.equal(line.includes('abc123'), false);
   assert.equal(line.includes('旅行'), false);
 });
@@ -533,7 +534,7 @@ test('channel hub enforce mode sends safe rewrite for unsupported action claims'
     },
   });
 
-  const rewritten = '链接内容未成功读取，未生成正文判断。可以重试，或发送截图/正文。';
+  const rewritten = '尚未收到可验证的执行结果，暂不确认已完成。';
   assert.equal(response.replyText, rewritten);
   assert.equal(sent.text, rewritten);
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
@@ -542,7 +543,7 @@ test('channel hub enforce mode sends safe rewrite for unsupported action claims'
   assert.equal(payload.final_action, 'safe_rewrite');
 });
 
-test('channel hub repair mode applies repaired reply through adapter', async (t) => {
+test('channel hub repair mode never injects a social retry from URL or reply prose', async (t) => {
   const env = {
     ...tempEnv(t),
     HERMES_ACTION_GATE_ENABLED: 'true',
@@ -587,16 +588,17 @@ test('channel hub repair mode applies repaired reply through adapter', async (t)
     },
   });
 
-  assert.equal(repairCalls, 1);
-  assert.equal(response.replyText, '链接内容已读取：它在讲旅行规划。');
-  assert.equal(sent.text, '链接内容已读取：它在讲旅行规划。');
+  assert.equal(repairCalls, 0);
+  assert.equal(response.replyText, '尚未收到可验证的执行结果，暂不确认已完成。');
+  assert.equal(sent.text, '尚未收到可验证的执行结果，暂不确认已完成。');
   const line = logs.find((item) => item.startsWith('[hermes-action-contract] '));
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
-  assert.equal(payload.repair_status, 'success');
-  assert.equal(payload.final_action, 'repair_success');
+  assert.equal(payload.repair_status, 'skipped');
+  assert.equal(payload.repair_trigger_source, 'none');
+  assert.equal(payload.final_action, 'repair_failed_safe_rewrite');
 });
 
-test('channel hub scheduled digest path does not trigger sticker repair', async (t) => {
+test('channel hub scheduled digest path is claim-only and does not trigger sticker repair', async (t) => {
   const env = {
     ...tempEnv(t),
     HERMES_ACTION_GATE_ENABLED: 'true',
@@ -631,7 +633,7 @@ test('channel hub scheduled digest path does not trigger sticker repair', async 
   });
 
   assert.equal(repairCalls, 0);
-  assert.equal(response.replyText, '收到这个表情包请求。');
+  assert.equal(response.replyText, '尚未收到可验证的执行结果，暂不确认已完成。');
 });
 
 test('channel hub creates pending sticker save and executes confirmation through adapter', async (t) => {

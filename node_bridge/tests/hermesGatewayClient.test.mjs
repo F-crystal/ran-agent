@@ -56,6 +56,14 @@ test('capability routing ignores natural-language lite/full words', () => {
   );
 });
 
+test('media profile routing only treats explicit media requests as generation and keeps digest requests lite', () => {
+  const config = { capabilityMode: 'auto' };
+  assert.equal(resolveCapabilityMode({ text: '生成一张猫图' }, config).mode, 'full');
+  assert.equal(resolveCapabilityMode({ text: '生成一段语音' }, config).mode, 'full');
+  assert.equal(resolveCapabilityMode({ text: '重新生成并发送日报' }, config).mode, 'lite');
+  assert.equal(resolveCapabilityMode({ text: '生成今日摘要' }, config).mode, 'lite');
+});
+
 async function captureHermesRequest({ payload = {}, env = {}, responseBody = null } = {}) {
   const logs = [];
   const warns = [];
@@ -106,6 +114,42 @@ function parseProviderUsageLog(logs) {
 function tempGatewayEnv(t, prefix = 'hermes-gateway-soft-reset-') {
   return createIsolatedTestEnv(t, {}, prefix);
 }
+
+test('AI digest task route uses a separate session and never writes provider-visible conversation history', async (t) => {
+  const env = tempGatewayEnv(t, 'hermes-task-digest-');
+  const { capturedHeaders, logs } = await captureHermesRequest({
+    payload: { route_hint: 'manual_ai_daily_digest', message_id: 'digest-task-1', recent_local_history: historyTurns('chat', 3) },
+    env: { ...env, HERMES_CONTEXT_CACHE_STRATEGY: 'cache_first' },
+  });
+  assert.match(String(capturedHeaders['X-Hermes-Session-Id'] || capturedHeaders['x-hermes-session-id']), /-task-/);
+  assert.equal(readProviderVisibleHistoryFiles(env.RAN_AGENT_STATE_DIR).length, 0);
+  const telemetry = parseProviderUsageLog(logs);
+  assert.equal(telemetry.session_scope, 'task');
+  assert.equal(telemetry.history_injected_turns, 0);
+  assert.equal(telemetry.provider_visible_history_used, false);
+  assert.equal(telemetry.soft_reset_eligible, false);
+});
+
+test('proactive and external MCP synthetic routes use the same isolated task session', async (t) => {
+  const env = tempGatewayEnv(t, 'hermes-task-synthetic-');
+  for (const routeHint of ['hermes_proactive_event', 'external_mcp_system_queue']) {
+    const { capturedHeaders, logs } = await captureHermesRequest({
+      payload: {
+        route_hint: routeHint,
+        message_id: `synthetic-${routeHint}`,
+        recent_local_history: historyTurns('ordinary', 2),
+      },
+      env: { ...env, HERMES_CONTEXT_CACHE_STRATEGY: 'cache_first' },
+    });
+    assert.match(String(capturedHeaders['X-Hermes-Session-Id'] || capturedHeaders['x-hermes-session-id']), /-task-/);
+    const telemetry = parseProviderUsageLog(logs);
+    assert.equal(telemetry.session_scope, 'task');
+    assert.equal(telemetry.task_kind, routeHint);
+    assert.equal(telemetry.history_injected_turns, 0);
+    assert.equal(telemetry.provider_visible_history_used, false);
+  }
+  assert.equal(readProviderVisibleHistoryFiles(env.RAN_AGENT_STATE_DIR).length, 0);
+});
 
 function readProviderVisibleHistoryFiles(stateDir) {
   const dir = path.join(stateDir, 'hermes', 'provider_visible_history');

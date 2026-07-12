@@ -34,6 +34,7 @@ import { createOperationLedger } from './operationLedger.mjs';
 import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
 import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
 import { createPersonalLearningExecutorAdapter } from './personalLearningClient.mjs';
+import { createAiDailyDigestExecutorAdapter } from './aiDailyDigestClient.mjs';
 import {
   deleteStickers,
   resolveStickerAsset,
@@ -63,6 +64,7 @@ export function createReplyBackend(options = {}) {
       env,
       fetchImpl: options.fetchImpl || globalThis.fetch,
     }));
+    configuredExecutorAdapters.push(createAiDailyDigestExecutorAdapter({ env, fetchImpl: options.fetchImpl || globalThis.fetch }));
   }
   const trustedActionExecutors = options.trustedActionExecutors || createTrustedExecutorAdapters({
     ledger: operationLedger,
@@ -211,6 +213,11 @@ export function createReplyBackend(options = {}) {
         ['memory.remember', 'memory.correct'].includes(receipt?.actionType)
         && receipt?.errorCode === 'ACTION_NOT_GROUNDED'
       ));
+      const digestAcknowledgement = actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send' && receipt?.status === 'succeeded')
+        ? '今日日报已补发。'
+        : actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send')
+          ? '日报生成或发送失败，未确认送达。'
+          : '';
       const coreAcknowledgement = commitmentBlocked
         ? ''
         : bridgeOwnedCoreAcknowledgement(replyEnvelope.commitments, durableReceiptSummaries);
@@ -220,6 +227,8 @@ export function createReplyBackend(options = {}) {
         response = { ...response, reply_text: '保存结果尚未返回，未写入长期记忆。', follow_up_messages: [] };
       } else if (coreAcknowledgement) {
         response = { ...response, reply_text: coreAcknowledgement, follow_up_messages: [] };
+      } else if (digestAcknowledgement) {
+        response = { ...response, reply_text: digestAcknowledgement, follow_up_messages: [] };
       }
 
       const logger = options.logger || console;
@@ -241,6 +250,8 @@ export function createReplyBackend(options = {}) {
         ? 'bridge_commitment_guard'
         : learningPromotionDenied
           ? 'bridge_learning_intent_guard'
+        : digestAcknowledgement
+          ? 'bridge_ai_daily_digest'
         : coreAcknowledgement
           ? 'bridge_core_job_ack'
           : 'hermes';
@@ -253,6 +264,7 @@ export function createReplyBackend(options = {}) {
           profile: gatewayConfig.profile || response.profile || response.model || '',
           message,
           response: { ...response, media: finalResponseMedia, reply_text: rawContractReplyText },
+          actionRequests: replyEnvelope.actionRequests,
           toolResults: actionExecution.evidence,
           config: actionGateConfig,
         });
@@ -291,6 +303,7 @@ export function createReplyBackend(options = {}) {
               profile: gatewayConfig.profile || response.profile || response.model || '',
               message,
               response: { ...response, media: contractRepairMedia, reply_text: rawContractReplyText },
+              actionRequests: replyEnvelope.actionRequests,
               toolResults: [...actionExecution.evidence, ...repair.toolResults],
               config: actionGateConfig,
             });
@@ -334,6 +347,7 @@ export function createReplyBackend(options = {}) {
             profile: gatewayConfig.profile || response.profile || response.model || '',
             message,
             response: { ...response, media: finalResponseMedia, reply_text: followUpText },
+            actionRequests: replyEnvelope.actionRequests,
             toolResults: actionExecution.evidence,
             config: actionGateConfig,
           });
@@ -758,6 +772,13 @@ function isActiveDurableReceipt(receipt, expected = {}) {
 
 function groundActionRequest(request, message = {}) {
   const actionType = String(request.actionType || '');
+  if (actionType === 'ai_daily_digest.send') {
+    const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
+    const userText = String(message.text || '');
+    if (!/(日报|简报|摘要)/.test(userText) || !/(发|补发|重发|重新|再)/.test(userText) || scope.mode !== 'manual') throw actionExecutionError('ACTION_NOT_GROUNDED');
+    if (!['current_local_date', 'today'].includes(String(scope.date || 'current_local_date'))) throw actionExecutionError('ACTION_NOT_GROUNDED');
+    return { ...request, scope: { mode: 'manual', date: 'current_local_date' } };
+  }
   if (!actionType.startsWith('memory.')) return request;
   const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope)
     ? request.scope

@@ -71,5 +71,6 @@ docs/governance/archive/
 
 # Agents
 .codex/
+.agents/
 .playwright-mcp/
 vault/ombre/

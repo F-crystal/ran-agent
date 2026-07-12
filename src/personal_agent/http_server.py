@@ -13,6 +13,7 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+from personal_agent.ai_daily_digest import build_digest_prompt, load_aihot_facts
 from personal_agent.config import AppConfig
 from personal_agent.durable_jobs import (
     DurableJobReceipt,
@@ -293,6 +294,40 @@ class BackendHttpController:
             "result": result,
         }
 
+    def handle_ai_daily_digest_action(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        try:
+            if set(payload) != {"operationId", "actionType", "scope"}:
+                raise ValueError("invalid request fields")
+            operation_id = str(payload["operationId"])
+            if not re.fullmatch(r"op_[a-f0-9]{32}", operation_id) or payload["actionType"] != "ai_daily_digest.send":
+                raise ValueError("invalid operation")
+            if payload["scope"] != {"mode": "manual", "date": "current_local_date"}:
+                raise ValueError("invalid digest scope")
+            partial = False
+            try:
+                facts = load_aihot_facts().strip()
+            except Exception:
+                facts = "事实材料暂时不可用。本期只报告来源获取失败，不补写或猜测新闻内容。"
+                partial = True
+            if not facts:
+                facts = "事实材料暂时不可用。本期只报告来源返回为空，不补写或猜测新闻内容。"
+                partial = True
+            bridge_result = self._message_service.send_ai_daily_digest(
+                build_digest_prompt(facts), mode="manual", operation_id=operation_id
+            )
+            if str(bridge_result.get("delivery_status") or "") != "sent" or not bridge_result.get("outbox_id"):
+                return HTTPStatus.BAD_GATEWAY, {"ok": False, "error": "digest delivery unconfirmed"}
+        except (TypeError, ValueError, KeyError):
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid daily digest request"}
+        except Exception:
+            self._logger.exception("private AI daily digest action failed")
+            return HTTPStatus.SERVICE_UNAVAILABLE, {"ok": False, "error": "daily digest unavailable"}
+        return HTTPStatus.OK, {
+            "ok": True, "authenticated": True, "operationId": operation_id,
+            "effectId": "ai-daily-digest:" + _short_private_digest(str(bridge_result["outbox_id"])),
+            "result": {"delivery_status": "sent", "partial": partial},
+        }
+
     def _handle_todo_create(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """Create a new todo from text."""
         text = str(payload.get("text", "")).strip()
@@ -539,6 +574,20 @@ class PersonalAgentHttpServer:
                         )
                         return
                     status_code, response_payload = controller.handle_personal_learning_action(payload)
+                    self._write_json(status_code, response_payload)
+                    return
+
+                if self.path == "/internal/ai-daily-digest":
+                    denied = self._private_access_denial()
+                    if denied is not None:
+                        self._write_json(*denied)
+                        return
+                    try:
+                        payload = self._read_json_body()
+                    except ValueError:
+                        self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid daily digest request"})
+                        return
+                    status_code, response_payload = controller.handle_ai_daily_digest_action(payload)
                     self._write_json(status_code, response_payload)
                     return
 

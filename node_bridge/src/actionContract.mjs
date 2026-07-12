@@ -1,10 +1,19 @@
 import { createHash } from 'node:crypto';
+import { loadActionCompatibilityRegistry } from './actionCompatibilityRegistry.mjs';
 
 const VALID_GATE_MODES = new Set(['observe', 'enforce', 'repair']);
 const TRUSTED_ACTION_EVIDENCE = Symbol('trustedActionEvidence');
 
 export function trustExternalMcpToolResult(result = {}) {
-  return markTrustedActionEvidence(result, 'external_mcp_tool_result');
+  return markTrustedActionEvidence({ type: 'external_mcp_tool_result', ...result }, 'external_mcp_tool_result');
+}
+
+export function trustMcpToolResult(result = {}, source = '') {
+  const trustedSource = String(source || result.source || '').trim();
+  if (!['social_reader', 'search_hub', 'media_reader', 'media_generation'].includes(trustedSource)) {
+    throw new Error('trusted MCP tool result source is invalid');
+  }
+  return markTrustedActionEvidence({ ...result, source: trustedSource }, 'mcp_tool_result');
 }
 
 export function trustExternalMcpAuthorizationEvidence(result = {}) {
@@ -35,12 +44,15 @@ export function evaluateActionContract({
   profile = '',
   message = {},
   response = {},
+  actionRequests = [],
   toolResults = [],
   config = getActionGateConfig(),
 } = {}) {
-  const intent = detectActionIntent(message, response);
-  const requiredEvidence = requiredEvidenceForIntent(intent);
   const observedEvidence = collectObservedEvidence({ response, toolResults });
+  const declaredActionTypes = normalizeDeclaredActionTypes(actionRequests);
+  const compatibility = declaredActionTypes.length > 0 ? null : detectCompatibilityAction(observedEvidence);
+  const intent = declaredActionTypes.length > 0 ? 'typed_action' : compatibility?.action || 'none';
+  const requiredEvidence = declaredActionTypes.length > 0 ? [] : requiredEvidenceForIntent(intent);
   const finalClaims = detectFinalClaims(response?.reply_text || response?.replyText || '');
   const hasRequiredEvidence = requiredEvidence.length === 0 || hasEvidenceForIntent(intent, observedEvidence);
   const missingEvidence = hasRequiredEvidence ? [] : missingEvidenceForIntent(intent, observedEvidence);
@@ -52,6 +64,11 @@ export function evaluateActionContract({
     channel: sanitizeShortString(channel || message.channel || message.platform || ''),
     conversation_id_hash: hashShort(conversationId || message.conversation_id || message.conversationId || message.sender_id || ''),
     profile: sanitizeShortString(profile || response.profile || response.model || ''),
+    contract_source: declaredActionTypes.length > 0 ? 'typed_action_request' : compatibility ? 'protected_compatibility' : 'no_action',
+    declared_action_types: declaredActionTypes,
+    executed_action_types: [],
+    compatibility_action: compatibility?.action || '',
+    compatibility_signal_source: compatibility?.source || '',
     gate_mode: config?.enabled === false ? 'disabled' : sanitizeShortString(config?.mode || 'observe'),
     intent,
     required_evidence: requiredEvidence,
@@ -116,10 +133,15 @@ export function evaluateActionGate({
   }
 
   const actionClaimed = hasActionClaimForIntent(intent, claims);
+  const unverifiedSuccessClaim = intent === 'none' && claims.length > 0;
   const partialClaimMismatch = partialSuccessDetected && hasPartialMismatchClaim(claims);
   const failedOutboundSuccessClaim = intent === 'external_send' && hasFailedOutboundEvidence(evidence) && claims.includes('external_sent');
 
-  if (partialClaimMismatch) {
+  if (unverifiedSuccessClaim) {
+    shouldRewrite = true;
+    reasons.push('unverified_success_claim');
+    rewrittenText = '尚未收到可验证的执行结果，暂不确认已完成。';
+  } else if (partialClaimMismatch) {
     shouldRewrite = true;
     reasons.push('partial_success_claim_mismatch');
     rewrittenText = partialRewriteForIntent(intent);
@@ -172,6 +194,10 @@ export function applyActionGateTelemetry(contract = {}, gate = {}, repair = {}) 
     repair_status: sanitizeShortString(repair.repairStatus || (repair.repairAttempted ? 'failed' : 'skipped')),
     repair_evidence_added: Array.isArray(repair.repairEvidenceAdded) ? repair.repairEvidenceAdded.map((item) => sanitizeShortString(item)) : [],
     repair_error_code: sanitizeShortString(repair.repairErrorCode || ''),
+    repair_trigger_source: sanitizeShortString(repair.repairTriggerSource || 'none'),
+    repair_session_scope: sanitizeShortString(repair.repairSessionScope || 'none'),
+    repair_attempt_count: Number.isInteger(repair.repairAttemptCount) ? repair.repairAttemptCount : 0,
+    repair_recursive_blocked: repair.repairRecursiveBlocked !== false,
     pending_action_id: sanitizeShortString(contract.pending_action_id || ''),
     pending_action_type: sanitizeShortString(contract.pending_action_type || ''),
     pending_action_status: sanitizeShortString(contract.pending_action_status || ''),
@@ -188,38 +214,22 @@ export function logActionContract(result = {}, logger = console) {
   logger?.log?.(`[hermes-action-contract] ${JSON.stringify(result)}`);
 }
 
-function detectActionIntent(message = {}, response = {}) {
-  const text = `${message.text || ''}\n${response.reply_text || response.replyText || ''}`;
-  const routeHint = `${message.route_hint || ''}\n${response.route_hint || ''}`;
-  const hasMedia = normalizeMediaItems(message.media).length > 0 || normalizeStringArray(message.image_urls).length > 0;
-  const externalMcpSignal = /external[_ -]?mcp|外部\s*MCP/i.test(`${text}\n${routeHint}`);
+function normalizeDeclaredActionTypes(actionRequests) {
+  if (!Array.isArray(actionRequests)) return [];
+  return [...new Set(actionRequests.map((item) => sanitizeShortString(item?.actionType)).filter(Boolean))];
+}
 
-  if (externalMcpSignal) {
-    if (/(评论|回复|发帖|点赞|关注|提交|走棋|下棋|交易|购买|转账|删除|保存|post|comment|like|follow|submit|move|trade|delete|purchase|buy)/i.test(text)) {
-      return 'external_mcp_write';
+function detectCompatibilityAction(evidence = []) {
+  const registry = loadActionCompatibilityRegistry();
+  if (hasEvidenceForIntent('external_mcp_write', evidence)) return { action: 'external_mcp_write', source: 'external_mcp' };
+  for (const action of Object.keys(registry.actions)) {
+    if (action === 'external_mcp_write') continue;
+    if (hasEvidenceForIntent(action, evidence)) {
+      const source = evidence.find((item) => item.source)?.source || evidence.find((item) => item.type === 'marker')?.summary?.source || '';
+      return { action, source: sanitizeShortString(source) };
     }
-    return 'external_mcp_read';
   }
-
-  if (/(发邮件|发送邮件|转发|批量外发|发给|发送给|外发)|send email/i.test(text)) {
-    return 'external_send';
-  }
-  if (/记住|保存.*(?:记忆|偏好)|长期记忆|保存这个为表情包|加入表情包|批注|写入/.test(text)) {
-    return 'memory_write';
-  }
-  if (/表情包|贴纸|\bsticker\b|RAN_MEDIA/i.test(text)) {
-    return 'sticker_send';
-  }
-  if (/(?:生成|做|画).*(?:图片|图|语音|视频)|朗读|发(?:图|语音)|WECHAT_MEDIA/.test(text)) {
-    return 'media_generate';
-  }
-  if (hasMedia || /看(?:下|看)?.*(?:图|图片|视频|文件)|听.*(?:音频|语音)|分析.*(?:视频|图片|截图)|读.*文件|图片里|图里/.test(text)) {
-    return 'media_read';
-  }
-  if (hasUrl(text) || /读(?:一下|这个|链接)|看(?:一下|这个链接)|总结(?:一下|这个)|小红书|公众号|B站|bilibili|xhslink|xiaohongshu/i.test(text)) {
-    return 'social_read';
-  }
-  return 'none';
+  return null;
 }
 
 function requiredEvidenceForIntent(intent) {
@@ -252,6 +262,9 @@ function collectObservedEvidence({ response = {}, toolResults = [] } = {}) {
   if (response.media && typeof response.media === 'object' && !Array.isArray(response.media)) {
     evidence.push(summarizeMediaEvidence(response.media));
   }
+  if (normalizeMediaItems(response.inbound_media || response.inboundMedia).length > 0) {
+    evidence.push({ type: 'inbound_media', status: 'present', source: 'bridge' });
+  }
   if (response.save_result?.[TRUSTED_ACTION_EVIDENCE] === 'action_receipt_result') {
     evidence.push(summarizeStateResult('save_result', response.save_result));
   }
@@ -266,19 +279,21 @@ function collectObservedEvidence({ response = {}, toolResults = [] } = {}) {
 }
 
 function hasEvidenceForIntent(intent, evidence = []) {
-  if (intent === 'none') return true;
+  if (intent === 'none' || intent === 'typed_action') return true;
   if (intent === 'social_read') {
-    return evidence.some((item) => item.type === 'tool_result' && ['success', 'partial_success'].includes(item.status));
+    return evidence.some((item) => item.type === 'tool_result' && ['social_reader', 'search_hub'].includes(item.source) && ['success', 'partial_success'].includes(item.status));
   }
   if (intent === 'media_read') {
-    return evidence.some((item) => item.type === 'artifact' || (item.type === 'tool_result' && ['success', 'partial_success'].includes(item.status)));
+    return evidence.some((item) => item.type === 'inbound_media')
+      || evidence.some((item) => item.type === 'tool_result' && item.source === 'media_reader' && ['success', 'partial_success'].includes(item.status));
   }
   if (intent === 'sticker_send') {
     return evidence.some((item) => item.type === 'marker' && item.marker === 'RAN_MEDIA' && item.summary?.source === 'sticker_catalog' && item.summary?.kind === 'sticker' && item.summary?.stickerId);
   }
   if (intent === 'media_generate') {
-    return evidence.some((item) => item.type === 'marker' && item.status === 'present' && ['WECHAT_MEDIA', 'RAN_MEDIA'].includes(item.marker))
-      || evidence.some((item) => item.type === 'artifact');
+    return evidence.some((item) => item.type === 'marker' && item.status === 'present' && ['WECHAT_MEDIA', 'RAN_MEDIA'].includes(item.marker) && ['media_generation', 'media_generation_mcp'].includes(item.summary?.source))
+      || evidence.some((item) => item.type === 'tool_result' && item.source === 'media_generation' && item.status === 'success')
+      || evidence.some((item) => item.type === 'artifact' && item.source === 'media_generation');
   }
   if (intent === 'memory_write') {
     return evidence.some((item) => item.type === 'save_result' || (item.type === 'tool_result' && item.status === 'success'));
@@ -471,6 +486,7 @@ function summarizeToolResult(result = {}) {
     if (result[TRUSTED_ACTION_EVIDENCE] !== 'external_mcp_tool_result') return null;
     return summarizeExternalMcpToolResult(result);
   }
+  if (result[TRUSTED_ACTION_EVIDENCE] !== 'mcp_tool_result') return null;
   const ok = result.ok === true || result.status === 'success';
   const coverage = summarizeMediaCoverage(result);
   const partial = result.partial_success === true
@@ -483,6 +499,7 @@ function summarizeToolResult(result = {}) {
     status: partial ? 'partial_success' : ok ? 'success' : 'failure',
     artifact_id_hash: hashOptional(result.artifact_id || result.artifactId || result.id),
     error_code: sanitizeShortString(result.error_code || result.errorCode || result.code),
+    source: sanitizeShortString(result.source),
   };
   if (coverage.totalMediaCount !== null) summary.total_media_count = coverage.totalMediaCount;
   if (coverage.analyzedMediaCount !== null) summary.analyzed_media_count = coverage.analyzedMediaCount;

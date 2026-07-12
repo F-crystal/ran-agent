@@ -733,6 +733,53 @@ class BackendHttpControllerTest(unittest.TestCase):
         self.assertEqual(invalid, {"ok": False, "error": "invalid personal learning request"})
         self.assertNotIn("leaked", json.dumps(invalid))
 
+    def test_ai_daily_digest_action_uses_bounded_facts_and_manual_delivery_receipt(self) -> None:
+        """The private executor may send only through the existing digest outbox path."""
+
+        operation_id = "op_" + "a" * 32
+        with (
+            patch("personal_agent.http_server.load_aihot_facts", return_value="一条已验证事实"),
+            patch.object(
+                self.service,
+                "send_ai_daily_digest",
+                return_value={"delivery_status": "sent", "outbox_id": "outbox_" + "b" * 32},
+            ) as send_digest,
+        ):
+            status, payload = self.controller.handle_ai_daily_digest_action(
+                {
+                    "operationId": operation_id,
+                    "actionType": "ai_daily_digest.send",
+                    "scope": {"mode": "manual", "date": "current_local_date"},
+                }
+            )
+
+        self.assertEqual(status, 200)
+        self.assertTrue(payload["ok"])
+        self.assertTrue(payload["authenticated"])
+        self.assertEqual(payload["operationId"], operation_id)
+        self.assertEqual(payload["result"], {"delivery_status": "sent", "partial": False})
+        self.assertTrue(payload["effectId"].startswith("ai-daily-digest:"))
+        sent_prompt = send_digest.call_args.args[0]
+        self.assertIn("一条已验证事实", sent_prompt)
+        self.assertEqual(send_digest.call_args.kwargs, {"mode": "manual", "operation_id": operation_id})
+
+    def test_ai_daily_digest_action_never_confirms_an_uncommitted_delivery(self) -> None:
+        operation_id = "op_" + "c" * 32
+        with (
+            patch("personal_agent.http_server.load_aihot_facts", return_value="一条事实"),
+            patch.object(self.service, "send_ai_daily_digest", return_value={"delivery_status": "ambiguous"}),
+        ):
+            status, payload = self.controller.handle_ai_daily_digest_action(
+                {
+                    "operationId": operation_id,
+                    "actionType": "ai_daily_digest.send",
+                    "scope": {"mode": "manual", "date": "current_local_date"},
+                }
+            )
+
+        self.assertEqual(status, 502)
+        self.assertEqual(payload, {"ok": False, "error": "digest delivery unconfirmed"})
+
 
 class _FakeSocket:
     def __init__(self, request_bytes: bytes) -> None:

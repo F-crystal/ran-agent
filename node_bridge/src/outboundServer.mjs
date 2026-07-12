@@ -313,8 +313,11 @@ export async function handleScheduledAiDigestRequest({
     };
   }
 
+  const mode = payload.mode === 'manual' ? 'manual' : 'scheduled';
   const runtimeNow = typeof nowImpl === 'function' ? nowImpl() : new Date();
-  const idempotencyKey = `ran-agent-ai-daily-digest-${runtimeNow.toISOString().slice(0, 10)}`;
+  const operationId = String(payload.operation_id || '').trim();
+  if (mode === 'manual' && !/^op_[a-f0-9]{32}$/.test(operationId)) return { status: 400, payload: { error: 'manual digest operation is invalid' } };
+  const idempotencyKey = mode === 'manual' ? operationId : `ran-agent-ai-daily-digest-${runtimeNow.toISOString().slice(0, 10)}`;
   const message = {
     id: idempotencyKey,
     message_id: idempotencyKey,
@@ -322,7 +325,7 @@ export async function handleScheduledAiDigestRequest({
     channel_type: 'dm',
     conversation_id: target.conversation_id,
     sender_id: target.sender_id,
-    route_hint: 'scheduled_ai_daily_digest',
+    route_hint: mode === 'manual' ? 'manual_ai_daily_digest' : 'scheduled_ai_daily_digest',
     text: buildScheduledAiDigestPrompt(facts),
     media: [],
     created_at: runtimeNow.getTime(),
@@ -338,7 +341,7 @@ export async function handleScheduledAiDigestRequest({
   }
   const outbox = createDurableOutbox({ env, now: () => runtimeNow });
   const outboxItem = await outbox.deliver({
-    operationKey: `scheduled:${idempotencyKey}`,
+    operationKey: `${mode}:${idempotencyKey}`,
     jobResultKey: `job-result:${idempotencyKey}`,
     route: {
       adapterKey: 'feishu',
@@ -374,6 +377,7 @@ export async function handleScheduledAiDigestRequest({
       reply_length: replyText.length,
       delivery_status: outboxItem.delivery,
       outbox_id: outboxItem.outboxId,
+      digest_kind: 'ai_daily_digest',
     },
   };
 }

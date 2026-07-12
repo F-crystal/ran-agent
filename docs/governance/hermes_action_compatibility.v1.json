@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "actions": {
+    "social_read": {"signals": ["tool_result:social_reader", "tool_result:search_hub"], "statuses": ["success", "partial_success"], "claims": ["read_complete"]},
+    "media_read": {"signals": ["inbound_media", "tool_result:media_reader"], "statuses": ["success", "partial_success"], "claims": ["media_described"]},
+    "sticker_send": {"signals": ["marker:RAN_MEDIA:sticker_catalog:sticker"], "statuses": ["present"], "claims": ["sticker_sent"]},
+    "media_generate": {"signals": ["tool_result:media_generation", "marker:WECHAT_MEDIA:media_generation", "marker:WECHAT_MEDIA:media_generation_mcp", "artifact:media_generation"], "statuses": ["success", "present"], "claims": ["media_generated"]},
+    "external_mcp_read": {"signals": ["external_mcp_tool_result"], "statuses": ["success", "partial_success"], "claims": ["read_complete"]},
+    "external_mcp_write": {"signals": ["external_mcp_authorization", "external_mcp_tool_result"], "statuses": ["success"], "claims": ["external_mcp_action_done"]},
+    "external_send": {"signals": ["outbound_result"], "statuses": ["success"], "claims": ["external_sent"]}
+  }
+}

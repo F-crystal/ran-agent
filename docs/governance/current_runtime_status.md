@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-08)
+Status: CURRENT (2026-07-12)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -36,6 +36,12 @@ External MCP candidates
 - Scheduled outbound is limited to allowlisted paths: explicit reminders, the
   opt-in AI daily digest, and governed external MCP watchlist notifications.
   Generic life-loop/check-in outbound remains retired.
+- Hermes action semantics are declared by typed `replyEnvelope.actionRequests`
+  or verified from protected compatibility signals. The bridge audits those
+  inputs and never selects an MCP tool from ordinary user/reply text.
+- Manual and scheduled AI-digest generation run in a task-scoped Hermes
+  session and deliver through the durable outbox. They do not consume or write
+  ordinary conversation/cache/soft-reset history.
 
 ## Lite/Full Runtime
 

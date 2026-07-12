@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-08)
+Status: CURRENT (2026-07-12)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -31,6 +31,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/media-pipeline.md` | Media pipeline and context policy |
 | `docs/governance/sticker-catalog.md` | Cross-channel sticker catalog and safe `RAN_MEDIA` contract |
 | `docs/governance/hermes-action-contract-gate.md` | Hermes action contract validation, repair, and pending-action rules |
+| `docs/governance/hermes_action_compatibility.v1.json` | Versioned closed registry of protected compatibility evidence signals |
 | `docs/governance/hermes-context-optimization.md` | Hermes context optimization, cache-friendly history, and soft reset |
 | `docs/governance/external-mcp-gateway.md` | External MCP gateway, admission, evidence, and proactive system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |

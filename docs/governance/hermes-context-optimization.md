@@ -1,6 +1,6 @@
 # Hermes Context Optimization
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-07-12)
 
 ## Why Not Hard Reset
 
@@ -16,6 +16,22 @@ Long-term memory remains external and on demand through `personal_memory`, `obsi
 - Long-term memory: explicit tool recall only, not injected wholesale.
 
 The optimization goal is to avoid stacking all layers on every lite request.
+
+## Task-Scoped Hermes Work
+
+Synthetic work is not a continuation of an owner's ordinary conversation.
+`scheduled_ai_daily_digest`, the actual generation stage of
+`manual_ai_daily_digest`, bounded action repair, and release journeys use a
+task-scoped/one-shot session. That scope has a distinct session id, bounded
+facts/template only, no local/global conversation history, no provider-visible
+append history, and no lite soft-reset digest. It neither writes ordinary
+recent/global history nor rotates a normal conversation session.
+
+Manual daily-digest understanding remains an ordinary lightweight chat turn:
+only the trusted `ai_daily_digest.send` executor switches to the isolated
+generation/delivery task. AI daily digests and lite soft-reset continuity
+digests remain distinct telemetry kinds (`ai_daily_digest` and
+`continuity_digest`).
 
 `vault/` may feed maintenance summaries or explicit recall, but only as short, sanitized excerpts. Follow the runtime budget: at most one vault recall hit and a small snippet, not raw daily chat logs. Soft reset digest generation may use already-summarized vault/wiki signals for `open_threads`, `pending_commitments`, `active_preferences`, and `recent_artifacts`; it must not copy `vault/inbox`, `vault/raw`, or `vault/wiki` content verbatim into `daily_digest`.
 
