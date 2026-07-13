@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-06)
+Status: CURRENT (2026-07-13)
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -27,8 +27,8 @@ WeChat / Feishu / Desktop Proxy
   -> reply
 
 IdentityMap + GlobalTimeline
-  -> global_user_id=user:ran
-  -> shared Hermes session_key, platform-specific session_id
+  -> explicit owner binding -> one global user identity
+  -> platform conversation/session scopes remain isolated
   -> local recent history + cross-platform active topic
 
 Python backend
@@ -45,20 +45,30 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 | Gateway | Port | Profile | Purpose |
 |---------|------|---------|---------|
-| lite | `8642` | `ran-assistant-lite` | Daily chat, Xiaohongshu, memory, image understanding |
-| full | `8643` | `ran-assistant` | Debugging, commands, logs, Playwright, media generation |
+| lite | `8642` | `ran-assistant-lite` | The real daily mainline: chat, Xiaohongshu, memory, image understanding |
+| full | `8643` | `ran-assistant` | Primarily debugging and heavy tools: commands, logs, Playwright, media generation |
 
 `8642` is a low-context entry, not a security sandbox. If full is unavailable, Node bridge falls back to lite and logs the reason.
+Desktop Proxy is disabled by default. When enabled, bind it only to localhost or
+a controlled private network and configure `DESKTOP_PROXY_API_KEY`.
+
+### Reliability Foundation
+
+The runtime now includes typed action requests/receipts, a durable outbox,
+external activity/revision/lease state, and an immutable-SHA release
+transaction. These provide auditable foundations for actions, delivery, and
+release; `docs/governance/` remains authoritative for their full boundaries and
+known limitations.
 
 ---
 
 ## What It Does
 
-**Unified multi-frontend entry.** WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter `node_bridge/src/channelHub.mjs`, then use the same `replyBackend -> hermesGatewayClient -> Hermes` mainline. In single-user mode, `IdentityMap` maps every frontend to `user:ran`; `GlobalTimeline` records cross-platform turns; Hermes `session_key` is shared across frontends while platform-specific `session_id` remains isolated.
+**Unified multi-frontend entry.** WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter `node_bridge/src/channelHub.mjs`, then use the same `replyBackend -> hermesGatewayClient -> Hermes` mainline. `IdentityMap` uses explicit owner binding to associate authenticated frontend identities with one global user identity, while platform conversation/session scopes remain isolated. `GlobalTimeline` records cross-platform turns.
 
 **WeChat conversation entry.** Messages enter `node_bridge/src/wechatBridge.mjs`, pass through inbound aggregation, ChannelHub, media context handling, Hermes Gateway, and DeepSeek V4 Flash, then return to WeChat. The Python backend receives `/ingest` asynchronously for recent memory and downstream tasks.
 
-**Feishu and desktop entries.** Feishu bridge consumes messages with `lark-cli event consume im.message.receive_v1 --as bot` and replies through `im +messages-send`; desktop clients connect to ran-agent's own OpenAI-compatible proxy so they do not bypass unified memory and reviewer.
+**Feishu and desktop entries.** Feishu bridge consumes messages with `lark-cli event consume im.message.receive_v1 --as bot` and replies through `im +messages-send`; desktop clients connect to ran-agent's OpenAI-compatible proxy so they do not bypass ChannelHub, unified identity/Timeline, or action/evidence gates.
 
 **Daily AI digest.** Optionally enable `AI_DAILY_DIGEST_ENABLED=true`; the Python scheduler fetches AIHOT facts at 08:00, sends a synthetic Feishu DM turn through `ChannelHub -> Hermes`, lets Hermes write the report-style digest from `src/personal_agent/prompts/ai_daily_digest_report.md`, and delivers it through the existing Feishu reply path. This does not re-enable old proactive check-ins, reminders, or life-loop outbound messages.
 
@@ -70,7 +80,14 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 
 **Media follow-up context.** Inbound media becomes conversation-scoped artifacts. When the user says “that image from earlier” or “analyze the image from before,” the inbound message buffer binds the text to recent media explicitly or as a soft candidate. Context Policy v1 injects at most 3 compact artifacts per turn by default.
 
-**Memory and knowledge.** `personal_memory` recalls personal memory through the Python backend and exposes lightweight `surface_relevant_context` so Hermes can naturally pick up familiar hobbies, projects, people, or historical themes without waiting for an explicit “search memory” request. `obsidian_memory` searches the Obsidian vault through a semantic index. Long-term writes, reflection, night-cycle work, and knowledge maintenance stay in the Python backend and on-demand skills instead of always living in the main prompt. The knowledge-maintenance agent is a provider-neutral local runner: it remains Qwen-compatible by default and can later be switched to Reasonix or another agent through config.
+**Memory and knowledge.** `personal_memory`, Ombre, Vault, and
+`GlobalTimeline` already exist. `personal_memory` recalls personal memory
+through the Python backend; `surface_relevant_context` is only the current
+lightweight memory surface and must not be described as automatically searching
+Vault. An automatic unified recall control plane is not complete yet.
+`obsidian_memory` and direct Ombre MCPs are optional surfaces. Long-term writes,
+reflection, night-cycle work, and knowledge maintenance stay in the Python
+backend and on-demand skills instead of always living in the main prompt.
 
 **Sendable media generation.** The full gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.
 
@@ -88,7 +105,10 @@ Production uses two Hermes gateway instances. Node bridge selects the gateway pe
 | `mimo_power` | RETIRED: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles | historical |
 | `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | lite/full |
 | `personal_memory` | Personal memory recall and backend health check | lite/full |
-| `obsidian_memory` | Obsidian vault semantic search | lite/full |
+| `obsidian_memory` | Obsidian vault semantic search | optional / disabled-by-default |
+| `ombre_memory` | Direct Ombre Brain MCP | optional / full only when deploy-ready |
+| `ombre_memory_extra` | Direct Ombre Brain extended MCP | optional / full only when deploy-ready |
+| `external_mcp_gateway` | Governed dynamic External MCP broker | governed / source profiles disabled-by-default |
 | `media_generation` | Image and speech generation | full |
 | `playwright` | Browser automation and dynamic-page debugging | full |
 | `tavily` | Optional lower-level provider, used only for Search Hub compatibility | internal/compat |
@@ -155,7 +175,13 @@ cd node_bridge
 ./start_node.sh
 ```
 
-Production systemd, dual gateway setup, Hermes env sync, and drift repair use:
+Formal production code releases use the immutable-SHA transaction:
+
+```bash
+bash scripts/deploy-hermes-main.sh --apply
+```
+
+Configuration application within a release and existing runtime drift repair use:
 
 ```bash
 bash scripts/apply-hermes-runtime-split.sh

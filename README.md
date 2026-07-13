@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-06)
+Status: CURRENT (2026-07-13)
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -27,8 +27,8 @@ WeChat / Feishu / Desktop Proxy
   -> reply
 
 IdentityMap + GlobalTimeline
-  -> global_user_id=user:ran
-  -> shared Hermes session_key, platform-specific session_id
+  -> explicit owner binding -> one global user identity
+  -> platform conversation/session scopes remain isolated
   -> local recent history + cross-platform active topic
 
 Python backend
@@ -45,20 +45,28 @@ MCP services
 
 | Gateway | 端口 | Profile | 用途 |
 |---------|------|---------|------|
-| lite | `8642` | `ran-assistant-lite` | 日常聊天、小红书、记忆、图片理解 |
-| full | `8643` | `ran-assistant` | 调试、命令、日志、Playwright、媒体生成 |
+| lite | `8642` | `ran-assistant-lite` | 日常真实主链：聊天、小红书、记忆、图片理解 |
+| full | `8643` | `ran-assistant` | 主要用于调试和重工具：命令、日志、Playwright、媒体生成 |
 
 `8642` 是低上下文入口，不是安全沙箱。full 不可用时，Node bridge 会回退到 lite 并记录原因。
+Desktop Proxy 默认关闭；启用时仅应绑定 localhost 或受控私网，并配置
+`DESKTOP_PROXY_API_KEY`。
+
+### 可靠性底座
+
+当前运行时已经具备 typed action request/receipt、durable outbox、外部活动的
+activity/revision/lease 以及 immutable-SHA release transaction。它们提供可审计
+的动作、投递和发布基础；完整边界与已知限制以 `docs/governance/` 为准。
 
 ---
 
 ## 能做什么
 
-**多前端统一入口。** 微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 都进入 `node_bridge/src/channelHub.mjs`，再走同一个 `replyBackend -> hermesGatewayClient -> Hermes` 主链路。`IdentityMap` 在单用户模式下把所有前端映射到 `user:ran`，`GlobalTimeline` 记录跨平台 turn，Hermes `session_key` 跨前端共享，平台级 `session_id` 保持隔离。
+**多前端统一入口。** 微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 都进入 `node_bridge/src/channelHub.mjs`，再走同一个 `replyBackend -> hermesGatewayClient -> Hermes` 主链路。`IdentityMap` 通过显式 owner binding，将已认证的多前端身份归并到同一全局用户身份；平台 conversation/session 仍保持隔离。`GlobalTimeline` 记录跨平台 turn。
 
 **微信对话入口。** 微信消息进入 `node_bridge/src/wechatBridge.mjs`，经入站聚合、ChannelHub、媒体上下文处理、Hermes Gateway、DeepSeek V4 Flash 后回到微信。Python 后端会异步接收 `/ingest`，维护近期记忆和后续任务。
 
-**飞书和桌面入口。** 飞书桥接通过 `lark-cli event consume im.message.receive_v1 --as bot` 消费消息，并通过 `im +messages-send` 回复；桌面客户端通过 ran-agent 自己的 OpenAI-compatible Proxy 接入，避免绕过统一记忆和 reviewer。
+**飞书和桌面入口。** 飞书桥接通过 `lark-cli event consume im.message.receive_v1 --as bot` 消费消息，并通过 `im +messages-send` 回复；桌面客户端通过 ran-agent 的 OpenAI-compatible Proxy 接入，避免绕过 ChannelHub、统一身份/Timeline，以及 action/evidence gates。
 
 **每日 AI 日报。** 可选启用 `AI_DAILY_DIGEST_ENABLED=true`，Python scheduler 每天 08:00 拉取 AIHOT 事实，作为合成的飞书私聊 turn 进入 `ChannelHub -> Hermes`，由 Hermes 按 `src/personal_agent/prompts/ai_daily_digest_report.md` 生成报道式日报，再通过现有飞书回复路径发回给你。它不打开旧 proactive check-in、reminder 或 life-loop 外发。
 
@@ -70,7 +78,12 @@ MCP services
 
 **媒体上下文追问。** 入站媒体会生成会话级 artifact。用户说“刚才那张图”“分析一下刚才那张图”时，入站消息缓冲会把文本与最近媒体显式或软绑定。默认 Context Policy v1 每轮最多注入 3 个紧凑 artifact。
 
-**记忆和知识。** `personal_memory` 通过 Python backend 召回个人记忆，并提供 `surface_relevant_context` 这类低成本浮现入口，让 Hermes 在遇到熟悉爱好、项目、人物或历史主题时自然接上上下文；`obsidian_memory` 通过 Obsidian vault 语义索引检索知识。长期写入、反思、夜间循环和知识维护留在 Python 后端和按需 skill 中，不常驻主 prompt。知识维护 agent 是 provider-neutral 的本地 runner，当前默认兼容 Qwen CLI，后续可通过配置切到 Reasonix 或其他 agent。
+**记忆和知识。** `personal_memory`、Ombre、Vault 和 `GlobalTimeline` 都已存在；
+`personal_memory` 通过 Python backend 提供个人记忆召回，
+`surface_relevant_context` 只是当前的轻量 memory surface，不能宣称会自动检索
+Vault。自动统一的 recall control plane 尚未完成。`obsidian_memory` 与 direct
+Ombre MCP 都是 optional surfaces；长期写入、反思、夜间循环和知识维护仍留在
+Python backend 与按需 skill 中，不常驻主 prompt。
 
 **可发送媒体生成。** full gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
 
@@ -90,7 +103,10 @@ MCP services
 | `mimo_power` | RETIRED：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles | historical |
 | `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | lite/full |
 | `personal_memory` | 个人记忆召回与 backend 健康检查 | lite/full |
-| `obsidian_memory` | Obsidian vault 语义检索 | lite/full |
+| `obsidian_memory` | Obsidian vault 语义检索 | optional / disabled-by-default |
+| `ombre_memory` | direct Ombre Brain MCP | optional / full only when deploy-ready |
+| `ombre_memory_extra` | direct Ombre Brain extended MCP | optional / full only when deploy-ready |
+| `external_mcp_gateway` | 受治理的动态 External MCP broker | governed / source profiles disabled-by-default |
 | `media_generation` | 图片和语音生成 | full |
 | `playwright` | 浏览器自动化和动态页面调试 | full |
 | `tavily` | 可选底层 provider，仅供 Search Hub 兼容使用 | 内部/兼容 |
@@ -155,7 +171,13 @@ cd node_bridge
 ./start_node.sh
 ```
 
-生产 systemd、双 gateway、Hermes env 同步和漂移修复统一使用：
+正式生产代码发布使用 immutable-SHA transaction：
+
+```bash
+bash scripts/deploy-hermes-main.sh --apply
+```
+
+release 内的配置应用与既有 runtime 漂移修复使用：
 
 ```bash
 bash scripts/apply-hermes-runtime-split.sh
