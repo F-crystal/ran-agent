@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import tempfile
+import threading
 import unittest
 import dataclasses
 from datetime import datetime
@@ -102,20 +103,30 @@ class PersonalAgentServiceTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.temp_dir = tempfile.TemporaryDirectory()
+        # unittest runs cleanups in LIFO order: registering the directory first
+        # makes it the last cleanup, after every tracked service has joined its
+        # deferred memory workers.
+        self.addCleanup(self.temp_dir.cleanup)
+        self._tracked_services: list[PersonalAgentService] = []
         base_dir = Path(self.temp_dir.name)
         self.config = make_test_config(base_dir)
         self.logger = build_test_logger()
         self.database = Database(self.config, self.logger)
         self.database.initialize()
-        self.service = PersonalAgentService(
+        self.service = self._service(
             database=self.database,
             model_client=PlaceholderModelClient(),
             logger=self.logger,
             config=self.config,
         )
 
-    def tearDown(self) -> None:
-        self.temp_dir.cleanup()
+    def _service(self, **kwargs: object) -> PersonalAgentService:
+        return self._track_service(PersonalAgentService(**kwargs))
+
+    def _track_service(self, service: PersonalAgentService) -> PersonalAgentService:
+        self._tracked_services.append(service)
+        self.addCleanup(service.shutdown)
+        return service
 
     def test_handle_incoming_message_records_user_and_reply_events(self) -> None:
         message = IncomingMessage(
@@ -182,7 +193,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
 
     def test_service_injects_system_prompt_into_model_request(self) -> None:
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -222,7 +233,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
             ),
         )
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -251,7 +262,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
             encoding="utf-8",
         )
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -273,7 +284,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         self.assertIn("稳定作息", capturing_client.last_request.system_prompt)
 
     def test_service_compacts_channel_history_for_manual_compact(self) -> None:
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=PlaceholderModelClient(),
             logger=self.logger,
@@ -311,7 +322,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         self.assertIn("API设计决策", session_state_raw or "")
 
     def test_service_compacts_only_the_target_sender_history(self) -> None:
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=PlaceholderModelClient(),
             logger=self.logger,
@@ -363,7 +374,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
             encoding="utf-8",
         )
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -390,7 +401,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         self.database.store_memory("用户喜欢安静一点的环境", "profile", importance=2)
         self.database.store_memory("用户最近在处理论文，情绪有些烦躁", "working", importance=1)
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -421,7 +432,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         self.database.store_memory("用户喜欢安静一点的环境", "profile", importance=2)
         self.database.store_memory("用户最近在处理论文，情绪有些烦躁", "working", importance=1)
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -444,7 +455,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
     def test_service_skips_memory_for_task_like_message(self) -> None:
         self.database.store_memory("用户喜欢安静一点的环境", "profile", importance=2)
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -467,7 +478,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         self.database.store_memory("用户喜欢安静一点的环境", "profile", importance=2)
         self.database.store_memory("用户最近在处理论文，情绪有些烦躁", "working", importance=1)
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -490,7 +501,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
     def test_service_routes_explicit_search_requests_to_tool_model(self) -> None:
         text_client = NamedCapturingModelClient(provider="deepseek", reply_text="text reply")
         tool_client = NamedCapturingModelClient(provider="qwen", reply_text="search reply")
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=text_client,
             tool_model_client=tool_client,
@@ -518,7 +529,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
     def test_service_routes_image_requests_to_tool_model(self) -> None:
         text_client = NamedCapturingModelClient(provider="deepseek", reply_text="text reply")
         tool_client = NamedCapturingModelClient(provider="qwen", reply_text="vision reply")
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=text_client,
             tool_model_client=tool_client,
@@ -545,7 +556,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
 
     def test_image_only_message_is_recorded_in_timeline(self) -> None:
         tool_client = NamedCapturingModelClient(provider="qwen", reply_text="vision reply")
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=PlaceholderModelClient(),
             tool_model_client=tool_client,
@@ -576,7 +587,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
                     should_fallback=False,
                 )
 
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=PlaceholderModelClient(),
             logger=self.logger,
@@ -649,7 +660,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
                 return self.run(action="apply", trigger=trigger, now_local=now_local)
 
         stub_agent = StubKnowledgeAgent()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=PlaceholderModelClient(),
             logger=self.logger,
@@ -678,7 +689,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
             "working",
             importance=1,
         )
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -700,7 +711,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
 
     def test_service_persists_session_state_between_turns(self) -> None:
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -734,7 +745,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
                 "先不急，慢慢说也可以。",
             ]
         )
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=model_client,
             logger=self.logger,
@@ -770,7 +781,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
                 "哈哈，建议你还是先休息一下。",
             ]
         )
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=model_client,
             logger=self.logger,
@@ -798,7 +809,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         model_client = SequentialModelClient(
             replies=["哈哈，那你可以先别急着想太多。"]
         )
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=model_client,
             logger=self.logger,
@@ -823,7 +834,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         model_client = SequentialModelClient(
             replies=["那就先随便聊聊，你现在最想吐槽哪一块？"]
         )
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=model_client,
             logger=self.logger,
@@ -848,7 +859,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         model_client = SequentialModelClient(
             replies=["今天上海像是要下雨，出门的话记得带伞。"]
         )
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=model_client,
             logger=self.logger,
@@ -878,7 +889,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
 
     def test_recent_turn_summary_is_short_and_fact_like(self) -> None:
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -901,7 +912,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
 
     def test_playful_context_marks_intimacy_as_weak_signal_only(self) -> None:
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -922,7 +933,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
 
     def test_temporal_awareness_adds_time_context_and_immediate_state_rule(self) -> None:
         capturing_client = CapturingModelClient()
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -961,7 +972,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
             "night_cycle:latest_reflection_digest",
             "- casual 场景里少一点建议腔。\n- 深夜状态先回应当下。",
         )
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=capturing_client,
             logger=self.logger,
@@ -989,7 +1000,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
                 "那先别硬撑了，困就早点歇一会儿。",
             ]
         )
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=model_client,
             logger=self.logger,
@@ -1010,6 +1021,43 @@ class PersonalAgentServiceTest(unittest.TestCase):
         self.assertEqual(reply.text, "那先别硬撑了，困就早点歇一会儿。")
         self.assertEqual(len(model_client.requests), 2)
         self.assertEqual(service.get_reviewer_stats()["recent_state_over_inference_count"], 1)
+        service.shutdown()
+        self.assertFalse(any(thread.name.startswith("pa_post_reply") for thread in threading.enumerate()))
+
+    def test_tracked_service_shutdown_waits_for_deferred_memory_worker(self) -> None:
+        worker_started = threading.Event()
+        allow_worker_finish = threading.Event()
+        shutdown_finished = threading.Event()
+        service = self._service(
+            database=self.database,
+            model_client=SequentialModelClient(replies=["好的。"]),
+            logger=self.logger,
+            config=self.config,
+            memory_extractor=NoopFallbackMemoryExtractor(),
+        )
+
+        def blocked_memory_update(*_: object) -> None:
+            worker_started.set()
+            allow_worker_finish.wait(timeout=2)
+
+        service._run_deferred_memory_pipeline = blocked_memory_update  # type: ignore[method-assign]
+        service.handle_incoming_message(
+            IncomingMessage(channel="wechat", sender_id="user-shutdown", text="我好困")
+        )
+        self.assertTrue(worker_started.wait(timeout=1))
+
+        shutdown_thread = threading.Thread(
+            target=lambda: (service.shutdown(), shutdown_finished.set()),
+            name="test-service-shutdown",
+        )
+        shutdown_thread.start()
+        self.assertFalse(shutdown_finished.wait(timeout=0.1))
+        allow_worker_finish.set()
+        shutdown_thread.join(timeout=2)
+
+        self.assertFalse(shutdown_thread.is_alive())
+        self.assertTrue(shutdown_finished.is_set())
+        self.assertFalse(any(thread.name.startswith("pa_post_reply") for thread in threading.enumerate()))
 
     def test_default_system_prompt_matches_wechat_style_constraints(self) -> None:
         system_prompt = self.config.agent_system_prompt
@@ -1042,7 +1090,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
             replies=["刚想到你最近一直在忙论文，今天还顺吗。"]
         )
         self.config = dataclasses.replace(self.config, proactive_enabled=True)
-        service = PersonalAgentService(
+        service = self._service(
             database=self.database,
             model_client=model_client,
             logger=self.logger,
