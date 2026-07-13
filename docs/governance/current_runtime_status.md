@@ -1,10 +1,24 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-12)
+Status: CURRENT (2026-07-13)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
 contracts live in the linked governance docs below.
+
+## Release Lineage
+
+```text
+deployed_runtime_sha: 3f6e7b705854838d9a1e8b466d959f7ead41b643
+main_closure_sha: recorded only after the documentation-only closure is committed
+closure_delta: documentation-only
+redeploy_required: false
+```
+
+`deployed_runtime_sha` is the deployed runtime revision. A later
+`main_closure_sha` records governance-only documentation and must never be
+described as the deployed runtime revision. Server acceptance evidence remains
+private deployment evidence; this document does not replace it.
 
 ## Mainline
 
@@ -171,3 +185,12 @@ Never commit or force-add env files, credentials, cookies, proxy URLs, runtime
 state, logs, debug output, provider-visible history, pending-action state,
 media assets, parser/sidecar markers, private `vault/` content,
 `local_archive/`, `.venv/`, caches, or `node_modules/`.
+
+## Known Follow-Up Boundaries
+
+The deployed release does not yet unify automatic memory recall, Ombre direct
+and wrapper surfaces, Vault recall, ordinary session continuity, and
+provider-visible history under one control plane. It also does not establish a
+single final-delivered assistant turn as the proven shared source for every
+timeline, backend, provider-history, and session layer. These are follow-up
+audit topics, not claims about current production behavior.

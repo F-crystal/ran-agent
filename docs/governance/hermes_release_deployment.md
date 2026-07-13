@@ -1,6 +1,6 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-07-12)
+Status: CURRENT (2026-07-13)
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable
@@ -12,6 +12,14 @@ worktree/service-pointer topology to the existing systemd deployment.
 
 Never run `git pull`, `git switch`, `git checkout`, `git reset`, or `git
 clean` as a pre-deploy action in `/opt/ran_agent`.
+
+## Release Lineage
+
+The deployed runtime revision for this reliability release is
+`3f6e7b705854838d9a1e8b466d959f7ead41b643`. A subsequent main closure commit
+contains documentation only; it is not the deployed runtime SHA and does not
+require a redeploy. Keep server acceptance evidence and snapshots in private
+archives rather than copying them into this public contract.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. Every other step below is read-only except

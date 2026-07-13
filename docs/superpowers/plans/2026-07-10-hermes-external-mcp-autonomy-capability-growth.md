@@ -1,5 +1,13 @@
 # Hermes External MCP Autonomy And Capability Growth Implementation Plan
 
+Status: HISTORICAL IMPLEMENTATION PLAN (2026-07-13)
+
+This is a contemporaneous execution plan, not current runtime truth. Its landed
+infrastructure is part of the deployed reliability release at
+`3f6e7b705854838d9a1e8b466d959f7ead41b643`; unchecked items remain future
+design, conformance, or live-audit work. Use
+`docs/governance/current_runtime_status.md` for production facts.
+
 > **Execution rule:** Start only after Core Tasks 1-10 are green. Use
 > `superpowers:subagent-driven-development` sequentially and TDD for every
 > production change. Do not activate a new MCP, mutate production, archive, or

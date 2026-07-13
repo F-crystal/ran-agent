@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-11)
+Status: CURRENT (2026-07-13)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -8,8 +8,10 @@ manual systemd or env edits.
 
 ## Source Of Truth
 
-- Deploy or repair lite/full runtime drift:
-  `bash scripts/apply-hermes-runtime-split.sh`
+- Formal main release: `bash scripts/deploy-hermes-main.sh --apply`
+- Reviewed release candidate: `bash scripts/deploy-hermes-candidate.sh --branch <remote-branch> --apply` or `bash scripts/deploy-hermes-candidate.sh --commit <40-char-sha> --apply`
+- Deploy or repair lite/full runtime drift within an existing release
+  transaction: `bash scripts/apply-hermes-runtime-split.sh`
 - Diagnose lite/full convergence:
   `bash scripts/diagnose-lite-full.sh`
 - Diagnose proactive events:

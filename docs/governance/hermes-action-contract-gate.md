@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: CURRENT (2026-07-12)
+Status: CURRENT (2026-07-13)
 
 ## Why Not Prompt Only
 
@@ -14,6 +14,15 @@ reply prose. In `enforce` mode, the bridge can replace unsupported action claims
 with a short, honest fallback. In `repair` mode, only an explicitly injected,
 bounded retry for an already declared trusted action may run before the same
 safe rewrite.
+
+## Delivery Boundary
+
+An action receipt proves only the action evidence named by its contract. It is
+not by itself a universal delivery receipt for every response surface. The
+durable text path records adapter delivery before timeline and backend
+projection; non-durable or media paths require their own delivery semantics.
+Do not infer that every assistant-history layer already has one proven
+final-delivered canonical turn.
 
 ## Action-Bearing Responses
 

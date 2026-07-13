@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-12)
+Status: CURRENT (2026-07-13)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -45,6 +45,20 @@ deployment notes belong under ignored `local_archive/`, not under
 2. Then the public source-of-truth docs listed above.
 3. Local archives are context only and are not part of the public release
    surface.
+
+## Hermes Reliability Release Status Boundary
+
+For the Hermes reliability release, `docs/governance/` describes current
+runtime behavior and release contracts. The 2026-07-10 Core and External MCP
+design documents remain proposed target architectures, even where individual
+components landed. Their implementation plans are historical task records with
+unchecked items and must not be read as either a release checklist or a claim
+that all design goals are deployed. The superseded durable-game document is a
+compatibility pointer only.
+
+The release lineage is intentionally split: the deployed runtime is
+`3f6e7b705854838d9a1e8b466d959f7ead41b643`; a later documentation-only main
+closure commit is not a runtime deployment and requires no redeploy.
 
 ## Governance Rules
 

@@ -1,5 +1,13 @@
 # Hermes Core Reliability And Learning Implementation Plan
 
+Status: HISTORICAL IMPLEMENTATION PLAN (2026-07-13)
+
+This is a contemporaneous execution plan, not current runtime truth. Components
+from it landed in the deployed reliability release at
+`3f6e7b705854838d9a1e8b466d959f7ead41b643`, but unchecked tasks remain design
+and audit work. Use `docs/governance/current_runtime_status.md` for production
+facts; do not treat this checklist as a complete-release assertion.
+
 > **Execution rule:** Use `superpowers:subagent-driven-development` one task at a
 > time and `superpowers:test-driven-development` for every behavior change. Do
 > not mutate production, archive, or push. After both Core and External plans
