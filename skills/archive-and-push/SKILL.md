@@ -1,83 +1,64 @@
 ---
 name: archive-and-push
-description: "当用户说“归档”时使用：运行基线测试、检查敏感文件、初始化/提交 git、将当前工作分支合并到 main、推送 origin main，并在 local_archive/docs/ 生成本地归档记录。"
+description: "当用户要求归档、提交、合并 main 或推送时使用：由 scripts/archive_and_push.sh 执行可恢复的本地事务，并在 local_archive/ 写入日志、journal 与归档记录。"
 ---
 
 # Archive And Push
 
-## Use When
+## Use
 
-- 用户说“归档”“把这轮存档”“准备推送归档”
-- 需要把当前工作整理成可追溯提交并写本地归档记录
-- 需要写部署记录或发布记录；这类记录默认放 `local_archive/docs/`，不要放进 public docs tree
+- 用户要求归档、提交、推送或同步 GitHub 时，使用脚本作为唯一 Git 事务入口。
+- 不要手工 checkout、merge 或 push 来绕过脚本，除非脚本已经报告不可恢复状态且用户明确授权。
+- `main` 已推送到远端不等于生产已部署；部署必须走独立、明确授权的流程。
 
-## Checklist
-
-- [ ] 运行基线测试
-  - `PYTHONPATH=src pytest -q tests/test_http_server.py tests/test_knowledge_agent.py tests/test_config.py`
-  - `npm --prefix node_bridge test`
-- [ ] 先做 dry-run，确认敏感路径不会进入提交
-  - `./scripts/archive_and_push.sh --dry-run --skip-tests`
-- [ ] 检查输出摘要中的 `sensitive_present`、`stage_candidates`、`archive_record`
-- [ ] 确认 `archive_record` 在 `local_archive/docs/governance/archive/` 下
-- [ ] 如果仓库还没有初始化，允许脚本执行 `git init`
-- [ ] 准备正式归档时执行 push 路径；脚本会先在当前工作分支提交，
-      再 fast-forward 合并到 `main`，最后推送 `origin main`
-  - `./scripts/archive_and_push.sh --push`
-- [ ] 如需指定或修正远程，补上 SSH 或 HTTPS remote URL；脚本会对齐本地 `origin`
-  - `./scripts/archive_and_push.sh --push --remote-url <git-url>`
-- [ ] 如果工作区有其他人的并发改动，用 `--path` 精确归档本轮文件
-  - `./scripts/archive_and_push.sh --push --path <file> --path <file>`
-
-## Rules
-
-- 不要把 `.env.local`、`.ran_agent_state/`、`data/`、`logs/`、`debug/`、`state/`、`.npm/`、`.pytest_cache/`、`.venv/`、`node_modules/`、`__pycache__/`、`*.pyc` 纳入提交。
-- 不要把 `vault/.obsidian/workspace.json`、`vault/.qwen/settings.json`、`vault/.qwen/settings.json.orig` 纳入提交；公开树只保留 `.example.json`。
-- 不要把 `local_archive/` 纳入提交。
-- 不要在 public tree 新增 `docs/deployment/` 或 `docs/governance/archive/`；部署文档写到 `local_archive/docs/deployment/`，归档记录写到 `local_archive/docs/governance/archive/`。
-- 如果 `origin` 不存在且没有提供 remote URL，停止并提示用户先配置远程。
-- `--remote-url` 可用 SSH 或 HTTPS；如果 `origin` 已存在但不同，脚本会先 `remote set-url` 对齐。
-- GitHub HTTPS/SSH 任一路径 push 失败时，脚本会推导另一种 URL、更新本地 `origin`、重试；重试成功后保留可工作的 URL。
-- 脚本正式归档前会清空 index 并重新 stage。未传 `--path` 时 stage 允许范围内的全量工作区；传 `--path` 时只 stage 指定路径。
-- 正式 `--push` 默认从当前工作分支开始：提交当前分支变更，要求工作树干净，然后 fast-forward 合并到 `main` 并推送 `origin main`。如果不能 fast-forward，停止并让操作者处理分支差异。
-- 只有明确需要旧行为时才用 `--no-merge-current-branch`，它会直接切到 `main` 后提交/推送。
-- 如果没有变更可提交，保留 dry-run 结果并报告 `nothing to commit`。
-- 实际 push 只在用户准备好发布时执行；dry-run 只做预检。
-
-## Commands
+## Normal operation
 
 ```bash
-# Preflight
-./scripts/archive_and_push.sh --dry-run --skip-tests
-
-# Final archive
 ./scripts/archive_and_push.sh --push
-
-# Final archive from current feature branch into main
-./scripts/archive_and_push.sh --push --commit-message "fix: describe change"
-
-# Final archive with explicit remote
-./scripts/archive_and_push.sh --push --remote-url git@github.com:owner/repo.git
 ```
 
-## Outputs
+脚本会持久化三类不同用途的本地记录：
 
-- 标准输出摘要必须包含：
-  - `root`
-  - `mode`
-  - `tests`
-  - `sensitive_present`
-  - `stage_candidates`
-  - `commit`
-  - `push`
-  - `archive_record`
-- 默认归档记录路径：
-  - `local_archive/docs/governance/archive/YYYY-MM-DD-archive-and-push.md`
-- 默认部署文档路径：
-  - `local_archive/docs/deployment/YYYY-MM-DD-<topic>.md`
+- `local_archive/docs/governance/archive/*.md` 是供维护者阅读的正式 Markdown archive record；
+- `local_archive/runtime/archive-and-push/<transaction-id>/transaction.json` 是机器 resume journal；
+- 同一事务目录的 `validation-record.json` 是可校验的 validation evidence。
+
+它们不能互相替代。测试输出中断或调用通道丢失时，不要猜测测试是否完成，也不要盲目重跑。
+
+## Existing trusted validation
+
+仅当操作者已持有脚本生成的、同一仓库真实路径、同一 HEAD、干净工作树且校验通过的记录时，才使用：
+
+```bash
+./scripts/archive_and_push.sh --push --reuse-validation /absolute/path/to/validation-record.json
+```
+
+`--reuse-validation` 会拒绝不匹配的路径、HEAD、工作树、checksum 或未通过的基线结果。
+
+## Interrupted or failed transaction
+
+1. 先读取 `local_archive/runtime/archive-and-push/<transaction-id>/transaction.json` 和对应日志；reused validation 必须以 journal 中已持久化的 provenance 为准。
+2. 仅在 journal 的 phase/status 表明可安全恢复时执行：
+
+   ```bash
+   ./scripts/archive_and_push.sh --resume <transaction-id>
+   ```
+
+3. 若 journal、当前 Git 状态或 `origin/main` 不一致，停止并报告；不要 reset、rebase、force push 或手工 merge/push。
+
+## Test exceptions
+
+`--skip-tests` 不是默认恢复手段。确有明确、可报告的理由时，必须同时提供理由：
+
+```bash
+./scripts/archive_and_push.sh --push --skip-tests --skip-tests-reason "reason"
+```
+
+archive record 会将其标记为 `skipped`，绝不标记为 `passed`。
 
 ## Boundaries
 
-- 只操作仓库内文件。
-- 不修改 `node_bridge/src/*` 与 `src/personal_agent/*` 之外的运行时代码。
-- 不执行真实 push 作为默认动作。
+- 所有 journal、测试日志、validation record、failure record 与 archive record 都必须位于本仓库的 `local_archive/` 下；不得创建与项目平级的 clone 或 archive 目录。
+- 只有成功事务会生成正式 Markdown archive record；失败事务保留 journal 和事务目录内的 failure summary，不得冒充成功归档。
+- 不要归档 `.env.local`、状态、日志、缓存、凭据或 `local_archive/` 本身。
+- `--push` 才会执行 Git mutation；`--dry-run` 不会替代真实验证或事务恢复。
