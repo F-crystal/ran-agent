@@ -15,12 +15,19 @@ import {
   getGlobalTimelineConfig,
   getLocalRecentHistory,
 } from './globalTimeline.mjs';
-import { isHermesTaskScopedRoute } from './hermesTaskScope.mjs';
+import {
+  isHermesTaskScopedRoute,
+  isInformationalReportTask,
+  isTrustedInformationalReportTask,
+  preserveTrustedBridgeTaskProvenance,
+} from './hermesTaskScope.mjs';
 
 export async function handleIncomingMessage(normalizedMessage = {}, options = {}) {
   const env = options.env || process.env;
   const logger = options.logger || console;
-  const message = normalizeIncomingMessage(normalizedMessage);
+  const message = discardUntrustedInformationalRouteHint(
+    preserveTrustedBridgeTaskProvenance(normalizedMessage, normalizeIncomingMessage(normalizedMessage))
+  );
   const taskScoped = isHermesTaskScopedRoute(message.route_hint);
   const globalUserId = getGlobalUserId(message, { env });
   const trustedActorContext = deriveTrustedActorContext(message, {
@@ -96,7 +103,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     actionRepairImpl: options.actionRepairImpl,
     pendingActionExecutorImpl: options.pendingActionExecutorImpl,
   });
-  const backendMessage = {
+  const backendMessage = preserveTrustedBridgeTaskProvenance(message, {
     ...message,
     global_user_id: globalUserId,
     stable_conversation_key: taskScoped ? '' : getStableConversationKey(message),
@@ -109,7 +116,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     stale_context: staleContext,
     continuity_note: continuityNote,
     trusted_actor_context: trustedActorContext,
-  };
+  });
   const response = await backend.getReply(backendMessage, {
     fetchImpl: options.fetchImpl,
     execFileImpl: options.execFileImpl,
@@ -229,6 +236,13 @@ export function normalizeIncomingMessage(input = {}) {
     image_urls: Array.isArray(input.image_urls) ? input.image_urls : [],
     created_at: Number(input.created_at || Date.now()),
   };
+}
+
+function discardUntrustedInformationalRouteHint(message = {}) {
+  if (isInformationalReportTask(message.route_hint) && !isTrustedInformationalReportTask(message)) {
+    return { ...message, route_hint: '' };
+  }
+  return message;
 }
 
 function normalizeMedia(media) {

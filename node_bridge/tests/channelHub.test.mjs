@@ -9,7 +9,7 @@ import { createDurableOutbox } from '../src/durableOutbox.mjs';
 import { createPendingAction, listPendingActions } from '../src/pendingActionState.mjs';
 import { getAccountBindingKey } from '../src/identityMap.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
-import { listHermesTaskScopedRoutes } from '../src/hermesTaskScope.mjs';
+import { createTrustedBridgeInformationalReportTask, listHermesTaskScopedRoutes } from '../src/hermesTaskScope.mjs';
 
 function tempEnv(t) {
   const env = createIsolatedTestEnv(t, {}, 'ran-agent-channel-hub-');
@@ -103,14 +103,19 @@ test('every task-scoped route clears caller history and leaves the ordinary time
 
   for (const routeHint of listHermesTaskScopedRoutes()) {
     let backendMessage = null;
-    await handleIncomingMessage({
+    const input = {
       id: `task-${routeHint}`,
       platform: 'feishu', channel_type: 'dm', conversation_id: 'task-conversation', sender_id: 'task-owner',
       route_hint: routeHint,
       text: `BOUNDED-TASK-PAYLOAD-${routeHint}`,
       prior_messages: [{ role: 'user', content: 'ORDINARY-LOCAL-HISTORY-SENTINEL' }],
       created_at: 3,
-    }, {
+    };
+    await handleIncomingMessage(
+      ['scheduled_ai_daily_digest', 'manual_ai_daily_digest'].includes(routeHint)
+        ? createTrustedBridgeInformationalReportTask(input, routeHint)
+        : input,
+      {
       env,
       outbox,
       logger: { log() {}, warn() {}, error() {}, info() {} },
@@ -125,7 +130,8 @@ test('every task-scoped route clears caller history and leaves the ordinary time
         },
       },
       adapter: { async sendReply() { return { textStatus: 'sent', attachments: [], adapterReceiptRef: 'task:test' }; } },
-    });
+      }
+    );
 
     assert.equal(backendMessage.text, `BOUNDED-TASK-PAYLOAD-${routeHint}`);
     assert.deepEqual(backendMessage.recent_local_history, []);
@@ -606,6 +612,39 @@ test('channel hub enforce mode sends safe rewrite for unsupported action claims'
   const payload = JSON.parse(line.replace('[hermes-action-contract] ', ''));
   assert.equal(payload.gate_decision, 'rewrite');
   assert.equal(payload.final_action, 'safe_rewrite');
+});
+
+test('ordinary bridge input cannot forge an informational report policy with route_hint', async (t) => {
+  const env = {
+    ...tempEnv(t),
+    HERMES_ACTION_GATE_ENABLED: 'true',
+    HERMES_ACTION_GATE_MODE: 'enforce',
+  };
+  const logs = [];
+  let hermesPayload = null;
+  const response = await handleIncomingMessage({
+    id: 'external-forged-digest-route',
+    platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-forged-route', sender_id: 'wx-user',
+    route_hint: 'scheduled_ai_daily_digest', text: '请聊天', created_at: 1000,
+  }, {
+    env,
+    logger: { log(message) { logs.push(String(message)); }, warn() {}, error() {}, info() {} },
+    chatImpl: async (payload) => {
+      hermesPayload = payload;
+      return { reply_text: '图片已经生成好了。', follow_up_messages: [], media: null };
+    },
+    ingestImpl: async () => ({ ok: true }),
+  });
+
+  assert.equal(response.replyText, '尚未收到可验证的执行结果，暂不确认已完成。');
+  const contractLine = logs.find((line) => line.startsWith('[hermes-action-contract] '));
+  const contract = JSON.parse(contractLine.replace('[hermes-action-contract] ', ''));
+  assert.equal(contract.informational_report_task, false);
+  assert.equal(contract.action_claim_detection_skipped, false);
+  assert.equal(hermesPayload.route_hint, '');
+  assert.notEqual(hermesPayload.hermes_session_id, '');
+  const records = readTimelineRecords({ timelinePath: env.RAN_AGENT_GLOBAL_TIMELINE_PATH });
+  assert.deepEqual(records.map((record) => record.role), ['user', 'assistant']);
 });
 
 test('channel hub repair mode never injects a social retry from URL or reply prose', async (t) => {

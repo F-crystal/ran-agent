@@ -14,6 +14,7 @@ import { createOperationLedger } from '../src/operationLedger.mjs';
 import { createTrustedExecutorAdapters } from '../src/trustedExecutorAdapters.mjs';
 import { listStickers, saveStickersFromInbox } from '../src/stickerCatalog.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
+import { createTrustedBridgeInformationalReportTask } from '../src/hermesTaskScope.mjs';
 
 function tempStateEnv(t, extra = {}) {
   return createIsolatedTestEnv(t, {
@@ -69,6 +70,68 @@ test('manual AI daily digest uses a typed owner action and never enters media co
   assert.equal(requests.length, 1);
   assert.equal(requests[0].actionType, 'ai_daily_digest.send');
   assert.deepEqual(requests[0].scope, { mode: 'manual', date: 'current_local_date' });
+});
+
+test('informational AI digest drops prohibited envelope actions before execution and releases the report body', async (t) => {
+  const env = tempStateEnv(t);
+  const calls = { trustedExecutor: 0, coreJob: 0, activity: 0, activityRepair: 0 };
+  const logs = [];
+  const semanticInputs = [];
+  const backend = createReplyBackend({
+    env,
+    trustedActionExecutors: {
+      supports() { calls.trustedExecutor += 1; return true; },
+      async execute() { calls.trustedExecutor += 1; throw new Error('must not execute'); },
+      verifyReceipt() { return { ok: false }; },
+    },
+    coreDurableJobExecutor: {
+      supports(actionType) { return actionType === 'core.reflection'; },
+      async execute() {
+        calls.coreJob += 1;
+        return { ok: true, receipt: { requestRef: 'core-1', actionType: 'core.reflection', jobId: 'job_digest_123456', actorKey: 'actor:owner', goalDigest: 'a'.repeat(64), status: 'active' } };
+      },
+    },
+    activityFacade: {
+      async handle() { calls.activity += 1; throw new Error('must not execute'); },
+      async repairStart() { calls.activityRepair += 1; throw new Error('must not repair'); },
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1,
+        message: '某公司宣布生成式 AI 平台已完成新一轮升级。',
+        actionRequests: [
+          { requestRef: 'sticker-1', actionType: 'sticker_save', scope: { candidate: 'digest' } },
+          { requestRef: 'core-1', actionType: 'core.reflection', scope: {} },
+        ],
+        activityRequest: { requestRef: 'activity-1', command: 'start_or_resume', goal: '继续外部活动', environmentHint: 'game' },
+        claims: [{ type: 'reported_fact' }],
+        commitments: [{ type: 'external_continue', requestRef: 'activity-1' }],
+      },
+    }),
+    semanticVerifierImpl: async (input) => {
+      semanticInputs.push(input);
+      return { supported: true, unsupportedClaims: [], rewrite: '' };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log(line) { logs.push(line); }, warn() {} },
+  });
+
+  const result = await backend.getReply(createTrustedBridgeInformationalReportTask({
+    text: '根据这些 AI 新闻写日报。', route_hint: 'scheduled_ai_daily_digest', sender_id: 'owner', conversation_id: 'home', platform: 'feishu',
+    trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
+  }, 'scheduled_ai_daily_digest'), { semanticVerifierConfig: { enabled: true, timeoutMs: 100, maxRewriteChars: 600 } });
+
+  assert.equal(result.replyText, '某公司宣布生成式 AI 平台已完成新一轮升级。');
+  assert.deepEqual(calls, { trustedExecutor: 0, coreJob: 0, activity: 0, activityRepair: 0 });
+  assert.deepEqual(listPendingActions({ env }), []);
+  assert.equal(semanticInputs.length, 1);
+  assert.deepEqual(semanticInputs[0].declarationTypes, ['claim:reported_fact']);
+  const telemetryLine = logs.find((line) => line.startsWith('[hermes-informational-report] '));
+  const telemetry = JSON.parse(telemetryLine.replace('[hermes-informational-report] ', ''));
+  assert.equal(telemetry.route_hint, 'scheduled_ai_daily_digest');
+  assert.equal(telemetry.action_claim_detection_skipped, true);
+  assert.deepEqual(telemetry.prohibited_action_fields_dropped, ['actionRequests', 'activityRequest', 'commitments']);
+  assert.equal(telemetry.informational_report_body_released, true);
 });
 
 test('createReplyBackend defaults to Hermes reply backend', async () => {

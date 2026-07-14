@@ -9,6 +9,7 @@ import { createHash, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 import { handleIncomingMessage } from './channelHub.mjs';
+import { createTrustedBridgeInformationalReportTask } from './hermesTaskScope.mjs';
 import { saveSensorLoggerMessage } from './environmentSense.mjs';
 import {
   buildExternalMcpSyntheticTurn,
@@ -48,6 +49,7 @@ const AI_DAILY_DIGEST_TEMPLATE_PATH = path.join(
   'src/personal_agent/prompts/ai_daily_digest_report.md'
 );
 const HERMES_LITE_SOFT_RESET_CONTROL_ROUTE = '/control/hermes-lite-soft-reset';
+const AI_DAILY_DIGEST_CONTROL_ROUTE = '/scheduled/ai-daily-digest';
 
 function normalizeAccountId(raw) {
   return String(raw).trim().toLowerCase().replace(/[@.]/g, '-');
@@ -130,20 +132,8 @@ export async function handleHermesLiteSoftResetControlRequest({
   remoteAddress = '',
   bodyText = '',
 } = {}) {
-  if (method !== 'POST' || url !== HERMES_LITE_SOFT_RESET_CONTROL_ROUTE) {
-    return { status: 404, payload: { error: 'route not found' } };
-  }
-  if (!isLoopbackAddress(remoteAddress)) {
-    return { status: 403, payload: { ok: false, error: 'loopback_required' } };
-  }
-  const expectedSecret = String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '');
-  if (!expectedSecret) {
-    return { status: 503, payload: { ok: false, error: 'control_secret_unavailable' } };
-  }
-  const suppliedSecret = bearerToken(firstHeader(headers, 'authorization'));
-  if (!safeEqual(suppliedSecret, expectedSecret)) {
-    return { status: 401, payload: { ok: false, error: 'unauthorized' } };
-  }
+  const denial = internalControlAccessDenial({ env, method, url, headers, remoteAddress, route: HERMES_LITE_SOFT_RESET_CONTROL_ROUTE });
+  if (denial) return denial;
 
   let payload;
   try {
@@ -176,6 +166,19 @@ export async function handleHermesLiteSoftResetControlRequest({
   } catch {
     return { status: 500, payload: { ok: false, error: 'soft_reset_state_unavailable' } };
   }
+}
+
+export async function handleScheduledAiDigestControlRequest({
+  env = process.env,
+  method,
+  url,
+  headers = {},
+  remoteAddress = '',
+  ...options
+} = {}) {
+  const denial = internalControlAccessDenial({ env, method, url, headers, remoteAddress, route: AI_DAILY_DIGEST_CONTROL_ROUTE });
+  if (denial) return denial;
+  return handleScheduledAiDigestRequest({ env, ...options });
 }
 
 export async function handleOutboundRequest({ bot, logger = console, method, url, bodyText }) {
@@ -318,18 +321,17 @@ export async function handleScheduledAiDigestRequest({
   const operationId = String(payload.operation_id || '').trim();
   if (mode === 'manual' && !/^op_[a-f0-9]{32}$/.test(operationId)) return { status: 400, payload: { error: 'manual digest operation is invalid' } };
   const idempotencyKey = mode === 'manual' ? operationId : `ran-agent-ai-daily-digest-${runtimeNow.toISOString().slice(0, 10)}`;
-  const message = {
+  const message = createTrustedBridgeInformationalReportTask({
     id: idempotencyKey,
     message_id: idempotencyKey,
     platform: 'feishu',
     channel_type: 'dm',
     conversation_id: target.conversation_id,
     sender_id: target.sender_id,
-    route_hint: mode === 'manual' ? 'manual_ai_daily_digest' : 'scheduled_ai_daily_digest',
     text: buildScheduledAiDigestPrompt(facts),
     media: [],
     created_at: runtimeNow.getTime(),
-  };
+  }, mode === 'manual' ? 'manual_ai_daily_digest' : 'scheduled_ai_daily_digest');
 
   const response = await channelHub(message, {
     env,
@@ -785,8 +787,16 @@ export function createOutboundServer({ bot, logger = console, env = process.env 
           remoteAddress: request.socket.remoteAddress,
           bodyText: rawBody,
         });
-      } else if (request.method === 'POST' && request.url === '/scheduled/ai-daily-digest') {
-        result = await handleScheduledAiDigestRequest({ logger, env, bodyText: rawBody });
+      } else if (request.method === 'POST' && request.url === AI_DAILY_DIGEST_CONTROL_ROUTE) {
+        result = await handleScheduledAiDigestControlRequest({
+          logger,
+          env,
+          method: request.method,
+          url: request.url,
+          headers: request.headers,
+          remoteAddress: request.socket.remoteAddress,
+          bodyText: rawBody,
+        });
       } else if (request.method === 'POST' && request.url === '/proactive/event') {
         result = await handleProactiveEventRequest({ logger, env, bodyText: rawBody });
       } else if (request.method === 'POST' && request.url === '/external-mcp/system-queue') {
@@ -835,6 +845,16 @@ function isLoopbackAddress(value) {
   const ipv4 = address.startsWith('::ffff:') ? address.slice(7) : address;
   return /^127(?:\.\d{1,3}){3}$/.test(ipv4)
     && ipv4.split('.').every((part) => Number(part) >= 0 && Number(part) <= 255);
+}
+
+function internalControlAccessDenial({ env, method, url, headers, remoteAddress, route }) {
+  if (method !== 'POST' || url !== route) return { status: 404, payload: { error: 'route not found' } };
+  if (!isLoopbackAddress(remoteAddress)) return { status: 403, payload: { ok: false, error: 'loopback_required' } };
+  const expectedSecret = String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '');
+  if (!expectedSecret) return { status: 503, payload: { ok: false, error: 'control_secret_unavailable' } };
+  const suppliedSecret = bearerToken(firstHeader(headers, 'authorization'));
+  if (!safeEqual(suppliedSecret, expectedSecret)) return { status: 401, payload: { ok: false, error: 'unauthorized' } };
+  return null;
 }
 
 function sanitizeControlReason(value) {

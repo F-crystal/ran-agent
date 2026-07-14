@@ -30,6 +30,7 @@ import {
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { normalizeReplyEnvelope } from './replyEnvelope.mjs';
 import { getSemanticVerifierConfig, verifySemanticClaims } from './semanticClaimVerifier.mjs';
+import { isTrustedInformationalReportTask } from './hermesTaskScope.mjs';
 import { createOperationLedger } from './operationLedger.mjs';
 import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
 import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
@@ -182,6 +183,8 @@ export function createReplyBackend(options = {}) {
         };
         excludeFromHistory = true;
       }
+      const informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
+      replyEnvelope = informationalReportPolicy.envelope;
 
       const actionExecution = await executeEnvelopeActionRequests({
         actionRequests: replyEnvelope.actionRequests,
@@ -397,6 +400,12 @@ export function createReplyBackend(options = {}) {
       const visibleReplyText = suppression.suppress ? '' : finalReplyText;
       const visibleFollowUpMessages = suppression.suppress ? [] : finalFollowUpMessages;
       const visibleMedia = suppression.suppress ? null : finalResponseMedia;
+      logInformationalReportPolicy({
+        policy: informationalReportPolicy,
+        routeHint: message.route_hint,
+        bodyReleased: !suppression.suppress && Boolean(visibleReplyText),
+        logger,
+      });
 
       let backendProjection = null;
       if (!excludeFromHistory && !suppression.suppress) {
@@ -479,6 +488,40 @@ function checkpointCandidateText(candidate) {
 
 function loggerFor(options = {}) {
   return options.logger || console;
+}
+
+function restrictInformationalReportEnvelope(envelope, message = {}) {
+  const informationalReportTask = isTrustedInformationalReportTask(message);
+  if (!informationalReportTask) {
+    return Object.freeze({ informationalReportTask: false, prohibitedFields: Object.freeze([]), envelope });
+  }
+  const prohibitedFields = [
+    ...(envelope.actionRequests.length > 0 ? ['actionRequests'] : []),
+    ...(envelope.activityRequest ? ['activityRequest'] : []),
+    ...(envelope.commitments.length > 0 ? ['commitments'] : []),
+  ];
+  return Object.freeze({
+    informationalReportTask: true,
+    prohibitedFields: Object.freeze(prohibitedFields),
+    envelope: Object.freeze({
+      ...envelope,
+      actionRequests: Object.freeze([]),
+      activityRequest: null,
+      commitments: Object.freeze([]),
+    }),
+  });
+}
+
+function logInformationalReportPolicy({ policy, routeHint, bodyReleased, logger }) {
+  if (!policy?.informationalReportTask) return;
+  logger?.log?.(`[hermes-informational-report] ${JSON.stringify({
+    route_hint: String(routeHint || '').trim(),
+    informational_report_task: true,
+    action_claim_detection_skipped: true,
+    prohibited_action_fields_detected: policy.prohibitedFields,
+    prohibited_action_fields_dropped: policy.prohibitedFields,
+    informational_report_body_released: bodyReleased === true,
+  })}`);
 }
 
 function trustedActorContext(value) {

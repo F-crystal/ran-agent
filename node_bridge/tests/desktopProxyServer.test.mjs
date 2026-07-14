@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createDesktopProxyServer, openAiResponseFromReply } from '../src/desktopProxyServer.mjs';
 import { createDurableOutbox } from '../src/durableOutbox.mjs';
 import { handleIncomingMessage } from '../src/channelHub.mjs';
+import { createReplyBackend } from '../src/replyBackend.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
 function request(method, url, body, headers = {}) {
@@ -80,6 +81,35 @@ test('desktop proxy chat completions routes through channelHub', async () => {
     },
   );
   assert.equal(response.body.choices[0].message.content, '桌面回复');
+});
+
+test('desktop OpenAI-compatible payload cannot submit a digest route hint to bypass the action gate', async (t) => {
+  const env = createIsolatedTestEnv(t, {
+    DESKTOP_PROXY_API_KEY: 'a'.repeat(32),
+    HERMES_ACTION_GATE_ENABLED: 'true',
+    HERMES_ACTION_GATE_MODE: 'enforce',
+  }, 'desktop-forged-route-');
+  const server = createDesktopProxyServer({
+    env,
+    logger: { log() {}, warn() {}, error() {}, info() {} },
+    channelHub: (message, options) => handleIncomingMessage(message, {
+      ...options,
+      replyBackend: createReplyBackend({
+        env,
+        hermesImpl: async () => ({ reply_text: '图片已经生成好了。', follow_up_messages: [], media: null }),
+        ingestImpl: async () => ({ ok: true }),
+        logger: { log() {}, warn() {} },
+      }),
+    }),
+  });
+  const response = await server.handleRequest(request('POST', '/v1/chat/completions', {
+    model: 'ran-agent',
+    route_hint: 'manual_ai_daily_digest',
+    messages: [{ role: 'user', content: 'hello' }],
+  }, { authorization: `Bearer ${'a'.repeat(32)}` }));
+
+  assert.equal(response.status, 200);
+  assert.equal(response.body.choices[0].message.content, '尚未收到可验证的执行结果，暂不确认已完成。');
 });
 
 test('desktop proxy denies non-loopback binding without a strong credential', async () => {

@@ -303,13 +303,10 @@ paste key-bearing curl commands into public docs.
 - The digest target is learned from the latest normal Feishu DM handled by
   `node_bridge/src/feishuBridge.mjs` and stored under runtime state. To bind it,
   send the bot any private Feishu message once after deployment.
-- Manual smoke from the server can POST facts to the local Node bridge endpoint:
-
-```bash
-curl -sS -X POST http://127.0.0.1:8791/scheduled/ai-daily-digest \
-  -H 'Content-Type: application/json' \
-  -d '{"facts":"AI daily digest smoke facts"}'
-```
+- Manual smoke is an owner-only internal control action. The local endpoint
+  accepts only loopback requests bearing `RAN_AGENT_INTERNAL_CONTROL_SECRET`;
+  use the authenticated deployment/verification procedure, and never place a
+  literal secret-bearing `curl` command in public documentation.
 
 Do not enable `PERSONAL_AGENT_PROACTIVE_ENABLED` for this feature.
 

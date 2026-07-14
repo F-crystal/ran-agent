@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { loadActionCompatibilityRegistry } from './actionCompatibilityRegistry.mjs';
+import { isTrustedInformationalReportTask } from './hermesTaskScope.mjs';
 
 const VALID_GATE_MODES = new Set(['observe', 'enforce', 'repair']);
 const TRUSTED_ACTION_EVIDENCE = Symbol('trustedActionEvidence');
@@ -53,7 +54,8 @@ export function evaluateActionContract({
   const compatibility = declaredActionTypes.length > 0 ? null : detectCompatibilityAction(observedEvidence);
   const intent = declaredActionTypes.length > 0 ? 'typed_action' : compatibility?.action || 'none';
   const requiredEvidence = declaredActionTypes.length > 0 ? [] : requiredEvidenceForIntent(intent);
-  const finalClaims = detectFinalClaims(response?.reply_text || response?.replyText || '');
+  const informationalReportTask = isTrustedInformationalReportTask(message);
+  const finalClaims = informationalReportTask ? [] : detectFinalClaims(response?.reply_text || response?.replyText || '');
   const hasRequiredEvidence = requiredEvidence.length === 0 || hasEvidenceForIntent(intent, observedEvidence);
   const missingEvidence = hasRequiredEvidence ? [] : missingEvidenceForIntent(intent, observedEvidence);
   const partialSuccessDetected = hasPartialSuccessEvidence(observedEvidence);
@@ -69,6 +71,8 @@ export function evaluateActionContract({
     executed_action_types: [],
     compatibility_action: compatibility?.action || '',
     compatibility_signal_source: compatibility?.source || '',
+    informational_report_task: informationalReportTask,
+    action_claim_detection_skipped: informationalReportTask,
     gate_mode: config?.enabled === false ? 'disabled' : sanitizeShortString(config?.mode || 'observe'),
     intent,
     required_evidence: requiredEvidence,

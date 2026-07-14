@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 
@@ -48,10 +49,13 @@ class NodeBridgeOutboundClient:
     def send_ai_daily_digest(self, facts: str, *, mode: str = "scheduled", operation_id: str = "") -> dict[str, object]:
         """Send one scheduled AI digest trigger through the local Node bridge."""
 
+        secret = os.getenv("RAN_AGENT_INTERNAL_CONTROL_SECRET", "").strip()
+        if not secret:
+            raise RuntimeError("node bridge internal control secret is unavailable")
         request = urllib.request.Request(
             url=f"{self._config.node_bridge_outbound_base_url}/scheduled/ai-daily-digest",
             data=json.dumps({"facts": facts, "mode": mode, "operation_id": operation_id}).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"},
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=30) as response:

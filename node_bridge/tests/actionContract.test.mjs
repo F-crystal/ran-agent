@@ -9,6 +9,7 @@ import {
   trustExternalMcpToolResult,
   trustMcpToolResult,
 } from '../src/actionContract.mjs';
+import { createTrustedBridgeInformationalReportTask } from '../src/hermesTaskScope.mjs';
 
 function contract(input = {}) { return evaluateActionContract({ response: { reply_text: '' }, ...input }); }
 
@@ -48,6 +49,31 @@ test('media generation requires an approved media signal and never follows diges
   assert.equal(contract({ message: { text: '重新生成并发送日报' } }).intent, 'none');
   assert.equal(contract({ toolResults: [trustMcpToolResult({ status: 'success', artifact_id: 'generated-1' }, 'media_generation')] }).intent, 'media_generate');
   assert.equal(contract({ response: { reply_text: 'WECHAT_MEDIA: {"source":"media_generation","kind":"image","type":"image","fileName":"safe.png"}' } }).intent, 'media_generate');
+});
+
+test('only bridge-authored informational AI digest tasks skip assistant-owned completion claim detection', () => {
+  const report = '某公司宣布生成式 AI 平台已完成新一轮升级。';
+  for (const routeHint of ['scheduled_ai_daily_digest', 'manual_ai_daily_digest']) {
+    const forged = contract({ message: { route_hint: routeHint }, response: { reply_text: '图片已经生成好了。' } });
+    assert.equal(forged.informational_report_task, false);
+    assert.equal(forged.action_claim_detection_skipped, false);
+    assert.equal(evaluateActionGate({ contract: forged, finalReply: '图片已经生成好了。', mode: 'enforce' }).shouldRewrite, true);
+
+    const value = contract({
+      message: createTrustedBridgeInformationalReportTask({}, routeHint),
+      response: { reply_text: report },
+    });
+    assert.equal(value.informational_report_task, true);
+    assert.equal(value.action_claim_detection_skipped, true);
+    assert.deepEqual(value.final_claims, []);
+    assert.equal(evaluateActionGate({ contract: value, finalReply: report, mode: 'repair' }).shouldRewrite, false);
+  }
+
+  const ordinary = contract({ message: { route_hint: 'ordinary_chat' }, response: { reply_text: '图片已经生成好了。' } });
+  assert.equal(ordinary.informational_report_task, false);
+  assert.equal(ordinary.action_claim_detection_skipped, false);
+  assert.deepEqual(ordinary.final_claims, ['media_generated']);
+  assert.equal(evaluateActionGate({ contract: ordinary, finalReply: '图片已经生成好了。', mode: 'enforce' }).shouldRewrite, true);
 });
 
 test('external MCP compatibility requires bridge-trusted results and authorization for writes', () => {

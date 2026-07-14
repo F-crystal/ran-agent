@@ -13,9 +13,11 @@ import {
   handleHermesLiteSoftResetControlRequest,
   handleOutboundRequest,
   handleProactiveEventRequest,
+  handleScheduledAiDigestControlRequest,
   handleScheduledAiDigestRequest,
   resolveStateDir,
 } from '../src/outboundServer.mjs';
+import { isTrustedInformationalReportTask } from '../src/hermesTaskScope.mjs';
 import { runHermesLiteSoftReset } from '../src/hermesSessionMaintenance.mjs';
 import {
   addExternalMcpWatch,
@@ -248,6 +250,7 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   assert.equal(channelMessage.conversation_id, 'oc-home');
   assert.equal(channelMessage.sender_id, 'ou-home');
   assert.equal(channelMessage.route_hint, 'scheduled_ai_daily_digest');
+  assert.equal(isTrustedInformationalReportTask(channelMessage), true);
   assert.match(channelMessage.text, /今日 AI 事实材料/);
   assert.match(channelMessage.text, /标题、来源、正文/);
   assert.match(channelMessage.text, /50-200/);
@@ -281,6 +284,7 @@ test('manual AI digest uses its operation scope to send one digest body exactly 
     channelHub: async (message) => {
       taskGenerations += 1;
       assert.equal(message.route_hint, 'manual_ai_daily_digest');
+      assert.equal(isTrustedInformationalReportTask(message), true);
       return { replyText: '日报正文只发送一次' };
     },
     execFileImpl: async (bin, args) => {
@@ -300,6 +304,42 @@ test('manual AI digest uses its operation scope to send one digest body exactly 
   assert.equal(first.payload.outbox_id, second.payload.outbox_id);
   assert.equal(sends.length, 1);
   assert.equal(taskGenerations, 2);
+});
+
+test('scheduled AI digest control route is loopback and bearer authenticated before it can create trusted provenance', async (t) => {
+  const env = tempEnv(t, {
+    RAN_AGENT_INTERNAL_CONTROL_SECRET: 'digest-control-secret',
+    FEISHU_LARK_CLI_BIN: 'lark-cli',
+    FEISHU_LARK_CLI_IDENTITY: 'bot',
+  }, 'scheduled-digest-control-');
+  setFeishuHomeDmTarget({
+    platform: 'feishu', channel_type: 'dm', conversation_id: 'oc-home', sender_id: 'ou-home',
+  }, env);
+  let channelMessage = null;
+  const request = (overrides = {}) => handleScheduledAiDigestControlRequest({
+    env,
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    method: 'POST',
+    url: '/scheduled/ai-daily-digest',
+    headers: { authorization: 'Bearer digest-control-secret' },
+    remoteAddress: '127.0.0.1',
+    bodyText: JSON.stringify({ facts: '已验证的日报事实' }),
+    channelHub: async (message) => {
+      channelMessage = message;
+      return { replyText: '日报正文' };
+    },
+    execFileImpl: async () => ({ stdout: '{"ok":true}' }),
+    ...overrides,
+  });
+
+  assert.equal((await request({ headers: {} })).status, 401);
+  assert.equal((await request({ headers: { authorization: 'Bearer wrong-secret' } })).status, 401);
+  assert.equal((await request({ remoteAddress: '192.0.2.8' })).status, 403);
+  assert.equal(channelMessage, null);
+
+  const accepted = await request();
+  assert.equal(accepted.status, 200);
+  assert.equal(isTrustedInformationalReportTask(channelMessage), true);
 });
 
 test('handleExternalMcpSystemQueueRequest is disabled by default and does not call Hermes', async () => {
