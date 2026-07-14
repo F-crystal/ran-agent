@@ -1,6 +1,17 @@
 # Hermes Stability And One-Shot Deploy Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+Status: SUPERSEDED (2026-07-10)
+
+Do not execute the remaining unchecked tasks verbatim. Landed fixes remain in
+Git history and CURRENT governance. Unexecuted or later-evolved requirements
+are split between:
+
+- `docs/superpowers/specs/2026-07-10-hermes-core-reliability-learning-one-shot-runtime-design.md`;
+- `docs/superpowers/specs/2026-07-10-hermes-external-mcp-autonomy-capability-growth-design.md`.
+
+Those documents are current design baselines: some components are landed, but
+their complete definitions of done are not implied here. The durable-game spec
+remains a historical compatibility pointer, not an execution entry point.
 
 **Goal:** Stabilize Hermes scheduled digest, bridge notices, reply windows, lite session governance, and external-MCP game autonomy so local work can iterate safely and production can deploy in one server pass.
 
