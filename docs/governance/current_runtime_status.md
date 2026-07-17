@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-13)
+Status: CURRENT (2026-07-17)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -149,6 +149,8 @@ state, vault, data, or XHS note debug output.
   `docs/governance/hermes-action-contract-gate.md`.
 - External MCP gateway and system queue:
   `docs/governance/external-mcp-gateway.md`.
+- Local-only Hermes Core Foundation and frozen Schema v1:
+  `docs/governance/hermes-core-foundation.md`.
 
 Core safety facts:
 
@@ -187,6 +189,10 @@ media assets, parser/sidecar markers, private `vault/` content,
 `local_archive/`, `.venv/`, caches, or `node_modules/`.
 
 ## Known Follow-Up Boundaries
+
+Hermes Core Package A and frozen Schema v1 exist only in repository source;
+they are not connected or deployed. Package B has not started, legacy writers
+remain current, and no partial Core production write path is authorized.
 
 The deployed release does not yet unify automatic memory recall, Ombre direct
 and wrapper surfaces, Vault recall, ordinary session continuity, and

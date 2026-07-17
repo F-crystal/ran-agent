@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-13)
+Status: CURRENT (2026-07-17)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -17,6 +17,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
+| `docs/governance/hermes-core-foundation.md` | Local-only Core Package A boundary and frozen Schema v1 |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/hermes_release_deployment.md` | Immutable-SHA Hermes deployment, acceptance, rollback, and RC-to-main closure |
 | `docs/governance/hermes_release_bootstrap.v1.sha256` | Bootstrap framework source-digest manifest |
