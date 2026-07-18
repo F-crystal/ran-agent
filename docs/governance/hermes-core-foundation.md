@@ -1,10 +1,11 @@
 # Hermes Core Foundation
 
-Status: CURRENT (2026-07-17)
+Status: CURRENT (2026-07-18)
 
-This document records the public source-level status of Hermes Core Package A.
-It is not a deployment record and does not change the current production
-runtime described by `docs/governance/current_runtime_status.md`.
+This document records the public source-level status of Hermes Core Package A
+and the owner-accepted Package B.1 typed business transactions. It is not a
+deployment record and does not change the current production runtime described
+by `docs/governance/current_runtime_status.md`.
 
 ## Status Boundary
 
@@ -12,12 +13,16 @@ runtime described by `docs/governance/current_runtime_status.md`.
   `node_bridge/src/core/`, with tests under `node_bridge/tests/core/`.
 - Schema v1 is frozen. Its migration artifact must not be edited in place;
   every future structural change requires a new migration v2 or later.
+- Package B.1 typed business transactions are implemented in the same local
+  Core source and have received owner acceptance. The accepted Conversation,
+  ingress, assembly, Turn, Provider Epoch, final-commit, and presentation
+  contracts use typed operation receipts and parent-scoped readers.
 - Core is not connected to `channelHub`, `replyBackend`, any frontend,
   provider history, or a presentation adapter.
 - Legacy Timeline, durable outbox, Python ingest/memory writers, and other
   legacy writers remain active in the current runtime.
-- No Core write path has been deployed or enabled in production. Package B has
-  not started, and the one-time production cutover is not authorized.
+- No Core write path has been deployed or enabled in production. Package B.2
+  has not started, and the one-time production cutover is not authorized.
 
 ## Frozen Schema v1
 
@@ -59,6 +64,35 @@ identity, tombstone/publication/effect receipts, projection reservation and
 cursor CAS, Work Run revision/fence CAS, and the database half of Living Soul
 state transitions. These are Foundation primitives, not evidence that the
 corresponding Package B/C runtime integrations exist.
+
+## Owner-Accepted Package B.1 Boundary
+
+Package B.1 adds six typed transaction namespaces inside the synchronous,
+revoked CoreWriter transaction facade:
+
+- `packageBAssembly`
+- `packageBFinal`
+- `packageBIngress`
+- `packageBPresentation`
+- `packageBProvider`
+- `packageBTurn`
+
+Conversation identity is an immutable typed binding covering owner, actor,
+platform, source instance, platform-native Conversation identity, provenance,
+and revision. Presentation bindings are separate routing authority; sharing or
+changing a destination route does not create or mutate Conversation identity.
+
+Assistant Canon writes are not exposed as standalone public primitives. A
+final assistant Turn, its first revision, ordered presentation outbox items,
+typed receipts, and durable result identity commit atomically in one SQLite
+transaction. Provider Epoch identity and source snapshot bindings are
+immutable; typed state transitions and sequential attempts retain sufficient
+non-secret metadata for close/reopen rebuild readback.
+
+This accepted source foundation remains inactive. `node_bridge/src/index.mjs`
+does not compose the Package B path, and ChannelHub, frontends, provider
+gateway/history, Global Timeline, `durableOutbox`, and Python ingest remain on
+their existing production paths.
 
 ## Operation Identity
 

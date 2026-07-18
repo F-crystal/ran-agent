@@ -8,6 +8,14 @@ import { CORE_DATABASE_MODE, CORE_DIRECTORY_MODE } from './corePaths.mjs';
 import { expectedCoreSchemaFingerprint, validateCoreSchema } from './coreSchemaManifest.mjs';
 import { createCoreWriter } from './coreWriter.mjs';
 import { createCoreTransactionFacade } from './repositories/coreRepository.mjs';
+import { createPackageBIngressReader } from './repositories/packageBIngressRepository.mjs';
+import { createPackageBAssemblyReader } from './repositories/packageBAssemblyRepository.mjs';
+import { createPackageBProviderReader } from './repositories/packageBProviderRepository.mjs';
+import { createPackageBTurnReader } from './repositories/packageBTurnRepository.mjs';
+import {
+  createPackageBFinalReader,
+  createPackageBPresentationReader,
+} from './repositories/packageBPresentationRepository.mjs';
 
 function scalar(db, sql) {
   const row = db.prepare(sql).get();
@@ -147,6 +155,12 @@ export class CoreDatabase {
   #createReader() {
     const read = (sql, ...params) => this.#requireOpen().prepare(sql).get(...params);
     const all = (sql, ...params) => this.#requireOpen().prepare(sql).all(...params);
+    const packageBIngress = createPackageBIngressReader({ read });
+    const packageBAssembly = createPackageBAssemblyReader({ read, all });
+    const packageBTurn = createPackageBTurnReader({ read, all });
+    const packageBProvider = createPackageBProviderReader({ read, all });
+    const packageBPresentation = createPackageBPresentationReader({ read, all });
+    const packageBFinal = createPackageBFinalReader({ read, all });
     return Object.freeze({
       pragmaSnapshot: () => verifyPragmas(this.#requireOpen()),
       schemaVersion: () => Number(read('PRAGMA user_version').user_version),
@@ -169,6 +183,12 @@ export class CoreDatabase {
       projectionOutbox: (outboxId) => read('SELECT * FROM projection_outbox WHERE projection_outbox_id=?', outboxId),
       livingIdentity: (identityId) => read('SELECT * FROM living_identity WHERE identity_id=?', identityId),
       soulRevision: (soulRevisionId) => read('SELECT * FROM soul_revision WHERE soul_revision_id=?', soulRevisionId),
+      packageBIngress,
+      packageBAssembly,
+      packageBTurn,
+      packageBProvider,
+      packageBPresentation,
+      packageBFinal,
     });
   }
 

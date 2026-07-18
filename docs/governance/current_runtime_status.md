@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-17)
+Status: CURRENT (2026-07-18)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -190,9 +190,14 @@ media assets, parser/sidecar markers, private `vault/` content,
 
 ## Known Follow-Up Boundaries
 
-Hermes Core Package A and frozen Schema v1 exist only in repository source;
-they are not connected or deployed. Package B has not started, legacy writers
-remain current, and no partial Core production write path is authorized.
+Hermes Core Package A and frozen Schema v1 exist in repository source. Package
+B.1 typed business transactions are also implemented there and have received
+owner acceptance, but this is repository state, not production runtime state.
+`node_bridge/src/index.mjs` does not compose the Core B path; ChannelHub,
+frontends, the provider gateway/history, Global Timeline, `durableOutbox`, and
+Python ingest remain on their existing paths. Package B.2 has not started, no
+Core B path has been deployed, and no partial Core production write path is
+authorized.
 
 The deployed release does not yet unify automatic memory recall, Ombre direct
 and wrapper surfaces, Vault recall, ordinary session continuity, and

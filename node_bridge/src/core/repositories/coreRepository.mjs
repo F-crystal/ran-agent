@@ -4,6 +4,11 @@ import {
   projectorClaimOperationDigest,
   workRunFenceOperationDigest,
 } from '../coreOperationDigest.mjs';
+import { createPackageBIngressRepository } from './packageBIngressRepository.mjs';
+import { createPackageBAssemblyRepository } from './packageBAssemblyRepository.mjs';
+import { createPackageBProviderRepository } from './packageBProviderRepository.mjs';
+import { createPackageBTurnRepository } from './packageBTurnRepository.mjs';
+import { createPackageBPresentationRepositories } from './packageBPresentationRepository.mjs';
 
 function freezeNamespace(methods) {
   return Object.freeze(methods);
@@ -111,6 +116,17 @@ export function createCoreTransactionFacade({ assertActive, prepare }) {
   };
   const get = (sql, ...params) => statement(sql).get(...params);
   const run = (sql, ...params) => statement(sql).run(...params);
+  const all = (sql, ...params) => statement(sql).all(...params);
+
+  const packageBIngress = createPackageBIngressRepository({ get, run });
+  const packageBAssembly = createPackageBAssemblyRepository({ get, all, run });
+  const packageBTurn = createPackageBTurnRepository({ get, run });
+  const packageBProvider = createPackageBProviderRepository({ get, run });
+  const packageBPresentationParts = createPackageBPresentationRepositories({
+    get, all, run,
+  });
+  const packageBFinal = packageBPresentationParts.finalRepository;
+  const packageBPresentation = packageBPresentationParts.presentationRepository;
 
   const journal = freezeNamespace({
     append(input) {
@@ -580,5 +596,9 @@ export function createCoreTransactionFacade({ assertActive, prepare }) {
     },
   });
 
-  return Object.freeze({ journal, ingress, tombstones, publications, effects, projections, revisions, soul });
+  return Object.freeze({
+    journal, ingress, tombstones, publications, effects, projections, revisions, soul,
+    packageBIngress, packageBAssembly, packageBTurn, packageBProvider,
+    packageBFinal, packageBPresentation,
+  });
 }
