@@ -17,6 +17,10 @@ by `docs/governance/current_runtime_status.md`.
   Core source and have received owner acceptance. The accepted Conversation,
   ingress, assembly, Turn, Provider Epoch, final-commit, and presentation
   contracts use typed operation receipts and parent-scoped readers.
+- The additive Package B.1 recovery API has also received owner acceptance.
+  It closes atomic ingress/intent commit, atomic part/processing commit,
+  durable reference/deferred state, factual recovery readers, and
+  reference-aware seal digest consistency without changing Schema v1.
 - Core is not connected to `channelHub`, `replyBackend`, any frontend,
   provider history, or a presentation adapter.
 - Legacy Timeline, durable outbox, Python ingest/memory writers, and other
@@ -89,10 +93,19 @@ transaction. Provider Epoch identity and source snapshot bindings are
 immutable; typed state transitions and sequential attempts retain sufficient
 non-secret metadata for close/reopen rebuild readback.
 
+The stable foundation available to a future Package B.2 service now includes
+atomic ingress plus immutable assembly intent, atomic part/reference plus
+processing transition, durable reference/deferred history, parent-scoped
+recovery and candidate readers, and a seal digest computed from persisted
+reference state. `appendPartWithProcessing` is the formal composite part path;
+the older split primitives remain compatibility and diagnostic surfaces whose
+half-states are explicitly exposed by typed readers rather than hidden.
+
 This accepted source foundation remains inactive. `node_bridge/src/index.mjs`
 does not compose the Package B path, and ChannelHub, frontends, provider
 gateway/history, Global Timeline, `durableOutbox`, and Python ingest remain on
-their existing production paths.
+their existing production paths. Package B.2 service orchestration has not
+been implemented.
 
 ## Operation Identity
 

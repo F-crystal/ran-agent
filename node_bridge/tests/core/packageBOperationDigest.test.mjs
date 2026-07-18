@@ -3,13 +3,17 @@ import test from 'node:test';
 
 import {
   assemblyActivePartSetDigest,
+  assemblyIntentOperationDigest,
   assemblyLifecycleOperationDigest,
   assemblyPartOperationDigest,
+  assemblyPartReferenceOperationDigest,
+  assemblyReferenceAwareActivePartSetDigest,
   assemblySealOperationDigest,
   conversationIdentityOperationDigest,
   finalCommitOperationDigest,
   foregroundExchangeOperationDigest,
   ingressOperationDigest,
+  ingressAssemblyProcessingOperationDigest,
   presentationClaimOperationDigest,
   presentationBindingOperationDigest,
   presentationDispatchStartOperationDigest,
@@ -134,4 +138,64 @@ test('digest builders reject missing required fields and non-scalar input', () =
   const providerFixture = fixtures.find(([builder]) => builder === providerEpochOperationDigest)[1];
   assert.throws(() => providerEpochOperationDigest({ ...providerFixture, provider: { arbitrary: 'object' } }), { code: 'CORE_OPERATION_SEMANTICS_INVALID' });
   assert.throws(() => assemblyActivePartSetDigest({ assemblyId: 'assembly', assemblyRevision: 1, parts: [] }), { code: 'CORE_ASSEMBLY_EMPTY' });
+});
+
+test('B.1 additive recovery operation digests have fixed vectors and bind reference targets', () => {
+  const intent = {
+    operationKey: 'intent:1', ingressEventId: 'ingress-1', ingressResultId: 'receipt-1',
+    ingressDisposition: 'applied', processingOperationKey: 'processing:1',
+    conversationId: 'conversation', canonicalConversationKey: 'conversation', ownerId: 'owner', actorRef: 'actor',
+    platform: 'desktop', sourceInstanceId: 'desktop:local', platformConversationBinding: 'native',
+    nativeEventId: 'native-1', nativeEventIdTrust: 'trusted', partKind: 'text', sequenceNo: 1,
+    payloadRef: 'payload', payloadHashToken: TOKEN, payloadSize: 24, referenceKind: 'deferred',
+    explicitReference: null, deferredReference: 'native:target', targetIngressId: null,
+    targetNativeEventId: 'native-target', anchorKind: 'quote', anchorLang: 'zh', partMetadataCanonical: '{}',
+    mutationKind: 'create', mutationTargetIngressId: null, mutationTargetNativeEventId: null,
+    retryCausation: null, receivedAt: '2026-07-18T00:00:00.000Z', vendorEventTime: '2026-07-18T00:00:00.000Z',
+    causationId: 'cause', correlationId: 'corr', createdAt: '2026-07-18T00:00:00.000Z',
+  };
+  const reference = {
+    operationKey: 'reference:1', conversationId: 'conversation', assemblyId: 'assembly', partId: 'part',
+    sourceIngressId: 'ingress-1', referenceRevision: 0, assemblyExpectedRevision: 0,
+    assemblyResultRevision: 1,
+    expectedState: null, referenceKind: 'deferred',
+    referenceState: 'unresolved', targetIngressId: null, targetNativeEventId: 'native-target',
+    targetNativeEventTrust: 'trusted', targetPartId: null, anchorKind: 'quote', anchorLang: 'zh',
+    causationId: 'cause', correlationId: 'corr',
+    createdAt: '2026-07-18T00:00:00.000Z',
+  };
+  const processing = {
+    operationKey: 'processing:1', conversationId: 'conversation', ingressEventId: 'ingress-1',
+    intentId: 'intent-receipt', processingRevision: 0, expectedState: null, processingState: 'pending',
+    assemblyId: null, partId: null, causationId: 'cause', createdAt: '2026-07-18T00:00:00.000Z',
+  };
+  const partSet = {
+    assemblyId: 'assembly', assemblyRevision: 2, parts: [{
+      sequenceNo: 1, ingressEventId: 'ingress-1', partId: 'part', partKind: 'text', payloadRef: 'payload',
+      payloadHashToken: TOKEN, disposition: 'active', referenceKind: 'deferred', referenceState: 'unresolved',
+      targetIngressId: null, targetNativeEventId: 'native-target', targetNativeEventTrust: 'trusted',
+      targetPartId: null, anchorKind: 'quote', anchorLang: 'zh', ingressIdentity: 'identity',
+      partSemanticDigest: `sha256:v1:${'b'.repeat(64)}`,
+      referenceSemanticDigest: `sha256:v1:${'c'.repeat(64)}`,
+    }],
+  };
+  assert.equal(assemblyIntentOperationDigest(intent), 'sha256:v1:f5c9eced5dd404ec909896d1a338a46fd58c3bdeedbadbc1ae937faa6306cde3');
+  assert.equal(assemblyPartReferenceOperationDigest(reference), 'sha256:v1:e9bb17c50b7586abc43c25a3adce87be1f686d02293275d02f1501fe4f6bb2d7');
+  assert.equal(ingressAssemblyProcessingOperationDigest(processing), 'sha256:v1:da43aa7bb788628e0a0375d4320e4acd4b9e3181044fa5749e41e1088e8c9250');
+  assert.equal(assemblyReferenceAwareActivePartSetDigest(partSet), 'sha256:v1:ed3f52c437349d16ba1700243664731b87a94e684a95cccfe1003f1c6a649aeb');
+  assert.equal(assemblyReferenceAwareActivePartSetDigest({ ...partSet, parts: [{
+    ...partSet.parts[0], referenceKind: 'explicit', referenceState: 'resolved',
+    targetIngressId: 'ingress-target', targetPartId: 'part-target',
+  }] }), 'sha256:v1:de66d8fc2130ea730637da42bb5486df18e92f58ad655528291de66c0e8c802f');
+  assert.equal(assemblyReferenceAwareActivePartSetDigest({ ...partSet, parts: [{
+    ...partSet.parts[0], referenceState: 'resolved', targetIngressId: 'ingress-target', targetPartId: 'part-target',
+  }] }), 'sha256:v1:11e6418d8d40192e569b48c67be4ff72bf08492c976a7d7f97f95b688c7e9876');
+  assert.equal(assemblyReferenceAwareActivePartSetDigest({ ...partSet, parts: [{
+    ...partSet.parts[0], referenceKind: 'mutation_target', referenceState: 'resolved',
+    targetIngressId: 'ingress-target', targetPartId: 'part-target', anchorKind: 'mutation', anchorLang: null,
+  }] }), 'sha256:v1:a42c052023aaecb323e0cc34f25a3a15ec8be250fb8f86b134bc9d6ef4ce5877');
+  assert.notEqual(assemblyReferenceAwareActivePartSetDigest(partSet), assemblyReferenceAwareActivePartSetDigest({
+    ...partSet,
+    parts: [{ ...partSet.parts[0], targetNativeEventId: 'native-other' }],
+  }));
 });

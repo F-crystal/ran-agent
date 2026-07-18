@@ -169,6 +169,123 @@ export function ingressOperationDigest(input) {
   ]);
 }
 
+export function assemblyIntentOperationDigest(input) {
+  return digest('package-b-assembly-intent:v1', [
+    ['operation_key', input.operationKey],
+    ['ingress_event_id', input.ingressEventId],
+    ['ingress_result_id', input.ingressResultId],
+    ['ingress_disposition', input.ingressDisposition],
+    ['processing_operation_key', input.processingOperationKey],
+    ['conversation_id', input.conversationId],
+    ['canonical_conversation_key', input.canonicalConversationKey],
+    ['owner_id', input.ownerId],
+    ['actor_ref', input.actorRef],
+    ['platform', input.platform],
+    ['source_instance_id', input.sourceInstanceId],
+    ['platform_conversation_binding', input.platformConversationBinding],
+    ['native_event_id', input.nativeEventId],
+    ['native_event_id_trust', input.nativeEventIdTrust],
+    ['part_kind', input.partKind],
+    ['sequence_no', input.sequenceNo],
+    ['payload_ref', input.payloadRef],
+    ['payload_hash_token', input.payloadHashToken],
+    ['payload_size', input.payloadSize],
+    ['reference_kind', input.referenceKind],
+    ['explicit_reference', input.explicitReference],
+    ['deferred_reference', input.deferredReference],
+    ['target_ingress_id', input.targetIngressId],
+    ['target_native_event_id', input.targetNativeEventId],
+    ['anchor_kind', input.anchorKind],
+    ['anchor_lang', input.anchorLang],
+    ['part_metadata', input.partMetadataCanonical],
+    ['mutation_kind', input.mutationKind],
+    ['mutation_target_ingress_id', input.mutationTargetIngressId],
+    ['mutation_target_native_event_id', input.mutationTargetNativeEventId],
+    ['retry_causation', input.retryCausation],
+    ['received_at', input.receivedAt],
+    ['vendor_event_time', input.vendorEventTime],
+    ['causation_id', input.causationId],
+    ['correlation_id', input.correlationId],
+    ['created_at', input.createdAt],
+  ]);
+}
+
+export function assemblyPartReferenceOperationDigest(input) {
+  return digest('package-b-assembly-part-reference:v1', [
+    ['operation_key', input.operationKey],
+    ['conversation_id', input.conversationId],
+    ['assembly_id', input.assemblyId],
+    ['part_id', input.partId],
+    ['source_ingress_id', input.sourceIngressId],
+    ['reference_revision', input.referenceRevision],
+    ['assembly_expected_revision', input.assemblyExpectedRevision],
+    ['assembly_result_revision', input.assemblyResultRevision],
+    ['expected_state', input.expectedState],
+    ['reference_kind', input.referenceKind],
+    ['reference_state', input.referenceState],
+    ['target_ingress_id', input.targetIngressId],
+    ['target_native_event_id', input.targetNativeEventId],
+    ['target_native_event_trust', input.targetNativeEventTrust],
+    ['target_part_id', input.targetPartId],
+    ['anchor_kind', input.anchorKind],
+    ['anchor_lang', input.anchorLang],
+    ['causation_id', input.causationId],
+    ['correlation_id', input.correlationId],
+    ['created_at', input.createdAt],
+  ]);
+}
+
+export function ingressAssemblyProcessingOperationDigest(input) {
+  return digest('package-b-ingress-assembly-processing:v1', [
+    ['operation_key', input.operationKey],
+    ['conversation_id', input.conversationId],
+    ['ingress_event_id', input.ingressEventId],
+    ['intent_id', input.intentId],
+    ['processing_revision', input.processingRevision],
+    ['expected_state', input.expectedState],
+    ['processing_state', input.processingState],
+    ['assembly_id', input.assemblyId],
+    ['part_id', input.partId],
+    ['causation_id', input.causationId],
+    ['created_at', input.createdAt],
+  ]);
+}
+
+export function assemblyReferenceAwareActivePartSetDigest({ assemblyId, assemblyRevision, parts }) {
+  if (!Array.isArray(parts) || parts.length === 0) {
+    throw coreError('CORE_ASSEMBLY_EMPTY', 'active assembly part set cannot be empty');
+  }
+  const ordered = [...parts].sort((left, right) => (
+    Number(left.sequenceNo) - Number(right.sequenceNo)
+    || String(left.ingressEventId).localeCompare(String(right.ingressEventId))
+    || String(left.partId).localeCompare(String(right.partId))
+  ));
+  return digest('package-b-assembly-active-part-set-reference:v1', [
+    ['assembly_id', assemblyId],
+    ['assembly_revision', assemblyRevision],
+    ['parts', JSON.stringify(ordered.map((part, index) => fields([
+      [`parts[${index}].sequence_no`, part.sequenceNo],
+      [`parts[${index}].ingress_event_id`, part.ingressEventId],
+      [`parts[${index}].part_id`, part.partId],
+      [`parts[${index}].part_kind`, part.partKind],
+      [`parts[${index}].payload_ref`, part.payloadRef],
+      [`parts[${index}].payload_hash_token`, part.payloadHashToken],
+      [`parts[${index}].disposition`, part.disposition],
+      [`parts[${index}].reference_kind`, part.referenceKind],
+      [`parts[${index}].reference_state`, part.referenceState],
+      [`parts[${index}].target_ingress_id`, part.targetIngressId],
+      [`parts[${index}].target_native_event_id`, part.targetNativeEventId],
+      [`parts[${index}].target_native_event_trust`, part.targetNativeEventTrust],
+      [`parts[${index}].target_part_id`, part.targetPartId],
+      [`parts[${index}].anchor_kind`, part.anchorKind],
+      [`parts[${index}].anchor_lang`, part.anchorLang],
+      [`parts[${index}].ingress_identity`, part.ingressIdentity],
+      [`parts[${index}].part_semantic_digest`, part.partSemanticDigest],
+      [`parts[${index}].reference_semantic_digest`, part.referenceSemanticDigest],
+    ])))],
+  ]);
+}
+
 export function assemblySealOperationDigest(input) {
   return digest('package-b-assembly-seal:v1', [
     ['operation_key', input.operationKey],

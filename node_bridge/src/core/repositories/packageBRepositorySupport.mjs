@@ -4,6 +4,7 @@ import { coreError } from '../coreErrors.mjs';
 import { assertOperationSemanticDigest } from '../coreOperationDigest.mjs';
 
 const OPERATION_KEY_PATTERN = /^[A-Za-z0-9._:-]{1,200}$/;
+const TYPED_RECEIPT_PREFIX = 'package_b_typed_receipt:';
 
 export function assertPackageBOperationKey(value) {
   if (typeof value !== 'string' || !OPERATION_KEY_PATTERN.test(value)) {
@@ -85,6 +86,58 @@ export function readVerifiedConversationIdentity(read, expected, conversationId 
   eventId, 'package_b_conversation_identity_bound', expected.conversationId, expected.ownerId,
   expected.actorRef, expected.canonicalConversationKey, `package_b_conversation_identity:${expected.platform}`,
   expected.sourceInstanceId, expected.platformConversationBinding, expected.identityRevision, expected.operationDigest);
+}
+
+export function encodePackageBTypedReceipt(kind, entries) {
+  assertNonEmptyString(kind, 'typed receipt kind');
+  if (!Array.isArray(entries) || entries.some((entry) => !Array.isArray(entry) || entry.length !== 2
+    || typeof entry[0] !== 'string')) {
+    throw coreError('CORE_TYPED_RECEIPT_INVALID', 'typed receipt fields are invalid');
+  }
+  const canonical = JSON.stringify([['receipt_schema', `${kind}:v1`], ...entries]);
+  return `${TYPED_RECEIPT_PREFIX}${kind}:v1:${Buffer.from(canonical, 'utf8').toString('base64url')}`;
+}
+
+export function decodePackageBTypedReceipt(sourceKind, kind, fieldNames) {
+  const prefix = `${TYPED_RECEIPT_PREFIX}${kind}:v1:`;
+  if (typeof sourceKind !== 'string' || !sourceKind.startsWith(prefix)) {
+    throw coreError('CORE_OPERATION_RECEIPT_INTEGRITY', `${kind} typed receipt encoding is missing`);
+  }
+  let decoded;
+  try {
+    decoded = JSON.parse(Buffer.from(sourceKind.slice(prefix.length), 'base64url').toString('utf8'));
+  } catch (error) {
+    throw coreError('CORE_OPERATION_RECEIPT_INTEGRITY', `${kind} typed receipt encoding is invalid`, error);
+  }
+  if (!Array.isArray(decoded) || decoded.length !== fieldNames.length + 1
+    || decoded[0]?.[0] !== 'receipt_schema' || decoded[0]?.[1] !== `${kind}:v1`) {
+    throw coreError('CORE_OPERATION_RECEIPT_INTEGRITY', `${kind} typed receipt schema is invalid`);
+  }
+  const result = {};
+  for (let index = 0; index < fieldNames.length; index += 1) {
+    const entry = decoded[index + 1];
+    if (!Array.isArray(entry) || entry.length !== 2 || entry[0] !== fieldNames[index]) {
+      throw coreError('CORE_OPERATION_RECEIPT_INTEGRITY', `${kind} typed receipt field order is invalid`);
+    }
+    result[fieldNames[index]] = entry[1];
+  }
+  return result;
+}
+
+export function conversationIdentityFromReceipt(receipt) {
+  const prefix = 'package_b_conversation_identity:';
+  if (!receipt?.source_kind?.startsWith(prefix) || !receipt.conversation_id || !receipt.owner_id
+    || !receipt.actor_ref || !receipt.origin_ref || !receipt.causation_id || !receipt.correlation_id) {
+    throw coreError('CORE_OPERATION_RECEIPT_INTEGRITY', 'Conversation identity receipt is incomplete');
+  }
+  return frozen({
+    identityRevision: Number(receipt.revision), canonicalConversationKey: receipt.origin_ref,
+    identityReceiptId: receipt.journal_event_id, journalSequence: Number(receipt.sequence_no),
+    conversationId: receipt.conversation_id, ownerId: receipt.owner_id, actorRef: receipt.actor_ref,
+    platform: receipt.source_kind.slice(prefix.length), sourceInstanceId: receipt.causation_id,
+    platformConversationBinding: receipt.correlation_id, operationDigest: receipt.source_ref,
+    createdAt: receipt.created_at,
+  });
 }
 
 export function frozen(value) {

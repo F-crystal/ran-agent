@@ -155,7 +155,7 @@ export class CoreDatabase {
   #createReader() {
     const read = (sql, ...params) => this.#requireOpen().prepare(sql).get(...params);
     const all = (sql, ...params) => this.#requireOpen().prepare(sql).all(...params);
-    const packageBIngress = createPackageBIngressReader({ read });
+    const packageBIngress = createPackageBIngressReader({ read, all });
     const packageBAssembly = createPackageBAssemblyReader({ read, all });
     const packageBTurn = createPackageBTurnReader({ read, all });
     const packageBProvider = createPackageBProviderReader({ read, all });

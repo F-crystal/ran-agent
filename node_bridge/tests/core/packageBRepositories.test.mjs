@@ -1019,17 +1019,17 @@ test('all B.1 reader and write namespaces remain typed and transaction-bound', a
   assert.deepEqual(names, ['packageBAssembly', 'packageBFinal', 'packageBIngress', 'packageBPresentation', 'packageBProvider', 'packageBTurn']);
   const writerMethods = await core.writer.write((tx) => Object.fromEntries(names.map((name) => [name, Object.keys(tx[name]).sort()])));
   assert.deepEqual(writerMethods, {
-    packageBAssembly: ['appendPart', 'beginSealing', 'create', 'interrupt', 'reject', 'seal', 'supersedePart', 'updateQuietDeadline', 'withdrawPart'],
+    packageBAssembly: ['appendPart', 'appendPartWithProcessing', 'beginSealing', 'create', 'interrupt', 'reject', 'seal', 'supersedePart', 'transitionReference', 'updateQuietDeadline', 'withdrawPart'],
     packageBFinal: ['commit'],
-    packageBIngress: ['commit'],
+    packageBIngress: ['commit', 'commitWithAssemblyIntent', 'transitionAssemblyProcessing'],
     packageBPresentation: ['claim', 'createOrReadBinding', 'markDispatchStarted', 'reconcile', 'recordResult'],
     packageBProvider: ['appendAttempt', 'createEpoch', 'transitionEpoch'],
     packageBTurn: ['appendUserRevision', 'commitUserTurn', 'compareAndSetForegroundExchange', 'createOrResolveConversation'],
   });
   assert.deepEqual(Object.fromEntries(names.map((name) => [name, Object.keys(core.reader[name]).sort()])), {
-    packageBAssembly: ['activePartSetDigest', 'byId', 'dueBefore', 'operationReceipt', 'parts', 'sealReceipt'],
+    packageBAssembly: ['activePartSetDigest', 'byId', 'deferredAssociations', 'dueBefore', 'dueWork', 'openRecent', 'operationReceipt', 'partByIngress', 'parts', 'referenceTarget', 'sealReceipt'],
     packageBFinal: ['byOperation'],
-    packageBIngress: ['byId', 'byOperation', 'byTrustedNativeScope'],
+    packageBIngress: ['assemblyIntentByIngress', 'assemblyIntentByOperation', 'assemblyProcessingByIngress', 'byId', 'byOperation', 'byTrustedNativeScope', 'pendingAssemblyWork'],
     packageBPresentation: ['binding', 'bindingReceipt', 'byAssistantTurn', 'claimReceipt', 'dispatchStarted', 'enqueueReceipt', 'outbox', 'resultReceipt'],
     packageBProvider: ['attemptReceipt', 'attempts', 'epoch', 'epochReceipt', 'rebuildMetadata', 'transitionReceipt'],
     packageBTurn: ['conversationByCanonicalKey', 'conversationIdentity', 'exchange', 'foregroundExchangeReceipt', 'identityReceipt', 'presentationBinding', 'turn', 'turnRevisions', 'userReceipt', 'userRevisionReceipt'],
