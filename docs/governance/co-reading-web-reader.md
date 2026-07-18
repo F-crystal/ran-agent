@@ -1,9 +1,29 @@
 # Co-Reading Web Reader
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-07-18)
 
 This document owns the private Tailscale-only Web reader for `co_reading`.
 It does not change the Bilibili yt-dlp proxy path.
+
+## Accepted Reader Redesign
+
+The redesigned Co-Reading Web Reader passed owner acceptance on 2026-07-18.
+It remains a dependency-free Vanilla HTML/CSS/JavaScript interface: no framework,
+bundler, package, or CDN was added. The redesign preserves the existing shelf,
+chunk navigation, progress, search, import, translation, annotation, Hermes
+thread, and Vault deposit flows while improving the responsive reading layout,
+selection/composer interactions, accessibility, and stale asynchronous-state
+isolation.
+
+The existing trust model is unchanged. The browser uses only
+`CO_READING_WEB_ACCESS_TOKEN`, stores it only in `sessionStorage`, and never
+receives `CO_READING_OWNER_TOKEN`. Private annotations are not sent to Hermes
+or deposited into Vault; saving a shared annotation invites Hermes once.
+Original and translated text remain annotatable, and the existing
+`anchor_kind`, `anchor_lang`, and `quote_offset` contract is preserved. The
+backend, API routes, database schema, MCP surface, and security configuration
+were not changed. This accepted source revision has not been deployed;
+production is unchanged.
 
 ## Network Model
 
