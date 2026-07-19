@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-18)
+Status: CURRENT (2026-07-19)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -195,8 +195,10 @@ B.1 typed business transactions are also implemented there and have received
 owner acceptance. Its additive recovery API is also owner accepted and gives a
 future B.2 service atomic ingress/intent and part/processing operations,
 durable reference/deferred state, factual recovery/candidate readers, and a
-reference-aware seal digest. These are inactive repository primitives, not a
-runtime service. `node_bridge/src/index.mjs` does not compose the Core B path;
+reference-aware seal digest. The owner-accepted global pending ingress reader
+also provides verified cold-start discovery without an identity seed. These
+are inactive repository primitives, not a runtime service.
+`node_bridge/src/index.mjs` does not compose the Core B path;
 ChannelHub, frontends, the provider gateway/history, Global Timeline,
 `durableOutbox`, and Python ingest remain on their existing paths. Package B.2
 service implementation has not started, no Core B path has been deployed, and
