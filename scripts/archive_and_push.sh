@@ -21,6 +21,7 @@ ARCHIVE_RECORD="${ARCHIVE_RECORD:-$ROOT_DIR/local_archive/docs/governance/archiv
 REUSE_VALIDATION=""
 SKIP_TESTS_REASON=""
 RESUME_ID=""
+INTEGRATE_MAIN_INTO_FEATURE=0
 STAGE_PATHS=()
 TRANSACTION_ID=""
 TRANSACTION_DIR=""
@@ -34,6 +35,20 @@ SOURCE_HEAD=""
 EXPECTED_ORIGIN_MAIN=""
 LOCAL_MAIN_BEFORE=""
 FINAL_HEAD=""
+ORIGINAL_FEATURE_BRANCH=""
+ORIGINAL_FEATURE_COMMIT=""
+ORIGINAL_MAIN_COMMIT=""
+ORIGINAL_BASE_COMMIT=""
+RECOVERY_MAIN_COMMIT=""
+RECOVERY_WORKTREE=""
+RECOVERY_MERGE_COMMIT=""
+EFFECTIVE_FEATURE_TIP=""
+RECOVERY_MERGE_MESSAGE="merge: integrate main for archive recovery"
+RECOVERY_PYTHON_COMMAND=""
+RECOVERY_NODE_COMMAND=""
+RECOVERY_ORIGINAL_EVIDENCE_PATH=""
+RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM=""
+RECOVERY_VALIDATION_FAILURE_REASON=""
 json_quote() { printf '%s' "$1" | "$PYTHON_BIN" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'; }
 json_or_null() { [ -n "$1" ] && json_quote "$1" || printf null; }
 repo_relative_path() {
@@ -58,11 +73,13 @@ local_archive_path() {
 
 usage() {
   cat <<'EOF'
-Usage: scripts/archive_and_push.sh [--push] [--dry-run] [--skip-tests --skip-tests-reason TEXT] [--reuse-validation PATH] [--resume ID] [--remote-url URL] [--commit-message MSG] [--record PATH] [--path PATH] [--no-merge-current-branch] [--self-test]
+Usage: scripts/archive_and_push.sh [--push] [--dry-run] [--skip-tests --skip-tests-reason TEXT] [--reuse-validation PATH] [--resume ID [--integrate-main-into-feature]] [--remote-url URL] [--commit-message MSG] [--record PATH] [--path PATH] [--no-merge-current-branch] [--self-test]
 
 --push                    Run a journaled archive transaction, ff merge to main, and push.
 --reuse-validation PATH   Reuse a verified validation record for the exact clean HEAD.
 --resume ID               Resume only the next provably safe phase of a prior transaction.
+--integrate-main-into-feature
+                          Explicitly recover a merge/failed ff-only divergence transaction.
 --skip-tests-reason TEXT  Required whenever --skip-tests is used.
 EOF
 }
@@ -84,6 +101,7 @@ parse_args() {
       --skip-tests-reason) shift; [ "$#" -gt 0 ] || die "--skip-tests-reason requires text"; SKIP_TESTS_REASON="$1" ;;
       --reuse-validation) shift; [ "$#" -gt 0 ] || die "--reuse-validation requires a path"; REUSE_VALIDATION="$1" ;;
       --resume) shift; [ "$#" -gt 0 ] || die "--resume requires a transaction id"; RESUME_ID="$1"; DRY_RUN=0 ;;
+      --integrate-main-into-feature) INTEGRATE_MAIN_INTO_FEATURE=1 ;;
       --remote-url) shift; [ "$#" -gt 0 ] || die "--remote-url requires a URL"; REMOTE_URL="$1" ;;
       --commit-message) shift; [ "$#" -gt 0 ] || die "--commit-message requires text"; COMMIT_MESSAGE="$1" ;;
       --record) shift; [ "$#" -gt 0 ] || die "--record requires a path"; ARCHIVE_RECORD="$1" ;;
@@ -97,6 +115,11 @@ parse_args() {
   done
   [ "$RUN_TESTS" -eq 1 ] || [ -n "$SKIP_TESTS_REASON" ] || die "--skip-tests requires --skip-tests-reason"
   [ -z "$REUSE_VALIDATION" ] || [ "$RUN_TESTS" -eq 1 ] || die "--reuse-validation cannot be combined with --skip-tests"
+  if [ "$INTEGRATE_MAIN_INTO_FEATURE" -eq 1 ]; then
+    [ -n "$RESUME_ID" ] || die "--integrate-main-into-feature requires --resume ID"
+    [ "$RUN_TESTS" -eq 1 ] || die "divergence recovery cannot skip tests"
+    [ -z "$REUSE_VALIDATION" ] || die "divergence recovery must rerun validation"
+  fi
 }
 
 redact_remote_url() {
@@ -172,9 +195,17 @@ fail() {
 }
 on_signal() {
   if [ -n "$JOURNAL" ] && [ "$TEMPORARY_REMOTE_SWITCHED" -eq 1 ]; then
-    restore_temporary_remote || journal_update --set-json 'push_result.original_remote_url_restored=false' || true
+    if [ "$INTEGRATE_MAIN_INTO_FEATURE" -eq 1 ]; then
+      restore_temporary_remote || journal_update --set-json 'recovery_push_result.original_remote_url_restored=false' || true
+    else
+      restore_temporary_remote || journal_update --set-json 'push_result.original_remote_url_restored=false' || true
+    fi
   fi
-  [ -z "$JOURNAL" ] || journal_update --phase-status interrupted --failure-stage signal --failure-code 130 || true
+  if [ -n "$JOURNAL" ]; then
+    if [ "$INTEGRATE_MAIN_INTO_FEATURE" -eq 1 ]; then recovery_event recovery/failed interrupted signal || true
+    else journal_update --phase-status interrupted --failure-stage signal --failure-code 130 || true
+    fi
+  fi
   exit 130
 }
 trap release_lock EXIT
@@ -386,6 +417,531 @@ archive_success() {
   journal_update --phase completed --phase-status succeeded
 }
 
+journal_optional() { journal_get "$1" 2>/dev/null || true; }
+utc_now() { date -u +%FT%TZ; }
+
+recovery_event() {
+  local phase="$1" status="$2" reason="${3:-}" history updated
+  history="$(journal_optional recovery_history)"
+  [ -n "$history" ] || history='[]'
+  updated="$($PYTHON_BIN -c 'import json,sys; value=json.loads(sys.argv[1]); value.append({"at":sys.argv[5],"phase":sys.argv[2],"status":sys.argv[3],"reason":sys.argv[4] or None}); print(json.dumps(value,separators=(",",":")))' "$history" "$phase" "$status" "$reason" "$(utc_now)")" || return 1
+  journal_update \
+    --set-json "recovery_history=$updated" \
+    --set-json "recovery_phase=$(json_quote "$phase")" \
+    --set-json "recovery_failure_reason=$(json_or_null "$reason")"
+}
+
+recovery_fail() {
+  local reason="$1" code="${2:-90}"
+  recovery_event recovery/failed failed "$reason" || true
+  printf 'ERROR: divergence recovery refused: %s\n' "$reason" >&2
+  exit "$code"
+}
+
+record_recovery_request() {
+  [ -z "$(journal_optional recovery_requested_at)" ] || return 0
+  journal_update \
+    --set-json 'recovery_mode="integrate_main_into_feature"' \
+    --set-json 'recovery_authorized=false' \
+    --set-json "recovery_requested_at=$(json_quote "$(utc_now)")" \
+    --set-json 'recovery_phase="recovery/preflight"' \
+    --set-json 'recovery_failure_reason=null' \
+    --set-json 'recovery_history=[]'
+  recovery_event recovery/preflight requested "operator explicitly selected divergence recovery"
+}
+
+worktree_for_branch() {
+  git -C "$ROOT_DIR" worktree list --porcelain | awk -v wanted="refs/heads/$1" '
+    /^worktree / { path=substr($0,10) }
+    $0 == "branch " wanted { print path; exit }
+  '
+}
+
+git_common_dir() {
+  local worktree="$1" common
+  common="$(git -C "$worktree" rev-parse --git-common-dir)" || return 1
+  case "$common" in /*) canonical_path "$common" ;; *) canonical_path "$worktree/$common" ;; esac
+}
+
+git_operation_in_progress() {
+  local worktree="$1" marker path
+  for marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD rebase-apply rebase-merge; do
+    path="$(git -C "$worktree" rev-parse --git-path "$marker")" || return 0
+    [ ! -e "$path" ] || return 0
+  done
+  return 1
+}
+
+related_worktrees_safe() {
+  local branch worktree seen=""
+  for branch in "$ORIGINAL_FEATURE_BRANCH" "$TARGET_BRANCH"; do
+    worktree="$(worktree_for_branch "$branch")"
+    [ -n "$worktree" ] || continue
+    case " $seen " in *" $worktree "*) continue ;; esac
+    seen="$seen $worktree"
+    [ -z "$(git -C "$worktree" status --porcelain --untracked-files=all | awk '$2 !~ /^local_archive\//')" ] || return 1
+    git_operation_in_progress "$worktree" && return 1
+  done
+  return 0
+}
+
+commit_has_recovery_parents() {
+  local commit="$1" parents
+  git -C "$ROOT_DIR" cat-file -e "$commit^{commit}" 2>/dev/null || return 1
+  parents="$(git -C "$ROOT_DIR" show -s --format=%P "$commit")" || return 1
+  [ "$parents" = "$ORIGINAL_FEATURE_COMMIT $RECOVERY_MAIN_COMMIT" ]
+}
+
+recovery_refs_valid() {
+  local feature_tip local_main remote_main
+  feature_tip="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")" || return 1
+  local_main="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" || return 1
+  remote_main="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" || return 1
+  if [ -z "$EFFECTIVE_FEATURE_TIP" ]; then
+    [ "$feature_tip" = "$ORIGINAL_FEATURE_COMMIT" ] && [ "$local_main" = "$RECOVERY_MAIN_COMMIT" ] && [ "$remote_main" = "$RECOVERY_MAIN_COMMIT" ]
+    return
+  fi
+  case "$feature_tip" in "$ORIGINAL_FEATURE_COMMIT"|"$EFFECTIVE_FEATURE_TIP") ;; *) return 1 ;; esac
+  if [ "$local_main" = "$RECOVERY_MAIN_COMMIT" ]; then
+    [ "$remote_main" = "$RECOVERY_MAIN_COMMIT" ]
+  elif [ "$local_main" = "$EFFECTIVE_FEATURE_TIP" ]; then
+    [ "$remote_main" = "$RECOVERY_MAIN_COMMIT" ] || [ "$remote_main" = "$EFFECTIVE_FEATURE_TIP" ]
+  else
+    return 1
+  fi
+}
+
+command_sha256() { printf '%s' "$1" | "$PYTHON_BIN" -c 'import hashlib,sys; print(hashlib.sha256(sys.stdin.buffer.read()).hexdigest())'; }
+
+json_arrays_equal() {
+  [ "$("$PYTHON_BIN" -c 'import json,sys; print(json.loads(sys.argv[1])==json.loads(sys.argv[2]))' "$1" "$2")" = True ]
+}
+
+validation_record_command() {
+  "$PYTHON_BIN" -c 'import json,sys
+commands = json.load(open(sys.argv[1])).get("commands")
+if not isinstance(commands, list) or len(commands) != 2 or not all(isinstance(command, str) and command.strip() for command in commands):
+    raise SystemExit("validation record does not contain two replayable commands")
+print(commands[int(sys.argv[2])])' "$1" "$2"
+}
+
+# Recovery validation reruns only the exact command pair recorded by the
+# original transaction's checksummed validation evidence.  The recovery
+# process environment can never replace, weaken, or backfill those commands.
+bind_recovery_validation_commands() {
+  local status validated_head path checksum record record_checksum override_python=0 override_node=0
+  status="$(journal_get validation_status)"
+  case "$status" in
+    ran|reused) ;;
+    *) recovery_fail "original transaction has no replayable validation commands" 95 ;;
+  esac
+  validated_head="$(journal_get validated_head)"
+  path="$(journal_get validation_record_path)"
+  checksum="$(journal_get validation_record_checksum)"
+  if [ -z "$validated_head" ] || [ -z "$path" ] || [ -z "$checksum" ]; then
+    recovery_fail "original validation provenance is incomplete" 95
+  fi
+  record="$(local_archive_path "$path")" || recovery_fail "original validation record path is outside local_archive" 95
+  [ -f "$record" ] || recovery_fail "original validation evidence is missing" 95
+  helper validation-verify --record "$record" --repository "$ROOT_DIR" --head "$validated_head" --worktree-clean false >/dev/null || recovery_fail "original validation evidence failed checksum, repository, or head verification" 95
+  record_checksum="$(accepted_validation_field checksum "$record")" || recovery_fail "original validation evidence is unreadable" 95
+  [ "$record_checksum" = "$checksum" ] || recovery_fail "original validation evidence checksum does not match the journal" 95
+  RECOVERY_PYTHON_COMMAND="$(validation_record_command "$record" 0)" || recovery_fail "original validation record does not contain two replayable commands" 95
+  RECOVERY_NODE_COMMAND="$(validation_record_command "$record" 1)" || recovery_fail "original validation record does not contain two replayable commands" 95
+  RECOVERY_ORIGINAL_EVIDENCE_PATH="$path"
+  RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM="$checksum"
+  if [ "${ARCHIVE_PYTHON_TEST_COMMAND+x}" = x ] && [ "$ARCHIVE_PYTHON_TEST_COMMAND" != "$RECOVERY_PYTHON_COMMAND" ]; then override_python=1; fi
+  if [ "${ARCHIVE_NODE_TEST_COMMAND+x}" = x ] && [ "$ARCHIVE_NODE_TEST_COMMAND" != "$RECOVERY_NODE_COMMAND" ]; then override_node=1; fi
+  if [ "$override_python" -eq 1 ] || [ "$override_node" -eq 1 ]; then
+    journal_update --set-json "recovery_validation_command_override={\"policy\":\"ignored\",\"python\":$([ "$override_python" -eq 1 ] && printf true || printf false),\"node\":$([ "$override_node" -eq 1 ] && printf true || printf false),\"command_source\":\"original_validation_record\"}" || recovery_fail "unable to journal ignored validation command override" 95
+    log "recovery: ignoring environment validation command overrides; using transaction-bound commands from $path"
+  fi
+}
+
+initialize_recovery() {
+  local phase status failure_code current_main remote_main common original_validation original_failure
+  record_recovery_request
+  phase="$(journal_get phase)"; status="$(journal_get phase_status)"; failure_code="$(journal_optional failure_code)"
+  [ "$phase:$status" = merge:failed ] || [ "$phase:$status" = merge:interrupted ] || recovery_fail "transaction phase is not merge/failed"
+  [ "$failure_code" = 64 ] || recovery_fail "transaction is not an ff-only divergence failure"
+  [ "$(journal_optional push_result.status)" != succeeded ] || recovery_fail "transaction already has a successful original push"
+  [ "$(journal_optional archive_result.status)" != succeeded ] || recovery_fail "transaction already has a successful original archive"
+
+  bind_recovery_validation_commands
+
+  ORIGINAL_FEATURE_BRANCH="$(journal_optional original_feature_branch)"
+  [ -n "$ORIGINAL_FEATURE_BRANCH" ] || ORIGINAL_FEATURE_BRANCH="$(journal_get source_branch)"
+  ORIGINAL_FEATURE_COMMIT="$(journal_optional original_feature_commit)"
+  [ -n "$ORIGINAL_FEATURE_COMMIT" ] || ORIGINAL_FEATURE_COMMIT="$(journal_get head_sha)"
+  ORIGINAL_MAIN_COMMIT="$(journal_optional original_main_commit)"
+  [ -n "$ORIGINAL_MAIN_COMMIT" ] || ORIGINAL_MAIN_COMMIT="$(journal_get local_main_before)"
+  if [ -z "$ORIGINAL_FEATURE_BRANCH" ] || [ -z "$ORIGINAL_FEATURE_COMMIT" ] || [ -z "$ORIGINAL_MAIN_COMMIT" ]; then
+    recovery_fail "original transaction identity is incomplete"
+  fi
+  git -C "$ROOT_DIR" show-ref --verify --quiet "refs/heads/$ORIGINAL_FEATURE_BRANCH" || recovery_fail "original feature branch no longer exists"
+  git -C "$ROOT_DIR" cat-file -e "$ORIGINAL_FEATURE_COMMIT^{commit}" 2>/dev/null || recovery_fail "original feature commit is missing"
+  git -C "$ROOT_DIR" cat-file -e "$ORIGINAL_MAIN_COMMIT^{commit}" 2>/dev/null || recovery_fail "original main commit is missing"
+
+  case "$(journal_optional recovery_authorized)" in true|True)
+    [ "$(journal_optional recovery_mode)" = integrate_main_into_feature ] || recovery_fail "journal recovery mode is inconsistent"
+    RECOVERY_MAIN_COMMIT="$(journal_get recovery_main_commit)"
+    ORIGINAL_BASE_COMMIT="$(journal_get original_base_commit)"
+    RECOVERY_WORKTREE="$(journal_get recovery_worktree)"
+    [ "$RECOVERY_WORKTREE" = "$TRANSACTION_DIR/recovery-worktree" ] || recovery_fail "journal recovery worktree path is outside the transaction"
+    RECOVERY_MERGE_COMMIT="$(journal_optional recovery_merge_commit)"
+    EFFECTIVE_FEATURE_TIP="$(journal_optional effective_feature_tip)"
+    [ -z "$RECOVERY_MERGE_COMMIT" ] || [ "$RECOVERY_MERGE_COMMIT" = "$EFFECTIVE_FEATURE_TIP" ] || recovery_fail "effective feature tip disagrees with recovery merge commit"
+    related_worktrees_safe || recovery_fail "related worktree or index is dirty, or a Git operation is unfinished"
+    recovery_refs_valid || recovery_fail "feature tip or main changed outside the authorized recovery topology"
+    return 0
+    ;;
+  esac
+
+  [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")" = "$ORIGINAL_FEATURE_COMMIT" ] || recovery_fail "original feature tip changed"
+  current_main="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")"
+  remote_main="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")"
+  [ "$current_main" = "$remote_main" ] || recovery_fail "local main does not equal origin/main"
+  git -C "$ROOT_DIR" merge-base --is-ancestor "$ORIGINAL_MAIN_COMMIT" "$current_main" || recovery_fail "current main is not a descendant of the original main target"
+  common="$(git -C "$ROOT_DIR" merge-base "$ORIGINAL_FEATURE_COMMIT" "$current_main")" || recovery_fail "feature and main have no verifiable common ancestor"
+  ORIGINAL_BASE_COMMIT="$(git -C "$ROOT_DIR" merge-base "$ORIGINAL_FEATURE_COMMIT" "$ORIGINAL_MAIN_COMMIT")" || recovery_fail "original feature and main have no common ancestor"
+  related_worktrees_safe || recovery_fail "related worktree or index is dirty, or a Git operation is unfinished"
+  [ ! -e "$ARCHIVE_RECORD" ] || recovery_fail "archive record already exists"
+
+  RECOVERY_MAIN_COMMIT="$current_main"
+  RECOVERY_WORKTREE="$TRANSACTION_DIR/recovery-worktree"
+  original_validation="$($PYTHON_BIN -c 'import json,sys; keys=("path","checksum","status","head","source","completed_at"); print(json.dumps(dict(zip(keys,[value or None for value in sys.argv[1:]])),separators=(",",":")))' "$(journal_optional validation_record_path)" "$(journal_optional validation_record_checksum)" "$(journal_optional validation_status)" "$(journal_optional validated_head)" "$(journal_optional validation_source)" "$(journal_optional validation_completed_at)")"
+  original_failure="$($PYTHON_BIN -c 'import json,sys; keys=("phase","phase_status","failure_stage","failure_code"); print(json.dumps(dict(zip(keys,sys.argv[1:])),separators=(",",":")))' "$phase" "$status" "$(journal_optional failure_stage)" "$failure_code")"
+  journal_update \
+    --set-json 'recovery_authorized=true' \
+    --set-json "original_feature_branch=$(json_quote "$ORIGINAL_FEATURE_BRANCH")" \
+    --set-json "original_feature_commit=$(json_quote "$ORIGINAL_FEATURE_COMMIT")" \
+    --set-json "original_main_commit=$(json_quote "$ORIGINAL_MAIN_COMMIT")" \
+    --set-json "original_base_commit=$(json_quote "$ORIGINAL_BASE_COMMIT")" \
+    --set-json "original_validation_record=$original_validation" \
+    --set-json "original_failure=$original_failure" \
+    --set-json "recovery_main_commit=$(json_quote "$RECOVERY_MAIN_COMMIT")" \
+    --set-json "recovery_common_ancestor=$(json_quote "$common")" \
+    --set-json "recovery_worktree=$(json_quote "$RECOVERY_WORKTREE")" \
+    --set-json 'recovery_merge_commit=null' \
+    --set-json 'effective_feature_tip=null' \
+    --set-json 'recovery_validation_record=null' \
+    --set-json 'recovery_conflict_paths=[]'
+  recovery_event recovery/preflight passed ""
+}
+
+ensure_recovery_worktree() {
+  local start head
+  start="$ORIGINAL_FEATURE_COMMIT"
+  [ -z "$EFFECTIVE_FEATURE_TIP" ] || start="$EFFECTIVE_FEATURE_TIP"
+  if [ -d "$RECOVERY_WORKTREE" ]; then
+    git -C "$RECOVERY_WORKTREE" rev-parse --is-inside-work-tree >/dev/null 2>&1 || recovery_fail "recovery worktree path exists but is not a Git worktree"
+    [ "$(git_common_dir "$RECOVERY_WORKTREE")" = "$(git_common_dir "$ROOT_DIR")" ] || recovery_fail "recovery worktree belongs to another repository"
+    head="$(git -C "$RECOVERY_WORKTREE" rev-parse HEAD)"
+    case "$head" in "$ORIGINAL_FEATURE_COMMIT"|"$start") ;; *) commit_has_recovery_parents "$head" || recovery_fail "recovery worktree HEAD is untrusted" ;; esac
+    [ -z "$(git -C "$RECOVERY_WORKTREE" status --porcelain --untracked-files=all)" ] || recovery_fail "recovery worktree is dirty"
+    git_operation_in_progress "$RECOVERY_WORKTREE" && recovery_fail "recovery worktree has an unfinished Git operation"
+    return 0
+  fi
+  [ ! -e "$RECOVERY_WORKTREE" ] || recovery_fail "recovery worktree path exists unexpectedly"
+  run_cmd git -C "$ROOT_DIR" worktree add --detach "$RECOVERY_WORKTREE" "$start" || recovery_fail "unable to create transaction-local recovery worktree"
+  recovery_event recovery/worktree-created passed ""
+}
+
+advance_branch_ff() {
+  local branch="$1" old="$2" new="$3" current worktree
+  current="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$branch")" || return 1
+  [ "$current" != "$new" ] || return 0
+  [ "$current" = "$old" ] || return 1
+  git -C "$ROOT_DIR" merge-base --is-ancestor "$old" "$new" || return 1
+  worktree="$(worktree_for_branch "$branch")"
+  if [ -n "$worktree" ]; then
+    [ -z "$(git -C "$worktree" status --porcelain --untracked-files=all | awk '$2 !~ /^local_archive\//')" ] || return 1
+    git_operation_in_progress "$worktree" && return 1
+    run_cmd git -C "$worktree" merge --ff-only "$new" || return 1
+  else
+    run_cmd git -C "$ROOT_DIR" update-ref "refs/heads/$branch" "$new" "$old" || return 1
+  fi
+  [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$branch")" = "$new" ]
+}
+
+ensure_recovery_merge() {
+  local worktree_head conflict_json feature_tip
+  RECOVERY_MERGE_COMMIT="$(journal_optional recovery_merge_commit)"
+  EFFECTIVE_FEATURE_TIP="$(journal_optional effective_feature_tip)"
+  worktree_head="$(git -C "$RECOVERY_WORKTREE" rev-parse HEAD)"
+  if [ -n "$RECOVERY_MERGE_COMMIT" ]; then
+    if [ "$RECOVERY_MERGE_COMMIT" != "$EFFECTIVE_FEATURE_TIP" ] || ! commit_has_recovery_parents "$RECOVERY_MERGE_COMMIT"; then
+      recovery_fail "journaled recovery merge commit is invalid"
+    fi
+    if [ "$worktree_head" != "$RECOVERY_MERGE_COMMIT" ]; then
+      [ "$worktree_head" = "$ORIGINAL_FEATURE_COMMIT" ] || recovery_fail "recovery worktree disagrees with journaled merge commit"
+      run_cmd git -C "$RECOVERY_WORKTREE" checkout --detach "$RECOVERY_MERGE_COMMIT" || recovery_fail "unable to restore recovery worktree HEAD"
+    fi
+  elif [ "$worktree_head" != "$ORIGINAL_FEATURE_COMMIT" ]; then
+    commit_has_recovery_parents "$worktree_head" || recovery_fail "unjournaled recovery worktree commit has invalid parents"
+    RECOVERY_MERGE_COMMIT="$worktree_head"
+    EFFECTIVE_FEATURE_TIP="$worktree_head"
+    journal_update --set-json "recovery_merge_commit=$(json_quote "$worktree_head")" --set-json "effective_feature_tip=$(json_quote "$worktree_head")"
+  else
+    run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
+    if [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" != "$RECOVERY_MAIN_COMMIT" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" != "$RECOVERY_MAIN_COMMIT" ]; then
+      recovery_fail "main changed after recovery preflight"
+    fi
+    [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")" = "$ORIGINAL_FEATURE_COMMIT" ] || recovery_fail "feature tip changed before recovery merge"
+    [ -z "$(git -C "$RECOVERY_WORKTREE" status --porcelain --untracked-files=all)" ] || recovery_fail "recovery worktree became dirty before merge"
+    recovery_event recovery/merge-started running ""
+    if ! git -C "$RECOVERY_WORKTREE" merge --no-ff --no-edit -m "$RECOVERY_MERGE_MESSAGE" "$RECOVERY_MAIN_COMMIT"; then
+      conflict_json="$(git -C "$RECOVERY_WORKTREE" diff --name-only --diff-filter=U -z | "$PYTHON_BIN" -c 'import json,sys; print(json.dumps(sys.stdin.buffer.read().decode().rstrip("\0").split("\0") if sys.stdin.buffer.read else [],separators=(",",":")))')" || conflict_json='[]'
+      journal_update --set-json "recovery_conflict_paths=$conflict_json" || true
+      git -C "$RECOVERY_WORKTREE" merge --abort >/dev/null 2>&1 || true
+      recovery_fail "merge conflict; no conflict resolution was attempted" 91
+    fi
+    RECOVERY_MERGE_COMMIT="$(git -C "$RECOVERY_WORKTREE" rev-parse HEAD)"
+    EFFECTIVE_FEATURE_TIP="$RECOVERY_MERGE_COMMIT"
+    commit_has_recovery_parents "$RECOVERY_MERGE_COMMIT" || recovery_fail "recovery merge does not have the required feature-first parent order"
+    journal_update --set-json "recovery_merge_commit=$(json_quote "$RECOVERY_MERGE_COMMIT")" --set-json "effective_feature_tip=$(json_quote "$EFFECTIVE_FEATURE_TIP")"
+  fi
+  feature_tip="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")"
+  case "$feature_tip" in
+    "$ORIGINAL_FEATURE_COMMIT") advance_branch_ff "$ORIGINAL_FEATURE_BRANCH" "$ORIGINAL_FEATURE_COMMIT" "$EFFECTIVE_FEATURE_TIP" || recovery_fail "unable to fast-forward original feature branch to recovery merge" ;;
+    "$EFFECTIVE_FEATURE_TIP") ;;
+    *) recovery_fail "feature tip changed after recovery merge" ;;
+  esac
+  recovery_event recovery/merge-completed passed ""
+}
+
+recovery_run_one_test() {
+  local name="$1" command="$2" timeout="$3" rewritten log_path result_path status
+  rewritten="${command//$ROOT_DIR/$RECOVERY_WORKTREE}"
+  log_path="$TRANSACTION_DIR/logs/recovery-$name-baseline.log"
+  result_path="$TRANSACTION_DIR/recovery-$name-result.json"
+  helper run --log "$log_path" --result-file "$result_path" --timeout-seconds "$timeout" --heartbeat-seconds "$HEARTBEAT_SECONDS" -- bash -lc "cd $(printf '%q' "$RECOVERY_WORKTREE") && $rewritten" || true
+  [ -f "$result_path" ] || recovery_fail "recovery validation did not produce a $name result" 92
+  journal_update --set-json "recovery_test_results.$name=$(cat "$result_path")"
+  status="$(journal_get "recovery_test_results.$name.status")"
+  [ "$status" = passed ] || recovery_fail "recovery validation $name command failed" 92
+}
+
+write_recovery_manifest() {
+  local output="$TRANSACTION_DIR/recovery-manifest.json"
+  "$PYTHON_BIN" -c '
+import hashlib,json,os,subprocess,sys
+repo,base,feature,main,effective,output=sys.argv[1:]
+def git(*args): return subprocess.check_output(["git","-C",repo,*args])
+def paths(left,right):
+    raw=git("diff","--name-only","-z",left,right)
+    return sorted(item.decode("utf-8","surrogateescape") for item in raw.rstrip(b"\0").split(b"\0") if item)
+original=paths(base,feature); recovered=paths(main,effective)
+if original != recovered: raise SystemExit("recovery path allowlist differs from original feature delta")
+for path in recovered:
+    if path in {".env",".env.local",".ran_agent_state",".openclaw_state"} or path.split("/",1)[0] in {"data","logs","debug","state","local_archive",".npm",".pytest_cache",".venv","node_modules","__pycache__"} or path.startswith(("vault/inbox/","vault/raw/","vault/wiki/","node_bridge/.ran_agent_state/")):
+        raise SystemExit("forbidden recovery path: "+path)
+record={"schema_version":1,"original_base_commit":base,"original_feature_commit":feature,"recovery_main_commit":main,"effective_feature_tip":effective,"original_paths":original,"effective_paths":recovered,"tree_sha":git("rev-parse",effective+"^{tree}").decode().strip(),"parents":git("show","-s","--format=%P",effective).decode().strip().split()}
+raw=json.dumps(record,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode(); record["checksum"]=hashlib.sha256(raw).hexdigest()
+temporary=output+".tmp"; open(temporary,"w",encoding="utf-8").write(json.dumps(record,sort_keys=True,separators=(",",":"),ensure_ascii=False)+"\n"); os.replace(temporary,output)
+' "$ROOT_DIR" "$ORIGINAL_BASE_COMMIT" "$ORIGINAL_FEATURE_COMMIT" "$RECOVERY_MAIN_COMMIT" "$EFFECTIVE_FEATURE_TIP" "$output" || recovery_fail "recovery path, forbidden-file, or manifest validation failed" 93
+  printf '%s\n' "$output"
+}
+
+# The recovery manifest is trusted only when its canonical sha256 (stable
+# sorted compact JSON of every field except checksum) matches both its stored
+# checksum and the journaled checksum, and its content equals what the same
+# algorithm regenerates from the journaled commits and live Git facts.
+recovery_manifest_valid() {
+  "$PYTHON_BIN" -c 'import hashlib,json,subprocess,sys
+path,journaled,repo,base,feature,main,effective=sys.argv[1:8]
+def git(*args): return subprocess.check_output(["git","-C",repo,*args])
+def paths(left,right):
+    raw=git("diff","--name-only","-z",left,right)
+    return sorted(item.decode("utf-8","surrogateescape") for item in raw.rstrip(b"\0").split(b"\0") if item)
+try:
+    manifest=json.load(open(path))
+except (OSError,ValueError):
+    print("manifest integrity failure: unreadable manifest"); raise SystemExit(1)
+stored=manifest.get("checksum")
+content={key:value for key,value in manifest.items() if key != "checksum"}
+digest=hashlib.sha256(json.dumps(content,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()).hexdigest()
+if not isinstance(stored,str) or stored != digest or digest != journaled:
+    print("manifest integrity failure: canonical checksum mismatch"); raise SystemExit(1)
+expected={"schema_version":1,"original_base_commit":base,"original_feature_commit":feature,"recovery_main_commit":main,"effective_feature_tip":effective,"original_paths":paths(base,feature),"effective_paths":paths(main,effective),"tree_sha":git("rev-parse",effective+"^{tree}").decode().strip(),"parents":git("show","-s","--format=%P",effective).decode().strip().split()}
+if expected["parents"] != [feature,main]:
+    print("manifest topology mismatch: parents violate the feature-first order"); raise SystemExit(1)
+if content != expected:
+    print("manifest topology mismatch: content disagrees with journaled or Git facts"); raise SystemExit(1)' "$1" "$2" "$ROOT_DIR" "$ORIGINAL_BASE_COMMIT" "$ORIGINAL_FEATURE_COMMIT" "$RECOVERY_MAIN_COMMIT" "$EFFECTIVE_FEATURE_TIP"
+}
+
+recovery_validation_valid() {
+  local status path checksum manifest_path manifest_checksum record expected_commands expected_checksums
+  status="$(journal_optional recovery_validation_record.status)"
+  [ "$status" = passed ] || return 1
+  [ "$(journal_optional recovery_validation_record.command_source)" = original_validation_record ] || return 1
+  path="$(journal_get recovery_validation_record.path)"; checksum="$(journal_get recovery_validation_record.checksum)"
+  manifest_path="$(journal_get recovery_validation_record.manifest_path)"; manifest_checksum="$(journal_get recovery_validation_record.manifest_checksum)"
+  record="$(local_archive_path "$path")" || return 1
+  [ -f "$record" ] && [ "$(accepted_validation_field checksum "$record")" = "$checksum" ] || return 1
+  helper validation-verify --record "$record" --repository "$ROOT_DIR" --head "$EFFECTIVE_FEATURE_TIP" --worktree-clean true >/dev/null || return 1
+  expected_commands="$(printf '[%s,%s]' "$(json_quote "${RECOVERY_PYTHON_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}")" "$(json_quote "${RECOVERY_NODE_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}")")"
+  json_arrays_equal "$expected_commands" "$(accepted_validation_json_field commands "$record")" || return 1
+  json_arrays_equal "$expected_commands" "$(journal_get recovery_validation_record.commands)" || return 1
+  expected_checksums="$(printf '[%s,%s]' "$(json_quote "$(command_sha256 "${RECOVERY_PYTHON_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}")")" "$(json_quote "$(command_sha256 "${RECOVERY_NODE_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}")")")"
+  json_arrays_equal "$expected_checksums" "$(journal_get recovery_validation_record.command_checksums)" || return 1
+  [ "$(journal_optional recovery_validation_record.original_evidence_path)" = "$RECOVERY_ORIGINAL_EVIDENCE_PATH" ] || return 1
+  [ "$(journal_optional recovery_validation_record.original_evidence_checksum)" = "$RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM" ] || return 1
+  manifest_path="$(local_archive_path "$manifest_path")" || { RECOVERY_VALIDATION_FAILURE_REASON="manifest integrity failure: manifest path is outside local_archive"; return 1; }
+  [ -f "$manifest_path" ] || { RECOVERY_VALIDATION_FAILURE_REASON="manifest integrity failure: manifest file is missing"; return 1; }
+  RECOVERY_VALIDATION_FAILURE_REASON="$(recovery_manifest_valid "$manifest_path" "$manifest_checksum")" || return 1
+  commit_has_recovery_parents "$EFFECTIVE_FEATURE_TIP" || return 1
+  [ "$(git -C "$RECOVERY_WORKTREE" rev-parse HEAD)" = "$EFFECTIVE_FEATURE_TIP" ] && [ -z "$(git -C "$RECOVERY_WORKTREE" status --porcelain --untracked-files=all)" ]
+}
+
+ensure_recovery_validation() {
+  local manifest manifest_checksum temporary_journal record checksum python_command node_command record_json
+  if [ -n "$(journal_optional recovery_validation_record.path)" ]; then
+    recovery_validation_valid || recovery_fail "journaled recovery validation record failed integrity or command-binding verification${RECOVERY_VALIDATION_FAILURE_REASON:+: $RECOVERY_VALIDATION_FAILURE_REASON}" 95
+    return 0
+  fi
+  [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")" = "$EFFECTIVE_FEATURE_TIP" ] || recovery_fail "effective feature tip does not match the feature branch before validation"
+  [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" = "$RECOVERY_MAIN_COMMIT" ] || recovery_fail "main moved before recovery validation"
+  if [ "$(git -C "$RECOVERY_WORKTREE" rev-parse HEAD)" != "$EFFECTIVE_FEATURE_TIP" ] || [ -n "$(git -C "$RECOVERY_WORKTREE" status --porcelain --untracked-files=all)" ]; then
+    recovery_fail "recovery worktree is not clean at the effective feature tip"
+  fi
+  recovery_event recovery/validation-started running ""
+  journal_update --set-json 'recovery_test_results={}'
+  recovery_run_one_test python "$RECOVERY_PYTHON_COMMAND" "$PYTHON_TIMEOUT"
+  recovery_run_one_test node "$RECOVERY_NODE_COMMAND" "$NODE_TIMEOUT"
+  commit_has_recovery_parents "$EFFECTIVE_FEATURE_TIP" || recovery_fail "recovery merge topology changed during validation"
+  git -C "$ROOT_DIR" merge-base --is-ancestor "$ORIGINAL_FEATURE_COMMIT" "$EFFECTIVE_FEATURE_TIP" || recovery_fail "original feature commit is not an ancestor of the effective tip"
+  git -C "$ROOT_DIR" merge-base --is-ancestor "$RECOVERY_MAIN_COMMIT" "$EFFECTIVE_FEATURE_TIP" || recovery_fail "recovery main commit is not an ancestor of the effective tip"
+  manifest="$(write_recovery_manifest)"
+  manifest_checksum="$($PYTHON_BIN -c 'import json,sys; print(json.load(open(sys.argv[1]))["checksum"])' "$manifest")"
+  temporary_journal="$TRANSACTION_DIR/recovery-validation-journal.json"
+  "$PYTHON_BIN" -c 'import json,os,sys; source,target=sys.argv[1:]; value=json.load(open(source)); value["test_results"]=value["recovery_test_results"]; temporary=target+".tmp"; open(temporary,"w").write(json.dumps(value,separators=(",",":"),sort_keys=True)+"\n"); os.replace(temporary,target)' "$JOURNAL" "$temporary_journal"
+  record="$TRANSACTION_DIR/recovery-validation-record.json"
+  python_command="${RECOVERY_PYTHON_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}"
+  node_command="${RECOVERY_NODE_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}"
+  helper validation-create --journal "$temporary_journal" --output "$record" --repository "$ROOT_DIR" --branch "$ORIGINAL_FEATURE_BRANCH" --base-sha "$RECOVERY_MAIN_COMMIT" --head "$EFFECTIVE_FEATURE_TIP" --worktree-clean true --node-version "$(node --version 2>/dev/null || printf unavailable)" --python-version "$($PYTHON_BIN --version 2>&1)" --commands-json "$(printf '[%s,%s]' "$(json_quote "$python_command")" "$(json_quote "$node_command")")" || recovery_fail "unable to create recovery validation record" 93
+  helper validation-verify --record "$record" --repository "$ROOT_DIR" --head "$EFFECTIVE_FEATURE_TIP" --worktree-clean true >/dev/null || recovery_fail "recovery validation record verification failed" 93
+  checksum="$(accepted_validation_field checksum "$record")"
+  record_json="$(printf '{"status":"passed","path":%s,"checksum":%s,"manifest_path":%s,"manifest_checksum":%s,"command_source":"original_validation_record","commands":[%s,%s],"command_checksums":[%s,%s],"original_evidence_path":%s,"original_evidence_checksum":%s}' "$(json_quote "$(repo_relative_path "$record")")" "$(json_quote "$checksum")" "$(json_quote "$(repo_relative_path "$manifest")")" "$(json_quote "$manifest_checksum")" "$(json_quote "$python_command")" "$(json_quote "$node_command")" "$(json_quote "$(command_sha256 "$python_command")")" "$(json_quote "$(command_sha256 "$node_command")")" "$(json_quote "$RECOVERY_ORIGINAL_EVIDENCE_PATH")" "$(json_quote "$RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM")")"
+  journal_update --set-json "recovery_validation_record=$record_json"
+  recovery_event recovery/validation-passed passed ""
+}
+
+ensure_recovery_main_ff() {
+  local local_main remote_main
+  run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
+  local_main="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")"
+  remote_main="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")"
+  if [ "$local_main" = "$RECOVERY_MAIN_COMMIT" ]; then
+    [ "$remote_main" = "$RECOVERY_MAIN_COMMIT" ] || recovery_fail "origin/main changed before main fast-forward"
+    advance_branch_ff "$TARGET_BRANCH" "$RECOVERY_MAIN_COMMIT" "$EFFECTIVE_FEATURE_TIP" || recovery_fail "unable to fast-forward main to the effective feature tip"
+  elif [ "$local_main" = "$EFFECTIVE_FEATURE_TIP" ]; then
+    [ "$remote_main" = "$RECOVERY_MAIN_COMMIT" ] || [ "$remote_main" = "$EFFECTIVE_FEATURE_TIP" ] || recovery_fail "origin/main is outside the recovery topology"
+  else
+    recovery_fail "main changed outside the recovery topology"
+  fi
+  recovery_event recovery/main-ff-completed passed ""
+}
+
+render_recovery_archive_record() {
+  local output="$1" status="$2" changed="$TRANSACTION_DIR/recovery-changed-files.txt" commits="$TRANSACTION_DIR/recovery-included-commits.txt" temporary
+  temporary="$output.tmp"
+  git -C "$ROOT_DIR" diff --name-status "$RECOVERY_MAIN_COMMIT" "$EFFECTIVE_FEATURE_TIP" >"$changed" || return 1
+  git -C "$ROOT_DIR" log --reverse --format='%H %s' "$RECOVERY_MAIN_COMMIT..$EFFECTIVE_FEATURE_TIP" >"$commits" || return 1
+  {
+    printf '# Archive And Push Divergence Recovery Record\n\n'
+    printf 'Status: %s\n\n' "$status"
+    printf '## Transaction\n- Transaction ID: %s\n- Original feature branch: %s\n- Original feature commit: %s\n- Original main commit: %s\n- Original base commit: %s\n- Recovery main commit: %s\n- Effective feature tip: %s\n- Merge mode: feature-first two-parent recovery, then main fast-forward only\n\n' "$TRANSACTION_ID" "$ORIGINAL_FEATURE_BRANCH" "$ORIGINAL_FEATURE_COMMIT" "$ORIGINAL_MAIN_COMMIT" "$ORIGINAL_BASE_COMMIT" "$RECOVERY_MAIN_COMMIT" "$EFFECTIVE_FEATURE_TIP"
+    printf '## Included Commits\n'; cat "$commits"; printf '\n\n## Changed Files\n'; cat "$changed"; printf '\n\n## Validation\n- Recovery validation record: %s\n- Recovery validation checksum: %s\n\n## Production Status\n- Repository main updated: yes\n- Production deployed: no\n- Server connected: no\n- Production state modified: no\n' "$(journal_get recovery_validation_record.path)" "$(journal_get recovery_validation_record.checksum)"
+  } >"$temporary" || return 1
+  mv "$temporary" "$output"
+}
+
+ensure_recovery_archive_generated() {
+  local pending="$TRANSACTION_DIR/recovery-archive-record.md"
+  if [ -e "$ARCHIVE_RECORD" ]; then
+    if ! grep -Fq -- "- Transaction ID: $TRANSACTION_ID" "$ARCHIVE_RECORD" || ! grep -Fq -- "- Effective feature tip: $EFFECTIVE_FEATURE_TIP" "$ARCHIVE_RECORD"; then
+      recovery_fail "existing archive record does not match recovery journal"
+    fi
+    return 0
+  fi
+  if [ -e "$pending" ]; then
+    if ! grep -Fq -- "- Transaction ID: $TRANSACTION_ID" "$pending" || ! grep -Fq -- "- Effective feature tip: $EFFECTIVE_FEATURE_TIP" "$pending"; then
+      recovery_fail "pending recovery archive does not match journal"
+    fi
+  else
+    render_recovery_archive_record "$pending" PENDING_PUSH || recovery_fail "unable to generate transaction-local recovery archive"
+  fi
+  journal_update --set-json "recovery_archive_record=$(json_quote "$(repo_relative_path "$pending")")"
+  recovery_event recovery/archive-generated passed ""
+}
+
+ensure_recovery_push() {
+  local local_main remote_main original alt
+  run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
+  local_main="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")"
+  remote_main="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")"
+  [ "$local_main" = "$EFFECTIVE_FEATURE_TIP" ] || recovery_fail "local main is not the effective feature tip before push"
+  if [ "$remote_main" = "$EFFECTIVE_FEATURE_TIP" ]; then
+    journal_update --set-json "recovery_push_result={\"status\":\"succeeded\",\"head\":\"$EFFECTIVE_FEATURE_TIP\",\"mutation\":\"already_present\"}"
+    recovery_event recovery/push-completed passed ""
+    return 0
+  fi
+  [ "$remote_main" = "$RECOVERY_MAIN_COMMIT" ] || recovery_fail "origin/main changed before recovery push"
+  original="$(git -C "$ROOT_DIR" config --get "remote.$REMOTE_NAME.url")"
+  if git -C "$ROOT_DIR" push "$REMOTE_NAME" "$TARGET_BRANCH"; then
+    journal_update --set-json "recovery_push_result={\"status\":\"succeeded\",\"head\":\"$EFFECTIVE_FEATURE_TIP\",\"primary_push\":\"succeeded\",\"alternate_attempted\":false,\"original_remote_url_restored\":true}"
+  else
+    alt="$(alternate_remote_url "$original" || true)"
+    [ -n "$alt" ] || recovery_fail "recovery push failed and no safe alternate URL is available" 94
+    log "push retry via $(redact_remote_url "$alt")"
+    git -C "$ROOT_DIR" remote set-url "$REMOTE_NAME" "$alt" || recovery_fail "unable to set recovery alternate remote" 94
+    TEMPORARY_ORIGINAL_REMOTE="$original"; TEMPORARY_REMOTE_SWITCHED=1
+    if git -C "$ROOT_DIR" push "$REMOTE_NAME" "$TARGET_BRANCH" && restore_temporary_remote; then
+      journal_update --set-json "recovery_push_result={\"status\":\"succeeded\",\"head\":\"$EFFECTIVE_FEATURE_TIP\",\"primary_push\":\"failed\",\"alternate_attempted\":true,\"alternate_push\":\"succeeded\",\"original_remote_url_restored\":true}"
+    else
+      restore_temporary_remote || true
+      recovery_fail "recovery push failed" 94
+    fi
+  fi
+  recovery_event recovery/push-completed passed ""
+}
+
+publish_recovery_archive() {
+  local pending="$TRANSACTION_DIR/recovery-archive-record.md"
+  if [ -e "$ARCHIVE_RECORD" ]; then
+    if ! grep -Fq -- "- Transaction ID: $TRANSACTION_ID" "$ARCHIVE_RECORD" || ! grep -Fq -- "- Effective feature tip: $EFFECTIVE_FEATURE_TIP" "$ARCHIVE_RECORD"; then
+      recovery_fail "published archive record does not match recovery journal"
+    fi
+    return 0
+  fi
+  mkdir -p "$(dirname "$ARCHIVE_RECORD")" || recovery_fail "unable to create archive record directory"
+  render_recovery_archive_record "$ARCHIVE_RECORD" ARCHIVE || recovery_fail "unable to publish recovery archive record"
+  journal_update --set-json "recovery_archive_record=$(json_quote "$(repo_relative_path "$ARCHIVE_RECORD")")"
+  [ ! -e "$pending" ] || rm -f "$pending"
+}
+
+recovery_resume() {
+  initialize_recovery
+  if [ "$(journal_optional recovery_phase)" = recovery/completed ]; then
+    if [ -z "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ ! -e "$ARCHIVE_RECORD" ]; then
+      recovery_fail "completed recovery evidence is inconsistent"
+    fi
+    recovery_validation_valid || recovery_fail "completed recovery validation record failed integrity or command-binding verification${RECOVERY_VALIDATION_FAILURE_REASON:+: $RECOVERY_VALIDATION_FAILURE_REASON}" 95
+    [ "$(journal_optional recovery_push_result.status)" = succeeded ] && [ "$(journal_optional recovery_push_result.head)" = "$EFFECTIVE_FEATURE_TIP" ] || recovery_fail "completed recovery push result is inconsistent" 95
+    grep -Fq -- "- Transaction ID: $TRANSACTION_ID" "$ARCHIVE_RECORD" && grep -Fq -- "- Effective feature tip: $EFFECTIVE_FEATURE_TIP" "$ARCHIVE_RECORD" || recovery_fail "completed recovery archive record does not match the journal" 95
+    return 0
+  fi
+  ensure_recovery_worktree
+  ensure_recovery_merge
+  ensure_recovery_validation
+  ensure_recovery_main_ff
+  ensure_recovery_archive_generated
+  ensure_recovery_push
+  publish_recovery_archive
+  recovery_event recovery/completed passed ""
+}
+
 resume() {
   local phase status
   phase="$(journal_get phase)"; status="$(journal_get phase_status)"
@@ -414,7 +970,12 @@ main() {
     log "dry-run: no Git mutation; use --push for a journaled transaction"
     return
   fi
-  if [ -n "$RESUME_ID" ]; then resume_transaction; resume; else ensure_archive_record_path; begin_transaction; validate; stage_and_commit; merge_to_main; push_main; archive_success; fi
+  if [ -n "$RESUME_ID" ]; then
+    resume_transaction
+    if [ "$INTEGRATE_MAIN_INTO_FEATURE" -eq 1 ]; then recovery_resume; else resume; fi
+  else
+    ensure_archive_record_path; begin_transaction; validate; stage_and_commit; merge_to_main; push_main; archive_success
+  fi
   printf 'archive transaction completed: %s\n' "$TRANSACTION_ID"
 }
 
