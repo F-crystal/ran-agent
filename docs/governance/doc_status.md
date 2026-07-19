@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-17)
+Status: CURRENT (2026-07-19)
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -26,6 +26,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/co-reading.md` | Co Reading storage, import, MCP, privacy, and API contract |
 | `docs/governance/co-reading-web-reader.md` | Tailscale-only Co Reading Web reader deployment and acceptance |
 | `docs/governance/skills.md` | On-demand skill map |
+| `docs/governance/delivery-evidence.md` | High-risk feasibility, validation evidence, and adversarial acceptance contract |
 | `docs/governance/agent-capability-governance.md` | Shared agent skill, hook, plugin, and MCP governance |
 | `docs/governance/sub_agents.md` | Sub-agent candidate policy |
 | `docs/governance/cleanup.md` | Retired/deleted component record |

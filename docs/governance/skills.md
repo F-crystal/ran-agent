@@ -1,6 +1,6 @@
 # Skills Map
 
-Status: CURRENT (2026-06-23)
+Status: CURRENT (2026-07-19)
 
 ## Active Skills (On-Demand)
 
@@ -28,6 +28,17 @@ Status: CURRENT (2026-06-23)
   commit, and push stay consistent and runtime/private files remain excluded.
 - Server deployment, runtime drift, lite/full, systemd/env, MCP exposure, and
   one-command rollout requests must use `server-runtime`.
+
+## Delivery Evidence
+
+- High-risk implementation and acceptance work follows
+  [`delivery-evidence.md`](delivery-evidence.md).
+- Use `scripts/workflow_guard.py verify` as the one-command high-risk completion
+  entry point; use explicit snapshot/run commands for long validation windows.
+  It is a project tool and instruction, not a host hook or plugin.
+- Do not create a new feasibility or acceptance skill until real-task failures
+  show that the existing project entry scan and independent review are
+  insufficient.
 
 ## Skill Sources
 
