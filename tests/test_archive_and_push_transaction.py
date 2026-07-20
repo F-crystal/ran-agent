@@ -5,7 +5,6 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import shlex
 import subprocess
 import time
 from pathlib import Path
@@ -56,17 +55,15 @@ def setup_feature_repo(tmp_path: Path) -> tuple[Path, Path]:
     return repo, remote
 
 
-def configure_fallback_after_merge(repo: Path, primary_target: Path, alternate_target: Path) -> None:
-    """Keep preflight local, then rewrite the actual primary/alternate pushes."""
-    hook = repo / ".git" / "hooks" / "post-merge"
-    hook.write_text(
-        "#!/usr/bin/env bash\nset -e\n"
-        f"git remote set-url origin {shlex.quote(GITHUB_HTTPS)}\n"
-        f"git config url.{shlex.quote(f'file://{primary_target}')}.insteadOf {shlex.quote(GITHUB_HTTPS)}\n"
-        f"git config url.{shlex.quote(f'file://{alternate_target}')}.insteadOf {shlex.quote(GITHUB_SSH)}\n",
-        encoding="utf-8",
-    )
-    hook.chmod(0o755)
+def configure_fallback_push_targets(repo: Path, primary_target: Path, alternate_target: Path) -> None:
+    """Point origin at the GitHub URLs, rewritten to the local push targets.
+
+    Fetches resolve through the primary clone, which holds identical refs, so
+    preflight stays local; only the actual pushes hit the rejecting hooks.
+    """
+    git(repo, "remote", "set-url", "origin", GITHUB_HTTPS)
+    git(repo, "config", f"url.file://{primary_target}.insteadOf", GITHUB_HTTPS)
+    git(repo, "config", f"url.file://{alternate_target}.insteadOf", GITHUB_SSH)
 
 
 def rejecting_bare_clone(source: Path, target: Path) -> Path:
@@ -128,7 +125,10 @@ def test_precommitted_feature_pushes_and_writes_resumable_journal(tmp_path: Path
     result = run_archive(repo, "--push")
 
     assert result.returncode == 0, result.stderr
-    assert git(repo, "branch", "--show-current") == "main"
+    # The merge phase never checks out the target branch in the source
+    # worktree; it advances refs/heads/main in place.
+    assert git(repo, "branch", "--show-current") == "feature/archive"
+    assert git(repo, "rev-parse", "main") == feature_head
     assert git(repo, "rev-parse", "HEAD") == feature_head
     assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == feature_head
 
@@ -373,7 +373,7 @@ def test_push_failure_resumes_only_the_push(tmp_path: Path) -> None:
 def test_primary_push_failure_uses_alternate_and_restores_original_url(tmp_path: Path) -> None:
     repo, successful_remote = setup_feature_repo(tmp_path)
     rejecting_primary = rejecting_bare_clone(successful_remote, tmp_path / "missing-primary.git")
-    configure_fallback_after_merge(repo, rejecting_primary, successful_remote)
+    configure_fallback_push_targets(repo, rejecting_primary, successful_remote)
     (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
     git(repo, "add", "feature.txt")
     git(repo, "commit", "-m", "feature")
@@ -394,7 +394,7 @@ def test_double_push_failure_restores_original_url_without_archive_success(tmp_p
     repo, _unused_remote = setup_feature_repo(tmp_path)
     rejecting_primary = rejecting_bare_clone(_unused_remote, tmp_path / "missing-primary.git")
     rejecting_alternate = rejecting_bare_clone(_unused_remote, tmp_path / "missing-alternate.git")
-    configure_fallback_after_merge(repo, rejecting_primary, rejecting_alternate)
+    configure_fallback_push_targets(repo, rejecting_primary, rejecting_alternate)
     (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
     git(repo, "add", "feature.txt")
     git(repo, "commit", "-m", "feature")
