@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-06-30)
+Status: CURRENT (2026-07-19)
 
 ## Scope
 
@@ -39,9 +39,23 @@ This is the canonical repo-root rule file for agents in this checkout. It must s
 - Before committing, stage only intentional source, tests, scripts, and public docs.
 - Platform resolver credentials such as SESSDATA, XHS_COOKIE, or proxy URLs must never appear in tool output, logs, docs, or git.
 
+## Delivery Evidence
+
+- Before claiming completion for high-risk deployment, migration,
+  archive/commit/push preparation, security, identity, idempotency, or
+  irreversible state work, run the applicable separately authorized,
+  read-only final check through
+  `python3 scripts/workflow_guard.py verify --label <label> -- <command>`.
+- For long validation windows, use the explicit snapshot/run flow documented in
+  `docs/governance/delivery-evidence.md` instead of taking a late baseline.
+- Evidence automation does not authorize commit, push, deploy, migration, risk
+  acceptance, destructive action, or any side effect performed by the wrapped
+  command; it is not a sandbox.
+
 ## Governance References
 
 - Documentation index and conflict rule: `docs/governance/doc_status.md`.
 - Current runtime status: `docs/governance/current_runtime_status.md`.
 - Server runbook: `docs/governance/server_runtime_commands.md`.
 - Agent capability governance: `docs/governance/agent-capability-governance.md`.
+- Delivery evidence and adversarial acceptance: `docs/governance/delivery-evidence.md`.
