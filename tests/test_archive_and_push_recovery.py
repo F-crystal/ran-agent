@@ -80,8 +80,11 @@ def failed_divergent_transaction(
     recorded = json.loads(journal.read_text(encoding="utf-8"))
     assert recorded["phase"] == "merge"
     assert recorded["phase_status"] == "failed"
+    assert recorded["failure_code"] == "64"
     assert recorded["head_sha"] == feature
-    assert git(repo, "branch", "--show-current") == "main"
+    # Divergence is detected by ancestry before any checkout, so the source
+    # worktree is never switched off the feature branch.
+    assert git(repo, "branch", "--show-current") == "feature/archive"
     assert git(repo, "rev-parse", "main") == main
     return repo, remote, journal, base, feature, main
 
@@ -165,7 +168,12 @@ def main_race_helper(tmp_path: Path, repo: Path) -> Path:
         "except SystemExit as exc:\n"
         "    if exc.code not in (None, 0): raise\n"
         "if matched:\n"
-        f"    subprocess.run(['git','-C',{str(repo)!r},'commit','--allow-empty','-m','main race'], check=True)\n"
+        # The source worktree stays on the feature branch during the
+        # transaction, so the main race is committed straight onto the ref.
+        f"    base=subprocess.check_output(['git','-C',{str(repo)!r},'rev-parse','main'], text=True).strip()\n"
+        f"    tree=subprocess.check_output(['git','-C',{str(repo)!r},'rev-parse','main^{{tree}}'], text=True).strip()\n"
+        f"    new=subprocess.check_output(['git','-C',{str(repo)!r},'commit-tree',tree,'-p',base,'-m','main race'], text=True).strip()\n"
+        f"    subprocess.run(['git','-C',{str(repo)!r},'update-ref','refs/heads/main',new,base], check=True)\n"
         f"    subprocess.run(['git','-C',{str(repo)!r},'push','origin','main'], check=True)\n",
         encoding="utf-8",
     )

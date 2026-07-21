@@ -48,6 +48,17 @@ Status: CURRENT (2026-07-18)
 
 3. 若 journal、当前 Git 状态或 `origin/main` 不一致，停止并报告；不要 reset、rebase、force push 或手工 merge/push。
 
+## Target branch advancement and multiple worktrees
+
+merge 阶段从不在 source worktree checkout `main`。脚本先检查 ancestry：`main` 不是 feature 的 ancestor 时，在任何 checkout/merge mutation 之前记录 `merge/failed` + failure code 64（受控分叉失败，供 divergence recovery 使用）。线性情况下：
+
+- 没有任何 worktree 持有 `main` 时，用 `update-ref` 原子推进 `refs/heads/main`，source worktree 停留在原 feature branch；
+- `main` 由同一 repository 的另一个 worktree 持有时，脚本验证该 worktree 属于同一 Git common dir、checkout 的确实是 `main`、HEAD 等于 journal 绑定的 expected main、工作树与 staging 均干净、没有 merge/rebase/cherry-pick/revert 进行中，然后在该 worktree 内执行 `git merge --ff-only <feature>`；绝不要求释放、删除或切换该 worktree。
+
+checkout/switch、merge、fetch、push 与 target worktree 验证的失败全部进入 journaled fail path；任何失败后 journal 不会停在 `running` 且无 failure code。
+
+恢复入口在任何 fetch 前先保存不可覆盖的 `original_failure` 并追加 `recovery/preflight` attempt。入口 fetch 失败固定记录 `failure_stage=recovery_fetch`、failure code `96`、failed preflight history 与 failure summary；同一 transaction 在 origin 恢复后重新执行 preflight，不创建第二个 transaction。
+
 ## Explicit divergence recovery
 
 普通事务和普通 `--resume` 始终只允许 `main` 通过 `--ff-only` 前进。feature 与 `main` 已从共同基线分叉时，脚本默认失败并保留 transaction；不会自动 merge，也不会把 feature branch 的任意后代当成可信提交。
@@ -73,11 +84,15 @@ Status: CURRENT (2026-07-18)
 - `commands` 是两条非空可重放命令，其内容被 evidence checksum 覆盖；
 - evidence 缺失、损坏、归属不符或原事务未保存可重放命令时 fail-closed（包括 `--skip-tests` 创建的事务）：不 merge、不移动 feature/main、不 archive、不 push，并把原因写入 `recovery_history`；绝不从当前环境补填命令。
 
+### Legacy stuck transaction (merge/running, null failure code)
+
+`--resume <id> --integrate-main-into-feature` 还接受且仅接受一种已知遗留状态：`phase=merge`、`phase_status=running`、`failure_code=null`，由旧版脚本在 target branch checkout 冲突时的骤然失败留下。资格审查与成功证据持久化严格分离：pure qualification 先只读验证 transaction/repository、source/commit、local/remote main、同 common-dir 的独立 main holder、相关 worktree safety、push/archive 未成功、archive record 不存在、validation path/checksum/repository/head/commands、common ancestor 与 checkout-conflict cause；此阶段不得创建 merge log、`legacy_recovery`、success reason 或 `recovery_authorized=true`。只有全部资格通过后，才可合成缺失的 `logs/merge.log`、记录 `legacy_recovery.evidence_source` 与 `legacy_merge_running_main_worktree_conflict`，并授权 recovery。已存在但不含精确 holder-conflict 的 merge log 不得降级为 topology probe；只有无 merge log 时才允许严格的同仓库 holder 拓扑探针。随后走标准 recovery merge、validation、main ff、push 与 archive 流程；成功完成后将原 journal 置为 `completed/succeeded`，原卡住状态保留在 `original_failure`、`legacy_recovery` 与 `recovery_history` 中。任一条件不满足即 fail-closed，不要求也不允许操作者手工编辑 transaction.json。
+
 ### Fail-closed preflight
 
 脚本持有 transaction lock 后才执行恢复。开始 merge 前必须同时确认：
 
-- journal 仍是 `merge/failed` 或等价的 `merge/interrupted`，且失败代码是 ff-only divergence；
+- journal 仍是 `merge/failed` 或等价的 `merge/interrupted`，且失败代码是 ff-only divergence（唯一例外是上一节描述的、经严格验证的 legacy `merge/running` + null code 状态）；
 - 原事务未成功 push，未成功生成正式 archive record；
 - `original_feature_branch` 存在，branch tip 精确等于 `original_feature_commit`；
 - 不按 branch 名称猜测提交身份，也不接受未知后代；

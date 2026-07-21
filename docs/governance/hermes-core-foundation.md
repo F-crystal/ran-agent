@@ -1,6 +1,6 @@
 # Hermes Core Foundation
 
-Status: CURRENT (2026-07-18)
+Status: CURRENT (2026-07-19)
 
 This document records the public source-level status of Hermes Core Package A
 and the owner-accepted Package B.1 typed business transactions. It is not a
@@ -21,6 +21,10 @@ by `docs/governance/current_runtime_status.md`.
   It closes atomic ingress/intent commit, atomic part/processing commit,
   durable reference/deferred state, factual recovery readers, and
   reference-aware seal digest consistency without changing Schema v1.
+- The Package B.1 global pending ingress reader has received owner acceptance.
+  The existing typed reader can discover cold-start recovery work without an
+  identity seed while retaining verified Conversation scope, canonical scoped
+  pagination, and fail-closed corruption handling.
 - Core is not connected to `channelHub`, `replyBackend`, any frontend,
   provider history, or a presentation adapter.
 - Legacy Timeline, durable outbox, Python ingest/memory writers, and other
@@ -96,10 +100,11 @@ non-secret metadata for close/reopen rebuild readback.
 The stable foundation available to a future Package B.2 service now includes
 atomic ingress plus immutable assembly intent, atomic part/reference plus
 processing transition, durable reference/deferred history, parent-scoped
-recovery and candidate readers, and a seal digest computed from persisted
-reference state. `appendPartWithProcessing` is the formal composite part path;
-the older split primitives remain compatibility and diagnostic surfaces whose
-half-states are explicitly exposed by typed readers rather than hidden.
+recovery and candidate readers, global pending-ingress cold-start discovery,
+and a seal digest computed from persisted reference state.
+`appendPartWithProcessing` is the formal composite part path; the older split
+primitives remain compatibility and diagnostic surfaces whose half-states are
+explicitly exposed by typed readers rather than hidden.
 
 This accepted source foundation remains inactive. `node_bridge/src/index.mjs`
 does not compose the Package B path, and ChannelHub, frontends, provider

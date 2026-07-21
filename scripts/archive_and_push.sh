@@ -49,6 +49,11 @@ RECOVERY_NODE_COMMAND=""
 RECOVERY_ORIGINAL_EVIDENCE_PATH=""
 RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM=""
 RECOVERY_VALIDATION_FAILURE_REASON=""
+RECOVERY_OVERRIDE_PYTHON=0
+RECOVERY_OVERRIDE_NODE=0
+LEGACY_STUCK_RECOVERY=0
+LEGACY_MAIN_WORKTREE=""
+LEGACY_EVIDENCE_SOURCE=""
 json_quote() { printf '%s' "$1" | "$PYTHON_BIN" -c 'import json,sys; print(json.dumps(sys.stdin.read()))'; }
 json_or_null() { [ -n "$1" ] && json_quote "$1" || printf null; }
 repo_relative_path() {
@@ -134,8 +139,10 @@ worktree_clean() { [ -z "$(git -C "$ROOT_DIR" status --porcelain --untracked-fil
 ensure_repo() { git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1 || die "not a Git repository: $ROOT_DIR"; }
 ensure_origin() { git -C "$ROOT_DIR" remote get-url "$REMOTE_NAME" >/dev/null 2>&1 || { [ -n "$REMOTE_URL" ] && run_cmd git -C "$ROOT_DIR" remote add "$REMOTE_NAME" "$REMOTE_URL" || die "missing remote '$REMOTE_NAME'"; }; }
 fetch_and_check_origin() {
-  run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
-  [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$EXPECTED_ORIGIN_MAIN" ] || fail "remote_race" 40
+  local remote_sha
+  if ! run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"; then fail fetch 44; fi
+  if ! remote_sha="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")"; then fail fetch 44; fi
+  [ "$remote_sha" = "$EXPECTED_ORIGIN_MAIN" ] || fail remote_race 40
 }
 
 acquire_lock() {
@@ -241,7 +248,17 @@ resume_transaction() {
   SOURCE_BRANCH="$(journal_get source_branch)"; SOURCE_HEAD="$(journal_get source_head)"; EXPECTED_ORIGIN_MAIN="$(journal_get expected_origin_main)"; LOCAL_MAIN_BEFORE="$(journal_get local_main_before)"
   ARCHIVE_RECORD="$ROOT_DIR/$(journal_get archive_record_path)"; ensure_archive_record_path
   acquire_lock
-  ensure_repo; ensure_origin; run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
+  ensure_repo; ensure_origin
+  if [ "$INTEGRATE_MAIN_INTO_FEATURE" -eq 1 ]; then
+    if [ "$(journal_optional recovery_phase)" != recovery/completed ]; then
+      begin_recovery_entry_attempt
+    fi
+    if ! run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"; then
+      recovery_entry_fetch_fail "unable to fetch origin during recovery preflight" 96
+    fi
+  elif ! run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"; then
+    fail fetch 44
+  fi
 }
 
 run_one_test() {
@@ -346,9 +363,13 @@ stage_and_commit() {
   [ "$(git -C "$ROOT_DIR" branch --show-current)" = "$SOURCE_BRANCH" ] || fail staging 42
   [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$SOURCE_HEAD" ] || fail staging 43
   journal_update --phase staging --phase-status running
-  run_cmd git -C "$ROOT_DIR" reset -q
-  if [ "${#STAGE_PATHS[@]}" -gt 0 ]; then run_cmd git -C "$ROOT_DIR" add -- "${STAGE_PATHS[@]}"; else run_cmd git -C "$ROOT_DIR" add -A -- .; fi
-  run_cmd git -C "$ROOT_DIR" reset -q -- .env .env.local .ran_agent_state .openclaw_state data logs debug state local_archive vault/inbox vault/raw vault/wiki .npm .pytest_cache .venv node_bridge/.ran_agent_state node_modules __pycache__
+  if ! run_cmd git -C "$ROOT_DIR" reset -q; then fail staging 45; fi
+  if [ "${#STAGE_PATHS[@]}" -gt 0 ]; then
+    if ! run_cmd git -C "$ROOT_DIR" add -- "${STAGE_PATHS[@]}"; then fail staging 46; fi
+  else
+    if ! run_cmd git -C "$ROOT_DIR" add -A -- .; then fail staging 46; fi
+  fi
+  if ! run_cmd git -C "$ROOT_DIR" reset -q -- .env .env.local .ran_agent_state .openclaw_state data logs debug state local_archive vault/inbox vault/raw vault/wiki .npm .pytest_cache .venv node_bridge/.ran_agent_state node_modules __pycache__; then fail staging 47; fi
   journal_update --phase-status succeeded
   journal_update --phase commit --phase-status running
   if git -C "$ROOT_DIR" diff --cached --quiet; then
@@ -364,6 +385,12 @@ stage_and_commit() {
   fi
 }
 
+# Advance the target branch to FINAL_HEAD without ever checking it out in the
+# source worktree.  Divergence is detected by ancestry before any mutation and
+# is reported as the structured ff-only failure (64).  When another worktree
+# holds the target branch, the fast-forward runs inside that worktree after
+# strict verification; the holding worktree is never released, removed, or
+# switched.
 merge_to_main() {
   journal_update --phase merge --phase-status running
   fetch_and_check_origin
@@ -371,17 +398,49 @@ merge_to_main() {
   [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$FINAL_HEAD" ] || fail merge 62
   worktree_clean || fail merge 63
   [ "$SOURCE_BRANCH" = "$TARGET_BRANCH" ] || [ "$MERGE_CURRENT_BRANCH" -eq 1 ] || fail merge 60
-  run_cmd git -C "$ROOT_DIR" checkout "$TARGET_BRANCH"
-  if [ "$SOURCE_BRANCH" != "$TARGET_BRANCH" ]; then run_cmd git -C "$ROOT_DIR" merge --ff-only "$SOURCE_BRANCH" || fail merge 64; fi
-  FINAL_HEAD="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+  if [ "$SOURCE_BRANCH" != "$TARGET_BRANCH" ]; then advance_target_branch_ff; fi
   journal_update --phase-status succeeded --set-json "merge_result={\"status\":\"succeeded\",\"head\":\"$FINAL_HEAD\"}"
+}
+
+advance_target_branch_ff() {
+  local target_sha target_worktree
+  if ! target_sha="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")"; then fail merge 65; fi
+  # Ancestry gate before any checkout/merge mutation: controlled divergence.
+  if ! git -C "$ROOT_DIR" merge-base --is-ancestor "$target_sha" "$FINAL_HEAD"; then
+    fail merge 64
+  fi
+  target_worktree="$(worktree_for_branch "$TARGET_BRANCH")"
+  if [ -z "$target_worktree" ]; then
+    if ! run_cmd git -C "$ROOT_DIR" update-ref "refs/heads/$TARGET_BRANCH" "$FINAL_HEAD" "$target_sha"; then
+      fail merge 65
+    fi
+    return 0
+  fi
+  verify_target_worktree "$target_worktree" "$target_sha"
+  if ! run_cmd git -C "$target_worktree" merge --ff-only "$FINAL_HEAD"; then
+    fail merge 65
+  fi
+}
+
+verify_target_worktree() {
+  local worktree="$1" target_sha="$2"
+  [ "$(canonical_path "$worktree")" != "$(canonical_path "$ROOT_DIR")" ] || fail merge 65
+  [ "$(git_common_dir "$worktree")" = "$(git_common_dir "$ROOT_DIR")" ] || fail merge 65
+  [ "$(git -C "$worktree" branch --show-current)" = "$TARGET_BRANCH" ] || fail merge 65
+  [ "$(git -C "$worktree" rev-parse HEAD)" = "$EXPECTED_ORIGIN_MAIN" ] || fail merge 65
+  [ "$target_sha" = "$EXPECTED_ORIGIN_MAIN" ] || fail merge 65
+  [ -z "$(git -C "$worktree" status --porcelain --untracked-files=all | awk '$2 !~ /^local_archive\//')" ] || fail merge 65
+  git -C "$worktree" diff --cached --quiet || fail merge 65
+  if git_operation_in_progress "$worktree"; then fail merge 65; fi
 }
 
 push_main() {
   journal_update --phase push --phase-status running
   fetch_and_check_origin
   [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$FINAL_HEAD" ] || fail push 71
-  local original alt
+  local main_sha original alt
+  if ! main_sha="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")"; then fail push 71; fi
+  [ "$main_sha" = "$FINAL_HEAD" ] || fail push 71
   original="$(git -C "$ROOT_DIR" config --get "remote.$REMOTE_NAME.url")"
   journal_update --set-json "push_result={\"status\":\"running\",\"local_main_advanced\":true,\"head\":\"$FINAL_HEAD\"}"
   if git -C "$ROOT_DIR" push "$REMOTE_NAME" "$TARGET_BRANCH"; then
@@ -448,6 +507,33 @@ record_recovery_request() {
     --set-json 'recovery_failure_reason=null' \
     --set-json 'recovery_history=[]'
   recovery_event recovery/preflight requested "operator explicitly selected divergence recovery"
+}
+
+begin_recovery_entry_attempt() {
+  local original_failure
+  record_recovery_request
+  if [ -z "$(journal_optional original_failure)" ]; then
+    original_failure="$($PYTHON_BIN -c 'import json,sys
+keys=("phase","phase_status","failure_stage","failure_code")
+values=[value or None for value in sys.argv[1:]]
+print(json.dumps(dict(zip(keys,values)),separators=(",",":")))' "$(journal_optional phase)" "$(journal_optional phase_status)" "$(journal_optional failure_stage)" "$(journal_optional failure_code)")"
+    journal_update --set-json "original_failure=$original_failure"
+  fi
+  journal_update --set-json 'recovery_phase_status="running"'
+  recovery_event recovery/preflight running "recovery entry preflight started"
+}
+
+recovery_entry_fetch_fail() {
+  local reason="$1" code="$2"
+  journal_update \
+    --phase-status failed \
+    --failure-stage recovery_fetch \
+    --failure-code "$code" \
+    --set-json 'recovery_phase_status="failed"' || true
+  recovery_event recovery/preflight failed "$reason" || true
+  write_failure_summary || true
+  printf 'ERROR: divergence recovery refused: %s\n' "$reason" >&2
+  exit "$code"
 }
 
 worktree_for_branch() {
@@ -529,7 +615,7 @@ print(commands[int(sys.argv[2])])' "$1" "$2"
 # original transaction's checksummed validation evidence.  The recovery
 # process environment can never replace, weaken, or backfill those commands.
 bind_recovery_validation_commands() {
-  local status validated_head path checksum record record_checksum override_python=0 override_node=0
+  local persist_override="${1:-1}" status validated_head path checksum record record_checksum
   status="$(journal_get validation_status)"
   case "$status" in
     ran|reused) ;;
@@ -550,24 +636,122 @@ bind_recovery_validation_commands() {
   RECOVERY_NODE_COMMAND="$(validation_record_command "$record" 1)" || recovery_fail "original validation record does not contain two replayable commands" 95
   RECOVERY_ORIGINAL_EVIDENCE_PATH="$path"
   RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM="$checksum"
-  if [ "${ARCHIVE_PYTHON_TEST_COMMAND+x}" = x ] && [ "$ARCHIVE_PYTHON_TEST_COMMAND" != "$RECOVERY_PYTHON_COMMAND" ]; then override_python=1; fi
-  if [ "${ARCHIVE_NODE_TEST_COMMAND+x}" = x ] && [ "$ARCHIVE_NODE_TEST_COMMAND" != "$RECOVERY_NODE_COMMAND" ]; then override_node=1; fi
-  if [ "$override_python" -eq 1 ] || [ "$override_node" -eq 1 ]; then
-    journal_update --set-json "recovery_validation_command_override={\"policy\":\"ignored\",\"python\":$([ "$override_python" -eq 1 ] && printf true || printf false),\"node\":$([ "$override_node" -eq 1 ] && printf true || printf false),\"command_source\":\"original_validation_record\"}" || recovery_fail "unable to journal ignored validation command override" 95
-    log "recovery: ignoring environment validation command overrides; using transaction-bound commands from $path"
+  RECOVERY_OVERRIDE_PYTHON=0
+  RECOVERY_OVERRIDE_NODE=0
+  if [ "${ARCHIVE_PYTHON_TEST_COMMAND+x}" = x ] && [ "$ARCHIVE_PYTHON_TEST_COMMAND" != "$RECOVERY_PYTHON_COMMAND" ]; then RECOVERY_OVERRIDE_PYTHON=1; fi
+  if [ "${ARCHIVE_NODE_TEST_COMMAND+x}" = x ] && [ "$ARCHIVE_NODE_TEST_COMMAND" != "$RECOVERY_NODE_COMMAND" ]; then RECOVERY_OVERRIDE_NODE=1; fi
+  [ "$persist_override" -eq 0 ] || persist_recovery_validation_override
+}
+
+persist_recovery_validation_override() {
+  if [ "$RECOVERY_OVERRIDE_PYTHON" -eq 1 ] || [ "$RECOVERY_OVERRIDE_NODE" -eq 1 ]; then
+    journal_update --set-json "recovery_validation_command_override={\"policy\":\"ignored\",\"python\":$([ "$RECOVERY_OVERRIDE_PYTHON" -eq 1 ] && printf true || printf false),\"node\":$([ "$RECOVERY_OVERRIDE_NODE" -eq 1 ] && printf true || printf false),\"command_source\":\"original_validation_record\"}" || recovery_fail "unable to journal ignored validation command override" 95
+    log "recovery: ignoring environment validation command overrides; using transaction-bound commands from $RECOVERY_ORIGINAL_EVIDENCE_PATH"
   fi
+}
+
+# Captured-log evidence of the legacy failure mode: the precise Git error
+# emitted when checkout of the target branch failed because another worktree
+# holds it.  The quoted path must be the worktree that holds the branch now.
+legacy_checkout_conflict_logged() {
+  local worktree="$1" log
+  [ -d "$TRANSACTION_DIR/logs" ] || return 1
+  for log in "$TRANSACTION_DIR"/logs/*.log; do
+    [ -f "$log" ] || continue
+    grep -Fq -- "'$TARGET_BRANCH' is already checked out at '$worktree'" "$log" && return 0
+  done
+  return 1
+}
+
+# Strict verification for the single known legacy state: phase=merge,
+# phase_status=running, failure_code=null, left by an abrupt target-branch
+# checkout conflict before journaled fail paths existed.  Every binding in the
+# journal must still match live Git facts; anything less fails closed.
+qualify_legacy_stuck_transaction() {
+  local feature_commit expected_main main_worktree
+  ORIGINAL_FEATURE_BRANCH="$SOURCE_BRANCH"
+  [ "$(journal_get transaction_id)" = "$RESUME_ID" ] || recovery_fail "legacy transaction id does not match the journal"
+  git -C "$ROOT_DIR" show-ref --verify --quiet "refs/heads/$SOURCE_BRANCH" || recovery_fail "legacy source branch is missing"
+  feature_commit="$(journal_get head_sha)"
+  [ -n "$feature_commit" ] || recovery_fail "legacy journal has no feature commit binding"
+  [ "$(journal_optional commit_result.status)" = "succeeded" ] || recovery_fail "legacy transaction commit did not succeed"
+  [ "$(journal_optional commit_result.commit_sha)" = "$feature_commit" ] || recovery_fail "legacy commit result disagrees with the journal head"
+  [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$SOURCE_BRANCH")" = "$feature_commit" ] || recovery_fail "legacy feature commit changed"
+  git -C "$ROOT_DIR" cat-file -e "$feature_commit^{commit}" 2>/dev/null || recovery_fail "legacy feature commit is missing from the object store"
+  expected_main="$(journal_get expected_origin_main)"
+  [ -n "$expected_main" ] || recovery_fail "legacy journal has no expected main binding"
+  [ "$(journal_get local_main_before)" = "$expected_main" ] || recovery_fail "legacy journal main bindings are inconsistent"
+  [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" = "$expected_main" ] || recovery_fail "legacy target main changed"
+  [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$expected_main" ] || recovery_fail "legacy origin main changed"
+  related_worktrees_safe || recovery_fail "legacy feature or main worktree is dirty, or a Git operation is unfinished"
+  main_worktree="$(worktree_for_branch "$TARGET_BRANCH")"
+  [ -n "$main_worktree" ] || recovery_fail "legacy target main is not held by another worktree; no checkout-conflict evidence"
+  [ "$(canonical_path "$main_worktree")" != "$(canonical_path "$ROOT_DIR")" ] || recovery_fail "legacy target main conflict cannot involve the source worktree"
+  [ "$(git_common_dir "$main_worktree")" = "$(git_common_dir "$ROOT_DIR")" ] || recovery_fail "legacy main worktree belongs to another repository"
+  LEGACY_EVIDENCE_SOURCE="captured_log"
+  if ! legacy_checkout_conflict_logged "$main_worktree"; then
+    [ ! -e "$TRANSACTION_DIR/logs/merge.log" ] || recovery_fail "legacy merge log does not prove a main-worktree checkout conflict"
+    LEGACY_EVIDENCE_SOURCE="worktree_topology_probe"
+  fi
+  LEGACY_MAIN_WORKTREE="$main_worktree"
+  LEGACY_STUCK_RECOVERY=1
+}
+
+persist_legacy_qualification() {
+  if [ "$LEGACY_EVIDENCE_SOURCE" = worktree_topology_probe ]; then
+    mkdir -p "$TRANSACTION_DIR/logs" || recovery_fail "unable to prepare legacy evidence log"
+    printf "fatal: '%s' is already checked out at '%s'\n" "$TARGET_BRANCH" "$LEGACY_MAIN_WORKTREE" >"$TRANSACTION_DIR/logs/merge.log" || recovery_fail "unable to record legacy checkout-conflict evidence"
+  fi
+  journal_update --set-json "legacy_recovery={\"reason\":\"legacy_merge_running_main_worktree_conflict\",\"evidence_source\":\"$LEGACY_EVIDENCE_SOURCE\",\"main_worktree\":$(json_quote "$LEGACY_MAIN_WORKTREE"),\"expected_main\":$(json_quote "$ORIGINAL_MAIN_COMMIT"),\"feature_commit\":$(json_quote "$ORIGINAL_FEATURE_COMMIT"),\"recorded_at\":$(json_quote "$(utc_now)")}" || recovery_fail "unable to journal the legacy recovery reason"
+  persist_recovery_validation_override
 }
 
 initialize_recovery() {
   local phase status failure_code current_main remote_main common original_validation original_failure
   record_recovery_request
   phase="$(journal_get phase)"; status="$(journal_get phase_status)"; failure_code="$(journal_optional failure_code)"
-  [ "$phase:$status" = merge:failed ] || [ "$phase:$status" = merge:interrupted ] || recovery_fail "transaction phase is not merge/failed"
-  [ "$failure_code" = 64 ] || recovery_fail "transaction is not an ff-only divergence failure"
+
+  case "$(journal_optional recovery_authorized)" in true|True)
+    [ "$(journal_optional recovery_mode)" = integrate_main_into_feature ] || recovery_fail "journal recovery mode is inconsistent"
+    bind_recovery_validation_commands
+    ORIGINAL_FEATURE_BRANCH="$(journal_get original_feature_branch)"
+    ORIGINAL_FEATURE_COMMIT="$(journal_get original_feature_commit)"
+    ORIGINAL_MAIN_COMMIT="$(journal_get original_main_commit)"
+    RECOVERY_MAIN_COMMIT="$(journal_get recovery_main_commit)"
+    ORIGINAL_BASE_COMMIT="$(journal_get original_base_commit)"
+    RECOVERY_WORKTREE="$(journal_get recovery_worktree)"
+    [ "$RECOVERY_WORKTREE" = "$TRANSACTION_DIR/recovery-worktree" ] || recovery_fail "journal recovery worktree path is outside the transaction"
+    RECOVERY_MERGE_COMMIT="$(journal_optional recovery_merge_commit)"
+    EFFECTIVE_FEATURE_TIP="$(journal_optional effective_feature_tip)"
+    [ -z "$RECOVERY_MERGE_COMMIT" ] || [ "$RECOVERY_MERGE_COMMIT" = "$EFFECTIVE_FEATURE_TIP" ] || recovery_fail "effective feature tip disagrees with recovery merge commit"
+    related_worktrees_safe || recovery_fail "related worktree or index is dirty, or a Git operation is unfinished"
+    recovery_refs_valid || recovery_fail "feature tip or main changed outside the authorized recovery topology"
+    return 0
+    ;;
+  esac
+
+  LEGACY_STUCK_RECOVERY=0
+  if [ "$phase:$status:$(journal_optional failure_stage):$failure_code" = "merge:failed:recovery_fetch:96" ] && [ -n "$(journal_optional original_failure)" ]; then
+    phase="$(journal_optional original_failure.phase)"
+    status="$(journal_optional original_failure.phase_status)"
+    failure_code="$(journal_optional original_failure.failure_code)"
+  fi
+  if [ "$phase:$status" = "merge:running" ] && [ -z "$failure_code" ]; then
+    # Legacy stuck transaction: an abrupt failure left merge/running with no
+    # failure code.  Accept only the one known legacy shape, proven strictly.
+    qualify_legacy_stuck_transaction
+  else
+    [ "$phase:$status" = merge:failed ] || [ "$phase:$status" = merge:interrupted ] || recovery_fail "transaction phase is not merge/failed"
+    [ "$failure_code" = 64 ] || recovery_fail "transaction is not an ff-only divergence failure"
+  fi
   [ "$(journal_optional push_result.status)" != succeeded ] || recovery_fail "transaction already has a successful original push"
   [ "$(journal_optional archive_result.status)" != succeeded ] || recovery_fail "transaction already has a successful original archive"
 
-  bind_recovery_validation_commands
+  if [ "$LEGACY_STUCK_RECOVERY" -eq 1 ]; then
+    bind_recovery_validation_commands 0
+  else
+    bind_recovery_validation_commands
+  fi
 
   ORIGINAL_FEATURE_BRANCH="$(journal_optional original_feature_branch)"
   [ -n "$ORIGINAL_FEATURE_BRANCH" ] || ORIGINAL_FEATURE_BRANCH="$(journal_get source_branch)"
@@ -582,21 +766,6 @@ initialize_recovery() {
   git -C "$ROOT_DIR" cat-file -e "$ORIGINAL_FEATURE_COMMIT^{commit}" 2>/dev/null || recovery_fail "original feature commit is missing"
   git -C "$ROOT_DIR" cat-file -e "$ORIGINAL_MAIN_COMMIT^{commit}" 2>/dev/null || recovery_fail "original main commit is missing"
 
-  case "$(journal_optional recovery_authorized)" in true|True)
-    [ "$(journal_optional recovery_mode)" = integrate_main_into_feature ] || recovery_fail "journal recovery mode is inconsistent"
-    RECOVERY_MAIN_COMMIT="$(journal_get recovery_main_commit)"
-    ORIGINAL_BASE_COMMIT="$(journal_get original_base_commit)"
-    RECOVERY_WORKTREE="$(journal_get recovery_worktree)"
-    [ "$RECOVERY_WORKTREE" = "$TRANSACTION_DIR/recovery-worktree" ] || recovery_fail "journal recovery worktree path is outside the transaction"
-    RECOVERY_MERGE_COMMIT="$(journal_optional recovery_merge_commit)"
-    EFFECTIVE_FEATURE_TIP="$(journal_optional effective_feature_tip)"
-    [ -z "$RECOVERY_MERGE_COMMIT" ] || [ "$RECOVERY_MERGE_COMMIT" = "$EFFECTIVE_FEATURE_TIP" ] || recovery_fail "effective feature tip disagrees with recovery merge commit"
-    related_worktrees_safe || recovery_fail "related worktree or index is dirty, or a Git operation is unfinished"
-    recovery_refs_valid || recovery_fail "feature tip or main changed outside the authorized recovery topology"
-    return 0
-    ;;
-  esac
-
   [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")" = "$ORIGINAL_FEATURE_COMMIT" ] || recovery_fail "original feature tip changed"
   current_main="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")"
   remote_main="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")"
@@ -607,10 +776,15 @@ initialize_recovery() {
   related_worktrees_safe || recovery_fail "related worktree or index is dirty, or a Git operation is unfinished"
   [ ! -e "$ARCHIVE_RECORD" ] || recovery_fail "archive record already exists"
 
+  if [ "$LEGACY_STUCK_RECOVERY" -eq 1 ]; then
+    persist_legacy_qualification
+  fi
+
   RECOVERY_MAIN_COMMIT="$current_main"
   RECOVERY_WORKTREE="$TRANSACTION_DIR/recovery-worktree"
   original_validation="$($PYTHON_BIN -c 'import json,sys; keys=("path","checksum","status","head","source","completed_at"); print(json.dumps(dict(zip(keys,[value or None for value in sys.argv[1:]])),separators=(",",":")))' "$(journal_optional validation_record_path)" "$(journal_optional validation_record_checksum)" "$(journal_optional validation_status)" "$(journal_optional validated_head)" "$(journal_optional validation_source)" "$(journal_optional validation_completed_at)")"
-  original_failure="$($PYTHON_BIN -c 'import json,sys; keys=("phase","phase_status","failure_stage","failure_code"); print(json.dumps(dict(zip(keys,sys.argv[1:])),separators=(",",":")))' "$phase" "$status" "$(journal_optional failure_stage)" "$failure_code")"
+  original_failure="$(journal_optional original_failure)"
+  [ -n "$original_failure" ] || original_failure="$($PYTHON_BIN -c 'import json,sys; keys=("phase","phase_status","failure_stage","failure_code"); print(json.dumps(dict(zip(keys,[value or None for value in sys.argv[1:]])),separators=(",",":")))' "$phase" "$status" "$(journal_optional failure_stage)" "$failure_code")"
   journal_update \
     --set-json 'recovery_authorized=true' \
     --set-json "original_feature_branch=$(json_quote "$ORIGINAL_FEATURE_BRANCH")" \
@@ -683,7 +857,7 @@ ensure_recovery_merge() {
     EFFECTIVE_FEATURE_TIP="$worktree_head"
     journal_update --set-json "recovery_merge_commit=$(json_quote "$worktree_head")" --set-json "effective_feature_tip=$(json_quote "$worktree_head")"
   else
-    run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
+    if ! run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"; then recovery_fail "unable to fetch origin before the recovery merge" 96; fi
     if [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" != "$RECOVERY_MAIN_COMMIT" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" != "$RECOVERY_MAIN_COMMIT" ]; then
       recovery_fail "main changed after recovery preflight"
     fi
@@ -829,7 +1003,7 @@ ensure_recovery_validation() {
 
 ensure_recovery_main_ff() {
   local local_main remote_main
-  run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
+  if ! run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"; then recovery_fail "unable to fetch origin before the recovery main fast-forward" 96; fi
   local_main="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")"
   remote_main="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")"
   if [ "$local_main" = "$RECOVERY_MAIN_COMMIT" ]; then
@@ -878,7 +1052,7 @@ ensure_recovery_archive_generated() {
 
 ensure_recovery_push() {
   local local_main remote_main original alt
-  run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
+  if ! run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"; then recovery_fail "unable to fetch origin before the recovery push" 96; fi
   local_main="$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")"
   remote_main="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")"
   [ "$local_main" = "$EFFECTIVE_FEATURE_TIP" ] || recovery_fail "local main is not the effective feature tip before push"
@@ -940,6 +1114,12 @@ recovery_resume() {
   ensure_recovery_push
   publish_recovery_archive
   recovery_event recovery/completed passed ""
+  if [ "$LEGACY_STUCK_RECOVERY" -eq 1 ]; then
+    # The legacy transaction journal must not stay at merge/running after a
+    # successful recovery; the original stuck state remains preserved in
+    # original_failure, legacy_recovery, and recovery_history.
+    journal_update --phase completed --phase-status succeeded
+  fi
 }
 
 resume() {
@@ -949,7 +1129,7 @@ resume() {
     validation:failed|validation:interrupted) validate; stage_and_commit; merge_to_main; push_main; archive_success ;;
     staging:failed|staging:interrupted|commit:failed|commit:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; [ "$(git -C "$ROOT_DIR" branch --show-current)" = "$SOURCE_BRANCH" ] && [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$SOURCE_HEAD" ] || die "unsafe resume before commit"; stage_and_commit; merge_to_main; push_main; archive_success ;;
     merge:failed|merge:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; FINAL_HEAD="$(journal_get commit_result.commit_sha)"; [ -n "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" branch --show-current)" = "$SOURCE_BRANCH" ] && [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$FINAL_HEAD" ] || die "unsafe merge resume"; [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$EXPECTED_ORIGIN_MAIN" ] || die "origin changed; refusing resume"; merge_to_main; push_main; archive_success ;;
-    push:failed|push:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; FINAL_HEAD="$(journal_get merge_result.head)"; [ "$(git -C "$ROOT_DIR" branch --show-current)" = "$TARGET_BRANCH" ] && [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$EXPECTED_ORIGIN_MAIN" ] || die "unsafe push resume"; push_main; archive_success ;;
+    push:failed|push:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; FINAL_HEAD="$(journal_get merge_result.head)"; [ -n "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" = "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$EXPECTED_ORIGIN_MAIN" ] || die "unsafe push resume"; push_main; archive_success ;;
     archive:failed|archive:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; FINAL_HEAD="$(journal_get push_result.head)"; [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$FINAL_HEAD" ] || die "unsafe archive resume"; archive_success ;;
     *) die "journal phase is not safely resumable: $phase/$status" ;;
   esac
