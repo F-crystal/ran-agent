@@ -36,6 +36,7 @@ import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
 import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
 import { createPersonalLearningExecutorAdapter } from './personalLearningClient.mjs';
 import { createAiDailyDigestExecutorAdapter } from './aiDailyDigestClient.mjs';
+import { createFeishuActionExecutorAdapter } from './feishuActionExecutor.mjs';
 import {
   deleteStickers,
   resolveStickerAsset,
@@ -56,10 +57,17 @@ export function getReplyBackendConfig(env = process.env) {
 export function createReplyBackend(options = {}) {
   const env = options.env || process.env;
   const config = getReplyBackendConfig(env);
-  const operationLedger = options.operationLedger || createOperationLedger({ env });
+  const now = typeof options.now === 'function' ? options.now : () => new Date();
+  const operationLedger = options.operationLedger || createOperationLedger({ env, now });
   const configuredExecutorAdapters = Array.isArray(options.trustedExecutorAdapterConfigs)
     ? [...options.trustedExecutorAdapterConfigs]
     : [];
+  if (!options.trustedActionExecutors) {
+    configuredExecutorAdapters.push(createFeishuActionExecutorAdapter({
+      env,
+      execFileImpl: options.execFileImpl,
+    }));
+  }
   if (!options.trustedActionExecutors && String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '').trim()) {
     configuredExecutorAdapters.push(createPersonalLearningExecutorAdapter({
       env,
@@ -70,6 +78,7 @@ export function createReplyBackend(options = {}) {
   const trustedActionExecutors = options.trustedActionExecutors || createTrustedExecutorAdapters({
     ledger: operationLedger,
     adapters: configuredExecutorAdapters,
+    now,
   });
   const coreDurableJobExecutor = options.coreDurableJobExecutor || createCoreDurableJobExecutor({
     env,
@@ -83,6 +92,12 @@ export function createReplyBackend(options = {}) {
       const gatewayConfig = backendOptions.hermesConfig || getHermesGatewayConfig(env);
       const chatImpl = options.hermesImpl || options.chatImpl || sendChatToHermesGateway;
       const requestId = sanitizeRequestId(backendOptions.requestId || message.request_id || createRequestId());
+      const operationDate = nodeLocalDate(now());
+      const actorContext = trustedActorContext(message.trusted_actor_context);
+      const conversationDigest = actorContext ? digestValue(actorContext.conversationKey) : '';
+      const priorActionOutcomes = actorContext && typeof operationLedger.listRecentOutcomes === 'function'
+        ? operationLedger.listRecentOutcomes({ actorKey: actorContext.actorKey, conversationDigest })
+        : [];
       const environmentPrivacyCommand = detectEnvironmentPrivacyCommand(message.text);
       if (environmentPrivacyCommand) {
         return {
@@ -146,6 +161,7 @@ export function createReplyBackend(options = {}) {
           active_topic: message.active_topic || '',
           stale_context: message.stale_context || '',
           continuity_note: message.continuity_note || '',
+          action_outcomes: priorActionOutcomes,
           route_hint: message.route_hint || '',
           message_batch: Array.isArray(message.message_batch) ? message.message_batch : [],
           prior_messages: Array.isArray(message.prior_messages) ? message.prior_messages : [],
@@ -185,14 +201,19 @@ export function createReplyBackend(options = {}) {
       }
       const informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
       replyEnvelope = informationalReportPolicy.envelope;
+      replyEnvelope = suppressUnrequestedEffectfulActionRequests(replyEnvelope, message.text);
 
       const actionExecution = await executeEnvelopeActionRequests({
         actionRequests: replyEnvelope.actionRequests,
-        actorContext: trustedActorContext(message.trusted_actor_context),
+        actorContext,
         currentMessage: message,
+        requestId,
+        conversationDigest,
+        platform: message.platform || message.channel || 'wechat',
         operationLedger,
         trustedActionExecutors,
         coreDurableJobExecutor,
+        operationDate,
       });
       let activityExecution = await executeEnvelopeActivityRequest({
         activityRequest: replyEnvelope.activityRequest,
@@ -216,11 +237,7 @@ export function createReplyBackend(options = {}) {
         ['memory.remember', 'memory.correct'].includes(receipt?.actionType)
         && receipt?.errorCode === 'ACTION_NOT_GROUNDED'
       ));
-      const digestAcknowledgement = actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send' && receipt?.status === 'succeeded')
-        ? '今日日报已补发。'
-        : actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send')
-          ? '日报生成或发送失败，未确认送达。'
-          : '';
+      const nodeActionAcknowledgement = buildNodeActionAcknowledgement(response.reply_text, actionExecution.receiptSummaries);
       const coreAcknowledgement = commitmentBlocked
         ? ''
         : bridgeOwnedCoreAcknowledgement(replyEnvelope.commitments, durableReceiptSummaries);
@@ -230,8 +247,8 @@ export function createReplyBackend(options = {}) {
         response = { ...response, reply_text: '保存结果尚未返回，未写入长期记忆。', follow_up_messages: [] };
       } else if (coreAcknowledgement) {
         response = { ...response, reply_text: coreAcknowledgement, follow_up_messages: [] };
-      } else if (digestAcknowledgement) {
-        response = { ...response, reply_text: digestAcknowledgement, follow_up_messages: [] };
+      } else if (nodeActionAcknowledgement) {
+        response = { ...response, reply_text: nodeActionAcknowledgement, follow_up_messages: [] };
       }
 
       const logger = options.logger || console;
@@ -253,7 +270,7 @@ export function createReplyBackend(options = {}) {
         ? 'bridge_commitment_guard'
         : learningPromotionDenied
           ? 'bridge_learning_intent_guard'
-        : digestAcknowledgement
+        : actionExecution.receiptSummaries.some((item) => item?.actionType === 'ai_daily_digest.send')
           ? 'bridge_ai_daily_digest'
         : coreAcknowledgement
           ? 'bridge_core_job_ack'
@@ -269,6 +286,7 @@ export function createReplyBackend(options = {}) {
           response: { ...response, media: finalResponseMedia, reply_text: rawContractReplyText },
           actionRequests: replyEnvelope.actionRequests,
           toolResults: actionExecution.evidence,
+          actionOutcomes: priorActionOutcomes,
           config: actionGateConfig,
         });
         let gate = evaluateActionGate({
@@ -308,6 +326,7 @@ export function createReplyBackend(options = {}) {
               response: { ...response, media: contractRepairMedia, reply_text: rawContractReplyText },
               actionRequests: replyEnvelope.actionRequests,
               toolResults: [...actionExecution.evidence, ...repair.toolResults],
+              actionOutcomes: priorActionOutcomes,
               config: actionGateConfig,
             });
             gate = evaluateActionGate({
@@ -352,6 +371,7 @@ export function createReplyBackend(options = {}) {
             response: { ...response, media: finalResponseMedia, reply_text: followUpText },
             actionRequests: replyEnvelope.actionRequests,
             toolResults: actionExecution.evidence,
+            actionOutcomes: priorActionOutcomes,
             config: actionGateConfig,
           });
           const followGate = evaluateActionGate({
@@ -439,6 +459,7 @@ export function createReplyBackend(options = {}) {
         suppressReason: suppression.reason,
         excludeFromHistory,
         backendProjection,
+        actionOutcomes: actionExecution.publicOutcomes,
       };
     },
     async releaseExternalCheckpoint({ candidate, context } = {}, backendOptions = {}) {
@@ -512,6 +533,53 @@ function restrictInformationalReportEnvelope(envelope, message = {}) {
   });
 }
 
+function suppressUnrequestedEffectfulActionRequests(envelope, userText) {
+  if (!Array.isArray(envelope?.actionRequests) || envelope.actionRequests.length === 0) return envelope;
+  const filtered = envelope.actionRequests.filter((request) => (
+    !['feishu.message.send', 'feishu.document.update', 'ai_daily_digest.send'].includes(String(request?.actionType || ''))
+    || hasFreshExecutionIntent(userText, request.actionType)
+  ));
+  if (filtered.length === envelope.actionRequests.length) return envelope;
+  return Object.freeze({ ...envelope, actionRequests: Object.freeze(filtered) });
+}
+
+function hasFreshExecutionIntent(value, actionType) {
+  const text = String(value || '').trim();
+  if (!text || hasNegatedExecutionIntent(text) || (hasMetaDiscussionIntent(text) && !hasExplicitMetaExecutionOverride(text))) return false;
+  if (actionType === 'feishu.document.update') {
+    return /(?:请|麻烦|现在|立即|再|重新).{0,40}(?:更新|修改|补充|追加|写入)/.test(text)
+      || /^\s*帮我.{0,40}(?:更新|修改|补充|追加|写入)/.test(text)
+      || /(?:更新|修改|补充|追加|写入).{0,16}(?:一下|一遍|一次)/.test(text);
+  }
+  if (actionType === 'ai_daily_digest.send') {
+    return /(?:日报|简报|摘要)/.test(text)
+      && /(?:请|帮我|麻烦|现在|立即|再|重新|补发|重发).{0,40}(?:发|发送|补发|重发)|(?:发|发送|补发|重发).{0,20}(?:日报|简报|摘要)/.test(text);
+  }
+  return /(?:请|麻烦|现在|立即|再|重新|补发|重发).{0,40}(?:发|发送|发出|转发|补发|重发)/.test(text)
+    || /^\s*帮我.{0,40}(?:发|发送|发出|转发|补发|重发)/.test(text)
+    || /(?:再|重新)(?:发|发送|补发|重发).{0,12}(?:一次|一遍)?/.test(text)
+    || /(?:发送|发出|转发|补发|重发).{0,16}(?:一下|一遍|一次)/.test(text);
+}
+
+function hasNegatedExecutionIntent(text) {
+  return /(?:不是|并非).{0,20}(?:让|要|叫)?.{0,12}(?:再|重新)?(?:执行|发送|发出|发|更新|修改|补发|重发)/.test(text)
+    || /(?:不要|别|无需|不用).{0,16}(?:再|重新)?(?:执行|发送|发出|发|更新|修改|补发|重发)/.test(text);
+}
+
+function hasMetaDiscussionIntent(text) {
+  const actionVerb = /(?:执行|发送|发出|补发|重发|发(?!现)|更新|修改|补充|追加|写入)/;
+  if (/[？?]/.test(text) && actionVerb.test(text)) return true;
+  return /(?:为什么|为何|怎么会|怎么就|怎么把|解释(?:一下)?|说明(?:一下)?)/.test(text)
+    || /(?:告诉我|说清楚).{0,24}(?:什么|哪些|为何|为什么|怎么)/.test(text)
+    || /(?:什么|哪些|谁|哪里|哪儿|哪个|几次|多少).{0,20}(?:发送|发出|补发|重发|发(?!现)|更新|修改|执行)/.test(text)
+    || /(?:发送|发出|补发|重发|发(?!现)|更新|修改|执行).{0,20}(?:什么|哪些|谁|哪里|哪儿|哪个|几次|多少)/.test(text)
+    || /(?:发送|发出|补发|重发|发(?!现)|更新|修改|执行).{0,20}(?:(?:了)?[吗么呢]|了没|没有)[？?]?$/.test(text);
+}
+
+function hasExplicitMetaExecutionOverride(text) {
+  return /(?:^|[，。！？；,;.!?])\s*(?:(?:请|麻烦|帮我|现在|立即).{0,8})?(?:再|重新|补发|重发).{0,12}(?:发|发送|发出|补发|重发|更新|修改|补充|追加|写入|执行)/.test(text);
+}
+
 function logInformationalReportPolicy({ policy, routeHint, bodyReleased, logger }) {
   if (!policy?.informationalReportTask) return;
   logger?.log?.(`[hermes-informational-report] ${JSON.stringify({
@@ -542,9 +610,13 @@ async function executeEnvelopeActionRequests({
   actionRequests = [],
   actorContext,
   currentMessage,
+  requestId,
+  conversationDigest,
+  platform,
   operationLedger,
   trustedActionExecutors,
   coreDurableJobExecutor,
+  operationDate,
 }) {
   const receiptSummaries = [];
   const evidence = [];
@@ -560,41 +632,96 @@ async function executeEnvelopeActionRequests({
       continue;
     }
     if (!actorContext?.owner) {
+      const summary = rejectedActionSummary(request.actionType, 'ACTOR_NOT_AUTHORIZED');
+      recordRejectedContinuity(operationLedger, { request, actorContext, requestId, conversationDigest, platform, code: 'ACTOR_NOT_AUTHORIZED', summary });
       receiptSummaries.push({
         requestRef: request.requestRef,
         actionType: request.actionType,
         outcome: 'denied',
-        status: 'failed',
+        status: 'rejected',
         errorCode: 'ACTOR_NOT_AUTHORIZED',
+        summary,
+        retryable: false,
       });
       continue;
     }
-    let groundedRequest;
+    let grounded;
+    let dispatchStarted = false;
     try {
-      groundedRequest = groundActionRequest(request, currentMessage);
+      grounded = groundActionRequest(request, currentMessage, { operationDate });
     } catch (error) {
+      const errorCode = sanitizeExecutionCode(error?.code || 'ACTION_NOT_GROUNDED');
+      const summary = rejectedActionSummary(request.actionType, errorCode);
+      recordRejectedContinuity(operationLedger, { request, actorContext, requestId, conversationDigest, platform, code: errorCode, summary });
       receiptSummaries.push({
         requestRef: request.requestRef,
         actionType: request.actionType,
         outcome: 'denied',
-        status: 'failed',
-        errorCode: sanitizeExecutionCode(error?.code || 'ACTION_NOT_GROUNDED'),
+        status: 'rejected',
+        errorCode,
+        summary,
+        retryable: false,
       });
       continue;
     }
+    const groundedRequest = grounded?.request || grounded;
+    const privatePayload = grounded?.privatePayload;
     if (!trustedActionExecutors.supports(groundedRequest.actionType)) {
+      const summary = rejectedActionSummary(request.actionType, 'EXECUTOR_UNSUPPORTED');
+      recordRejectedContinuity(operationLedger, { request, actorContext, requestId, conversationDigest, platform, code: 'EXECUTOR_UNSUPPORTED', summary });
       receiptSummaries.push({
         requestRef: request.requestRef,
         actionType: request.actionType,
         outcome: 'unsupported',
-        status: 'failed',
+        status: 'rejected',
         errorCode: 'EXECUTOR_UNSUPPORTED',
+        summary,
+        retryable: false,
       });
       continue;
     }
     try {
-      const operation = operationLedger.mint({ request: groundedRequest, actorContext });
-      const receipt = await trustedActionExecutors.execute(operation);
+      const operationKey = String(request.scope?.operationKey || request.requestRef || '').trim();
+      const idempotencyDigest = digestValue(`${conversationDigest}:${request.actionType}:${operationKey}`);
+      const equivalent = typeof operationLedger.findEquivalentOutcome === 'function'
+        ? operationLedger.findEquivalentOutcome({
+          actorKey: actorContext.actorKey,
+          conversationDigest,
+          actionType: groundedRequest.actionType,
+          scope: groundedRequest.scope,
+        })
+        : null;
+      if (equivalent && (['partial', 'ambiguous'].includes(equivalent.status)
+        || grounded?.statusQuestion === true)) {
+        const replayed = replayedOperationSummary(request, equivalent);
+        receiptSummaries.push(replayed);
+        if (replayed.receiptVerified) evidence.push(trustedReceiptEvidence(replayed, equivalent.operationId));
+        continue;
+      }
+      if (grounded?.statusQuestion === true) throw actionExecutionError('ACTION_NOT_GROUNDED');
+      const reserved = typeof operationLedger.reserve === 'function'
+        ? operationLedger.reserve({
+          request: groundedRequest,
+          actorContext,
+          binding: {
+            idempotencyDigest,
+            conversationDigest,
+            requestId,
+            platform,
+            attempt: 1,
+            capability: groundedRequest.actionType,
+          },
+        })
+        : { replayed: false, operation: operationLedger.mint({ request: groundedRequest, actorContext }) };
+      const operation = reserved.operation;
+      if (reserved.replayed) {
+        const replayed = replayedOperationSummary(request, operation);
+        receiptSummaries.push(replayed);
+        if (replayed.receiptVerified) evidence.push(trustedReceiptEvidence(replayed, operation.operationId));
+        continue;
+      }
+      dispatchStarted = true;
+      const receipt = await trustedActionExecutors.execute(operation, { payload: privatePayload });
       const verified = trustedActionExecutors.verifyReceipt(receipt, {
         operationId: operation.operationId,
         actorKey: operation.actorKey,
@@ -603,6 +730,12 @@ async function executeEnvelopeActionRequests({
         issuer: receipt.issuer,
         status: receipt.status,
         evidenceType: receipt.evidenceType,
+        requestId,
+        conversationDigest,
+        platform,
+        attempt: 1,
+        capability: groundedRequest.actionType,
+        idempotencyDigest,
       });
       if (verified.ok !== true) throw actionExecutionError('RECEIPT_VERIFICATION_FAILED');
       const succeeded = receipt.status === 'succeeded';
@@ -612,27 +745,48 @@ async function executeEnvelopeActionRequests({
         outcome: succeeded ? 'applied' : receipt.status,
         status: receipt.status,
         effectDigest: receipt.effectDigest,
+        summary: receipt.summary || defaultOutcomeSummary(request.actionType, receipt.status),
+        target: receipt.target || String(groundedRequest.scope?.target || ''),
+        retryable: receipt.retryable === true,
+        receiptVerified: true,
+        replayed: false,
       });
-      evidence.push(trustActionReceiptEvidence({
-        type: actionEvidenceType(request.actionType),
-        ok: succeeded,
-        status: succeeded ? 'success' : 'failure',
-        action_id: receipt.operationId,
-        error_code: succeeded ? '' : `EXECUTOR_${receipt.status.toUpperCase()}`,
-      }));
+      evidence.push(trustedReceiptEvidence(receiptSummaries.at(-1), receipt.operationId));
     } catch (error) {
+      const errorCode = sanitizeExecutionCode(error?.code || 'EXECUTOR_FAILED');
+      const status = dispatchStarted ? 'ambiguous' : 'rejected';
+      const summary = status === 'ambiguous'
+        ? defaultOutcomeSummary(request.actionType, 'ambiguous')
+        : rejectedActionSummary(request.actionType, errorCode);
+      if (!dispatchStarted) {
+        recordRejectedContinuity(operationLedger, { request, actorContext, requestId, conversationDigest, platform, code: errorCode, summary });
+      }
       receiptSummaries.push({
         requestRef: request.requestRef,
         actionType: request.actionType,
-        outcome: 'failed',
-        status: 'failed',
-        errorCode: sanitizeExecutionCode(error?.code || 'EXECUTOR_FAILED'),
+        outcome: 'unverified',
+        status,
+        errorCode,
+        summary,
+        retryable: false,
+        receiptVerified: false,
       });
     }
   }
   return Object.freeze({
     receiptSummaries: Object.freeze(receiptSummaries.map((item) => Object.freeze(item))),
     evidence: Object.freeze(evidence),
+    publicOutcomes: Object.freeze(receiptSummaries
+      .filter((item) => ['feishu.message.send', 'feishu.document.update', 'ai_daily_digest.send'].includes(item.actionType))
+      .map((item) => Object.freeze({
+        actionType: item.actionType,
+        target: String(item.target || ''),
+        status: item.status,
+        summary: String(item.summary || defaultOutcomeSummary(item.actionType, item.status)),
+        retryable: item.retryable === true,
+        replayed: item.replayed === true,
+        ...(item.errorCode ? { errorCode: item.errorCode } : {}),
+      }))),
   });
 }
 
@@ -813,14 +967,20 @@ function isActiveDurableReceipt(receipt, expected = {}) {
   return Object.entries(expected).every(([field, value]) => value === undefined || receipt[field] === value);
 }
 
-function groundActionRequest(request, message = {}) {
+function groundActionRequest(request, message = {}, { operationDate } = {}) {
   const actionType = String(request.actionType || '');
   if (actionType === 'ai_daily_digest.send') {
     const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
     const userText = String(message.text || '');
     if (!/(日报|简报|摘要)/.test(userText) || !/(发|补发|重发|重新|再)/.test(userText) || scope.mode !== 'manual') throw actionExecutionError('ACTION_NOT_GROUNDED');
     if (!['current_local_date', 'today'].includes(String(scope.date || 'current_local_date'))) throw actionExecutionError('ACTION_NOT_GROUNDED');
-    return { ...request, scope: { mode: 'manual', date: 'current_local_date' } };
+    return {
+      request: { ...request, scope: { mode: 'manual', date: 'current_local_date', operationDate } },
+      statusQuestion: isExecutionStatusQuestion(userText),
+    };
+  }
+  if (['feishu.message.send', 'feishu.document.update'].includes(actionType)) {
+    return groundFeishuActionRequest(request, message);
   }
   if (!actionType.startsWith('memory.')) return request;
   const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope)
@@ -877,6 +1037,182 @@ function groundActionRequest(request, message = {}) {
   throw actionExecutionError('ACTION_NOT_GROUNDED');
 }
 
+function groundFeishuActionRequest(request, message = {}) {
+  const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
+  const target = scope.target && typeof scope.target === 'object' && !Array.isArray(scope.target) ? scope.target : {};
+  const args = scope.arguments && typeof scope.arguments === 'object' && !Array.isArray(scope.arguments) ? scope.arguments : {};
+  const actionType = String(request.actionType || '');
+  const operationKey = String(scope.operationKey || request.requestRef || '').trim();
+  const targetId = String(target.id || '').trim();
+  const targetType = String(target.type || '').trim();
+  const userText = String(message.text || '');
+  const currentFeishuTarget = String(message.platform || message.channel || '') === 'feishu'
+    && String(message.conversation_id || message.conversationId || '') === targetId;
+  if (!operationKey || !targetId || (!userText.includes(targetId) && !currentFeishuTarget)) throw actionExecutionError('ACTION_NOT_GROUNDED');
+
+  let privatePayload;
+  if (actionType === 'feishu.message.send') {
+    if (scope.expectedEffect !== 'external_send' || !/(?:发|发送|转发|补发|重发)/.test(userText) || !['chat', 'user'].includes(targetType)) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    const text = String(args.text || '').trim();
+    if (!text || text.length > 16_000) throw actionExecutionError('ACTION_NOT_GROUNDED');
+    privatePayload = {
+      actionType,
+      targetType,
+      targetId,
+      text,
+      identity: 'bot',
+    };
+  } else {
+    if (scope.expectedEffect !== 'persistent_update' || !/(?:更新|修改|补充|追加|写入)/.test(userText) || targetType !== 'document') {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    privatePayload = {
+      actionType,
+      targetId,
+      command: String(args.command || ''),
+      content: args.content === undefined ? undefined : String(args.content),
+      pattern: args.pattern === undefined ? undefined : String(args.pattern),
+      blockId: args.blockId === undefined ? undefined : String(args.blockId),
+      docFormat: args.docFormat === undefined ? undefined : String(args.docFormat),
+      identity: 'user',
+    };
+  }
+  const argumentsDigest = digestValue(JSON.stringify({ target, arguments: args, expectedEffect: scope.expectedEffect }));
+  privatePayload.argumentsDigest = argumentsDigest;
+  return {
+    request: {
+      requestRef: request.requestRef,
+      actionType,
+      scope: {
+        operationKey,
+        target: `${targetType}:${digestValue(targetId).slice(-16)}`,
+        argumentsDigest,
+        expectedEffect: scope.expectedEffect,
+      },
+    },
+    privatePayload: Object.freeze(privatePayload),
+    statusQuestion: isExecutionStatusQuestion(userText),
+  };
+}
+
+function replayedOperationSummary(request, operation) {
+  const completed = operation?.state === 'completed';
+  const rejected = operation?.state === 'rejected';
+  const status = completed ? operation.status : rejected ? 'rejected' : 'ambiguous';
+  return {
+    requestRef: request.requestRef,
+    actionType: request.actionType,
+    outcome: completed && status === 'succeeded' ? 'applied' : status,
+    status,
+    effectDigest: String(operation?.effectDigest || ''),
+    summary: String(operation?.summary || defaultOutcomeSummary(request.actionType, status)),
+    target: String(operation?.target || operation?.scope?.target || ''),
+    retryable: completed ? operation?.retryable === true : rejected,
+    receiptVerified: completed,
+    replayed: true,
+    ...(operation?.rejectionCode ? { errorCode: operation.rejectionCode } : {}),
+  };
+}
+
+function trustedReceiptEvidence(summary, operationId) {
+  const succeeded = summary.status === 'succeeded';
+  return trustActionReceiptEvidence({
+    type: actionEvidenceType(summary.actionType),
+    ok: succeeded,
+    status: succeeded ? 'success' : summary.status,
+    receipt_status: summary.status,
+    action_type: summary.actionType,
+    action_id: operationId,
+    result_summary: summary.summary,
+    target: summary.target,
+    retryable: summary.retryable === true,
+    error_code: succeeded ? '' : `EXECUTOR_${String(summary.status || 'FAILED').toUpperCase()}`,
+  });
+}
+
+function buildNodeActionAcknowledgement(originalReply, receiptSummaries) {
+  const outcomes = (Array.isArray(receiptSummaries) ? receiptSummaries : [])
+    .filter((item) => ['feishu.message.send', 'feishu.document.update', 'ai_daily_digest.send'].includes(item?.actionType));
+  if (outcomes.length === 0) return '';
+  const ordinary = stripActionClaimClauses(originalReply);
+  const summaries = outcomes.map((item) => String(item.summary || defaultOutcomeSummary(item.actionType, item.status))).filter(Boolean);
+  return [ordinary, ...summaries].filter(Boolean).join('\n\n');
+}
+
+function stripActionClaimClauses(value) {
+  const parts = String(value || '').trim().split(/(?<=[。！？.!])\s*|\n+/).map((item) => item.trim()).filter(Boolean);
+  const claim = /(?:已经|已)(?:成功)?(?:发送|发出|补发|更新|修改|保存|写入)|(?:发送|更新|保存)(?:成功|完成|好了)/;
+  return parts.map((sentence) => {
+    const terminal = /[。！？.!]$/.test(sentence) ? sentence.slice(-1) : '';
+    const body = terminal ? sentence.slice(0, -1) : sentence;
+    const kept = body.split(/[，,；;]/).map((item) => item.trim()).filter((item) => item && !claim.test(item));
+    return kept.length > 0 ? `${kept.join('，')}${terminal}` : '';
+  }).filter(Boolean).join('\n\n');
+}
+
+function defaultOutcomeSummary(actionType, status) {
+  if (actionType === 'feishu.message.send') {
+    if (status === 'succeeded') return '飞书消息已发送。';
+    if (status === 'ambiguous') return '发送请求已经发出，但当前无法确认是否送达。';
+    if (status === 'failed') return '飞书消息发送失败。';
+  }
+  if (actionType === 'feishu.document.update') {
+    if (status === 'succeeded') return '飞书文档已更新。';
+    if (status === 'ambiguous') return '文档更新请求已经发出，但当前无法确认最终结果。';
+    if (status === 'failed') return '飞书文档更新失败。';
+  }
+  if (actionType === 'ai_daily_digest.send') {
+    if (status === 'succeeded') return '今日日报已补发。';
+    if (status === 'ambiguous') return '日报发送请求已经发出，但当前无法确认是否送达。';
+    if (status === 'rejected') return '我目前不能确认日报发送已经执行。';
+    return '日报生成或发送失败，未确认送达。';
+  }
+  return '我目前不能确认这一步已经执行。';
+}
+
+function isExecutionStatusQuestion(value) {
+  const text = String(value || '');
+  const explicitEffect = /(?:请|帮我|麻烦|把|再|重新|重发|补发).{0,40}(?:发送|发出|转发|更新|修改|补充|追加|写入)/.test(text)
+    || /(?:发送|发出|转发|更新|修改|补充|追加|写入).{0,20}(?:一下|一遍|一次)/.test(text);
+  return !explicitEffect && /(?:刚才|之前|那一步|结果|状态|是否|有没有|成功了吗|送达了吗|怎么样|怎么了)|[吗么]\s*[？?]?$/.test(text);
+}
+
+function nodeLocalDate(value) {
+  const date = value instanceof Date ? new Date(value.getTime()) : new Date(value);
+  if (!Number.isFinite(date.getTime())) throw actionExecutionError('ACTION_NOT_GROUNDED');
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(date).reduce((result, item) => ({ ...result, [item.type]: item.value }), {});
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+
+function rejectedActionSummary(actionType, code) {
+  if (code === 'EXECUTOR_UNSUPPORTED') return '这一步当前不受 Node 执行器支持，未执行。';
+  if (code === 'ACTOR_NOT_AUTHORIZED') return '这一步未获授权，未执行。';
+  return actionType === 'ai_daily_digest.send'
+    ? '我目前不能确认日报发送已经执行。'
+    : '我目前不能确认这一步已经执行。';
+}
+
+function recordRejectedContinuity(operationLedger, { request, actorContext, requestId, conversationDigest, platform, code, summary }) {
+  if (typeof operationLedger?.recordRejectedOutcome !== 'function' || !actorContext?.actorKey) return;
+  try {
+    operationLedger.recordRejectedOutcome({
+      requestRef: request.requestRef,
+      actionType: request.actionType,
+      actorContext,
+      binding: { conversationDigest, requestId, platform, attempt: 1, capability: request.actionType },
+      code,
+      summary,
+      retryable: false,
+    });
+  } catch {
+    // A rejected continuity projection must never make the reply path fail open.
+  }
+}
+
 function hasExplicitMemoryIntent(userText, actionType) {
   const text = String(userText || '');
   if (actionType === 'memory.correct') {
@@ -893,6 +1229,10 @@ function actionEvidenceType(actionType) {
   return /(?:^|[._:-])(?:send|post|submit|publish|reply)(?:$|[._:-])/i.test(String(actionType || ''))
     ? 'outbound_result'
     : 'save_result';
+}
+
+function digestValue(value) {
+  return `sha256:${createHash('sha256').update(String(value || ''), 'utf8').digest('hex')}`;
 }
 
 function sanitizeExecutionCode(value) {

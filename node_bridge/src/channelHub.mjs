@@ -102,6 +102,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     chatImpl: options.chatImpl,
     actionRepairImpl: options.actionRepairImpl,
     pendingActionExecutorImpl: options.pendingActionExecutorImpl,
+    execFileImpl: options.execFileImpl,
   });
   const backendMessage = preserveTrustedBridgeTaskProvenance(message, {
     ...message,

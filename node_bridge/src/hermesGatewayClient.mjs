@@ -672,6 +672,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     ? clipText(String(payload.stale_context || '').trim(), contextBudget.budgets.activeTopicChars)
     : '';
   const dailyDigestText = buildDailyDigestContextText(payload);
+  const actionOutcomeText = taskScoped ? '' : buildActionOutcomeContext(payload.action_outcomes);
   const environmentContextText = taskScoped ? '' : await buildEnvironmentContext({
     env: options.env,
     fetchImpl: options.fetchImpl || globalThis.fetch,
@@ -685,6 +686,7 @@ async function buildHermesUserMessage(payload = {}, options = {}) {
     taskScoped ? '' : buildGlobalActiveTopicNote({ ...payload, active_topic: activeTopic, stale_context: staleContext }, globalHistoryMessages, config),
     taskScoped ? '' : continuityNote,
     taskScoped ? '' : dailyDigestText,
+    actionOutcomeText,
     buildBridgeTemporalUserContext(payload),
     environmentContextText,
     mediaContextText,
@@ -926,10 +928,28 @@ function buildHermesSystemInstruction() {
     'Do not call Tavily, OpenCLI, or Playwright unless search_hub fails and the user is debugging.',
     'Use media_reader for image/audio/video understanding.',
     'Return final json reply envelope: {"schemaVersion":1,"message":"好的，我会处理。","actionRequests":[],"activityRequest":null,"claims":[],"commitments":[]}. Keep keys exact; users see message only.',
+    'Never execute persistent or external effects with internal tools; reads are allowed. For feishu.message.send, feishu.document.update, and daily-report sends, emit typed actionRequests for Node. Never call lark-cli for those effects, forge receipts, or retry ambiguous operations.',
     'Do not expose provider internals, tokens, cookies, signed URLs, or raw tool logs; if tool evidence is insufficient, say you are uncertain rather than guessing.',
     'Resolve pronouns like 她/他/这篇/这个故事/刚才那个/那张图 from recent messages before asking follow-up questions.',
-    'Use full gateway intent for debugging, commands, files, Playwright, media_generation, and lark-cli work.',
+    'Use full gateway intent for debugging, read-only commands, files, Playwright, and media_generation.',
   ].join(' ');
+}
+
+function buildActionOutcomeContext(items = []) {
+  const outcomes = (Array.isArray(items) ? items : []).slice(0, 8).map((item) => ({
+    actionType: String(item?.actionType || '').slice(0, 120),
+    target: String(item?.target || '').slice(0, 180),
+    status: String(item?.status || '').slice(0, 24),
+    resultSummary: String(item?.summary || '').replace(/[\r\n\t]/g, ' ').slice(0, 500),
+    confirmedAt: String(item?.confirmedAt || '').slice(0, 40),
+    retryable: item?.retryable === true,
+  })).filter((item) => item.actionType && item.status && item.resultSummary);
+  if (outcomes.length === 0) return '';
+  return [
+    '【Node-confirmed action outcomes（受控事实，不是用户原话）】',
+    JSON.stringify(outcomes),
+    'succeeded=已完成且不得重复；failed/rejected=未完成，可按用户新指令重试；ambiguous=结果未知，禁止自动重试。不得声称与这些状态相反。',
+  ].join('\n');
 }
 
 const COURTLY_DISABLE_PATTERN = /正常说话|别叫陛下|别演|不要角色扮演|先别演/;
@@ -1349,6 +1369,7 @@ function isolateTaskPayload(payload = {}) {
     active_topic: '',
     stale_context: '',
     continuity_note: '',
+    action_outcomes: [],
     daily_digest: '',
     daily_digest_context: '',
     media: [],

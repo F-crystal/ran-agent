@@ -7,7 +7,7 @@ const ALLOWED_BOUNDARIES = new Set([
   'durable_outbox',
   'internal_broker',
 ]);
-const RECEIPT_STATUSES = new Set(['succeeded', 'failed', 'partial', 'ambiguous']);
+const RECEIPT_STATUSES = new Set(['succeeded', 'failed', 'partial', 'ambiguous', 'rejected']);
 const BINDING_FIELDS = [
   'operationId',
   'actorKey',
@@ -16,6 +16,12 @@ const BINDING_FIELDS = [
   'issuer',
   'status',
   'evidenceType',
+  'requestId',
+  'conversationDigest',
+  'platform',
+  'attempt',
+  'capability',
+  'idempotencyDigest',
 ];
 
 export function createActionReceiptAuthority({ ledger, now = () => new Date() } = {}) {
@@ -89,6 +95,8 @@ export function createActionReceiptAuthority({ ledger, now = () => new Date() } 
       nonce: operation.nonce,
       expiresAt: operation.expiresAt,
       createdAt,
+      ...copyOperationBindings(operation),
+      ...copyOutcome(canonicalResult),
     });
     ledger.complete({
       operationId: receipt.operationId,
@@ -100,6 +108,9 @@ export function createActionReceiptAuthority({ ledger, now = () => new Date() } 
       issuer: receipt.issuer,
       evidenceType: receipt.evidenceType,
       effectDigest: receipt.effectDigest,
+      summary: receipt.summary,
+      target: receipt.target,
+      retryable: receipt.retryable,
     });
     trustedReceipts.set(receipt, fingerprint(receipt));
     return receipt;
@@ -109,6 +120,10 @@ export function createActionReceiptAuthority({ ledger, now = () => new Date() } 
     const trustedFingerprint = receipt && typeof receipt === 'object' ? trustedReceipts.get(receipt) : null;
     if (!trustedFingerprint || !Object.isFrozen(receipt) || fingerprint(receipt) !== trustedFingerprint) {
       return { ok: false, reason: 'receipt_untrusted' };
+    }
+    const expiresAt = Date.parse(receipt.expiresAt);
+    if (!Number.isFinite(expiresAt) || currentDate(now).getTime() >= expiresAt) {
+      return { ok: false, reason: 'receipt_expired' };
     }
     const operation = ledger.getOperation(receipt.operationId);
     if (!operation || operation.state !== 'completed') return { ok: false, reason: 'receipt_operation_untrusted' };
@@ -123,6 +138,8 @@ export function createActionReceiptAuthority({ ledger, now = () => new Date() } 
       effectDigest: operation.effectDigest,
       nonce: operation.nonce,
       expiresAt: operation.expiresAt,
+      ...copyOperationBindings(operation),
+      ...copyOutcome(operation),
     };
     for (const [field, value] of Object.entries(ledgerBindings)) {
       if (receipt[field] !== value) return { ok: false, reason: `receipt_${field}_mismatch` };
@@ -153,17 +170,42 @@ function assertExecutingOperation(ledger, operation) {
 
 function assertCanonicalResult(result) {
   if (!isPlainObject(result)) throw new Error('normalized result must be an object');
-  const keys = Object.keys(result).sort();
-  if (keys.length !== 2 || keys[0] !== 'effectId' || keys[1] !== 'status') {
-    throw new Error('normalized result must contain only status and effectId');
+  const allowed = new Set(['effectId', 'status', 'summary', 'target', 'retryable']);
+  if (Object.keys(result).some((key) => !allowed.has(key)) || !Object.hasOwn(result, 'effectId') || !Object.hasOwn(result, 'status')) {
+    throw new Error('normalized result contains invalid fields');
   }
   if (!RECEIPT_STATUSES.has(result.status)) throw new Error('normalized result status is invalid');
   boundedIdentifier(result.effectId, 'effectId', 240);
+  if (result.summary !== undefined) boundedText(result.summary, 'summary', 500);
+  if (result.target !== undefined) boundedText(result.target, 'target', 180);
+  if (result.retryable !== undefined && typeof result.retryable !== 'boolean') throw new Error('normalized retryable is invalid');
+}
+
+function copyOperationBindings(operation) {
+  const output = {};
+  for (const field of ['requestId', 'conversationDigest', 'platform', 'attempt', 'capability', 'idempotencyDigest']) {
+    if (operation[field] !== undefined) output[field] = operation[field];
+  }
+  return output;
+}
+
+function copyOutcome(result) {
+  const output = {};
+  for (const field of ['summary', 'target', 'retryable']) {
+    if (result[field] !== undefined) output[field] = result[field];
+  }
+  return output;
+}
+
+function boundedText(value, name, maxLength) {
+  const text = String(value || '').trim();
+  if (!text || text.length > maxLength || /[\r\n\t\0]/.test(text)) throw new Error(`${name} is invalid`);
+  return text;
 }
 
 function rejectSafely(ledger, operationId, code) {
   try {
-    ledger.reject({ operationId, code });
+    ledger.reject({ operationId, code, summary: '我目前不能确认这一步已经执行。', retryable: false });
   } catch {}
 }
 
@@ -180,6 +222,15 @@ function fingerprint(receipt) {
     receipt.nonce,
     receipt.expiresAt,
     receipt.createdAt,
+    receipt.requestId,
+    receipt.conversationDigest,
+    receipt.platform,
+    receipt.attempt,
+    receipt.capability,
+    receipt.idempotencyDigest,
+    receipt.summary,
+    receipt.target,
+    receipt.retryable,
   ]);
 }
 

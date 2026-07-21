@@ -928,12 +928,15 @@ disabled_tools:
   - text_to_speech
   - video_analyze
   - vision_analyze
+  - terminal
+  - file
+  - sticker_save_from_inbox
+  - sticker_update
+  - sticker_delete
 
 platform_toolsets:
   cli:
     - web
-    - terminal
-    - file
     - skills
     - memory
     - session_search
@@ -952,8 +955,6 @@ platform_toolsets:
     - mcp-playwright
   gateway:
     - web
-    - terminal
-    - file
     - skills
     - memory
     - session_search

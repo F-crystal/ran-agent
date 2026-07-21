@@ -35,6 +35,7 @@ export function createTrustedExecutorAdapters({ ledger, adapters = [], now } = {
       result = await registration.execute(Object.freeze({
         operation: claimed,
         signal: options.signal,
+        payload: options.payload,
       }));
     } catch (cause) {
       try { ledger.reject({ operationId: claimed.operationId, code: 'executor_call_failed' }); } catch {}

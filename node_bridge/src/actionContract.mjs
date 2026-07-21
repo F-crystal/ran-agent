@@ -47,17 +47,18 @@ export function evaluateActionContract({
   response = {},
   actionRequests = [],
   toolResults = [],
+  actionOutcomes = [],
   config = getActionGateConfig(),
 } = {}) {
   const observedEvidence = collectObservedEvidence({ response, toolResults });
   const declaredActionTypes = normalizeDeclaredActionTypes(actionRequests);
   const compatibility = declaredActionTypes.length > 0 ? null : detectCompatibilityAction(observedEvidence);
   const intent = declaredActionTypes.length > 0 ? 'typed_action' : compatibility?.action || 'none';
-  const requiredEvidence = declaredActionTypes.length > 0 ? [] : requiredEvidenceForIntent(intent);
+  const requiredEvidence = declaredActionTypes.length > 0 ? ['action_receipt'] : requiredEvidenceForIntent(intent);
   const informationalReportTask = isTrustedInformationalReportTask(message);
   const finalClaims = informationalReportTask ? [] : detectFinalClaims(response?.reply_text || response?.replyText || '');
-  const hasRequiredEvidence = requiredEvidence.length === 0 || hasEvidenceForIntent(intent, observedEvidence);
-  const missingEvidence = hasRequiredEvidence ? [] : missingEvidenceForIntent(intent, observedEvidence);
+  const hasRequiredEvidence = requiredEvidence.length === 0 || hasEvidenceForIntent(intent, observedEvidence, declaredActionTypes);
+  const missingEvidence = hasRequiredEvidence ? [] : missingEvidenceForIntent(intent, observedEvidence, declaredActionTypes);
   const partialSuccessDetected = hasPartialSuccessEvidence(observedEvidence);
   const gateDecision = hasRequiredEvidence ? 'pass' : (finalClaims.length > 0 ? 'missing_evidence' : 'no_claim');
 
@@ -68,7 +69,7 @@ export function evaluateActionContract({
     profile: sanitizeShortString(profile || response.profile || response.model || ''),
     contract_source: declaredActionTypes.length > 0 ? 'typed_action_request' : compatibility ? 'protected_compatibility' : 'no_action',
     declared_action_types: declaredActionTypes,
-    executed_action_types: [],
+    executed_action_types: observedEvidence.filter((item) => item.receipt_status).map((item) => item.action_type).filter(Boolean),
     compatibility_action: compatibility?.action || '',
     compatibility_signal_source: compatibility?.source || '',
     informational_report_task: informationalReportTask,
@@ -84,6 +85,8 @@ export function evaluateActionContract({
     evidence_satisfied: hasRequiredEvidence,
     missing_evidence: missingEvidence,
     partial_success_detected: partialSuccessDetected,
+    continuity_outcomes: sanitizeContinuityOutcomes(actionOutcomes),
+    continuity_reference: isContinuityReference(message?.text),
     repair_attempted: false,
     final_action: config?.enabled === false ? 'disabled' : 'observe_only',
   };
@@ -101,9 +104,15 @@ export function evaluateActionGate({
   const intent = contract.intent || 'none';
   const claims = Array.isArray(contract.final_claims) ? contract.final_claims : [];
   const evidence = Array.isArray(contract.observed_evidence) ? contract.observed_evidence : [];
-  const evidenceSatisfied = hasEvidenceForIntent(intent, evidence);
-  const missingEvidence = evidenceSatisfied ? [] : missingEvidenceForIntent(intent, evidence);
+  const evidenceSatisfied = hasEvidenceForIntent(intent, evidence, contract.declared_action_types || []);
+  const missingEvidence = evidenceSatisfied ? [] : missingEvidenceForIntent(intent, evidence, contract.declared_action_types || []);
   const partialSuccessDetected = hasPartialSuccessEvidence(evidence);
+  const typedReceipts = evidence.filter((item) => item.receipt_status && contract.declared_action_types?.includes(item.action_type));
+  const continuitySupportsClaim = contract.continuity_reference === true
+    && continuitySupportsClaims(contract.continuity_outcomes, claims);
+  const continuityCorrection = contract.continuity_reference === true
+    ? continuityCorrectionForClaims(contract.continuity_outcomes, claims)
+    : '';
   const reasons = [];
   let shouldRewrite = false;
   let rewrittenText = text;
@@ -137,14 +146,29 @@ export function evaluateActionGate({
   }
 
   const actionClaimed = hasActionClaimForIntent(intent, claims);
-  const unverifiedSuccessClaim = intent === 'none' && claims.length > 0;
+  const successClaims = claims.filter((claim) => !['external_not_sent', 'state_not_changed', 'full_failure'].includes(claim));
+  const unverifiedSuccessClaim = intent === 'none' && successClaims.length > 0 && !continuitySupportsClaim;
   const partialClaimMismatch = partialSuccessDetected && hasPartialMismatchClaim(claims);
   const failedOutboundSuccessClaim = intent === 'external_send' && hasFailedOutboundEvidence(evidence) && claims.includes('external_sent');
 
-  if (unverifiedSuccessClaim) {
+  if (continuityCorrection) {
+    shouldRewrite = true;
+    reasons.push('continuity_outcome_conflict');
+    rewrittenText = rewriteActionClaims(text, [continuityCorrection]);
+  } else if (intent === 'typed_action' && typedReceipts.length === 0 && actionClaimed) {
+    shouldRewrite = true;
+    reasons.push('typed_action_receipt_missing');
+    rewrittenText = rewriteActionClaims(text, ['我目前不能确认这一步已经执行。']);
+  } else if (intent === 'typed_action' && typedOutcomeContradictsClaims(typedReceipts, claims)) {
+    shouldRewrite = true;
+    reasons.push('typed_action_outcome_mismatch');
+    rewrittenText = rewriteActionClaims(text, typedReceipts.map((item) => item.result_summary).filter(Boolean));
+  } else if (unverifiedSuccessClaim) {
     shouldRewrite = true;
     reasons.push('unverified_success_claim');
-    rewrittenText = '尚未收到可验证的执行结果，暂不确认已完成。';
+    rewrittenText = successClaims.some((claim) => ['external_sent', 'state_changed', 'external_mcp_action_done'].includes(claim))
+      ? rewriteActionClaims(text, ['我目前不能确认这一步已经执行。'])
+      : '尚未收到可验证的执行结果，暂不确认已完成。';
   } else if (partialClaimMismatch) {
     shouldRewrite = true;
     reasons.push('partial_success_claim_mismatch');
@@ -282,8 +306,13 @@ function collectObservedEvidence({ response = {}, toolResults = [] } = {}) {
   return evidence.filter(Boolean);
 }
 
-function hasEvidenceForIntent(intent, evidence = []) {
-  if (intent === 'none' || intent === 'typed_action') return true;
+function hasEvidenceForIntent(intent, evidence = [], declaredActionTypes = []) {
+  if (intent === 'none') return true;
+  if (intent === 'typed_action') {
+    return declaredActionTypes.length > 0 && declaredActionTypes.every((actionType) => (
+      evidence.some((item) => item.action_type === actionType && item.receipt_status)
+    ));
+  }
   if (intent === 'social_read') {
     return evidence.some((item) => item.type === 'tool_result' && ['social_reader', 'search_hub'].includes(item.source) && ['success', 'partial_success'].includes(item.status));
   }
@@ -334,8 +363,14 @@ function detectFinalClaims(replyText = '') {
   if (/已保存|已经保存|保存好了|记住了|已更新|已经更新|已删除|删除好了/.test(text)) {
     claims.push('state_changed');
   }
-  if (/已发送|已经发送|发送成功|已经发出|转发好了/.test(text)) {
+  if (/已发送|已经发送|发送成功|已经发出|已补发|已经补发|转发好了/.test(text)) {
     claims.push('external_sent');
+  }
+  if (/未发送|没有发送|没发出|发送失败|无法确认.*送达/.test(text)) {
+    claims.push('external_not_sent');
+  }
+  if (/未更新|没有更新|更新失败|无法确认.*更新/.test(text)) {
+    claims.push('state_not_changed');
   }
   if (/(已经|已).*(?:评论|回复|发帖|点赞|关注|提交|走棋|下棋|交易|保存|删除|操作).*(?:成功|完成|好了)|(?:评论|回复|发帖|点赞|关注|提交|走棋|下棋|交易|操作)成功/.test(text)) {
     claims.push('external_mcp_action_done');
@@ -371,6 +406,7 @@ function buildGateResult({
 }
 
 function hasActionClaimForIntent(intent, claims = []) {
+  if (intent === 'typed_action') return claims.some((claim) => ['state_changed', 'external_sent', 'external_mcp_action_done'].includes(claim));
   if (intent === 'social_read') return claims.includes('read_complete');
   if (intent === 'media_read') return claims.includes('media_described');
   if (intent === 'sticker_send') return claims.includes('sticker_sent');
@@ -379,6 +415,18 @@ function hasActionClaimForIntent(intent, claims = []) {
   if (intent === 'external_send') return claims.includes('external_sent');
   if (intent === 'external_mcp_read') return claims.includes('read_complete');
   if (intent === 'external_mcp_write') return claims.includes('external_mcp_action_done') || claims.includes('state_changed') || claims.includes('external_sent');
+  return false;
+}
+
+function typedOutcomeContradictsClaims(receipts = [], claims = []) {
+  if (claims.includes('external_sent')) {
+    const outbound = receipts.filter((item) => ['feishu.message.send', 'ai_daily_digest.send'].includes(item.action_type));
+    if (outbound.length === 0 || !outbound.some((item) => item.receipt_status === 'succeeded')) return true;
+  }
+  if (claims.includes('state_changed')) {
+    const writes = receipts.filter((item) => item.action_type === 'feishu.document.update' || String(item.action_type || '').startsWith('memory.'));
+    if (writes.length === 0 || !writes.some((item) => item.receipt_status === 'succeeded')) return true;
+  }
   return false;
 }
 
@@ -394,9 +442,77 @@ function hasFailedOutboundEvidence(evidence = []) {
   return evidence.some((item) => item?.type === 'outbound_result' && item?.status === 'failure');
 }
 
-function missingEvidenceForIntent(intent, evidence = []) {
-  if (hasEvidenceForIntent(intent, evidence)) return [];
+function missingEvidenceForIntent(intent, evidence = [], declaredActionTypes = []) {
+  if (hasEvidenceForIntent(intent, evidence, declaredActionTypes)) return [];
+  if (intent === 'typed_action') return ['action_receipt'];
   return requiredEvidenceForIntent(intent);
+}
+
+function rewriteActionClaims(value, summaries = []) {
+  const claimPattern = /(?:已经|已)(?:成功)?(?:发送|发出|补发|更新|修改|保存|写入)|(?:发送|更新|保存)(?:成功|完成|好了|失败)|(?:未|没有|没)(?:发送|发出|更新|修改|保存|写入)|无法确认.*(?:送达|更新)/;
+  const ordinary = String(value || '').trim()
+    .split(/(?<=[。！？.!])\s*|\n+/)
+    .map((sentence) => {
+      const item = sentence.trim();
+      const terminal = /[。！？.!]$/.test(item) ? item.slice(-1) : '';
+      const body = terminal ? item.slice(0, -1) : item;
+      const kept = body.split(/[，,；;]/).map((part) => part.trim()).filter((part) => part && !claimPattern.test(part));
+      return kept.length > 0 ? `${kept.join('，')}${terminal}` : '';
+    })
+    .filter(Boolean)
+    .join('\n\n');
+  return [ordinary, ...summaries.map((item) => sanitizeOutcomeSummary(item)).filter(Boolean)].filter(Boolean).join('\n\n');
+}
+
+function continuityCorrectionForClaims(outcomes = [], claims = []) {
+  if (!Array.isArray(outcomes) || outcomes.length === 0) return '';
+  if (claims.includes('external_not_sent')) {
+    const latest = outcomes.find((item) => item.action_type === 'feishu.message.send');
+    return latest?.status === 'succeeded' ? latest.result_summary || '' : '';
+  }
+  if (claims.includes('state_not_changed')) {
+    const latest = outcomes.find((item) => item.action_type === 'feishu.document.update');
+    return latest?.status === 'succeeded' ? latest.result_summary || '' : '';
+  }
+  if (claims.includes('external_sent')) {
+    const latest = outcomes.find((item) => ['feishu.message.send', 'ai_daily_digest.send'].includes(item.action_type));
+    return latest && latest.status !== 'succeeded' ? latest.result_summary || '' : '';
+  }
+  if (claims.includes('state_changed')) {
+    const latest = outcomes.find((item) => item.action_type === 'feishu.document.update');
+    return latest && latest.status !== 'succeeded' ? latest.result_summary || '' : '';
+  }
+  return '';
+}
+
+function continuitySupportsClaims(outcomes = [], claims = []) {
+  if (!Array.isArray(outcomes) || outcomes.length === 0 || claims.length === 0) return false;
+  if (claims.includes('external_sent')) {
+    return outcomes.find((item) => item.action_type === 'feishu.message.send')?.status === 'succeeded';
+  }
+  if (claims.includes('state_changed')) {
+    return outcomes.find((item) => item.action_type === 'feishu.document.update')?.status === 'succeeded';
+  }
+  return false;
+}
+
+function isContinuityReference(value) {
+  return /(?:刚才|之前|那一步|上一步|结果|状态|是否|有没有|成功了吗|送达了吗|怎么样|怎么了)/.test(String(value || ''));
+}
+
+function sanitizeContinuityOutcomes(items) {
+  return (Array.isArray(items) ? items : []).slice(0, 8).map((item) => ({
+    action_type: sanitizeShortString(item?.actionType),
+    target: sanitizeShortString(item?.target),
+    status: ['succeeded', 'failed', 'partial', 'ambiguous', 'rejected'].includes(String(item?.status || '')) ? String(item.status) : 'rejected',
+    result_summary: sanitizeOutcomeSummary(item?.summary),
+    confirmed_at: sanitizeShortString(item?.confirmedAt),
+    retryable: item?.retryable === true,
+  }));
+}
+
+function sanitizeOutcomeSummary(value) {
+  return redactSecrets(String(value || '').trim().replace(/[\r\n\t]/g, ' ')).slice(0, 500);
 }
 
 function missingEvidenceRewriteForIntent(intent) {
@@ -597,6 +713,13 @@ function summarizeStateResult(type, result = {}) {
   return {
     type,
     status: result.ok === true || result.status === 'success' ? 'success' : 'failure',
+    receipt_status: ['succeeded', 'failed', 'partial', 'ambiguous', 'rejected'].includes(String(result.receipt_status || ''))
+      ? String(result.receipt_status)
+      : result.ok === true ? 'succeeded' : 'failed',
+    action_type: sanitizeShortString(result.action_type || result.actionType),
+    result_summary: sanitizeOutcomeSummary(result.result_summary || result.resultSummary),
+    target: sanitizeShortString(result.target),
+    retryable: result.retryable === true,
     result_id_hash: hashOptional(result.action_id || result.actionId || result.id || result.message_id || result.messageId),
     error_code: sanitizeShortString(result.error_code || result.errorCode || result.code),
   };
