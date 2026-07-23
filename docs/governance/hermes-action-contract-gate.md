@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: CURRENT (2026-07-21)
+Status: CURRENT (2026-07-13)
 
 ## Why Not Prompt Only
 
@@ -23,29 +23,6 @@ durable text path records adapter delivery before timeline and backend
 projection; non-durable or media paths require their own delivery semantics.
 Do not infer that every assistant-history layer already has one proven
 final-delivered canonical turn.
-
-## Transitional Node-Owned Tool Receipt Bridge
-
-The repository contains an owner-accepted transitional compatibility bridge
-for `feishu.message.send`, `feishu.document.update`, and the existing
-`ai_daily_digest.send` action. It has not been deployed. It does not complete
-Package B.3 or the Core tool broker.
-
-Hermes proposes these effects only through the v1
-`replyEnvelope.actionRequests` contract. Node binds the trusted request,
-Conversation, actor, platform, operation, attempt, capability, argument digest,
-and idempotency scope; executes the action; and issues a sanitized
-`succeeded`, `failed`, `rejected`, or `ambiguous` receipt. A model-provided
-receipt, status, issuer, log, or copied result is never authority. Exact replay
-uses the durable operation outcome, conflicting arguments fail closed, and an
-ambiguous dispatch is not retried blindly.
-
-The visible gate rewrites only unsupported action claims and preserves
-unrelated conversational content. Sanitized outcomes are projected into the
-next Hermes turn so later claims remain consistent with the same Node-owned
-result. Feishu and WeChat ingress, and Lite and Full profiles, share this
-receipt boundary. Persistent or external effects already covered by the bridge
-remain Node-owned; read-only MCP observation may remain inside Hermes.
 
 ## Action-Bearing Responses
 

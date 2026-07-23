@@ -102,23 +102,6 @@ test('verification requires exact operation, actor, action, scope, issuer, statu
   }
 });
 
-test('verification binds the Node-owned platform when present', (t) => {
-  const ledger = createOperationLedger({ env: createIsolatedTestEnv(t) });
-  const authority = actionReceipt.createActionReceiptAuthority({ ledger });
-  const operation = ledger.mint({
-    request: REQUEST,
-    actorContext: ACTOR,
-    binding: { platform: 'feishu' },
-  });
-  const receipt = authority.issue({
-    issuerHandle: createIssuer(authority),
-    operation: ledger.claim(operation),
-    result: { ok: true, authenticated: true, effectId: 'memory:platform' },
-  });
-  assert.equal(authority.verify(receipt, { platform: 'feishu' }).ok, true);
-  assert.equal(authority.verify(receipt, { platform: 'wechat' }).reason, 'receipt_platform_mismatch');
-});
-
 test('copied MCP JSON, handwritten markers, forged objects, and receipts from another authority are untrusted', (t) => {
   const ledger = createOperationLedger({ env: createIsolatedTestEnv(t) });
   const authority = actionReceipt.createActionReceiptAuthority({ ledger });
@@ -147,58 +130,6 @@ test('copied MCP JSON, handwritten markers, forged objects, and receipts from an
 
   const otherAuthority = actionReceipt.createActionReceiptAuthority({ ledger });
   assert.deepEqual(otherAuthority.verify(receipt), { ok: false, reason: 'receipt_untrusted' });
-});
-
-test('receipt verification fails closed at the injected-clock expiry boundary', (t) => {
-  let nowMs = Date.parse('2026-07-20T00:00:00.000Z');
-  const now = () => new Date(nowMs);
-  const ledger = createOperationLedger({ env: createIsolatedTestEnv(t), now });
-  const authority = actionReceipt.createActionReceiptAuthority({ ledger, now });
-  const operation = ledger.mint({ request: REQUEST, actorContext: ACTOR, ttlMs: 1_000 });
-  const receipt = authority.issue({
-    issuerHandle: createIssuer(authority),
-    operation: ledger.claim(operation),
-    result: { ok: true, authenticated: true, effectId: 'memory:expires' },
-  });
-
-  nowMs = Date.parse(receipt.expiresAt) - 1;
-  assert.equal(authority.verify(receipt).ok, true);
-
-  nowMs = Date.parse(receipt.expiresAt);
-  assert.deepEqual(authority.verify(receipt), { ok: false, reason: 'receipt_expired' });
-
-  nowMs += 1;
-  assert.deepEqual(authority.verify(receipt), { ok: false, reason: 'receipt_expired' });
-  assert.equal(ledger.getOperation(receipt.operationId).state, 'completed');
-  assert.equal(ledger.getOperation(receipt.operationId).status, 'succeeded');
-});
-
-test('a frozen receipt is rechecked on every verify and nonce authority remains ledger-bound', (t) => {
-  let nowMs = Date.parse('2026-07-20T00:00:00.000Z');
-  const now = () => new Date(nowMs);
-  const env = createIsolatedTestEnv(t);
-  const ledger = createOperationLedger({ env, now });
-  const authority = actionReceipt.createActionReceiptAuthority({ ledger, now });
-  const operation = ledger.mint({ request: REQUEST, actorContext: ACTOR, ttlMs: 1_000 });
-  const receipt = authority.issue({
-    issuerHandle: createIssuer(authority),
-    operation: ledger.claim(operation),
-    result: { ok: true, authenticated: true, effectId: 'memory:frozen-expiry' },
-  });
-  assert.equal(Object.isFrozen(receipt), true);
-  assert.equal(authority.verify(receipt, { operationId: receipt.operationId }).ok, true);
-  assert.deepEqual(authority.verify(Object.freeze({ ...receipt, nonce: 'nonce_wrong' })), {
-    ok: false,
-    reason: 'receipt_untrusted',
-  });
-
-  nowMs = Date.parse(receipt.expiresAt) + 1;
-  assert.deepEqual(authority.verify(receipt), { ok: false, reason: 'receipt_expired' });
-
-  const reopenedLedger = createOperationLedger({ env, now });
-  const reopenedAuthority = actionReceipt.createActionReceiptAuthority({ ledger: reopenedLedger, now });
-  assert.deepEqual(reopenedAuthority.verify(receipt), { ok: false, reason: 'receipt_untrusted' });
-  assert.equal(reopenedLedger.getOperation(receipt.operationId).status, 'succeeded');
 });
 
 test('a failed receipt or unrelated success cannot satisfy a successful claim', (t) => {

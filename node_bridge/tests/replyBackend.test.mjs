@@ -66,12 +66,10 @@ test('manual AI daily digest uses a typed owner action and never enters media co
     ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
   });
   const result = await backend.getReply({ text: '请重新发送今日日报', sender_id: 'owner', conversation_id: 'home', platform: 'feishu', trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' } });
-  assert.equal(result.replyText, '正在补发。\n\n今日日报已补发。');
+  assert.equal(result.replyText, '今日日报已补发。');
   assert.equal(requests.length, 1);
   assert.equal(requests[0].actionType, 'ai_daily_digest.send');
-  assert.equal(requests[0].scope.mode, 'manual');
-  assert.equal(requests[0].scope.date, 'current_local_date');
-  assert.match(requests[0].scope.operationDate, /^\d{4}-\d{2}-\d{2}$/);
+  assert.deepEqual(requests[0].scope, { mode: 'manual', date: 'current_local_date' });
 });
 
 test('informational AI digest drops prohibited envelope actions before execution and releases the report body', async (t) => {

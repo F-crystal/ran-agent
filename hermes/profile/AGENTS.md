@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-07-21)
+Status: CURRENT (2026-07-02)
 
 ## 工具与边界简表
 
@@ -23,10 +23,6 @@ DeepSeek V4 在本项目中不直接处理原始图片、视频、音频或社�
 
 普通闲聊不主动调用重工具。只有用户明确要求搜索、读链接、看图、听音频、分析视频、执行命令、调试服务、归档、更新代码、生成图片/语音、查记忆或查知识库时才调用相应工具。例外是 `personal_memory.surface_relevant_context`：当当前话题像历史主题或个人偏好时，可以作为低成本只读浮现工具使用。工具结果不够或引用不清时，直接说明，不要猜。
 
-Effect ownership：Hermes 内部工具只做读取、查询、搜索和分析。飞书消息发送、飞书文档更新与日报发送不得调用内部 terminal、`lark-cli` 或 MCP 写工具；只能在 reply envelope 中提出 `feishu.message.send`、`feishu.document.update` 或既有日报 typed action intent，由 Node executor 执行并签发 receipt。模型不得提供 receipt/issuer/status/operation authority；`ambiguous` outcome 不得自动重试。lite/full 使用同一规则。
-
-上述 Node-owned receipt bridge 已在 repository 中通过 owner acceptance，但尚未部署；它只是 transitional compatibility hotfix，不代表 Package B.3 或 Core broker 已完成。Lite/Full 共享同一 effect owner 与 receipt 合同；只读 MCP 可继续留在 Hermes runtime。
-
 不要直接使用 Tavily、OpenCLI 或 Playwright 做普通搜索。只有 `search_hub` 明确失败且用户正在调试工具链时，才考虑底层工具。平台搜索可由 `search_hub` 路由到 OpenCLI 或 social_reader；OpenCLI 必须保持只读 allowlist，不做发布、点赞、关注、评论、保存、删除、购物车、写文件等操作。
 
 禁用 Hermes 原生多模态工具：`vision_analyze`、`browser_vision`、`video_analyze`、`image_generate`、`text_to_speech`。除非未来明确切换到原生多模态模型和新工具链，否则不要使用这些工具，也不要把 `image_url` 作为消息内容发给 DeepSeek。
@@ -34,7 +30,7 @@ Effect ownership：Hermes 内部工具只做读取、查询、搜索和分析。
 lite/full 口径：
 
 - `8642` / `ran-assistant-lite` 是 lite-context 日常入口，默认用于普通聊天、XHS/media/memory 等请求。
-- `8643` / `ran-assistant` 是 full-debug 重工具入口，用于调试、文件、Playwright、media_generation 等请求；transitional receipt hotfix 期间不暴露 terminal。
+- `8643` / `ran-assistant` 是 full-debug 重工具入口，用于调试、命令、文件、Playwright、media_generation、lark-cli 等请求。
 - `8642` 不是强安全沙箱；不要把“不能 terminal”当成验收项。
 - `search_hub` 同时注册到 lite/full。lite 使用轻量 provider：Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed；full 额外保留 Playwright fallback，OpenCLI browser-backed 默认关闭（2C4G/60G 服务器约束，Phase 11.2 可选增强）。
 
@@ -46,7 +42,8 @@ lite/full 口径：
 - 不连续刷表情包；用户明确说不要表情包、别发表情、保持正式时必须遵守。
 - 日报、总结、错误报告、正式通知、digest、调试结论默认不用表情包。
 - 用户发来的图片如果像表情包，可以询问是否保存；普通截图、照片、文档图片、工作文件不得自动保存。
-- `sticker_save_from_inbox`、`sticker_update`、`sticker_delete` 在 Hermes 内部禁用；保存、更新、删除只走 Node pending-action executor。
-- `sticker_list` 仍是 full/owner-only 只读管理工具；lite 入口只使用 `sticker_tags/sticker_pick/sticker_attach`。
+- `sticker_save_from_inbox` 允许在 lite 日常聊天中使用，但只能在用户明确表达“保存这个为表情包/加入表情包/以后用这个表情”等语义时保存可信入站 media；不要把普通截图、照片、工作图片自动保存。
+- `sticker_update` / `sticker_delete` / `sticker_list` 仍是 full/owner-only 管理工具，非 owner 或意图不明确时拒绝。
+- lite 入口可使用 `sticker_tags/sticker_pick/sticker_attach/sticker_save_from_inbox`；full 入口额外可在 owner 明确要求时使用维护工具。
 
-主动消息边界：不要主动发 check-in、追问、问候或普通 follow-up。Heartbeat、todo、reflection 只做内部维护；显式到点 reminder 可以走 `ProactiveEvent -> Hermes synthetic turn -> egress`，由你决定是否 `notify`，但不能绕过 bridge 直接发文本。每日 AI 日报仍走 `scheduled_ai_daily_digest`，基于 AIHOT/Search Hub 事实生成内容，并通过既有 Node-owned `ai_daily_digest.send` action executor 发送，不得在 Hermes 内部直接调用飞书写工具，也不得开启旧 proactive/life-loop 外发。外部 MCP 系统队列只能走 `/external-mcp/system-queue -> ProactiveEvent -> ChannelHub -> replyBackend -> Hermes` 的合成 turn；`silent`、`remember`、`draft`、空回复或普通文本必须静默，不得发送字面 silent。
+主动消息边界：不要主动发 check-in、追问、问候或普通 follow-up。Heartbeat、todo、reflection 只做内部维护；显式到点 reminder 可以走 `ProactiveEvent -> Hermes synthetic turn -> egress`，由你决定是否 `notify`，但不能绕过 bridge 直接发文本。每日 AI 日报仍走 `scheduled_ai_daily_digest`，基于 AIHOT/Search Hub 事实，由 Hermes 生成一条飞书私聊日报，不得开启旧 proactive/life-loop 外发。外部 MCP 系统队列只能走 `/external-mcp/system-queue -> ProactiveEvent -> ChannelHub -> replyBackend -> Hermes` 的合成 turn；`silent`、`remember`、`draft`、空回复或普通文本必须静默，不得发送字面 silent。

@@ -8,7 +8,7 @@ import { resolveStateDir } from './runtimeState.mjs';
 const SCHEMA_VERSION = 1;
 const DEFAULT_TTL_MS = 5 * 60_000;
 const MAX_TTL_MS = 15 * 60_000;
-const RECEIPT_STATUSES = new Set(['succeeded', 'failed', 'partial', 'ambiguous', 'rejected']);
+const RECEIPT_STATUSES = new Set(['succeeded', 'failed', 'partial', 'ambiguous']);
 const OPERATION_STATES = new Set(['pending', 'executing', 'completed', 'rejected']);
 
 export function createOperationLedger(options = {}) {
@@ -17,7 +17,7 @@ export function createOperationLedger(options = {}) {
   const randomBytes = typeof options.randomBytes === 'function' ? options.randomBytes : nodeRandomBytes;
   const target = options.path || path.join(resolveStateDir(env), 'core', 'operation-ledger.json');
 
-  function mint({ request, actorContext, ttlMs = DEFAULT_TTL_MS, binding = {} } = {}) {
+  function mint({ request, actorContext, ttlMs = DEFAULT_TTL_MS } = {}) {
     const normalizedRequest = normalizeActionRequest(request);
     const actorKey = boundedIdentity(actorContext?.actorKey, 'actorKey');
     const createdAt = currentDate(now).toISOString();
@@ -38,7 +38,6 @@ export function createOperationLedger(options = {}) {
       state: 'pending',
       createdAt,
       expiresAt: new Date(Date.parse(createdAt) + lifetime).toISOString(),
-      ...normalizeOperationBinding(binding),
     };
     if (normalizedRequest.payloadRef !== undefined) record.payloadRef = normalizedRequest.payloadRef;
     if (normalizedRequest.requestedAuthorizationBasis !== undefined) {
@@ -50,26 +49,6 @@ export function createOperationLedger(options = {}) {
     return deepFreeze({
       ...publicOperation(record),
       privateCapability,
-    });
-  }
-
-  function reserve({ request, actorContext, ttlMs = DEFAULT_TTL_MS, binding = {} } = {}) {
-    const normalizedRequest = normalizeActionRequest(request);
-    const actorKey = boundedIdentity(actorContext?.actorKey, 'actorKey');
-    const normalizedBinding = normalizeOperationBinding(binding, { requireIdempotency: true });
-    const scopeDigest = digestActionScope(normalizedRequest.scope);
-    const existing = load().operations.find((item) => (
-      item.actorKey === actorKey && item.idempotencyDigest === normalizedBinding.idempotencyDigest
-    ));
-    if (existing) {
-      if (existing.actionType !== normalizedRequest.actionType || existing.scopeDigest !== scopeDigest) {
-        throw operationError('OPERATION_IDEMPOTENCY_CONFLICT', 'operation key was already used with different arguments');
-      }
-      return deepFreeze({ replayed: true, operation: publicOperation(existing) });
-    }
-    return deepFreeze({
-      replayed: false,
-      operation: mint({ request: normalizedRequest, actorContext, ttlMs, binding: normalizedBinding }),
     });
   }
 
@@ -124,21 +103,18 @@ export function createOperationLedger(options = {}) {
       evidenceType,
       effectDigest,
       completedAt: currentDate(now).toISOString(),
-      ...normalizeOutcome(binding),
     });
     save(state);
     return deepFreeze(publicOperation(record));
   }
 
-  function reject({ operationId, code = 'invalid_executor_result', summary = '', target = '', retryable = true } = {}) {
+  function reject({ operationId, code = 'invalid_executor_result' } = {}) {
     const state = load();
     const record = state.operations.find((item) => item.operationId === operationId);
     if (!record) throw operationError('OPERATION_NOT_FOUND', 'operation was not registered');
     if (record.state !== 'executing') throw operationError('OPERATION_NOT_EXECUTING', 'operation is not executing');
     record.state = 'rejected';
     record.rejectionCode = boundedIdentity(code, 'rejectionCode');
-    record.status = 'rejected';
-    Object.assign(record, normalizeOutcome({ summary, target, retryable }));
     record.completedAt = currentDate(now).toISOString();
     save(state);
     return deepFreeze(publicOperation(record));
@@ -147,61 +123,6 @@ export function createOperationLedger(options = {}) {
   function getOperation(operationId) {
     const record = load().operations.find((item) => item.operationId === operationId);
     return record ? deepFreeze(publicOperation(record)) : null;
-  }
-
-  function listRecentOutcomes({ actorKey, conversationDigest, limit = 8 } = {}) {
-    const actor = boundedIdentity(actorKey, 'actorKey');
-    const conversation = boundedDigest(conversationDigest, 'conversationDigest');
-    const boundedLimit = Math.max(1, Math.min(32, Number(limit) || 8));
-    return deepFreeze(load().operations
-      .filter((item) => item.actorKey === actor
-        && item.conversationDigest === conversation
-        && ['completed', 'rejected'].includes(item.state)
-        && item.summary)
-      .slice(-boundedLimit)
-      .reverse()
-      .map((item) => ({
-        actionType: item.actionType,
-        target: item.target || '',
-        status: item.state === 'rejected' ? 'rejected' : item.status,
-        summary: item.summary,
-        confirmedAt: item.completedAt,
-        retryable: item.retryable === true,
-      })));
-  }
-
-  function findEquivalentOutcome({ actorKey, conversationDigest, actionType, scope } = {}) {
-    const actor = boundedIdentity(actorKey, 'actorKey');
-    const conversation = boundedDigest(conversationDigest, 'conversationDigest');
-    const candidate = scope && typeof scope === 'object' ? scope : {};
-    const feishuComparable = [candidate.target, candidate.argumentsDigest, candidate.expectedEffect]
-      .every((item) => typeof item === 'string' && item);
-    const dailyComparable = actionType === 'ai_daily_digest.send'
-      && candidate.mode === 'manual' && candidate.date === 'current_local_date'
-      && /^\d{4}-\d{2}-\d{2}$/.test(String(candidate.operationDate || ''));
-    if (!feishuComparable && !dailyComparable) return null;
-    const record = load().operations.findLast((item) => item.actorKey === actor
-      && item.conversationDigest === conversation
-      && item.actionType === actionType
-      && ['completed', 'rejected'].includes(item.state)
-      && (feishuComparable
-        ? item.scope?.target === candidate.target
-          && item.scope?.argumentsDigest === candidate.argumentsDigest
-          && item.scope?.expectedEffect === candidate.expectedEffect
-        : item.scope?.mode === candidate.mode
-          && item.scope?.date === candidate.date
-          && item.scope?.operationDate === candidate.operationDate));
-    return record ? deepFreeze(publicOperation(record)) : null;
-  }
-
-  function recordRejectedOutcome({ requestRef, actionType, actorContext, binding = {}, code, summary, target = '', retryable = false } = {}) {
-    const operation = mint({
-      request: { requestRef, actionType, scope: {} },
-      actorContext,
-      binding,
-    });
-    claim(operation);
-    return reject({ operationId: operation.operationId, code, summary, target, retryable });
   }
 
   function load() {
@@ -216,7 +137,7 @@ export function createOperationLedger(options = {}) {
     writeJsonAtomic(target, state, { validate: validateLedgerState });
   }
 
-  return Object.freeze({ target, mint, reserve, claim, complete, reject, getOperation, listRecentOutcomes, findEquivalentOutcome, recordRejectedOutcome });
+  return Object.freeze({ target, mint, claim, complete, reject, getOperation });
 }
 
 function publicOperation(record) {
@@ -245,52 +166,8 @@ function validateLedgerState(value) {
       if (!RECEIPT_STATUSES.has(item.status) || !item.issuer || !item.evidenceType) return false;
       if (!/^sha256:[a-f0-9]{64}$/.test(String(item.effectDigest || ''))) return false;
     }
-    if (item.idempotencyDigest !== undefined && !/^sha256:[a-f0-9]{64}$/.test(String(item.idempotencyDigest))) return false;
-    if (item.conversationDigest !== undefined && !/^sha256:[a-f0-9]{64}$/.test(String(item.conversationDigest))) return false;
-    if (item.requestId !== undefined && !item.requestId) return false;
-    if (item.attempt !== undefined && (!Number.isInteger(item.attempt) || item.attempt < 1)) return false;
-    if (item.summary !== undefined && (typeof item.summary !== 'string' || item.summary.length > 500)) return false;
-    if (item.target !== undefined && (typeof item.target !== 'string' || item.target.length > 180)) return false;
-    if (item.retryable !== undefined && typeof item.retryable !== 'boolean') return false;
   }
   return true;
-}
-
-function normalizeOperationBinding(value = {}, { requireIdempotency = false } = {}) {
-  const output = {};
-  if (value.idempotencyDigest !== undefined || requireIdempotency) {
-    output.idempotencyDigest = boundedDigest(value.idempotencyDigest, 'idempotencyDigest');
-  }
-  if (value.conversationDigest !== undefined) output.conversationDigest = boundedDigest(value.conversationDigest, 'conversationDigest');
-  if (value.requestId !== undefined) output.requestId = boundedIdentity(value.requestId, 'requestId');
-  if (value.platform !== undefined) output.platform = boundedIdentity(value.platform, 'platform');
-  if (value.capability !== undefined) output.capability = boundedIdentity(value.capability, 'capability');
-  if (value.attempt !== undefined) {
-    const attempt = Number(value.attempt);
-    if (!Number.isInteger(attempt) || attempt < 1 || attempt > 100) throw operationError('OPERATION_INVALID', 'attempt is invalid');
-    output.attempt = attempt;
-  }
-  return output;
-}
-
-function normalizeOutcome(value = {}) {
-  const output = {};
-  if (value.summary !== undefined && String(value.summary || '').trim()) output.summary = boundedText(value.summary, 'summary', 500);
-  if (value.target !== undefined && String(value.target || '').trim()) output.target = boundedText(value.target, 'target', 180);
-  if (value.retryable !== undefined) output.retryable = value.retryable === true;
-  return output;
-}
-
-function boundedDigest(value, name) {
-  const text = String(value || '');
-  if (!/^sha256:[a-f0-9]{64}$/.test(text)) throw operationError('OPERATION_INVALID', `${name} is invalid`);
-  return text;
-}
-
-function boundedText(value, name, maxLength) {
-  const text = String(value || '').trim();
-  if (!text || text.length > maxLength || /[\r\n\t\0]/.test(text)) throw operationError('OPERATION_INVALID', `${name} is invalid`);
-  return text;
 }
 
 function sameCapability(expectedDigest, capability) {
