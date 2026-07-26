@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
-# Server-local acceptance.  It never contacts a chat channel or an MCP
-# provider; it validates only the deployed process and owner/state invariants.
+# Server-local acceptance. It never contacts a chat channel or external MCP.
+# Its gateway canary is valid only against the controlled local provider boundary.
 set -euo pipefail
 umask 077
 
@@ -27,6 +27,7 @@ fi
 
 if [[ "${EUID}" -eq 0 ]]; then SUDO=(); else command -v sudo >/dev/null 2>&1 || fail sudo_required; SUDO=(sudo); fi
 NODE_BIN="${RAN_AGENT_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
+PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-/opt/ran_agent/.venv/bin/python}"
 HERMES_LITE_BRIDGE_SMOKE_URL="${RAN_AGENT_RELEASE_LITE_BRIDGE_SMOKE_URL:-http://127.0.0.1:8642/v1/models}"
 HERMES_FULL_BRIDGE_SMOKE_URL="${RAN_AGENT_RELEASE_FULL_BRIDGE_SMOKE_URL:-http://127.0.0.1:8643/v1/models}"
 GATEWAY_READY_TIMEOUT_SECONDS="${RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS:-120}"
@@ -86,9 +87,90 @@ release_broker_read_only_smoke() {
 }
 
 release_post_start_health() {
-  for unit in ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service; do
+  for unit in ran-agent-python.service ran-agent-node.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-hermes.service ran-agent-hermes-full.service; do
     "${SUDO[@]}" systemctl is-active --quiet "$unit" || fail "service_inactive:$unit"
   done
+  release_managed_endpoint_health \
+    ran-agent-ombre-brain.service 18001 \
+    "${OMBRE_BRAIN_HEALTH_URL:-http://127.0.0.1:18001/health}" \
+    ombre_upstream
+  release_managed_endpoint_health \
+    ran-agent-ombre-recall.service 18002 \
+    "${OMBRE_RECALL_HEALTH_URL:-http://127.0.0.1:18002/health}" \
+    ombre_recall
+  release_ombre_unit_contract
+}
+
+release_ombre_unit_contract() {
+  local unit_text pid process_env
+  unit_text="$("${SUDO[@]}" systemctl cat ran-agent-ombre-brain.service 2>/dev/null)" ||
+    fail ombre_upstream_unit_unavailable
+  for setting in \
+    'Environment=OMBRE_BRAIN_RUNNER=source' \
+    'Environment=OMBRE_BRAIN_COMMIT=0e83d4671ce1629e03ad36bb9160235bf60dbd34' \
+    'Environment=OMBRE_BIND_HOST=127.0.0.1' \
+    'Environment=OMBRE_MCP_REQUIRE_AUTH=false' \
+    'Environment=OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp'; do
+    grep -qF "$setting" <<<"$unit_text" || fail ombre_upstream_unit_contract
+  done
+  pid="$("${SUDO[@]}" systemctl show ran-agent-ombre-brain.service --property=MainPID --value 2>/dev/null)" ||
+    fail ombre_upstream_main_pid_unavailable
+  process_env="$("${SUDO[@]}" cat "/proc/$pid/environ" 2>/dev/null | tr '\0' '\n')" ||
+    fail ombre_upstream_process_environment_unavailable
+  for setting in \
+    'OMBRE_BRAIN_RUNNER=source' \
+    'OMBRE_BRAIN_COMMIT=0e83d4671ce1629e03ad36bb9160235bf60dbd34' \
+    'OMBRE_BIND_HOST=127.0.0.1' \
+    'OMBRE_MCP_REQUIRE_AUTH=false'; do
+    grep -qxF "$setting" <<<"$process_env" || fail ombre_upstream_process_environment_contract
+  done
+}
+
+release_managed_endpoint_health() {
+  local unit="$1" port="$2" health_url="$3" label="$4" pid listeners
+  pid="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" ||
+    fail "${label}_main_pid_unavailable"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "${label}_main_pid_invalid"
+  listeners="$(ss -ltnp 2>/dev/null)" || fail "${label}_listener_probe_failed"
+  printf '%s\n' "$listeners" |
+    grep -Eq "127\\.0\\.0\\.1:$port([^0-9]|$).*pid=$pid([^0-9]|$)" ||
+    fail "${label}_listener_not_owned_by_main_pid"
+  curl --fail --silent --show-error --max-time 5 "$health_url" >/dev/null ||
+    fail "${label}_health_failed"
+}
+
+release_ombre_recall_acceptance() {
+  local configs=(
+    "${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/config.yaml" \
+    "${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/profiles/ran-assistant/config.yaml" \
+    "${HERMES_LITE_HOME:-${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/lite}/config.yaml" \
+    "${HERMES_LITE_HOME:-${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/lite}/profiles/ran-assistant-lite/config.yaml"
+  )
+  OMBRE_RECALL_MCP_URL="${OMBRE_RECALL_MCP_URL:-http://127.0.0.1:18002/mcp}" \
+    "${SUDO[@]}" "$PYTHON_BIN" "$SOURCE_ROOT/scripts/ombre_o1_contract.py" \
+      validate-config "${configs[@]}" >/dev/null ||
+    fail ombre_runtime_semantic_contract
+  curl --fail --silent --show-error --max-time 5 \
+    --header 'content-type: application/json' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+    "${OMBRE_RECALL_MCP_URL:-http://127.0.0.1:18002/mcp}" |
+    "$NODE_BIN" --input-type=module -e '
+      let body = "";
+      for await (const chunk of process.stdin) body += chunk;
+      const names = JSON.parse(body)?.result?.tools?.map((tool) => tool.name);
+      if (JSON.stringify(names) !== JSON.stringify(["ombre_recall_search", "ombre_recall_read"])) process.exit(1);
+    ' || fail ombre_recall_toolset_invalid
+}
+
+release_projection_acceptance() {
+  RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
+  RAN_AGENT_PROJECTION_POINTER="${RAN_AGENT_PROJECTION_POINTER:-/opt/ran_agent/.ran_agent_state/hermes/published-memory-context.json}" \
+    "$NODE_BIN" --input-type=module -e '
+      import { computeHermesIdentityVersion, loadPublishedProjection } from "./node_bridge/src/hermesIdentityProjection.mjs";
+      const identity = computeHermesIdentityVersion(process.env.RAN_AGENT_RELEASE_SOURCE_ROOT);
+      const snapshot = loadPublishedProjection(process.env.RAN_AGENT_PROJECTION_POINTER, identity.version);
+      if (!snapshot.projection_revision || !Number.isInteger(snapshot.activity_revision)) process.exit(1);
+    ' >/dev/null || fail projection_not_verified
 }
 
 require_bounded_integer() {
@@ -159,6 +241,39 @@ release_bridge_synthetic_paths() {
   wait_for_gateway full ran-agent-hermes-full.service "$HERMES_FULL_BRIDGE_SMOKE_URL"
 }
 
+release_provider_boundary_canary() {
+  local mode="$1" unit="$2" port="$3" profile="$4" pid key nonce
+  pid="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" ||
+    fail "${mode}_provider_canary_main_pid_unavailable"
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "${mode}_provider_canary_main_pid_invalid"
+  key="$(gateway_api_key "$pid")" || fail "${mode}_provider_canary_key_unavailable"
+  [[ -n "$key" ]] || fail "${mode}_provider_canary_key_missing"
+  nonce="$("$NODE_BIN" -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')" ||
+    fail "${mode}_provider_canary_nonce_failed"
+  env \
+    HERMES_REPLY_MODE=api \
+    HERMES_API_BASE_URL="http://127.0.0.1:$port/v1" \
+    HERMES_LITE_API_BASE_URL="http://127.0.0.1:$port/v1" \
+    HERMES_FULL_API_BASE_URL="http://127.0.0.1:$port/v1" \
+    HERMES_API_KEY="$key" \
+    HERMES_PROFILE="$profile" \
+    HERMES_LITE_PROFILE="$profile" \
+    HERMES_FULL_PROFILE="$profile" \
+    RAN_AGENT_CAPABILITY_MODE="$mode" \
+    RAN_AGENT_REPO_ROOT="$SOURCE_ROOT" \
+    HERMES_PUBLISHED_MEMORY_CONTEXT_PATH="${RAN_AGENT_PROJECTION_POINTER:-/opt/ran_agent/.ran_agent_state/hermes/published-memory-context.json}" \
+    RAN_AGENT_PROVIDER_CANARY_MODE="$mode" \
+    RAN_AGENT_PROVIDER_CANARY_NONCE="$nonce" \
+    RAN_AGENT_CONTEXT_SIZE_LOG=0 \
+    "$NODE_BIN" "$SOURCE_ROOT/node_bridge/src/hermesProviderBoundaryCanary.mjs" >/dev/null ||
+    fail "${mode}_provider_boundary_canary_failed"
+}
+
+release_provider_boundary_canaries() {
+  release_provider_boundary_canary lite ran-agent-hermes.service 8642 ran-assistant-lite
+  release_provider_boundary_canary full ran-agent-hermes-full.service 8643 ran-assistant
+}
+
 if [[ "$MODE" == "--dry-run" ]]; then
   require_acceptance_prerequisites
   bash "$SOURCE_ROOT/scripts/hermes-release-gate.sh" --preflight-only >/dev/null || fail preflight
@@ -180,6 +295,12 @@ fi
 release_semantic_verifier_preflight
 foreign_owner_binding_denied
 release_post_start_health
+release_ombre_recall_acceptance
+release_projection_acceptance
 release_bridge_synthetic_paths
+release_provider_boundary_canaries
 release_broker_read_only_smoke
+release_post_start_health
+release_projection_acceptance
+release_provider_boundary_canaries
 printf 'accept-hermes-release: apply-ok candidate=%s\n' "$CANDIDATE"

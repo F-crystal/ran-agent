@@ -609,7 +609,7 @@ test('apply script filter_obsidian_memory_from_config preserves other MCP server
   assert.match(text, /  personal_memory:/);
 });
 
-test('apply script preserves existing Ombre env values when using optional upsert', () => {
+test('apply script preserves optional Ombre env values and pins the loopback MCP contract', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-env-upsert-'));
   const envFile = join(dir, '.env');
   writeFileSync(envFile, [
@@ -627,7 +627,10 @@ test('apply script preserves existing Ombre env values when using optional upser
       JSON.stringify(envFile),
       '"?OMBRE_BRAIN_ENABLED=$OMBRE_BRAIN_ENABLED_DEFAULT"',
       '"?OMBRE_BRAIN_PORT=$OMBRE_BRAIN_PORT_DEFAULT"',
-      '"?OMBRE_BRAIN_MCP_URL=$OMBRE_BRAIN_MCP_URL_DEFAULT"',
+      '"OMBRE_BIND_HOST=$OMBRE_BIND_HOST_DEFAULT"',
+      '"OMBRE_MCP_REQUIRE_AUTH=$OMBRE_MCP_REQUIRE_AUTH_DEFAULT"',
+      '"OMBRE_BRAIN_MCP_URL=$OMBRE_BRAIN_MCP_URL_DEFAULT"',
+      '"OMBRE_RECALL_MCP_URL=$OMBRE_RECALL_MCP_URL_DEFAULT"',
       '"?PERSONAL_AGENT_OMBRE_MAX_CHARS=$PERSONAL_AGENT_OMBRE_MAX_CHARS_DEFAULT"',
     ].join(' '),
   ].join('\n')], {
@@ -638,56 +641,37 @@ test('apply script preserves existing Ombre env values when using optional upser
   const text = readFileSync(envFile, 'utf8');
   assert.match(text, /OMBRE_BRAIN_ENABLED=false/);
   assert.match(text, /OMBRE_BRAIN_PORT=19999/);
+  assert.match(text, /OMBRE_BIND_HOST=127\.0\.0\.1/);
+  assert.match(text, /OMBRE_MCP_REQUIRE_AUTH=false/);
   assert.match(text, /OMBRE_BRAIN_MCP_URL=http:\/\/127\.0\.0\.1:18001\/mcp/);
+  assert.match(text, /OMBRE_RECALL_MCP_URL=http:\/\/127\.0\.0\.1:18002\/mcp/);
   assert.match(text, /PERSONAL_AGENT_OMBRE_MAX_CHARS=900/);
   assert.doesNotMatch(text, /OMBRE_BRAIN_PORT=18001/);
 });
 
-test('apply script filter_ombre_memory_from_config removes direct Ombre MCP from toolsets and servers', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ombre-filter-'));
-  const configFile = join(dir, 'config.yaml');
-  writeFileSync(configFile, [
-    'platform_toolsets:',
-    '  cli:',
-    '    - mcp-search_hub',
-    '    - mcp-ombre_memory',
-    '    - mcp-ombre_memory_extra',
-    '    - mcp-playwright',
-    '',
-    'mcp_servers:',
-    '  search_hub:',
-    '    command: bash',
-    '  ombre_memory:',
-    '    url: "${OMBRE_BRAIN_MCP_URL}"',
-    '    timeout: 120',
-    '  ombre_memory_extra:',
-    '    url: "${OMBRE_BRAIN_MCP_EXTRA_URL}"',
-    '    timeout: 120',
-    '  playwright:',
-    '    command: bash',
-  ].join('\n'));
-
-  execFileSync('bash', ['-lc', [
-    'set -euo pipefail',
-    'export RAN_AGENT_NO_SUDO=1',
-    'source scripts/apply-hermes-runtime-split.sh',
-    `filter_ombre_memory_from_config ${JSON.stringify(configFile)}`,
-  ].join('\n')], {
-    cwd: new URL('../..', import.meta.url).pathname,
-    stdio: 'pipe',
-  });
-
-  const text = readFileSync(configFile, 'utf8');
-  assert.doesNotMatch(text, /mcp-ombre_memory/);
-  assert.doesNotMatch(text, /ombre_memory:/);
-  assert.doesNotMatch(text, /ombre_memory_extra:/);
-  assert.match(text, /mcp-search_hub/);
-  assert.match(text, /mcp-playwright/);
-  assert.match(text, /search_hub:/);
-  assert.match(text, /playwright:/);
+test('apply script enforces the unauthenticated loopback-only Ombre contract', () => {
+  for (const exports of [
+    ['OMBRE_BIND_HOST=0.0.0.0', 'OMBRE_BRAIN_MCP_URL=http://0.0.0.0:18001/mcp'],
+    ['OMBRE_BRAIN_HEALTH_URL=http://example.invalid/health'],
+    ['OMBRE_RECALL_MCP_URL=http://example.invalid/mcp'],
+    ['OMBRE_RECALL_HEALTH_URL=http://example.invalid/health'],
+    ['OMBRE_MCP_REQUIRE_AUTH=true'],
+  ]) {
+    assert.throws(() => execFileSync('bash', ['-lc', [
+      'set -euo pipefail',
+      'export RAN_AGENT_NO_SUDO=1',
+      'export OMBRE_MCP_REQUIRE_AUTH=false',
+      ...exports.map((entry) => `export ${entry}`),
+      'source scripts/apply-hermes-runtime-split.sh',
+      'validate_ombre_network_contract',
+    ].join('\n')], {
+      cwd: new URL('../..', import.meta.url).pathname,
+      stdio: 'pipe',
+    }));
+  }
 });
 
-test('apply script keeps full direct Ombre MCP when source runner is prepared', () => {
+test('apply script keeps full recall-only Ombre MCP when source runner is prepared', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-full-source-ready-'));
   const fullHome = join(dir, 'full');
   const liteHome = join(dir, 'lite');
@@ -704,9 +688,7 @@ test('apply script keeps full direct Ombre MCP when source runner is prepared', 
   writeFileSync(join(fullHome, 'profiles', 'ran-assistant', 'config.yaml'), [
     'mcp_servers:',
     '  ombre_memory:',
-    '    url: "${OMBRE_BRAIN_MCP_URL}"',
-    '  ombre_memory_extra:',
-    '    url: "${OMBRE_BRAIN_MCP_EXTRA_URL}"',
+    '    url: "${OMBRE_RECALL_MCP_URL}"',
     '  search_hub:',
     '    command: bash',
     '  sticker_catalog:',
@@ -732,10 +714,12 @@ test('apply script keeps full direct Ombre MCP when source runner is prepared', 
   const text = readFileSync(join(fullHome, 'config.yaml'), 'utf8');
   assert.match(text, /mcp-ombre_memory/);
   assert.match(text, /^  ombre_memory:/m);
-  assert.match(text, /^  ombre_memory_extra:/m);
+  assert.match(text, /\$\{OMBRE_RECALL_MCP_URL\}/);
+  assert.doesNotMatch(text, /\$\{OMBRE_BRAIN_MCP_URL\}/);
+  assert.doesNotMatch(text, new RegExp([['ombre_memory', 'extra'].join('_'), ['mcp', 'extra'].join('-')].join('|')));
 });
 
-test('apply script writes Ombre systemd unit without hard-coded Ombre env overrides', () => {
+test('apply script writes the pinned source/loopback/auth Ombre systemd contract', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-systemd-'));
   const systemdDir = join(dir, 'systemd');
   mkdirSync(systemdDir, { recursive: true });
@@ -752,12 +736,20 @@ test('apply script writes Ombre systemd unit without hard-coded Ombre env overri
   });
 
   const unit = readFileSync(join(systemdDir, 'ran-agent-ombre-brain.service'), 'utf8');
+  const liteUnit = readFileSync(join(systemdDir, 'ran-agent-hermes.service'), 'utf8');
+  const fullUnit = readFileSync(join(systemdDir, 'ran-agent-hermes-full.service'), 'utf8');
   assert.match(unit, /Description=Ran Agent Ombre Brain Memory Service/);
   assert.match(unit, /EnvironmentFile=-\/opt\/ran_agent\/\.env\.local/);
   assert.match(unit, /source \/opt\/ran_agent\/\.venv\/bin\/activate/);
   assert.match(unit, /scripts\/start_ombre_brain_service\.sh/);
+  assert.match(unit, /^Environment=OMBRE_BRAIN_RUNNER=source$/m);
+  assert.match(unit, /^Environment=OMBRE_BRAIN_COMMIT=0e83d4671ce1629e03ad36bb9160235bf60dbd34$/m);
+  assert.match(unit, /^Environment=OMBRE_BIND_HOST=127\.0\.0\.1$/m);
+  assert.match(unit, /^Environment=OMBRE_MCP_REQUIRE_AUTH=false$/m);
   assert.doesNotMatch(unit, /^Environment=OMBRE_BRAIN_PORT=/m);
   assert.doesNotMatch(unit, /^Environment=OMBRE_BUCKETS_DIR=/m);
+  assert.match(liteUnit, /After=.*ran-agent-ombre-brain\.service/);
+  assert.match(fullUnit, /After=.*ran-agent-ombre-brain\.service/);
 });
 
 test('apply script skips reset-failed for systemd units that are not loaded yet', () => {
@@ -895,15 +887,14 @@ test('diagnose-ombre-memory.sh keeps full config path separate from lite env HER
   assert.match(output, /warnings: PRESENT/);
 });
 
-test('prepare-ombre-brain.sh creates compose and config without secrets', () => {
+test('prepare-ombre-brain.sh rejects Docker without creating a parallel O1 runtime', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-prepare-'));
   const rootDir = join(dir, 'repo');
   const homeDir = join(dir, 'ombre-home');
   const bucketsDir = join(dir, 'vault', 'ombre');
   mkdirSync(rootDir, { recursive: true });
 
-  let failed = false;
-  try {
+  assert.throws(() => {
     execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
       cwd: new URL('../..', import.meta.url).pathname,
       env: {
@@ -917,28 +908,12 @@ test('prepare-ombre-brain.sh creates compose and config without secrets', () => 
       },
       stdio: 'pipe',
     });
-  } catch {
-    failed = true;
-  }
-
-  const compose = readFileSync(join(homeDir, 'docker-compose.yml'), 'utf8');
-  const config = readFileSync(join(homeDir, 'config.yaml'), 'utf8');
-  const upstream = readFileSync(join(homeDir, 'upstream_url.txt'), 'utf8');
-  const status = JSON.parse(readFileSync(join(homeDir, 'status.json'), 'utf8'));
-
-  assert.match(compose, /p0luz\/ombre-brain:latest/);
-  assert.match(compose, /127\.0\.0\.1/);
-  assert.match(compose, /\$\{OMBRE_COMPRESS_API_KEY:-\}/);
-  assert.doesNotMatch(compose, /must-not-be-written/);
-  assert.match(config, /transport: "streamable-http"/);
-  assert.match(config, new RegExp(`buckets_dir: "${bucketsDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
-  assert.match(upstream, /https:\/\/github\.com\/P0luz\/Ombre-Brain/);
-  assert.equal(status.deploy_ready, failed ? false : true);
-  assert.equal(status.runner, 'docker');
-  assert.equal(JSON.stringify(status).includes('must-not-be-written'), false);
+  }, /Command failed/);
+  assert.equal(existsSync(join(homeDir, 'docker-compose.yml')), false);
+  assert.equal(existsSync(join(homeDir, 'status.json')), false);
 });
 
-test('prepare-ombre-brain.sh wraps existing source update in 5 minute timeout', () => {
+test('prepare-ombre-brain.sh fails closed when timed-out source cannot prove the pinned commit', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-update-timeout-'));
   const rootDir = join(dir, 'repo');
   const homeDir = join(dir, 'ombre-home');
@@ -946,9 +921,14 @@ test('prepare-ombre-brain.sh wraps existing source update in 5 minute timeout', 
   const binDir = join(dir, 'bin');
   const timeoutLog = join(dir, 'timeout.log');
   mkdirSync(join(sourceDir, 'src'), { recursive: true });
-  mkdirSync(join(sourceDir, '.git'), { recursive: true });
   mkdirSync(binDir, { recursive: true });
   writeFileSync(join(sourceDir, 'src', 'server.py'), '');
+  execFileSync('git', ['init'], { cwd: sourceDir, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.email', 'ombre-test@example.invalid'], { cwd: sourceDir });
+  execFileSync('git', ['config', 'user.name', 'Ombre test'], { cwd: sourceDir });
+  execFileSync('git', ['add', 'src/server.py'], { cwd: sourceDir });
+  execFileSync('git', ['commit', '-m', 'fixed fixture'], { cwd: sourceDir, stdio: 'pipe' });
+  const fixedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf8' }).trim();
   writeFileSync(join(binDir, 'timeout'), [
     '#!/usr/bin/env bash',
     `printf '%s\\n' "$*" >> ${JSON.stringify(timeoutLog)}`,
@@ -956,7 +936,7 @@ test('prepare-ombre-brain.sh wraps existing source update in 5 minute timeout', 
   ].join('\n'));
   chmodSync(join(binDir, 'timeout'), 0o755);
 
-  const output = execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
+  assert.throws(() => execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
     cwd: new URL('../..', import.meta.url).pathname,
     env: {
       ...process.env,
@@ -968,13 +948,10 @@ test('prepare-ombre-brain.sh wraps existing source update in 5 minute timeout', 
     },
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  }), /Command failed/);
 
-  assert.match(readFileSync(timeoutLog, 'utf8'), /300 git -C .* pull --ff-only/);
-  assert.match(output, /WARNING: source update timed out or failed; preserving current checkout/);
-  const status = JSON.parse(readFileSync(join(homeDir, 'status.json'), 'utf8'));
-  assert.equal(status.deploy_ready, true);
-  assert.equal(status.repo.update, 'timeout');
+  assert.match(readFileSync(timeoutLog, 'utf8'), /300 git -C .* fetch origin 0e83d4671ce1629e03ad36bb9160235bf60dbd34/);
+  assert.equal(existsSync(join(homeDir, 'status.json')), false);
 });
 
 test('prepare-ombre-brain.sh skips pip install when requirements are unchanged', () => {
@@ -988,15 +965,33 @@ test('prepare-ombre-brain.sh skips pip install when requirements are unchanged',
   mkdirSync(join(venvDir, 'bin'), { recursive: true });
   writeFileSync(join(sourceDir, 'src', 'server.py'), '');
   writeFileSync(join(sourceDir, 'requirements.txt'), 'fastapi==0.1\n');
+  execFileSync('git', ['init'], { cwd: sourceDir, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.email', 'ombre-test@example.invalid'], { cwd: sourceDir });
+  execFileSync('git', ['config', 'user.name', 'Ombre test'], { cwd: sourceDir });
+  execFileSync('git', ['add', 'src/server.py', 'requirements.txt'], { cwd: sourceDir });
+  execFileSync('git', ['commit', '-m', 'fixed fixture'], { cwd: sourceDir, stdio: 'pipe' });
+  const fixedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf8' }).trim();
   writeFileSync(join(venvDir, 'bin', 'python'), [
     '#!/usr/bin/env bash',
     `printf '%s\\n' "$*" >> ${JSON.stringify(pipLog)}`,
     'exit 0',
   ].join('\n'));
   chmodSync(join(venvDir, 'bin', 'python'), 0o755);
+  const gitShim = join(dir, 'git');
+  writeFileSync(gitShim, [
+    '#!/usr/bin/env bash',
+    'if [[ "$*" == *"rev-parse HEAD"* ]]; then',
+    '  printf "%s\\n" 0e83d4671ce1629e03ad36bb9160235bf60dbd34',
+    '  exit 0',
+    'fi',
+    'exec /usr/bin/git "$@"',
+    '',
+  ].join('\n'));
+  chmodSync(gitShim, 0o755);
 
   const env = {
     ...process.env,
+    PATH: `${dir}:${process.env.PATH}`,
     RAN_AGENT_REPO_ROOT: rootDir,
     OMBRE_BRAIN_UPDATE_SOURCE: 'false',
     OMBRE_BRAIN_HOME: homeDir,

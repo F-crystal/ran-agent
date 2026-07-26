@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Diagnose the optional Ombre Brain runtime and Hermes full-profile MCP wiring.
+# Diagnose the internal Ombre runtime and Lite/Full recall-only wiring.
 
 set -euo pipefail
 
@@ -24,18 +24,36 @@ OMBRE_BRAIN_REPO_URL="${OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Bra
 OMBRE_BRAIN_ENABLED="${OMBRE_BRAIN_ENABLED:-true}"
 OMBRE_BRAIN_MCP_ENABLED="${OMBRE_BRAIN_MCP_ENABLED:-true}"
 OMBRE_BRAIN_RUNNER="${OMBRE_BRAIN_RUNNER:-source}"
+OMBRE_BRAIN_COMMIT="${OMBRE_BRAIN_COMMIT:-0e83d4671ce1629e03ad36bb9160235bf60dbd34}"
 OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$ROOT_DIR/.ran_agent_state/ombre-brain}"
 OMBRE_BRAIN_SOURCE_DIR="${OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME/upstream}"
 OMBRE_BRAIN_VENV="${OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME/.venv}"
 OMBRE_BUCKETS_DIR="${OMBRE_BUCKETS_DIR:-$ROOT_DIR/vault/ombre}"
-OMBRE_BRAIN_BIND_HOST="${OMBRE_BRAIN_BIND_HOST:-127.0.0.1}"
+OMBRE_BIND_HOST="${OMBRE_BIND_HOST:-127.0.0.1}"
+OMBRE_MCP_REQUIRE_AUTH="${OMBRE_MCP_REQUIRE_AUTH:-false}"
 OMBRE_BRAIN_PORT="${OMBRE_BRAIN_PORT:-18001}"
-OMBRE_BRAIN_MCP_URL="${OMBRE_BRAIN_MCP_URL:-http://$OMBRE_BRAIN_BIND_HOST:$OMBRE_BRAIN_PORT/mcp}"
-OMBRE_BRAIN_MCP_EXTRA_URL="${OMBRE_BRAIN_MCP_EXTRA_URL:-http://$OMBRE_BRAIN_BIND_HOST:$OMBRE_BRAIN_PORT/mcp-extra}"
-OMBRE_BRAIN_HEALTH_URL="${OMBRE_BRAIN_HEALTH_URL:-http://$OMBRE_BRAIN_BIND_HOST:$OMBRE_BRAIN_PORT/health}"
+OMBRE_BRAIN_MCP_URL="${OMBRE_BRAIN_MCP_URL:-http://$OMBRE_BIND_HOST:$OMBRE_BRAIN_PORT/mcp}"
+OMBRE_BRAIN_HEALTH_URL="${OMBRE_BRAIN_HEALTH_URL:-http://$OMBRE_BIND_HOST:$OMBRE_BRAIN_PORT/health}"
+OMBRE_RECALL_PORT="${OMBRE_RECALL_PORT:-18002}"
+OMBRE_RECALL_MCP_URL="${OMBRE_RECALL_MCP_URL:-http://127.0.0.1:$OMBRE_RECALL_PORT/mcp}"
+OMBRE_RECALL_HEALTH_URL="${OMBRE_RECALL_HEALTH_URL:-http://127.0.0.1:$OMBRE_RECALL_PORT/health}"
 OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-compose.yml}"
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
 OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
+PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
+
+if [ "$OMBRE_BRAIN_ENABLED" != "false" ] && [ "$OMBRE_BRAIN_ENABLED" != "0" ]; then
+  env \
+    OMBRE_BRAIN_RUNNER="$OMBRE_BRAIN_RUNNER" \
+    OMBRE_BRAIN_COMMIT="$OMBRE_BRAIN_COMMIT" \
+    OMBRE_BIND_HOST="$OMBRE_BIND_HOST" \
+    OMBRE_MCP_REQUIRE_AUTH="$OMBRE_MCP_REQUIRE_AUTH" \
+    OMBRE_BRAIN_MCP_URL="$OMBRE_BRAIN_MCP_URL" \
+    OMBRE_BRAIN_HEALTH_URL="$OMBRE_BRAIN_HEALTH_URL" \
+    OMBRE_RECALL_MCP_URL="$OMBRE_RECALL_MCP_URL" \
+    OMBRE_RECALL_HEALTH_URL="$OMBRE_RECALL_HEALTH_URL" \
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/ombre_o1_contract.py" validate-runner >/dev/null
+fi
 
 json_field() {
   local file="$1"
@@ -115,8 +133,9 @@ echo "source: $OMBRE_BRAIN_SOURCE_DIR"
 echo "venv: $OMBRE_BRAIN_VENV"
 echo "buckets: $OMBRE_BUCKETS_DIR"
 echo "health_url: $OMBRE_BRAIN_HEALTH_URL"
-echo "mcp_url: $OMBRE_BRAIN_MCP_URL"
-echo "mcp_extra_url: $OMBRE_BRAIN_MCP_EXTRA_URL"
+echo "internal_mcp_url: $OMBRE_BRAIN_MCP_URL"
+echo "recall_health_url: $OMBRE_RECALL_HEALTH_URL"
+echo "recall_mcp_url: $OMBRE_RECALL_MCP_URL"
 
 echo ""
 echo "=== Status ==="
@@ -152,21 +171,23 @@ for path in "$OMBRE_BRAIN_HOME" "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" "$OMBRE_
 done
 
 echo ""
-echo "=== Docker/service ==="
-if command -v docker >/dev/null 2>&1; then
-  echo "docker: $(command -v docker)"
-  if docker compose version >/dev/null 2>&1; then
-    echo "docker compose: OK"
-  else
-    echo "docker compose: NOT READY"
-  fi
-else
-  echo "docker: NOT FOUND"
-fi
+echo "=== Managed source services ==="
 
 if command -v systemctl >/dev/null 2>&1; then
-  status=$(systemctl is-active ran-agent-ombre-brain.service 2>/dev/null || echo "unknown")
-  echo "ran-agent-ombre-brain.service: $status"
+  upstream_status=$(systemctl is-active ran-agent-ombre-brain.service 2>/dev/null || echo "unknown")
+  recall_status=$(systemctl is-active ran-agent-ombre-recall.service 2>/dev/null || echo "unknown")
+  echo "ran-agent-ombre-brain.service: $upstream_status"
+  echo "ran-agent-ombre-recall.service: $recall_status"
+  for spec in "ran-agent-ombre-brain.service:18001" "ran-agent-ombre-recall.service:18002"; do
+    unit="${spec%%:*}"; port="${spec##*:}"
+    pid="$(systemctl show "$unit" --property=MainPID --value 2>/dev/null || true)"
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]] &&
+      ss -ltnp 2>/dev/null | grep -Eq "127\\.0\\.0\\.1:$port([^0-9]|$).*pid=$pid([^0-9]|$)"; then
+      echo "$unit ownership: MainPID=$pid owns loopback:$port"
+    else
+      echo "$unit ownership: INVALID"
+    fi
+  done
 else
   echo "systemctl: NOT FOUND"
 fi
@@ -183,9 +204,32 @@ fi
 rm -f /tmp/ombre-brain-health.$$ /tmp/ombre-brain-health.err.$$
 
 echo ""
+echo "=== Recall adapter health ==="
+if curl -fsS --max-time 5 "$OMBRE_RECALL_HEALTH_URL" >/tmp/ombre-recall-health.$$ 2>/tmp/ombre-recall-health.err.$$; then
+  cat /tmp/ombre-recall-health.$$
+  echo ""
+else
+  echo "recall_health: FAILED"
+  sed 's/[[:cntrl:]]//g' /tmp/ombre-recall-health.err.$$ 2>/dev/null || true
+fi
+rm -f /tmp/ombre-recall-health.$$ /tmp/ombre-recall-health.err.$$
+
+echo ""
 echo "=== Hermes MCP config ==="
 LITE_CONFIG="$LITE_HOME/config.yaml"
 FULL_CONFIG="$FULL_HOME/config.yaml"
+if [ -f "$FULL_CONFIG" ] &&
+  [ -f "$FULL_HOME/profiles/ran-assistant/config.yaml" ] &&
+  [ -f "$LITE_CONFIG" ] &&
+  [ -f "$LITE_HOME/profiles/ran-assistant-lite/config.yaml" ]; then
+  OMBRE_RECALL_MCP_URL="$OMBRE_RECALL_MCP_URL" \
+    "$PYTHON_BIN" "$ROOT_DIR/scripts/ombre_o1_contract.py" validate-config \
+      "$FULL_CONFIG" "$FULL_HOME/profiles/ran-assistant/config.yaml" \
+      "$LITE_CONFIG" "$LITE_HOME/profiles/ran-assistant-lite/config.yaml" >/dev/null
+  echo "semantic recall-only config: VALID"
+else
+  echo "semantic recall-only config: INCOMPLETE"
+fi
 for label in lite full; do
   if [ "$label" = "lite" ]; then
     cfg="$LITE_CONFIG"
@@ -197,7 +241,7 @@ for label in lite full; do
     echo "config: MISSING"
     continue
   fi
-  for name in ombre_memory ombre_memory_extra; do
+  for name in ombre_memory; do
     if toolset_has "$cfg" "mcp-$name"; then
       echo "toolset mcp-$name: PRESENT"
     else
@@ -205,6 +249,16 @@ for label in lite full; do
     fi
     if server_has "$cfg" "$name"; then
       echo "mcp_servers.$name: PRESENT"
+      if grep -q '\${OMBRE_RECALL_MCP_URL}' "$cfg"; then
+        echo "mcp_servers.$name recall-only URL: PRESENT"
+      else
+        echo "mcp_servers.$name recall-only URL: MISSING"
+      fi
+      if grep -q '\${OMBRE_BRAIN_MCP_URL}' "$cfg"; then
+        echo "mcp_servers.$name raw upstream URL: UNSAFE"
+      else
+        echo "mcp_servers.$name raw upstream URL: absent"
+      fi
     else
       echo "mcp_servers.$name: absent"
     fi

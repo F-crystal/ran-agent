@@ -1,6 +1,14 @@
 # Ombre Memory Skill
 
-Status: ACTIVE (2026-06-23)
+Status: CURRENT (2026-07-24)
+
+`USER_SUPPLIED_RUNTIME`: known production SHA
+`bb66f1e6a8a400d599c7f86139107742bbedddc8` was not revalidated by this local
+O1 line. Production has manual hotfixes; O1 is uncommitted, unarchived, and
+undeployed. V4 Pro is frozen; Node Receipt is deferred; O2 is not
+started/authorized; Package B.2/B.3 have not started.
+
+Status: ACTIVE (2026-07-23)
 
 ## Overview
 
@@ -69,7 +77,11 @@ Ombre Brain uses Russell's circumplex model of affect:
 - **Arousal**: 0.0 (calm) to 1.0 (excited)
 - **Weight**: 0.0 to 1.0 (memory importance)
 
-## MCP Actions
+## Upstream Registry Reference
+
+The action names below describe the pinned upstream project, not capabilities
+granted to Hermes. Several apparent retrieval actions can update access or
+decay state. O1 therefore exposes none of this raw registry to Hermes.
 
 ### Recall Actions
 
@@ -79,7 +91,7 @@ Ombre Brain uses Russell's circumplex model of affect:
 | `trace` | Follow emotional threads through memory | Connected memories |
 | `pulse` | Check core, high-weight memories | Fundamental memories |
 
-### Store Actions
+### Mutation Actions (not authorized in O1)
 
 | Action | Purpose | Layer |
 |--------|---------|-------|
@@ -102,14 +114,7 @@ memories = ombre.recall(
     response_mode="chat"
 )
 
-# Store memory
-ombre.store_long_term({
-    "content": "记忆内容",
-    "valence": 0.8,
-    "arousal": 0.6,
-    "weight": 0.7,
-    "tags": ["preference", "important"]
-})
+# O1 intentionally provides no Ombre mutation method.
 ```
 
 ### MCP Server
@@ -118,8 +123,7 @@ ombre.store_long_term({
 # Recall memories
 echo '{"user_text": "query", "response_mode": "chat"}' | python src/personal_agent/ombre_brain_mcp.py breath
 
-# Store memory
-echo '{"candidate": {"content": "...", "weight": 0.8}, "layer": "long"}' | python src/personal_agent/ombre_brain_mcp.py hold
+# O1 intentionally provides no hold/grow/raw-upstream call path.
 ```
 
 ## Configuration
@@ -128,9 +132,8 @@ echo '{"candidate": {"content": "...", "weight": 0.8}, "layer": "long"}' | pytho
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PERSONAL_AGENT_OMBRE_BACKEND` | `official_with_legacy_fallback` | Prefer upstream Ombre Brain HTTP MCP, fallback to the repo-local shim only when unavailable |
-| `PERSONAL_AGENT_OMBRE_MCP_URL` | `http://127.0.0.1:18001/mcp` | Upstream Ombre Brain primary MCP endpoint |
-| `PERSONAL_AGENT_OMBRE_MCP_EXTRA_URL` | `http://127.0.0.1:18001/mcp-extra` | Upstream Ombre Brain extra endpoint for `anchor`, `pulse`, `plan`, and letters |
+| `PERSONAL_AGENT_OMBRE_BACKEND` | `recall_only` | Use the local fail-closed recall adapter; O1 has no Ombre mutation path |
+| `PERSONAL_AGENT_OMBRE_MCP_URL` | `http://127.0.0.1:18002/mcp` | Local recall-only MCP endpoint |
 | `PERSONAL_AGENT_OMBRE_MCP_COMMAND` | `src/personal_agent/ombre_brain_mcp.py` | MCP server path |
 | `PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS` | 10 | Request timeout |
 | `OMBRE_VAULT_PATH` | `vault/ombre` | Primary memory storage path |
@@ -143,11 +146,11 @@ server values by default (`?KEY=value` in `apply-hermes-runtime-split.sh`) and
 only overwrite through explicit `RAN_AGENT_DEPLOY_*` overrides or canonical
 safety/routing contracts.
 
-Hermes server deployments should use the upstream source runner by default
-(`OMBRE_BRAIN_RUNNER=source`). Docker is not required for Hermes and must not be
-installed silently by the deploy script; use Docker only as an explicit operator
-choice. Direct `ombre_memory` / `ombre_memory_extra` exposure belongs in full
-only after the upstream runner is available.
+O1 Hermes server deployments support only the pinned upstream source runner
+(`OMBRE_BRAIN_RUNNER=source`). Docker, external, and unknown runners fail
+closed. The single `ombre_memory` entry shared by Lite and Full points to the
+local recall-only adapter at `127.0.0.1:18002/mcp`; raw upstream
+`127.0.0.1:18001/mcp` is never part of the Hermes MCP surface.
 
 ### Memory Storage Format
 
@@ -184,17 +187,10 @@ Memory Strength = Weight × e^(-AgeInDays / 7)
 
 ## Usage Examples
 
-### Automatic Emotion Inference
+### Mutation
 
-When storing without explicit emotions:
-
-```python
-# Content: "用户非常喜欢这个功能，太棒了！"
-# Inferred: valence=0.9, arousal=0.8
-
-# Content: "有点失望，希望能改进"
-# Inferred: valence=-0.5, arousal=0.4
-```
+O1 does not authorize automatic storage, emotional inference, or any other
+Ombre mutation. Those capabilities require a separately authorized later line.
 
 ### Memory Retrieval
 

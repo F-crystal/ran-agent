@@ -138,7 +138,6 @@ Source: `/Users/fengran/.codex/config.toml` enabled plugin entries.
 - `obsidian_memory`
 - `personal_memory`
 - `ombre_memory`
-- `ombre_memory_extra`
 - `search_hub`
 - `tavily`
 

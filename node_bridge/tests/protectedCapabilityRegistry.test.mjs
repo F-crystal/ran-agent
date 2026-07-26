@@ -30,7 +30,6 @@ test('external manifests reject every protected server name and namespace', () =
     'personal_memory',
     'obsidian_memory',
     'ombre_memory',
-    'ombre_memory_extra',
     'co_reading',
     'sticker_catalog',
     'media_generation',

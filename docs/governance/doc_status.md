@@ -1,6 +1,13 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-19)
+Status: CURRENT (2026-07-24)
+
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is
+`bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
+revalidated it online. Production has manual hotfixes. Ombre O1 is an
+uncommitted, unarchived, undeployed local candidate; V4 Pro is frozen and
+undeployed; Node Receipt is deferred; O2 is not started/authorized; Package
+B.2/B.3 have not started.
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -58,9 +65,9 @@ unchecked items and must not be read as either a release checklist or a claim
 that all design goals are deployed. The superseded durable-game document is a
 compatibility pointer only.
 
-The release lineage is intentionally split: the deployed runtime is
-`3f6e7b705854838d9a1e8b466d959f7ead41b643`; a later documentation-only main
-closure commit is not a runtime deployment and requires no redeploy.
+Historical release lineage entries are superseded by
+`docs/governance/current_runtime_status.md`; they must not be used to describe
+the current production SHA.
 
 ## Governance Rules
 
@@ -130,5 +137,5 @@ closure commit is not a runtime deployment and requires no redeploy.
 - Slow WeChat/Feishu replies use the managed reply-window contract:
   `HERMES_REPLY_TIMEOUT_SECONDS`, default-off quick ack, authorized async final
   send, and distinct Feishu ack/final idempotency keys.
-- Ombre Brain deploy readiness is recorded in `OMBRE_BRAIN_STATUS_FILE`; direct
-  full-profile Ombre MCP exposure is optional and gated by deploy-ready status.
+- The local O1 candidate exposes only the local recall-only adapter to Hermes;
+  raw upstream Ombre MCP is isolated. This is not a production claim.

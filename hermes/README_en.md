@@ -2,7 +2,9 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-07-06)
+Status: CURRENT (2026-07-23)
+
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not revalidated it online. Manual production hotfixes do not mean this O1 profile candidate has been formally released. This candidate is uncommitted, unarchived, and undeployed; V4 Pro is frozen; Node Receipt is deferred; O2 is not started/authorized; Package B.2/B.3 have not started.
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 
@@ -144,7 +146,7 @@ ran-agent uses repo-owned MCP services:
 | `mimo_power` | Retired: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles |
 | `personal_memory` | Personal memory recall through the Python backend |
 | `obsidian_memory` | Obsidian vault semantic search |
-| `ombre_memory`, `ombre_memory_extra` | Upstream Ombre Brain direct MCP, full-profile memory/debug surface |
+| `ombre_memory` | Local recall-only O1 candidate endpoint; the upstream registry is not exposed to Hermes |
 | `media_generation` | Image and speech generation, available on full by default |
 | `playwright` | Browser automation, available on full by default |
 | `tavily` | Optional lower-level web search provider for Search Hub compatibility |
@@ -172,12 +174,13 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB path |
 | `OBSIDIAN_INDEX_DEVICE` | Default `cpu` on Linux servers |
 | `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | Set to `1` only during explicit maintenance |
-| `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Ombre Brain service and full-profile direct MCP switches |
-| `OMBRE_BRAIN_RUNNER` | Ombre Brain runner, default `source`; `docker` is optional |
+| `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Internal Ombre Brain service switches; they do not authorize direct Hermes access |
+| `OMBRE_BRAIN_RUNNER` | O1 is pinned to `source`; `docker`, `external`, and unknown runners fail closed |
 | `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream, default `https://github.com/P0luz/Ombre-Brain` |
 | `OMBRE_BRAIN_HOME`, `OMBRE_BRAIN_SOURCE_DIR`, `OMBRE_BRAIN_VENV`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime, source checkout, venv, and private buckets paths |
-| `OMBRE_BRAIN_MCP_URL`, `OMBRE_BRAIN_MCP_EXTRA_URL` | Ombre MCP endpoints connected by the full profile |
-| `PERSONAL_AGENT_OMBRE_BACKEND` | Python `personal_memory` Ombre backend, default `official_with_legacy_fallback` |
+| `OMBRE_BIND_HOST`, `OMBRE_MCP_REQUIRE_AUTH`, `OMBRE_BRAIN_MCP_URL` | Loopback-only contract for the internal upstream; O1 has no network authenticator, so only `127.0.0.1` and `false` are accepted |
+| `OMBRE_RECALL_MCP_URL` | Local recall-only endpoint used by Hermes and Python |
+| `PERSONAL_AGENT_OMBRE_BACKEND` | Python `personal_memory` Ombre backend, fixed to `recall_only` in the O1 candidate |
 
 Secrets must live in machine-local `.env` files, for example:
 

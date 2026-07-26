@@ -8,7 +8,6 @@
     "personal_memory",
     "obsidian_memory",
     "ombre_memory",
-    "ombre_memory_extra",
     "co_reading",
     "sticker_catalog",
     "media_generation",
@@ -27,7 +26,8 @@
         "mcp-media_reader",
         "mcp-search_hub",
         "mcp-sticker_catalog",
-        "mcp-personal_memory"
+        "mcp-personal_memory",
+        "mcp-ombre_memory"
       ],
       "conditionalToolsets": {
         "mcp-obsidian_memory": "OBSIDIAN_MEMORY_MCP_ENABLED",
@@ -39,9 +39,7 @@
         "session_search",
         "mcp-co_reading",
         "mcp-media_generation",
-        "mcp-playwright",
-        "mcp-ombre_memory",
-        "mcp-ombre_memory_extra"
+        "mcp-playwright"
       ],
       "sourceToolsets": [
         "web",
@@ -55,6 +53,7 @@
         "mcp-sticker_catalog",
         "mcp-personal_memory",
         "mcp-obsidian_memory",
+        "mcp-ombre_memory",
         "mcp-external_mcp_gateway"
       ],
       "sourceMcpServers": [
@@ -65,6 +64,7 @@
         "search_hub",
         "personal_memory",
         "obsidian_memory",
+        "ombre_memory",
         "external_mcp_gateway",
         "tavily"
       ]
@@ -86,12 +86,11 @@
         "mcp-sticker_catalog",
         "mcp-media_generation",
         "mcp-personal_memory",
+        "mcp-ombre_memory",
         "mcp-playwright"
       ],
       "conditionalToolsets": {
         "mcp-obsidian_memory": "OBSIDIAN_MEMORY_MCP_ENABLED",
-        "mcp-ombre_memory": "OMBRE_BRAIN_DEPLOY_READY",
-        "mcp-ombre_memory_extra": "OMBRE_BRAIN_DEPLOY_READY",
         "mcp-external_mcp_gateway": "EXTERNAL_MCP_GATEWAY_ENABLED"
       },
       "forbiddenToolsets": [],
@@ -113,7 +112,6 @@
         "mcp-personal_memory",
         "mcp-obsidian_memory",
         "mcp-ombre_memory",
-        "mcp-ombre_memory_extra",
         "mcp-playwright",
         "mcp-external_mcp_gateway"
       ],
@@ -126,7 +124,6 @@
         "obsidian_memory",
         "personal_memory",
         "ombre_memory",
-        "ombre_memory_extra",
         "search_hub",
         "co_reading",
         "playwright",
@@ -146,6 +143,11 @@
     },
     "personal_memory": {
       "toolNames": ["check_personal_memory_backend", "recall_personal_memory", "surface_relevant_context"]
+    },
+    "ombre_memory": {
+      "mode": "local-recall-only",
+      "upstreamCommit": "0e83d4671ce1629e03ad36bb9160235bf60dbd34",
+      "toolNames": ["ombre_recall_search", "ombre_recall_read"]
     },
     "co_reading": {
       "toolNames": [
@@ -193,8 +195,6 @@
     "external_mcp": "Node External registry under RAN_AGENT_STATE_DIR/external_mcp"
   },
   "liveFingerprintOnly": [
-    "ombre_memory",
-    "ombre_memory_extra",
     "obsidian_memory",
     "time",
     "playwright"

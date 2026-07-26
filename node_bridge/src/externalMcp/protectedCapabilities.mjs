@@ -5,7 +5,6 @@ export const PROTECTED_MCP_NAMES = Object.freeze([
   'personal_memory',
   'obsidian_memory',
   'ombre_memory',
-  'ombre_memory_extra',
   'co_reading',
   'sticker_catalog',
   'media_generation',

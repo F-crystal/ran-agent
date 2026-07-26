@@ -2,7 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-13)
+Status: CURRENT (2026-07-24)
+
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，本地 O1 线未在线复核。生产存在人工热补丁，但正式 release 尚未包含本地 Ombre O1 候选；本候选未提交、未归档、未部署。V4 Pro 技术候选冻结且未归档/部署；Node Receipt deferred；O2 未开始且未授权；Package B.2/B.3 未开始。
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -81,9 +83,10 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 **记忆和知识。** `personal_memory`、Ombre、Vault 和 `GlobalTimeline` 都已存在；
 `personal_memory` 通过 Python backend 提供个人记忆召回，
 `surface_relevant_context` 只是当前的轻量 memory surface，不能宣称会自动检索
-Vault。自动统一的 recall control plane 尚未完成。`obsidian_memory` 与 direct
-Ombre MCP 都是 optional surfaces；长期写入、反思、夜间循环和知识维护仍留在
-Python backend 与按需 skill 中，不常驻主 prompt。
+Vault。自动统一的 recall control plane 尚未完成。当前生产仓库形态仍把
+`obsidian_memory` 与 direct Ombre MCP 记为 optional surfaces；未部署的 O1
+候选只把 Ombre 替换成本地 recall-only 入口。长期写入、反思、夜间循环和知识
+维护仍留在 Python backend 与按需 skill 中，不常驻主 prompt。
 
 **可发送媒体生成。** full gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
 
@@ -104,8 +107,7 @@ Python backend 与按需 skill 中，不常驻主 prompt。
 | `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | lite/full |
 | `personal_memory` | 个人记忆召回与 backend 健康检查 | lite/full |
 | `obsidian_memory` | Obsidian vault 语义检索 | optional / disabled-by-default |
-| `ombre_memory` | direct Ombre Brain MCP | optional / full only when deploy-ready |
-| `ombre_memory_extra` | direct Ombre Brain extended MCP | optional / full only when deploy-ready |
+| `ombre_memory` | O1 本地候选的 recall-only 适配入口（非当前生产声明） | lite/full candidate |
 | `external_mcp_gateway` | 受治理的动态 External MCP broker | governed / source profiles disabled-by-default |
 | `media_generation` | 图片和语音生成 | full |
 | `playwright` | 浏览器自动化和动态页面调试 | full |

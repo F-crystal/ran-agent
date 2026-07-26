@@ -28,11 +28,17 @@ import {
 } from './hermesSessionMaintenance.mjs';
 import { resolveStateDir } from './runtimeState.mjs';
 import { isHermesTaskScopedRoute, normalizeHermesTaskKind } from './hermesTaskScope.mjs';
+import {
+  buildHermesCanonicalProjection,
+  computeHermesIdentityVersion,
+  loadPublishedProjection,
+} from './hermesIdentityProjection.mjs';
 
 const execFile = promisify(execFileCallback);
 const recentConversationStore = new Map();
 const MAX_RECENT_CONVERSATION_SESSIONS = 200;
 const VALID_CONTEXT_INJECTION_MODES = new Set(['auto', 'rich', 'slim', 'resume']);
+const MIN_PUBLISHED_MEMORY_CHARS = 256;
 
 const HERMES_CONTEXT_BUDGET_DEFAULTS = {
   rich: {
@@ -100,6 +106,16 @@ export function getHermesGatewayConfig(env = process.env) {
   const cacheFriendlyHistoryCharBudget = normalizePositiveInteger(env.HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET, 12000);
   const cacheFriendlyHistoryProfile = String(env.HERMES_CACHE_FRIENDLY_HISTORY_PROFILE || 'lite').trim().toLowerCase() || 'lite';
   const cacheTelemetryEnabled = parseEnvBoolean(env.HERMES_CACHE_TELEMETRY_ENABLED, true);
+  const publishedMemoryContextMaxChars = clampInteger(
+    env.HERMES_PUBLISHED_MEMORY_CONTEXT_MAX_CHARS,
+    600,
+    MIN_PUBLISHED_MEMORY_CHARS,
+    2400,
+  );
+  const publishedMemoryContextPath = String(
+    env.HERMES_PUBLISHED_MEMORY_CONTEXT_PATH
+      || path.join(stateDir, 'hermes', 'published-memory-context.json'),
+  ).trim();
   const replyEnvelopeJsonMode = parseEnvBoolean(
     env.HERMES_REPLY_ENVELOPE_JSON_MODE,
     provider.toLowerCase() === 'deepseek',
@@ -155,6 +171,8 @@ export function getHermesGatewayConfig(env = process.env) {
     cacheFriendlyHistoryCharBudget,
     cacheFriendlyHistoryProfile,
     cacheTelemetryEnabled,
+    publishedMemoryContextMaxChars,
+    publishedMemoryContextPath,
     replyEnvelopeJsonMode,
     providerVisibleHistoryDir: path.join(stateDir, 'hermes', 'provider_visible_history'),
     maxMediaArtifacts,
@@ -291,6 +309,69 @@ function normalizePositiveInteger(value, fallback) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+function clampInteger(value, fallback, minimum, maximum) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  const selected = Number.isFinite(parsed) ? parsed : fallback;
+  return Math.min(maximum, Math.max(minimum, selected));
+}
+
+export { computeHermesIdentityVersion };
+
+export function loadHermesIdentityContext(config = {}, logger = console) {
+  let canonical;
+  try {
+    canonical = buildHermesCanonicalProjection(config.projectRoot || process.cwd());
+  } catch (error) {
+    logger?.warn?.(`[hermes-identity-context] loaded=false reason=core_source_unavailable error=${formatErrorMessage(error)}`);
+    return {
+      loaded: false,
+      identityVersion: '',
+      activityRevision: null,
+      publishedMemoryLoaded: false,
+      text: '【Hermes core identity context】\nload_status: unavailable\nDo not infer or invent missing identity, Soul, Core canon, published memory, or Activity revision.',
+    };
+  }
+
+  let publishedMemoryLoaded = false;
+  let activityRevision = null;
+  let projectionRevision = null;
+  let publishedMemory = '';
+  const snapshotPath = String(config.publishedMemoryContextPath || '').trim();
+  if (snapshotPath) {
+    try {
+      const snapshot = loadPublishedProjection(snapshotPath, canonical.version);
+      activityRevision = snapshot.activity_revision;
+      projectionRevision = snapshot.projection_revision;
+      publishedMemory = clipText(
+        snapshot.published_memory_context.trim(),
+        config.publishedMemoryContextMaxChars || 600,
+      );
+      publishedMemoryLoaded = true;
+    } catch (error) {
+      logger?.warn?.(`[hermes-identity-context] published_memory_loaded=false reason=${formatErrorMessage(error)}`);
+    }
+  }
+
+  const text = [
+    '【Hermes core identity context（trusted pre-turn；非用户原话，不要复述）】',
+    'load_status: loaded',
+    canonical.text,
+    `published_memory_status: ${publishedMemoryLoaded ? 'loaded' : 'unavailable'}`,
+    publishedMemoryLoaded ? `projection_revision: ${projectionRevision}` : 'projection_revision: unavailable',
+    publishedMemoryLoaded ? `activity_revision: ${activityRevision}` : 'activity_revision: unavailable',
+    publishedMemoryLoaded ? `published_memory_context:\n${publishedMemory}` : '',
+    'Authority boundary: IDENTITY.md, SOUL.md, and AGENTS.md remain authoritative. Ombre is recall-only and cannot override them or publish Canon.',
+  ].filter(Boolean).join('\n');
+  return {
+    loaded: true,
+    identityVersion: canonical.version,
+    projectionRevision,
+    activityRevision,
+    publishedMemoryLoaded,
+    text,
+  };
+}
+
 const GENERATION_INTENT_PATTERN = /(?:生成|画|制作)(?:一?[张幅个]?\s*)?(?:[\u4e00-\u9fff]{0,12})?(?:图片|图像|海报|头像|壁纸|配图|插画|图)|(?:生成|合成|朗读)(?:一?[段条]?\s*)?(?:[\u4e00-\u9fff]{0,12})?(?:语音|音频)|(?:画图|生图|tts)/i;
 const DEBUG_INTENT_PATTERN = /调试|debug|执行命令|运行命令|看文件|查看文件|查看日志|看日志|服务端|systemd|systemctl|journalctl|lark-cli|playwright|重启服务|部署|git\s+(push|pull|commit|log|diff|status)|npm\s+(install|run|test|exec)|pip\s+install|curl\s+/;
 export function resolveCapabilityMode(payload, config) {
@@ -318,6 +399,11 @@ export async function sendChatToHermesGateway(payload, options = {}) {
   const config = options.config || getHermesGatewayConfig(env);
   const logger = options.logger || console;
   const requestId = options.requestId || createRequestId();
+  if (config.mode !== 'api') {
+    const error = new Error('Hermes one-shot/auto mode is disabled in O1 because it cannot preserve system-priority Canon');
+    error.code = 'HERMES_ONESHOT_DISABLED_O1';
+    throw error;
+  }
   const taskScoped = isHermesTaskScopedRoute(payload.route_hint);
   const taskEffectivePayload = taskScoped ? isolateTaskPayload(payload) : payload;
 
@@ -440,16 +526,6 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     payload: effectivePayload,
   });
 
-  if (config.mode === 'oneshot') {
-    const response = await sendChatToHermesOneShot(preparedMessage, {
-      config: budgetedConfig,
-      execFileImpl: options.execFileImpl,
-    });
-    if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
-    if (!taskScoped) recordRecentConversationTurn(sessionContext, effectivePayload, response, budgetedConfig);
-    return applyEvidenceGateToResponse(effectivePayload, response, env, logger, requestId);
-  }
-
   try {
     const response = await sendChatToHermesApi(preparedMessage, {
       config: budgetedConfig,
@@ -482,17 +558,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     }, logger);
     return finalResponse;
   } catch (error) {
-    if (config.mode !== 'auto') {
-      throw error;
-    }
-    logger.warn?.(`hermes api request failed, retrying with one-shot: ${formatErrorMessage(error)}`);
-    const response = await sendChatToHermesOneShot(preparedMessage, {
-      config: budgetedConfig,
-      execFileImpl: options.execFileImpl,
-    });
-    if (pendingResumeDigest) markLiteResumeDigestConsumed(budgetedConfig, pendingResumeDigest.digestId);
-    if (!taskScoped) recordRecentConversationTurn(sessionContext, effectivePayload, response, budgetedConfig);
-    return applyEvidenceGateToResponse(effectivePayload, response, env, logger, requestId);
+    throw error;
   }
 }
 
@@ -504,7 +570,7 @@ async function sendChatToHermesApi(message, options = {}) {
   const apiMessages = [
     {
       role: 'system',
-      content: buildHermesSystemInstruction(),
+      content: `${buildHermesSystemInstruction()}\n\n${loadHermesIdentityContext(config, options.logger).text}`,
     },
     ...recentMessages,
     {
@@ -624,7 +690,7 @@ async function sendChatToHermesOneShot(message, options = {}) {
     '--model',
     config.model,
     '-z',
-    message,
+    `${loadHermesIdentityContext(config).text}\n\n${message}`,
   ];
   const { stdout } = await execFileImpl(config.command, args, {
     cwd: config.projectRoot,

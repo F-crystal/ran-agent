@@ -48,37 +48,29 @@ class OmbreMCPTest(unittest.TestCase):
     def test_client_uses_python_interpreter_for_script_commands(self) -> None:
         client = OmbreMCPClient(self.config, self.logger)
 
-        argv = client._build_argv("breath")
+        argv = client._build_argv("ombre_recall_search")
 
-        self.assertEqual(argv, [sys.executable, self.config.ombre_mcp_command, "breath"])
+        self.assertEqual(argv, [sys.executable, self.config.ombre_mcp_command, "ombre_recall_search"])
 
     def test_recall_accepts_structured_items_and_legacy_payload_keys(self) -> None:
         backend = OmbreMCPMemoryBackend(config=self.config, logger=self.logger)
 
         responses = {
-            "breath": OmbreCallResult(
+            "ombre_recall_search": OmbreCallResult(
                 ok=True,
                 payload={
                     "items": [
                         {"content": "第一条结构化记忆", "tags": ["a"]},
                         {"summary": "第二条摘要"},
                         "第三条纯文本",
-                    ]
-                },
-            ),
-            "trace": OmbreCallResult(
-                ok=True,
-                payload={
-                    "memories": [
-                        {"memory": "第二条摘要"},
                         {"text": "第四条文本"},
+                        {"content": "第五条"},
                     ]
                 },
             ),
-            "pulse": OmbreCallResult(ok=True, payload={"results": [{"content": "第五条"}]}),
         }
 
-        backend._client.call = lambda action, payload: responses[action]  # type: ignore[method-assign]
+        backend._official_client.call = lambda action, payload: responses[action]  # type: ignore[method-assign]
 
         recalled = backend.recall(user_text="测试", response_mode="chat")
 
@@ -100,23 +92,21 @@ class OmbreMCPTest(unittest.TestCase):
         logger.propagate = True
         backend = OmbreMCPMemoryBackend(config=self.config, logger=logger)
 
-        responses = {
-            "breath": OmbreCallResult(ok=False, payload={"error": "boom"}),
-            "trace": OmbreCallResult(ok=True, payload={"items": ["trace memory"]}),
-            "pulse": OmbreCallResult(ok=True, payload={"items": []}),
-        }
-        backend._client.call = lambda action, payload: responses[action]  # type: ignore[method-assign]
+        backend._official_client.call = lambda action, payload: OmbreCallResult(  # type: ignore[method-assign]
+            ok=False,
+            payload={"error": "boom"},
+        )
 
         with self.assertLogs("personal_agent.tests.ombre_mcp.observable", level="INFO") as captured:
             recalled = backend.recall(user_text="测试", response_mode="chat")
 
-        self.assertEqual(recalled, ("trace memory",))
+        self.assertEqual(recalled, ())
         log_text = "\n".join(captured.output)
-        self.assertIn("ombre recall action=breath ok=False", log_text)
+        self.assertIn("ombre recall action=ombre_recall_search ok=False", log_text)
         self.assertIn("error=call_not_ok", log_text)
         self.assertIn("duration_seconds=", log_text)
 
-    def test_official_http_backend_is_used_before_legacy_subprocess(self) -> None:
+    def test_http_backend_calls_only_local_recall_tool(self) -> None:
         calls: list[tuple[str, str]] = []
 
         def fake_urlopen(request, timeout):
@@ -151,10 +141,9 @@ class OmbreMCPTest(unittest.TestCase):
             vault_dir=Path(self.temp_dir.name) / "vault",
             database_path=Path(self.temp_dir.name) / "data" / "personal_agent.db",
             log_file_path=Path(self.temp_dir.name) / "logs" / "personal_agent.log",
-            ombre_backend="official",
+            ombre_backend="recall_only",
             ombre_mcp_command="/no/such/legacy.py",
-            ombre_mcp_url="http://127.0.0.1:18001/mcp",
-            ombre_mcp_extra_url="http://127.0.0.1:18001/mcp-extra",
+            ombre_mcp_url="http://127.0.0.1:18002/mcp",
         )
         backend = OmbreMCPMemoryBackend(config=config, logger=self.logger)
 
@@ -163,17 +152,22 @@ class OmbreMCPTest(unittest.TestCase):
 
         self.assertEqual(
             recalled,
-            ("official breath", "official trace", "official pulse", "official anchor"),
+            ("official ombre_recall_search",),
         )
         self.assertEqual(
             calls,
             [
-                ("http://127.0.0.1:18001/mcp", "breath"),
-                ("http://127.0.0.1:18001/mcp", "trace"),
-                ("http://127.0.0.1:18001/mcp-extra", "pulse"),
-                ("http://127.0.0.1:18001/mcp-extra", "anchor"),
+                ("http://127.0.0.1:18002/mcp", "ombre_recall_search"),
             ],
         )
+
+    def test_ombre_store_methods_are_fail_closed_in_o1(self) -> None:
+        backend = OmbreMCPMemoryBackend(config=self.config, logger=self.logger)
+        backend._official_client.call = MagicMock(side_effect=AssertionError("must not call"))  # type: ignore[method-assign]
+
+        self.assertEqual(backend.store_long_term({"content": "x"}).action, "skip")
+        self.assertEqual(backend.store_core({"content": "x"}).action, "skip")
+        backend._official_client.call.assert_not_called()
 
 
 if __name__ == "__main__":

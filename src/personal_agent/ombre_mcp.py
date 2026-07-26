@@ -109,7 +109,6 @@ class OfficialOmbreHTTPClient:
 
     def __init__(self, config: AppConfig, logger: logging.Logger) -> None:
         self._mcp_url = config.ombre_mcp_url.strip()
-        self._mcp_extra_url = config.ombre_mcp_extra_url.strip()
         self._timeout_seconds = config.ombre_mcp_timeout_seconds
         self._logger = logger
 
@@ -118,8 +117,7 @@ class OfficialOmbreHTTPClient:
         return bool(self._mcp_url)
 
     def _endpoint_for_action(self, action: str) -> str:
-        if action in {"anchor", "release", "pulse", "plan", "letter_write", "letter_read"}:
-            return self._mcp_extra_url or self._mcp_url
+        del action
         return self._mcp_url
 
     def call(self, action: str, payload: dict[str, object]) -> OmbreCallResult:
@@ -240,7 +238,7 @@ class OfficialOmbreHTTPClient:
 
 
 class OmbreMCPMemoryBackend(OmbreMemoryBackend):
-    """Memory-specialist backend that talks to Ombre Brain over MCP."""
+    """Recall-only backend that talks to the local filtered Ombre adapter."""
 
     def __init__(self, config: AppConfig, logger: logging.Logger) -> None:
         self._backend_mode = config.ombre_backend.strip().lower()
@@ -249,22 +247,12 @@ class OmbreMCPMemoryBackend(OmbreMemoryBackend):
         self._logger = logger
 
     def recall(self, *, user_text: str, response_mode: str) -> tuple[str, ...]:
-        if self._backend_mode in {"official", "official_with_legacy_fallback", "auto"}:
-            official = self._recall_with_client(
-                self._official_client,
-                user_text=user_text,
-                response_mode=response_mode,
-                actions=("breath", "trace", "pulse", "anchor"),
-                source="official_ombre",
-            )
-            if official or self._backend_mode == "official":
-                return official
         return self._recall_with_client(
-            self._client,
+            self._official_client,
             user_text=user_text,
             response_mode=response_mode,
-            actions=("breath", "trace", "pulse"),
-            source="legacy_ombre",
+            actions=("ombre_recall_search",),
+            source="local_recall_projection",
         )
 
     def _recall_with_client(
@@ -329,28 +317,9 @@ class OmbreMCPMemoryBackend(OmbreMemoryBackend):
         return tuple(deduped[:5])
 
     def store_long_term(self, candidate: dict[str, object]) -> MemoryStoreDecision:
-        result = self._store_with_preferred_client("hold", {"candidate": candidate, "layer": "long"})
-        if result.ok and result.payload.get("stored") is True:
-            return MemoryStoreDecision(
-                action="stored_ombre_long",
-                candidate=candidate,
-                source="ombre_mcp",
-            )
+        """O1 has no Ombre mutation authority."""
         return MemoryStoreDecision(action="skip", candidate=candidate, source="ombre_mcp")
 
     def store_core(self, candidate: dict[str, object]) -> MemoryStoreDecision:
-        result = self._store_with_preferred_client("grow", {"candidate": candidate, "layer": "core"})
-        if result.ok and result.payload.get("stored") is True:
-            return MemoryStoreDecision(
-                action="stored_ombre_core",
-                candidate=candidate,
-                source="ombre_mcp",
-            )
+        """O1 has no Ombre mutation authority."""
         return MemoryStoreDecision(action="skip", candidate=candidate, source="ombre_mcp")
-
-    def _store_with_preferred_client(self, action: str, payload: dict[str, object]) -> OmbreCallResult:
-        if self._backend_mode in {"official", "official_with_legacy_fallback", "auto"}:
-            result = self._official_client.call(action, payload)
-            if result.ok or self._backend_mode == "official":
-                return result
-        return self._client.call(action, payload)

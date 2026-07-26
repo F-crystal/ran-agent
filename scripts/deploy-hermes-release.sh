@@ -40,6 +40,8 @@ STATE_DIR="${RAN_AGENT_RELEASE_STATE_DIR:-$REPO_ROOT/.ran_agent_state}"
 # Kept outside STATE_DIR: snapshots must never archive their own transaction.
 ARTIFACT_ROOT="${RAN_AGENT_RELEASE_ARTIFACT_ROOT:-/opt/ran_agent-release}"
 SNAPSHOT_ROOT="$ARTIFACT_ROOT/snapshots"
+SUCCESSFUL_SNAPSHOT_RETENTION=2
+CURRENT_PRODUCTION_POINTER="$SNAPSHOT_ROOT/current-production.json"
 STAGE_ROOT="$ARTIFACT_ROOT/stages"
 ARCHIVE_ROOT="$ARTIFACT_ROOT/archives"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
@@ -48,13 +50,14 @@ LITE_HOME="${HERMES_LITE_HOME:-$FULL_HOME/lite}"
 FULL_PROFILE="${HERMES_FULL_PROFILE:-ran-assistant}"
 LITE_PROFILE="${HERMES_LITE_PROFILE:-ran-assistant-lite}"
 CORE_RUNTIME_UNITS=(ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service)
-ALL_RUNTIME_UNITS=("${CORE_RUNTIME_UNITS[@]}" ran-agent-ombre-brain.service ran-agent-xhs-browse.service ran-agent-xhs-public-sidecar.service)
+ALL_RUNTIME_UNITS=("${CORE_RUNTIME_UNITS[@]}" ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-xhs-browse.service ran-agent-xhs-public-sidecar.service)
 SNAPSHOT_DIR=''
 STAGE_DIR=''
 CANDIDATE_ARCHIVE=''
 PRODUCTION_HEAD=''
 DELTA_FILE=''
 TRANSACTION_STARTED=0
+RETENTION_PRODUCTION_TRANSACTION=''
 
 [[ "$MODE" == --rollback ]] || {
   CANDIDATE="${RAN_AGENT_RELEASE_CANDIDATE:-}"
@@ -263,7 +266,7 @@ service_load_state() {
 
 optional_runtime_unit() {
   case "$1" in
-    ran-agent-ombre-brain.service|ran-agent-xhs-browse.service|ran-agent-xhs-public-sidecar.service) return 0 ;;
+    ran-agent-ombre-brain.service|ran-agent-ombre-recall.service|ran-agent-xhs-browse.service|ran-agent-xhs-public-sidecar.service) return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -296,9 +299,11 @@ snapshot_runtime_state() {
     "$FULL_HOME/config.yaml" "$FULL_HOME/.env" "$FULL_HOME/profiles/$FULL_PROFILE/config.yaml" "$FULL_HOME/profiles/$FULL_PROFILE/.env"
     "$LITE_HOME/config.yaml" "$LITE_HOME/.env" "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml" "$LITE_HOME/profiles/$LITE_PROFILE/.env"
     "$SYSTEMD_DIR/ran-agent-hermes.service" "$SYSTEMD_DIR/ran-agent-hermes-full.service" "$SYSTEMD_DIR/ran-agent-node.service" "$SYSTEMD_DIR/ran-agent-python.service"
-    "$SYSTEMD_DIR/ran-agent-ombre-brain.service" "$SYSTEMD_DIR/ran-agent-xhs-browse.service" "$SYSTEMD_DIR/ran-agent-xhs-public-sidecar.service"
+    "$SYSTEMD_DIR/ran-agent-ombre-brain.service" "$SYSTEMD_DIR/ran-agent-ombre-recall.service" "$SYSTEMD_DIR/ran-agent-xhs-browse.service" "$SYSTEMD_DIR/ran-agent-xhs-public-sidecar.service"
     "$SYSTEMD_DIR/ran-agent-hermes.service.d" "$SYSTEMD_DIR/ran-agent-hermes-full.service.d" "$SYSTEMD_DIR/ran-agent-node.service.d" "$SYSTEMD_DIR/ran-agent-python.service.d"
-    "$SYSTEMD_DIR/ran-agent-ombre-brain.service.d" "$SYSTEMD_DIR/ran-agent-xhs-browse.service.d" "$SYSTEMD_DIR/ran-agent-xhs-public-sidecar.service.d"
+    "$SYSTEMD_DIR/ran-agent-ombre-brain.service.d" "$SYSTEMD_DIR/ran-agent-ombre-recall.service.d" "$SYSTEMD_DIR/ran-agent-xhs-browse.service.d" "$SYSTEMD_DIR/ran-agent-xhs-public-sidecar.service.d"
+    "$FULL_HOME/profiles/$FULL_PROFILE/IDENTITY.md" "$FULL_HOME/profiles/$FULL_PROFILE/SOUL.md" "$FULL_HOME/profiles/$FULL_PROFILE/AGENTS.md"
+    "$LITE_HOME/profiles/$LITE_PROFILE/IDENTITY.md" "$LITE_HOME/profiles/$LITE_PROFILE/SOUL.md" "$LITE_HOME/profiles/$LITE_PROFILE/AGENTS.md"
   )
   local index=0 path unit
   while IFS= read -r path; do paths+=("$path"); done < <(
@@ -306,6 +311,137 @@ snapshot_runtime_state() {
   )
   for path in "${paths[@]}"; do snapshot_path "$path" "$index"; index=$((index + 1)); done
   for unit in "${ALL_RUNTIME_UNITS[@]}"; do snapshot_service_state "$unit"; done
+  write_transaction_state snapshot-created false
+}
+
+write_transaction_state() {
+  local requested_status="$1" rollbackable="${2:-false}" completed_marker="${3:-}"
+  local status acceptance_state rollback_state completed_at transaction_id base_sha manifest_digest service_state_digest production_identity
+  case "$requested_status" in
+    snapshot-created) status=in_progress; acceptance_state=not_accepted; rollback_state=not_used ;;
+    accepted) status=accepted; acceptance_state=accepted; rollback_state=not_used ;;
+    rollback-in-progress) status=rollback_in_progress; acceptance_state=not_accepted; rollback_state=in_progress ;;
+    rollback-incomplete) status=rollback_failed; acceptance_state=not_accepted; rollback_state=rollback_failed ;;
+    rolled-back) status=rollback_used; acceptance_state=not_accepted; rollback_state=rollback_used ;;
+    *) fail transaction_state_status_invalid ;;
+  esac
+  transaction_id="$(basename "$SNAPSHOT_DIR")"
+  base_sha="$("${SUDO[@]}" cat "$SNAPSHOT_DIR/prior-head")"
+  [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || fail transaction_state_base_invalid
+  manifest_digest="$("${SUDO[@]}" sha256sum "$SNAPSHOT_DIR/manifest" | awk '{print $1}')"
+  service_state_digest="$("${SUDO[@]}" sha256sum "$SNAPSHOT_DIR/services" | awk '{print $1}')"
+  production_identity=unknown
+  if "${SUDO[@]}" test -s "$CURRENT_PRODUCTION_POINTER"; then
+    production_identity="$("${SUDO[@]}" "$PYTHON_BIN" -c 'import json,sys; print("transaction:"+json.load(open(sys.argv[1], encoding="utf-8"))["transaction_id"])' "$CURRENT_PRODUCTION_POINTER" 2>/dev/null || printf unknown)"
+  fi
+  [[ "$status" != accepted ]] || production_identity="transaction:$transaction_id"
+  completed_at=''
+  [[ -z "$completed_marker" ]] || completed_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  "${SUDO[@]}" env \
+    TX_TARGET="$SNAPSHOT_DIR/transaction-state.json" \
+    TX_ID="$transaction_id" TX_CANDIDATE="$CANDIDATE" TX_BASE="$base_sha" \
+    TX_STATUS="$status" TX_ACCEPTANCE="$acceptance_state" TX_ROLLBACK="$rollback_state" \
+    TX_ROLLBACKABLE="$rollbackable" TX_PRODUCTION="$production_identity" \
+    TX_COMPLETED="$completed_at" TX_MANIFEST="$manifest_digest" TX_SERVICES="$service_state_digest" \
+    "$PYTHON_BIN" -c '
+import json, os
+from pathlib import Path
+target = Path(os.environ["TX_TARGET"])
+value = {
+  "schema_version": 1,
+  "transaction_id": os.environ["TX_ID"],
+  "candidate_sha": os.environ["TX_CANDIDATE"],
+  "base_sha": os.environ["TX_BASE"],
+  "status": os.environ["TX_STATUS"],
+  "acceptance_state": os.environ["TX_ACCEPTANCE"],
+  "rollback_state": os.environ["TX_ROLLBACK"],
+  "rollbackable": os.environ["TX_ROLLBACKABLE"] == "true",
+  "current_production_identity": os.environ["TX_PRODUCTION"],
+  "completed_at": os.environ["TX_COMPLETED"],
+  "manifest_digest": os.environ["TX_MANIFEST"],
+  "service_state_digest": os.environ["TX_SERVICES"],
+}
+temporary = target.with_name("." + target.name + ".tmp")
+with open(temporary, "x", encoding="utf-8") as handle:
+    json.dump(value, handle, sort_keys=True)
+    handle.write("\n")
+    handle.flush()
+    os.fsync(handle.fileno())
+os.replace(temporary, target)
+directory = os.open(target.parent, os.O_RDONLY)
+try: os.fsync(directory)
+finally: os.close(directory)
+'
+}
+
+mark_snapshot_accepted() {
+  write_transaction_state accepted true "$(date -u +%s)"
+  local transaction_id
+  transaction_id="$(basename "$SNAPSHOT_DIR")"
+  "${SUDO[@]}" env TX_POINTER="$CURRENT_PRODUCTION_POINTER" TX_ID="$transaction_id" TX_CANDIDATE="$CANDIDATE" \
+    "$PYTHON_BIN" -c '
+import json, os
+from pathlib import Path
+target = Path(os.environ["TX_POINTER"])
+temporary = target.with_name("." + target.name + ".tmp")
+with open(temporary, "x", encoding="utf-8") as handle:
+    json.dump({"schema_version": 1, "transaction_id": os.environ["TX_ID"], "candidate_sha": os.environ["TX_CANDIDATE"]}, handle, sort_keys=True)
+    handle.write("\n"); handle.flush(); os.fsync(handle.fileno())
+os.replace(temporary, target)
+directory = os.open(target.parent, os.O_RDONLY)
+try: os.fsync(directory)
+finally: os.close(directory)
+'
+}
+
+classify_snapshot() {
+  local directory="$1" current_transaction='' production_transaction="$RETENTION_PRODUCTION_TRANSACTION"
+  [[ "$TRANSACTION_STARTED" -eq 1 && -n "$SNAPSHOT_DIR" ]] && current_transaction="$(basename "$SNAPSHOT_DIR")"
+  "${SUDO[@]}" "$PYTHON_BIN" "$SCRIPT_ROOT/scripts/ombre_o1_contract.py" classify-snapshot \
+    "$directory" --current-transaction "$current_transaction" \
+    --production-transaction "$production_transaction" --format tsv
+}
+
+prune_accepted_snapshots() {
+  local directory decision reason completed index=0 retained_slots=0
+  local -a eligible=()
+  if "${SUDO[@]}" test -e "$CURRENT_PRODUCTION_POINTER"; then
+    RETENTION_PRODUCTION_TRANSACTION="$("${SUDO[@]}" "$PYTHON_BIN" \
+      "$SCRIPT_ROOT/scripts/ombre_o1_contract.py" read-production-pointer \
+      "$CURRENT_PRODUCTION_POINTER" --format transaction-id 2>/dev/null)" || {
+        printf 'deploy-hermes-release: retention=SKIP_UNCERTAIN snapshot=%s reason=production-pointer-invalid\n' "$SNAPSHOT_ROOT" >&2
+        return 0
+      }
+  else
+    printf 'deploy-hermes-release: retention=SKIP_UNCERTAIN snapshot=%s reason=production-pointer-missing\n' "$SNAPSHOT_ROOT" >&2
+    return 0
+  fi
+  while IFS= read -r directory; do
+    IFS=$'\t' read -r decision reason completed < <(classify_snapshot "$directory")
+    if [[ "$decision" == ELIGIBLE ]]; then
+      eligible+=("$completed"$'\t'"$directory")
+    else
+      printf 'deploy-hermes-release: retention=%s snapshot=%s reason=%s\n' "$decision" "$directory" "$reason"
+      [[ "$decision" == KEEP && "$reason" == current_production_rollback_point ]] && retained_slots=1
+    fi
+  done < <("${SUDO[@]}" find "$SNAPSHOT_ROOT" -mindepth 1 -maxdepth 1 -type d | sort)
+
+  while IFS=$'\t' read -r completed directory; do
+    [[ -n "$directory" ]] || continue
+    if (( index < SUCCESSFUL_SNAPSHOT_RETENTION - retained_slots )); then
+      printf 'deploy-hermes-release: retention=KEEP snapshot=%s reason=recent-accepted-rollbackable\n' "$directory"
+    else
+      printf 'deploy-hermes-release: retention=DELETE snapshot=%s reason=older-accepted-rollbackable\n' "$directory"
+      [[ "$directory" == "$SNAPSHOT_ROOT"/release-transaction.* ]] || {
+        printf 'deploy-hermes-release: retention=SKIP_UNCERTAIN snapshot=%s reason=path-invalid\n' "$directory" >&2
+        index=$((index + 1))
+        continue
+      }
+      "${SUDO[@]}" rm -rf -- "$directory" ||
+        printf 'deploy-hermes-release: retention-warning snapshot=%s reason=delete-failed\n' "$directory" >&2
+    fi
+    index=$((index + 1))
+  done < <(printf '%s\n' "${eligible[@]}" | sort -r)
 }
 
 quiesce_runtime_services() {
@@ -366,69 +502,116 @@ restore_code_revision() {
 
 restore_runtime_files() {
   [[ -n "$SNAPSHOT_DIR" ]] && "${SUDO[@]}" test -f "$SNAPSHOT_DIR/manifest" || return 1
-  local kind index path
+  local kind index path failed=0
   while IFS=$'\t' read -r kind index path; do
     [[ "$kind" == present || "$kind" == absent ]] || continue
     if [[ "$kind" == present ]]; then
-      "${SUDO[@]}" rm -rf -- "$path"; "${SUDO[@]}" mkdir -p "$(dirname "$path")"; "${SUDO[@]}" cp -a -- "$SNAPSHOT_DIR/files/$index" "$path"
+      if ! "${SUDO[@]}" rm -rf -- "$path" ||
+        ! "${SUDO[@]}" mkdir -p "$(dirname "$path")" ||
+        ! "${SUDO[@]}" cp -a -- "$SNAPSHOT_DIR/files/$index" "$path"; then
+        printf 'deploy-hermes-release: rollback-stage=runtime-file result=failed path=%s\n' "$path" >&2
+        failed=1
+      fi
     else
-      "${SUDO[@]}" rm -rf -- "$path"
+      "${SUDO[@]}" rm -rf -- "$path" || failed=1
     fi
   done < <("${SUDO[@]}" cat "$SNAPSHOT_DIR/manifest")
+  return "$failed"
 }
 
 restore_state_migrations() {
   [[ -n "$SNAPSHOT_DIR" ]] && "${SUDO[@]}" test -f "$SNAPSHOT_DIR/manifest" || return 1
-  local kind index path
+  local kind index path failed=0
   while IFS=$'\t' read -r kind index path; do
     [[ "$kind" == migration-present ]] || continue
-    "${SUDO[@]}" rm -f -- "$path"; "${SUDO[@]}" mkdir -p "$(dirname "$path")"; "${SUDO[@]}" cp -a -- "$SNAPSHOT_DIR/files/$index" "$path"
+    if ! "${SUDO[@]}" rm -f -- "$path" ||
+      ! "${SUDO[@]}" mkdir -p "$(dirname "$path")" ||
+      ! "${SUDO[@]}" cp -a -- "$SNAPSHOT_DIR/files/$index" "$path"; then
+      printf 'deploy-hermes-release: rollback-stage=state-file result=failed path=%s\n' "$path" >&2
+      failed=1
+    fi
   done < <("${SUDO[@]}" cat "$SNAPSHOT_DIR/manifest")
+  return "$failed"
 }
 
 restore_service_state() {
   [[ -n "$SNAPSHOT_DIR" ]] && "${SUDO[@]}" test -f "$SNAPSHOT_DIR/services" || return 1
-  "${SUDO[@]}" systemctl daemon-reload
-  local unit active enabled snapshot_load_state current_load_state
+  local failed=0
+  "${SUDO[@]}" systemctl daemon-reload || failed=1
+  local unit active enabled snapshot_load_state current_load_state unit_failed
   while IFS=$'\t' read -r unit active enabled snapshot_load_state; do
+    unit_failed=0
     if [[ "$snapshot_load_state" == not-found ]]; then
       optional_runtime_unit "$unit" && { optional_unit_absent "$unit"; continue; }
-      return 1
+      unit_failed=1
+    else
+      current_load_state="$(service_load_state "$unit")" || unit_failed=1
+      if [[ "$unit_failed" -eq 0 && "$current_load_state" == not-found ]]; then
+        optional_runtime_unit "$unit" && { optional_unit_absent "$unit"; continue; }
+        unit_failed=1
+      fi
     fi
-    current_load_state="$(service_load_state "$unit")" || return 1
-    if [[ "$current_load_state" == not-found ]]; then
-      optional_runtime_unit "$unit" && { optional_unit_absent "$unit"; continue; }
-      return 1
+    if [[ "$unit_failed" -eq 0 && "$enabled" == masked ]]; then
+      "${SUDO[@]}" systemctl stop "$unit" || unit_failed=1
+      "${SUDO[@]}" systemctl mask "$unit" >/dev/null || unit_failed=1
+    elif [[ "$unit_failed" -eq 0 ]]; then
+      "${SUDO[@]}" systemctl unmask "$unit" >/dev/null 2>&1 || unit_failed=1
+      if [[ "$unit_failed" -eq 0 ]]; then
+        case "$enabled" in
+          enabled) "${SUDO[@]}" systemctl enable "$unit" >/dev/null || unit_failed=1 ;;
+          enabled-runtime) "${SUDO[@]}" systemctl enable --runtime "$unit" >/dev/null || unit_failed=1 ;;
+          disabled) "${SUDO[@]}" systemctl disable "$unit" >/dev/null || unit_failed=1 ;;
+        esac
+      fi
+      if [[ "$unit_failed" -eq 0 ]]; then
+        if [[ "$active" == active ]]; then
+          "${SUDO[@]}" systemctl restart "$unit" || unit_failed=1
+        else
+          "${SUDO[@]}" systemctl stop "$unit" || unit_failed=1
+        fi
+      fi
     fi
-    if [[ "$enabled" == masked ]]; then
-      "${SUDO[@]}" systemctl stop "$unit"
-      "${SUDO[@]}" systemctl mask "$unit" >/dev/null
-      continue
+    if [[ "$unit_failed" -ne 0 ]]; then
+      printf 'deploy-hermes-release: rollback-stage=service result=failed unit=%s\n' "$unit" >&2
+      failed=1
     fi
-    "${SUDO[@]}" systemctl unmask "$unit" >/dev/null 2>&1 || true
-    case "$enabled" in
-      enabled) "${SUDO[@]}" systemctl enable "$unit" >/dev/null ;;
-      enabled-runtime) "${SUDO[@]}" systemctl enable --runtime "$unit" >/dev/null ;;
-      disabled) "${SUDO[@]}" systemctl disable "$unit" >/dev/null ;;
-    esac
-    if [[ "$active" == active ]]; then "${SUDO[@]}" systemctl restart "$unit"; else "${SUDO[@]}" systemctl stop "$unit"; fi
   done < <("${SUDO[@]}" cat "$SNAPSHOT_DIR/services")
+  return "$failed"
 }
 
 rollback_transaction() {
-  local status="$1"
+  local deployment_status="$1" rollback_failed=0
   trap - EXIT INT TERM
   set +e
   if [[ "$TRANSACTION_STARTED" -eq 1 ]]; then
-    quiesce_runtime_services || true
-    restore_code_revision || true
-    restore_runtime_files || true
-    restore_state_migrations || true
-    restore_service_state || true
-    record_protected_capability_evidence rollback || true
-    printf 'deploy-hermes-release: rollback-complete candidate=%s snapshot=%s\n' "$CANDIDATE" "$SNAPSHOT_DIR" >&2
+    write_transaction_state rollback-in-progress false || rollback_failed=1
+    local stage
+    for stage in quiesce_runtime_services restore_code_revision restore_runtime_files restore_state_migrations restore_service_state; do
+      if "$stage"; then
+        printf 'deploy-hermes-release: rollback-stage=%s result=ok\n' "$stage" >&2
+      else
+        printf 'deploy-hermes-release: rollback-stage=%s result=failed\n' "$stage" >&2
+        rollback_failed=1
+      fi
+    done
+    if record_protected_capability_evidence rollback; then
+      printf 'deploy-hermes-release: rollback-stage=evidence result=ok\n' >&2
+    else
+      printf 'deploy-hermes-release: rollback-stage=evidence result=failed\n' >&2
+      rollback_failed=1
+    fi
+    if [[ "$rollback_failed" -ne 0 ]]; then
+      write_transaction_state rollback-incomplete false || :
+      printf 'deploy-hermes-release: rollback-incomplete deployment_status=%s candidate=%s snapshot=%s\n' "$deployment_status" "$CANDIDATE" "$SNAPSHOT_DIR" >&2
+      exit 70
+    fi
+    write_transaction_state rolled-back false "$(date -u +%s)" || {
+      printf 'deploy-hermes-release: rollback-incomplete deployment_status=%s candidate=%s snapshot=%s\n' "$deployment_status" "$CANDIDATE" "$SNAPSHOT_DIR" >&2
+      exit 70
+    }
+    printf 'deploy-hermes-release: rollback-complete deployment_status=%s candidate=%s snapshot=%s\n' "$deployment_status" "$CANDIDATE" "$SNAPSHOT_DIR" >&2
   fi
-  exit "$status"
+  exit "$deployment_status"
 }
 
 load_rollback_snapshot() {
@@ -437,7 +620,7 @@ load_rollback_snapshot() {
   "${SUDO[@]}" test -s "$SNAPSHOT_DIR/prior-head" || fail rollback_manifest_invalid
   "${SUDO[@]}" test -f "$SNAPSHOT_DIR/manifest" || fail rollback_manifest_invalid
   "${SUDO[@]}" test -f "$SNAPSHOT_DIR/services" || fail rollback_manifest_invalid
-  CANDIDATE="$("${SUDO[@]}" cat "$SNAPSHOT_DIR/candidate" 2>/dev/null || true)"
+  CANDIDATE="$("${SUDO[@]}" cat "$SNAPSHOT_DIR/candidate" 2>/dev/null)" || fail rollback_candidate_unreadable
   [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail rollback_candidate_invalid
 }
 
@@ -446,18 +629,9 @@ explicit_rollback() {
   require_artifact_layout
   load_rollback_snapshot "$2"
   TRANSACTION_STARTED=1
-  trap 'rollback_transaction $?' EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  quiesce_runtime_services || fail rollback_quiesce_failed
-  restore_code_revision || fail rollback_code_failed
-  restore_runtime_files || fail rollback_runtime_files_failed
-  restore_state_migrations || fail rollback_state_failed
-  restore_service_state || fail rollback_services_failed
-  record_protected_capability_evidence explicit_rollback || fail rollback_evidence_failed
-  TRANSACTION_STARTED=0
-  trap - EXIT INT TERM
-  printf 'deploy-hermes-release: rollback-ok snapshot=%s restored=%s\n' "$SNAPSHOT_DIR" "$("${SUDO[@]}" cat "$SNAPSHOT_DIR/prior-head")"
+  rollback_transaction 0
 }
 
 if [[ "$MODE" == --rollback ]]; then explicit_rollback "$@"; exit 0; fi
@@ -483,6 +657,8 @@ activate_candidate_checkout
 "${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
 "${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
 record_protected_capability_evidence after || fail protected_capability_evidence_after
+mark_snapshot_accepted
 TRANSACTION_STARTED=0
 trap - EXIT INT TERM
+prune_accepted_snapshots
 printf 'deploy-hermes-release: apply-ok candidate=%s snapshot=%s\n' "$CANDIDATE" "$SNAPSHOT_DIR"

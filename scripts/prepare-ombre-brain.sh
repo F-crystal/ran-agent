@@ -7,13 +7,14 @@ set -euo pipefail
 ROOT_DIR="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 OMBRE_BRAIN_REPO_URL="${OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Brain}"
+OMBRE_BRAIN_SOURCE_COMMIT="${OMBRE_BRAIN_COMMIT:-${OMBRE_BRAIN_SOURCE_COMMIT:-0e83d4671ce1629e03ad36bb9160235bf60dbd34}}"
 OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$ROOT_DIR/.ran_agent_state/ombre-brain}"
 OMBRE_BRAIN_RUNNER="${OMBRE_BRAIN_RUNNER:-source}"
 OMBRE_BRAIN_SOURCE_DIR="${OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME/upstream}"
 OMBRE_BRAIN_VENV="${OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME/.venv}"
 OMBRE_BUCKETS_DIR="${OMBRE_BUCKETS_DIR:-$ROOT_DIR/vault/ombre}"
 OMBRE_BRAIN_IMAGE="${OMBRE_BRAIN_IMAGE:-p0luz/ombre-brain:latest}"
-OMBRE_BRAIN_BIND_HOST="${OMBRE_BRAIN_BIND_HOST:-127.0.0.1}"
+OMBRE_BIND_HOST="${OMBRE_BIND_HOST:-127.0.0.1}"
 OMBRE_BRAIN_PORT="${OMBRE_BRAIN_PORT:-18001}"
 OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-compose.yml}"
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
@@ -52,6 +53,19 @@ while [ "$#" -gt 0 ]; do
   shift
 done
 
+if [ "$OMBRE_BRAIN_RUNNER" != "source" ]; then
+  echo "ERROR: O1 only supports OMBRE_BRAIN_RUNNER=source" >&2
+  exit 2
+fi
+if [ "$OMBRE_BRAIN_SOURCE_COMMIT" != "0e83d4671ce1629e03ad36bb9160235bf60dbd34" ]; then
+  echo "ERROR: O1 requires the pinned Ombre source commit" >&2
+  exit 2
+fi
+if [ "$OMBRE_BRAIN_PULL_IMAGE" = "1" ] || [ "$OMBRE_BRAIN_PULL_IMAGE" = "true" ] || [ "$FORCE_COMPOSE" = "1" ]; then
+  echo "ERROR: Docker preparation is outside O1" >&2
+  exit 2
+fi
+
 log() {
   printf '[prepare-ombre-brain] %s\n' "$*"
 }
@@ -69,24 +83,9 @@ json_bool() {
 }
 
 status_deploy_ready() {
-  case "$OMBRE_BRAIN_RUNNER" in
-    source)
-      [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ] && [ -x "$OMBRE_BRAIN_VENV/bin/python" ]
-      ;;
-    docker)
-      command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [ -f "$OMBRE_BRAIN_COMPOSE_FILE" ]
-      ;;
-    external)
-      return 0
-      ;;
-    auto)
-      { [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ] && [ -x "$OMBRE_BRAIN_VENV/bin/python" ]; } \
-        || { command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && [ -f "$OMBRE_BRAIN_COMPOSE_FILE" ]; }
-      ;;
-    *)
-      return 1
-      ;;
-  esac
+  [ "$OMBRE_BRAIN_RUNNER" = "source" ] &&
+    [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ] &&
+    [ -x "$OMBRE_BRAIN_VENV/bin/python" ]
 }
 
 repo_needs_update_json() {
@@ -217,7 +216,8 @@ prepare_source_runner() {
     if [ -d "$OMBRE_BRAIN_SOURCE_DIR/.git" ] && [ "$OMBRE_BRAIN_UPDATE_SOURCE" != "false" ] && [ "$OMBRE_BRAIN_UPDATE_SOURCE" != "0" ]; then
       REPO_BEFORE="$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
       if command -v timeout >/dev/null 2>&1; then
-        if timeout "$OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS" git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only; then
+        if timeout "$OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS" git -C "$OMBRE_BRAIN_SOURCE_DIR" fetch origin "$OMBRE_BRAIN_SOURCE_COMMIT" &&
+          git -C "$OMBRE_BRAIN_SOURCE_DIR" checkout --detach "$OMBRE_BRAIN_SOURCE_COMMIT"; then
           REPO_UPDATE="current"
         else
           code=$?
@@ -231,7 +231,8 @@ prepare_source_runner() {
           log "WARNING: source update timed out or failed; preserving current checkout"
         fi
       else
-        if git -C "$OMBRE_BRAIN_SOURCE_DIR" pull --ff-only; then
+        if git -C "$OMBRE_BRAIN_SOURCE_DIR" fetch origin "$OMBRE_BRAIN_SOURCE_COMMIT" &&
+          git -C "$OMBRE_BRAIN_SOURCE_DIR" checkout --detach "$OMBRE_BRAIN_SOURCE_COMMIT"; then
           REPO_UPDATE="current"
         else
           REPO_UPDATE="failed"
@@ -254,7 +255,9 @@ prepare_source_runner() {
     fi
     mkdir -p "$(dirname "$OMBRE_BRAIN_SOURCE_DIR")"
     log "cloning $OMBRE_BRAIN_REPO_URL to $OMBRE_BRAIN_SOURCE_DIR"
-    git clone --depth 1 "$OMBRE_BRAIN_REPO_URL" "$OMBRE_BRAIN_SOURCE_DIR"
+    git clone --no-checkout "$OMBRE_BRAIN_REPO_URL" "$OMBRE_BRAIN_SOURCE_DIR"
+    git -C "$OMBRE_BRAIN_SOURCE_DIR" fetch --depth 1 origin "$OMBRE_BRAIN_SOURCE_COMMIT"
+    git -C "$OMBRE_BRAIN_SOURCE_DIR" checkout --detach "$OMBRE_BRAIN_SOURCE_COMMIT"
     REPO_UPDATE="cloned"
     REPO_AFTER="$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)"
     REPO_REMOTE="$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse '@{u}' 2>/dev/null || true)"
@@ -262,6 +265,10 @@ prepare_source_runner() {
 
   if [ ! -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ]; then
     echo "ERROR: missing Ombre Brain source server.py: $OMBRE_BRAIN_SOURCE_DIR/src/server.py" >&2
+    exit 1
+  fi
+  if [ "$(git -C "$OMBRE_BRAIN_SOURCE_DIR" rev-parse HEAD 2>/dev/null || true)" != "$OMBRE_BRAIN_SOURCE_COMMIT" ]; then
+    echo "ERROR: Ombre Brain source is not the fixed reviewed commit" >&2
     exit 1
   fi
 
@@ -318,7 +325,7 @@ services:
     container_name: ${OMBRE_BRAIN_CONTAINER_NAME:-ran-agent-ombre-brain}
     restart: unless-stopped
     ports:
-      - "${OMBRE_BRAIN_BIND_HOST:-127.0.0.1}:${OMBRE_BRAIN_PORT:-18001}:8000"
+      - "${OMBRE_BIND_HOST:-127.0.0.1}:${OMBRE_BRAIN_PORT:-18001}:8000"
     environment:
       - OMBRE_TRANSPORT=streamable-http
       - OMBRE_EMBED_BACKEND=${OMBRE_EMBED_BACKEND:-local}
@@ -346,15 +353,6 @@ OMBRE_EMBED_BASE_URL=
 OMBRE_EMBED_MODEL=
 OMBRE_DASHBOARD_PASSWORD=
 EOF
-
-if [ "$OMBRE_BRAIN_PULL_IMAGE" = "1" ] || [ "$OMBRE_BRAIN_PULL_IMAGE" = "true" ]; then
-  if ! command -v docker >/dev/null 2>&1; then
-    echo "ERROR: docker is required for --pull" >&2
-    exit 1
-  fi
-  log "pulling $OMBRE_BRAIN_IMAGE"
-  docker pull "$OMBRE_BRAIN_IMAGE"
-fi
 
 prepare_source_runner
 

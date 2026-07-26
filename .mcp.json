@@ -52,10 +52,7 @@
       ]
     },
     "ombre_memory": {
-      "url": "${OMBRE_BRAIN_MCP_URL}"
-    },
-    "ombre_memory_extra": {
-      "url": "${OMBRE_BRAIN_MCP_EXTRA_URL}"
+      "url": "${OMBRE_RECALL_MCP_URL}"
     },
     "search_hub": {
       "command": "bash",

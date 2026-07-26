@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-19)
+Status: CURRENT (2026-07-24)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -9,16 +9,21 @@ contracts live in the linked governance docs below.
 ## Release Lineage
 
 ```text
-deployed_runtime_sha: 3f6e7b705854838d9a1e8b466d959f7ead41b643
-main_closure_sha: recorded only after the documentation-only closure is committed
-closure_delta: documentation-only
-redeploy_required: false
+production_repository_sha: bb66f1e6a8a400d599c7f86139107742bbedddc8
+runtime_evidence_class: USER_SUPPLIED_RUNTIME
+local_o1_online_revalidation: not performed
+production_manual_hotfixes: present; verify on host
+ombre_o1_candidate: local, uncommitted, unarchived, undeployed
+v4_pro: technical candidate frozen, unarchived, undeployed
+node_receipt: deferred
+ombre_o2: not started, not authorized
+package_b_2_b_3: not started
 ```
 
-`deployed_runtime_sha` is the deployed runtime revision. A later
-`main_closure_sha` records governance-only documentation and must never be
-described as the deployed runtime revision. Server acceptance evidence remains
-private deployment evidence; this document does not replace it.
+This production statement is `USER_SUPPLIED_RUNTIME`, not revalidated by this
+local O1 line. The formal production release does not contain the local Ombre O1 candidate.
+Production has manual hotfixes, but this document does not guess their exact
+live shape; server acceptance evidence remains the authority for those patches.
 
 ## Mainline
 
@@ -121,7 +126,7 @@ state, vault, data, or XHS note debug output.
 | `sticker_catalog` | Local sticker picker/attach/save catalog |
 | `personal_memory` | Personal memory recall and backend health check |
 | `obsidian_memory` | Optional Obsidian vault search, disabled by default |
-| `ombre_memory` / `ombre_memory_extra` | Optional upstream Ombre Brain direct MCP |
+| legacy direct Ombre surfaces | Prior production-repository shape; the local O1 recall-only replacement is not deployed |
 | `media_generation` | Image and speech generation |
 | `playwright` | Dynamic/visual web pages, full/debug use |
 | `external_mcp_gateway` | Stable broker for governed external MCPs |

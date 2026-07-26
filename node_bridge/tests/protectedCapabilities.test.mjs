@@ -12,6 +12,7 @@ import { buildPersonalMemoryTools } from '../src/personalMemoryMcpServer.mjs';
 import { buildSearchHubTools } from '../src/searchHub/schema.mjs';
 import { buildSocialReaderTools } from '../src/socialReaderMcpServer.mjs';
 import { buildStickerCatalogTools } from '../src/stickerCatalogMcpServer.mjs';
+import { OMBRE_RECALL_TOOLS, OMBRE_UPSTREAM_COMMIT } from '../src/ombreRecallPolicy.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const MANIFEST_PATH = path.join(ROOT, 'docs/governance/hermes_protected_capabilities.v1.json');
@@ -93,6 +94,7 @@ test('protected locally-owned MCP tool names and public schemas stay exact', asy
     social_reader: buildSocialReaderTools({}),
     media_reader: buildMediaReaderTools(),
     personal_memory: buildPersonalMemoryTools(),
+    ombre_memory: OMBRE_RECALL_TOOLS,
     co_reading: buildCoReadingTools(),
     sticker_catalog_lite: buildStickerCatalogTools({ profileMode: 'lite' }),
     sticker_catalog_full: buildStickerCatalogTools({ profileMode: 'full' }),
@@ -103,6 +105,9 @@ test('protected locally-owned MCP tool names and public schemas stay exact', asy
     const privateKeys = collectKeys(tools).filter((key) => FORBIDDEN_PRIVATE_KEYS.test(key));
     assert.deepEqual(privateKeys, [], `${name} leaked private receipt schema keys`);
   }
+  assert.equal(manifest.locallyOwnedServers.ombre_memory.mode, 'local-recall-only');
+  assert.equal(manifest.locallyOwnedServers.ombre_memory.upstreamCommit, OMBRE_UPSTREAM_COMMIT);
+  assert.equal(manifest.liveFingerprintOnly.includes('ombre_memory'), false);
 });
 
 test('runtime protected namespace exactly matches the governed manifest', async () => {

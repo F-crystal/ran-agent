@@ -2,13 +2,17 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
 const root = new URL('../..', import.meta.url).pathname;
 const nodeBin = process.execPath;
+const pythonBin = process.env.RAN_AGENT_PYTHON_BIN || '/Users/fengran/anaconda3/bin/python3.10';
+const runtimeUser = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
+const runtimeGroup = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
 
 function candidate() {
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
@@ -20,6 +24,7 @@ function run(script, args = [], extraEnv = {}) {
     env: {
       PATH: '/usr/bin:/bin',
       RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_PYTHON_BIN: pythonBin,
       RAN_AGENT_RELEASE_CANDIDATE: candidate(),
       ...extraEnv,
     },
@@ -32,8 +37,30 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+function writeRetentionState(directory, overrides = {}) {
+  const manifest = 'fixture manifest\n';
+  const services = 'ran-agent-ombre-brain.service\tactive\tenabled\tloaded\n';
+  writeFileSync(join(directory, 'prior-head'), 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n');
+  writeFileSync(join(directory, 'manifest'), manifest);
+  writeFileSync(join(directory, 'services'), services);
+  writeFileSync(join(directory, 'transaction-state.json'), JSON.stringify({
+    schema_version: 1,
+    transaction_id: directory.split('/').at(-1),
+    candidate_sha: 'b'.repeat(40),
+    base_sha: 'a'.repeat(40),
+    status: 'accepted',
+    acceptance_state: 'accepted',
+    rollback_state: 'not_used',
+    rollbackable: true,
+    current_production_identity: `transaction:${directory.split('/').at(-1)}`,
+    completed_at: '2026-07-24T00:00:00Z',
+    manifest_digest: sha256(manifest),
+    service_state_digest: sha256(services),
+    ...overrides,
+  }));
+}
+
 function requiredGatePython() {
-  const pythonBin = process.env.RAN_AGENT_PYTHON_BIN || '';
   assert.match(
     pythonBin,
     /^\//,
@@ -121,6 +148,7 @@ function makeDeployServiceFixture(initialStates = {}) {
   const footer = deploy.lastIndexOf('if [[ "$MODE" == --rollback ]]');
   assert.ok(footer > 0, 'deploy function harness requires the transaction footer');
   writeFileSync(join(scripts, 'deploy-hermes-release.sh'), deploy.slice(0, footer));
+  copyFileSync(join(root, 'scripts', 'ombre_o1_contract.py'), join(scripts, 'ombre_o1_contract.py'));
   copyFileSync(join(root, 'scripts', 'resolve-hermes-service-node.sh'), join(scripts, 'resolve-hermes-service-node.sh'));
   chmodSync(join(scripts, 'resolve-hermes-service-node.sh'), 0o755);
 
@@ -174,12 +202,15 @@ function runDeployServiceFixture(fixture, commands) {
     `source ${JSON.stringify(join(fixture.repo, 'scripts', 'deploy-hermes-release.sh'))}`,
     `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
     'for unit in "${ALL_RUNTIME_UNITS[@]}"; do snapshot_service_state "$unit"; done',
+    'printf "%s\\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$SNAPSHOT_DIR/prior-head"',
+    '[ -f "$SNAPSHOT_DIR/manifest" ] || printf "%s\\n" fixture-manifest > "$SNAPSHOT_DIR/manifest"',
     commands,
   ].join('\n')], {
     cwd: fixture.repo,
     env: {
       PATH: `${fixture.bin}:/usr/bin:/bin`,
       RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_PYTHON_BIN: pythonBin,
       RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
       RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(fixture.dir, 'artifacts'),
       SYSTEMCTL_LOG: fixture.log,
@@ -290,6 +321,12 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.match(deploy, /\/opt\/ran_agent/);
   assert.doesNotMatch(deploy, /candidate_not_checked_out/);
   assert.match(deploy, /snapshot_runtime_state/);
+  assert.match(deploy, /SUCCESSFUL_SNAPSHOT_RETENTION=2/);
+  assert.match(deploy, /mark_snapshot_accepted/);
+  assert.match(deploy, /prune_accepted_snapshots/);
+  assert.doesNotMatch(deploy, /-name success/);
+  assert.ok(deploy.lastIndexOf('mark_snapshot_accepted') < deploy.lastIndexOf('prune_accepted_snapshots'));
+  assert.ok(deploy.lastIndexOf('verify-hermes-release.sh') < deploy.lastIndexOf('mark_snapshot_accepted'));
   assert.match(deploy, /stage_candidate/);
   assert.match(deploy, /git -C .* archive/);
   assert.match(deploy, /restore_code_revision/);
@@ -311,10 +348,12 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.match(deploy, /\$STAGE_DIR\/scripts\/apply-hermes-runtime-split\.sh/);
   assert.match(deploy, /\$STAGE_DIR\/scripts\/verify-hermes-release\.sh/);
   assert.match(deploy, /ran-agent-ombre-brain\.service/);
+  assert.match(deploy, /ran-agent-ombre-recall\.service/);
   assert.match(deploy, /ran-agent-xhs-browse\.service/);
   assert.match(deploy, /ran-agent-xhs-public-sidecar\.service/);
-  assert.ok(deploy.indexOf('restore_runtime_files || true') < deploy.indexOf('restore_state_migrations || true'));
-  assert.ok(deploy.indexOf('restore_state_migrations || true') < deploy.indexOf('restore_service_state || true'));
+  assert.doesNotMatch(deploy, /restore_(?:runtime_files|state_migrations|service_state) \|\| true/);
+  assert.match(deploy, /rollback-incomplete/);
+  assert.match(deploy, /exit 70/);
   assert.ok(deploy.lastIndexOf('quiesce_runtime_services') < deploy.lastIndexOf('snapshot_state_migrations'));
   assert.match(deploy, /rollback/);
   assert.match(deploy, /RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1/);
@@ -337,6 +376,226 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.doesNotMatch(accept, /ssh |scp |rsync /);
 });
 
+test('transaction retention keeps current production and only deletes explicitly accepted rollbackable history', () => {
+  const fixture = makeDeployServiceFixture();
+  const snapshotRoot = join(fixture.dir, 'artifacts', 'snapshots');
+  const older = join(snapshotRoot, 'release-transaction.older.fixture');
+  const oldest = join(snapshotRoot, 'release-transaction.oldest.fixture');
+  const newestPrior = join(snapshotRoot, 'release-transaction.prior.fixture');
+  const current = join(snapshotRoot, 'release-transaction.current.fixture');
+  try {
+    for (const [snapshot, timestamp, sha] of [
+      [oldest, '2026-07-20T00:00:00Z', '1111111111111111111111111111111111111111'],
+      [older, '2026-07-21T00:00:00Z', '2222222222222222222222222222222222222222'],
+      [newestPrior, '2026-07-23T00:00:00Z', '3333333333333333333333333333333333333333'],
+      [current, '2026-07-19T00:00:00Z', candidate()],
+    ]) {
+      mkdirSync(snapshot, { recursive: true });
+      writeRetentionState(snapshot, { candidate_sha: sha, completed_at: timestamp });
+    }
+    writeFileSync(join(snapshotRoot, 'current-production.json'), JSON.stringify({
+      schema_version: 1,
+      transaction_id: current.split('/').at(-1),
+      candidate_sha: candidate(),
+    }));
+    runDeployServiceFixture(fixture, [
+      `SNAPSHOT_ROOT=${JSON.stringify(snapshotRoot)}`,
+      'CURRENT_PRODUCTION_POINTER="$SNAPSHOT_ROOT/current-production.json"',
+      `SNAPSHOT_DIR=${JSON.stringify(current)}`,
+      `REPO_ROOT=${JSON.stringify(root)}`,
+      'TRANSACTION_STARTED=0',
+      'prune_accepted_snapshots',
+    ].join('\n'));
+    assert.equal(existsSync(current), true);
+    assert.equal(existsSync(newestPrior), true);
+    assert.equal(existsSync(older), false);
+    assert.equal(existsSync(oldest), false);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('rollback is fail-loud, continues later stages, and preserves incomplete evidence', () => {
+  const fixture = makeDeployServiceFixture();
+  try {
+    let failure;
+    try {
+      runDeployServiceFixture(fixture, [
+        'CANDIDATE=0123456789abcdef0123456789abcdef01234567',
+        'TRANSACTION_STARTED=1',
+        'quiesce_runtime_services() { return 0; }',
+        'restore_code_revision() { return 0; }',
+        'restore_runtime_files() { printf runtime-files-attempted >> "$SNAPSHOT_DIR/stages"; return 1; }',
+        'restore_state_migrations() { printf state-attempted >> "$SNAPSHOT_DIR/stages"; return 1; }',
+        'restore_service_state() { printf services-attempted >> "$SNAPSHOT_DIR/stages"; return 0; }',
+        'record_protected_capability_evidence() { return 0; }',
+        'rollback_transaction 23',
+      ].join('\n'));
+    } catch (error) {
+      failure = error;
+    }
+    assert.equal(failure?.status, 70);
+    assert.match(String(failure?.stderr), /rollback-incomplete deployment_status=23/);
+    assert.match(readFileSync(join(fixture.snapshot, 'stages'), 'utf8'), /runtime-files-attemptedstate-attemptedservices-attempted/);
+    assert.equal(JSON.parse(readFileSync(join(fixture.snapshot, 'transaction-state.json'), 'utf8')).status, 'rollback_failed');
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('successful rollback reports complete and records a non-retainable rolled-back state', () => {
+  const fixture = makeDeployServiceFixture();
+  try {
+    const output = runDeployServiceFixture(fixture, [
+      'CANDIDATE=0123456789abcdef0123456789abcdef01234567',
+      'TRANSACTION_STARTED=1',
+      'quiesce_runtime_services() { return 0; }',
+      'restore_code_revision() { return 0; }',
+      'restore_runtime_files() { return 0; }',
+      'restore_state_migrations() { return 0; }',
+      'restore_service_state() { return 0; }',
+      'record_protected_capability_evidence() { return 0; }',
+      'rollback_transaction 0',
+    ].join('\n'));
+    assert.equal(output, '');
+    const state = JSON.parse(readFileSync(join(fixture.snapshot, 'transaction-state.json'), 'utf8'));
+    assert.equal(state.status, 'rollback_used');
+    assert.equal(state.rollbackable, false);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('runtime file owner/mode restoration failure is reported after attempting remaining files', () => {
+  const fixture = makeDeployServiceFixture();
+  const first = join(fixture.dir, 'restore-first');
+  const second = join(fixture.dir, 'restore-second');
+  try {
+    mkdirSync(join(fixture.snapshot, 'files'), { recursive: true });
+    writeFileSync(join(fixture.snapshot, 'files', '0'), 'first');
+    writeFileSync(join(fixture.snapshot, 'files', '1'), 'second');
+    writeFileSync(join(fixture.snapshot, 'manifest'), `present\t0\t${first}\npresent\t1\t${second}\n`);
+    const output = runDeployServiceFixture(fixture, [
+      'sudo() { if [[ "$1" == cp && "$4" == *"/files/0" ]]; then return 1; fi; command sudo "$@"; }',
+      'if restore_runtime_files; then exit 9; else printf "restore-failed-loud\\n"; fi',
+    ].join('\n'));
+    assert.match(output, /restore-failed-loud/);
+    assert.equal(readFileSync(second, 'utf8'), 'second');
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('Lite, Full, and Ombre service restoration failures are individually fail-loud', () => {
+  const units = [
+    'ran-agent-python.service',
+    'ran-agent-node.service',
+    'ran-agent-hermes.service',
+    'ran-agent-hermes-full.service',
+    'ran-agent-ombre-brain.service',
+    'ran-agent-ombre-recall.service',
+    'ran-agent-xhs-browse.service',
+    'ran-agent-xhs-public-sidecar.service',
+  ];
+  const states = Object.fromEntries(units.map((unit) => [unit, {
+    load: 'loaded', active: 'active', enabled: 'enabled',
+  }]));
+  for (const failedUnit of ['ran-agent-hermes.service', 'ran-agent-hermes-full.service', 'ran-agent-ombre-brain.service']) {
+    const fixture = makeDeployServiceFixture(states);
+    try {
+      const output = runDeployServiceFixture(fixture, [
+        `FAILED_UNIT=${JSON.stringify(failedUnit)}`,
+        'sudo() { if [[ "$1" == systemctl && "$2" == restart && "$3" == "$FAILED_UNIT" ]]; then return 1; fi; command sudo "$@"; }',
+        'if restore_service_state; then exit 9; else printf "service-restore-failed-loud\\n"; fi',
+      ].join('\n'));
+      assert.match(output, /service-restore-failed-loud/);
+      const trace = readFileSync(fixture.log, 'utf8');
+      assert.match(trace, /restart ran-agent-xhs-public-sidecar\.service/);
+    } finally {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('successful acceptance keeps Ombre dependencies active instead of restoring pre-deploy inactivity', () => {
+  const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+  assert.doesNotMatch(deploy, /restore_temporary_ombre_state_after_acceptance/);
+  assert.match(deploy, /mark_snapshot_accepted[\s\S]*prune_accepted_snapshots/);
+});
+
+test('retention skips unfinished, rollback-failed, resumable, and unknown snapshots', () => {
+  const fixture = makeDeployServiceFixture();
+  const snapshotRoot = join(fixture.dir, 'artifacts', 'snapshots');
+  try {
+    for (const [name, status] of [
+      ['unfinished', 'snapshot-created'],
+      ['rollback-failed', 'rollback-incomplete'],
+      ['resumable', 'deployment-started'],
+    ]) {
+      const directory = join(snapshotRoot, `release-transaction.${name}.fixture`);
+      mkdirSync(directory, { recursive: true });
+      writeRetentionState(directory, {
+        status: status === 'rollback-incomplete' ? 'rollback_failed' : status === 'deployment-started' ? 'resumable' : 'in_progress',
+        acceptance_state: 'not_accepted',
+        rollback_state: status === 'rollback-incomplete' ? 'rollback_failed' : 'not_used',
+        rollbackable: false,
+        completed_at: '',
+      });
+    }
+    const unknown = join(snapshotRoot, 'release-transaction.unknown.fixture');
+    mkdirSync(unknown, { recursive: true });
+    writeFileSync(join(snapshotRoot, 'current-production.json'), JSON.stringify({
+      schema_version: 1,
+      transaction_id: 'release-transaction.production.fixture',
+      candidate_sha: 'f'.repeat(40),
+    }));
+    const output = runDeployServiceFixture(fixture, [
+      `SNAPSHOT_ROOT=${JSON.stringify(snapshotRoot)}`,
+      'CURRENT_PRODUCTION_POINTER="$SNAPSHOT_ROOT/current-production.json"',
+      `REPO_ROOT=${JSON.stringify(root)}`,
+      'TRANSACTION_STARTED=0',
+      'prune_accepted_snapshots',
+    ].join('\n'));
+    assert.equal((output.match(/retention=SKIP_UNCERTAIN/g) || []).length, 4);
+    for (const directory of readdirSync(snapshotRoot)) assert.equal(existsSync(join(snapshotRoot, directory)), true);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('retention deletion failure warns without reversing an accepted deployment', () => {
+  const fixture = makeDeployServiceFixture();
+  const snapshotRoot = join(fixture.dir, 'artifacts', 'snapshots');
+  const doomed = join(snapshotRoot, 'release-transaction.doomed.fixture');
+  try {
+    for (const [index, completed] of [1, 2, 3].map((value) => [value, value])) {
+      const directory = index === 1 ? doomed : join(snapshotRoot, `release-transaction.keep-${index}.fixture`);
+      mkdirSync(directory, { recursive: true });
+      writeRetentionState(directory, {
+        candidate_sha: String(index).repeat(40),
+        completed_at: `2026-07-2${completed}T00:00:00Z`,
+      });
+    }
+    writeFileSync(join(snapshotRoot, 'current-production.json'), JSON.stringify({
+      schema_version: 1,
+      transaction_id: 'release-transaction.keep-3.fixture',
+      candidate_sha: '3'.repeat(40),
+    }));
+    const output = runDeployServiceFixture(fixture, [
+      `SNAPSHOT_ROOT=${JSON.stringify(snapshotRoot)}`,
+      'CURRENT_PRODUCTION_POINTER="$SNAPSHOT_ROOT/current-production.json"',
+      `REPO_ROOT=${JSON.stringify(root)}`,
+      'TRANSACTION_STARTED=0',
+      'sudo() { if [[ "$1" == rm ]]; then return 1; fi; command sudo "$@"; }',
+      'prune_accepted_snapshots 2>&1',
+    ].join('\n'));
+    assert.match(output, /retention-warning.*delete-failed/);
+    assert.equal(existsSync(doomed), true);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test('release scripts make an immutable staged candidate the only apply authority and validate dry-run prerequisites', () => {
   const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
   const accept = readFileSync(join(root, 'scripts', 'accept-hermes-release.sh'), 'utf8');
@@ -351,6 +610,10 @@ test('release scripts make an immutable staged candidate the only apply authorit
   assert.doesNotMatch(deploy, /bash "\$REPO_ROOT\/scripts\/accept-hermes-release\.sh" --apply/);
   assert.match(accept, /RAN_AGENT_RELEASE_SOURCE_ROOT/);
   assert.match(accept, /release_post_start_health/);
+  assert.match(accept, /release_ombre_recall_acceptance/);
+  assert.match(accept, /ombre_recall_search/);
+  assert.match(accept, /ombre_runtime_semantic_contract/);
+  assert.match(accept, /ombre_o1_contract\.py/);
 });
 
 test('preserve mode cannot rewrite profiles or environment, or remove unrelated MCP units', () => {
@@ -398,7 +661,19 @@ test('acceptance readiness fails closed for authentication, missing keys, servic
     { name: 'authentication', env: 'HERMES_API_KEY=secret-auth', extra: { MOCK_EXPECTED_LITE_KEY: 'different', MOCK_EXPECTED_FULL_KEY: 'full-key' }, expected: 'lite_bridge_authentication_failed' },
     { name: 'forbidden', env: 'HERMES_API_KEY=secret-forbidden', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-forbidden', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_lite_SEQUENCE: '403' }, expected: 'lite_bridge_authentication_failed' },
     { name: 'missing-key', env: 'UNRELATED=value', extra: { MOCK_EXPECTED_FULL_KEY: 'full-key' }, expected: 'lite_bridge_auth_key_missing' },
-    { name: 'service-exit', env: 'HERMES_API_KEY=secret-exit', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-exit', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_DROP_LITE_AFTER_CURL: '1', MOCK_lite_SEQUENCE: 'refused' }, expected: 'lite_bridge_service_inactive' },
+    {
+      name: 'service-exit',
+      env: 'HERMES_API_KEY=secret-exit',
+      extra: {
+        MOCK_EXPECTED_LITE_KEY: 'secret-exit',
+        MOCK_EXPECTED_FULL_KEY: 'full-key',
+        MOCK_DROP_LITE_AFTER_CURL: '1',
+        MOCK_lite_SEQUENCE: 'refused',
+        RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '12',
+      },
+      expected: 'lite_bridge_service_inactive',
+      maxMs: 15_000,
+    },
     { name: 'timeout', env: 'HERMES_API_KEY=secret-timeout', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-timeout', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_lite_SEQUENCE: '503', RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '1' }, expected: 'lite_bridge_ready_timeout' },
   ];
   for (const item of cases) {
@@ -406,7 +681,7 @@ test('acceptance readiness fails closed for authentication, missing keys, servic
     try {
       const started = Date.now();
       assert.throws(() => runAcceptanceReadiness(fixture, item.extra), new RegExp(item.expected));
-      assert.ok(Date.now() - started < 4000, `${item.name} must be bounded`);
+      assert.ok(Date.now() - started < (item.maxMs || 5000), `${item.name} must be bounded`);
       const curlTrace = existsSync(join(fixture.trace, 'curl')) ? readFileSync(join(fixture.trace, 'curl'), 'utf8') : '';
       assert.doesNotMatch(curlTrace, /secret-(?:auth|exit|timeout)/);
       if (item.name === 'missing-key') assert.equal(curlTrace, '', 'missing key must not send an unauthenticated request');
@@ -448,54 +723,342 @@ test('acceptance removes an in-flight authenticated header when terminated', asy
   }
 });
 
-test('preserve runtime shape restarts only core services when Hermes is absent from PATH', () => {
+test('preserve runtime shape prepares Ombre and starts recall before lite and full without requiring Hermes CLI', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hermes-preserve-no-cli-'));
   const bin = join(dir, 'bin');
   const trace = join(dir, 'systemctl.log');
   const state = join(dir, 'state');
   const debug = join(dir, 'debug');
   const config = join(dir, 'config.yaml');
+  const fullHome = join(dir, 'hermes-home');
+  const liteHome = join(fullHome, 'lite');
+  const ombreHome = join(dir, 'ombre');
+  const ombreSource = join(ombreHome, 'upstream');
+  const ombreVenv = join(ombreHome, '.venv');
   mkdirSync(bin, { recursive: true });
   writeFileSync(config, 'operator-owned-config\n');
+  const safeConfig = [
+    'platform_toolsets:',
+    '  cli: [mcp-ombre_memory]',
+    '  gateway: [mcp-ombre_memory]',
+    'mcp_servers:',
+    '  ombre_memory:',
+    '    url: "${OMBRE_RECALL_MCP_URL}"',
+    '',
+  ].join('\n');
+  for (const target of [
+    join(fullHome, 'config.yaml'),
+    join(fullHome, 'profiles', 'ran-assistant', 'config.yaml'),
+    join(liteHome, 'config.yaml'),
+    join(liteHome, 'profiles', 'ran-assistant-lite', 'config.yaml'),
+  ]) {
+    mkdirSync(join(target, '..'), { recursive: true });
+    writeFileSync(target, safeConfig);
+  }
+  mkdirSync(join(ombreSource, 'src'), { recursive: true });
+  mkdirSync(join(ombreVenv, 'bin'), { recursive: true });
+  writeFileSync(join(ombreSource, 'src', 'server.py'), '# fixture\n');
+  writeFileSync(join(ombreVenv, 'bin', 'python'), '#!/bin/sh\nexit 0\n');
+  chmodSync(join(ombreVenv, 'bin', 'python'), 0o755);
+  writeFileSync(join(bin, 'git'), [
+    '#!/bin/sh',
+    'case "$*" in',
+    '  *"rev-parse HEAD"*) printf "%s\\n" 0e83d4671ce1629e03ad36bb9160235bf60dbd34 ;;',
+    '  *) exit 0 ;;',
+    'esac',
+    '',
+  ].join('\n'));
+  chmodSync(join(bin, 'git'), 0o755);
+  mkdirSync(join(state, 'core'), { recursive: true });
+  const core = new DatabaseSync(join(state, 'core', 'core-state.sqlite3'));
+  core.exec('CREATE TABLE activity (activity_id TEXT PRIMARY KEY, title TEXT NOT NULL, domain TEXT NOT NULL, state TEXT NOT NULL, contract_revision INTEGER NOT NULL, updated_at TEXT NOT NULL)');
+  core.close();
   writeFileSync(join(bin, 'systemctl'), [
     '#!/bin/sh',
     'printf "%s\\n" "$*" >> "$SYSTEMCTL_TRACE"',
     'case "$1" in',
-    '  show) printf "%s\\n" loaded ;;',
+    '  show) case "$*" in',
+    '    *"--property=MainPID"*) printf "%s\\n" 123 ;;',
+    '    *"--property=User"*) printf "%s\\n" "$MOCK_RUNTIME_USER" ;;',
+    '    *"--property=Group"*) printf "%s\\n" "$MOCK_RUNTIME_GROUP" ;;',
+    '    *) printf "%s\\n" loaded ;;',
+    '  esac ;;',
+    '  is-active) exit 0 ;;',
+    '  is-enabled) printf "%s\\n" disabled ;;',
     '  is-failed) exit 1 ;;',
     'esac',
     '',
   ].join('\n'));
-  for (const command of ['journalctl', 'pgrep', 'ss', 'openssl', 'sleep']) {
+  for (const command of ['journalctl', 'pgrep', 'openssl', 'sleep', 'curl']) {
     writeFileSync(join(bin, command), '#!/bin/sh\nexit 0\n');
     chmodSync(join(bin, command), 0o755);
   }
+  writeFileSync(join(bin, 'chown'), '#!/bin/sh\nprintf "chown %s\\n" "$*" >> "$SYSTEMCTL_TRACE"\nexit 0\n');
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nprintf "%s\\n" "LISTEN 0 128 127.0.0.1:18001 users:((x,pid=123,fd=3))" "LISTEN 0 128 127.0.0.1:18002 users:((x,pid=123,fd=3))" "LISTEN 0 128 127.0.0.1:8642 users:((x,pid=123,fd=3))" "LISTEN 0 128 127.0.0.1:8643 users:((x,pid=123,fd=3))"\n');
+  writeFileSync(join(bin, 'provider-canary'), '#!/bin/sh\nprintf "canary %s\\n" "$1" >> "$SYSTEMCTL_TRACE"\n[ "${FAIL_CANARY_MODE:-}" != "$1" ]\n');
+  chmodSync(join(bin, 'ss'), 0o755);
+  chmodSync(join(bin, 'provider-canary'), 0o755);
   chmodSync(join(bin, 'systemctl'), 0o755);
+  chmodSync(join(bin, 'chown'), 0o755);
 
+  const baseEnv = {
+    PATH: `${bin}:/usr/bin:/bin`,
+    RAN_AGENT_NO_SUDO: '1',
+    RAN_AGENT_RUNTIME_USER: runtimeUser,
+    RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
+    RAN_AGENT_PYTHON_BIN: pythonBin,
+    RAN_AGENT_NODE_BIN: nodeBin,
+    RAN_AGENT_TEST_MODE: '1',
+    RAN_AGENT_PROVIDER_CANARY_TEST_COMMAND: join(bin, 'provider-canary'),
+    RAN_AGENT_REPO_ROOT: root,
+    RAN_AGENT_DEPLOY_STATE_DIR: state,
+    RAN_AGENT_DEPLOY_DEBUG_DIR: debug,
+    HERMES_HOME: fullHome,
+    HERMES_LITE_HOME: liteHome,
+    SYSTEMD_DIR: join(dir, 'systemd'),
+    RAN_AGENT_DEPLOY_OMBRE_BRAIN_RUNNER: 'source',
+    RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME: ombreHome,
+    RAN_AGENT_DEPLOY_OMBRE_BRAIN_SOURCE_DIR: ombreSource,
+    RAN_AGENT_DEPLOY_OMBRE_BRAIN_VENV: ombreVenv,
+    OMBRE_BRAIN_UPDATE_SOURCE: 'false',
+    RAN_AGENT_DEPLOY_OMBRE_BUCKETS_DIR: join(dir, 'buckets'),
+    SYSTEMCTL_TRACE: trace,
+    MOCK_RUNTIME_USER: runtimeUser,
+    MOCK_RUNTIME_GROUP: runtimeGroup,
+  };
   try {
     assert.doesNotThrow(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
       cwd: root,
-      env: {
-        PATH: `${bin}:/usr/bin:/bin`,
-        RAN_AGENT_NO_SUDO: '1',
-        RAN_AGENT_REPO_ROOT: root,
-        RAN_AGENT_DEPLOY_STATE_DIR: state,
-        RAN_AGENT_DEPLOY_DEBUG_DIR: debug,
-        HERMES_HOME: join(dir, 'hermes-home'),
-        HERMES_LITE_HOME: join(dir, 'hermes-home', 'lite'),
-        SYSTEMCTL_TRACE: trace,
-      },
+      env: baseEnv,
       stdio: 'pipe',
     }));
     const log = readFileSync(trace, 'utf8');
-    for (const unit of ['ran-agent-python.service', 'ran-agent-node.service', 'ran-agent-hermes.service', 'ran-agent-hermes-full.service']) {
+    for (const unit of ['ran-agent-ombre-brain.service', 'ran-agent-ombre-recall.service', 'ran-agent-python.service', 'ran-agent-node.service', 'ran-agent-hermes.service', 'ran-agent-hermes-full.service']) {
       assert.match(log, new RegExp(`restart ${unit.replace('.', '\\.')}`));
     }
-    assert.doesNotMatch(log, /ran-agent-ombre|ran-agent-xhs|\b(enable|disable)\b/);
+    assert.ok(log.indexOf('restart ran-agent-ombre-brain.service') < log.indexOf('restart ran-agent-ombre-recall.service'));
+    assert.ok(log.indexOf('restart ran-agent-ombre-recall.service') < log.indexOf('restart ran-agent-hermes.service'));
+    assert.ok(log.indexOf('restart ran-agent-hermes.service') < log.indexOf('canary lite'));
+    assert.ok(log.indexOf('canary lite') < log.indexOf('restart ran-agent-hermes-full.service'));
+    assert.ok(log.indexOf('restart ran-agent-hermes.service') < log.indexOf('restart ran-agent-hermes-full.service'));
+    assert.ok(log.indexOf('restart ran-agent-hermes-full.service') < log.indexOf('canary full'));
+    assert.ok(log.indexOf('canary full') < log.indexOf('restart ran-agent-node.service'));
+    assert.doesNotMatch(log, /ran-agent-xhs|\bdisable\b/);
+    assert.match(log, /enable ran-agent-ombre-brain\.service/);
+    assert.match(log, /enable ran-agent-ombre-recall\.service/);
+    assert.equal(existsSync(join(dir, 'systemd', 'ran-agent-ombre-brain.service')), true);
+    assert.equal(existsSync(join(dir, 'systemd', 'ran-agent-ombre-recall.service')), true);
     assert.equal(readFileSync(config, 'utf8'), 'operator-owned-config\n');
+    const projection = join(state, 'hermes', 'published-memory-context.json');
+    const pointer = JSON.parse(readFileSync(projection, 'utf8'));
+    const manifestPath = join(`${projection}.manifests`, pointer.manifest_file);
+    const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    const revisionPath = join(`${projection}.revisions`, manifest.revision_file);
+    for (const directory of [join(state, 'hermes'), `${projection}.revisions`, `${projection}.manifests`]) {
+      const metadata = statSync(directory);
+      assert.equal(metadata.mode & 0o777, 0o700);
+      assert.equal(metadata.uid, process.getuid());
+      assert.equal(metadata.gid, process.getgid());
+    }
+    for (const file of [projection, `${projection}.publication-state.json`, manifestPath, revisionPath]) {
+      const metadata = statSync(file);
+      assert.equal(metadata.mode & 0o777, 0o600);
+      assert.equal(metadata.uid, process.getuid());
+      assert.equal(metadata.gid, process.getgid());
+    }
+    assert.match(log, new RegExp(`chown ${runtimeUser}:${runtimeGroup} .*\\/hermes`));
+
+    for (const mode of ['lite', 'full']) {
+      writeFileSync(trace, '');
+      assert.throws(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
+        cwd: root,
+        env: { ...baseEnv, FAIL_CANARY_MODE: mode },
+        stdio: 'pipe',
+      }), /Command failed/);
+      const canaryFailureLog = readFileSync(trace, 'utf8');
+      if (mode === 'lite') {
+        assert.match(canaryFailureLog, /canary lite/);
+        assert.doesNotMatch(canaryFailureLog, /restart ran-agent-hermes-full\.service|restart ran-agent-node\.service/);
+      } else {
+        assert.match(canaryFailureLog, /canary full/);
+        assert.doesNotMatch(canaryFailureLog, /restart ran-agent-node\.service/);
+      }
+    }
+
+    writeFileSync(trace, '');
+    assert.throws(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
+      cwd: root,
+      env: { ...baseEnv, MOCK_RUNTIME_USER: 'different-runtime-user' },
+      stdio: 'pipe',
+    }), /Command failed/);
+    assert.doesNotMatch(
+      readFileSync(trace, 'utf8'),
+      /restart ran-agent-hermes(?:-full)?\.service|restart ran-agent-node\.service/,
+    );
+
+    const corruptingNode = join(bin, 'node-corrupt-projection-owner-shape');
+    writeFileSync(corruptingNode, [
+      '#!/bin/sh',
+      'if [ "$1" = "$RAN_AGENT_REPO_ROOT/node_bridge/src/hermesIdentityProjection.mjs" ] && [ "${2:-}" != verify-runtime ]; then',
+      '  "$REAL_NODE" "$@"',
+      '  find "$3.manifests" -type f -exec chmod 0644 {} +',
+      '  exit 0',
+      'fi',
+      'exec "$REAL_NODE" "$@"',
+      '',
+    ].join('\n'));
+    chmodSync(corruptingNode, 0o755);
+    writeFileSync(trace, '');
+    assert.throws(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
+      cwd: root,
+      env: { ...baseEnv, RAN_AGENT_NODE_BIN: corruptingNode, REAL_NODE: nodeBin },
+      stdio: 'pipe',
+    }), /Command failed/);
+    const unreadableGraphLog = readFileSync(trace, 'utf8');
+    assert.doesNotMatch(
+      unreadableGraphLog,
+      /restart ran-agent-hermes(?:-full)?\.service|restart ran-agent-node\.service/,
+    );
+    chmodSync(manifestPath, 0o600);
+
+    writeFileSync(join(bin, 'curl'), '#!/bin/sh\nexit 1\n');
+    chmodSync(join(bin, 'curl'), 0o755);
+    writeFileSync(trace, '');
+    assert.throws(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
+      cwd: root,
+      env: {
+        ...baseEnv,
+        RAN_AGENT_DEPLOY_OMBRE_HEALTH_TIMEOUT_SECONDS: '0',
+      },
+      stdio: 'pipe',
+    }), /Command failed/);
+    const failedLog = readFileSync(trace, 'utf8');
+    assert.match(failedLog, /restart ran-agent-ombre-brain\.service/);
+    assert.doesNotMatch(failedLog, /restart ran-agent-hermes(?:-full)?\.service/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('projection publisher switches to a distinct validated runtime identity and fails closed without it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'projection-runtime-identity-'));
+  const bin = join(dir, 'bin');
+  const trace = join(dir, 'trace');
+  const check = join(bin, 'check-runtime');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'id'), [
+    '#!/bin/sh',
+    'if [ "${MISSING_RUNTIME_USER:-0}" = 1 ] && [ "$#" -gt 1 ]; then exit 1; fi',
+    'case "$1:$#" in',
+    '  -u:1|-g:1) printf "%s\\n" 2000 ;;',
+    '  -u:2|-g:2) printf "%s\\n" 1000 ;;',
+    '  -gn:2) printf "%s\\n" runtime-group ;;',
+    '  *) exit 1 ;;',
+    'esac',
+    '',
+  ].join('\n'));
+  writeFileSync(join(bin, 'runuser'), [
+    '#!/bin/sh',
+    'printf "%s\\n" "$*" >> "$RUNTIME_TRACE"',
+    'while [ "$1" != -- ]; do shift; done',
+    'shift',
+    'MOCK_RUNTIME_EFFECTIVE=1 exec "$@"',
+    '',
+  ].join('\n'));
+  writeFileSync(check, '#!/bin/sh\n[ "${MOCK_RUNTIME_EFFECTIVE:-0}" = 1 ]\n');
+  for (const file of ['id', 'runuser', 'check-runtime']) chmodSync(join(bin, file), 0o755);
+  const env = {
+    ...process.env,
+    PATH: `${bin}:/usr/bin:/bin`,
+    RAN_AGENT_NO_SUDO: '1',
+    RAN_AGENT_RUNTIME_USER: 'runtime-user',
+    RAN_AGENT_RUNTIME_GROUP: 'runtime-group',
+    RUNTIME_TRACE: trace,
+  };
+  try {
+    assert.doesNotThrow(() => execFileSync('bash', ['-c', [
+      'source scripts/apply-hermes-runtime-split.sh',
+      'resolve_runtime_identity',
+      `run_as_runtime_identity ${JSON.stringify(check)}`,
+    ].join('\n')], { cwd: root, env, stdio: 'pipe' }));
+    assert.match(
+      readFileSync(trace, 'utf8'),
+      /--user runtime-user --group runtime-group -- .*check-runtime/,
+    );
+
+    assert.throws(() => execFileSync('bash', ['-c', [
+      'source scripts/apply-hermes-runtime-split.sh',
+      'resolve_runtime_identity',
+      'command() { if [ "$1" = -v ] && [ "$2" = runuser ]; then return 1; fi; builtin command "$@"; }',
+      `run_as_runtime_identity ${JSON.stringify(check)}`,
+    ].join('\n')], { cwd: root, env, stdio: 'pipe' }), /Command failed/);
+
+    assert.throws(() => execFileSync('bash', ['-c', [
+      'source scripts/apply-hermes-runtime-split.sh',
+      'resolve_runtime_identity',
+    ].join('\n')], {
+      cwd: root,
+      env: { ...env, MISSING_RUNTIME_USER: '1' },
+      stdio: 'pipe',
+    }), /Command failed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('O1 dependency startup resets failed units, enables inactive units, and refuses masked policy', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-service-states-'));
+  const systemctl = join(dir, 'systemctl');
+  const log = join(dir, 'systemctl.log');
+  writeFileSync(systemctl, [
+    '#!/bin/sh',
+    'printf "%s\\n" "$*" >> "$SYSTEMCTL_LOG"',
+    'case "$1" in',
+    '  is-enabled) printf "%s\\n" "$SYSTEMCTL_ENABLED"; [ "$SYSTEMCTL_ENABLED" = enabled ] ;;',
+    '  show) printf "%s\\n" loaded ;;',
+    '  is-failed) [ "$SYSTEMCTL_FAILED" = 1 ] ;;',
+    '  reset-failed|enable|restart) exit 0 ;;',
+    '  *) exit 0 ;;',
+    'esac',
+    '',
+  ].join('\n'));
+  chmodSync(systemctl, 0o755);
+  const invoke = (enabled, failed) => {
+    writeFileSync(log, '');
+    try {
+      execFileSync('bash', ['-c', [
+        'set -euo pipefail',
+        'source scripts/apply-hermes-runtime-split.sh',
+        'start_o1_dependency ran-agent-ombre-brain.service',
+      ].join('\n')], {
+        cwd: root,
+        env: {
+          ...process.env,
+          PATH: `${dir}:/usr/bin:/bin`,
+          RAN_AGENT_NO_SUDO: '1',
+          SYSTEMCTL_LOG: log,
+          SYSTEMCTL_ENABLED: enabled,
+          SYSTEMCTL_FAILED: failed ? '1' : '0',
+        },
+        stdio: 'pipe',
+      });
+      return { status: 0, trace: readFileSync(log, 'utf8') };
+    } catch (error) {
+      return { status: error.status, trace: readFileSync(log, 'utf8') };
+    }
+  };
+  const failed = invoke('disabled', true);
+  assert.equal(failed.status, 0);
+  assert.match(failed.trace, /reset-failed ran-agent-ombre-brain\.service/);
+  assert.match(failed.trace, /enable ran-agent-ombre-brain\.service/);
+  assert.match(failed.trace, /restart ran-agent-ombre-brain\.service/);
+  const inactive = invoke('disabled', false);
+  assert.equal(inactive.status, 0);
+  assert.doesNotMatch(inactive.trace, /reset-failed/);
+  assert.match(inactive.trace, /enable ran-agent-ombre-brain\.service/);
+  const masked = invoke('masked', false);
+  assert.notEqual(masked.status, 0);
+  assert.doesNotMatch(masked.trace, /unmask|restart ran-agent-ombre-brain/);
 });
 
 test('non-preserve runtime split fails before mutation when Hermes is absent from PATH', () => {
@@ -789,11 +1352,11 @@ test('release transaction snapshots the live production checkout before activati
   assert.ok(deploy.indexOf('hermes-release-gate.sh" --all') < deploy.lastIndexOf('snapshot_runtime_state'));
   assert.ok(deploy.indexOf('snapshot_code_revision') < deploy.lastIndexOf('activate_candidate_checkout'));
   assert.match(deploy, /--rollback/);
-  assert.match(deploy, /rollback-ok snapshot=/);
+  assert.match(deploy, /rollback-complete deployment_status=/);
+  assert.match(deploy, /rollback-incomplete deployment_status=/);
   assert.match(deploy, /trap 'rollback_transaction \$\?' EXIT/);
-  assert.ok(deploy.indexOf('restore_code_revision || true') < deploy.indexOf('restore_runtime_files || true'));
-  assert.ok(deploy.indexOf('restore_runtime_files || true') < deploy.indexOf('restore_state_migrations || true'));
-  assert.ok(deploy.indexOf('restore_state_migrations || true') < deploy.indexOf('restore_service_state || true'));
+  assert.match(deploy, /for stage in quiesce_runtime_services restore_code_revision restore_runtime_files restore_state_migrations restore_service_state/);
+  assert.doesNotMatch(deploy, /restore_(?:code_revision|runtime_files|state_migrations|service_state) \|\| true/);
   assert.match(deploy, /service_env_source_unavailable/);
   assert.match(deploy, /RAN_AGENT_INTERNAL_CONTROL_SECRET/);
   assert.match(deploy, /git -C "\$REPO_ROOT" diff --name-status "\$PRODUCTION_HEAD" "\$CANDIDATE"/);

@@ -1,10 +1,17 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-13)
+Status: CURRENT (2026-07-24)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
 manual systemd or env edits.
+
+`USER_SUPPLIED_RUNTIME`: production repository SHA is
+`bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
+revalidated it online.
+The host has manual hotfixes, but the local Ombre O1 candidate in this checkout
+is uncommitted, unarchived, and undeployed. Its Ombre commands below describe
+the reviewed target state, not behavior already asserted in production.
 
 ## Source Of Truth
 
@@ -164,7 +171,8 @@ bash scripts/apply-hermes-runtime-split.sh
 | `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | Daily lite-context entry |
 | `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | Full debug/heavy-tool entry |
 | `ran-agent-xhs-public-sidecar.service` | `18061` | n/a | `/opt/ran_agent/.ran_agent_state/xhs-public-sidecar` | XHS-Downloader public API sidecar for `social_reader` |
-| `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Optional upstream Ombre Brain memory service |
+| `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | O1 target: loopback-only internal upstream |
+| `ran-agent-ombre-recall.service` | `18002` | n/a | `/opt/ran_agent` | O1 target: local recall-only MCP exposed to Lite/Full |
 
 `8642` is a lite-context entry, not a security sandbox. Node bridge routes
 normal chat, XHS, media, and memory requests to lite by default, and routes
@@ -228,11 +236,12 @@ OMBRE_BRAIN_SOURCE_DIR=/opt/ran_agent/.ran_agent_state/ombre-brain/upstream
 OMBRE_BRAIN_VENV=/opt/ran_agent/.ran_agent_state/ombre-brain/.venv
 OMBRE_BUCKETS_DIR=/opt/ran_agent/vault/ombre
 OMBRE_BRAIN_STATUS_FILE=/opt/ran_agent/.ran_agent_state/ombre-brain/status.json
+OMBRE_BIND_HOST=127.0.0.1
+OMBRE_MCP_REQUIRE_AUTH=false
 OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
-OMBRE_BRAIN_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra
-PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback
-PERSONAL_AGENT_OMBRE_MCP_URL=http://127.0.0.1:18001/mcp
-PERSONAL_AGENT_OMBRE_MCP_EXTRA_URL=http://127.0.0.1:18001/mcp-extra
+OMBRE_RECALL_MCP_URL=http://127.0.0.1:18002/mcp
+PERSONAL_AGENT_OMBRE_BACKEND=recall_only
+PERSONAL_AGENT_OMBRE_MCP_URL=http://127.0.0.1:18002/mcp
 AI_DAILY_DIGEST_ENABLED=true
 AI_DAILY_DIGEST_HOUR=8
 AI_DAILY_DIGEST_MINUTE=0
@@ -251,6 +260,11 @@ HERMES_PROACTIVE_NOTIFY_MAX_CHARS=1600
 EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=true
 EXTERNAL_MCP_ACTIVITY_TICK_MS=60000
 ```
+
+O1 deliberately has no Ombre network authenticator.
+`OMBRE_MCP_REQUIRE_AUTH=false` is valid only with the enforced `127.0.0.1`
+bind and loopback-only MCP/health URLs. An external bind—or claiming
+authentication with `true`—is a release error.
 
 Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform
 login state must stay in local env files only and must never be printed into

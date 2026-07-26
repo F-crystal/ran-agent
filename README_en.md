@@ -2,7 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-13)
+Status: CURRENT (2026-07-24)
+
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not revalidated it online. Production has manual hotfixes, but its formal release does not include this local Ombre O1 candidate. The candidate is uncommitted, unarchived, and undeployed. V4 Pro is frozen and unarchived/undeployed; Node Receipt is deferred; O2 is not started or authorized; Package B.2/B.3 have not started.
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -84,10 +86,12 @@ known limitations.
 `GlobalTimeline` already exist. `personal_memory` recalls personal memory
 through the Python backend; `surface_relevant_context` is only the current
 lightweight memory surface and must not be described as automatically searching
-Vault. An automatic unified recall control plane is not complete yet.
-`obsidian_memory` and direct Ombre MCPs are optional surfaces. Long-term writes,
-reflection, night-cycle work, and knowledge maintenance stay in the Python
-backend and on-demand skills instead of always living in the main prompt.
+Vault. An automatic unified recall control plane is not complete yet. The
+production-repository shape still describes `obsidian_memory` and direct Ombre
+MCPs as optional surfaces; the undeployed O1 candidate replaces only the Ombre
+surface with a local recall-only endpoint. Long-term writes, reflection,
+night-cycle work, and knowledge maintenance stay in the Python backend and
+on-demand skills instead of always living in the main prompt.
 
 **Sendable media generation.** The full gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.
 
@@ -106,8 +110,7 @@ backend and on-demand skills instead of always living in the main prompt.
 | `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | lite/full |
 | `personal_memory` | Personal memory recall and backend health check | lite/full |
 | `obsidian_memory` | Obsidian vault semantic search | optional / disabled-by-default |
-| `ombre_memory` | Direct Ombre Brain MCP | optional / full only when deploy-ready |
-| `ombre_memory_extra` | Direct Ombre Brain extended MCP | optional / full only when deploy-ready |
+| `ombre_memory` | Recall-only adapter in the local O1 candidate (not a production claim) | lite/full candidate |
 | `external_mcp_gateway` | Governed dynamic External MCP broker | governed / source profiles disabled-by-default |
 | `media_generation` | Image and speech generation | full |
 | `playwright` | Browser automation and dynamic-page debugging | full |

@@ -1,6 +1,12 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-07-13)
+Status: CURRENT (2026-07-24)
+
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is
+`bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
+revalidated it online. Production has manual hotfixes. Ombre O1 remains an
+uncommitted, unarchived, undeployed candidate; V4 Pro is frozen; Node Receipt
+is deferred; O2 is not started/authorized; Package B.2/B.3 have not started.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable
@@ -15,11 +21,10 @@ clean` as a pre-deploy action in `/opt/ran_agent`.
 
 ## Release Lineage
 
-The deployed runtime revision for this reliability release is
-`3f6e7b705854838d9a1e8b466d959f7ead41b643`. A subsequent main closure commit
-contains documentation only; it is not the deployed runtime SHA and does not
-require a redeploy. Keep server acceptance evidence and snapshots in private
-archives rather than copying them into this public contract.
+The owner-supplied known production repository revision is
+`bb66f1e6a8a400d599c7f86139107742bbedddc8`. Keep server acceptance evidence
+and snapshots in private archives rather than copying them into this public
+contract.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. Every other step below is read-only except
@@ -53,9 +58,10 @@ against `docs/governance/hermes_release_bootstrap.v1.sha256` in the candidate.
 It invokes the same `deploy-hermes-release.sh` transaction as normal releases;
 there is no second persistent deployment mechanism.
 
-During candidate apply the staged `apply-hermes-runtime-split.sh
---preserve-runtime-shape` path checks `systemctl` and restarts only the four
-existing core units. It deliberately does not invoke or require an interactive
+During O1 candidate apply the staged `apply-hermes-runtime-split.sh
+--preserve-runtime-shape` path also installs and verifies the pinned Ombre
+upstream and recall-adapter units before Python/Lite/Full/Node. It deliberately
+does not invoke or require an interactive
 shell `hermes` executable: the staged gate and later verification remain the
 release checks, while the ordinary non-preserve drift-repair path still
 requires Hermes because it installs profiles and writes Hermes units.

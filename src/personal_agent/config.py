@@ -228,11 +228,10 @@ class AppConfig:
     persona_proposals_dir: Path = Path("debug/persona_proposals")
     identity_path: Path = Path("IDENTITY.md")
     soul_path: Path = Path("SOUL.md")
-    ombre_backend: str = "official_with_legacy_fallback"
+    ombre_backend: str = "recall_only"
     ombre_mcp_command: str = ""
     ombre_mcp_timeout_seconds: int = 10
-    ombre_mcp_url: str = "http://127.0.0.1:18001/mcp"
-    ombre_mcp_extra_url: str = "http://127.0.0.1:18001/mcp-extra"
+    ombre_mcp_url: str = "http://127.0.0.1:18002/mcp"
     wechat_account_id: str = "personal_agent"
     wechat_login_mode: str = "terminal"
     http_host: str = "127.0.0.1"
@@ -476,7 +475,7 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         soul_path=resolved_base_dir / "SOUL.md",
         ombre_backend=os.getenv(
             "PERSONAL_AGENT_OMBRE_BACKEND",
-            "official_with_legacy_fallback",
+            "recall_only",
         ).strip().lower(),
         ombre_mcp_command=os.getenv(
             "PERSONAL_AGENT_OMBRE_MCP_COMMAND",
@@ -487,11 +486,7 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         ),
         ombre_mcp_url=os.getenv(
             "PERSONAL_AGENT_OMBRE_MCP_URL",
-            os.getenv("OMBRE_BRAIN_MCP_URL", "http://127.0.0.1:18001/mcp"),
-        ).strip(),
-        ombre_mcp_extra_url=os.getenv(
-            "PERSONAL_AGENT_OMBRE_MCP_EXTRA_URL",
-            os.getenv("OMBRE_BRAIN_MCP_EXTRA_URL", "http://127.0.0.1:18001/mcp-extra"),
+            os.getenv("OMBRE_RECALL_MCP_URL", "http://127.0.0.1:18002/mcp"),
         ).strip(),
         wechat_account_id=os.getenv("PERSONAL_AGENT_WECHAT_ACCOUNT_ID", "personal_agent").strip(),
         wechat_login_mode=os.getenv("PERSONAL_AGENT_WECHAT_LOGIN_MODE", "terminal").strip().lower(),

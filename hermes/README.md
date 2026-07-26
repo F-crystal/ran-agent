@@ -2,7 +2,9 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-07-06)
+Status: CURRENT (2026-07-23)
+
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，本地 O1 线未在线复核。生产人工热补丁不等于本目录的 O1 候选已正式发布。本候选未提交、未归档、未部署；V4 Pro frozen；Node Receipt deferred；O2 未开始/未授权；Package B.2/B.3 未开始。
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 
@@ -144,7 +146,7 @@ ran-agent 使用仓库内 MCP 服务：
 | `mimo_power` | 已退役：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles |
 | `personal_memory` | Python backend 个人记忆召回 |
 | `obsidian_memory` | Obsidian vault 语义检索 |
-| `ombre_memory`, `ombre_memory_extra` | 上游 Ombre Brain 直接 MCP，full profile 调试/记忆维护用 |
+| `ombre_memory` | O1 候选的本地 recall-only 入口；不向 Hermes 暴露上游 registry |
 | `media_generation` | 图片和语音生成，full 默认可用 |
 | `playwright` | 浏览器自动化，full 默认可用 |
 | `tavily` | 可选底层网页搜索 provider，仅供 Search Hub 兼容使用 |
@@ -172,12 +174,13 @@ ran-agent 使用仓库内 MCP 服务：
 | `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB 路径 |
 | `OBSIDIAN_INDEX_DEVICE` | Linux 服务器默认 `cpu` |
 | `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | 只在显式维护时设为 `1` |
-| `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Ombre Brain 服务和 full-profile direct MCP 开关 |
-| `OMBRE_BRAIN_RUNNER` | Ombre Brain runner，默认 `source`；`docker` 只是可选 |
+| `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | 内部 Ombre Brain 服务开关；不授权 Hermes 直连 |
+| `OMBRE_BRAIN_RUNNER` | O1 固定为 pinned `source`；`docker`、`external` 和未知 runner 均 fail-closed |
 | `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream，默认 `https://github.com/P0luz/Ombre-Brain` |
 | `OMBRE_BRAIN_HOME`, `OMBRE_BRAIN_SOURCE_DIR`, `OMBRE_BRAIN_VENV`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime、source checkout、venv 和私有 buckets 路径 |
-| `OMBRE_BRAIN_MCP_URL`, `OMBRE_BRAIN_MCP_EXTRA_URL` | full profile 直接连接的 Ombre MCP 端点 |
-| `PERSONAL_AGENT_OMBRE_BACKEND` | Python `personal_memory` 底层 Ombre 后端，默认 `official_with_legacy_fallback` |
+| `OMBRE_BIND_HOST`, `OMBRE_MCP_REQUIRE_AUTH`, `OMBRE_BRAIN_MCP_URL` | 内部上游的 loopback-only 网络契约；O1 未实现网络认证，故仅允许 `127.0.0.1` 与 `false` |
+| `OMBRE_RECALL_MCP_URL` | Hermes/Python 使用的本地 recall-only 端点 |
+| `PERSONAL_AGENT_OMBRE_BACKEND` | Python `personal_memory` 底层 Ombre 后端，O1 候选固定为 `recall_only` |
 
 Secrets 必须放在机器本地 `.env`，例如：
 

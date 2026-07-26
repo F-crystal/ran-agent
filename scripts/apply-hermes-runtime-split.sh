@@ -8,6 +8,7 @@ set -euo pipefail
 
 REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 HERMES_BIN="${HERMES_BIN:-hermes}"
+PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-/opt/ran_agent/.venv/bin/python}"
 FULL_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="${HERMES_LITE_HOME:-$FULL_HOME/lite}"
 RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
@@ -21,6 +22,7 @@ RUNTIME_DEBUG_DIR="${RAN_AGENT_DEPLOY_DEBUG_DIR:-/opt/ran_agent/debug}"
 LITE_SERVICE="$SYSTEMD_DIR/ran-agent-hermes.service"
 FULL_SERVICE="$SYSTEMD_DIR/ran-agent-hermes-full.service"
 OMBRE_SERVICE="$SYSTEMD_DIR/ran-agent-ombre-brain.service"
+OMBRE_RECALL_SERVICE="$SYSTEMD_DIR/ran-agent-ombre-recall.service"
 XHS_BROWSE_SERVICE="$SYSTEMD_DIR/ran-agent-xhs-browse.service"
 XHS_PUBLIC_SIDECAR_SERVICE="$SYSTEMD_DIR/ran-agent-xhs-public-sidecar.service"
 LITE_DROPIN_DIR="$SYSTEMD_DIR/ran-agent-hermes.service.d"
@@ -107,29 +109,30 @@ PERSONAL_AGENT_OCR_TIMEOUT_MS_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OCR_TIM
 OMBRE_BRAIN_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_ENABLED:-true}"
 OMBRE_BRAIN_MCP_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_MCP_ENABLED:-true}"
 OMBRE_BRAIN_RUNNER_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_RUNNER:-source}"
+OMBRE_BRAIN_COMMIT_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_COMMIT:-0e83d4671ce1629e03ad36bb9160235bf60dbd34}"
 OMBRE_BRAIN_REPO_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Brain}"
 OMBRE_BRAIN_HOME_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME:-/opt/ran_agent/.ran_agent_state/ombre-brain}"
 OMBRE_BRAIN_SOURCE_DIR_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME_DEFAULT/upstream}"
 OMBRE_BRAIN_VENV_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME_DEFAULT/.venv}"
 OMBRE_BUCKETS_DIR_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BUCKETS_DIR:-/opt/ran_agent/vault/ombre}"
 OMBRE_BRAIN_IMAGE_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_IMAGE:-p0luz/ombre-brain:latest}"
-OMBRE_BRAIN_BIND_HOST_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_BIND_HOST:-127.0.0.1}"
+OMBRE_BIND_HOST_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BIND_HOST:-${RAN_AGENT_DEPLOY_OMBRE_BRAIN_BIND_HOST:-127.0.0.1}}"
+OMBRE_MCP_REQUIRE_AUTH_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_MCP_REQUIRE_AUTH:-false}"
 OMBRE_BRAIN_PORT_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_PORT:-18001}"
 OMBRE_BRAIN_COMPOSE_FILE_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME_DEFAULT/docker-compose.yml}"
 OMBRE_BRAIN_CONFIG_FILE_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME_DEFAULT/config.yaml}"
 OMBRE_BRAIN_STATUS_FILE_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME_DEFAULT/status.json}"
-OMBRE_BRAIN_MCP_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_MCP_URL:-http://$OMBRE_BRAIN_BIND_HOST_DEFAULT:$OMBRE_BRAIN_PORT_DEFAULT/mcp}"
-OMBRE_BRAIN_MCP_EXTRA_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_MCP_EXTRA_URL:-http://$OMBRE_BRAIN_BIND_HOST_DEFAULT:$OMBRE_BRAIN_PORT_DEFAULT/mcp-extra}"
-OMBRE_BRAIN_HEALTH_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_HEALTH_URL:-http://$OMBRE_BRAIN_BIND_HOST_DEFAULT:$OMBRE_BRAIN_PORT_DEFAULT/health}"
+OMBRE_BRAIN_MCP_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_MCP_URL:-http://$OMBRE_BIND_HOST_DEFAULT:$OMBRE_BRAIN_PORT_DEFAULT/mcp}"
+OMBRE_BRAIN_HEALTH_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_HEALTH_URL:-http://$OMBRE_BIND_HOST_DEFAULT:$OMBRE_BRAIN_PORT_DEFAULT/health}"
+OMBRE_RECALL_PORT_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_RECALL_PORT:-18002}"
+OMBRE_RECALL_MCP_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_RECALL_MCP_URL:-http://127.0.0.1:$OMBRE_RECALL_PORT_DEFAULT/mcp}"
+OMBRE_RECALL_HEALTH_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_RECALL_HEALTH_URL:-http://127.0.0.1:$OMBRE_RECALL_PORT_DEFAULT/health}"
+OMBRE_HEALTH_TIMEOUT_SECONDS="${RAN_AGENT_DEPLOY_OMBRE_HEALTH_TIMEOUT_SECONDS:-90}"
 PERSONAL_AGENT_OMBRE_READ_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_READ_ENABLED:-true}"
-PERSONAL_AGENT_OMBRE_WRITE_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_WRITE_ENABLED:-false}"
 PERSONAL_AGENT_OMBRE_TIMEOUT_MS_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_TIMEOUT_MS:-1500}"
 PERSONAL_AGENT_OMBRE_MAX_RESULTS_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_MAX_RESULTS:-3}"
 PERSONAL_AGENT_OMBRE_MAX_CHARS_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_MAX_CHARS:-900}"
-PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED:-true}"
-PERSONAL_AGENT_OMBRE_I_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_I_ENABLED:-true}"
-PERSONAL_AGENT_OMBRE_WRITE_MODE_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_WRITE_MODE:-guarded}"
-PERSONAL_AGENT_OMBRE_BACKEND_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_BACKEND:-official_with_legacy_fallback}"
+PERSONAL_AGENT_OMBRE_BACKEND_DEFAULT="${RAN_AGENT_DEPLOY_PERSONAL_AGENT_OMBRE_BACKEND:-recall_only}"
 # The release transaction uses this narrowly-scoped mode.  It refreshes the
 # executable services while preserving the operator's existing Hermes profile
 # and config.yaml shape, including arbitrary opaque MCP entries and full/lite
@@ -156,6 +159,36 @@ require_command() {
     echo "ERROR: required command not found: $1" >&2
     exit 1
   fi
+}
+
+resolve_runtime_identity() {
+  [[ "$RUNTIME_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
+    { echo "ERROR: invalid Hermes runtime user" >&2; return 1; }
+  [[ "$RUNTIME_GROUP" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
+    { echo "ERROR: invalid Hermes runtime group" >&2; return 1; }
+  RUNTIME_UID="$(id -u "$RUNTIME_USER" 2>/dev/null)" ||
+    { echo "ERROR: Hermes runtime user does not exist: $RUNTIME_USER" >&2; return 1; }
+  RUNTIME_GID="$(id -g "$RUNTIME_USER" 2>/dev/null)" ||
+    { echo "ERROR: cannot resolve Hermes runtime group for $RUNTIME_USER" >&2; return 1; }
+  local primary_group
+  primary_group="$(id -gn "$RUNTIME_USER" 2>/dev/null)" ||
+    { echo "ERROR: cannot resolve Hermes runtime group name for $RUNTIME_USER" >&2; return 1; }
+  [ "$primary_group" = "$RUNTIME_GROUP" ] ||
+    { echo "ERROR: Hermes runtime group must be the runtime user's primary group" >&2; return 1; }
+}
+
+run_as_runtime_identity() {
+  [ -n "${RUNTIME_UID:-}" ] && [ -n "${RUNTIME_GID:-}" ] ||
+    { echo "ERROR: Hermes runtime identity is unresolved" >&2; return 1; }
+  if [ "$(id -u)" = "$RUNTIME_UID" ] && [ "$(id -g)" = "$RUNTIME_GID" ]; then
+    "$@"
+    return
+  fi
+  local runuser_bin
+  runuser_bin="$(command -v runuser 2>/dev/null || true)"
+  [ -n "$runuser_bin" ] ||
+    { echo "ERROR: runuser is required to publish as the Hermes runtime identity" >&2; return 1; }
+  "${SUDO[@]}" "$runuser_bin" --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- "$@"
 }
 
 chown_if_user_exists() {
@@ -211,8 +244,102 @@ bool_is_true() {
   esac
 }
 
-docker_compose_available() {
-  command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1
+validate_ombre_network_contract() {
+  if ! ombre_brain_enabled || ! bool_is_true "$(effective_env_value OMBRE_BRAIN_MCP_ENABLED "$OMBRE_BRAIN_MCP_ENABLED_DEFAULT")"; then
+    echo "ERROR: Ombre Lite/Full parity requires OMBRE_BRAIN_ENABLED=true and OMBRE_BRAIN_MCP_ENABLED=true" >&2
+    return 1
+  fi
+  env \
+    OMBRE_BRAIN_RUNNER="$(effective_env_value OMBRE_BRAIN_RUNNER "$OMBRE_BRAIN_RUNNER_DEFAULT")" \
+    OMBRE_BRAIN_COMMIT="$(effective_env_value OMBRE_BRAIN_COMMIT "$OMBRE_BRAIN_COMMIT_DEFAULT")" \
+    OMBRE_BIND_HOST="$(effective_env_value OMBRE_BIND_HOST "$OMBRE_BIND_HOST_DEFAULT")" \
+    OMBRE_MCP_REQUIRE_AUTH="$(effective_env_value OMBRE_MCP_REQUIRE_AUTH "$OMBRE_MCP_REQUIRE_AUTH_DEFAULT")" \
+    OMBRE_BRAIN_MCP_URL="$(effective_env_value OMBRE_BRAIN_MCP_URL "$OMBRE_BRAIN_MCP_URL_DEFAULT")" \
+    OMBRE_BRAIN_HEALTH_URL="$(effective_env_value OMBRE_BRAIN_HEALTH_URL "$OMBRE_BRAIN_HEALTH_URL_DEFAULT")" \
+    OMBRE_RECALL_MCP_URL="$(effective_env_value OMBRE_RECALL_MCP_URL "$OMBRE_RECALL_MCP_URL_DEFAULT")" \
+    OMBRE_RECALL_HEALTH_URL="$(effective_env_value OMBRE_RECALL_HEALTH_URL "$OMBRE_RECALL_HEALTH_URL_DEFAULT")" \
+    "$PYTHON_BIN" "$REPO_ROOT/scripts/ombre_o1_contract.py" validate-runner >/dev/null
+}
+
+wait_for_managed_endpoint() {
+  local unit="$1" health_url="$2" port="$3" label="$4" waited=0 pid listeners
+  while [ "$waited" -le "$OMBRE_HEALTH_TIMEOUT_SECONDS" ]; do
+    pid="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null || true)"
+    listeners="$(ss -ltnp 2>/dev/null || true)"
+    if "${SUDO[@]}" systemctl is-active --quiet "$unit" &&
+      [[ "$pid" =~ ^[1-9][0-9]*$ ]] &&
+      printf '%s\n' "$listeners" | grep -Eq "127\\.0\\.0\\.1:$port([^0-9]|$).*pid=$pid([^0-9]|$)" &&
+      curl --fail --silent --show-error --max-time 3 "$health_url" >/dev/null; then
+      log "$label unit/PID/listener/health contract passed"
+      return 0
+    fi
+    sleep 3
+    waited=$((waited + 3))
+  done
+  echo "ERROR: $label unit/PID/listener/health contract did not pass before dependent startup" >&2
+  return 1
+}
+
+wait_for_ombre_health() {
+  wait_for_managed_endpoint \
+    ran-agent-ombre-brain.service \
+    "$(effective_env_value OMBRE_BRAIN_HEALTH_URL "$OMBRE_BRAIN_HEALTH_URL_DEFAULT")" \
+    "$OMBRE_BRAIN_PORT_DEFAULT" \
+    "Ombre upstream"
+}
+
+wait_for_ombre_recall_health() {
+  wait_for_managed_endpoint \
+    ran-agent-ombre-recall.service \
+    "$(effective_env_value OMBRE_RECALL_HEALTH_URL "$OMBRE_RECALL_HEALTH_URL_DEFAULT")" \
+    "$OMBRE_RECALL_PORT_DEFAULT" \
+    "Ombre recall adapter"
+}
+
+verify_gateway_runtime_identity() {
+  local unit actual_user actual_group
+  for unit in ran-agent-hermes.service ran-agent-hermes-full.service; do
+    actual_user="$("${SUDO[@]}" systemctl show "$unit" --property=User --value 2>/dev/null)" ||
+      { echo "ERROR: cannot read runtime user for $unit" >&2; return 1; }
+    actual_group="$("${SUDO[@]}" systemctl show "$unit" --property=Group --value 2>/dev/null)" ||
+      { echo "ERROR: cannot read runtime group for $unit" >&2; return 1; }
+    [ "$actual_user" = "$RUNTIME_USER" ] ||
+      { echo "ERROR: $unit runtime user does not match projection publisher" >&2; return 1; }
+    if [ -z "$actual_group" ]; then
+      actual_group="$(id -gn "$actual_user" 2>/dev/null)" || return 1
+    fi
+    [ "$actual_group" = "$RUNTIME_GROUP" ] ||
+      { echo "ERROR: $unit runtime group does not match projection publisher" >&2; return 1; }
+  done
+}
+
+publish_verified_hermes_projection() {
+  local core_db="$RUNTIME_STATE_DIR/core/core-state.sqlite3"
+  local output="$RUNTIME_STATE_DIR/hermes/published-memory-context.json"
+  local node_bin="${RAN_AGENT_NODE_BIN:-/opt/nodejs/node-v22.22.2-linux-x64/bin/node}"
+  local projection_root
+  projection_root="$(dirname "$output")"
+  if [ ! -f "$core_db" ]; then
+    echo "ERROR: Core activity snapshot unavailable; existing verified projection retained" >&2
+    return 1
+  fi
+  verify_gateway_runtime_identity
+  "${SUDO[@]}" mkdir -p "$projection_root"
+  "${SUDO[@]}" chown "$RUNTIME_USER:$RUNTIME_GROUP" "$projection_root"
+  "${SUDO[@]}" chmod 0700 "$projection_root"
+  if ! run_as_runtime_identity \
+    "$node_bin" "$REPO_ROOT/node_bridge/src/hermesIdentityProjection.mjs" \
+    "$core_db" "$output" "$REPO_ROOT"; then
+    echo "ERROR: verified Hermes projection publication failed or is ambiguous; Hermes startup blocked" >&2
+    return 1
+  fi
+  if ! run_as_runtime_identity \
+    "$node_bin" "$REPO_ROOT/node_bridge/src/hermesIdentityProjection.mjs" \
+    verify-runtime "$output" "$REPO_ROOT" "$RUNTIME_UID" "$RUNTIME_GID"; then
+    echo "ERROR: Hermes runtime identity cannot verify the complete projection graph; Lite startup blocked" >&2
+    return 1
+  fi
+  log "published one verified identity/activity projection for Lite and Full"
 }
 
 ombre_brain_enabled() {
@@ -243,15 +370,6 @@ ombre_runner_available() {
   case "$runner" in
     source)
       ombre_source_ready
-      ;;
-    docker)
-      docker_compose_available
-      ;;
-    external)
-      return 0
-      ;;
-    auto)
-      ombre_source_ready || docker_compose_available
       ;;
     *)
       return 1
@@ -377,7 +495,7 @@ upsert_env_file() {
 
 is_managed_env_key() {
   case "$1" in
-    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|RAN_AGENT_INTERNAL_CONTROL_SECRET|HERMES_CONTEXT_INJECTION_MODE|HERMES_CONTEXT_CACHE_STRATEGY|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|HERMES_CONTINUITY_FRESHNESS_HOURS|HERMES_CACHE_FRIENDLY_HISTORY|HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS|HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET|HERMES_CACHE_FRIENDLY_HISTORY_PROFILE|HERMES_CACHE_TELEMETRY_ENABLED|HERMES_LITE_SOFT_RESET_ENABLED|HERMES_LITE_SOFT_RESET_DRY_RUN|HERMES_LITE_SOFT_RESET_MAX_DIGEST_CHARS|HERMES_LITE_SOFT_RESET_KEEP_LAST_N|HERMES_LITE_SOFT_RESET_STATE_FILE|HERMES_LITE_SOFT_RESET_DIGEST_DIR|HERMES_ACTION_GATE_ENABLED|HERMES_ACTION_GATE_MODE|HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS|HERMES_ACTION_PENDING_ENABLED|HERMES_ACTION_PENDING_TTL_MINUTES|HERMES_REPLY_TIMEOUT_SECONDS|NODE_BRIDGE_QUICK_ACK_ENABLED|NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS|NODE_BRIDGE_QUICK_ACK_TEXT|FEISHU_SEND_TIMEOUT_SECONDS|FEISHU_DOWNLOAD_TIMEOUT_SECONDS|HERMES_ENVIRONMENT_CONTEXT_ENABLED|HERMES_ENVIRONMENT_WEATHER_ENABLED|HERMES_ENVIRONMENT_MAX_AGE_MS|HERMES_ENVIRONMENT_WEATHER_CACHE_MS|HERMES_ENVIRONMENT_TIMEZONE|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|HERMES_PROACTIVE_EVENTS_ENABLED|HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED|HERMES_PROACTIVE_REMINDERS_ENABLED|HERMES_PROACTIVE_NOTIFY_MAX_CHARS|PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS|PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS|PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE|PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED|PERSONAL_AGENT_DAILY_CARRYOVER_HOUR|PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE|AI_DAILY_DIGEST_ENABLED|AI_DAILY_DIGEST_HOUR|AI_DAILY_DIGEST_MINUTE|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_GENERIC_FALLBACK_ENABLED|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS|MEDIA_READER_MCP_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY|PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS|PERSONAL_AGENT_OCR_PROVIDER|PERSONAL_AGENT_OCR_MODEL|PERSONAL_AGENT_OCR_TIMEOUT_MS|OBSIDIAN_MEMORY_MCP_ENABLED|XHS_GENERIC_FALLBACK_READY_PATH|XHS_GENERIC_FALLBACK_MIN_VERSION|XHS_PUBLIC_SIDECAR_ENABLED|XHS_PUBLIC_SIDECAR_URL|XHS_PUBLIC_SIDECAR_TIMEOUT_MS|XHS_PUBLIC_HTML_FALLBACK_ENABLED|XHS_PUBLIC_SIDECAR_MARKER_PATH|XHS_PUBLIC_SIDECAR_ROOT_DIR|WEIXIN_SDK_INBOUND_MEDIA_DIRS|EXTERNAL_MCP_GATEWAY_PROFILE|EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE|EXTERNAL_MCP_GATEWAY_ENABLED|EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED|EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED|EXTERNAL_MCP_ACTIVITY_TICK_MS|OMBRE_BRAIN_ENABLED|OMBRE_BRAIN_MCP_ENABLED|OMBRE_BRAIN_RUNNER|OMBRE_BRAIN_REPO_URL|OMBRE_BRAIN_HOME|OMBRE_BRAIN_SOURCE_DIR|OMBRE_BRAIN_VENV|OMBRE_BUCKETS_DIR|OMBRE_BRAIN_IMAGE|OMBRE_BRAIN_BIND_HOST|OMBRE_BRAIN_PORT|OMBRE_BRAIN_COMPOSE_FILE|OMBRE_BRAIN_CONFIG_FILE|OMBRE_BRAIN_STATUS_FILE|OMBRE_BRAIN_MCP_URL|OMBRE_BRAIN_MCP_EXTRA_URL|OMBRE_BRAIN_HEALTH_URL|PERSONAL_AGENT_OMBRE_BACKEND|PERSONAL_AGENT_OMBRE_MCP_URL|PERSONAL_AGENT_OMBRE_MCP_EXTRA_URL|PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS|PERSONAL_AGENT_OMBRE_READ_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_ENABLED|PERSONAL_AGENT_OMBRE_TIMEOUT_MS|PERSONAL_AGENT_OMBRE_MAX_RESULTS|PERSONAL_AGENT_OMBRE_MAX_CHARS|PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED|PERSONAL_AGENT_OMBRE_I_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_MODE)
+    HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|RAN_AGENT_INTERNAL_CONTROL_SECRET|HERMES_CONTEXT_INJECTION_MODE|HERMES_CONTEXT_CACHE_STRATEGY|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|HERMES_CONTINUITY_FRESHNESS_HOURS|HERMES_CACHE_FRIENDLY_HISTORY|HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS|HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET|HERMES_CACHE_FRIENDLY_HISTORY_PROFILE|HERMES_CACHE_TELEMETRY_ENABLED|HERMES_LITE_SOFT_RESET_ENABLED|HERMES_LITE_SOFT_RESET_DRY_RUN|HERMES_LITE_SOFT_RESET_MAX_DIGEST_CHARS|HERMES_LITE_SOFT_RESET_KEEP_LAST_N|HERMES_LITE_SOFT_RESET_STATE_FILE|HERMES_LITE_SOFT_RESET_DIGEST_DIR|HERMES_ACTION_GATE_ENABLED|HERMES_ACTION_GATE_MODE|HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS|HERMES_ACTION_PENDING_ENABLED|HERMES_ACTION_PENDING_TTL_MINUTES|HERMES_REPLY_TIMEOUT_SECONDS|NODE_BRIDGE_QUICK_ACK_ENABLED|NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS|NODE_BRIDGE_QUICK_ACK_TEXT|FEISHU_SEND_TIMEOUT_SECONDS|FEISHU_DOWNLOAD_TIMEOUT_SECONDS|HERMES_ENVIRONMENT_CONTEXT_ENABLED|HERMES_ENVIRONMENT_WEATHER_ENABLED|HERMES_ENVIRONMENT_MAX_AGE_MS|HERMES_ENVIRONMENT_WEATHER_CACHE_MS|HERMES_ENVIRONMENT_TIMEZONE|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|HERMES_PROACTIVE_EVENTS_ENABLED|HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED|HERMES_PROACTIVE_REMINDERS_ENABLED|HERMES_PROACTIVE_NOTIFY_MAX_CHARS|PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS|PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS|PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE|PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED|PERSONAL_AGENT_DAILY_CARRYOVER_HOUR|PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE|AI_DAILY_DIGEST_ENABLED|AI_DAILY_DIGEST_HOUR|AI_DAILY_DIGEST_MINUTE|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_GENERIC_FALLBACK_ENABLED|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS|MEDIA_READER_MCP_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY|PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS|PERSONAL_AGENT_OCR_PROVIDER|PERSONAL_AGENT_OCR_MODEL|PERSONAL_AGENT_OCR_TIMEOUT_MS|OBSIDIAN_MEMORY_MCP_ENABLED|XHS_GENERIC_FALLBACK_READY_PATH|XHS_GENERIC_FALLBACK_MIN_VERSION|XHS_PUBLIC_SIDECAR_ENABLED|XHS_PUBLIC_SIDECAR_URL|XHS_PUBLIC_SIDECAR_TIMEOUT_MS|XHS_PUBLIC_HTML_FALLBACK_ENABLED|XHS_PUBLIC_SIDECAR_MARKER_PATH|XHS_PUBLIC_SIDECAR_ROOT_DIR|WEIXIN_SDK_INBOUND_MEDIA_DIRS|EXTERNAL_MCP_GATEWAY_PROFILE|EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE|EXTERNAL_MCP_GATEWAY_ENABLED|EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED|EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED|EXTERNAL_MCP_ACTIVITY_TICK_MS|OMBRE_BRAIN_ENABLED|OMBRE_BRAIN_MCP_ENABLED|OMBRE_BRAIN_RUNNER|OMBRE_BRAIN_REPO_URL|OMBRE_BRAIN_HOME|OMBRE_BRAIN_SOURCE_DIR|OMBRE_BRAIN_VENV|OMBRE_BUCKETS_DIR|OMBRE_BRAIN_IMAGE|OMBRE_BIND_HOST|OMBRE_MCP_REQUIRE_AUTH|OMBRE_BRAIN_PORT|OMBRE_BRAIN_COMPOSE_FILE|OMBRE_BRAIN_CONFIG_FILE|OMBRE_BRAIN_STATUS_FILE|OMBRE_BRAIN_MCP_URL|OMBRE_BRAIN_HEALTH_URL|OMBRE_RECALL_PORT|OMBRE_RECALL_MCP_URL|OMBRE_RECALL_HEALTH_URL|PERSONAL_AGENT_OMBRE_BACKEND|PERSONAL_AGENT_OMBRE_MCP_URL|PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS|PERSONAL_AGENT_OMBRE_READ_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_ENABLED|PERSONAL_AGENT_OMBRE_TIMEOUT_MS|PERSONAL_AGENT_OMBRE_MAX_RESULTS|PERSONAL_AGENT_OMBRE_MAX_CHARS|PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED|PERSONAL_AGENT_OMBRE_I_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_MODE)
       return 0
       ;;
     XHS_COOKIE|XHS_MCP_COMMAND|XHS_MCP_ARGS_JSON|PERSONAL_AGENT_XHS_MCP_COMMAND|PERSONAL_AGENT_XHS_MCP_ARGS_JSON|XHS_BROWSE_ENABLED|SOCIAL_READER_EXPOSE_XHS_BROWSE_TOOLS|XHS_BROWSE_MARKER_PATH|XHS_BROWSE_ROOT_DIR|XHS_BROWSE_MCP_URL|XHS_BROWSE_MCP_COMMAND|XHS_BROWSE_MCP_ARGS_JSON|XHS_BROWSE_MCP_COOKIE_ENV|XHS_BROWSE_MCP_COOKIE|XHS_BROWSE_MCP_TIMEOUT_MS|XHS_BROWSE_MAX_RESULTS|XHS_BROWSE_MAX_ITEMS|XHS_BROWSE_MIN_INTERVAL_MS|XHS_BROWSE_MAX_CALLS_PER_SESSION|XHS_BROWSE_SEARCH_ENABLED|XHS_BROWSE_NOTE_ENABLED|XHS_BROWSE_USER_ENABLED|XHS_BROWSE_FEED_ENABLED|XHS_NOTE_TOKEN_CACHE_PATH|XHS_NOTE_TOKEN_CACHE_DEBUG)
@@ -396,6 +514,68 @@ install_profiles() {
 
   HERMES_HOME="$FULL_HOME" "$HERMES_BIN" profile install "$REPO_ROOT/hermes/profile" --name "$FULL_PROFILE" --force -y
   HERMES_HOME="$LITE_HOME" "$HERMES_BIN" profile install "$REPO_ROOT/hermes/profile" --name "$LITE_PROFILE" --force -y
+}
+
+install_o1_identity_and_recall_contract() {
+  local home profile target name
+  for home in "$FULL_HOME" "$LITE_HOME"; do
+    if [ "$home" = "$FULL_HOME" ]; then profile="$FULL_PROFILE"; else profile="$LITE_PROFILE"; fi
+    target="$home/profiles/$profile"
+    "${SUDO[@]}" mkdir -p "$target"
+    for name in IDENTITY.md SOUL.md AGENTS.md; do
+      install_file_portable 644 "$REPO_ROOT/hermes/profile/$name" "$target/$name"
+      chown_if_user_exists "$target/$name"
+    done
+    for target in "$home/config.yaml" "$home/profiles/$profile/config.yaml"; do
+      "${SUDO[@]}" test -f "$target" || continue
+      "${SUDO[@]}" sed -i.bak 's/${OMBRE_BRAIN_MCP_URL}/${OMBRE_RECALL_MCP_URL}/g' "$target"
+      "${SUDO[@]}" rm -f "$target.bak"
+    done
+  done
+}
+
+verify_o1_identity_and_recall_contract() {
+  local home profile target name
+  for home in "$FULL_HOME" "$LITE_HOME"; do
+    if [ "$home" = "$FULL_HOME" ]; then profile="$FULL_PROFILE"; else profile="$LITE_PROFILE"; fi
+    target="$home/profiles/$profile"
+    for name in IDENTITY.md SOUL.md AGENTS.md; do
+      "${SUDO[@]}" cmp -s "$REPO_ROOT/hermes/profile/$name" "$target/$name" || {
+        echo "ERROR: installed $profile/$name drifted from the O1 identity authority" >&2
+        return 1
+      }
+    done
+    for target in "$home/config.yaml" "$home/profiles/$profile/config.yaml"; do
+      "${SUDO[@]}" test -f "$target" || continue
+    done
+  done
+  validate_runtime_ombre_configs
+}
+
+validate_runtime_ombre_configs() {
+  local configs=(
+    "$FULL_HOME/config.yaml"
+    "$FULL_HOME/profiles/$FULL_PROFILE/config.yaml"
+    "$LITE_HOME/config.yaml"
+    "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
+  )
+  local target
+  for target in "${configs[@]}"; do
+    "${SUDO[@]}" test -f "$target" || {
+      echo "ERROR: required installed Hermes config is missing: $target" >&2
+      return 1
+    }
+  done
+  [ "${#configs[@]}" -eq 4 ] || {
+    echo "ERROR: all four installed Lite/Full root/profile configs are required" >&2
+    return 1
+  }
+  OMBRE_RECALL_MCP_URL="$(effective_env_value OMBRE_RECALL_MCP_URL "$OMBRE_RECALL_MCP_URL_DEFAULT")" \
+    "${SUDO[@]}" "$PYTHON_BIN" "$REPO_ROOT/scripts/ombre_o1_contract.py" \
+      validate-config "${configs[@]}" >/dev/null || {
+        echo "ERROR: installed Hermes MCP surface violates the semantic O1 recall-only contract" >&2
+        return 1
+      }
 }
 
 write_runtime_env() {
@@ -417,26 +597,24 @@ write_runtime_env() {
     "?OMBRE_BRAIN_VENV=$OMBRE_BRAIN_VENV_DEFAULT"
     "?OMBRE_BUCKETS_DIR=$OMBRE_BUCKETS_DIR_DEFAULT"
     "?OMBRE_BRAIN_IMAGE=$OMBRE_BRAIN_IMAGE_DEFAULT"
-    "?OMBRE_BRAIN_BIND_HOST=$OMBRE_BRAIN_BIND_HOST_DEFAULT"
+    "OMBRE_BIND_HOST=$OMBRE_BIND_HOST_DEFAULT"
+    "OMBRE_MCP_REQUIRE_AUTH=$OMBRE_MCP_REQUIRE_AUTH_DEFAULT"
     "?OMBRE_BRAIN_PORT=$OMBRE_BRAIN_PORT_DEFAULT"
     "?OMBRE_BRAIN_COMPOSE_FILE=$OMBRE_BRAIN_COMPOSE_FILE_DEFAULT"
     "?OMBRE_BRAIN_CONFIG_FILE=$OMBRE_BRAIN_CONFIG_FILE_DEFAULT"
     "?OMBRE_BRAIN_STATUS_FILE=$OMBRE_BRAIN_STATUS_FILE_DEFAULT"
-    "?OMBRE_BRAIN_MCP_URL=$OMBRE_BRAIN_MCP_URL_DEFAULT"
-    "?OMBRE_BRAIN_MCP_EXTRA_URL=$OMBRE_BRAIN_MCP_EXTRA_URL_DEFAULT"
+    "OMBRE_BRAIN_MCP_URL=$OMBRE_BRAIN_MCP_URL_DEFAULT"
     "?OMBRE_BRAIN_HEALTH_URL=$OMBRE_BRAIN_HEALTH_URL_DEFAULT"
+    "OMBRE_RECALL_PORT=$OMBRE_RECALL_PORT_DEFAULT"
+    "OMBRE_RECALL_MCP_URL=$OMBRE_RECALL_MCP_URL_DEFAULT"
+    "OMBRE_RECALL_HEALTH_URL=$OMBRE_RECALL_HEALTH_URL_DEFAULT"
     "?PERSONAL_AGENT_OMBRE_BACKEND=$PERSONAL_AGENT_OMBRE_BACKEND_DEFAULT"
-    "?PERSONAL_AGENT_OMBRE_MCP_URL=$OMBRE_BRAIN_MCP_URL_DEFAULT"
-    "?PERSONAL_AGENT_OMBRE_MCP_EXTRA_URL=$OMBRE_BRAIN_MCP_EXTRA_URL_DEFAULT"
+    "PERSONAL_AGENT_OMBRE_MCP_URL=$OMBRE_RECALL_MCP_URL_DEFAULT"
     "?PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS=10"
     "?PERSONAL_AGENT_OMBRE_READ_ENABLED=$PERSONAL_AGENT_OMBRE_READ_ENABLED_DEFAULT"
-    "?PERSONAL_AGENT_OMBRE_WRITE_ENABLED=$PERSONAL_AGENT_OMBRE_WRITE_ENABLED_DEFAULT"
     "?PERSONAL_AGENT_OMBRE_TIMEOUT_MS=$PERSONAL_AGENT_OMBRE_TIMEOUT_MS_DEFAULT"
     "?PERSONAL_AGENT_OMBRE_MAX_RESULTS=$PERSONAL_AGENT_OMBRE_MAX_RESULTS_DEFAULT"
     "?PERSONAL_AGENT_OMBRE_MAX_CHARS=$PERSONAL_AGENT_OMBRE_MAX_CHARS_DEFAULT"
-    "?PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED=$PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED_DEFAULT"
-    "?PERSONAL_AGENT_OMBRE_I_ENABLED=$PERSONAL_AGENT_OMBRE_I_ENABLED_DEFAULT"
-    "?PERSONAL_AGENT_OMBRE_WRITE_MODE=$PERSONAL_AGENT_OMBRE_WRITE_MODE_DEFAULT"
   )
   local xhs_public_env=(
     "XHS_PUBLIC_SIDECAR_ENABLED=$XHS_PUBLIC_SIDECAR_ENABLED_DEFAULT"
@@ -836,31 +1014,10 @@ filter_obsidian_memory_from_config() {
   rm -f "$tmp_filter"
 }
 
-filter_ombre_memory_from_config() {
-  local file="$1"
-  local tmp_filter
-  tmp_filter="$(mktemp)"
-  awk '
-    /^mcp_servers:/ { in_mcp=1 }
-    in_mcp && /^  ombre_memory:/ { skip=1; next }
-    in_mcp && /^  ombre_memory_extra:/ { skip=1; next }
-    in_mcp && skip && /^  [^ ]/ { skip=0 }
-    in_mcp && skip { next }
-    /^platform_toolsets:/ { in_pt=1 }
-    in_pt && /mcp-ombre_memory/ { next }
-    in_pt && /mcp-ombre_memory_extra/ { next }
-    { print }
-  ' "$file" >| "$tmp_filter"
-  "${SUDO[@]}" cp "$tmp_filter" "$file"
-  rm -f "$tmp_filter"
-}
-
 write_lite_runtime_config() {
   log "refreshing lite runtime config"
   install_file_portable 644 "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/config.yaml"
   install_file_portable 644 "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
-  filter_ombre_memory_from_config "$LITE_HOME/config.yaml"
-  filter_ombre_memory_from_config "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
   if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
     filter_obsidian_memory_from_config "$LITE_HOME/config.yaml"
     filter_obsidian_memory_from_config "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
@@ -948,7 +1105,6 @@ platform_toolsets:
     - mcp-personal_memory
     - mcp-obsidian_memory
     - mcp-ombre_memory
-    - mcp-ombre_memory_extra
     - mcp-playwright
   gateway:
     - web
@@ -968,7 +1124,6 @@ platform_toolsets:
     - mcp-personal_memory
     - mcp-obsidian_memory
     - mcp-ombre_memory
-    - mcp-ombre_memory_extra
     - mcp-playwright
 
 EOF
@@ -987,16 +1142,69 @@ EOF
   if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
     filter_obsidian_memory_from_config "$tmp"
   fi
-  if ! ombre_mcp_should_be_exposed; then
-    if ombre_brain_enabled && bool_is_true "$(effective_env_value OMBRE_BRAIN_MCP_ENABLED "$OMBRE_BRAIN_MCP_ENABLED_DEFAULT")"; then
-      log "WARNING: Ombre Brain runner is not available; omitting direct Ombre MCP from full Hermes config"
-    fi
-    filter_ombre_memory_from_config "$tmp"
-  fi
-
   install_file_portable 644 "$tmp" "$runtime_config"
   chown_if_user_exists "$runtime_config"
   rm -f "$tmp"
+}
+
+write_ombre_recall_unit() {
+  write_file 0644 "$OMBRE_RECALL_SERVICE" <<EOF
+[Unit]
+Description=Ran Agent Ombre Recall-Only MCP Adapter (port $OMBRE_RECALL_PORT_DEFAULT)
+After=network-online.target ran-agent-ombre-brain.service
+Requires=ran-agent-ombre-brain.service
+
+[Service]
+Type=simple
+User=$RUNTIME_USER
+Group=$RUNTIME_GROUP
+WorkingDirectory=/opt/ran_agent
+EnvironmentFile=-$NODE_ENV_FILE
+EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
+Environment=OMBRE_RECALL_BIND_HOST=127.0.0.1
+Environment=OMBRE_RECALL_PORT=$OMBRE_RECALL_PORT_DEFAULT
+ExecStart=/opt/nodejs/node-v22.22.2-linux-x64/bin/node /opt/ran_agent/node_bridge/src/ombreRecallMcpServer.mjs
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+}
+
+write_ombre_brain_unit() {
+  write_file 0644 "$OMBRE_SERVICE" <<EOF
+[Unit]
+Description=Ran Agent Ombre Brain Memory Service (port $OMBRE_BRAIN_PORT_DEFAULT)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$RUNTIME_USER
+Group=$RUNTIME_GROUP
+WorkingDirectory=/opt/ran_agent
+EnvironmentFile=-$NODE_ENV_FILE
+EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
+EnvironmentFile=-$HERMES_GLOBAL_ENV_FILE
+EnvironmentFile=-$FULL_HOME/.env
+EnvironmentFile=-$FULL_HOME/profiles/$FULL_PROFILE/.env
+Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
+Environment=OMBRE_BRAIN_RUNNER=source
+Environment=OMBRE_BRAIN_COMMIT=$OMBRE_BRAIN_COMMIT_DEFAULT
+Environment=OMBRE_BIND_HOST=127.0.0.1
+Environment=OMBRE_MCP_REQUIRE_AUTH=false
+Environment=OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
+Environment=OMBRE_BRAIN_HEALTH_URL=http://127.0.0.1:18001/health
+ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec bash scripts/start_ombre_brain_service.sh'
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=120
+
+[Install]
+WantedBy=multi-user.target
+EOF
 }
 
 write_systemd_units() {
@@ -1004,12 +1212,13 @@ write_systemd_units() {
   write_file 0644 "$LITE_SERVICE" <<EOF
 [Unit]
 Description=Ran Agent Hermes Lite Gateway (port $LITE_PORT)
-After=network-online.target ran-agent-python.service
+After=network-online.target ran-agent-python.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=$RUNTIME_USER
+Group=$RUNTIME_GROUP
 WorkingDirectory=/opt/ran_agent
 EnvironmentFile=-$NODE_ENV_FILE
 EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
@@ -1070,12 +1279,13 @@ EOF
   write_file 0644 "$FULL_SERVICE" <<EOF
 [Unit]
 Description=Ran Agent Hermes Full Gateway (port $FULL_PORT)
-After=network-online.target ran-agent-python.service
+After=network-online.target ran-agent-python.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service
 Wants=network-online.target
 
 [Service]
 Type=simple
 User=$RUNTIME_USER
+Group=$RUNTIME_GROUP
 WorkingDirectory=/opt/ran_agent
 EnvironmentFile=-$NODE_ENV_FILE
 EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
@@ -1133,30 +1343,8 @@ TimeoutStopSec=240
 WantedBy=multi-user.target
 EOF
 
-  write_file 0644 "$OMBRE_SERVICE" <<EOF
-[Unit]
-Description=Ran Agent Ombre Brain Memory Service (port $OMBRE_BRAIN_PORT_DEFAULT)
-After=network-online.target docker.service
-Wants=network-online.target docker.service
-
-[Service]
-Type=simple
-User=$RUNTIME_USER
-WorkingDirectory=/opt/ran_agent
-EnvironmentFile=-$NODE_ENV_FILE
-EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
-EnvironmentFile=-$HERMES_GLOBAL_ENV_FILE
-EnvironmentFile=-$FULL_HOME/.env
-EnvironmentFile=-$FULL_HOME/profiles/$FULL_PROFILE/.env
-Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
-ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec bash scripts/start_ombre_brain_service.sh'
-Restart=on-failure
-RestartSec=10
-TimeoutStopSec=120
-
-[Install]
-WantedBy=multi-user.target
-EOF
+  write_ombre_brain_unit
+  write_ombre_recall_unit
 
   write_file 0644 "$XHS_PUBLIC_SIDECAR_SERVICE" <<EOF
 [Unit]
@@ -1213,8 +1401,38 @@ reset_failed_if_loaded() {
   local service
   for service in "$@"; do
     if systemd_unit_is_loaded "$service"; then
-      "${SUDO[@]}" systemctl reset-failed "$service" >/dev/null 2>&1 || true
+      if "${SUDO[@]}" systemctl is-failed --quiet "$service"; then
+        "${SUDO[@]}" systemctl reset-failed "$service"
+      fi
     fi
+  done
+}
+
+start_o1_dependency() {
+  local service="$1"
+  local enabled_state
+  enabled_state="$("${SUDO[@]}" systemctl is-enabled "$service" 2>/dev/null || true)"
+  [ "$enabled_state" != "masked" ] && [ "$enabled_state" != "masked-runtime" ] || {
+    echo "ERROR: $service is masked; O1 will not unmask operator policy" >&2
+    return 1
+  }
+  systemd_unit_is_loaded "$service" || {
+    echo "ERROR: required generated unit is still not-found after daemon-reload: $service" >&2
+    return 1
+  }
+  reset_failed_if_loaded "$service"
+  "${SUDO[@]}" systemctl enable "$service" >/dev/null
+  "${SUDO[@]}" systemctl restart "$service"
+}
+
+refuse_masked_o1_units() {
+  local service state
+  for service in ran-agent-ombre-brain.service ran-agent-ombre-recall.service; do
+    state="$("${SUDO[@]}" systemctl is-enabled "$service" 2>/dev/null || true)"
+    [ "$state" != "masked" ] && [ "$state" != "masked-runtime" ] || {
+      echo "ERROR: $service is masked; O1 will not overwrite or unmask operator policy" >&2
+      return 1
+    }
   done
 }
 
@@ -1262,13 +1480,15 @@ prepare_ombre_runtime() {
     OMBRE_BRAIN_ENABLED="$(effective_env_value OMBRE_BRAIN_ENABLED "$OMBRE_BRAIN_ENABLED_DEFAULT")" \
     OMBRE_BRAIN_MCP_ENABLED="$(effective_env_value OMBRE_BRAIN_MCP_ENABLED "$OMBRE_BRAIN_MCP_ENABLED_DEFAULT")" \
     OMBRE_BRAIN_RUNNER="$(effective_env_value OMBRE_BRAIN_RUNNER "$OMBRE_BRAIN_RUNNER_DEFAULT")" \
+    OMBRE_BRAIN_COMMIT="$(effective_env_value OMBRE_BRAIN_COMMIT "$OMBRE_BRAIN_COMMIT_DEFAULT")" \
     OMBRE_BRAIN_REPO_URL="$(effective_env_value OMBRE_BRAIN_REPO_URL "$OMBRE_BRAIN_REPO_URL_DEFAULT")" \
     OMBRE_BRAIN_HOME="$(effective_env_value OMBRE_BRAIN_HOME "$OMBRE_BRAIN_HOME_DEFAULT")" \
     OMBRE_BRAIN_SOURCE_DIR="$(effective_env_value OMBRE_BRAIN_SOURCE_DIR "$OMBRE_BRAIN_SOURCE_DIR_DEFAULT")" \
     OMBRE_BRAIN_VENV="$(effective_env_value OMBRE_BRAIN_VENV "$OMBRE_BRAIN_VENV_DEFAULT")" \
     OMBRE_BUCKETS_DIR="$(effective_env_value OMBRE_BUCKETS_DIR "$OMBRE_BUCKETS_DIR_DEFAULT")" \
     OMBRE_BRAIN_IMAGE="$(effective_env_value OMBRE_BRAIN_IMAGE "$OMBRE_BRAIN_IMAGE_DEFAULT")" \
-    OMBRE_BRAIN_BIND_HOST="$(effective_env_value OMBRE_BRAIN_BIND_HOST "$OMBRE_BRAIN_BIND_HOST_DEFAULT")" \
+    OMBRE_BIND_HOST="$(effective_env_value OMBRE_BIND_HOST "$OMBRE_BIND_HOST_DEFAULT")" \
+    OMBRE_MCP_REQUIRE_AUTH="$(effective_env_value OMBRE_MCP_REQUIRE_AUTH "$OMBRE_MCP_REQUIRE_AUTH_DEFAULT")" \
     OMBRE_BRAIN_PORT="$(effective_env_value OMBRE_BRAIN_PORT "$OMBRE_BRAIN_PORT_DEFAULT")" \
     OMBRE_BRAIN_COMPOSE_FILE="$(effective_env_value OMBRE_BRAIN_COMPOSE_FILE "$OMBRE_BRAIN_COMPOSE_FILE_DEFAULT")" \
     OMBRE_BRAIN_CONFIG_FILE="$(effective_env_value OMBRE_BRAIN_CONFIG_FILE "$OMBRE_BRAIN_CONFIG_FILE_DEFAULT")" \
@@ -1276,7 +1496,8 @@ prepare_ombre_runtime() {
     bash "$REPO_ROOT/scripts/prepare-ombre-brain.sh" 2>&1; then
     log "Ombre Brain runtime prepared"
   else
-    log "WARNING: Ombre Brain preparation failed (non-blocking)"
+    echo "ERROR: Ombre Brain preparation failed" >&2
+    return 1
   fi
 }
 
@@ -1285,29 +1506,38 @@ restart_services() {
   "${SUDO[@]}" systemctl daemon-reload
   sleep 1
   if [ "$PRESERVE_RUNTIME_SHAPE" = "1" ]; then
-    reset_failed_if_loaded ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service
+    reset_failed_if_loaded ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service
+    prepare_ombre_runtime
+    start_o1_dependency ran-agent-ombre-brain.service
+    wait_for_ombre_health
+    start_o1_dependency ran-agent-ombre-recall.service
+    wait_for_ombre_recall_health
     "${SUDO[@]}" systemctl restart ran-agent-python.service
-    "${SUDO[@]}" systemctl restart ran-agent-node.service
+    publish_verified_hermes_projection
     "${SUDO[@]}" systemctl restart ran-agent-hermes.service
+    wait_for_gateway_port "$LITE_PORT" ran-agent-hermes.service
+    run_gateway_provider_canary lite "$LITE_PORT" "$LITE_PROFILE" ran-agent-hermes.service
     "${SUDO[@]}" systemctl restart ran-agent-hermes-full.service
+    wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service
+    run_gateway_provider_canary full "$FULL_PORT" "$FULL_PROFILE" ran-agent-hermes-full.service
+    "${SUDO[@]}" systemctl restart ran-agent-node.service
     return 0
   fi
-  reset_failed_if_loaded ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service ran-agent-xhs-public-sidecar.service
+  reset_failed_if_loaded ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-xhs-public-sidecar.service
   cleanup_account_backed_xhs_runtime
   if ombre_brain_enabled; then
     if ombre_runner_available; then
-      "${SUDO[@]}" systemctl enable ran-agent-ombre-brain.service >/dev/null 2>&1 || true
-      if "${SUDO[@]}" systemctl restart ran-agent-ombre-brain.service; then
-        log "Ombre Brain service restart requested"
-      else
-        log "WARNING: Ombre Brain service restart failed (non-blocking)"
-      fi
+      start_o1_dependency ran-agent-ombre-brain.service
+      wait_for_ombre_health
+      start_o1_dependency ran-agent-ombre-recall.service
+      wait_for_ombre_recall_health
     else
-      log "WARNING: Ombre Brain runner is not available; service prepared but not started"
-      "${SUDO[@]}" systemctl disable --now ran-agent-ombre-brain.service >/dev/null 2>&1 || true
+      echo "ERROR: Ombre Brain runner is not available" >&2
+      return 1
     fi
   else
     "${SUDO[@]}" systemctl disable --now ran-agent-ombre-brain.service >/dev/null 2>&1 || true
+    "${SUDO[@]}" systemctl disable --now ran-agent-ombre-recall.service >/dev/null 2>&1 || true
   fi
   if bool_is_true "$XHS_PUBLIC_SIDECAR_ENABLED_DEFAULT" && xhs_public_sidecar_marker_ready; then
     "${SUDO[@]}" systemctl enable ran-agent-xhs-public-sidecar.service >/dev/null 2>&1 || true
@@ -1321,11 +1551,13 @@ restart_services() {
     "${SUDO[@]}" systemctl disable --now ran-agent-xhs-public-sidecar.service >/dev/null 2>&1 || true
   fi
   "${SUDO[@]}" systemctl restart ran-agent-python.service
-  "${SUDO[@]}" systemctl restart ran-agent-node.service
+  publish_verified_hermes_projection
   "${SUDO[@]}" systemctl restart ran-agent-hermes.service
-  wait_for_gateway_port "$LITE_PORT" ran-agent-hermes.service || true
+  wait_for_gateway_port "$LITE_PORT" ran-agent-hermes.service
+  run_gateway_provider_canary lite "$LITE_PORT" "$LITE_PROFILE" ran-agent-hermes.service
   "${SUDO[@]}" systemctl restart ran-agent-hermes-full.service
-  wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service || true
+  wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service
+  run_gateway_provider_canary full "$FULL_PORT" "$FULL_PROFILE" ran-agent-hermes-full.service
   "${SUDO[@]}" systemctl restart ran-agent-node.service
 }
 
@@ -1374,6 +1606,47 @@ wait_for_gateway_port() {
   return 1
 }
 
+gateway_service_env_value() {
+  local service="$1" name="$2" pid entry
+  pid="$("${SUDO[@]}" systemctl show "$service" --property=MainPID --value 2>/dev/null)" || return 1
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || return 1
+  while IFS= read -r -d '' entry; do
+    case "$entry" in
+      "$name"=*) printf '%s' "${entry#*=}"; return 0 ;;
+    esac
+  done < <("${SUDO[@]}" cat "/proc/$pid/environ")
+  return 1
+}
+
+run_gateway_provider_canary() {
+  local mode="$1" port="$2" profile="$3" service="$4" node_bin api_key nonce pointer
+  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 && -n "${RAN_AGENT_PROVIDER_CANARY_TEST_COMMAND:-}" ]]; then
+    "$RAN_AGENT_PROVIDER_CANARY_TEST_COMMAND" "$mode" "$port" "$profile" "$service"
+    return
+  fi
+  node_bin="${RAN_AGENT_NODE_BIN:-/opt/nodejs/node-v22.22.2-linux-x64/bin/node}"
+  api_key="$(gateway_service_env_value "$service" HERMES_API_KEY || gateway_service_env_value "$service" API_SERVER_KEY)" ||
+    { echo "ERROR: $mode provider canary API key unavailable" >&2; return 1; }
+  nonce="$("$node_bin" -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("hex"))')"
+  pointer="$RUNTIME_STATE_DIR/hermes/published-memory-context.json"
+  env \
+    HERMES_REPLY_MODE=api \
+    HERMES_API_BASE_URL="http://127.0.0.1:$port/v1" \
+    HERMES_LITE_API_BASE_URL="http://127.0.0.1:$port/v1" \
+    HERMES_FULL_API_BASE_URL="http://127.0.0.1:$port/v1" \
+    HERMES_API_KEY="$api_key" \
+    HERMES_PROFILE="$profile" \
+    HERMES_LITE_PROFILE="$profile" \
+    HERMES_FULL_PROFILE="$profile" \
+    RAN_AGENT_CAPABILITY_MODE="$mode" \
+    RAN_AGENT_REPO_ROOT="$REPO_ROOT" \
+    HERMES_PUBLISHED_MEMORY_CONTEXT_PATH="$pointer" \
+    RAN_AGENT_PROVIDER_CANARY_MODE="$mode" \
+    RAN_AGENT_PROVIDER_CANARY_NONCE="$nonce" \
+    RAN_AGENT_CONTEXT_SIZE_LOG=0 \
+    "$node_bin" "$REPO_ROOT/node_bridge/src/hermesProviderBoundaryCanary.mjs" >/dev/null
+}
+
 systemd_cat_contains() {
   local service="$1"
   local pattern="$2"
@@ -1395,6 +1668,7 @@ config_has_toolset() {
 verify_runtime() {
   local lite_pid
   local full_pid
+  validate_runtime_ombre_configs
 
   log "verifying compact systemd units"
   # Cache systemctl cat output once for all checks
@@ -1589,6 +1863,20 @@ verify_runtime() {
     echo "ERROR: lite source profile missing mcp-sticker_catalog" >&2
     exit 1
   fi
+  if ! grep -q 'mcp-ombre_memory' "$REPO_ROOT/hermes/profile/config.lite.yaml"; then
+    echo "ERROR: lite source profile missing mcp-ombre_memory" >&2
+    exit 1
+  fi
+  local legacy_ombre_name='ombre_memory_''extra'
+  local legacy_ombre_path='/mcp''-extra'
+  if grep -R -Eq "$legacy_ombre_name|$legacy_ombre_path" \
+    "$REPO_ROOT/.mcp.json" \
+    "$REPO_ROOT/hermes/profile/config.yaml" \
+    "$REPO_ROOT/hermes/profile/config.lite.yaml" \
+    "$REPO_ROOT/hermes/profile/mcp.template.yaml"; then
+    echo "ERROR: legacy Ombre extra MCP surface remains in source config" >&2
+    exit 1
+  fi
   if ! grep -q '^  search_hub:' "$FULL_HOME/config.yaml"; then
     echo "ERROR: full runtime config missing search_hub MCP server" >&2
     exit 1
@@ -1621,8 +1909,12 @@ verify_runtime() {
     echo "ERROR: lite runtime toolset exposes mcp-media_generation" >&2
     exit 1
   fi
-  if config_has_toolset "$LITE_HOME/config.yaml" 'mcp-ombre_memory'; then
-    echo "ERROR: lite runtime toolset exposes mcp-ombre_memory" >&2
+  if ! config_has_toolset "$LITE_HOME/config.yaml" 'mcp-ombre_memory'; then
+    echo "ERROR: lite runtime toolset missing mcp-ombre_memory" >&2
+    exit 1
+  fi
+  if ! grep -q '^  ombre_memory:' "$LITE_HOME/config.yaml"; then
+    echo "ERROR: lite runtime config missing ombre_memory MCP server" >&2
     exit 1
   fi
   if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-search_hub'; then
@@ -1645,25 +1937,19 @@ verify_runtime() {
     echo "ERROR: scripts/start_sticker_catalog_mcp.sh missing or not executable" >&2
     exit 1
   fi
-  if ombre_mcp_should_be_exposed; then
-    if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-ombre_memory'; then
-      echo "ERROR: full runtime toolset missing mcp-ombre_memory while OMBRE_BRAIN_MCP_ENABLED=true" >&2
-      exit 1
-    fi
-    if ! grep -q '^  ombre_memory:' "$FULL_HOME/config.yaml"; then
-      echo "ERROR: full runtime config missing ombre_memory MCP server while OMBRE_BRAIN_MCP_ENABLED=true" >&2
-      exit 1
-    fi
-  else
-    if config_has_toolset "$FULL_HOME/config.yaml" 'mcp-ombre_memory'; then
-      echo "ERROR: full runtime toolset exposes mcp-ombre_memory while Ombre runner is unavailable" >&2
-      exit 1
-    fi
-    if grep -q '^  ombre_memory:' "$FULL_HOME/config.yaml"; then
-      echo "ERROR: full runtime config exposes ombre_memory while Ombre runner is unavailable" >&2
-      exit 1
-    fi
+  if ! config_has_toolset "$FULL_HOME/config.yaml" 'mcp-ombre_memory'; then
+    echo "ERROR: full runtime toolset missing mcp-ombre_memory" >&2
+    exit 1
   fi
+  if ! grep -q '^  ombre_memory:' "$FULL_HOME/config.yaml"; then
+    echo "ERROR: full runtime config missing ombre_memory MCP server" >&2
+    exit 1
+  fi
+  if grep -Eq "$legacy_ombre_name|$legacy_ombre_path" "$LITE_HOME/config.yaml" "$FULL_HOME/config.yaml"; then
+    echo "ERROR: legacy Ombre extra MCP surface remains in runtime config" >&2
+    exit 1
+  fi
+  wait_for_ombre_health
 
   log "verifying obsidian_memory MCP config"
   if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
@@ -1729,6 +2015,14 @@ main() {
   # opaque MCP config, env files, and units stay owned by the operator.
   if [ "$PRESERVE_RUNTIME_SHAPE" = "1" ]; then
     require_command systemctl
+    require_command curl
+    resolve_runtime_identity
+    validate_ombre_network_contract
+    install_o1_identity_and_recall_contract
+    verify_o1_identity_and_recall_contract
+    refuse_masked_o1_units
+    write_ombre_brain_unit
+    write_ombre_recall_unit
     restart_services
     return 0
   fi
@@ -1741,6 +2035,10 @@ main() {
   require_command pgrep
   require_command ss
   require_command openssl
+  require_command curl
+  resolve_runtime_identity
+  validate_ombre_network_contract
+  refuse_masked_o1_units
 
   ensure_runtime_dirs
 
