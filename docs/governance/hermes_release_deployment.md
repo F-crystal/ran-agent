@@ -1,12 +1,14 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-07-24)
+Status: CURRENT (2026-07-27)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
-revalidated it online. Production has manual hotfixes. Ombre O1 remains an
-uncommitted, unarchived, undeployed candidate; V4 Pro is frozen; Node Receipt
-is deferred; O2 is not started/authorized; Package B.2/B.3 have not started.
+revalidated it online. Production has manual hotfixes. Ombre O1 baseline
+`1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
+local V4+O1 integration candidate is uncommitted, unarchived, and undeployed;
+Node Receipt is deferred, O2 is not started/authorized, and Package B.2/B.3
+have not started.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable
@@ -66,6 +68,21 @@ shell `hermes` executable: the staged gate and later verification remain the
 release checks, while the ordinary non-preserve drift-repair path still
 requires Hermes because it installs profiles and writes Hermes units.
 
+For the local V4+O1 candidate, that same preserve path changes only the four
+installed Lite/Full model blocks, six non-secret model-policy environment
+keys, and the shared DeepSeek provider plugin. It retains the O1 recall-only
+MCP shape, identity projection, startup ordering, rollback state machine, and
+retention policy. The snapshot includes both installed provider plugin trees;
+rollback restores the prior Flash configs/env/plugin state for Lite and Full
+together and remains fail-loud if any restore stage fails.
+
+A reviewed model-only rollback re-applies the same immutable O1-capable
+candidate through the same release transaction with
+`RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-flash`. Acceptance then proves the
+Flash identifier and the same disabled-thinking final HTTP body for Lite and
+Full. This is a model policy input to the existing transaction, not a second
+rollback state machine.
+
 Before either bootstrap or normal apply snapshots/switches production, the
 complete candidate archive provides `hermes-release-candidate-preflight.mjs`.
 That stage-local code imports the candidate `identityMap.mjs`, not the active
@@ -108,6 +125,7 @@ The apply transaction creates one owner-only snapshot under
 - prior code SHA and symbolic ref;
 - systemd units/drop-ins, all EnvironmentFile sources actually used by managed
   services, and Hermes homes/profiles;
+- Lite/Full DeepSeek provider plugin trees and all four installed model configs;
 - service active/enabled state;
 - the complete Node durable state directory after managed services stop;
 - SQLite/WAL/SHM migration files under `/opt/ran_agent/data`.

@@ -1,10 +1,10 @@
 # AGENTS.md
 
-## Agent Capability Governance
+## Agent Configuration Scope
 
-- Cross-tool skills live in `/Users/fengran/.agents/skills`; vault-only instructions stay in this `AGENTS.md` or vault-local templates.
-- Hooks, plugins, and MCP entries are executable capability surfaces; record new or changed entries in `/Users/fengran/.agents/hook-policy/` or `/Users/fengran/.agents/plugin-inventory/`.
-- Do not edit tool-specific skill copies directly; use per-skill symlinks from the shared source.
+- This file is the canonical vault policy on desktop and server; vault-only instructions stay here or in vault-local templates.
+- Desktop-global policy may add local defaults but is not required by the vault or server runtime.
+- Tool-specific mirrors use minimal regular-file imports because the immutable release gate rejects symlinks.
 
 ## 角色定义
 
@@ -848,3 +848,9 @@ cleanup 模式下：
 * 输出稳定
 * 修改范围可控
 * 日志可回溯
+
+## Agent Capability Governance
+
+- Cross-tool skills live in `/Users/fengran/.agents/skills`; project-only skills stay in this repo's `skills/`.
+- Hooks, plugins, and MCP entries are executable capability surfaces; record new or changed entries in `/Users/fengran/.agents/hook-policy/` or `/Users/fengran/.agents/plugin-inventory/`.
+- Do not edit tool-specific skill copies directly; use per-skill symlinks from the shared source.

@@ -58,11 +58,17 @@ PRODUCTION_HEAD=''
 DELTA_FILE=''
 TRANSACTION_STARTED=0
 RETENTION_PRODUCTION_TRANSACTION=''
+DEPLOY_MODEL='deepseek-v4-pro'
 
 [[ "$MODE" == --rollback ]] || {
   CANDIDATE="${RAN_AGENT_RELEASE_CANDIDATE:-}"
   [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail candidate_digest_invalid
   git -C "$REPO_ROOT" cat-file -e "${CANDIDATE}^{commit}" 2>/dev/null || fail candidate_object_missing
+  DEPLOY_MODEL="${RAN_AGENT_DEPLOY_HERMES_MODEL:-deepseek-v4-pro}"
+  case "$DEPLOY_MODEL" in
+    deepseek-v4-pro|deepseek-v4-flash) ;;
+    *) fail deploy_model_invalid ;;
+  esac
 }
 
 require_node_sqlite() {
@@ -298,6 +304,7 @@ snapshot_runtime_state() {
   local paths=(
     "$FULL_HOME/config.yaml" "$FULL_HOME/.env" "$FULL_HOME/profiles/$FULL_PROFILE/config.yaml" "$FULL_HOME/profiles/$FULL_PROFILE/.env"
     "$LITE_HOME/config.yaml" "$LITE_HOME/.env" "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml" "$LITE_HOME/profiles/$LITE_PROFILE/.env"
+    "$FULL_HOME/plugins/model-providers/deepseek" "$LITE_HOME/plugins/model-providers/deepseek"
     "$SYSTEMD_DIR/ran-agent-hermes.service" "$SYSTEMD_DIR/ran-agent-hermes-full.service" "$SYSTEMD_DIR/ran-agent-node.service" "$SYSTEMD_DIR/ran-agent-python.service"
     "$SYSTEMD_DIR/ran-agent-ombre-brain.service" "$SYSTEMD_DIR/ran-agent-ombre-recall.service" "$SYSTEMD_DIR/ran-agent-xhs-browse.service" "$SYSTEMD_DIR/ran-agent-xhs-public-sidecar.service"
     "$SYSTEMD_DIR/ran-agent-hermes.service.d" "$SYSTEMD_DIR/ran-agent-hermes-full.service.d" "$SYSTEMD_DIR/ran-agent-node.service.d" "$SYSTEMD_DIR/ran-agent-python.service.d"
@@ -654,11 +661,11 @@ quiesce_runtime_services
 snapshot_node_durable_state
 snapshot_state_migrations
 activate_candidate_checkout
-"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
-"${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
+"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
+"${SUDO[@]}" env RAN_AGENT_EXPECTED_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
 record_protected_capability_evidence after || fail protected_capability_evidence_after
 mark_snapshot_accepted
 TRANSACTION_STARTED=0
 trap - EXIT INT TERM
 prune_accepted_snapshots
-printf 'deploy-hermes-release: apply-ok candidate=%s snapshot=%s\n' "$CANDIDATE" "$SNAPSHOT_DIR"
+printf 'deploy-hermes-release: apply-ok candidate=%s model=%s snapshot=%s\n' "$CANDIDATE" "$DEPLOY_MODEL" "$SNAPSHOT_DIR"

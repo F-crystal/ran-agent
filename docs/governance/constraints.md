@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-07-02)
+Status: CURRENT (2026-07-27)
 
 ## Split Of Responsibility
 
@@ -14,7 +14,11 @@ Status: CURRENT (2026-07-02)
 
 ## Real Mainlines
 
-- Chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
+- Production chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
+- Local integration candidate: the same Lite/Full mainline selects
+  `DeepSeek V4 Pro` and adds explicit `thinking.type=disabled` only at the
+  provider boundary; it does not change O1 identity, recall, startup, rollback,
+  or retention ownership.
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Scheduled digest mainline: `scheduler -> AIHOT facts -> synthetic Feishu turn -> Hermes -> Feishu reply`
 - External MCP candidate mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional ProactiveEvent synthetic Hermes turn`; source profiles fall back disabled, while standard server deploy enables the gateway, proactive event, and system queue env gates.

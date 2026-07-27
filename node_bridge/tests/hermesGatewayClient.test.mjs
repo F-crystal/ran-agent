@@ -380,6 +380,15 @@ test('getHermesGatewayConfig reads Hermes defaults and normalizes base URL', () 
   assert.equal(config.enableContextSizeLog, false);
 });
 
+test('getHermesGatewayConfig defaults to Pro and keeps explicit env precedence', () => {
+  assert.equal(getHermesGatewayConfig({}).model, 'deepseek-v4-pro');
+  assert.equal(getHermesGatewayConfig({ HERMES_INFERENCE_MODEL: 'inference-override' }).model, 'inference-override');
+  assert.equal(getHermesGatewayConfig({
+    HERMES_DEFAULT_MODEL: 'default-override',
+    HERMES_INFERENCE_MODEL: 'inference-override',
+  }).model, 'default-override');
+});
+
 test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async () => {
   let capturedUrl = '';
   let capturedBody = null;

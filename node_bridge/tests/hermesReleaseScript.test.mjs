@@ -616,7 +616,7 @@ test('release scripts make an immutable staged candidate the only apply authorit
   assert.match(accept, /ombre_o1_contract\.py/);
 });
 
-test('preserve mode cannot rewrite profiles or environment, or remove unrelated MCP units', () => {
+test('preserve mode changes only O1 identity and model policy without removing unrelated MCP units', () => {
   const apply = readFileSync(join(root, 'scripts', 'apply-hermes-runtime-split.sh'), 'utf8');
   const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
   const preserveMain = apply.slice(apply.indexOf('main() {'));
@@ -624,6 +624,9 @@ test('preserve mode cannot rewrite profiles or environment, or remove unrelated 
 
   assert.ok(preserveBlock);
   assert.match(preserveBlock[1], /restart_services/);
+  assert.match(preserveBlock[1], /install_deepseek_provider_plugin/);
+  assert.match(preserveBlock[1], /select_installed_profile_models/);
+  assert.match(preserveBlock[1], /write_model_policy_env/);
   assert.match(preserveBlock[1], /return 0/);
   assert.doesNotMatch(preserveBlock[1], /write_runtime_env|write_systemd_units|install_profiles/);
   assert.match(apply, /if \[ "\$PRESERVE_RUNTIME_SHAPE" != "1" \]; then\n    cleanup_stale_lite_dropins/);
@@ -738,6 +741,10 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   mkdirSync(bin, { recursive: true });
   writeFileSync(config, 'operator-owned-config\n');
   const safeConfig = [
+    'model:',
+    '  provider: deepseek',
+    '  default: deepseek-v4-flash',
+    '  model: deepseek-v4-flash',
     'platform_toolsets:',
     '  cli: [mcp-ombre_memory]',
     '  gateway: [mcp-ombre_memory]',
@@ -811,6 +818,8 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
     RAN_AGENT_TEST_MODE: '1',
     RAN_AGENT_PROVIDER_CANARY_TEST_COMMAND: join(bin, 'provider-canary'),
     RAN_AGENT_REPO_ROOT: root,
+    RAN_AGENT_NODE_ENV_FILE: join(dir, 'node.env'),
+    RAN_AGENT_NODE_BRIDGE_ENV_FILE: join(dir, 'bridge.env'),
     RAN_AGENT_DEPLOY_STATE_DIR: state,
     RAN_AGENT_DEPLOY_DEBUG_DIR: debug,
     HERMES_HOME: fullHome,
@@ -1344,6 +1353,7 @@ test('release transaction snapshots the live production checkout before activati
   assert.match(deploy, /CANDIDATE.*\^\[0-9a-f\]\{40\}\$/);
   assert.doesNotMatch(deploy, /candidate_not_checked_out/);
   assert.match(deploy, /snapshot_node_durable_state/);
+  assert.match(deploy, /plugins\/model-providers\/deepseek/);
   assert.match(deploy, /snapshot_path "\$REPO_ROOT\/data" 901/);
   assert.match(deploy, /RAN_AGENT_RELEASE_ARTIFACT_ROOT/);
   assert.match(deploy, /activate_candidate_checkout/);

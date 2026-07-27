@@ -29,6 +29,14 @@ class ConfigLoadingTest(unittest.TestCase):
 
         self.assertEqual(DEFAULT_SYSTEM_PROMPT, prompt_data["agent_system_prompt"])
 
+    def test_hermes_model_defaults_to_pro_and_env_override_wins(self) -> None:
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(load_config().hermes_model, "deepseek-v4-pro")
+        with patch.dict(
+            os.environ, {"PERSONAL_AGENT_HERMES_MODEL": "manual-model"}, clear=True
+        ):
+            self.assertEqual(load_config().hermes_model, "manual-model")
+
     def test_environment_variable_overrides_prompt_file(self) -> None:
         with patch.dict(os.environ, {"PERSONAL_AGENT_SYSTEM_PROMPT": "env prompt"}, clear=False):
             config = load_config()

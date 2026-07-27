@@ -2,9 +2,9 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-07-23)
+Status: CURRENT (2026-07-27)
 
-`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，本地 O1 线未在线复核。生产人工热补丁不等于本目录的 O1 候选已正式发布。本候选未提交、未归档、未部署；V4 Pro frozen；Node Receipt deferred；O2 未开始/未授权；Package B.2/B.3 未开始。
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 Flash 与人工热补丁，本地未在线复核。O1 基线 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` 已归档但未部署；本地 V4+O1 候选未提交、未归档、未部署。Node Receipt deferred；O2 未开始/未授权；Package B.2/B.3 未开始。
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 
@@ -13,7 +13,8 @@ Status: CURRENT (2026-07-23)
 ## 当前定位
 
 - Hermes 是 ran-agent 的前台对话 shell。
-- 默认模型是 `deepseek-v4-flash`；`deepseek-v4-pro` 只通过显式模板或手动 override 使用。
+- 本地候选中 Lite/Full 默认模型统一为 `deepseek-v4-pro`，provider policy
+  在最终 HTTP body 显式加入 `thinking.type=disabled`；生产仍是 Flash。
 - DeepSeek V4 在本项目中按文本模型使用，原始图片、音频、视频和社交平台内容必须先由 MCP 工具处理。
 - Node bridge 生产运行会在 lite/full 两个 gateway 之间自动路由；微信、飞书/Lark 和桌面 Proxy 都先进入 ChannelHub，再由统一主链路调用 Hermes。
 - OpenClaw、Kimi、GLM 前台路线已经退休，不再作为运行时、部署目标或调试权威。
@@ -224,7 +225,7 @@ hermes profile --help
 hermes profile show ran-assistant
 hermes -p ran-assistant mcp list
 hermes -p ran-assistant mcp test media_reader
-hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "只输出 OK"
 ```
 
 前台启动 gateway：

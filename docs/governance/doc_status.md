@@ -1,13 +1,14 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-24)
+Status: CURRENT (2026-07-27)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
-revalidated it online. Production has manual hotfixes. Ombre O1 is an
-uncommitted, unarchived, undeployed local candidate; V4 Pro is frozen and
-undeployed; Node Receipt is deferred; O2 is not started/authorized; Package
-B.2/B.3 have not started.
+revalidated it online. Production has manual hotfixes. Ombre O1 baseline
+`1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
+local V4+O1 integration candidate is uncommitted, unarchived, and undeployed;
+Node Receipt is deferred and its failed source is not reintroduced; O2 is not
+started/authorized; Package B.2/B.3 have not started.
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -137,5 +138,6 @@ the current production SHA.
 - Slow WeChat/Feishu replies use the managed reply-window contract:
   `HERMES_REPLY_TIMEOUT_SECONDS`, default-off quick ack, authorized async final
   send, and distinct Feishu ack/final idempotency keys.
-- The local O1 candidate exposes only the local recall-only adapter to Hermes;
+- The archived O1 contract retained by the local V4+O1 candidate exposes only
+  the local recall-only adapter to Hermes;
   raw upstream Ombre MCP is isolated. This is not a production claim.

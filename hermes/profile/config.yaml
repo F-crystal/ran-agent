@@ -3,11 +3,10 @@
 
 model:
   provider: deepseek
-  default: deepseek-v4-flash
+  default: deepseek-v4-pro
 
-# Keep daily chat on Flash. Use the Pro template or an explicit model override
-# for high-cost work:
-#   hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "..."
+# Lite and Full use the installed DeepSeek provider policy, which adds
+# thinking.type=disabled at the final provider boundary.
 
 disabled_tools:
   - browser_vision

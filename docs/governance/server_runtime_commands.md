@@ -1,17 +1,18 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-24)
+Status: CURRENT (2026-07-27)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
 manual systemd or env edits.
 
 `USER_SUPPLIED_RUNTIME`: production repository SHA is
-`bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
-revalidated it online.
-The host has manual hotfixes, but the local Ombre O1 candidate in this checkout
-is uncommitted, unarchived, and undeployed. Its Ombre commands below describe
-the reviewed target state, not behavior already asserted in production.
+`bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local line has not
+revalidated it online. The host has manual hotfixes. O1 baseline
+`1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed; the
+local V4+O1 candidate is uncommitted, unarchived, and undeployed. Commands
+below describe the reviewed target state, not behavior already asserted in
+production.
 
 ## Source Of Truth
 
@@ -21,6 +22,8 @@ the reviewed target state, not behavior already asserted in production.
   transaction: `bash scripts/apply-hermes-runtime-split.sh`
 - Diagnose lite/full convergence:
   `bash scripts/diagnose-lite-full.sh`
+- Prove the final Hermes v0.13 provider HTTP body without network access:
+  `RAN_AGENT_CAPABILITY_MODE=<lite|full> HERMES_SERVICE_UNIT=<unit> HERMES_HOME=<home> bash scripts/diagnose-hermes-provider-boundary.sh`
 - Diagnose proactive events:
   `bash scripts/diagnose-proactive-events.sh`
 - Diagnose external MCP gateway:
@@ -44,6 +47,8 @@ the reviewed target state, not behavior already asserted in production.
   `bash scripts/clean-uv-cache-safe.sh`
 - Immutable Hermes release transaction and rollback:
   `docs/governance/hermes_release_deployment.md`
+- Reviewed model-only rollback, still through the same immutable transaction:
+  `RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-flash bash scripts/deploy-hermes-candidate.sh --commit <CURRENT_REVIEWED_SHA> --apply`
 
 Do not publish one-off pasteable repair blocks in this file. If a repeated
 operation is needed, turn it into a script and reference it here.
@@ -75,6 +80,9 @@ apply transaction.
   `ran-agent-hermes-full.service`.
 - Runtime env upsert for Hermes homes, root Node env, and
   `/opt/ran_agent/node_bridge/.env.local`.
+- Synchronized Lite/Full `deepseek-v4-pro` selection and the shared DeepSeek
+  provider plugin that forces `thinking.type=disabled`. Flash remains the
+  simultaneous model rollback value.
 - Service restart for `ran-agent-python.service`, `ran-agent-node.service`,
   `ran-agent-hermes.service`, and `ran-agent-hermes-full.service` so new env
   gates are loaded by running processes.

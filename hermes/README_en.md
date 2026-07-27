@@ -2,9 +2,9 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-07-23)
+Status: CURRENT (2026-07-27)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not revalidated it online. Manual production hotfixes do not mean this O1 profile candidate has been formally released. This candidate is uncommitted, unarchived, and undeployed; V4 Pro is frozen; Node Receipt is deferred; O2 is not started/authorized; Package B.2/B.3 have not started.
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses Flash with manual hotfixes and has not been revalidated by this local line. O1 baseline `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The local V4+O1 candidate is uncommitted, unarchived, and undeployed. Node Receipt is deferred; O2 is not started/authorized; Package B.2/B.3 have not started.
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 
@@ -13,7 +13,9 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 ## Current Role
 
 - Hermes is the frontend conversation shell for ran-agent.
-- The default model is `deepseek-v4-flash`; `deepseek-v4-pro` is opt-in through an explicit template or manual override.
+- In the local candidate, Lite and Full both default to `deepseek-v4-pro`; the
+  provider policy adds `thinking.type=disabled` to the final HTTP body.
+  Production remains on Flash.
 - DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must be processed by MCP tools first.
 - In production, Node bridge automatically routes requests between lite and full gateways; WeChat, Feishu/Lark, and the desktop proxy all enter ChannelHub before the unified mainline calls Hermes.
 - OpenClaw, Kimi, and GLM are retired as frontend paths and must not be used as runtime, deployment, or debugging authorities.
@@ -224,7 +226,7 @@ hermes profile --help
 hermes profile show ran-assistant
 hermes -p ran-assistant mcp list
 hermes -p ran-assistant mcp test media_reader
-hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "只输出 OK"
 ```
 
 Run a gateway in the foreground:

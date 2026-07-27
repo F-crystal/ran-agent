@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-24)
+Status: CURRENT (2026-07-27)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -13,17 +13,24 @@ production_repository_sha: bb66f1e6a8a400d599c7f86139107742bbedddc8
 runtime_evidence_class: USER_SUPPLIED_RUNTIME
 local_o1_online_revalidation: not performed
 production_manual_hotfixes: present; verify on host
-ombre_o1_candidate: local, uncommitted, unarchived, undeployed
-v4_pro: technical candidate frozen, unarchived, undeployed
+ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
+local_v4_o1_integration: uncommitted, unarchived, undeployed
+v4_pro: local Lite/Full integration candidate; undeployed
 node_receipt: deferred
 ombre_o2: not started, not authorized
 package_b_2_b_3: not started
 ```
 
 This production statement is `USER_SUPPLIED_RUNTIME`, not revalidated by this
-local O1 line. The formal production release does not contain the local Ombre O1 candidate.
+local integration line. The formal production release does not contain the
+archived O1 baseline or the local V4+O1 integration candidate.
 Production has manual hotfixes, but this document does not guess their exact
 live shape; server acceptance evidence remains the authority for those patches.
+
+The repository candidate keeps every O1 invariant from
+`1be3ee58919fb01f1c442d75ba2463e237fba0b2` and changes only the Lite/Full
+model policy to `deepseek-v4-pro` with explicit provider-boundary
+`thinking: {"type":"disabled"}`. It is not a production capability.
 
 ## Mainline
 
@@ -45,6 +52,11 @@ External MCP candidates
 ```
 
 - Provider: `hermes`; model: `deepseek-v4-flash`; fallback provider: none.
+- Local V4+O1 candidate: Lite and Full both select `deepseek-v4-pro`; the
+  installed Hermes v0.13 DeepSeek provider policy adds
+  `thinking: {"type":"disabled"}` to the final provider HTTP body. Flash is
+  the simultaneous Lite/Full model rollback value; O1 runtime safety is not
+  rolled back.
 - Python frontend `/chat` returns 410.
 - OpenClaw, Kimi, GLM, and MiMo Power are retired frontend paths.
 - WeChat, Feishu/Lark, and Desktop proxy share `ChannelHub`, `IdentityMap`,
@@ -95,6 +107,12 @@ Hermes homes, and lite/full Hermes profile env files aligned.
 
 Important non-secret env groups:
 
+- Local candidate model policy: `HERMES_PROVIDER=deepseek`,
+  `HERMES_INFERENCE_PROVIDER=deepseek`,
+  `HERMES_DEFAULT_MODEL=deepseek-v4-pro`,
+  `HERMES_INFERENCE_MODEL=deepseek-v4-pro`,
+  `HERMES_PRO_MODEL=deepseek-v4-pro`, and
+  `HERMES_DEEPSEEK_THINKING_MODE=disabled`.
 - Hermes routing and cache: `HERMES_LITE_API_BASE_URL`,
   `HERMES_FULL_API_BASE_URL`, `HERMES_CONTEXT_INJECTION_MODE`,
   `HERMES_CONTEXT_CACHE_STRATEGY`, `HERMES_CACHE_*`.

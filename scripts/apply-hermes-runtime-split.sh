@@ -36,7 +36,21 @@ LITE_PORT="${HERMES_LITE_API_PORT:-8642}"
 FULL_PORT="${HERMES_FULL_API_PORT:-8643}"
 LITE_PROFILE="ran-assistant-lite"
 FULL_PROFILE="ran-assistant"
-MODEL_NAME="deepseek-v4-flash"
+MODEL_NAME="${RAN_AGENT_DEPLOY_HERMES_MODEL:-deepseek-v4-pro}"
+PROVIDER_NAME="deepseek"
+DEEPSEEK_THINKING_MODE="disabled"
+case "$MODEL_NAME" in
+  deepseek-v4-pro|deepseek-v4-flash) ;;
+  *) echo "ERROR: RAN_AGENT_DEPLOY_HERMES_MODEL must be deepseek-v4-pro or deepseek-v4-flash" >&2; exit 1 ;;
+esac
+MODEL_POLICY_ENV=(
+  "HERMES_PROVIDER=$PROVIDER_NAME"
+  "HERMES_INFERENCE_PROVIDER=$PROVIDER_NAME"
+  "HERMES_DEFAULT_MODEL=$MODEL_NAME"
+  "HERMES_INFERENCE_MODEL=$MODEL_NAME"
+  "HERMES_PRO_MODEL=$MODEL_NAME"
+  "HERMES_DEEPSEEK_THINKING_MODE=$DEEPSEEK_THINKING_MODE"
+)
 BACKUP_DIR="$(mktemp -d)"
 XHS_GENERIC_FALLBACK_PREPARE_TIMEOUT_SECONDS="${XHS_GENERIC_FALLBACK_PREPARE_TIMEOUT_SECONDS:-120}"
 XHS_PUBLIC_SIDECAR_PREPARE_TIMEOUT_SECONDS="${XHS_PUBLIC_SIDECAR_PREPARE_TIMEOUT_SECONDS:-900}"
@@ -495,6 +509,9 @@ upsert_env_file() {
 
 is_managed_env_key() {
   case "$1" in
+    HERMES_PROVIDER|HERMES_INFERENCE_PROVIDER|HERMES_DEFAULT_MODEL|HERMES_INFERENCE_MODEL|HERMES_PRO_MODEL|HERMES_DEEPSEEK_THINKING_MODE|PERSONAL_AGENT_HERMES_MODEL)
+      return 0
+      ;;
     HERMES_HOME|HERMES_PROFILE|API_SERVER_ENABLED|API_SERVER_HOST|API_SERVER_PORT|API_SERVER_MODEL_NAME|HERMES_API_BASE_URL|HERMES_LITE_API_BASE_URL|HERMES_FULL_API_BASE_URL|HERMES_LITE_PROFILE|HERMES_FULL_PROFILE|RAN_AGENT_CAPABILITY_MODE|RAN_AGENT_INTERNAL_CONTROL_SECRET|HERMES_CONTEXT_INJECTION_MODE|HERMES_CONTEXT_CACHE_STRATEGY|HERMES_SESSION_CONTINUITY_ENABLED|HERMES_SESSION_ID_PREFIX|HERMES_SESSION_KEY_PREFIX|HERMES_RECENT_TEXT_TURNS|HERMES_RECENT_TEXT_CHAR_BUDGET|HERMES_RECENT_TEXT_MAX_USER_CHARS|HERMES_RECENT_TEXT_MAX_ASSISTANT_CHARS|HERMES_GLOBAL_RECENT_TURNS|HERMES_GLOBAL_RECENT_CHAR_BUDGET|HERMES_ACTIVE_TOPIC_CHAR_BUDGET|HERMES_CONTINUITY_FRESHNESS_HOURS|HERMES_CACHE_FRIENDLY_HISTORY|HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS|HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET|HERMES_CACHE_FRIENDLY_HISTORY_PROFILE|HERMES_CACHE_TELEMETRY_ENABLED|HERMES_LITE_SOFT_RESET_ENABLED|HERMES_LITE_SOFT_RESET_DRY_RUN|HERMES_LITE_SOFT_RESET_MAX_DIGEST_CHARS|HERMES_LITE_SOFT_RESET_KEEP_LAST_N|HERMES_LITE_SOFT_RESET_STATE_FILE|HERMES_LITE_SOFT_RESET_DIGEST_DIR|HERMES_ACTION_GATE_ENABLED|HERMES_ACTION_GATE_MODE|HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS|HERMES_ACTION_PENDING_ENABLED|HERMES_ACTION_PENDING_TTL_MINUTES|HERMES_REPLY_TIMEOUT_SECONDS|NODE_BRIDGE_QUICK_ACK_ENABLED|NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS|NODE_BRIDGE_QUICK_ACK_TEXT|FEISHU_SEND_TIMEOUT_SECONDS|FEISHU_DOWNLOAD_TIMEOUT_SECONDS|HERMES_ENVIRONMENT_CONTEXT_ENABLED|HERMES_ENVIRONMENT_WEATHER_ENABLED|HERMES_ENVIRONMENT_MAX_AGE_MS|HERMES_ENVIRONMENT_WEATHER_CACHE_MS|HERMES_ENVIRONMENT_TIMEZONE|RAN_AGENT_TIMELINE_MAX_BYTES|RAN_AGENT_TIMELINE_MAX_TURNS|RAN_AGENT_TIMELINE_RETENTION_DAYS|RAN_AGENT_TIMELINE_COMPACT_ENABLED|RAN_AGENT_TIMELINE_ARCHIVE_DIR|PERSONAL_AGENT_PROACTIVE_ENABLED|PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED|HERMES_PROACTIVE_EVENTS_ENABLED|HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED|HERMES_PROACTIVE_REMINDERS_ENABLED|HERMES_PROACTIVE_NOTIFY_MAX_CHARS|PERSONAL_AGENT_QWEN_TIMEOUT_SECONDS|PERSONAL_AGENT_KNOWLEDGE_CRON_HOURS|PERSONAL_AGENT_KNOWLEDGE_CRON_MINUTE|PERSONAL_AGENT_DAILY_CARRYOVER_ENABLED|PERSONAL_AGENT_DAILY_CARRYOVER_HOUR|PERSONAL_AGENT_DAILY_CARRYOVER_MINUTE|AI_DAILY_DIGEST_ENABLED|AI_DAILY_DIGEST_HOUR|AI_DAILY_DIGEST_MINUTE|FEISHU_LARK_CLI_BIN|FEISHU_LARK_CLI_IDENTITY|DESKTOP_PROXY_HOST|DESKTOP_PROXY_PORT|SEARCH_HUB_ENABLED|SEARCH_HUB_PROFILE_MODE|SEARCH_HUB_DEFAULT_LIMIT|SEARCH_HUB_TIMEOUT_MS|SEARCH_HUB_CACHE_TTL_MS|SEARCH_HUB_CACHE_PATH|SEARCH_HUB_ENABLE_TAVILY|SEARCH_HUB_ENABLE_AIHOT|SEARCH_HUB_ENABLE_OPENCLI|SEARCH_HUB_ENABLE_OPENCLI_BROWSER|SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK|SEARCH_HUB_OPENCLI_BIN|SEARCH_HUB_OPENCLI_TIMEOUT_MS|SEARCH_HUB_PUBLIC_ONLY_DEFAULT|UV_CACHE_DIR|UV_TOOL_DIR|UV_LINK_MODE|UV_PYTHON_DOWNLOADS|SOCIAL_READER_GENERIC_FALLBACK_ENABLED|SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS|SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS|XHS_BACKEND_MCP_TIMEOUT_MS|MEDIA_READER_MCP_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY|PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS|PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS|PERSONAL_AGENT_OCR_PROVIDER|PERSONAL_AGENT_OCR_MODEL|PERSONAL_AGENT_OCR_TIMEOUT_MS|OBSIDIAN_MEMORY_MCP_ENABLED|XHS_GENERIC_FALLBACK_READY_PATH|XHS_GENERIC_FALLBACK_MIN_VERSION|XHS_PUBLIC_SIDECAR_ENABLED|XHS_PUBLIC_SIDECAR_URL|XHS_PUBLIC_SIDECAR_TIMEOUT_MS|XHS_PUBLIC_HTML_FALLBACK_ENABLED|XHS_PUBLIC_SIDECAR_MARKER_PATH|XHS_PUBLIC_SIDECAR_ROOT_DIR|WEIXIN_SDK_INBOUND_MEDIA_DIRS|EXTERNAL_MCP_GATEWAY_PROFILE|EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE|EXTERNAL_MCP_GATEWAY_ENABLED|EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED|EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED|EXTERNAL_MCP_ACTIVITY_TICK_MS|OMBRE_BRAIN_ENABLED|OMBRE_BRAIN_MCP_ENABLED|OMBRE_BRAIN_RUNNER|OMBRE_BRAIN_REPO_URL|OMBRE_BRAIN_HOME|OMBRE_BRAIN_SOURCE_DIR|OMBRE_BRAIN_VENV|OMBRE_BUCKETS_DIR|OMBRE_BRAIN_IMAGE|OMBRE_BIND_HOST|OMBRE_MCP_REQUIRE_AUTH|OMBRE_BRAIN_PORT|OMBRE_BRAIN_COMPOSE_FILE|OMBRE_BRAIN_CONFIG_FILE|OMBRE_BRAIN_STATUS_FILE|OMBRE_BRAIN_MCP_URL|OMBRE_BRAIN_HEALTH_URL|OMBRE_RECALL_PORT|OMBRE_RECALL_MCP_URL|OMBRE_RECALL_HEALTH_URL|PERSONAL_AGENT_OMBRE_BACKEND|PERSONAL_AGENT_OMBRE_MCP_URL|PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS|PERSONAL_AGENT_OMBRE_READ_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_ENABLED|PERSONAL_AGENT_OMBRE_TIMEOUT_MS|PERSONAL_AGENT_OMBRE_MAX_RESULTS|PERSONAL_AGENT_OMBRE_MAX_CHARS|PERSONAL_AGENT_OMBRE_ANCHOR_ENABLED|PERSONAL_AGENT_OMBRE_I_ENABLED|PERSONAL_AGENT_OMBRE_WRITE_MODE)
       return 0
       ;;
@@ -514,6 +531,93 @@ install_profiles() {
 
   HERMES_HOME="$FULL_HOME" "$HERMES_BIN" profile install "$REPO_ROOT/hermes/profile" --name "$FULL_PROFILE" --force -y
   HERMES_HOME="$LITE_HOME" "$HERMES_BIN" profile install "$REPO_ROOT/hermes/profile" --name "$LITE_PROFILE" --force -y
+}
+
+install_deepseek_provider_plugin() {
+  local source="$REPO_ROOT/hermes/profile/plugins/model-providers/deepseek"
+  local home name
+  for home in "$FULL_HOME" "$LITE_HOME"; do
+    for name in __init__.py plugin.yaml; do
+      [ -f "$source/$name" ] || {
+        echo "ERROR: missing DeepSeek provider policy: $source/$name" >&2
+        return 1
+      }
+      install_file_portable 644 "$source/$name" "$home/plugins/model-providers/deepseek/$name"
+      chown_if_user_exists "$home/plugins/model-providers/deepseek/$name"
+    done
+  done
+}
+
+write_model_selected_config() {
+  local source="$1" destination="$2" tmp
+  tmp="$(mktemp)"
+  "${SUDO[@]}" sed -E \
+    -e "s/^([[:space:]]*default:[[:space:]]*)deepseek-v4-(pro|flash)[[:space:]]*$/\\1$MODEL_NAME/" \
+    -e "s/^([[:space:]]*model:[[:space:]]*)deepseek-v4-(pro|flash)[[:space:]]*$/\\1$MODEL_NAME/" \
+    "$source" >| "$tmp"
+  install_file_portable 644 "$tmp" "$destination"
+  chown_if_user_exists "$destination"
+  rm -f "$tmp"
+}
+
+select_installed_profile_models() {
+  local config
+  for config in \
+    "$FULL_HOME/config.yaml" \
+    "$FULL_HOME/profiles/$FULL_PROFILE/config.yaml" \
+    "$LITE_HOME/config.yaml" \
+    "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"; do
+    "${SUDO[@]}" test -f "$config" || {
+      echo "ERROR: required installed Hermes config is missing: $config" >&2
+      return 1
+    }
+    write_model_selected_config "$config" "$config"
+  done
+}
+
+write_model_policy_env() {
+  local file
+  for file in \
+    "$NODE_ENV_FILE" \
+    "$NODE_BRIDGE_ENV_FILE" \
+    "$FULL_HOME/.env" \
+    "$FULL_HOME/profiles/$FULL_PROFILE/.env" \
+    "$LITE_HOME/.env" \
+    "$LITE_HOME/profiles/$LITE_PROFILE/.env"; do
+    upsert_env_file "$file" "${MODEL_POLICY_ENV[@]}" "PERSONAL_AGENT_HERMES_MODEL=$MODEL_NAME"
+  done
+}
+
+verify_model_policy() {
+  local config home name file assignment
+  for config in \
+    "$FULL_HOME/config.yaml" \
+    "$FULL_HOME/profiles/$FULL_PROFILE/config.yaml" \
+    "$LITE_HOME/config.yaml" \
+    "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"; do
+    "${SUDO[@]}" grep -Eq "^[[:space:]]*(default|model):[[:space:]]*${MODEL_NAME}[[:space:]]*$" "$config" ||
+      { echo "ERROR: Hermes model policy mismatch: $config" >&2; return 1; }
+  done
+  for home in "$FULL_HOME" "$LITE_HOME"; do
+    for name in __init__.py plugin.yaml; do
+      "${SUDO[@]}" cmp -s \
+        "$REPO_ROOT/hermes/profile/plugins/model-providers/deepseek/$name" \
+        "$home/plugins/model-providers/deepseek/$name" ||
+        { echo "ERROR: installed DeepSeek provider policy mismatch: $home" >&2; return 1; }
+    done
+  done
+  for file in \
+    "$NODE_ENV_FILE" \
+    "$NODE_BRIDGE_ENV_FILE" \
+    "$FULL_HOME/.env" \
+    "$FULL_HOME/profiles/$FULL_PROFILE/.env" \
+    "$LITE_HOME/.env" \
+    "$LITE_HOME/profiles/$LITE_PROFILE/.env"; do
+    for assignment in "${MODEL_POLICY_ENV[@]}"; do
+      "${SUDO[@]}" grep -qxF "$assignment" "$file" ||
+        { echo "ERROR: Hermes model env mismatch: $file:${assignment%%=*}" >&2; return 1; }
+    done
+  done
 }
 
 install_o1_identity_and_recall_contract() {
@@ -637,6 +741,8 @@ write_runtime_env() {
     "EXTERNAL_MCP_ACTIVITY_TICK_MS=$EXTERNAL_MCP_ACTIVITY_TICK_MS_DEFAULT"
   )
   local hermes_client_env=(
+    "${MODEL_POLICY_ENV[@]}"
+    "PERSONAL_AGENT_HERMES_MODEL=$MODEL_NAME"
     "HERMES_REPLY_TIMEOUT_SECONDS=$HERMES_REPLY_TIMEOUT_SECONDS_DEFAULT"
   )
   local reply_window_env=(
@@ -960,6 +1066,8 @@ write_runtime_env() {
     "${ombre_env[@]}"
 
   upsert_env_file "$NODE_BRIDGE_ENV_FILE" \
+    "${MODEL_POLICY_ENV[@]}" \
+    "PERSONAL_AGENT_HERMES_MODEL=$MODEL_NAME" \
     "HERMES_CONTEXT_CACHE_STRATEGY=$HERMES_CONTEXT_CACHE_STRATEGY_DEFAULT" \
     "HERMES_CACHE_FRIENDLY_HISTORY=$HERMES_CACHE_FRIENDLY_HISTORY_DEFAULT" \
     "HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS=$HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS_DEFAULT" \
@@ -1016,8 +1124,8 @@ filter_obsidian_memory_from_config() {
 
 write_lite_runtime_config() {
   log "refreshing lite runtime config"
-  install_file_portable 644 "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/config.yaml"
-  install_file_portable 644 "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
+  write_model_selected_config "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/config.yaml"
+  write_model_selected_config "$REPO_ROOT/hermes/profile/config.lite.yaml" "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
   if [ "${OBSIDIAN_MEMORY_MCP_ENABLED:-false}" = "false" ]; then
     filter_obsidian_memory_from_config "$LITE_HOME/config.yaml"
     filter_obsidian_memory_from_config "$LITE_HOME/profiles/$LITE_PROFILE/config.yaml"
@@ -1669,6 +1777,7 @@ verify_runtime() {
   local lite_pid
   local full_pid
   validate_runtime_ombre_configs
+  verify_model_policy
 
   log "verifying compact systemd units"
   # Cache systemctl cat output once for all checks
@@ -2019,11 +2128,17 @@ main() {
     resolve_runtime_identity
     validate_ombre_network_contract
     install_o1_identity_and_recall_contract
+    install_deepseek_provider_plugin
+    select_installed_profile_models
+    write_model_policy_env
     verify_o1_identity_and_recall_contract
+    verify_model_policy
     refuse_masked_o1_units
     write_ombre_brain_unit
     write_ombre_recall_unit
     restart_services
+    verify_o1_identity_and_recall_contract
+    verify_model_policy
     return 0
   fi
 
@@ -2051,6 +2166,7 @@ main() {
     backup_env_file node_bridge_env "$NODE_BRIDGE_ENV_FILE"
 
     install_profiles
+    install_deepseek_provider_plugin
 
     restore_env_file full_home_env "$FULL_HOME/.env"
     restore_env_file full_profile_env "$FULL_HOME/profiles/$FULL_PROFILE/.env"

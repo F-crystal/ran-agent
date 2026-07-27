@@ -33,6 +33,11 @@ HERMES_FULL_BRIDGE_SMOKE_URL="${RAN_AGENT_RELEASE_FULL_BRIDGE_SMOKE_URL:-http://
 GATEWAY_READY_TIMEOUT_SECONDS="${RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS:-120}"
 GATEWAY_READY_INTERVAL_SECONDS="${RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS:-2}"
 GATEWAY_HEADER_FILE=''
+EXPECTED_MODEL="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-pro}"
+case "$EXPECTED_MODEL" in
+  deepseek-v4-pro|deepseek-v4-flash) ;;
+  *) fail expected_model_invalid ;;
+esac
 
 cleanup_gateway_header() {
   [[ -z "$GATEWAY_HEADER_FILE" ]] || rm -f -- "$GATEWAY_HEADER_FILE"
@@ -256,6 +261,12 @@ release_provider_boundary_canary() {
     HERMES_LITE_API_BASE_URL="http://127.0.0.1:$port/v1" \
     HERMES_FULL_API_BASE_URL="http://127.0.0.1:$port/v1" \
     HERMES_API_KEY="$key" \
+    HERMES_PROVIDER=deepseek \
+    HERMES_INFERENCE_PROVIDER=deepseek \
+    HERMES_DEFAULT_MODEL="$EXPECTED_MODEL" \
+    HERMES_INFERENCE_MODEL="$EXPECTED_MODEL" \
+    HERMES_PRO_MODEL="$EXPECTED_MODEL" \
+    HERMES_DEEPSEEK_THINKING_MODE=disabled \
     HERMES_PROFILE="$profile" \
     HERMES_LITE_PROFILE="$profile" \
     HERMES_FULL_PROFILE="$profile" \
@@ -272,6 +283,20 @@ release_provider_boundary_canary() {
 release_provider_boundary_canaries() {
   release_provider_boundary_canary lite ran-agent-hermes.service 8642 ran-assistant-lite
   release_provider_boundary_canary full ran-agent-hermes-full.service 8643 ran-assistant
+  RAN_AGENT_CAPABILITY_MODE=lite \
+  HERMES_SERVICE_UNIT=ran-agent-hermes.service \
+  HERMES_HOME="${HERMES_LITE_HOME:-${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/lite}" \
+  RAN_AGENT_EXPECTED_HERMES_MODEL="$EXPECTED_MODEL" \
+  RAN_AGENT_REPO_ROOT="$SOURCE_ROOT" \
+    bash "$SOURCE_ROOT/scripts/diagnose-hermes-provider-boundary.sh" >/dev/null ||
+    fail lite_provider_http_body_proof_failed
+  RAN_AGENT_CAPABILITY_MODE=full \
+  HERMES_SERVICE_UNIT=ran-agent-hermes-full.service \
+  HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}" \
+  RAN_AGENT_EXPECTED_HERMES_MODEL="$EXPECTED_MODEL" \
+  RAN_AGENT_REPO_ROOT="$SOURCE_ROOT" \
+    bash "$SOURCE_ROOT/scripts/diagnose-hermes-provider-boundary.sh" >/dev/null ||
+    fail full_provider_http_body_proof_failed
 }
 
 if [[ "$MODE" == "--dry-run" ]]; then

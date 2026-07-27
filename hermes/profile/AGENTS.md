@@ -1,10 +1,13 @@
 # AGENTS.md
 
-Status: CURRENT (2026-07-02)
+Status: CURRENT (2026-07-27)
 
 ## 工具与边界简表
 
-Hermes 是 ran-agent 的前台对话 shell。DeepSeek V4 Flash 是默认 text-oriented 主脑；Pro 只在明确 override 时使用。不要改造新的前台 agent loop。
+Hermes 是 ran-agent 的前台对话 shell。本地整合候选中 Lite 与 Full 统一使用
+DeepSeek V4 Pro，安装的 provider policy 在最终 HTTP body 显式加入
+`thinking.type=disabled`。生产仍是 owner 提供的旧 SHA、Flash 与人工热补丁；
+不要把本地候选描述为已部署，也不要改造新的前台 agent loop。
 
 DeepSeek V4 在本项目中不直接处理原始图片、视频、音频或社交平台内容。需要理解媒体时，先走 ran-agent MCP，再基于结构化结果回复：
 

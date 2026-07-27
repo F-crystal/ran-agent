@@ -1,10 +1,10 @@
 # AGENTS.md
 
-Status: CURRENT (2026-07-19)
+Status: CURRENT (2026-07-27)
 
 ## Scope
 
-This is the canonical repo-root rule file for agents in this checkout. It must stay self-contained for repo-wide rules. Tool-specific mirrors, including `CLAUDE.md`, must point here instead of duplicating these rules. Hermes runtime constraints live in `hermes/profile/AGENTS.md`.
+This is the canonical repo-root rule file for agents in this checkout and must stay self-contained on both desktop and server. A separately loaded desktop host policy may add local defaults but is not a prerequisite for this project. Server checkouts under `/opt/ran_agent` must assume no global `AGENTS.md`. Because the immutable release gate rejects symlinks, `CLAUDE.md` and `GEMINI.md` use minimal regular-file imports of the nearest scoped `AGENTS.md`. Hermes runtime constraints live in `hermes/profile/AGENTS.md`.
 
 ## Operating Rules
 
@@ -26,10 +26,10 @@ This is the canonical repo-root rule file for agents in this checkout. It must s
 
 ## Agent Capability Governance
 
-- Cross-tool desktop skills live in `/Users/fengran/.agents/skills`; project-only skills stay in this repo's `skills/`.
-- Hooks, plugins, and MCP entries are executable capability surfaces; record changes in `/Users/fengran/.agents/hook-policy/` or `/Users/fengran/.agents/plugin-inventory/`.
-- Do not edit tool-specific skill copies directly; use per-skill symlinks from the shared source.
-- These `/Users/fengran` paths govern the local desktop agent setup only. Server runtime under `/opt/ran_agent` is governed by `skills/server-runtime/SKILL.md` and `docs/governance/server_runtime_commands.md`.
+- This file and nested project `AGENTS.md` files own project policy on every host; desktop-global policy may add local defaults but may not replace or relax project rules.
+- Keep project instruction files limited to stable local correctness and safety rules. Skill-specific triggers and procedures belong in repository skills or governed project documentation.
+- Project-only skills stay in this repository. Shared host skills are desktop-only and must not become server runtime dependencies.
+- Server runtime under `/opt/ran_agent` is governed by `skills/server-runtime/SKILL.md` and `docs/governance/server_runtime_commands.md`.
 
 ## Security And Git
 

@@ -2,9 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-24)
+Status: CURRENT (2026-07-27)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not revalidated it online. Production has manual hotfixes, but its formal release does not include this local Ombre O1 candidate. The candidate is uncommitted, unarchived, and undeployed. V4 Pro is frozen and unarchived/undeployed; Node Receipt is deferred; O2 is not started or authorized; Package B.2/B.3 have not started.
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses DeepSeek V4 Flash with manual hotfixes and has not been revalidated by this local line. O1 baseline `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The local V4+O1 integration candidate is uncommitted, unarchived, and undeployed. Node Receipt is deferred and the failed delta is not restored; O2 is not started or authorized; Package B.2/B.3 have not started.
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -12,9 +12,9 @@ Status: CURRENT (2026-07-24)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub, replies through Hermes Gateway with DeepSeek V4 Flash, and uses MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, `personal_memory`, and `obsidian_memory` for fresh facts, media, social content, sticker lookup, personal memory, and vault retrieval. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
+Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The local integration candidate moves Lite and Full together to DeepSeek V4 Pro and adds `thinking: {"type":"disabled"}` to the final provider HTTP body; production remains on V4 Flash. MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, `personal_memory`, and `obsidian_memory` provide fresh facts, media, social content, sticker lookup, personal memory, and vault retrieval. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
 
-OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. The current frontend mainline is Hermes + DeepSeek V4 Flash.
+OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Production remains Hermes + DeepSeek V4 Flash; the local candidate target is Hermes + DeepSeek V4 Pro non-thinking.
 
 ---
 
@@ -279,7 +279,7 @@ Hermes profile smoke:
 ```bash
 hermes -p ran-assistant mcp list
 hermes -p ran-assistant mcp test media_reader
-hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "只输出 OK"
 ```
 
 ---

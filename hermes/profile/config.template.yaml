@@ -4,7 +4,7 @@
 
 model:
   provider: deepseek
-  default: deepseek-v4-flash
+  default: deepseek-v4-pro
 
 mcp_servers:
   time:

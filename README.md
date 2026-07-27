@@ -2,9 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-24)
+Status: CURRENT (2026-07-27)
 
-`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，本地 O1 线未在线复核。生产存在人工热补丁，但正式 release 尚未包含本地 Ombre O1 候选；本候选未提交、未归档、未部署。V4 Pro 技术候选冻结且未归档/部署；Node Receipt deferred；O2 未开始且未授权；Package B.2/B.3 未开始。
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 DeepSeek V4 Flash 并包含人工热补丁，本地未在线复核。O1 基线 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` 已归档但未部署；本地 V4+O1 整合候选未提交、未归档、未部署。Node Receipt deferred 且失败差量未恢复；O2 未开始且未授权；Package B.2/B.3 未开始。
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -12,9 +12,9 @@ Status: CURRENT (2026-07-24)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 用 DeepSeek V4 Flash 生成回复；同时通过 `search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory`、`obsidian_memory` 等 MCP 工具读取联网事实、媒体、社交内容、表情包目录、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
+Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。本地整合候选将 Lite/Full 同时切换为 DeepSeek V4 Pro，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；生产仍是 V4 Flash。`search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory`、`obsidian_memory` 等 MCP 工具负责联网事实、媒体、社交内容、表情包目录、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
 
-OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；当前前台主线只有 Hermes + DeepSeek V4 Flash。
+OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产前台仍是 Hermes + DeepSeek V4 Flash，本地候选目标是 Hermes + DeepSeek V4 Pro non-thinking。
 
 ---
 
@@ -281,7 +281,7 @@ Hermes profile smoke：
 ```bash
 hermes -p ran-assistant mcp list
 hermes -p ran-assistant mcp test media_reader
-hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "只输出 OK"
 ```
 
 ---

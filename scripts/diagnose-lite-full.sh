@@ -6,12 +6,17 @@
 set -euo pipefail
 
 HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
-LITE_HOME="$HERMES_HOME/lite"
+LITE_HOME="${HERMES_LITE_HOME:-$HERMES_HOME/lite}"
 REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 NODE_ENV_FILE="${RAN_AGENT_NODE_ENV_FILE:-/opt/ran_agent/.env.local}"
 SYSTEMCTL_BIN="$(command -v systemctl 2>/dev/null || true)"
 JOURNALCTL_BIN="$(command -v journalctl 2>/dev/null || true)"
+MODEL_NAME="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-pro}"
+case "$MODEL_NAME" in
+  deepseek-v4-pro|deepseek-v4-flash) ;;
+  *) echo "ERROR: expected Hermes model must be deepseek-v4-pro or deepseek-v4-flash" >&2; exit 1 ;;
+esac
 
 systemd_cat() {
   local service="$1"
@@ -70,6 +75,30 @@ done
 if [ "$missing_ports" -ne 0 ]; then
   echo "HINT: run bash scripts/apply-hermes-runtime-split.sh to re-apply the lite/full runtime split."
 fi
+
+echo ""
+echo "=== 2b. DeepSeek provider boundary ==="
+for boundary_spec in \
+  "lite|ran-agent-hermes.service|$LITE_HOME|ran-assistant-lite" \
+  "full|ran-agent-hermes-full.service|$HERMES_HOME|ran-assistant"; do
+  IFS='|' read -r mode unit home profile <<<"$boundary_spec"
+  for config in "$home/config.yaml" "$home/profiles/$profile/config.yaml"; do
+    grep -Eq "^[[:space:]]*(default|model):[[:space:]]*${MODEL_NAME}[[:space:]]*$" "$config" ||
+      { echo "ERROR: $mode model mismatch: $config" >&2; exit 1; }
+  done
+  for name in __init__.py plugin.yaml; do
+    cmp -s \
+      "$REPO_ROOT/hermes/profile/plugins/model-providers/deepseek/$name" \
+      "$home/plugins/model-providers/deepseek/$name" ||
+      { echo "ERROR: $mode provider plugin mismatch" >&2; exit 1; }
+  done
+  RAN_AGENT_CAPABILITY_MODE="$mode" \
+  HERMES_SERVICE_UNIT="$unit" \
+  HERMES_HOME="$home" \
+  RAN_AGENT_EXPECTED_HERMES_MODEL="$MODEL_NAME" \
+  RAN_AGENT_REPO_ROOT="$REPO_ROOT" \
+    bash "$REPO_ROOT/scripts/diagnose-hermes-provider-boundary.sh"
+done
 
 echo ""
 echo "=== 3. Systemd services ==="
