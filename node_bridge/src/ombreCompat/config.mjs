@@ -1,7 +1,6 @@
-// O2 compatibility layer configuration. Default posture is OFF in every
-// environment; local tests opt in through an explicit test flag (§14.1:
-// compatibility writer stays disabled until O1 and O2 pass independent
-// review). No production wiring enables this layer.
+// O2 remains fail-off without managed production env. The production runtime
+// explicitly enables it after wiring the canonical Steward and the existing
+// tool-less DeepSeek provider boundary.
 
 import path from 'node:path';
 
@@ -25,21 +24,23 @@ export function getOmbreCompatConfig(env = process.env) {
     stewardEndpoint: env.OMBRE_COMPAT_STEWARD_ENDPOINT || 'http://127.0.0.1:18001/internal/ran-agent/steward/v1',
     stewardTokenFile: env.RAN_AGENT_STEWARD_TOKEN_FILE
       || path.join(resolveStateDir(env), 'ombre-compat', 'secrets', 'steward-api-token'),
-    stewardIdentityFile: env.OMBRE_COMPAT_STEWARD_IDENTITY_FILE || '',
+    stewardIdentityFile: env.OMBRE_COMPAT_STEWARD_IDENTITY_FILE
+      || env.RAN_AGENT_STEWARD_IDENTITY_FILE
+      || path.join(resolveStateDir(env), 'ombre-brain', 'steward-identity.v1.json'),
     patchManifestSha256: env.OMBRE_COMPAT_PATCH_MANIFEST_SHA256 || '',
     apiSchemaSha256: env.OMBRE_COMPAT_API_SCHEMA_SHA256 || '',
     effectiveSourceTreeSha256: env.OMBRE_COMPAT_EFFECTIVE_SOURCE_TREE_SHA256 || '',
     dispatchTimeoutMs: clampInt(env.OMBRE_COMPAT_DISPATCH_TIMEOUT_MS, 15000, 1000, 120000),
     curator: {
-      baseUrl: env.OMBRE_COMPAT_CURATOR_BASE_URL || '',
-      model: env.OMBRE_COMPAT_CURATOR_MODEL || '',
-      apiKey: env.OMBRE_COMPAT_CURATOR_API_KEY || '',
+      baseUrl: env.OMBRE_COMPAT_CURATOR_BASE_URL || 'https://api.deepseek.com/v1',
+      model: env.OMBRE_COMPAT_CURATOR_MODEL || env.HERMES_DEFAULT_MODEL || 'deepseek-v4-flash',
+      apiKey: env.DEEPSEEK_API_KEY || env.OMBRE_COMPAT_CURATOR_API_KEY || '',
       timeoutMs: clampInt(env.OMBRE_COMPAT_CURATOR_TIMEOUT_MS, 30000, 1000, 180000),
     },
     reviewer: {
-      baseUrl: env.OMBRE_COMPAT_REVIEWER_BASE_URL || '',
-      model: env.OMBRE_COMPAT_REVIEWER_MODEL || '',
-      apiKey: env.OMBRE_COMPAT_REVIEWER_API_KEY || '',
+      baseUrl: env.OMBRE_COMPAT_REVIEWER_BASE_URL || 'https://api.deepseek.com/v1',
+      model: env.OMBRE_COMPAT_REVIEWER_MODEL || env.HERMES_DEFAULT_MODEL || 'deepseek-v4-flash',
+      apiKey: env.DEEPSEEK_API_KEY || env.OMBRE_COMPAT_REVIEWER_API_KEY || '',
       timeoutMs: clampInt(env.OMBRE_COMPAT_REVIEWER_TIMEOUT_MS, 30000, 1000, 180000),
     },
   };

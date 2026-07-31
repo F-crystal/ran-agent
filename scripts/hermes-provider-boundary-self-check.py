@@ -64,7 +64,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--hermes-home", required=True)
     parser.add_argument("--mode", required=True, choices=("lite", "full"))
-    parser.add_argument("--model", default="deepseek-v4-pro")
+    parser.add_argument("--model", default="deepseek-v4-flash")
     args = parser.parse_args()
 
     home = Path(args.hermes_home).resolve()

@@ -11,9 +11,11 @@ pushed but undeployed. Node Receipt is deferred and its failed source is not
 reintroduced. Ombre O2 implementation
 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` passed independent v0.7
 implementation review and is archived and pushed to `main`. It remains
-default-disabled, non-authoritative, not authorized for deployment, and not
-deployed. Gate 5 is neither executed nor authorized, and `total_delete`
-remains typed unsupported.
+the independently reviewed implementation baseline. The current line adds
+three-round-reviewed, owner-authorized production wiring: source remains
+fail-off, formal release defaults to Flash with O2 enabled, and production is
+still undeployed. Gate 5 is neither executed nor authorized, and
+`total_delete` remains typed unsupported.
 Package B.2/B.3 have not started.
 
 This file is the public documentation index and conflict rule. Historical

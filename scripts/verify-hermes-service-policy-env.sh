@@ -10,7 +10,7 @@ if [[ "${1:-}" == --emit ]]; then emit=1; shift; fi
 unit="$1"
 systemctl_bin="${RAN_AGENT_SYSTEMCTL_BIN:-$(command -v systemctl 2>/dev/null || true)}"
 proc_root="${RAN_AGENT_PROC_ROOT:-/proc}"
-model="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-pro}"
+model="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-flash}"
 case "$model" in deepseek-v4-pro|deepseek-v4-flash) ;; *) fail expected_model_invalid ;; esac
 [[ "$systemctl_bin" == /* && -x "$systemctl_bin" ]] || fail systemctl_unavailable
 pid="$("$systemctl_bin" show "$unit" --property=MainPID --value 2>/dev/null || true)"

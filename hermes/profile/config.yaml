@@ -3,7 +3,7 @@
 
 model:
   provider: deepseek
-  default: deepseek-v4-pro
+  default: deepseek-v4-flash
 
 # Lite and Full use the installed DeepSeek provider policy, which adds
 # thinking.type=disabled at the final provider boundary.

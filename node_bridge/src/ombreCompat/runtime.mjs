@@ -25,6 +25,8 @@ export async function createOmbreCompatRuntime(options = {}) {
   const outbox = options.outbox;
   const config = getOmbreCompatConfig(env);
   if (!isCompatActive(config, env)) return disabledRuntime();
+  validateModelStageConfig('curator', config.curator, options.curatorImpl);
+  validateModelStageConfig('reviewer', config.reviewer, options.reviewerImpl);
   if (!outbox || typeof outbox.get !== 'function' || typeof outbox.getTerminalReceipt !== 'function') {
     throw compatError('COMPAT_CONFIG_INCOMPLETE', 'durable outbox binding is required');
   }
@@ -167,6 +169,18 @@ export async function createOmbreCompatRuntime(options = {}) {
     try { payloadStore?.close(); } catch {}
     try { store.close(); } catch {}
     throw error;
+  }
+}
+
+function validateModelStageConfig(label, config, implementation) {
+  if (implementation !== undefined) {
+    if (typeof implementation === 'function') return;
+    throw compatError('COMPAT_CONFIG_INCOMPLETE', `${label} implementation must be a function`);
+  }
+  for (const key of ['baseUrl', 'model', 'apiKey']) {
+    if (typeof config?.[key] !== 'string' || config[key].trim() === '') {
+      throw compatError('COMPAT_CONFIG_INCOMPLETE', `${label} ${key} is required`);
+    }
   }
 }
 

@@ -380,8 +380,8 @@ test('getHermesGatewayConfig reads Hermes defaults and normalizes base URL', () 
   assert.equal(config.enableContextSizeLog, false);
 });
 
-test('getHermesGatewayConfig defaults to Pro and keeps explicit env precedence', () => {
-  assert.equal(getHermesGatewayConfig({}).model, 'deepseek-v4-pro');
+test('getHermesGatewayConfig defaults to Flash and keeps explicit env precedence', () => {
+  assert.equal(getHermesGatewayConfig({}).model, 'deepseek-v4-flash');
   assert.equal(getHermesGatewayConfig({ HERMES_INFERENCE_MODEL: 'inference-override' }).model, 'inference-override');
   assert.equal(getHermesGatewayConfig({
     HERMES_DEFAULT_MODEL: 'default-override',

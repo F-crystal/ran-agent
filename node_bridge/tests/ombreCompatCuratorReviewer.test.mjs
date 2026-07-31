@@ -173,9 +173,11 @@ test('curator completes with provenance, empty tool inventory, and a tool-less r
   // Hard rule: the request body carries no tool-capability fields anywhere.
   assert.equal(captured.url, 'http://curator.invalid/chat/completions');
   assert.equal(captured.method, 'POST');
-  assert.deepEqual(Object.keys(captured.body).sort(), ['messages', 'model', 'stream', 'temperature']);
+  assert.deepEqual(Object.keys(captured.body).sort(), ['messages', 'model', 'response_format', 'stream', 'temperature', 'thinking']);
   assert.equal(captured.body.model, 'curator-model-v1');
   assert.equal(captured.body.temperature, 0);
+  assert.deepEqual(captured.body.thinking, { type: 'disabled' });
+  assert.deepEqual(captured.body.response_format, { type: 'json_object' });
   assert.equal(captured.body.stream, false);
   const bodyKeys = collectKeys(captured.body);
   assert.ok(!bodyKeys.some((key) => TOOL_FIELD_NAMES.includes(key)), `tool field leaked: ${bodyKeys}`);
@@ -210,7 +212,7 @@ test('curator default HTTP impl posts a tool-less body and reads the completion'
   assert.equal(sent[0].init.method, 'POST');
   assert.equal(sent[0].init.headers.authorization, 'Bearer curator-test-key');
   const sentBody = JSON.parse(sent[0].init.body);
-  assert.deepEqual(Object.keys(sentBody).sort(), ['messages', 'model', 'stream', 'temperature']);
+  assert.deepEqual(Object.keys(sentBody).sort(), ['messages', 'model', 'response_format', 'stream', 'temperature', 'thinking']);
   assert.ok(!collectKeys(sentBody).some((key) => TOOL_FIELD_NAMES.includes(key)));
 
   // 5xx from the endpoint is typed unavailable, never an exception.
@@ -453,7 +455,9 @@ test('reviewer invocation is independent: distinct id, own provenance, empty too
   assert.equal(reviewed.output_digest, canonicalDigest(outputText));
 
   assert.equal(captured.url, 'http://reviewer.invalid/chat/completions');
-  assert.deepEqual(Object.keys(captured.body).sort(), ['messages', 'model', 'stream', 'temperature']);
+  assert.deepEqual(Object.keys(captured.body).sort(), ['messages', 'model', 'response_format', 'stream', 'temperature', 'thinking']);
+  assert.deepEqual(captured.body.thinking, { type: 'disabled' });
+  assert.deepEqual(captured.body.response_format, { type: 'json_object' });
   assert.ok(!collectKeys(captured.body).some((key) => TOOL_FIELD_NAMES.includes(key)));
 });
 

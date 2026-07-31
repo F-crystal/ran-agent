@@ -114,7 +114,7 @@ def _load_openclaw_runtime_contract(_base_dir: Path) -> dict[str, object]:
         "config_path": "hermes/profile/config.yaml",
         "gateway_base_url": "http://127.0.0.1:8642",
         "gateway_token_env_var": "HERMES_API_KEY",
-        "gateway_model_target": "deepseek-v4-pro",
+        "gateway_model_target": "deepseek-v4-flash",
         "gateway_timeout_seconds": 180,
         "backend_model_ref": "",
         "backend_model_provider": "",
@@ -209,7 +209,7 @@ class AppConfig:
     night_cycle_minute: int = 0
     hermes_base_url: str = "http://127.0.0.1:8642"
     hermes_api_key_env_var: str = "HERMES_API_KEY"
-    hermes_model: str = "deepseek-v4-pro"
+    hermes_model: str = "deepseek-v4-flash"
     hermes_timeout_seconds: int = 180
     backend_model_ref: str = ""
     backend_model_provider: str = ""

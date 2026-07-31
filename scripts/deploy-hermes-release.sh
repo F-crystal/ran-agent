@@ -67,17 +67,36 @@ STEWARD_TOKEN_RESTORED=1
 STEWARD_ROTATION_ACTIVE=0
 OMBRE_INGRESS_BLOCKED=0
 RETENTION_PRODUCTION_TRANSACTION=''
-DEPLOY_MODEL='deepseek-v4-pro'
+DEPLOY_MODEL='deepseek-v4-flash'
+DEPLOY_OMBRE_COMPAT_ENABLED='true'
+DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL='https://api.deepseek.com/v1'
+DEPLOY_OMBRE_COMPAT_CURATOR_MODEL='deepseek-v4-flash'
+DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL='https://api.deepseek.com/v1'
+DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL='deepseek-v4-flash'
 
 [[ "$MODE" == --rollback ]] || {
   CANDIDATE="${RAN_AGENT_RELEASE_CANDIDATE:-}"
   [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail candidate_digest_invalid
   git -C "$REPO_ROOT" cat-file -e "${CANDIDATE}^{commit}" 2>/dev/null || fail candidate_object_missing
-  DEPLOY_MODEL="${RAN_AGENT_DEPLOY_HERMES_MODEL:-deepseek-v4-pro}"
+  DEPLOY_MODEL="${RAN_AGENT_DEPLOY_HERMES_MODEL:-deepseek-v4-flash}"
   case "$DEPLOY_MODEL" in
     deepseek-v4-pro|deepseek-v4-flash) ;;
     *) fail deploy_model_invalid ;;
   esac
+  DEPLOY_OMBRE_COMPAT_ENABLED="${RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED:-true}"
+  case "$DEPLOY_OMBRE_COMPAT_ENABLED" in true|false) ;; *) fail ombre_compat_enabled_invalid ;; esac
+  DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL="${RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL:-https://api.deepseek.com/v1}"
+  DEPLOY_OMBRE_COMPAT_CURATOR_MODEL="${RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_MODEL:-$DEPLOY_MODEL}"
+  DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL="${RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL:-https://api.deepseek.com/v1}"
+  DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL="${RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL:-$DEPLOY_MODEL}"
+  for model_endpoint in \
+    "$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL|$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" \
+    "$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL|$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL"; do
+    case "$model_endpoint" in
+      'https://api.deepseek.com/v1|deepseek-v4-flash'|'https://api.deepseek.com/v1|deepseek-v4-pro') ;;
+      *) fail ombre_compat_model_endpoint_invalid ;;
+    esac
+  done
 }
 
 require_node_sqlite() {
@@ -196,6 +215,7 @@ require_plan_prerequisites() {
 
 require_apply_prerequisites() {
   [[ "$REPO_ROOT" == "$SERVER_ROOT" ]] || fail server_root_required
+  require_ombre_ingress_dropin_absent
   PRODUCTION_HEAD="$(git -C "$REPO_ROOT" rev-parse --verify HEAD)" || fail current_head_unavailable
   git -C "$REPO_ROOT" diff --quiet || fail worktree_dirty
   git -C "$REPO_ROOT" diff --cached --quiet || fail index_dirty
@@ -208,6 +228,12 @@ require_apply_prerequisites() {
   require_artifact_layout
   require_service_environment
   require_atomic_state
+}
+
+require_ombre_ingress_dropin_absent() {
+  if "${SUDO[@]}" test -e "$OMBRE_INGRESS_DROPIN" || "${SUDO[@]}" test -L "$OMBRE_INGRESS_DROPIN"; then
+    fail ombre_ingress_dropin_residue
+  fi
 }
 
 # Compare the actual production commit to the candidate.  Never use
@@ -529,10 +555,14 @@ block_ombre_ingress() {
 }
 
 restore_ombre_ingress() {
-  "${SUDO[@]}" rm -f -- "$OMBRE_INGRESS_DROPIN"
-  "${SUDO[@]}" systemctl daemon-reload
+  clear_ombre_ingress_block
   "${SUDO[@]}" systemctl restart ran-agent-node.service
   "${SUDO[@]}" systemctl is-active --quiet ran-agent-node.service
+}
+
+clear_ombre_ingress_block() {
+  "${SUDO[@]}" rm -f -- "$OMBRE_INGRESS_DROPIN"
+  "${SUDO[@]}" systemctl daemon-reload
   OMBRE_INGRESS_BLOCKED=0
 }
 
@@ -707,7 +737,7 @@ rollback_transaction() {
   if [[ "$TRANSACTION_STARTED" -eq 1 ]]; then
     write_transaction_state rollback-in-progress false || rollback_failed=1
     local stage
-    for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress restore_service_state; do
+    for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress clear_ombre_ingress_block restore_service_state; do
       if "$stage"; then
         printf 'deploy-hermes-release: rollback-stage=%s result=ok\n' "$stage" >&2
       else
@@ -792,11 +822,11 @@ snapshot_state_migrations
 backup_steward_token
 STEWARD_ROTATION_ACTIVE=1
 activate_candidate_checkout
-"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_DEPLOY_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_ROTATE_STEWARD_TOKEN=1 RAN_AGENT_STEWARD_ROTATION_QUIESCED=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
+"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR/ombre-compat" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_ENDPOINT=http://127.0.0.1:18001/internal/ran-agent/steward/v1 RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_IDENTITY_FILE="$CANONICAL_LIVE_STATE_DIR/ombre-brain/steward-identity.v1.json" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_DEPLOY_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_ROTATE_STEWARD_TOKEN=1 RAN_AGENT_STEWARD_ROTATION_QUIESCED=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
 restore_ombre_ingress
 OLD_STEWARD_TOKEN_FILE=''
 [[ "$STEWARD_TOKEN_HAD_PRIOR" -ne 1 ]] || OLD_STEWARD_TOKEN_FILE="$SECRET_ROLLBACK_DIR/steward-api-token.rollback"
-"${SUDO[@]}" env RAN_AGENT_EXPECTED_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_RELEASE_SNAPSHOT_DIR="$SNAPSHOT_DIR" RAN_AGENT_RELEASE_SECRET_ROLLBACK_ROOT="$SECRET_ROLLBACK_ROOT" RAN_AGENT_RELEASE_SECRET_ROLLBACK_DIR="$SECRET_ROLLBACK_DIR" RAN_AGENT_STEWARD_OLD_TOKEN_FILE="$OLD_STEWARD_TOKEN_FILE" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
+"${SUDO[@]}" env RAN_AGENT_EXPECTED_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_RELEASE_SNAPSHOT_DIR="$SNAPSHOT_DIR" RAN_AGENT_RELEASE_SECRET_ROLLBACK_ROOT="$SECRET_ROLLBACK_ROOT" RAN_AGENT_RELEASE_SECRET_ROLLBACK_DIR="$SECRET_ROLLBACK_DIR" RAN_AGENT_STEWARD_OLD_TOKEN_FILE="$OLD_STEWARD_TOKEN_FILE" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
 record_protected_capability_evidence after || fail protected_capability_evidence_after
 destroy_secret_rollback || fail secret_rollback_cleanup_failed
 mark_snapshot_accepted

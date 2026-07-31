@@ -4,7 +4,7 @@
 
 Status: CURRENT (2026-07-31)
 
-`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 Flash 与人工热补丁，本地未在线复核。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。O2 默认关闭、未获部署批准，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred；Package B.2/B.3 未开始。
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 Flash 与人工热补丁，本地未在线复核。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 基线 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。当前候选已完成三轮 O2 生产接线审查，正式发布默认保持 Flash 并启用 O2；生产仍未部署，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred；Package B.2/B.3 未开始。
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 
@@ -13,8 +13,8 @@ Status: CURRENT (2026-07-31)
 ## 当前定位
 
 - Hermes 是 ran-agent 的前台对话 shell。
-- 本地候选中 Lite/Full 默认模型统一为 `deepseek-v4-pro`，provider policy
-  在最终 HTTP body 显式加入 `thinking.type=disabled`；生产仍是 Flash。
+- 当前候选中 Lite/Full 默认模型统一为 `deepseek-v4-flash`，provider policy
+  在最终 HTTP body 显式加入 `thinking.type=disabled`；Pro 仅显式 opt-in。
 - DeepSeek V4 在本项目中按文本模型使用，原始图片、音频、视频和社交平台内容必须先由 MCP 工具处理。
 - Node bridge 生产运行会在 lite/full 两个 gateway 之间自动路由；微信、飞书/Lark 和桌面 Proxy 都先进入 ChannelHub，再由统一主链路调用 Hermes。
 - OpenClaw、Kimi、GLM 前台路线已经退休，不再作为运行时、部署目标或调试权威。
@@ -225,7 +225,7 @@ hermes profile --help
 hermes profile show ran-assistant
 hermes -p ran-assistant mcp list
 hermes -p ran-assistant mcp test media_reader
-HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "只输出 OK"
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
 前台启动 gateway：

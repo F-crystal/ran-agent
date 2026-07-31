@@ -12,7 +12,7 @@ SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
 NODE_ENV_FILE="${RAN_AGENT_NODE_ENV_FILE:-/opt/ran_agent/.env.local}"
 SYSTEMCTL_BIN="$(command -v systemctl 2>/dev/null || true)"
 JOURNALCTL_BIN="$(command -v journalctl 2>/dev/null || true)"
-MODEL_NAME="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-pro}"
+MODEL_NAME="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-flash}"
 case "$MODEL_NAME" in
   deepseek-v4-pro|deepseek-v4-flash) ;;
   *) echo "ERROR: expected Hermes model must be deepseek-v4-pro or deepseek-v4-flash" >&2; exit 1 ;;

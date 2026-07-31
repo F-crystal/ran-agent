@@ -8,17 +8,41 @@ import test from 'node:test';
 const root = new URL('../..', import.meta.url).pathname;
 const readProjectFile = (path) => readFileSync(join(root, path), 'utf8');
 
-test('all current Hermes profile sources select DeepSeek V4 Pro', () => {
+test('ordinary Hermes profile sources default to Flash and Pro remains explicit opt-in', () => {
   for (const path of [
     'hermes/profile/config.yaml',
     'hermes/profile/config.lite.yaml',
     'hermes/profile/config.template.yaml',
-    'hermes/profile/config.pro.template.yaml',
   ]) {
     const text = readProjectFile(path);
     assert.match(text, /provider:\s*deepseek/);
-    assert.match(text, /default:\s*deepseek-v4-pro/);
-    assert.doesNotMatch(text, /default:\s*deepseek-v4-flash/);
+    assert.match(text, /default:\s*deepseek-v4-flash/);
+    assert.doesNotMatch(text, /default:\s*deepseek-v4-pro/);
+  }
+  assert.match(readProjectFile('hermes/profile/config.pro.template.yaml'), /default:\s*deepseek-v4-pro/);
+  const provider = readProjectFile('hermes/profile/plugins/model-providers/deepseek/__init__.py');
+  assert.match(provider, /fallback_models=\("deepseek-v4-flash",\)/);
+  assert.doesNotMatch(provider, /fallback_models=\("deepseek-v4-pro",\)/);
+  assert.doesNotMatch(readProjectFile('hermes/profile/plugins/model-providers/deepseek/plugin.yaml'), /Pro.*default|V4 Pro/i);
+});
+
+test('non-explicit runtime configuration surfaces default to Flash', () => {
+  const envExample = readProjectFile('.env.example');
+  for (const key of [
+    'HERMES_DEFAULT_MODEL',
+    'HERMES_PRO_MODEL',
+    'HERMES_INFERENCE_MODEL',
+    'PERSONAL_AGENT_HERMES_MODEL',
+  ]) assert.match(envExample, new RegExp(`^${key}=deepseek-v4-flash$`, 'm'));
+
+  for (const path of [
+    'scripts/diagnose-lite-full.sh',
+    'scripts/diagnose-hermes-provider-boundary.sh',
+    'scripts/verify-hermes-service-policy-env.sh',
+    'scripts/hermes-provider-boundary-self-check.py',
+  ]) {
+    const text = readProjectFile(path);
+    assert.doesNotMatch(text, /default=["']deepseek-v4-pro["']|:-deepseek-v4-pro/);
   }
 });
 

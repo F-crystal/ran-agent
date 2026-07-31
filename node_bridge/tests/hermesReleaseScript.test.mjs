@@ -1684,7 +1684,7 @@ test('release transaction snapshots the live production checkout before activati
   assert.match(deploy, /rollback-complete deployment_status=/);
   assert.match(deploy, /rollback-incomplete deployment_status=/);
   assert.match(deploy, /trap 'rollback_transaction \$\?' EXIT/);
-  assert.match(deploy, /for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress restore_service_state/);
+  assert.match(deploy, /for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress clear_ombre_ingress_block restore_service_state/);
   assert.doesNotMatch(deploy, /restore_(?:code_revision|runtime_files|state_migrations|service_state) \|\| true/);
   assert.match(deploy, /service_env_source_unavailable/);
   assert.match(deploy, /RAN_AGENT_INTERNAL_CONTROL_SECRET/);

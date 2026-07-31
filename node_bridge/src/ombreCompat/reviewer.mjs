@@ -229,6 +229,8 @@ export async function runReviewerInvocation({
           { role: 'user', content: canonicalStringify(envelope) },
         ],
         temperature: 0,
+        thinking: { type: 'disabled' },
+        response_format: { type: 'json_object' },
         stream: false,
       },
     };

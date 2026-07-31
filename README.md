@@ -4,7 +4,7 @@
 
 Status: CURRENT (2026-07-31)
 
-`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 DeepSeek V4 Flash 并包含人工热补丁，本地未在线复核。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。O2 默认关闭、未获部署批准，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred 且失败差量未恢复；Package B.2/B.3 未开始。
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 DeepSeek V4 Flash 并包含人工热补丁，本地未在线复核。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 基线 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。当前候选已完成三轮 O2 生产接线审查：正式发布默认保持 Flash 并启用 O2；生产仍未部署，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred 且失败差量未恢复；Package B.2/B.3 未开始。
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -12,9 +12,9 @@ Status: CURRENT (2026-07-31)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。本地整合候选将 Lite/Full 同时切换为 DeepSeek V4 Pro，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；生产仍是 V4 Flash。`search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory`、`obsidian_memory` 等 MCP 工具负责联网事实、媒体、社交内容、表情包目录、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
+Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。当前候选与生产模型口径一致：Lite/Full 默认使用 DeepSeek V4 Flash，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；V4 Pro 只保留为显式 opt-in。`search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory`、`obsidian_memory` 等 MCP 工具负责联网事实、媒体、社交内容、表情包目录、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
 
-OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产前台仍是 Hermes + DeepSeek V4 Flash，本地候选目标是 Hermes + DeepSeek V4 Pro non-thinking。
+OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产前台和当前候选都使用 Hermes + DeepSeek V4 Flash non-thinking，Pro 仅显式启用。
 
 ---
 
@@ -85,8 +85,10 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 `surface_relevant_context` 只是当前的轻量 memory surface，不能宣称会自动检索
 Vault。自动统一的 recall control plane 尚未完成。当前生产仓库形态仍把
 `obsidian_memory` 与 direct Ombre MCP 记为 optional surfaces；未部署的 O1
-候选只把 Ombre 替换成本地 recall-only 入口。长期写入、反思、夜间循环和知识
-维护仍留在 Python backend 与按需 skill 中，不常驻主 prompt。
+候选只把 Ombre 替换成本地 recall-only 入口。当前未部署候选另有 pre-Gate-5
+O2 兼容写入层，只处理已确认投递的最终轮次，且始终是非权威、projection-only
+状态。长期写入、反思、夜间循环和知识维护仍留在 Python backend 与按需 skill
+中，不常驻主 prompt。
 
 **可发送媒体生成。** full gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
 
@@ -281,7 +283,7 @@ Hermes profile smoke：
 ```bash
 hermes -p ran-assistant mcp list
 hermes -p ran-assistant mcp test media_reader
-HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "只输出 OK"
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
 ---

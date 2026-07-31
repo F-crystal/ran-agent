@@ -41,11 +41,25 @@ HERMES_FULL_BRIDGE_SMOKE_URL="${RAN_AGENT_RELEASE_FULL_BRIDGE_SMOKE_URL:-http://
 GATEWAY_READY_TIMEOUT_SECONDS="${RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS:-120}"
 GATEWAY_READY_INTERVAL_SECONDS="${RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS:-2}"
 GATEWAY_HEADER_FILE=''
-EXPECTED_MODEL="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-pro}"
+EXPECTED_MODEL="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-flash}"
 case "$EXPECTED_MODEL" in
   deepseek-v4-pro|deepseek-v4-flash) ;;
   *) fail expected_model_invalid ;;
 esac
+EXPECTED_OMBRE_COMPAT_ENABLED="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_ENABLED:-true}"
+case "$EXPECTED_OMBRE_COMPAT_ENABLED" in true|false) ;; *) fail expected_ombre_compat_enabled_invalid ;; esac
+EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL:-https://api.deepseek.com/v1}"
+EXPECTED_OMBRE_COMPAT_CURATOR_MODEL="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_MODEL:-$EXPECTED_MODEL}"
+EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL:-https://api.deepseek.com/v1}"
+EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL:-$EXPECTED_MODEL}"
+for expected_pair in \
+  "$EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL|$EXPECTED_OMBRE_COMPAT_CURATOR_MODEL" \
+  "$EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL|$EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL"; do
+  case "$expected_pair" in
+    'https://api.deepseek.com/v1|deepseek-v4-flash'|'https://api.deepseek.com/v1|deepseek-v4-pro') ;;
+    *) fail expected_ombre_compat_model_endpoint_invalid ;;
+  esac
+done
 
 cleanup_gateway_header() {
   [[ -z "$GATEWAY_HEADER_FILE" ]] || rm -f -- "$GATEWAY_HEADER_FILE"
@@ -105,6 +119,7 @@ release_post_start_health() {
   done
   release_steward_identity_contract ran-agent-node.service
   release_steward_identity_contract ran-agent-ombre-brain.service
+  release_ombre_compat_contract
   release_managed_endpoint_health \
     ran-agent-ombre-brain.service 18001 \
     "${OMBRE_BRAIN_HEALTH_URL:-http://127.0.0.1:18001/health}" \
@@ -114,6 +129,41 @@ release_post_start_health() {
     "${OMBRE_RECALL_HEALTH_URL:-http://127.0.0.1:18002/health}" \
     ombre_recall
   release_ombre_unit_contract
+}
+
+release_ombre_compat_contract() {
+  local pid_before pid_after process_env state_dir identity_file steward_endpoint
+  pid_before="$("${SUDO[@]}" systemctl show ran-agent-node.service --property=MainPID --value 2>/dev/null)" ||
+    fail ombre_compat_node_pid_unavailable
+  [[ "$pid_before" =~ ^[1-9][0-9]*$ ]] || fail ombre_compat_node_pid_invalid
+  process_env="$("${SUDO[@]}" cat "/proc/$pid_before/environ" 2>/dev/null | tr '\0' '\n')" ||
+    fail ombre_compat_node_environment_unavailable
+  pid_after="$("${SUDO[@]}" systemctl show ran-agent-node.service --property=MainPID --value 2>/dev/null)" ||
+    fail ombre_compat_node_pid_recheck_unavailable
+  [[ "$pid_after" == "$pid_before" ]] || fail ombre_compat_node_pid_drift
+
+  state_dir="$RAN_AGENT_STATE_DIR/ombre-compat"
+  identity_file="$OMBRE_BRAIN_HOME/steward-identity.v1.json"
+  steward_endpoint='http://127.0.0.1:18001/internal/ran-agent/steward/v1'
+  grep -qxF "OMBRE_COMPAT_ENABLED=$EXPECTED_OMBRE_COMPAT_ENABLED" <<<"$process_env" ||
+    fail ombre_compat_process_environment_contract:OMBRE_COMPAT_ENABLED
+  [ "$EXPECTED_OMBRE_COMPAT_ENABLED" = true ] || return 0
+  for setting in \
+    "OMBRE_COMPAT_STATE_DIR=$state_dir" \
+    "OMBRE_COMPAT_STEWARD_ENDPOINT=$steward_endpoint" \
+    "OMBRE_COMPAT_STEWARD_IDENTITY_FILE=$identity_file" \
+    "OMBRE_COMPAT_CURATOR_BASE_URL=$EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL" \
+    "OMBRE_COMPAT_CURATOR_MODEL=$EXPECTED_OMBRE_COMPAT_CURATOR_MODEL" \
+    "OMBRE_COMPAT_REVIEWER_BASE_URL=$EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL" \
+    "OMBRE_COMPAT_REVIEWER_MODEL=$EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL"; do
+    grep -qxF "$setting" <<<"$process_env" || fail "ombre_compat_process_environment_contract:${setting%%=*}"
+  done
+  grep -Eq '^DEEPSEEK_API_KEY=.+$' <<<"$process_env" ||
+    fail ombre_compat_deepseek_auth_unavailable
+  [[ "$("${SUDO[@]}" stat -c '%U:%G:%a' "$state_dir")" == ran-agent:ran-agent:700 ]] ||
+    fail ombre_compat_state_identity_contract
+  "${SUDO[@]}" test -f "$identity_file" && "${SUDO[@]}" test ! -L "$identity_file" ||
+    fail ombre_compat_steward_identity_file_contract
 }
 
 release_steward_identity_contract() {

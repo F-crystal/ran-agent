@@ -12,9 +12,10 @@ revalidated it online. The host has manual hotfixes. O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed; the
 V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently
 reviewed O2 implementation `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7`
-are archived and pushed but undeployed. O2 remains default-disabled and is
-not authorized for deployment. Commands below describe the reviewed target
-state, not behavior already asserted in production.
+are archived and pushed but undeployed. The current reviewed line adds
+owner-authorized production wiring: the source remains fail-off, while the
+formal release defaults to Flash with O2 enabled. Commands below describe
+that target state, not behavior already asserted in production.
 
 ## Source Of Truth
 
@@ -49,8 +50,8 @@ state, not behavior already asserted in production.
   `bash scripts/clean-uv-cache-safe.sh`
 - Immutable Hermes release transaction and rollback:
   `docs/governance/hermes_release_deployment.md`
-- Reviewed model-only rollback, still through the same immutable transaction:
-  `RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-flash bash scripts/deploy-hermes-candidate.sh --commit <CURRENT_REVIEWED_SHA> --apply`
+- Explicit Pro evaluation, still through the same immutable transaction:
+  `RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-pro bash scripts/deploy-hermes-candidate.sh --commit <CURRENT_REVIEWED_SHA> --apply`
 
 Do not publish one-off pasteable repair blocks in this file. If a repeated
 operation is needed, turn it into a script and reference it here.
@@ -82,9 +83,14 @@ apply transaction.
   `ran-agent-hermes-full.service`.
 - Runtime env upsert for Hermes homes, root Node env, and
   `/opt/ran_agent/node_bridge/.env.local`.
-- Synchronized Lite/Full `deepseek-v4-pro` selection and the shared DeepSeek
-  provider plugin that forces `thinking.type=disabled`. Flash remains the
-  simultaneous model rollback value.
+- Synchronized Lite/Full `deepseek-v4-flash` selection and the shared DeepSeek
+  provider plugin that forces `thinking.type=disabled`. Pro remains available
+  only through an explicit deployment override.
+- Managed pre-Gate-5 O2 compatibility wiring: official release default
+  `OMBRE_COMPAT_ENABLED=true`, canonical state/Steward identity paths, and
+  separate tool-less Curator/Reviewer calls using Flash and the existing
+  `DEEPSEEK_API_KEY`. Ordinary drift repair preserves an existing effective
+  operator `false` across the two Node environment files.
 - Service restart for `ran-agent-python.service`, `ran-agent-node.service`,
   `ran-agent-hermes.service`, and `ran-agent-hermes-full.service` so new env
   gates are loaded by running processes.

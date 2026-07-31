@@ -10,9 +10,10 @@ V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
 pushed but undeployed. Node Receipt is deferred. O2 implementation
 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` passed independent v0.7
 implementation review and is archived and pushed to `main`, but remains
-default-disabled, not authorized for deployment, and undeployed (Gate 5 not
-started or authorized; `total_delete` typed unsupported). Package B.2/B.3
-have not started.
+undeployed. The current reviewed line adds owner-authorized production wiring:
+source remains fail-off, while the formal release defaults to Flash with O2
+enabled (Gate 5 not started or authorized; `total_delete` typed unsupported).
+Package B.2/B.3 have not started.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable
@@ -76,20 +77,19 @@ shell `hermes` executable: the staged gate and later verification remain the
 release checks, while the ordinary non-preserve drift-repair path still
 requires Hermes because it installs profiles and writes Hermes units.
 
-For the local V4+O1 candidate, that same preserve path changes only the four
-installed Lite/Full model blocks, six non-secret model-policy environment
-keys, and the shared DeepSeek provider plugin. It retains the O1 recall-only
-MCP shape, identity projection, startup ordering, rollback state machine, and
-retention policy. The snapshot includes both installed provider plugin trees;
-rollback restores the prior Flash configs/env/plugin state for Lite and Full
-together and remains fail-loud if any restore stage fails.
+For the current Flash+O1+O2 candidate, that same preserve path converges the
+four installed Lite/Full model blocks, six non-secret model-policy environment
+keys, the shared DeepSeek provider plugin, and the managed O2 Node environment.
+It retains the O1 recall-only MCP shape, identity projection, startup ordering,
+rollback state machine, and retention policy. The snapshot includes both
+installed provider plugin trees and all effective environment sources;
+rollback restores the prior configs/env/plugin/O2 state together and remains
+fail-loud if any restore stage fails.
 
-A reviewed model-only rollback re-applies the same immutable O1-capable
-candidate through the same release transaction with
-`RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-flash`. Acceptance then proves the
-Flash identifier and the same disabled-thinking final HTTP body for Lite and
-Full. This is a model policy input to the existing transaction, not a second
-rollback state machine.
+V4 Pro remains an explicit evaluation input to the same transaction through
+`RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-pro`. Acceptance proves the selected
+identifier and disabled-thinking final HTTP body for Lite and Full. This does
+not create a second deployment or rollback state machine.
 
 Before either bootstrap or normal apply snapshots/switches production, the
 complete candidate archive provides `hermes-release-candidate-preflight.mjs`.
@@ -138,6 +138,11 @@ have nonzero numeric UID/GID inside the host's explicit
 Missing or ambiguous ranges and any account mismatch are blocking identity
 conflicts. Lite and Full retain their separately configured identity.
 
+The transaction also refuses to begin if its private
+`98-ombre-steward-rotation.conf` drop-in already exists or is a broken symlink.
+This prevents an interrupted or foreign residue from being overwritten and
+then silently removed during rollback.
+
 ## 2. Automatic Backup And Rollback Point
 
 The apply transaction creates one owner-only snapshot under
@@ -162,12 +167,14 @@ regular file owned by `ran-agent:ran-agent` with mode `0600`.
 Rotation first disables O2 ingress and stops Node, then saves the old token in
 a root-owned `0700` transaction directory under
 `/run/ran-agent-release-secrets`, atomically installs the new token, restarts
-and authenticates Ombre, restarts Node, and restores ingress. That private
+and authenticates Ombre, clears the temporary block, restarts Node with the
+managed O2 posture, and runs read-only acceptance. That private
 copy is never placed in a retained snapshot, manifest, archive, or release
 record and is destroyed immediately after acceptance. On failure, ingress
-remains disabled while the old token is restored, Ombre is restarted and
-authenticated, and Node is restarted; cleanup failure retains the existing
-`rollback-incomplete` fail-loud result.
+remains disabled while files, state, code, and the old token are restored; the
+temporary block is then cleared before the saved service active/inactive state
+is restored. Any failed stage retains the `rollback-incomplete` fail-loud
+result.
 
 The services manifest additionally records each unit's systemd load state.
 Retired optional units such as `ran-agent-xhs-browse.service` may therefore be
@@ -245,8 +252,11 @@ checks their common canonical token path,
 the token owner/mode/type contract, authenticated health with the new token,
 rejection of the prior token, absence from the staged checkout and ordinary
 snapshot/archive artifacts, and the root-only in-flight rollback directory.
-Any mismatch keeps O2 disabled and fails the release without weakening O1
-recall-only behavior.
+For active O2 it additionally verifies canonical compatibility state/identity
+paths, exact DeepSeek endpoint/model values, a nonempty shared provider key,
+and `ran-agent:ran-agent:0700` state ownership without making a model or memory
+write canary. Any mismatch fails the release and restores the snapshot's prior
+O2 posture without weakening O1 recall-only behavior.
 
 ## 5. Difference Record And Acceptance Evidence
 

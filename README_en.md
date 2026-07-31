@@ -4,7 +4,7 @@
 
 Status: CURRENT (2026-07-31)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses DeepSeek V4 Flash with manual hotfixes and has not been revalidated by this local line. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 implementation `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. O2 remains default-disabled and not approved for deployment; `total_delete` remains typed unsupported and Gate 5 has not started. Node Receipt is deferred and the failed delta is not restored; Package B.2/B.3 have not started.
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses DeepSeek V4 Flash with manual hotfixes and has not been revalidated by this local line. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 baseline `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. The current candidate has completed three production-wiring review rounds: the formal release keeps Flash and enables O2 by default. Production remains undeployed; `total_delete` is still typed unsupported and Gate 5 has not started. Node Receipt is deferred and the failed delta is not restored; Package B.2/B.3 have not started.
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -12,9 +12,9 @@ Status: CURRENT (2026-07-31)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The local integration candidate moves Lite and Full together to DeepSeek V4 Pro and adds `thinking: {"type":"disabled"}` to the final provider HTTP body; production remains on V4 Flash. MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, `personal_memory`, and `obsidian_memory` provide fresh facts, media, social content, sticker lookup, personal memory, and vault retrieval. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
+Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The current candidate matches the production model policy: Lite and Full default to DeepSeek V4 Flash and add `thinking: {"type":"disabled"}` to the final provider HTTP body; V4 Pro is explicit opt-in only. MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, `personal_memory`, and `obsidian_memory` provide fresh facts, media, social content, sticker lookup, personal memory, and vault retrieval. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
 
-OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Production remains Hermes + DeepSeek V4 Flash; the local candidate target is Hermes + DeepSeek V4 Pro non-thinking.
+OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Production and the current candidate both use Hermes + DeepSeek V4 Flash non-thinking; Pro requires an explicit opt-in.
 
 ---
 
@@ -89,9 +89,11 @@ lightweight memory surface and must not be described as automatically searching
 Vault. An automatic unified recall control plane is not complete yet. The
 production-repository shape still describes `obsidian_memory` and direct Ombre
 MCPs as optional surfaces; the undeployed O1 candidate replaces only the Ombre
-surface with a local recall-only endpoint. Long-term writes, reflection,
-night-cycle work, and knowledge maintenance stay in the Python backend and
-on-demand skills instead of always living in the main prompt.
+surface with a local recall-only endpoint. The current undeployed candidate
+also adds a pre-Gate-5 O2 compatibility writer for confirmed delivered final
+turns; it remains non-authoritative and projection-only. Long-term writes,
+reflection, night-cycle work, and knowledge maintenance stay in the Python
+backend and on-demand skills instead of always living in the main prompt.
 
 **Sendable media generation.** The full gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.
 
@@ -279,7 +281,7 @@ Hermes profile smoke:
 ```bash
 hermes -p ran-assistant mcp list
 hermes -p ran-assistant mcp test media_reader
-HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "只输出 OK"
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
 ---

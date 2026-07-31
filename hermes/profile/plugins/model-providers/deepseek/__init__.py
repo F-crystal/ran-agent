@@ -37,6 +37,6 @@ register_provider(RanAgentDeepSeekProfile(
     display_name="DeepSeek",
     description="DeepSeek — native API with ran-agent non-thinking policy",
     signup_url="https://platform.deepseek.com/",
-    fallback_models=("deepseek-v4-pro",),
+    fallback_models=("deepseek-v4-flash",),
     base_url="https://api.deepseek.com/v1",
 ))

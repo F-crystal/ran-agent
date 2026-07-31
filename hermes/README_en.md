@@ -4,7 +4,7 @@
 
 Status: CURRENT (2026-07-31)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses Flash with manual hotfixes and has not been revalidated by this local line. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 implementation `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. O2 remains default-disabled and not approved for deployment; `total_delete` remains typed unsupported and Gate 5 has not started. Node Receipt is deferred; Package B.2/B.3 have not started.
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses Flash with manual hotfixes and has not been revalidated by this local line. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 baseline `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. The current candidate completed three O2 production-wiring review rounds; the formal release keeps Flash and enables O2 by default. Production remains undeployed; `total_delete` is still typed unsupported and Gate 5 has not started. Node Receipt is deferred; Package B.2/B.3 have not started.
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 
@@ -13,9 +13,9 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 ## Current Role
 
 - Hermes is the frontend conversation shell for ran-agent.
-- In the local candidate, Lite and Full both default to `deepseek-v4-pro`; the
-  provider policy adds `thinking.type=disabled` to the final HTTP body.
-  Production remains on Flash.
+- In the current candidate, Lite and Full both default to
+  `deepseek-v4-flash`; the provider policy adds `thinking.type=disabled` to
+  the final HTTP body. Pro is explicit opt-in only.
 - DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must be processed by MCP tools first.
 - In production, Node bridge automatically routes requests between lite and full gateways; WeChat, Feishu/Lark, and the desktop proxy all enter ChannelHub before the unified mainline calls Hermes.
 - OpenClaw, Kimi, and GLM are retired as frontend paths and must not be used as runtime, deployment, or debugging authorities.
@@ -226,7 +226,7 @@ hermes profile --help
 hermes profile show ran-assistant
 hermes -p ran-assistant mcp list
 hermes -p ran-assistant mcp test media_reader
-HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-pro -z "只输出 OK"
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
 Run a gateway in the foreground:

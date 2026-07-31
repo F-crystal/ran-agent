@@ -225,3 +225,49 @@ test('enabled false has zero filesystem and upstream side effects', async () => 
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('active runtime fails before identity or state creation when a real model stage lacks its key', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ombre-config-incomplete-'));
+  try {
+    await assert.rejects(createOmbreCompatRuntime({
+      env: {
+        NODE_ENV: 'test',
+        RAN_AGENT_ALLOW_TEST_STATE_DIR: '1',
+        RAN_AGENT_STATE_DIR: dir,
+        OMBRE_COMPAT_ENABLED: 'true',
+        OMBRE_COMPAT_TEST_MODE: 'true',
+        HERMES_DEFAULT_MODEL: 'deepseek-v4-flash',
+      },
+      outbox: {
+        get() { return null; },
+        getTerminalReceipt() { return null; },
+      },
+    }), (error) => {
+      assert.equal(error?.code, 'COMPAT_CONFIG_INCOMPLETE');
+      assert.match(error?.message || '', /curator apiKey is required/);
+      return true;
+    });
+    await assert.rejects(createOmbreCompatRuntime({
+      env: {
+        NODE_ENV: 'test',
+        RAN_AGENT_ALLOW_TEST_STATE_DIR: '1',
+        RAN_AGENT_STATE_DIR: dir,
+        OMBRE_COMPAT_ENABLED: 'true',
+        OMBRE_COMPAT_TEST_MODE: 'true',
+        HERMES_DEFAULT_MODEL: 'deepseek-v4-flash',
+      },
+      outbox: {
+        get() { return null; },
+        getTerminalReceipt() { return null; },
+      },
+      curatorImpl: async () => '{"candidates":[]}',
+    }), (error) => {
+      assert.equal(error?.code, 'COMPAT_CONFIG_INCOMPLETE');
+      assert.match(error?.message || '', /reviewer apiKey is required/);
+      return true;
+    });
+    assert.deepEqual(fs.readdirSync(dir), []);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});

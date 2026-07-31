@@ -4,7 +4,7 @@ set -euo pipefail
 
 REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd -P)}"
 HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
-MODEL_NAME="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-pro}"
+MODEL_NAME="${RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-flash}"
 MODE="${RAN_AGENT_CAPABILITY_MODE:?RAN_AGENT_CAPABILITY_MODE is required}"
 SERVICE_UNIT="${HERMES_SERVICE_UNIT:?HERMES_SERVICE_UNIT is required}"
 case "$MODE" in lite|full) ;; *) echo 'diagnose-hermes-provider-boundary: failed:invalid_mode' >&2; exit 1 ;; esac

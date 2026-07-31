@@ -15,9 +15,9 @@ local_o1_online_revalidation: not performed
 production_manual_hotfixes: present; verify on host
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
-v4_pro: mainline Lite/Full target; undeployed
+v4_pro: explicit Lite/Full opt-in only; undeployed
 node_receipt: deferred
-ombre_o2: a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7; independently reviewed, archived, and pushed to main; default disabled; compatibility queue is non-authoritative, projection-only, pre-Gate-5; not authorized for deployment; not deployed
+ombre_o2: a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7; independently reviewed implementation baseline; current line adds owner-authorized production wiring; source fail-off; official release default enabled; non-authoritative, projection-only, pre-Gate-5; not deployed
 ombre_o2_total_delete: typed unsupported
 gate_5: not started, not authorized
 package_b_2_b_3: not started
@@ -30,11 +30,12 @@ Production has manual hotfixes, but this document does not guess their exact
 live shape; server acceptance evidence remains the authority for those patches.
 
 The repository mainline keeps every O1 invariant from
-`1be3ee58919fb01f1c442d75ba2463e237fba0b2` and changes only the Lite/Full
-model policy to `deepseek-v4-pro` with explicit provider-boundary
-`thinking: {"type":"disabled"}`. It is not a production capability.
+`1be3ee58919fb01f1c442d75ba2463e237fba0b2`, keeps Lite/Full on
+`deepseek-v4-flash` with explicit provider-boundary
+`thinking: {"type":"disabled"}`, and production-wires O2 for the next formal
+release. It is not a claim about the still-unrevalidated production host.
 
-## Ombre O2 Archived Implementation Boundary
+## Ombre O2 Reviewed Production Candidate Boundary
 
 The Ombre O2 Stewarded Growth compatibility implementation is archived and
 pushed to `main` at `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` under
@@ -46,11 +47,17 @@ contract:
   `c52f8ba9b26338204e8ae189d1f1df5f3800e630` (V4+O1) is archived on main but
   still undeployed and unverified in production. Archive-and-push is not
   deployment approval.
-- The compatibility writer is **disabled by default everywhere**
-  (`OMBRE_COMPAT_ENABLED` unset/false). Integration tests use explicit test
-  flags and fake upstreams; the patched-process contract was also exercised
-  locally against the pinned patched source with isolated temporary data. No
-  production Ombre data or external DeepSeek endpoint was contacted.
+- The compatibility writer remains fail-off in source when
+  `OMBRE_COMPAT_ENABLED` is absent. The official server apply/release path now
+  manages it as enabled by default; ordinary drift repair preserves an
+  existing effective operator `false`, while the formal release passes an
+  explicit reviewed value. No production Ombre data or external DeepSeek
+  endpoint was contacted during this implementation or review.
+- Curator and Reviewer are separate tool-less calls to the pinned DeepSeek
+  provider boundary. They reuse `DEEPSEEK_API_KEY`, default to
+  `deepseek-v4-flash`, force non-thinking JSON output, and fail before O2 state
+  creation if required authentication is absent. V4 Pro remains an explicit
+  deployment opt-in rather than a fallback.
 - The compatibility queue is **pre-Gate-5, non-authoritative, and
   projection-only**: it is not a Canon, Journal, Soul, permission, or
   read-your-write source, and Lite/Full still see only the O1 recall-only
@@ -62,17 +69,23 @@ contract:
   deletion plus Ed25519 receipt verification. These are local test results,
   not deployment or production claims. `total_delete` remains typed
   unsupported; O2 contains no Core source-deletion signer or private key.
-- Its release candidate now separates staged source from the canonical live
+- Its release candidate separates staged source from the canonical live
   state directory (including a non-default release state root and its derived
   Ombre home), fixes Node and the patched Ombre runner to the verified
   `ran-agent:ran-agent` system account and numeric MainPID identity, rotates
   the owner-only Steward token transactionally, excludes it from retained
-  snapshots/archives, and fails closed with O2 ingress disabled during
-  rollback. These boundaries passed independent implementation review but
-  still require server acceptance before deployment.
-- Production remains on the pre-O1 shape; V4 Pro + O1 are still not
+  snapshots/archives, rejects a stale rotation drop-in before mutation, and
+  keeps O2 ingress disabled during token rotation and critical rollback.
+  Three adversarial production-wiring review rounds fixed startup auth,
+  duplicate-env drift, rollback residue, and hidden Pro fallback paths.
+- Production remains on the pre-O1 shape; Flash + O1 + O2 are still not
   validated or deployed there. Node Receipt stays deferred, and Package
   B.2/B.3 have not started.
+- Fresh production-wiring evidence: 137 focused Node tests passed under Node
+  22.22.2, including O2 runtime, tool-less Curator/Reviewer, managed env,
+  release residue, model policy, and gateway fallback checks. Shell/Python
+  syntax and diff validation also passed. This does not replace server
+  acceptance or contact a real DeepSeek/Ombre endpoint.
 - Local final evidence: Node 22.22.2 standard full discovery collected 1410
   tests across 116 files (1409 passed, 0 failed, 1 environment-gated skip);
   the sole skip, `real patched Ombre process satisfies Steward API v1
@@ -102,11 +115,10 @@ External MCP candidates
 ```
 
 - Provider: `hermes`; model: `deepseek-v4-flash`; fallback provider: none.
-- Local V4+O1 candidate: Lite and Full both select `deepseek-v4-pro`; the
+- The reviewed candidate keeps Lite and Full on `deepseek-v4-flash`; the
   installed Hermes v0.13 DeepSeek provider policy adds
-  `thinking: {"type":"disabled"}` to the final provider HTTP body. Flash is
-  the simultaneous Lite/Full model rollback value; O1 runtime safety is not
-  rolled back.
+  `thinking: {"type":"disabled"}` to the final provider HTTP body. Pro is
+  available only through explicit `RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-pro`.
 - Python frontend `/chat` returns 410.
 - OpenClaw, Kimi, GLM, and MiMo Power are retired frontend paths.
 - WeChat, Feishu/Lark, and Desktop proxy share `ChannelHub`, `IdentityMap`,
@@ -157,11 +169,11 @@ Hermes homes, and lite/full Hermes profile env files aligned.
 
 Important non-secret env groups:
 
-- Local candidate model policy: `HERMES_PROVIDER=deepseek`,
+- Current candidate model policy: `HERMES_PROVIDER=deepseek`,
   `HERMES_INFERENCE_PROVIDER=deepseek`,
-  `HERMES_DEFAULT_MODEL=deepseek-v4-pro`,
-  `HERMES_INFERENCE_MODEL=deepseek-v4-pro`,
-  `HERMES_PRO_MODEL=deepseek-v4-pro`, and
+  `HERMES_DEFAULT_MODEL=deepseek-v4-flash`,
+  `HERMES_INFERENCE_MODEL=deepseek-v4-flash`,
+  `HERMES_PRO_MODEL=deepseek-v4-flash`, and
   `HERMES_DEEPSEEK_THINKING_MODE=disabled`.
 - Hermes routing and cache: `HERMES_LITE_API_BASE_URL`,
   `HERMES_FULL_API_BASE_URL`, `HERMES_CONTEXT_INJECTION_MODE`,
@@ -170,6 +182,9 @@ Important non-secret env groups:
   `XHS_PUBLIC_*`, `MEDIA_READER_*`, `PERSONAL_AGENT_OCR_*`.
 - Managed UV/Ombre state: `UV_CACHE_DIR`, `UV_TOOL_DIR`,
   `OMBRE_BRAIN_*`, `OMBRE_BRAIN_STATUS_FILE`, `PERSONAL_AGENT_OMBRE_*`.
+- O2 compatibility writer: `OMBRE_COMPAT_ENABLED`, canonical state/Steward
+  paths, and fixed Curator/Reviewer endpoint/model keys. Authentication reuses
+  `DEEPSEEK_API_KEY`; no second production key is written.
 - External MCP/proactive gates: `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`,
   `EXTERNAL_MCP_GATEWAY_ENABLED=true`,
   `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`,
