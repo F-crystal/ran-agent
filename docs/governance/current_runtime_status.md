@@ -12,7 +12,10 @@ contracts live in the linked governance docs below.
 production_repository_sha: bb66f1e6a8a400d599c7f86139107742bbedddc8
 runtime_evidence_class: USER_SUPPLIED_RUNTIME
 local_o1_online_revalidation: not performed
-production_manual_hotfixes: present; verify on host
+production_worktree: clean in owner-supplied 2026-07-31 preflight
+production_services: four core units active in owner-supplied 2026-07-31 preflight
+production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
+rejected_deployment_candidate: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9; stopped at immutable pre-mutation gate because its provider-boundary test named a desktop-only Hermes path
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -26,8 +29,11 @@ package_b_2_b_3: not started
 This production statement is `USER_SUPPLIED_RUNTIME`, not revalidated by this
 local integration line. The formal production release does not contain the
 archived O1 baseline, V4+O1 baseline, or O2 implementation.
-Production has manual hotfixes, but this document does not guess their exact
-live shape; server acceptance evidence remains the authority for those patches.
+The owner-supplied preflight showed no tracked or untracked worktree changes.
+The failed candidate gate ran before snapshots, service interruption, checkout
+activation, or runtime mutation, so production remains on the recorded SHA and
+does not require rollback. Server acceptance remains the authority after the
+next apply.
 
 The repository mainline keeps every O1 invariant from
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2`, keeps Lite/Full on
@@ -81,12 +87,18 @@ contract:
 - Production remains on the pre-O1 shape; Flash + O1 + O2 are still not
   validated or deployed there. Node Receipt stays deferred, and Package
   B.2/B.3 have not started.
+- Candidate `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` is not deployable: its
+  immutable gate embedded a desktop-only Hermes executable path. The current
+  remediation resolves the installed v0.13 executable independently from both
+  Lite and Full systemd units, requires the canonical executables to match,
+  and injects that absolute path only into the isolated provider-boundary test.
+  This is a gate portability correction, not a Hermes or model upgrade.
 - Fresh production-wiring evidence: 137 focused Node tests passed under Node
   22.22.2, including O2 runtime, tool-less Curator/Reviewer, managed env,
   release residue, model policy, and gateway fallback checks. Shell/Python
   syntax and diff validation also passed. This does not replace server
   acceptance or contact a real DeepSeek/Ombre endpoint.
-- Local final evidence: Node 22.22.2 standard full discovery collected 1410
+- Pre-remediation O2 production-wiring baseline: Node 22.22.2 standard full discovery collected 1410
   tests across 116 files (1409 passed, 0 failed, 1 environment-gated skip);
   the sole skip, `real patched Ombre process satisfies Steward API v1
   contract`, is gate-skipped because its controlled-process environment
@@ -94,6 +106,12 @@ contract:
   skipped. All 120 tests across the 13 Core files passed. Python 3.10.9 full
   discovery collected 377 tests across 37 files (377 passed, 0 failed,
   0 skipped).
+- Remediation evidence: four focused release-gate/resolver checks passed,
+  including poisoned inherited PATH and override rejection, Lite/Full canonical
+  runtime mismatch, missing executable, and v0.14 fail-closed cases. The real
+  independent Lite/Full Hermes provider-boundary integration passed with the
+  explicit local v0.13 executable. The archive transaction reruns full Node and
+  Python discovery before push.
 
 ## Mainline
 

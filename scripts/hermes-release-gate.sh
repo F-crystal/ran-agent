@@ -2,12 +2,18 @@
 
 set -euo pipefail
 
+STAGED_CANDIDATE="${RAN_AGENT_RELEASE_STAGED_CANDIDATE:-0}"
+if [[ "$STAGED_CANDIDATE" == 1 ]]; then
+  PATH=/usr/bin:/bin
+  export PATH
+fi
+
 fail() {
   printf 'hermes-release-gate: failed:%s\n' "$1" >&2
   exit 1
 }
 
-SOURCE_ROOT_INPUT="${RAN_AGENT_RELEASE_SOURCE_ROOT:-$(dirname "${BASH_SOURCE[0]}")/..}"
+SOURCE_ROOT_INPUT="${RAN_AGENT_RELEASE_SOURCE_ROOT:-$(/usr/bin/dirname "${BASH_SOURCE[0]}")/..}"
 REPO_ROOT="$(cd "$SOURCE_ROOT_INPUT" && pwd -P)" || fail source_root_unavailable
 MODE="${1:---core}"
 case "$MODE" in
@@ -28,9 +34,9 @@ if [[ -z "$NODE_BIN" || "$NODE_BIN" != /* || ! -x "$NODE_BIN" ]]; then
   fail node_binary_required
 fi
 
-SAFE_PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin"
+SAFE_PATH="$(/usr/bin/dirname "$NODE_BIN"):/usr/bin:/bin"
 run_clean() {
-  env -i \
+  /usr/bin/env -i \
     HOME="$SANDBOX_ROOT/home" \
     PATH="$SAFE_PATH" \
     TMPDIR="$SANDBOX_ROOT/tmp" \
@@ -76,8 +82,30 @@ fi
 if [[ -z "$PYTHON_BIN" || "$PYTHON_BIN" != /* || ! -x "$PYTHON_BIN" ]]; then
   fail python_with_pytest_required
 fi
-SAFE_PATH="$(dirname "$NODE_BIN"):$(dirname "$PYTHON_BIN"):/usr/bin:/bin"
+SAFE_PATH="$(/usr/bin/dirname "$NODE_BIN"):$(/usr/bin/dirname "$PYTHON_BIN"):/usr/bin:/bin"
 run_clean "$PYTHON_BIN" -I -c 'import pytest' >/dev/null 2>&1 || fail pytest_unavailable
+
+HERMES_TEST_BIN=''
+resolve_test_hermes_bin() {
+  local resolver version
+  if [[ "$STAGED_CANDIDATE" == 1 ]]; then
+    resolver="$REPO_ROOT/scripts/resolve-hermes-gate-runtime.mjs"
+    [[ -f "$resolver" && ! -L "$resolver" && -x /usr/bin/systemctl ]] ||
+      fail hermes_runtime_resolver_required
+    HERMES_TEST_BIN="$(run_clean "$NODE_BIN" "$resolver" /usr/bin/systemctl)" ||
+      fail hermes_v0_13_runtime_required
+  else
+    HERMES_TEST_BIN="${RAN_AGENT_HERMES_TEST_BIN:-$HOME/.local/bin/hermes}"
+  fi
+  [[ "$HERMES_TEST_BIN" == /* && -x "$HERMES_TEST_BIN" ]] || fail hermes_v0_13_runtime_required
+  version="$(run_clean "$NODE_BIN" -e '
+    const { spawnSync } = require("node:child_process");
+    const result = spawnSync(process.argv[1], ["version"], { encoding: "utf8", timeout: 10000 });
+    if (result.error || result.status !== 0) process.exit(1);
+    process.stdout.write(result.stdout);
+  ' "$HERMES_TEST_BIN")" || fail hermes_v0_13_runtime_required
+  [[ "$version" =~ ^Hermes\ Agent\ v0\.13\. ]] || fail hermes_v0_13_runtime_required
+}
 
 SOURCE_ROOT="$SANDBOX_ROOT/source"
 mkdir -p "$SOURCE_ROOT"
@@ -92,7 +120,7 @@ copy_source_file() {
 if [[ -e "$REPO_ROOT/.git" ]]; then
   while IFS= read -r -d '' relative_path; do
     copy_source_file "$relative_path"
-  done < <(env -i \
+  done < <(/usr/bin/env -i \
     HOME="$SANDBOX_ROOT/home" \
     PATH=/usr/bin:/bin \
     GIT_CONFIG_GLOBAL=/dev/null \
@@ -122,15 +150,19 @@ chmod -R a-w "$SOURCE_ROOT"
 
 run_node_test() {
   local test_file="$1"
-  local test_name case_root
+  local test_name case_root hermes_test_bin=''
   test_name="$(basename "$test_file" .test.mjs)"
+  if [[ "$(basename "$test_file")" == hermesGatewayProviderBoundary.integration.test.mjs ]]; then
+    resolve_test_hermes_bin
+    hermes_test_bin="$HERMES_TEST_BIN"
+  fi
   case_root="$SANDBOX_ROOT/node-test-$test_name"
   mkdir -p "$case_root/home" "$case_root/tmp/state" "$case_root/cache" "$case_root/config" \
     "$case_root/data" "$case_root/uv-cache" "$case_root/uv-tools" "$case_root/npm-cache" \
     "$case_root/pip-cache" "$case_root/vault" "$case_root/media" "$case_root/co-reading"
   (
     cd "$SOURCE_ROOT/node_bridge"
-    env -i \
+    /usr/bin/env -i \
       HOME="$case_root/home" \
       PATH="$SAFE_PATH" \
       TMPDIR="$case_root/tmp" \
@@ -140,6 +172,7 @@ run_node_test() {
       RAN_AGENT_SKIP_ENV_FILE_LOAD=1 \
       RAN_AGENT_NODE_BIN="$NODE_BIN" \
       RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
+      RAN_AGENT_HERMES_TEST_BIN="$hermes_test_bin" \
       SOCIAL_READER_NODE_BIN="$NODE_BIN" \
       EXTERNAL_MCP_GATEWAY_NODE_BIN="$NODE_BIN" \
       RAN_AGENT_GLOBAL_TIMELINE_PATH="$case_root/tmp/state/global-timeline.jsonl" \
@@ -175,7 +208,7 @@ run_node_smoke() {
     "$case_root/pip-cache" "$case_root/vault" "$case_root/media" "$case_root/co-reading"
   (
     cd "$SOURCE_ROOT"
-    env -i \
+    /usr/bin/env -i \
       HOME="$case_root/home" \
       PATH="$SAFE_PATH" \
       TMPDIR="$case_root/tmp" \
@@ -219,7 +252,7 @@ mkdir -p "$PYTHON_ROOT/home" "$PYTHON_ROOT/tmp/state" "$PYTHON_ROOT/cache" \
   "$PYTHON_ROOT/uv-tools" "$PYTHON_ROOT/pip-cache" "$PYTHON_ROOT/pytest"
 (
   cd "$SOURCE_ROOT"
-  env -i \
+  /usr/bin/env -i \
     HOME="$PYTHON_ROOT/home" \
     PATH="$SAFE_PATH" \
     TMPDIR="$PYTHON_ROOT/tmp" \

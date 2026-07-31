@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -1604,10 +1604,31 @@ test('release smoke executes named core and external journey suites without sele
 
 test('release gate has an all mode that invokes the named smoke matrix after isolated suites', () => {
   const source = readFileSync(join(root, 'scripts', 'hermes-release-gate.sh'), 'utf8');
+  const hermesResolver = readFileSync(join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs'), 'utf8');
+  const providerBoundary = readFileSync(join(root, 'node_bridge', 'tests', 'hermesGatewayProviderBoundary.integration.test.mjs'), 'utf8');
   assert.match(source, /--core\|--all\|--preflight-only/);
   assert.match(source, /hermes-release-smoke\.mjs/);
   assert.match(source, /--all/);
   assert.match(source, /RAN_AGENT_PYTHON_BIN="\$PYTHON_BIN"/);
+  assert.match(source, /resolve-hermes-gate-runtime\.mjs/);
+  assert.match(source, /STAGED_CANDIDATE.*RAN_AGENT_RELEASE_STAGED_CANDIDATE/);
+  assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\]; then\s+PATH=\/usr\/bin:\/bin/);
+  assert.ok(source.indexOf('STAGED_CANDIDATE=') < source.indexOf('SOURCE_ROOT_INPUT='));
+  assert.doesNotMatch(source, /(^|[^/])\benv -i/);
+  assert.match(source, /run_clean "\$NODE_BIN" "\$resolver" \/usr\/bin\/systemctl/);
+  assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\][\s\S]*\/usr\/bin\/systemctl[\s\S]*else\s+HERMES_TEST_BIN="\$\{RAN_AGENT_HERMES_TEST_BIN:-\$HOME\/\.local\/bin\/hermes\}"/);
+  assert.match(source, /spawnSync\(process\.argv\[1\].*timeout: 10000/);
+  assert.match(hermesResolver, /ran-agent-hermes\.service/);
+  assert.match(hermesResolver, /ran-agent-hermes-full\.service/);
+  assert.match(hermesResolver, /env: \{ PATH: '\/usr\/bin:\/bin', RAN_AGENT_SYSTEMCTL_BIN: systemctlBin \}/);
+  assert.match(hermesResolver, /timeout: 10_000/);
+  assert.match(hermesResolver, /fs\.realpathSync/);
+  assert.match(hermesResolver, /liteReal !== fullReal/);
+  assert.doesNotMatch(hermesResolver, /process\.env\.RAN_AGENT_(?:HERMES_TEST_BIN|SYSTEMCTL_BIN)/);
+  assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$hermes_test_bin"/);
+  assert.match(providerBoundary, /process\.env\.RAN_AGENT_HERMES_TEST_BIN/);
+  assert.match(providerBoundary, /Hermes Agent v0\\\.13/);
+  assert.doesNotMatch(providerBoundary, /\/Users\/fengran/);
   assert.ok(source.indexOf('chmod -R a-w') < source.indexOf('hermes-release-smoke.mjs'));
   for (const name of ['RAN_AGENT_STATE_DIR', 'RAN_AGENT_GLOBAL_TIMELINE_PATH', 'RAN_AGENT_TIMELINE_ARCHIVE_DIR']) {
     assert.match(source.match(/run_node_test\(\)[\s\S]*?\n\}/)?.[0] || '', new RegExp(name));
@@ -1631,13 +1652,23 @@ test('release gate executes a git-less staged candidate from its explicit immuta
     ].join('\n'));
     writeFileSync(join(stage, 'scripts', 'hermes-release-smoke.mjs'), 'process.exit(0);\n');
     writeFileSync(join(stage, 'tests', 'test_stage.py'), 'def test_gitless_stage():\n    assert True\n');
+    const poisonBin = join(stage, 'poison-bin');
+    const poisonMarker = join(stage, 'poison-command-ran');
+    mkdirSync(poisonBin, { recursive: true });
+    for (const command of ['env', 'mktemp', 'mkdir', 'dirname']) {
+      const executable = join(poisonBin, command);
+      writeFileSync(executable, `#!/bin/sh\nprintf poison >> ${JSON.stringify(poisonMarker)}\nexit 99\n`);
+      chmodSync(executable, 0o755);
+    }
 
-    const output = execFileSync('bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--core'], {
+    const output = execFileSync('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--core'], {
       cwd: stage,
       env: {
-        PATH: '/usr/bin:/bin',
+        PATH: poisonBin,
         RAN_AGENT_NODE_BIN: nodeBin,
         RAN_AGENT_PYTHON_BIN: pythonBin,
+        RAN_AGENT_HERMES_TEST_BIN: '/attacker/hermes',
+        RAN_AGENT_SYSTEMCTL_BIN: '/attacker/systemctl',
         RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
         RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
       },
@@ -1645,11 +1676,12 @@ test('release gate executes a git-less staged candidate from its explicit immuta
       stdio: 'pipe',
     });
     assert.match(output, /hermes-release-gate: ok/);
+    assert.equal(existsSync(poisonMarker), false, 'staged gate must fix PATH before invoking any external command');
     assert.throws(
-      () => execFileSync('bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--core'], {
+      () => execFileSync('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--core'], {
         cwd: stage,
         env: {
-          PATH: '/usr/bin:/bin',
+          PATH: poisonBin,
           RAN_AGENT_NODE_BIN: nodeBin,
           RAN_AGENT_PYTHON_BIN: '/definitely/missing/ran-agent-python',
           RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
@@ -1791,6 +1823,83 @@ test('release node resolver uses explicit input, systemctl show, systemctl cat, 
     assert.throws(() => runResolver({ RAN_AGENT_SYSTEMCTL_BIN: unresolved.path }), /Command failed/);
   } finally {
     for (const fixture of [byShow, byCat, unresolved]) rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('release Hermes resolver accepts only an executable service-managed v0.13 runtime', () => {
+  const resolver = join(root, 'scripts', 'resolve-hermes-service-runtime.sh');
+  const runtime = mkdtempSync(join(tmpdir(), 'ran-agent-hermes-runtime-'));
+  const validBin = join(runtime, 'v013', 'hermes');
+  const wrongVersionBin = join(runtime, 'v014', 'hermes');
+  mkdirSync(join(runtime, 'v013'), { recursive: true });
+  mkdirSync(join(runtime, 'v014'), { recursive: true });
+  writeFileSync(validBin, '#!/bin/sh\nprintf "Hermes Agent v0.13.0\\n"\n');
+  writeFileSync(wrongVersionBin, '#!/bin/sh\nprintf "Hermes Agent v0.14.0\\n"\n');
+  chmodSync(validBin, 0o755);
+  chmodSync(wrongVersionBin, 0o755);
+  const valid = makeSystemctlFixture({ cat: `ExecStart=${validBin} gateway run` });
+  const wrongVersion = makeSystemctlFixture({ cat: `ExecStart=${wrongVersionBin} gateway run` });
+  const missing = makeSystemctlFixture({ cat: `ExecStart=${join(runtime, 'missing', 'hermes')} gateway run` });
+  const runResolver = (fixture) => execFileSync('bash', [resolver, 'ran-agent-hermes.service'], {
+    env: { PATH: '/usr/bin:/bin', RAN_AGENT_SYSTEMCTL_BIN: fixture.path },
+    encoding: 'utf8',
+    stdio: 'pipe',
+  }).trim();
+  try {
+    assert.equal(runResolver(valid), validBin);
+    assert.throws(() => runResolver(wrongVersion), /Command failed/);
+    assert.throws(() => runResolver(missing), /Command failed/);
+  } finally {
+    rmSync(runtime, { recursive: true, force: true });
+    for (const fixture of [valid, wrongVersion, missing]) rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('staged Hermes gate runtime ignores inherited overrides and rejects Lite/Full drift', () => {
+  const gateResolver = join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs');
+  const runtime = mkdtempSync(join(tmpdir(), 'ran-agent-hermes-gate-runtime-'));
+  const makeHermes = (name, version) => {
+    const bin = join(runtime, name, 'hermes');
+    mkdirSync(join(runtime, name), { recursive: true });
+    writeFileSync(bin, `#!/bin/sh\nprintf "Hermes Agent ${version}\\n"\n`);
+    chmodSync(bin, 0o755);
+    return bin;
+  };
+  const valid = makeHermes('valid', 'v0.13.0');
+  const other = makeHermes('other', 'v0.13.1');
+  const wrongVersion = makeHermes('wrong-version', 'v0.14.0');
+  const missing = join(runtime, 'missing', 'hermes');
+  const makeServiceMap = (lite, full) => {
+    const dir = mkdtempSync(join(tmpdir(), 'ran-agent-hermes-gate-systemctl-'));
+    const path = join(dir, 'systemctl');
+    writeFileSync(path, `#!/bin/sh\ncase "$1:$2" in\n  show:*) exit 0 ;;\n  cat:ran-agent-hermes.service) printf '%s\\n' 'ExecStart=${lite} gateway run' ;;\n  cat:ran-agent-hermes-full.service) printf '%s\\n' 'ExecStart=${full} gateway run' ;;\n  *) exit 1 ;;\nesac\n`);
+    chmodSync(path, 0o755);
+    return { dir, path };
+  };
+  const same = makeServiceMap(valid, valid);
+  const mismatch = makeServiceMap(valid, other);
+  const badVersion = makeServiceMap(valid, wrongVersion);
+  const absent = makeServiceMap(valid, missing);
+  const maliciousSystemctl = makeServiceMap(other, other);
+  const runGateResolver = (fixture, env = {}) => execFileSync(nodeBin, [gateResolver, fixture.path], {
+    env: { PATH: '/usr/bin:/bin', ...env },
+    encoding: 'utf8',
+    stdio: 'pipe',
+  }).trim();
+  try {
+    assert.equal(runGateResolver(same, {
+      PATH: join(runtime, 'attacker-bin'),
+      RAN_AGENT_HERMES_TEST_BIN: other,
+      RAN_AGENT_SYSTEMCTL_BIN: maliciousSystemctl.path,
+    }), realpathSync(valid));
+    assert.throws(() => runGateResolver(mismatch), /Command failed/);
+    assert.throws(() => runGateResolver(badVersion), /Command failed/);
+    assert.throws(() => runGateResolver(absent), /Command failed/);
+  } finally {
+    rmSync(runtime, { recursive: true, force: true });
+    for (const fixture of [same, mismatch, badVersion, absent, maliciousSystemctl]) {
+      rmSync(fixture.dir, { recursive: true, force: true });
+    }
   }
 });
 

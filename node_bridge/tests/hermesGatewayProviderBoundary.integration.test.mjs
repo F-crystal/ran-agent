@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
@@ -18,7 +18,7 @@ import {
 import { runHermesProviderBoundaryCanary } from '../src/hermesProviderBoundaryCanary.mjs';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
-const HERMES = '/Users/fengran/.local/bin/hermes';
+const HERMES = process.env.RAN_AGENT_HERMES_TEST_BIN || path.join(os.homedir(), '.local', 'bin', 'hermes');
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -118,6 +118,7 @@ test('real independent Lite/Full Hermes gateways preserve system-priority Canon 
   timeout: 70_000,
 }, async (t) => {
   assert.equal(fs.existsSync(HERMES), true, 'verified local Hermes v0.13.0 executable is required');
+  assert.match(execFileSync(HERMES, ['version'], { encoding: 'utf8', timeout: 10_000 }), /^Hermes Agent v0\.13\./);
   const requests = [];
   const provider = http.createServer(async (request, response) => {
     let body = '';

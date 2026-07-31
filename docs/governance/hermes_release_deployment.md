@@ -4,7 +4,8 @@ Status: CURRENT (2026-07-31)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
-revalidated it online. Production has manual hotfixes. Ombre O1 baseline
+revalidated it online. The owner-supplied 2026-07-31 preflight reported a clean
+worktree and all four core units active. Ombre O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
 V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
 pushed but undeployed. Node Receipt is deferred. O2 implementation
@@ -33,9 +34,13 @@ clean` as a pre-deploy action in `/opt/ran_agent`.
 ## Release Lineage
 
 The owner-supplied known production repository revision is
-`bb66f1e6a8a400d599c7f86139107742bbedddc8`. Keep server acceptance evidence
-and snapshots in private archives rather than copying them into this public
-contract.
+`bb66f1e6a8a400d599c7f86139107742bbedddc8`. Candidate
+`834eabef5a2e8883d3237f7b35c96f70d1fac7a9` passed dry-run but its apply
+stopped at the immutable pre-mutation gate because a provider-boundary test
+named a desktop-only Hermes path. The transaction had not snapshotted state,
+stopped services, activated code, or mutated runtime, so no rollback was
+required. Keep later server acceptance evidence and snapshots in private
+archives rather than copying them into this public contract.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. Every other step below is read-only except
@@ -71,11 +76,15 @@ there is no second persistent deployment mechanism.
 
 During O1 candidate apply the staged `apply-hermes-runtime-split.sh
 --preserve-runtime-shape` path also installs and verifies the pinned Ombre
-upstream and recall-adapter units before Python/Lite/Full/Node. It deliberately
-does not invoke or require an interactive
-shell `hermes` executable: the staged gate and later verification remain the
-release checks, while the ordinary non-preserve drift-repair path still
-requires Hermes because it installs profiles and writes Hermes units.
+upstream and recall-adapter units before Python/Lite/Full/Node. That apply step
+does not use an interactive-shell `hermes`. Before mutation, the staged gate
+resolves the installed Hermes v0.13 executable from both Lite and Full systemd
+units in a clean, bounded environment, requires both units to resolve to the
+same canonical executable, and passes that absolute path to the isolated real
+provider-boundary test. A missing, mismatched, or non-v0.13 runtime stops the
+release; it is not repaired or upgraded implicitly. The ordinary non-preserve
+drift-repair path still requires Hermes because it installs profiles and writes
+Hermes units.
 
 For the current Flash+O1+O2 candidate, that same preserve path converges the
 four installed Lite/Full model blocks, six non-secret model-policy environment
@@ -309,9 +318,9 @@ server's unit has been inspected. Before first apply, confirm on the server:
   exposes an absolute `…/node` executable, or `systemctl cat` has a direct
   `ExecStart=/absolute/path/node …` form;
 - if neither form exists (for example the unit launches `bash` and resolves
-  Node dynamically), provide the service's actual absolute executable only for
-  that command: `RAN_AGENT_NODE_BIN=/absolute/path/node bash …`; do not use
-  `command -v node` from an interactive shell;
+  Node dynamically), use the confirmed production executable
+  `/opt/nodejs/node-v22.22.2-linux-x64/bin/node` as `RAN_AGENT_NODE_BIN` for the
+  deploy command; do not use `command -v node` from an interactive shell;
 - that the selected executable reports Node 22.13+ and supports `node:sqlite`;
 - that the candidate SHA and the bootstrap SHA-256 above are the reviewed
   release values before executing `/tmp/ran-agent-bootstrap.sh`.
