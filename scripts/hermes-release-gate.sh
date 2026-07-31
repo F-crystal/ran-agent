@@ -85,9 +85,22 @@ fi
 SAFE_PATH="$(/usr/bin/dirname "$NODE_BIN"):$(/usr/bin/dirname "$PYTHON_BIN"):/usr/bin:/bin"
 run_clean "$PYTHON_BIN" -I -c 'import pytest' >/dev/null 2>&1 || fail pytest_unavailable
 
+RELEASE_CANDIDATE="${RAN_AGENT_RELEASE_CANDIDATE:-}"
+if [[ -z "$RELEASE_CANDIDATE" && -e "$REPO_ROOT/.git" ]]; then
+  RELEASE_CANDIDATE="$(/usr/bin/env -i \
+    HOME="$SANDBOX_ROOT/home" \
+    PATH=/usr/bin:/bin \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_NOSYSTEM=1 \
+    git -C "$REPO_ROOT" rev-parse --verify HEAD 2>/dev/null)" ||
+    fail release_candidate_unavailable
+fi
+[[ "$RELEASE_CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail release_candidate_invalid
+
 HERMES_TEST_BIN=''
 resolve_test_hermes_bin() {
   local resolver version
+  [[ -n "$HERMES_TEST_BIN" ]] && return
   if [[ "$STAGED_CANDIDATE" == 1 ]]; then
     resolver="$REPO_ROOT/scripts/resolve-hermes-gate-runtime.mjs"
     [[ -f "$resolver" && ! -L "$resolver" && -x /usr/bin/systemctl ]] ||
@@ -172,6 +185,7 @@ run_node_test() {
       RAN_AGENT_SKIP_ENV_FILE_LOAD=1 \
       RAN_AGENT_NODE_BIN="$NODE_BIN" \
       RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
+      RAN_AGENT_RELEASE_CANDIDATE="$RELEASE_CANDIDATE" \
       RAN_AGENT_HERMES_TEST_BIN="$hermes_test_bin" \
       SOCIAL_READER_NODE_BIN="$NODE_BIN" \
       EXTERNAL_MCP_GATEWAY_NODE_BIN="$NODE_BIN" \
@@ -246,6 +260,10 @@ else
   run_node_smoke --all || fail all_smoke
 fi
 
+if [[ -f "$SOURCE_ROOT/tests/test_hermes_deepseek_provider.py" ]]; then
+  resolve_test_hermes_bin
+fi
+
 PYTHON_ROOT="$SANDBOX_ROOT/python-test"
 mkdir -p "$PYTHON_ROOT/home" "$PYTHON_ROOT/tmp/state" "$PYTHON_ROOT/cache" \
   "$PYTHON_ROOT/config" "$PYTHON_ROOT/data" "$PYTHON_ROOT/uv-cache" \
@@ -261,6 +279,7 @@ mkdir -p "$PYTHON_ROOT/home" "$PYTHON_ROOT/tmp/state" "$PYTHON_ROOT/cache" \
     RAN_AGENT_STATE_DIR="$PYTHON_ROOT/tmp/state" \
     RAN_AGENT_SKIP_ENV_FILE_LOAD=1 \
     RAN_AGENT_NODE_BIN="$NODE_BIN" \
+    RAN_AGENT_HERMES_TEST_BIN="$HERMES_TEST_BIN" \
     PYTHONPATH="$SOURCE_ROOT/src" \
     PYTHONSAFEPATH=1 \
     PYTHONDONTWRITEBYTECODE=1 \

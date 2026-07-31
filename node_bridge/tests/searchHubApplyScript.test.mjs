@@ -216,6 +216,7 @@ test('apply script creates runtime trusted media directories', () => {
     'set -euo pipefail',
     'export RAN_AGENT_NO_SUDO=1',
     `export RAN_AGENT_DEPLOY_STATE_DIR=${JSON.stringify(stateDir)}`,
+    `export RAN_AGENT_STATE_DIR=${JSON.stringify(stateDir)}`,
     `export RAN_AGENT_DEPLOY_DEBUG_DIR=${JSON.stringify(debugDir)}`,
     `export RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME=${JSON.stringify(join(stateDir, 'ombre-brain'))}`,
     `export RAN_AGENT_DEPLOY_OMBRE_BUCKETS_DIR=${JSON.stringify(join(stateDir, 'ombre-buckets'))}`,

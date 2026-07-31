@@ -92,6 +92,8 @@ class OmbreStewardTokenTest(unittest.TestCase):
     def test_rotation_failure_can_restore_without_copying_secret_into_state(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            os.chown(root, os.getuid(), os.getgid())
+            root.chmod(0o700)
             state = root / "live-state"
             stage = root / "stage"
             rollback = root / "release-private"
@@ -115,6 +117,8 @@ class OmbreStewardTokenTest(unittest.TestCase):
     def test_rotated_token_is_accepted_and_old_token_is_rejected_without_leakage(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            os.chown(root, os.getuid(), os.getgid())
+            root.chmod(0o700)
             state = root / "live-state"
             token = state / MODULE.TOKEN_RELATIVE_PATH
             identity_file = root / "identity.json"
@@ -122,6 +126,7 @@ class OmbreStewardTokenTest(unittest.TestCase):
             current = ("a" * 64) + "\n"
             old = ("b" * 64) + "\n"
             token.write_text(current, encoding="ascii")
+            os.chown(token, os.getuid(), os.getgid())
             token.chmod(0o600)
             old_file = root / "old-token"
             old_file.write_text(old, encoding="ascii")

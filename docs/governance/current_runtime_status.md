@@ -15,7 +15,7 @@ local_o1_online_revalidation: not performed
 production_worktree: clean in owner-supplied 2026-07-31 preflight
 production_services: four core units active in owner-supplied 2026-07-31 preflight
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
-rejected_deployment_candidate: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9; stopped at immutable pre-mutation gate because its provider-boundary test named a desktop-only Hermes path
+rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); both stopped at immutable pre-mutation gate
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -93,6 +93,13 @@ contract:
   Lite and Full systemd units, requires the canonical executables to match,
   and injects that absolute path only into the isolated provider-boundary test.
   This is a gate portability correction, not a Hermes or model upgrade.
+- Candidate `f6f6048029de6e4c73b5b8b11f1441069770786c` is also not deployable:
+  its next immutable-gate layer exposed release tests that read `.git` and
+  relied on the deploy fixture selecting the non-root `sudo` branch. The
+  current remediation supplies the immutable candidate SHA explicitly, fixes
+  the fixture privilege seam independently of EUID, and codifies Git-less,
+  read-only, root/non-root, `env -i` portability in `AGENTS.md`. It changes no
+  production runtime or model policy.
 - Fresh production-wiring evidence: 137 focused Node tests passed under Node
   22.22.2, including O2 runtime, tool-less Curator/Reviewer, managed env,
   release residue, model policy, and gateway fallback checks. Shell/Python
@@ -112,6 +119,15 @@ contract:
   independent Lite/Full Hermes provider-boundary integration passed with the
   explicit local v0.13 executable. The archive transaction reruns full Node and
   Python discovery before push.
+- Environment-portability remediation evidence: the four release-transaction
+  failures reproduced from the server report passed 4/4 after the candidate SHA
+  and privilege seam became explicit. Strict owner/group fixtures passed 49/49
+  under `env -i` with a host temporary root whose inherited group differed from
+  the process group; the four Python Hermes/token regressions also passed 4/4
+  in that shape. The complete Git-less, read-only staged `--all` gate then ran
+  every admitted Node test file, passed the real Hermes v0.13 provider boundary
+  and release smoke, passed all 377 Python tests, printed
+  `hermes-release-gate: ok`, and received a `passed` workflow-guard result.
 
 ## Mainline
 

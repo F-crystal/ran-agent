@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { accessSync, chmodSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, chownSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -15,6 +15,11 @@ const runtimeUser = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
 const runtimeGroup = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
 
 function candidate() {
+  const explicit = process.env.RAN_AGENT_RELEASE_CANDIDATE;
+  if (explicit) {
+    assert.match(explicit, /^[0-9a-f]{40}$/, 'explicit release candidate must be an immutable commit SHA');
+    return explicit;
+  }
   return execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
 }
 
@@ -200,6 +205,7 @@ function runDeployServiceFixture(fixture, commands) {
     'set -euo pipefail',
     'set -- --rollback fixture-snapshot',
     `source ${JSON.stringify(join(fixture.repo, 'scripts', 'deploy-hermes-release.sh'))}`,
+    'SUDO=(sudo)',
     `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
     'for unit in "${ALL_RUNTIME_UNITS[@]}"; do snapshot_service_state "$unit"; done',
     'printf "%s\\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$SNAPSHOT_DIR/prior-head"',
@@ -975,6 +981,8 @@ test('acceptance removes an in-flight authenticated header when terminated', asy
 
 test('preserve runtime shape prepares Ombre and starts recall before lite and full without requiring Hermes CLI', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hermes-preserve-no-cli-'));
+  chownSync(dir, process.getuid(), process.getgid());
+  chmodSync(dir, 0o700);
   const bin = join(dir, 'bin');
   const trace = join(dir, 'systemctl.log');
   const state = join(dir, 'state');
@@ -1610,6 +1618,8 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /hermes-release-smoke\.mjs/);
   assert.match(source, /--all/);
   assert.match(source, /RAN_AGENT_PYTHON_BIN="\$PYTHON_BIN"/);
+  assert.match(source, /tests\/test_hermes_deepseek_provider\.py[\s\S]*resolve_test_hermes_bin/);
+  assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$HERMES_TEST_BIN"[\s\S]*-m pytest/);
   assert.match(source, /resolve-hermes-gate-runtime\.mjs/);
   assert.match(source, /STAGED_CANDIDATE.*RAN_AGENT_RELEASE_STAGED_CANDIDATE/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\]; then\s+PATH=\/usr\/bin:\/bin/);
@@ -1628,6 +1638,7 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$hermes_test_bin"/);
   assert.match(providerBoundary, /process\.env\.RAN_AGENT_HERMES_TEST_BIN/);
   assert.match(providerBoundary, /Hermes Agent v0\\\.13/);
+  assert.match(providerBoundary, /timeout: 30_000/);
   assert.doesNotMatch(providerBoundary, /\/Users\/fengran/);
   assert.ok(source.indexOf('chmod -R a-w') < source.indexOf('hermes-release-smoke.mjs'));
   for (const name of ['RAN_AGENT_STATE_DIR', 'RAN_AGENT_GLOBAL_TIMELINE_PATH', 'RAN_AGENT_TIMELINE_ARCHIVE_DIR']) {
@@ -1667,6 +1678,7 @@ test('release gate executes a git-less staged candidate from its explicit immuta
         PATH: poisonBin,
         RAN_AGENT_NODE_BIN: nodeBin,
         RAN_AGENT_PYTHON_BIN: pythonBin,
+        RAN_AGENT_RELEASE_CANDIDATE: 'a'.repeat(40),
         RAN_AGENT_HERMES_TEST_BIN: '/attacker/hermes',
         RAN_AGENT_SYSTEMCTL_BIN: '/attacker/systemctl',
         RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
@@ -1684,6 +1696,7 @@ test('release gate executes a git-less staged candidate from its explicit immuta
           PATH: poisonBin,
           RAN_AGENT_NODE_BIN: nodeBin,
           RAN_AGENT_PYTHON_BIN: '/definitely/missing/ran-agent-python',
+          RAN_AGENT_RELEASE_CANDIDATE: 'a'.repeat(40),
           RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
           RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
         },

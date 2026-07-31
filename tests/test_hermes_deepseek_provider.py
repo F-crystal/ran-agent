@@ -13,7 +13,8 @@ PLUGIN = ROOT / "hermes/profile/plugins/model-providers/deepseek"
 
 def _runtime_project() -> Path:
     result = subprocess.run(
-        [os.environ.get("HERMES_TEST_BIN", "hermes"), "version"],
+        [os.environ.get("RAN_AGENT_HERMES_TEST_BIN")
+         or os.environ.get("HERMES_TEST_BIN", "hermes"), "version"],
         check=True,
         text=True,
         capture_output=True,

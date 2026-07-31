@@ -42,6 +42,19 @@ stopped services, activated code, or mutated runtime, so no rollback was
 required. Keep later server acceptance evidence and snapshots in private
 archives rather than copying them into this public contract.
 
+Candidate `f6f6048029de6e4c73b5b8b11f1441069770786c` then reached the next
+gate layer and stopped because release-test fixtures still assumed source Git
+metadata and non-root `sudo` selection. It also failed before snapshot or
+mutation. Deployable release tests must receive the candidate SHA and
+privilege seam explicitly and remain valid under Git-less, read-only,
+root/non-root, `env -i` execution as required by the repository `AGENTS.md`.
+The remediated staged gate also fixes host-dependent temporary-directory group
+inheritance, nested-shell state-directory leakage, and Python tests that found
+Hermes only through an interactive `PATH`. Before another deployable candidate
+is produced, the complete local staged `--all` gate must end with 377/377
+Python tests, `hermes-release-smoke: all-ok`, and
+`hermes-release-gate: ok`; an ordinary checkout test pass is not equivalent.
+
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. Every other step below is read-only except
 `git fetch`, which updates local remote tracking objects only.

@@ -20,9 +20,13 @@ const MODES = new Set([
 
 export function createFakeUpstreamOmbre() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-steward-'));
+  fs.chownSync(root, process.getuid(), process.getgid());
+  fs.chmodSync(root, 0o700);
   const tokenFile = path.join(root, 'steward-api-token');
   const token = randomBytes(32).toString('hex');
   fs.writeFileSync(tokenFile, `${token}\n`, { mode: 0o600 });
+  fs.chownSync(tokenFile, process.getuid(), process.getgid());
+  fs.chmodSync(tokenFile, 0o600);
   const operations = new Map();
   const targets = new Map();
   const requests = [];

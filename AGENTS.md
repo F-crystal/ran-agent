@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-07-31)
 
 ## Scope
 
@@ -51,6 +51,26 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 - Evidence automation does not authorize commit, push, deploy, migration, risk
   acceptance, destructive action, or any side effect performed by the wrapped
   command; it is not a sandbox.
+
+## Release Gate Portability
+
+- Tests admitted to an immutable release gate must run from a Git-less,
+  read-only source copy under both root and non-root execution, with `env -i`
+  isolation and writes confined to explicit scratch/runtime paths.
+- Pass candidate digests, runtime executables, and privilege seams as validated
+  explicit inputs. Never depend on `.git`, a developer-machine path,
+  interactive-shell `PATH`, inherited environment state, or an implicit
+  non-root `sudo` branch.
+- Fault-injection fixtures must set their privilege-command seam explicitly so
+  the intended failure executes regardless of the caller's EUID.
+- Identity-sensitive fixtures must explicitly establish the owner, group, and
+  mode of their scratch/runtime root; do not rely on host-specific temporary
+  directory group inheritance.
+- Real-process integration probes must keep bounded timeouts sized for the
+  repository's full-suite concurrency load, not only isolated-file latency.
+- A local full-suite pass is insufficient for release-gate changes. Keep and
+  run a staged-environment regression that would fail on any of the portability
+  assumptions above before producing a deployable SHA.
 
 ## Governance References
 

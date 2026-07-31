@@ -73,11 +73,14 @@ function signReceipt(material, privateKey) {
 
 function setup(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ombre-ed25519-'));
+  fs.chownSync(root, process.getuid(), process.getgid());
+  fs.chmodSync(root, 0o700);
   t.after(() => fs.rmSync(root, { recursive: true, force: true }));
   const core = keyFixture();
   const registry = registryFor(core);
   const registryPath = path.join(root, 'ed25519-key-registry.v1.json');
   fs.writeFileSync(registryPath, `${JSON.stringify(registry)}\n`, { mode: 0o644 });
+  fs.chownSync(registryPath, process.getuid(), process.getgid());
   fs.chmodSync(registryPath, 0o644);
   const expected = unsignedReceipt(core.keyId);
   const verifier = createSourceDeletionReceiptVerifier({

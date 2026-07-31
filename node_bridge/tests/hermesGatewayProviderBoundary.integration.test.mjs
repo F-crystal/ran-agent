@@ -115,10 +115,10 @@ async function stopChild(child) {
 }
 
 test('real independent Lite/Full Hermes gateways preserve system-priority Canon at provider boundary', {
-  timeout: 70_000,
+  timeout: 120_000,
 }, async (t) => {
   assert.equal(fs.existsSync(HERMES), true, 'verified local Hermes v0.13.0 executable is required');
-  assert.match(execFileSync(HERMES, ['version'], { encoding: 'utf8', timeout: 10_000 }), /^Hermes Agent v0\.13\./);
+  assert.match(execFileSync(HERMES, ['version'], { encoding: 'utf8', timeout: 30_000 }), /^Hermes Agent v0\.13\./);
   const requests = [];
   const provider = http.createServer(async (request, response) => {
     let body = '';

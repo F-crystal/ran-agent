@@ -18,6 +18,10 @@ const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
 function fixture(prefix = 'hermes-projection-', revision = 7) {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  if (Number.isInteger(process.getuid?.()) && Number.isInteger(process.getgid?.())) {
+    fs.chownSync(directory, process.getuid(), process.getgid());
+  }
+  fs.chmodSync(directory, 0o700);
   const coreDbPath = path.join(directory, 'core.sqlite3');
   const outputPath = path.join(directory, 'state', 'published-memory-context.json');
   const db = new DatabaseSync(coreDbPath);
