@@ -2,9 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-07-31)
 
-`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 DeepSeek V4 Flash 并包含人工热补丁，本地未在线复核。O1 基线 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` 已归档但未部署；本地 V4+O1 整合候选未提交、未归档、未部署。Node Receipt deferred 且失败差量未恢复；O2 未开始且未授权；Package B.2/B.3 未开始。
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 DeepSeek V4 Flash 并包含人工热补丁，本地未在线复核。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。O2 默认关闭、未获部署批准，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred 且失败差量未恢复；Package B.2/B.3 未开始。
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 

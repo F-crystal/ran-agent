@@ -2,9 +2,9 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-07-31)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses Flash with manual hotfixes and has not been revalidated by this local line. O1 baseline `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The local V4+O1 candidate is uncommitted, unarchived, and undeployed. Node Receipt is deferred; O2 is not started/authorized; Package B.2/B.3 have not started.
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses Flash with manual hotfixes and has not been revalidated by this local line. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 implementation `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. O2 remains default-disabled and not approved for deployment; `total_delete` remains typed unsupported and Gate 5 has not started. Node Receipt is deferred; Package B.2/B.3 have not started.
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 

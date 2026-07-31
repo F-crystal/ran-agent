@@ -1,17 +1,18 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-07-30)
+Status: CURRENT (2026-07-31)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
 revalidated it online. Production has manual hotfixes. Ombre O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
-local V4+O1 integration candidate is uncommitted, unarchived, and undeployed;
-Node Receipt is deferred, O2 exists only as a local uncommitted
-default-disabled compatibility candidate whose v0.7 design is approved and
-whose implementation review remains pending (Gate 5 not started or
-authorized; `total_delete` typed unsupported), and Package B.2/B.3 have not
-started.
+V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
+pushed but undeployed. Node Receipt is deferred. O2 implementation
+`a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` passed independent v0.7
+implementation review and is archived and pushed to `main`, but remains
+default-disabled, not authorized for deployment, and undeployed (Gate 5 not
+started or authorized; `total_delete` typed unsupported). Package B.2/B.3
+have not started.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable

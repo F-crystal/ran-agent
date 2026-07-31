@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-07-31)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -10,9 +10,11 @@ manual systemd or env edits.
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local line has not
 revalidated it online. The host has manual hotfixes. O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed; the
-local V4+O1 candidate is uncommitted, unarchived, and undeployed. Commands
-below describe the reviewed target state, not behavior already asserted in
-production.
+V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently
+reviewed O2 implementation `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7`
+are archived and pushed but undeployed. O2 remains default-disabled and is
+not authorized for deployment. Commands below describe the reviewed target
+state, not behavior already asserted in production.
 
 ## Source Of Truth
 
