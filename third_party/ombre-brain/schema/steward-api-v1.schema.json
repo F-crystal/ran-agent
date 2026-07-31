@@ -1,0 +1,552 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://ran-agent.local/schema/ombre-steward-api-v1.json",
+  "title": "Ombre Steward API v1 request",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/append_experience"
+    },
+    {
+      "$ref": "#/$defs/append_association"
+    },
+    {
+      "$ref": "#/$defs/append_low_impact_preference_observation"
+    },
+    {
+      "$ref": "#/$defs/append_i_observation_candidate"
+    },
+    {
+      "$ref": "#/$defs/append_correction_or_supersession_observation"
+    },
+    {
+      "$ref": "#/$defs/suppress"
+    },
+    {
+      "$ref": "#/$defs/tombstone"
+    },
+    {
+      "$ref": "#/$defs/total_delete"
+    },
+    {
+      "$ref": "#/$defs/reconcile_operation"
+    },
+    {
+      "$ref": "#/$defs/get_operation_receipt"
+    },
+    {
+      "$ref": "#/$defs/get_target_revision"
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^sha256:[a-f0-9]{64}$"
+    },
+    "target_ref": {
+      "type": "string",
+      "pattern": "^ombre-steward://target/(experience|association|preference-observation|i-observation-candidate|correction-observation)/[a-z0-9][a-z0-9_-]{0,127}$"
+    },
+    "lifecycle_ref": {
+      "type": "string",
+      "pattern": "^compat-lifecycle://event/[A-Za-z0-9_-]{1,128}/revision/(0|[1-9][0-9]*)$"
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id",
+        "attempt_number"
+      ],
+      "properties": {
+        "attempt_id": {
+          "type": "string",
+          "pattern": "^ocq_attempt_[a-f0-9]{24}$"
+        },
+        "attempt_number": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "compat_protocol_id",
+        "source_event_id",
+        "source_revision",
+        "source_event_digest",
+        "candidate_payload_digest",
+        "scope_envelope_digest",
+        "sensitivity",
+        "deletion_domain",
+        "adapter_policy_digest"
+      ],
+      "properties": {
+        "compat_protocol_id": {
+          "const": "ombre-stewarded-growth-compatibility/6"
+        },
+        "source_event_id": {
+          "type": "string",
+          "pattern": "^ocq_src_[a-f0-9]{32}$"
+        },
+        "source_revision": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_event_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidate_payload_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "scope_envelope_digest": {
+          "$ref": "#/$defs/sha256"
+        },
+        "sensitivity": {
+          "enum": [
+            "public",
+            "standard",
+            "personal",
+            "sensitive",
+            "sealed"
+          ]
+        },
+        "deletion_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "adapter_policy_digest": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapter_id",
+        "adapter_version",
+        "issued_at"
+      ],
+      "properties": {
+        "adapter_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "issued_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "envelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "method",
+        "operation_key",
+        "idempotency_key",
+        "attempt",
+        "source",
+        "params",
+        "meta"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "ombre.steward-api/1"
+        },
+        "method": {
+          "type": "string"
+        },
+        "operation_key": {
+          "$ref": "#/$defs/sha256"
+        },
+        "idempotency_key": {
+          "type": "string",
+          "minLength": 74,
+          "maxLength": 96
+        },
+        "attempt": {
+          "$ref": "#/$defs/attempt"
+        },
+        "source": {
+          "$ref": "#/$defs/source"
+        },
+        "params": {
+          "type": "object"
+        },
+        "meta": {
+          "$ref": "#/$defs/meta"
+        }
+      }
+    },
+    "append_experience": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "append_experience"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "body"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "append_association": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "append_association"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "body",
+                "endpoint_refs"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                "endpoint_refs": {
+                  "type": "array",
+                  "minItems": 2,
+                  "maxItems": 2,
+                  "items": {
+                    "$ref": "#/$defs/target_ref"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "append_low_impact_preference_observation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "append_low_impact_preference_observation"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "body",
+                "non_current"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                "non_current": {
+                  "const": true
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "append_i_observation_candidate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "append_i_observation_candidate"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "body",
+                "candidate_only"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                "candidate_only": {
+                  "const": true
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "append_correction_or_supersession_observation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "append_correction_or_supersession_observation"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "body",
+                "supersedes_target_ref"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 8192
+                },
+                "supersedes_target_ref": {
+                  "$ref": "#/$defs/target_ref"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "suppress": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/lifecycle"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "suppress"
+            }
+          }
+        }
+      ]
+    },
+    "tombstone": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/lifecycle"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "tombstone"
+            }
+          }
+        }
+      ]
+    },
+    "lifecycle": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "enum": [
+                "suppress",
+                "tombstone"
+              ]
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target_ref",
+                "lifecycle_ref",
+                "expected_revision"
+              ],
+              "properties": {
+                "target_ref": {
+                  "$ref": "#/$defs/target_ref"
+                },
+                "lifecycle_ref": {
+                  "$ref": "#/$defs/lifecycle_ref"
+                },
+                "expected_revision": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "total_delete": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "total_delete"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target_ref",
+                "lifecycle_ref",
+                "expected_revision",
+                "cascade_manifest_digest",
+                "source_deletion_receipt"
+              ],
+              "properties": {
+                "target_ref": {
+                  "$ref": "#/$defs/target_ref"
+                },
+                "lifecycle_ref": {
+                  "$ref": "#/$defs/lifecycle_ref"
+                },
+                "expected_revision": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "cascade_manifest_digest": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "source_deletion_receipt": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "reconcile_operation": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "reconcile_operation"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "operation_key"
+              ],
+              "properties": {
+                "operation_key": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "get_operation_receipt": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "get_operation_receipt"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "operation_key",
+                "attempt_number"
+              ],
+              "properties": {
+                "operation_key": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "attempt_number": {
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "get_target_revision": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/envelope"
+        },
+        {
+          "properties": {
+            "method": {
+              "const": "get_target_revision"
+            },
+            "params": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "target_ref"
+              ],
+              "properties": {
+                "target_ref": {
+                  "$ref": "#/$defs/target_ref"
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -309,6 +309,9 @@ test('channel hub repairs a sent durable timeline projection after restart witho
   };
   await assert.rejects(outbox.deliver({
     operationKey: 'channel-reply:wechat:0299cc81d2a504b4',
+    platform: 'wechat',
+    conversation_id: message.conversation_id,
+    exchange_id: message.id,
     route: { adapterKey: 'wechat', destinationRef: 'conversation:d5d089fcd7ceb1d0' },
     text: '恢复后的回复',
     attachments: [],

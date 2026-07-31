@@ -33,9 +33,11 @@ test('main injects the shared runtime env into the outbound control server', () 
 test('main creates and recovers one shared durable outbox before wiring live channel entries', () => {
   assert.match(INDEX_SOURCE, /const durableOutbox = createDurableOutbox\(\{ env: runtimeEnv \}\)/);
   assert.match(INDEX_SOURCE, /runtimeEnv\.durableOutbox = durableOutbox/);
-  assert.match(INDEX_SOURCE, /await durableOutbox\.recover\(\)/);
-  assert.match(INDEX_SOURCE, /startFeishuBridge\(\{ env: process\.env, logger: console, outbox: durableOutbox \}\)/);
-  assert.match(INDEX_SOURCE, /startDesktopProxyServer\(\{ env: process\.env, logger: console, outbox: durableOutbox \}\)/);
+  assert.match(INDEX_SOURCE, /await durableOutbox\.recover\(\{\s*onTerminal:/);
+  assert.match(INDEX_SOURCE, /await ombreCompatRuntime\.catchUp\(\)/);
+  assert.match(INDEX_SOURCE, /startFeishuBridge\(\{ env: runtimeEnv, logger: console, outbox: durableOutbox \}\)/);
+  assert.match(INDEX_SOURCE, /startDesktopProxyServer\(\{ env: runtimeEnv, logger: console, outbox: durableOutbox \}\)/);
+  assert.match(INDEX_SOURCE, /await ombreCompatRuntime\.stop\(\)/);
 });
 
 test('main starts the v2 external MCP runtime instead of the legacy activity runner loop', () => {

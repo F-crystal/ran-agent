@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT_DIR="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+CALLER_STATE_DIR="${RAN_AGENT_STATE_DIR:-}"
+CALLER_OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-}"
 
 if [ "${NODE_ENV:-}" != "test" ] || [ "${RAN_AGENT_SKIP_ENV_FILE_LOAD:-}" != "1" ]; then
   for env_file in "$ROOT_DIR/.env.local" "$ROOT_DIR/node_bridge/.env.local"; do
@@ -22,13 +24,36 @@ if [ "$OMBRE_BRAIN_ENABLED" = "0" ] || [ "$OMBRE_BRAIN_ENABLED" = "false" ] || [
   exit 0
 fi
 
-OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$ROOT_DIR/.ran_agent_state/ombre-brain}"
+export RAN_AGENT_STATE_DIR="${CALLER_STATE_DIR:-${RAN_AGENT_STATE_DIR:-/opt/ran_agent/.ran_agent_state}}"
+[[ -z "$CALLER_OMBRE_BRAIN_HOME" ]] || OMBRE_BRAIN_HOME="$CALLER_OMBRE_BRAIN_HOME"
+DERIVED_OMBRE_BRAIN_HOME="$RAN_AGENT_STATE_DIR/ombre-brain"
+if [[ -n "${OMBRE_BRAIN_HOME:-}" && "$OMBRE_BRAIN_HOME" != "$DERIVED_OMBRE_BRAIN_HOME" ]]; then
+  echo "ERROR: Ombre Brain home must derive from RAN_AGENT_STATE_DIR" >&2
+  exit 2
+fi
+OMBRE_BRAIN_HOME="$DERIVED_OMBRE_BRAIN_HOME"
 OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-compose.yml}"
 OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
 OMBRE_BRAIN_RUNNER="${OMBRE_BRAIN_RUNNER:-source}"
 OMBRE_BRAIN_COMMIT="${OMBRE_BRAIN_COMMIT:-0e83d4671ce1629e03ad36bb9160235bf60dbd34}"
 OMBRE_BRAIN_SOURCE_DIR="${OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME/upstream}"
 OMBRE_BRAIN_VENV="${OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME/.venv}"
+OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
+RAN_AGENT_STEWARD_IDENTITY_FILE="${RAN_AGENT_STEWARD_IDENTITY_FILE:-$OMBRE_BRAIN_HOME/steward-identity.v1.json}"
+RAN_AGENT_STEWARD_TOKEN_FILE="${RAN_AGENT_STEWARD_TOKEN_FILE:-$RAN_AGENT_STATE_DIR/ombre-compat/secrets/steward-api-token}"
+for actual_expected in \
+  "$OMBRE_BRAIN_COMPOSE_FILE|$OMBRE_BRAIN_HOME/docker-compose.yml" \
+  "$OMBRE_BRAIN_STATUS_FILE|$OMBRE_BRAIN_HOME/status.json" \
+  "$OMBRE_BRAIN_SOURCE_DIR|$OMBRE_BRAIN_HOME/upstream" \
+  "$OMBRE_BRAIN_VENV|$OMBRE_BRAIN_HOME/.venv" \
+  "$OMBRE_BRAIN_CONFIG_FILE|$OMBRE_BRAIN_HOME/config.yaml" \
+  "$RAN_AGENT_STEWARD_IDENTITY_FILE|$OMBRE_BRAIN_HOME/steward-identity.v1.json" \
+  "$RAN_AGENT_STEWARD_TOKEN_FILE|$RAN_AGENT_STATE_DIR/ombre-compat/secrets/steward-api-token"; do
+  [[ "${actual_expected%%|*}" == "${actual_expected#*|}" ]] || {
+    echo "ERROR: Ombre runtime path must derive from RAN_AGENT_STATE_DIR" >&2
+    exit 2
+  }
+done
 export OMBRE_BRAIN_HOME
 export OMBRE_BRAIN_COMPOSE_FILE
 export OMBRE_BRAIN_STATUS_FILE
@@ -42,7 +67,9 @@ export OMBRE_MCP_REQUIRE_AUTH="${OMBRE_MCP_REQUIRE_AUTH:-false}"
 export OMBRE_BRAIN_PORT="${OMBRE_BRAIN_PORT:-18001}"
 export OMBRE_PORT="$OMBRE_BRAIN_PORT"
 export OMBRE_BUCKETS_DIR="${OMBRE_BUCKETS_DIR:-$ROOT_DIR/vault/ombre}"
-export OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
+export OMBRE_BRAIN_CONFIG_FILE
+export RAN_AGENT_STEWARD_IDENTITY_FILE
+export RAN_AGENT_STEWARD_TOKEN_FILE
 
 if [ "$OMBRE_BRAIN_RUNNER" != "source" ] ||
   [ "$OMBRE_BRAIN_COMMIT" != "0e83d4671ce1629e03ad36bb9160235bf60dbd34" ] ||

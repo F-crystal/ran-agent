@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-07-30)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -17,7 +17,9 @@ ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 local_v4_o1_integration: uncommitted, unarchived, undeployed
 v4_pro: local Lite/Full integration candidate; undeployed
 node_receipt: deferred
-ombre_o2: not started, not authorized
+ombre_o2: local uncommitted candidate on feat/ombre-o2-stewarded-growth; default disabled; compatibility queue is non-authoritative, projection-only, pre-Gate-5; not reviewed, not authorized, not deployed
+ombre_o2_total_delete: typed unsupported
+gate_5: not started, not authorized
 package_b_2_b_3: not started
 ```
 
@@ -31,6 +33,52 @@ The repository candidate keeps every O1 invariant from
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` and changes only the Lite/Full
 model policy to `deepseek-v4-pro` with explicit provider-boundary
 `thinking: {"type":"disabled"}`. It is not a production capability.
+
+## Ombre O2 Local Candidate Boundary
+
+A local Ombre O2 Stewarded Growth compatibility candidate exists uncommitted
+on `feat/ombre-o2-stewarded-growth` under `node_bridge/src/ombreCompat/`.
+Honest status, matching the O2 implementation contract:
+
+- It is a **local, uncommitted candidate pending implementation review**;
+  the v0.7 design contract has passed independent design review. The baseline
+  `c52f8ba9b26338204e8ae189d1f1df5f3800e630` (V4+O1) is archived on main but
+  still undeployed and unverified in production.
+- The compatibility writer is **disabled by default everywhere**
+  (`OMBRE_COMPAT_ENABLED` unset/false). Integration tests use explicit test
+  flags and fake upstreams; the patched-process contract was also exercised
+  locally against the pinned patched source with isolated temporary data. No
+  production Ombre data or external DeepSeek endpoint was contacted.
+- The compatibility queue is **pre-Gate-5, non-authoritative, and
+  projection-only**: it is not a Canon, Journal, Soul, permission, or
+  read-your-write source, and Lite/Full still see only the O1 recall-only
+  read surface.
+- **Gate 5 is neither executed nor authorized**; the Gate 5 pieces present
+  are migration-mapping and sunset dry-run contracts against fixtures only.
+- The local candidate connects the presentation-gated worker pipeline to a
+  patched pinned Ombre Steward API and implements compatibility-owned payload
+  deletion plus Ed25519 receipt verification. These are local test results,
+  not deployment or production claims. `total_delete` remains typed
+  unsupported; O2 contains no Core source-deletion signer or private key.
+- Its release candidate now separates staged source from the canonical live
+  state directory (including a non-default release state root and its derived
+  Ombre home), fixes Node and the patched Ombre runner to the verified
+  `ran-agent:ran-agent` system account and numeric MainPID identity, rotates
+  the owner-only Steward token transactionally, excludes it from retained
+  snapshots/archives, and fails closed with O2 ingress disabled during
+  rollback. This remains an uncommitted local repair pending independent
+  rereview, not server acceptance.
+- Production remains on the pre-O1 shape; V4 Pro + O1 are still not
+  validated or deployed there. Node Receipt stays deferred, and Package
+  B.2/B.3 have not started.
+- Local final evidence: Node 22.22.2 standard full discovery collected 1410
+  tests across 116 files (1409 passed, 0 failed, 1 environment-gated skip);
+  the sole skip, `real patched Ombre process satisfies Steward API v1
+  contract`, is gate-skipped because its controlled-process environment
+  variables are absent from the standard full run, not failed or ordinarily
+  skipped. All 120 tests across the 13 Core files passed. Python 3.10.9 full
+  discovery collected 377 tests across 37 files (377 passed, 0 failed,
+  0 skipped).
 
 ## Mainline
 

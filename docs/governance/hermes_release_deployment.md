@@ -1,14 +1,17 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-07-30)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
 revalidated it online. Production has manual hotfixes. Ombre O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
 local V4+O1 integration candidate is uncommitted, unarchived, and undeployed;
-Node Receipt is deferred, O2 is not started/authorized, and Package B.2/B.3
-have not started.
+Node Receipt is deferred, O2 exists only as a local uncommitted
+default-disabled compatibility candidate whose v0.7 design is approved and
+whose implementation review remains pending (Gate 5 not started or
+authorized; `total_delete` typed unsupported), and Package B.2/B.3 have not
+started.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable
@@ -17,6 +20,10 @@ it archives the SHA to `/opt/ran_agent-release/stages`, gates that stage,
 snapshots the active checkout and runtime, then changes `/opt/ran_agent` only
 inside the transaction. This is smaller and safer than adding a second
 worktree/service-pointer topology to the existing systemd deployment.
+The staged checkout is source-only. Persistent runtime state is resolved once
+as `/opt/ran_agent/.ran_agent_state` (or the explicit
+`RAN_AGENT_RELEASE_STATE_DIR`) and is passed separately to every apply,
+acceptance, diagnostic, and rollback step.
 
 Never run `git pull`, `git switch`, `git checkout`, `git reset`, or `git
 clean` as a pre-deploy action in `/opt/ran_agent`.
@@ -117,6 +124,19 @@ with any legacy SQLite files under `/opt/ran_agent/data`. Their exact active
 paths are captured in each snapshot manifest; do not infer table names or copy
 an individual database while services are running.
 
+O2 uses exactly one service identity: `ran-agent:ran-agent`. The privileged
+apply path creates that system account/group when absent, rejects malformed or
+conflicting existing identities, and installs effective `User=ran-agent` and
+`Group=ran-agent` for Node and the patched Ombre source runner only. Legacy
+runtime-user variables are consistency assertions and cannot override this
+identity. Creation uses the host system-account entry points with the frozen
+home `/opt/ran_agent` and shell `/usr/sbin/nologin`; an existing account must
+have nonzero numeric UID/GID inside the host's explicit
+`SYS_UID_MIN..SYS_UID_MAX` and `SYS_GID_MIN..SYS_GID_MAX` ranges from
+`/etc/login.defs`, with its primary GID equal to the `ran-agent` group GID.
+Missing or ambiguous ranges and any account mismatch are blocking identity
+conflicts. Lite and Full retain their separately configured identity.
+
 ## 2. Automatic Backup And Rollback Point
 
 The apply transaction creates one owner-only snapshot under
@@ -127,8 +147,26 @@ The apply transaction creates one owner-only snapshot under
   services, and Hermes homes/profiles;
 - Lite/Full DeepSeek provider plugin trees and all four installed model configs;
 - service active/enabled state;
-- the complete Node durable state directory after managed services stop;
+- the complete Node durable state directory after managed services stop,
+  excluding `ombre-compat/secrets`;
 - SQLite/WAL/SHM migration files under `/opt/ran_agent/data`.
+
+The transaction resolves one canonical live state directory from
+`RAN_AGENT_RELEASE_STATE_DIR`, defaulting to
+`/opt/ran_agent/.ran_agent_state`. The patched checkout/home and Steward token
+then exist only at `${RAN_AGENT_STATE_DIR}/ombre-brain` and
+`${RAN_AGENT_STATE_DIR}/ombre-compat/secrets/steward-api-token`; an explicit
+`OMBRE_BRAIN_HOME` that disagrees is rejected. The token is a non-symlink
+regular file owned by `ran-agent:ran-agent` with mode `0600`.
+Rotation first disables O2 ingress and stops Node, then saves the old token in
+a root-owned `0700` transaction directory under
+`/run/ran-agent-release-secrets`, atomically installs the new token, restarts
+and authenticates Ombre, restarts Node, and restores ingress. That private
+copy is never placed in a retained snapshot, manifest, archive, or release
+record and is destroyed immediately after acceptance. On failure, ingress
+remains disabled while the old token is restored, Ombre is restarted and
+authenticated, and Node is restarted; cleanup failure retains the existing
+`rollback-incomplete` fail-loud result.
 
 The services manifest additionally records each unit's systemd load state.
 Retired optional units such as `ran-agent-xhs-browse.service` may therefore be
@@ -196,6 +234,18 @@ curl, then removed on success, failure, or signal; it is never printed or put
 in curl argv. `RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS` and
 `RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS` provide bounded operator
 overrides.
+
+Blocking acceptance also checks Node and Ombre effective systemd
+`User`/`Group`, and each live MainPID's effective numeric UID/GID from
+`/proc/<MainPID>/status` against `id -u/-g ran-agent`. It rechecks MainPID and
+numeric identity to reject process exit or drift. Apply startup, final
+acceptance, and rollback recovery use the same verifier. Acceptance also
+checks their common canonical token path,
+the token owner/mode/type contract, authenticated health with the new token,
+rejection of the prior token, absence from the staged checkout and ordinary
+snapshot/archive artifacts, and the root-only in-flight rollback directory.
+Any mismatch keeps O2 disabled and fails the release without weakening O1
+recall-only behavior.
 
 ## 5. Difference Record And Acceptance Evidence
 

@@ -807,8 +807,10 @@ test('apply script skips reset-failed for systemd units that are not loaded yet'
 test('start_ombre_brain_service.sh supports source runner without docker', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-source-runner-'));
   const rootDir = join(dir, 'repo');
-  const sourceDir = join(dir, 'upstream');
-  const venvDir = join(dir, 'venv');
+  const stateDir = join(dir, 'custom-live-state');
+  const homeDir = join(stateDir, 'ombre-brain');
+  const sourceDir = join(homeDir, 'upstream');
+  const venvDir = join(homeDir, '.venv');
   const logFile = join(dir, 'python.log');
   mkdirSync(join(rootDir, 'scripts'), { recursive: true });
   mkdirSync(join(sourceDir, 'src'), { recursive: true });
@@ -829,6 +831,7 @@ test('start_ombre_brain_service.sh supports source runner without docker', () =>
     env: {
       ...process.env,
       RAN_AGENT_REPO_ROOT: rootDir,
+      RAN_AGENT_STATE_DIR: stateDir,
       OMBRE_BRAIN_RUNNER: 'source',
       OMBRE_BRAIN_SOURCE_DIR: sourceDir,
       OMBRE_BRAIN_VENV: venvDir,
@@ -845,6 +848,7 @@ test('start_ombre_brain_service.sh supports source runner without docker', () =>
 test('diagnose-ombre-memory.sh keeps full config path separate from lite env HERMES_HOME', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-diagnose-paths-'));
   const rootDir = join(dir, 'repo');
+  const stateDir = join(dir, 'custom-live-state');
   const fullHome = join(dir, 'full-home');
   const liteHome = join(dir, 'lite-home');
   mkdirSync(rootDir, { recursive: true });
@@ -854,7 +858,7 @@ test('diagnose-ombre-memory.sh keeps full config path separate from lite env HER
   writeFileSync(join(liteHome, '.env'), `HERMES_HOME=${liteHome}\n`);
   writeFileSync(join(fullHome, 'config.yaml'), 'platform_toolsets:\n  cli: []\nmcp_servers: {}\n');
   writeFileSync(join(liteHome, 'config.yaml'), 'platform_toolsets:\n  cli: []\nmcp_servers: {}\n');
-  const statusFile = join(rootDir, '.ran_agent_state', 'ombre-brain', 'status.json');
+  const statusFile = join(stateDir, 'ombre-brain', 'status.json');
   mkdirSync(dirname(statusFile), { recursive: true });
   writeFileSync(statusFile, JSON.stringify({
     schema_version: 1,
@@ -870,6 +874,7 @@ test('diagnose-ombre-memory.sh keeps full config path separate from lite env HER
     env: {
       ...process.env,
       RAN_AGENT_REPO_ROOT: rootDir,
+      RAN_AGENT_STATE_DIR: stateDir,
       HERMES_HOME: fullHome,
       HERMES_LITE_HOME: liteHome,
       OMBRE_BRAIN_ENABLED: 'false',
@@ -890,7 +895,8 @@ test('diagnose-ombre-memory.sh keeps full config path separate from lite env HER
 test('prepare-ombre-brain.sh rejects Docker without creating a parallel O1 runtime', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-prepare-'));
   const rootDir = join(dir, 'repo');
-  const homeDir = join(dir, 'ombre-home');
+  const stateDir = join(dir, 'custom-live-state');
+  const homeDir = join(stateDir, 'ombre-brain');
   const bucketsDir = join(dir, 'vault', 'ombre');
   mkdirSync(rootDir, { recursive: true });
 
@@ -900,6 +906,7 @@ test('prepare-ombre-brain.sh rejects Docker without creating a parallel O1 runti
       env: {
         ...process.env,
         RAN_AGENT_REPO_ROOT: rootDir,
+        RAN_AGENT_STATE_DIR: stateDir,
         OMBRE_BRAIN_RUNNER: 'docker',
         OMBRE_BRAIN_HOME: homeDir,
         OMBRE_BUCKETS_DIR: bucketsDir,
@@ -916,7 +923,8 @@ test('prepare-ombre-brain.sh rejects Docker without creating a parallel O1 runti
 test('prepare-ombre-brain.sh fails closed when timed-out source cannot prove the pinned commit', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-update-timeout-'));
   const rootDir = join(dir, 'repo');
-  const homeDir = join(dir, 'ombre-home');
+  const stateDir = join(dir, 'custom-live-state');
+  const homeDir = join(stateDir, 'ombre-brain');
   const sourceDir = join(homeDir, 'upstream');
   const binDir = join(dir, 'bin');
   const timeoutLog = join(dir, 'timeout.log');
@@ -942,6 +950,7 @@ test('prepare-ombre-brain.sh fails closed when timed-out source cannot prove the
       ...process.env,
       PATH: `${binDir}:${process.env.PATH}`,
       RAN_AGENT_REPO_ROOT: rootDir,
+      RAN_AGENT_STATE_DIR: stateDir,
       OMBRE_BRAIN_HOME: homeDir,
       OMBRE_BRAIN_SOURCE_DIR: sourceDir,
       OMBRE_BRAIN_VENV: join(homeDir, '.venv'),
@@ -957,7 +966,8 @@ test('prepare-ombre-brain.sh fails closed when timed-out source cannot prove the
 test('prepare-ombre-brain.sh skips pip install when requirements are unchanged', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-requirements-cache-'));
   const rootDir = join(dir, 'repo');
-  const homeDir = join(dir, 'ombre-home');
+  const stateDir = join(dir, 'custom-live-state');
+  const homeDir = join(stateDir, 'ombre-brain');
   const sourceDir = join(homeDir, 'upstream');
   const venvDir = join(homeDir, '.venv');
   const pipLog = join(dir, 'pip.log');
@@ -977,6 +987,9 @@ test('prepare-ombre-brain.sh skips pip install when requirements are unchanged',
     'exit 0',
   ].join('\n'));
   chmodSync(join(venvDir, 'bin', 'python'), 0o755);
+  const patchPython = join(dir, 'ombre-patch-python');
+  writeFileSync(patchPython, '#!/usr/bin/env bash\nexit 0\n');
+  chmodSync(patchPython, 0o755);
   const gitShim = join(dir, 'git');
   writeFileSync(gitShim, [
     '#!/usr/bin/env bash',
@@ -993,10 +1006,12 @@ test('prepare-ombre-brain.sh skips pip install when requirements are unchanged',
     ...process.env,
     PATH: `${dir}:${process.env.PATH}`,
     RAN_AGENT_REPO_ROOT: rootDir,
+    RAN_AGENT_STATE_DIR: stateDir,
     OMBRE_BRAIN_UPDATE_SOURCE: 'false',
     OMBRE_BRAIN_HOME: homeDir,
     OMBRE_BRAIN_SOURCE_DIR: sourceDir,
     OMBRE_BRAIN_VENV: venvDir,
+    RAN_AGENT_OMBRE_PATCH_PYTHON_BIN: patchPython,
   };
   execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
     cwd: new URL('../..', import.meta.url).pathname,

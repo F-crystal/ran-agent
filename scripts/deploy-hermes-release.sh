@@ -36,27 +36,36 @@ else
   NODE_BIN="$("${SUDO[@]}" env RAN_AGENT_SYSTEMCTL_BIN="${RAN_AGENT_SYSTEMCTL_BIN:-}" bash "$SCRIPT_ROOT/scripts/resolve-hermes-service-node.sh")" || fail node_service_path_unavailable
 fi
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-$REPO_ROOT/.venv/bin/python}"
-STATE_DIR="${RAN_AGENT_RELEASE_STATE_DIR:-$REPO_ROOT/.ran_agent_state}"
+CANONICAL_LIVE_STATE_DIR="${RAN_AGENT_RELEASE_STATE_DIR:-/opt/ran_agent/.ran_agent_state}"
+STATE_DIR="$CANONICAL_LIVE_STATE_DIR"
 # Kept outside STATE_DIR: snapshots must never archive their own transaction.
 ARTIFACT_ROOT="${RAN_AGENT_RELEASE_ARTIFACT_ROOT:-/opt/ran_agent-release}"
+SECRET_ROLLBACK_ROOT="${RAN_AGENT_RELEASE_SECRET_ROLLBACK_ROOT:-/run/ran-agent-release-secrets}"
 SNAPSHOT_ROOT="$ARTIFACT_ROOT/snapshots"
 SUCCESSFUL_SNAPSHOT_RETENTION=2
 CURRENT_PRODUCTION_POINTER="$SNAPSHOT_ROOT/current-production.json"
 STAGE_ROOT="$ARTIFACT_ROOT/stages"
 ARCHIVE_ROOT="$ARTIFACT_ROOT/archives"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
+OMBRE_INGRESS_DROPIN="$SYSTEMD_DIR/ran-agent-node.service.d/98-ombre-steward-rotation.conf"
 FULL_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="${HERMES_LITE_HOME:-$FULL_HOME/lite}"
 FULL_PROFILE="${HERMES_FULL_PROFILE:-ran-assistant}"
 LITE_PROFILE="${HERMES_LITE_PROFILE:-ran-assistant-lite}"
 CORE_RUNTIME_UNITS=(ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service)
 ALL_RUNTIME_UNITS=("${CORE_RUNTIME_UNITS[@]}" ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-xhs-browse.service ran-agent-xhs-public-sidecar.service)
+SERVICE_TRANSACTION_UNITS=(ran-agent-python.service ran-agent-ombre-brain.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-recall.service ran-agent-xhs-browse.service ran-agent-xhs-public-sidecar.service)
 SNAPSHOT_DIR=''
 STAGE_DIR=''
 CANDIDATE_ARCHIVE=''
 PRODUCTION_HEAD=''
 DELTA_FILE=''
 TRANSACTION_STARTED=0
+SECRET_ROLLBACK_DIR=''
+STEWARD_TOKEN_HAD_PRIOR=0
+STEWARD_TOKEN_RESTORED=1
+STEWARD_ROTATION_ACTIVE=0
+OMBRE_INGRESS_BLOCKED=0
 RETENTION_PRODUCTION_TRANSACTION=''
 DEPLOY_MODEL='deepseek-v4-pro'
 
@@ -92,11 +101,18 @@ inside_path() {
 }
 
 require_artifact_layout() {
-  [[ "$ARTIFACT_ROOT" == /* && "$STATE_DIR" == /* ]] || fail artifact_root_absolute_required
+  [[ "$ARTIFACT_ROOT" == /* && "$STATE_DIR" == /* && "$SECRET_ROLLBACK_ROOT" == /* ]] || fail artifact_root_absolute_required
   ! inside_path "$ARTIFACT_ROOT" "$REPO_ROOT" || fail artifact_root_inside_repo
   ! inside_path "$ARTIFACT_ROOT" "$STATE_DIR" || fail artifact_root_inside_state_dir
   ! inside_path "$STATE_DIR" "$ARTIFACT_ROOT" || fail state_dir_inside_artifact_root
+  ! inside_path "$SECRET_ROLLBACK_ROOT" "$REPO_ROOT" || fail secret_rollback_inside_repo
+  ! inside_path "$SECRET_ROLLBACK_ROOT" "$STATE_DIR" || fail secret_rollback_inside_state_dir
+  ! inside_path "$SECRET_ROLLBACK_ROOT" "$ARTIFACT_ROOT" || fail secret_rollback_inside_artifact_root
   "${SUDO[@]}" install -d -m 700 "$SNAPSHOT_ROOT" "$STAGE_ROOT" "$ARCHIVE_ROOT" || fail artifact_root_unavailable
+  "${SUDO[@]}" install -d -o root -g root -m 700 "$SECRET_ROLLBACK_ROOT" || fail secret_rollback_root_unavailable
+  if "${SUDO[@]}" find "$SECRET_ROLLBACK_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
+    fail secret_rollback_residue
+  fi
 }
 
 # systemctl cat is the authority for the active service's EnvironmentFile
@@ -186,6 +202,9 @@ require_apply_prerequisites() {
   [[ -z "$(git -C "$REPO_ROOT" ls-files --others --exclude-standard)" ]] || fail worktree_untracked
   require_node_sqlite
   require_python_runtime
+  CANONICAL_LIVE_STATE_DIR="$("${SUDO[@]}" sh -c 'cd "$1" && pwd -P' sh "$CANONICAL_LIVE_STATE_DIR")" ||
+    fail state_dir_unavailable
+  STATE_DIR="$CANONICAL_LIVE_STATE_DIR"
   require_artifact_layout
   require_service_environment
   require_atomic_state
@@ -317,7 +336,7 @@ snapshot_runtime_state() {
     for unit in "${ALL_RUNTIME_UNITS[@]}"; do service_env_files "$unit"; done | sort -u
   )
   for path in "${paths[@]}"; do snapshot_path "$path" "$index"; index=$((index + 1)); done
-  for unit in "${ALL_RUNTIME_UNITS[@]}"; do snapshot_service_state "$unit"; done
+  for unit in "${SERVICE_TRANSACTION_UNITS[@]}"; do snapshot_service_state "$unit"; done
   write_transaction_state snapshot-created false
 }
 
@@ -471,9 +490,20 @@ quiesce_runtime_services() {
   done < <("${SUDO[@]}" cat "$SNAPSHOT_DIR/services")
 }
 
-# Node uses JSON/JSONL durable files under state; snapshot the complete state
-# only after services stop, so the SQLite and outbox snapshots agree.
-snapshot_node_durable_state() { snapshot_path "$STATE_DIR" 900; }
+# Node uses JSON/JSONL durable files under state. Steward secrets are never
+# copied into the ordinary retained snapshot.
+snapshot_node_durable_state() {
+  local target="$SNAPSHOT_DIR/files/900"
+  printf 'present\t900\t%s\n' "$STATE_DIR" | "${SUDO[@]}" tee -a "$SNAPSHOT_DIR/manifest" >/dev/null
+  "${SUDO[@]}" mkdir -p "$target"
+  "${SUDO[@]}" tar -C "$STATE_DIR" \
+    --exclude='./ombre-compat/secrets' \
+    --exclude='./ombre-compat/secrets/*' \
+    -cpf - . | "${SUDO[@]}" tar -C "$target" -xpf -
+  if "${SUDO[@]}" find "$target" -path '*/ombre-compat/secrets*' -print -quit | grep -q .; then
+    fail steward_secret_entered_snapshot
+  fi
+}
 
 snapshot_state_migrations() {
   local path index=1000
@@ -486,6 +516,74 @@ snapshot_state_migrations() {
     "${SUDO[@]}" cp -a -- "$path" "$SNAPSHOT_DIR/files/$index"
     index=$((index + 1))
   done < <("${SUDO[@]}" find "$REPO_ROOT/data" -type f \( -name '*.sqlite' -o -name '*.sqlite-*' -o -name '*.db' -o -name '*.db-*' \) -print0)
+}
+
+block_ombre_ingress() {
+  "${SUDO[@]}" install -d -m 755 "$(dirname "$OMBRE_INGRESS_DROPIN")"
+  printf '%s\n' '[Service]' 'Environment=OMBRE_COMPAT_ENABLED=false' |
+    "${SUDO[@]}" tee "$OMBRE_INGRESS_DROPIN" >/dev/null
+  "${SUDO[@]}" chmod 644 "$OMBRE_INGRESS_DROPIN"
+  "${SUDO[@]}" systemctl daemon-reload
+  "${SUDO[@]}" systemctl stop ran-agent-node.service
+  OMBRE_INGRESS_BLOCKED=1
+}
+
+restore_ombre_ingress() {
+  "${SUDO[@]}" rm -f -- "$OMBRE_INGRESS_DROPIN"
+  "${SUDO[@]}" systemctl daemon-reload
+  "${SUDO[@]}" systemctl restart ran-agent-node.service
+  "${SUDO[@]}" systemctl is-active --quiet ran-agent-node.service
+  OMBRE_INGRESS_BLOCKED=0
+}
+
+verify_restored_steward_service() {
+  local unit="$1" pid_before pid_after token_path process_env
+  "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" \
+    --verify-process "$unit" || return 1
+  pid_before="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" || return 1
+  [[ "$pid_before" =~ ^[1-9][0-9]*$ ]] || return 1
+  process_env="$("${SUDO[@]}" cat "/proc/$pid_before/environ" 2>/dev/null | tr '\0' '\n')" || return 1
+  pid_after="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" || return 1
+  [[ "$pid_after" == "$pid_before" ]] || return 1
+  token_path="$STATE_DIR/ombre-compat/secrets/steward-api-token"
+  grep -qxF "RAN_AGENT_STEWARD_TOKEN_FILE=$token_path" <<<"$process_env"
+}
+
+backup_steward_token() {
+  SECRET_ROLLBACK_DIR="$("${SUDO[@]}" mktemp -d "$SECRET_ROLLBACK_ROOT/steward-token.XXXXXX")" ||
+    fail secret_rollback_create_failed
+  "${SUDO[@]}" chmod 700 "$SECRET_ROLLBACK_DIR"
+  STEWARD_TOKEN_HAD_PRIOR=0
+  if "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/install-ombre-steward-token.py" \
+    --state-dir "$STATE_DIR" --backup-to "$SECRET_ROLLBACK_DIR"; then
+    STEWARD_TOKEN_HAD_PRIOR=1
+  else
+    local code=$?
+    [[ "$code" -eq 2 ]] || fail steward_token_backup_failed
+  fi
+  STEWARD_TOKEN_RESTORED=0
+}
+
+restore_steward_token() {
+  if [[ -z "$SECRET_ROLLBACK_DIR" ]]; then
+    STEWARD_TOKEN_RESTORED=1
+    return 0
+  fi
+  if [[ "$STEWARD_TOKEN_HAD_PRIOR" -eq 1 ]]; then
+    "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/install-ombre-steward-token.py" \
+      --state-dir "$STATE_DIR" --restore-from "$SECRET_ROLLBACK_DIR" || return 1
+  else
+    "${SUDO[@]}" rm -f -- "$STATE_DIR/ombre-compat/secrets/steward-api-token" || return 1
+  fi
+  STEWARD_TOKEN_RESTORED=1
+}
+
+destroy_secret_rollback() {
+  [[ -n "$SECRET_ROLLBACK_DIR" ]] || return 0
+  "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/install-ombre-steward-token.py" \
+    --state-dir "$STATE_DIR" --destroy-rollback "$SECRET_ROLLBACK_DIR" || return 1
+  SECRET_ROLLBACK_DIR=''
+  ! "${SUDO[@]}" find "$SECRET_ROLLBACK_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
 }
 
 activate_candidate_checkout() {
@@ -543,6 +641,10 @@ restore_state_migrations() {
 
 restore_service_state() {
   [[ -n "$SNAPSHOT_DIR" ]] && "${SUDO[@]}" test -f "$SNAPSHOT_DIR/services" || return 1
+  [[ "$STEWARD_TOKEN_RESTORED" -eq 1 ]] || {
+    printf 'deploy-hermes-release: rollback-stage=service result=blocked reason=steward-token-not-restored\n' >&2
+    return 1
+  }
   local failed=0
   "${SUDO[@]}" systemctl daemon-reload || failed=1
   local unit active enabled snapshot_load_state current_load_state unit_failed
@@ -573,6 +675,18 @@ restore_service_state() {
       if [[ "$unit_failed" -eq 0 ]]; then
         if [[ "$active" == active ]]; then
           "${SUDO[@]}" systemctl restart "$unit" || unit_failed=1
+          if [[ "$unit_failed" -eq 0 && "$STEWARD_ROTATION_ACTIVE" -eq 1 && "$STEWARD_TOKEN_HAD_PRIOR" -eq 1 && "$unit" == ran-agent-ombre-brain.service ]]; then
+            verify_restored_steward_service "$unit" || unit_failed=1
+          fi
+          if [[ "$unit_failed" -eq 0 && "$STEWARD_ROTATION_ACTIVE" -eq 1 && "$STEWARD_TOKEN_HAD_PRIOR" -eq 1 && "$unit" == ran-agent-ombre-brain.service ]]; then
+            "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/verify-ombre-steward-runtime.py" \
+              --state-dir "$STATE_DIR" \
+              --identity-file "$STATE_DIR/ombre-brain/steward-identity.v1.json" >/dev/null ||
+              unit_failed=1
+          fi
+          if [[ "$unit_failed" -eq 0 && "$STEWARD_ROTATION_ACTIVE" -eq 1 && "$STEWARD_TOKEN_HAD_PRIOR" -eq 1 && "$unit" == ran-agent-node.service ]]; then
+            verify_restored_steward_service "$unit" || unit_failed=1
+          fi
         else
           "${SUDO[@]}" systemctl stop "$unit" || unit_failed=1
         fi
@@ -593,7 +707,7 @@ rollback_transaction() {
   if [[ "$TRANSACTION_STARTED" -eq 1 ]]; then
     write_transaction_state rollback-in-progress false || rollback_failed=1
     local stage
-    for stage in quiesce_runtime_services restore_code_revision restore_runtime_files restore_state_migrations restore_service_state; do
+    for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress restore_service_state; do
       if "$stage"; then
         printf 'deploy-hermes-release: rollback-stage=%s result=ok\n' "$stage" >&2
       else
@@ -601,6 +715,12 @@ rollback_transaction() {
         rollback_failed=1
       fi
     done
+    if destroy_secret_rollback; then
+      printf 'deploy-hermes-release: rollback-stage=secret-cleanup result=ok\n' >&2
+    else
+      printf 'deploy-hermes-release: rollback-stage=secret-cleanup result=failed\n' >&2
+      rollback_failed=1
+    fi
     if record_protected_capability_evidence rollback; then
       printf 'deploy-hermes-release: rollback-stage=evidence result=ok\n' >&2
     else
@@ -633,8 +753,15 @@ load_rollback_snapshot() {
 
 explicit_rollback() {
   [[ "$REPO_ROOT" == "$SERVER_ROOT" ]] || fail server_root_required
+  CANONICAL_LIVE_STATE_DIR="$("${SUDO[@]}" sh -c 'cd "$1" && pwd -P' sh "$CANONICAL_LIVE_STATE_DIR")" ||
+    fail state_dir_unavailable
+  STATE_DIR="$CANONICAL_LIVE_STATE_DIR"
   require_artifact_layout
   load_rollback_snapshot "$2"
+  STAGE_DIR="$REPO_ROOT"
+  "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --verify-account ||
+    fail steward_identity_conflict
+  backup_steward_token
   TRANSACTION_STARTED=1
   trap 'exit 130' INT
   trap 'exit 143' TERM
@@ -657,13 +784,21 @@ record_protected_capability_evidence before || fail protected_capability_evidenc
 trap 'rollback_transaction $?' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
+"${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --ensure-account
+block_ombre_ingress
 quiesce_runtime_services
 snapshot_node_durable_state
 snapshot_state_migrations
+backup_steward_token
+STEWARD_ROTATION_ACTIVE=1
 activate_candidate_checkout
-"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
-"${SUDO[@]}" env RAN_AGENT_EXPECTED_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
+"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_DEPLOY_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_ROTATE_STEWARD_TOKEN=1 RAN_AGENT_STEWARD_ROTATION_QUIESCED=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
+restore_ombre_ingress
+OLD_STEWARD_TOKEN_FILE=''
+[[ "$STEWARD_TOKEN_HAD_PRIOR" -ne 1 ]] || OLD_STEWARD_TOKEN_FILE="$SECRET_ROLLBACK_DIR/steward-api-token.rollback"
+"${SUDO[@]}" env RAN_AGENT_EXPECTED_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_RELEASE_SNAPSHOT_DIR="$SNAPSHOT_DIR" RAN_AGENT_RELEASE_SECRET_ROLLBACK_ROOT="$SECRET_ROLLBACK_ROOT" RAN_AGENT_RELEASE_SECRET_ROLLBACK_DIR="$SECRET_ROLLBACK_DIR" RAN_AGENT_STEWARD_OLD_TOKEN_FILE="$OLD_STEWARD_TOKEN_FILE" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
 record_protected_capability_evidence after || fail protected_capability_evidence_after
+destroy_secret_rollback || fail secret_rollback_cleanup_failed
 mark_snapshot_accepted
 TRANSACTION_STARTED=0
 trap - EXIT INT TERM

@@ -21,6 +21,7 @@ import { callExternalMcpTool } from './externalMcp/executor.mjs';
 import { createExternalMcpAutonomyRuntime } from './externalMcp/runtime.mjs';
 import { createReplyBackend } from './replyBackend.mjs';
 import { createDurableOutbox } from './durableOutbox.mjs';
+import { createOmbreCompatRuntime } from './ombreCompat/runtime.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
@@ -815,7 +816,17 @@ async function main() {
   };
   const durableOutbox = createDurableOutbox({ env: runtimeEnv });
   runtimeEnv.durableOutbox = durableOutbox;
-  await durableOutbox.recover();
+  const ombreCompatRuntime = await createOmbreCompatRuntime({
+    env: runtimeEnv,
+    outbox: durableOutbox,
+  });
+  runtimeEnv.ombreCompatRuntime = ombreCompatRuntime;
+  await durableOutbox.recover({
+    onTerminal: ombreCompatRuntime.active
+      ? (receipt) => ombreCompatRuntime.observeTerminal(receipt)
+      : undefined,
+  });
+  await ombreCompatRuntime.catchUp();
   const externalMcpRuntime = createExternalMcpAutonomyRuntime({
     env: runtimeEnv,
     logger: console,
@@ -840,8 +851,8 @@ async function main() {
   });
   const outboundConfig = getOutboundServerConfig(process.env);
   const outboundServer = createOutboundServer({ bot: proactiveBot, logger: console, env: runtimeEnv });
-  const feishuBridge = startFeishuBridge({ env: process.env, logger: console, outbox: durableOutbox });
-  const desktopProxyServer = startDesktopProxyServer({ env: process.env, logger: console, outbox: durableOutbox });
+  const feishuBridge = startFeishuBridge({ env: runtimeEnv, logger: console, outbox: durableOutbox });
+  const desktopProxyServer = startDesktopProxyServer({ env: runtimeEnv, logger: console, outbox: durableOutbox });
   const coReadingWebServer = startCoReadingWebServer({ env: process.env, logger: console });
   await externalMcpRuntime.start();
 
@@ -861,6 +872,7 @@ async function main() {
     await new Promise((resolve) => coReadingWebServer?.close ? coReadingWebServer.close(resolve) : resolve());
     await new Promise((resolve) => desktopProxyServer?.close ? desktopProxyServer.close(resolve) : resolve());
     await new Promise((resolve) => outboundServer.close(resolve));
+    await ombreCompatRuntime.stop();
   }
 }
 

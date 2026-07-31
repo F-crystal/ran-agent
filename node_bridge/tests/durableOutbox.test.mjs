@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import test from 'node:test';
 
@@ -341,4 +342,40 @@ test('projection and restart faults replay only projections with the same outbox
 test('uses the supported Node 22.13+ runtime floor for this suite', () => {
   const [major, minor] = process.versions.node.split('.').map(Number);
   assert.equal(major > 22 || (major === 22 && minor >= 13), true);
+});
+
+test('legacy O1 terminal items are adopted with immutable terminal observation without changing their content digest', async (t) => {
+  const env = createIsolatedTestEnv(t);
+  const outbox = durableOutbox.createDurableOutbox({ env });
+  const input = request('operation:legacy:sent');
+  const sent = await outbox.deliver(input, { send: async () => sentResult() });
+  const state = JSON.parse(fs.readFileSync(outbox.target, 'utf8'));
+  const item = state.items[0];
+  delete item.platform;
+  delete item.conversation_id;
+  delete item.exchange_id;
+  delete item.delivery_terminal_revision;
+  delete item.delivery_terminal_receipt_id;
+  delete item.deliveryTerminalReceipts;
+  const legacyContent = {
+    operationKey: item.operationKey,
+    jobResultKey: item.jobResultKey,
+    route: item.route,
+    text: item.text,
+    attachments: item.attachments,
+    idempotent: item.idempotent,
+    maxAttempts: item.maxAttempts,
+  };
+  item.contentDigest = `sha256:${createHash('sha256').update(JSON.stringify(legacyContent)).digest('hex')}`;
+  fs.writeFileSync(outbox.target, `${JSON.stringify(state)}\n`);
+
+  const restarted = durableOutbox.createDurableOutbox({ env });
+  const adopted = restarted.get(sent.outboxId);
+  assert.equal(adopted.platform, 'wechat');
+  assert.equal(adopted.conversation_id, input.route.destinationRef);
+  assert.equal(adopted.exchange_id, input.operationKey);
+  assert.equal(adopted.delivery_terminal_revision, 1);
+  assert.match(adopted.delivery_terminal_receipt_id, /^dtr_[a-f0-9]{32}$/);
+  assert.equal(restarted.getTerminalReceipt(adopted.delivery_terminal_receipt_id).delivery, 'sent');
+  assert.equal(restarted.reserve(input).contentDigest, item.contentDigest);
 });

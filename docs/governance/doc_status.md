@@ -1,14 +1,19 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-07-30)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
 revalidated it online. Production has manual hotfixes. Ombre O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
 local V4+O1 integration candidate is uncommitted, unarchived, and undeployed;
-Node Receipt is deferred and its failed source is not reintroduced; O2 is not
-started/authorized; Package B.2/B.3 have not started.
+Node Receipt is deferred and its failed source is not reintroduced. Ombre O2
+exists only as a local, uncommitted, default-disabled, non-authoritative
+compatibility candidate on `feat/ombre-o2-stewarded-growth`; it is not
+authorized or deployed, its v0.7 design is approved while implementation
+review remains pending, and Gate 5 is neither executed nor authorized. Its
+`total_delete` operation remains typed unsupported.
+Package B.2/B.3 have not started.
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under

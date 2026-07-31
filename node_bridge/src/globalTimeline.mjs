@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { gzipSync } from 'node:zlib';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import {
   appendJsonLine,
   quarantineCorruptState,
@@ -52,10 +52,6 @@ export function appendTurn(turn = {}) {
   const existingRecords = fs.existsSync(timelinePath)
     ? readTimelineRecords({ timelinePath, limit: Number.MAX_SAFE_INTEGER })
     : [];
-  if (eventKey) {
-    const existing = existingRecords.find((item) => item.event_key === eventKey);
-    if (existing) return existing;
-  }
   const record = {
     id: String(turn.id || `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
     global_user_id: String(turn.global_user_id || 'user:ran'),
@@ -75,6 +71,16 @@ export function appendTurn(turn = {}) {
   if (turn.source) record.source = sanitizeTimelineSource(turn.source);
   const tags = normalizeTags(turn.tags, text);
   if (tags.length > 0) record.tags = tags;
+  if (eventKey) {
+    const matches = existingRecords.filter((item) => item.event_key === eventKey);
+    if (matches.length > 1) throw timelineError('RAN_AGENT_TIMELINE_EVENT_KEY_CONFLICT', 'timeline event key is not unique');
+    if (matches.length === 1) {
+      if (timelineEventContentDigest(matches[0]) !== timelineEventContentDigest(record)) {
+        throw timelineError('RAN_AGENT_TIMELINE_EVENT_KEY_CONFLICT', 'timeline event key content conflicts');
+      }
+      return matches[0];
+    }
+  }
 
   appendJsonLine(timelinePath, record, { validate: isTimelineRecord });
   if (config.compactEnabled) {
@@ -92,6 +98,28 @@ export function appendTurn(turn = {}) {
     }
   }
   return record;
+}
+
+export function resolveTimelineEventByKey({ timelinePath, eventKey }) {
+  const key = sanitizeTimelineEventKey(eventKey);
+  if (!key) throw timelineError('COMPAT_PAYLOAD_UNRESOLVABLE', 'timeline event key is invalid');
+  const matches = readTimelineRecords({ timelinePath, limit: Number.MAX_SAFE_INTEGER })
+    .filter((record) => record.event_key === key);
+  if (matches.length === 0) throw timelineError('COMPAT_PAYLOAD_UNRESOLVABLE', 'timeline event key was not found');
+  if (matches.length > 1) throw timelineError('RAN_AGENT_TIMELINE_EVENT_KEY_CONFLICT', 'timeline event key is not unique');
+  return Object.freeze({
+    record: Object.freeze(structuredClone(matches[0])),
+    timeline_record_digest: timelineRecordDigest(matches[0]),
+  });
+}
+
+export function timelineRecordDigest(record) {
+  return `sha256:${createHash('sha256').update(canonicalStringify(record), 'utf8').digest('hex')}`;
+}
+
+function timelineEventContentDigest(record) {
+  const { id: _id, created_at: _createdAt, ...content } = record;
+  return timelineRecordDigest(content);
 }
 
 export function compactTimeline({
@@ -490,4 +518,18 @@ function clipText(value, maxChars) {
 function normalizePlatform(platform) {
   const value = String(platform || '').trim().toLowerCase();
   return ['wechat', 'feishu', 'desktop'].includes(value) ? value : 'wechat';
+}
+
+function canonicalStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function timelineError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
 }

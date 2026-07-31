@@ -11,18 +11,27 @@ HERMES_BIN="${HERMES_BIN:-hermes}"
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-/opt/ran_agent/.venv/bin/python}"
 FULL_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="${HERMES_LITE_HOME:-$FULL_HOME/lite}"
-RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
-RUNTIME_GROUP="${RAN_AGENT_RUNTIME_GROUP:-$RUNTIME_USER}"
+RUNTIME_USER="${RAN_AGENT_HERMES_RUNTIME_USER:-ubuntu}"
+RUNTIME_GROUP="${RAN_AGENT_HERMES_RUNTIME_GROUP:-$RUNTIME_USER}"
+STEWARD_RUNTIME_USER=ran-agent
+STEWARD_RUNTIME_GROUP=ran-agent
 NODE_ENV_FILE="${RAN_AGENT_NODE_ENV_FILE:-/opt/ran_agent/.env.local}"
 NODE_BRIDGE_ENV_FILE="${RAN_AGENT_NODE_BRIDGE_ENV_FILE:-/opt/ran_agent/node_bridge/.env.local}"
 HERMES_GLOBAL_ENV_FILE="${HERMES_GLOBAL_ENV_FILE:-/home/ubuntu/.hermes/.env}"
 SYSTEMD_DIR="${SYSTEMD_DIR:-/etc/systemd/system}"
-RUNTIME_STATE_DIR="${RAN_AGENT_DEPLOY_STATE_DIR:-/opt/ran_agent/.ran_agent_state}"
+RUNTIME_STATE_DIR="${RAN_AGENT_DEPLOY_STATE_DIR:-${RAN_AGENT_STATE_DIR:-/opt/ran_agent/.ran_agent_state}}"
+if [[ -n "${RAN_AGENT_DEPLOY_STATE_DIR:-}" && -n "${RAN_AGENT_STATE_DIR:-}" &&
+  "$RAN_AGENT_DEPLOY_STATE_DIR" != "$RAN_AGENT_STATE_DIR" ]]; then
+  echo "ERROR: canonical live state directory mismatch" >&2
+  exit 1
+fi
 RUNTIME_DEBUG_DIR="${RAN_AGENT_DEPLOY_DEBUG_DIR:-/opt/ran_agent/debug}"
 LITE_SERVICE="$SYSTEMD_DIR/ran-agent-hermes.service"
 FULL_SERVICE="$SYSTEMD_DIR/ran-agent-hermes-full.service"
 OMBRE_SERVICE="$SYSTEMD_DIR/ran-agent-ombre-brain.service"
 OMBRE_RECALL_SERVICE="$SYSTEMD_DIR/ran-agent-ombre-recall.service"
+NODE_STEWARD_DROPIN_DIR="$SYSTEMD_DIR/ran-agent-node.service.d"
+NODE_STEWARD_DROPIN="$NODE_STEWARD_DROPIN_DIR/99-ombre-steward-identity.conf"
 XHS_BROWSE_SERVICE="$SYSTEMD_DIR/ran-agent-xhs-browse.service"
 XHS_PUBLIC_SIDECAR_SERVICE="$SYSTEMD_DIR/ran-agent-xhs-public-sidecar.service"
 LITE_DROPIN_DIR="$SYSTEMD_DIR/ran-agent-hermes.service.d"
@@ -125,7 +134,12 @@ OMBRE_BRAIN_MCP_ENABLED_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_MCP_ENABLED:-tru
 OMBRE_BRAIN_RUNNER_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_RUNNER:-source}"
 OMBRE_BRAIN_COMMIT_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_COMMIT:-0e83d4671ce1629e03ad36bb9160235bf60dbd34}"
 OMBRE_BRAIN_REPO_URL_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Brain}"
-OMBRE_BRAIN_HOME_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME:-/opt/ran_agent/.ran_agent_state/ombre-brain}"
+OMBRE_BRAIN_HOME_DEFAULT="$RUNTIME_STATE_DIR/ombre-brain"
+if [[ -n "${RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME:-}" &&
+  "$RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME" != "$OMBRE_BRAIN_HOME_DEFAULT" ]]; then
+  echo "ERROR: Ombre Brain home must derive from the canonical live state directory" >&2
+  exit 1
+fi
 OMBRE_BRAIN_SOURCE_DIR_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME_DEFAULT/upstream}"
 OMBRE_BRAIN_VENV_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME_DEFAULT/.venv}"
 OMBRE_BUCKETS_DIR_DEFAULT="${RAN_AGENT_DEPLOY_OMBRE_BUCKETS_DIR:-/opt/ran_agent/vault/ombre}"
@@ -175,6 +189,20 @@ require_command() {
   fi
 }
 
+validate_legacy_runtime_identity_overrides() {
+  for value in "${RAN_AGENT_RUNTIME_USER:-ran-agent}" "${RAN_AGENT_RUNTIME_GROUP:-ran-agent}"; do
+    [ "$value" = ran-agent ] ||
+      { echo "ERROR: legacy runtime identity override must equal ran-agent" >&2; return 1; }
+  done
+}
+
+ensure_steward_runtime_identity() {
+  validate_legacy_runtime_identity_overrides
+  local verifier="$REPO_ROOT/scripts/verify-ran-agent-runtime-identity.sh"
+  [ -x "$verifier" ] || { echo "ERROR: Steward identity verifier unavailable" >&2; return 1; }
+  "${SUDO[@]}" bash "$verifier" --ensure-account
+}
+
 resolve_runtime_identity() {
   [[ "$RUNTIME_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
     { echo "ERROR: invalid Hermes runtime user" >&2; return 1; }
@@ -189,6 +217,22 @@ resolve_runtime_identity() {
     { echo "ERROR: cannot resolve Hermes runtime group name for $RUNTIME_USER" >&2; return 1; }
   [ "$primary_group" = "$RUNTIME_GROUP" ] ||
     { echo "ERROR: Hermes runtime group must be the runtime user's primary group" >&2; return 1; }
+}
+
+verify_steward_service_identity() {
+  local unit="$1" require_process="${2:-0}" mode=--verify-unit
+  [ "$require_process" = 1 ] && mode=--verify-process
+  "${SUDO[@]}" bash "$REPO_ROOT/scripts/verify-ran-agent-runtime-identity.sh" "$mode" "$unit"
+}
+
+verify_steward_runtime_health() {
+  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 && -n "${RAN_AGENT_STEWARD_VERIFY_TEST_COMMAND:-}" ]]; then
+    "$RAN_AGENT_STEWARD_VERIFY_TEST_COMMAND"
+    return
+  fi
+  "${SUDO[@]}" "$PYTHON_BIN" "$REPO_ROOT/scripts/verify-ombre-steward-runtime.py" \
+    --state-dir "$RUNTIME_STATE_DIR" \
+    --identity-file "$RUNTIME_STATE_DIR/ombre-brain/steward-identity.v1.json" >/dev/null
 }
 
 run_as_runtime_identity() {
@@ -1281,6 +1325,16 @@ WantedBy=multi-user.target
 EOF
 }
 
+write_node_steward_identity_dropin() {
+  write_file 0644 "$NODE_STEWARD_DROPIN" <<EOF
+[Service]
+User=$STEWARD_RUNTIME_USER
+Group=$STEWARD_RUNTIME_GROUP
+Environment=RAN_AGENT_STATE_DIR=$RUNTIME_STATE_DIR
+Environment=RAN_AGENT_STEWARD_TOKEN_FILE=$RUNTIME_STATE_DIR/ombre-compat/secrets/steward-api-token
+EOF
+}
+
 write_ombre_brain_unit() {
   write_file 0644 "$OMBRE_SERVICE" <<EOF
 [Unit]
@@ -1290,8 +1344,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$RUNTIME_USER
-Group=$RUNTIME_GROUP
+User=$STEWARD_RUNTIME_USER
+Group=$STEWARD_RUNTIME_GROUP
 WorkingDirectory=/opt/ran_agent
 EnvironmentFile=-$NODE_ENV_FILE
 EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
@@ -1305,6 +1359,10 @@ Environment=OMBRE_BIND_HOST=127.0.0.1
 Environment=OMBRE_MCP_REQUIRE_AUTH=false
 Environment=OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
 Environment=OMBRE_BRAIN_HEALTH_URL=http://127.0.0.1:18001/health
+Environment=RAN_AGENT_STATE_DIR=$RUNTIME_STATE_DIR
+Environment=OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME_DEFAULT
+Environment=RAN_AGENT_STEWARD_IDENTITY_FILE=$RUNTIME_STATE_DIR/ombre-brain/steward-identity.v1.json
+Environment=RAN_AGENT_STEWARD_TOKEN_FILE=$RUNTIME_STATE_DIR/ombre-compat/secrets/steward-api-token
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec bash scripts/start_ombre_brain_service.sh'
 Restart=on-failure
 RestartSec=10
@@ -1601,6 +1659,8 @@ prepare_ombre_runtime() {
     OMBRE_BRAIN_COMPOSE_FILE="$(effective_env_value OMBRE_BRAIN_COMPOSE_FILE "$OMBRE_BRAIN_COMPOSE_FILE_DEFAULT")" \
     OMBRE_BRAIN_CONFIG_FILE="$(effective_env_value OMBRE_BRAIN_CONFIG_FILE "$OMBRE_BRAIN_CONFIG_FILE_DEFAULT")" \
     OMBRE_BRAIN_STATUS_FILE="$(effective_env_value OMBRE_BRAIN_STATUS_FILE "$OMBRE_BRAIN_STATUS_FILE_DEFAULT")" \
+    RAN_AGENT_STATE_DIR="$RUNTIME_STATE_DIR" \
+    RAN_AGENT_ROTATE_STEWARD_TOKEN="${RAN_AGENT_ROTATE_STEWARD_TOKEN:-0}" \
     bash "$REPO_ROOT/scripts/prepare-ombre-brain.sh" 2>&1; then
     log "Ombre Brain runtime prepared"
   else
@@ -1612,12 +1672,16 @@ prepare_ombre_runtime() {
 restart_services() {
   log "reloading systemd and restarting services"
   "${SUDO[@]}" systemctl daemon-reload
+  verify_steward_service_identity ran-agent-node.service
+  verify_steward_service_identity ran-agent-ombre-brain.service
   sleep 1
   if [ "$PRESERVE_RUNTIME_SHAPE" = "1" ]; then
     reset_failed_if_loaded ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service
     prepare_ombre_runtime
     start_o1_dependency ran-agent-ombre-brain.service
     wait_for_ombre_health
+    verify_steward_service_identity ran-agent-ombre-brain.service 1
+    verify_steward_runtime_health
     start_o1_dependency ran-agent-ombre-recall.service
     wait_for_ombre_recall_health
     "${SUDO[@]}" systemctl restart ran-agent-python.service
@@ -1629,6 +1693,7 @@ restart_services() {
     wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service
     run_gateway_provider_canary full "$FULL_PORT" "$FULL_PROFILE" ran-agent-hermes-full.service
     "${SUDO[@]}" systemctl restart ran-agent-node.service
+    verify_steward_service_identity ran-agent-node.service 1
     return 0
   fi
   reset_failed_if_loaded ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-xhs-public-sidecar.service
@@ -1637,6 +1702,8 @@ restart_services() {
     if ombre_runner_available; then
       start_o1_dependency ran-agent-ombre-brain.service
       wait_for_ombre_health
+      verify_steward_service_identity ran-agent-ombre-brain.service 1
+      verify_steward_runtime_health
       start_o1_dependency ran-agent-ombre-recall.service
       wait_for_ombre_recall_health
     else
@@ -1667,6 +1734,7 @@ restart_services() {
   wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service
   run_gateway_provider_canary full "$FULL_PORT" "$FULL_PROFILE" ran-agent-hermes-full.service
   "${SUDO[@]}" systemctl restart ran-agent-node.service
+  verify_steward_service_identity ran-agent-node.service 1
 }
 
 print_failure_context() {
@@ -2125,6 +2193,7 @@ main() {
   if [ "$PRESERVE_RUNTIME_SHAPE" = "1" ]; then
     require_command systemctl
     require_command curl
+    ensure_steward_runtime_identity
     resolve_runtime_identity
     validate_ombre_network_contract
     install_o1_identity_and_recall_contract
@@ -2134,6 +2203,7 @@ main() {
     verify_o1_identity_and_recall_contract
     verify_model_policy
     refuse_masked_o1_units
+    write_node_steward_identity_dropin
     write_ombre_brain_unit
     write_ombre_recall_unit
     restart_services
@@ -2151,6 +2221,7 @@ main() {
   require_command ss
   require_command openssl
   require_command curl
+  ensure_steward_runtime_identity
   resolve_runtime_identity
   validate_ombre_network_contract
   refuse_masked_o1_units
@@ -2183,6 +2254,7 @@ main() {
     write_full_runtime_config
   fi
   write_systemd_units
+  write_node_steward_identity_dropin
   if [ "$PRESERVE_RUNTIME_SHAPE" != "1" ]; then
     cleanup_account_backed_xhs_runtime
   fi

@@ -22,7 +22,7 @@ export function createDurableOutbox(options = {}) {
     const state = load();
     const existing = state.items.find((item) => item.operationKey === normalized.operationKey);
     if (existing) {
-      if (existing.contentDigest !== normalized.contentDigest) {
+      if (!reservationMatches(existing, normalized)) {
         throw outboxError('OUTBOX_OPERATION_CONFLICT', 'operation already has a different outbox payload');
       }
       return snapshot(existing);
@@ -39,6 +39,9 @@ export function createDurableOutbox(options = {}) {
       ...normalized,
       delivery: 'reserved',
       revision: 0,
+      delivery_terminal_revision: 0,
+      delivery_terminal_receipt_id: null,
+      deliveryTerminalReceipts: [],
       attemptCount: 0,
       timelineProjection: 'pending',
       backendProjection: 'pending',
@@ -67,6 +70,7 @@ export function createDurableOutbox(options = {}) {
       item.delivery = classifyDelivery(adapterResult);
       item.adapterResult = adapterResult;
       item.deliveryCommittedAt = currentDate(now).toISOString();
+      appendTerminalReceipt(item);
     });
   }
 
@@ -128,6 +132,7 @@ export function createDurableOutbox(options = {}) {
     const result = await options.send(adapterView(item));
     await inject(options, 'after_adapter_return', item);
     item = completeSend(item.outboxId, { expectedRevision: item.revision, result });
+    if (typeof options.onTerminal === 'function') await options.onTerminal(currentTerminal(item));
     if (item.delivery === 'sent') {
       await inject(options, 'after_sent_commit', item);
       await projectItem(item.outboxId, options);
@@ -138,12 +143,14 @@ export function createDurableOutbox(options = {}) {
   async function recover(options = {}) {
     for (const listed of list()) {
       if (listed.delivery !== 'sending') continue;
-      mutate(listed.outboxId, listed.revision, (item) => {
+      const recovered = mutate(listed.outboxId, listed.revision, (item) => {
         item.delivery = 'ambiguous';
         item.adapterResult = unknownAdapterResult(item);
         item.deliveryCommittedAt = currentDate(now).toISOString();
         item.recoveredAt = item.deliveryCommittedAt;
+        appendTerminalReceipt(item);
       });
+      if (typeof options.onTerminal === 'function') await options.onTerminal(currentTerminal(recovered));
     }
     await inject(options, 'after_restart_recovery');
     await projectPending(options);
@@ -157,6 +164,14 @@ export function createDurableOutbox(options = {}) {
 
   function list() {
     return load().items.map(snapshot);
+  }
+
+  function getTerminalReceipt(receiptId) {
+    for (const item of load().items) {
+      const receipt = item.deliveryTerminalReceipts.find((entry) => entry.delivery_terminal_receipt_id === receiptId);
+      if (receipt) return snapshot(receipt);
+    }
+    return null;
   }
 
   async function projectItem(outboxId, options) {
@@ -188,11 +203,13 @@ export function createDurableOutbox(options = {}) {
   }
 
   function load() {
-    return readJsonState(target, {
-      validate: validateState,
+    const state = readJsonState(target, {
+      validate: validateCompatibleState,
       missingValue: { schemaVersion: SCHEMA_VERSION, items: [] },
       critical: true,
     });
+    if (upgradeLegacyState(state)) save(state);
+    return state;
   }
 
   function save(state) {
@@ -211,7 +228,9 @@ export function createDurableOutbox(options = {}) {
     recover,
     get,
     list,
+    getTerminalReceipt,
   });
+
 }
 
 function normalizeReservation(input) {
@@ -228,7 +247,28 @@ function normalizeReservation(input) {
   if (!text && attachments.length === 0) throw outboxError('OUTBOX_CONTENT_INVALID', 'outbox content is empty');
   const idempotent = input.idempotent === true;
   const maxAttempts = normalizeMaxAttempts(input.maxAttempts, idempotent);
-  const content = { operationKey, jobResultKey, route, text, attachments, idempotent, maxAttempts };
+  const platform = boundedIdentifier(
+    input.platform || (['wechat', 'feishu', 'desktop'].includes(route.adapterKey) ? route.adapterKey : 'desktop'),
+    'platform',
+    80,
+  );
+  if (!['wechat', 'feishu', 'desktop'].includes(platform)) {
+    throw outboxError('OUTBOX_CONTENT_INVALID', 'platform is invalid');
+  }
+  const conversation_id = boundedIdentifier(input.conversation_id || route.destinationRef, 'conversation_id', 512);
+  const exchange_id = boundedIdentifier(input.exchange_id || operationKey, 'exchange_id', 512);
+  const content = {
+    operationKey,
+    jobResultKey,
+    platform,
+    conversation_id,
+    exchange_id,
+    route,
+    text,
+    attachments,
+    idempotent,
+    maxAttempts,
+  };
   return {
     outboxId: `outbox_${hash(operationKey).slice(0, 32)}`,
     ...content,
@@ -350,8 +390,14 @@ function validateState(value) {
       if (item.jobResultKey && jobs.has(item.jobResultKey)) return false;
       if (item.jobResultKey) jobs.add(item.jobResultKey);
       const normalized = normalizeReservation(item);
-      if (normalized.outboxId !== item.outboxId || normalized.contentDigest !== item.contentDigest) return false;
+      if (normalized.outboxId !== item.outboxId
+        || (normalized.contentDigest !== item.contentDigest && legacyContentDigest(item) !== item.contentDigest)) return false;
       if (!Number.isInteger(item.revision) || item.revision < 0) return false;
+      if (!Number.isInteger(item.delivery_terminal_revision) || item.delivery_terminal_revision < 0) return false;
+      if (!Array.isArray(item.deliveryTerminalReceipts)
+        || item.deliveryTerminalReceipts.length !== item.delivery_terminal_revision) return false;
+      if (item.delivery_terminal_receipt_id !== null
+        && !item.deliveryTerminalReceipts.some((entry) => entry.delivery_terminal_receipt_id === item.delivery_terminal_receipt_id)) return false;
       if (!Number.isInteger(item.attemptCount) || item.attemptCount < 0 || item.attemptCount > item.maxAttempts) return false;
       if (!['pending', 'committed'].includes(item.timelineProjection)) return false;
       if (!['pending', 'committed'].includes(item.backendProjection)) return false;
@@ -359,6 +405,10 @@ function validateState(value) {
       if (['sent', 'failed', 'ambiguous'].includes(item.delivery)) {
         normalizeAdapterResult(item, item.adapterResult);
         if (!Number.isFinite(Date.parse(item.deliveryCommittedAt))) return false;
+        const receipt = currentTerminal(item);
+        if (!receipt || receipt.delivery !== item.delivery || receipt.content_digest !== item.contentDigest) return false;
+        const { receipt_digest: digest, ...material } = receipt;
+        if (digest !== `sha256:${hash(canonicalStringify(material))}`) return false;
       }
       if (item.delivery !== 'sent' && (item.timelineProjection !== 'pending' || item.backendProjection !== 'pending')) return false;
     } catch {
@@ -366,6 +416,109 @@ function validateState(value) {
     }
   }
   return true;
+}
+
+function validateCompatibleState(value) {
+  try {
+    const copy = structuredClone(value);
+    upgradeLegacyState(copy);
+    return validateState(copy);
+  } catch {
+    return false;
+  }
+}
+
+function upgradeLegacyState(state) {
+  let changed = false;
+  for (const item of state.items || []) {
+    if (!item.platform) {
+      item.platform = ['wechat', 'feishu', 'desktop'].includes(item.route?.adapterKey)
+        ? item.route.adapterKey : 'desktop';
+      changed = true;
+    }
+    if (!item.conversation_id) {
+      item.conversation_id = item.route?.destinationRef;
+      changed = true;
+    }
+    if (!item.exchange_id) {
+      item.exchange_id = item.operationKey;
+      changed = true;
+    }
+    if (!Number.isInteger(item.delivery_terminal_revision)) {
+      item.delivery_terminal_revision = 0;
+      changed = true;
+    }
+    if (!Array.isArray(item.deliveryTerminalReceipts)) {
+      item.deliveryTerminalReceipts = [];
+      changed = true;
+    }
+    if (!Object.hasOwn(item, 'delivery_terminal_receipt_id')) {
+      item.delivery_terminal_receipt_id = null;
+      changed = true;
+    }
+    if (['sent', 'failed', 'ambiguous'].includes(item.delivery)
+      && item.deliveryTerminalReceipts.length === 0) {
+      appendTerminalReceipt(item);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function appendTerminalReceipt(item) {
+  item.delivery_terminal_revision += 1;
+  const material = {
+    schema_version: 'durable-outbox.delivery-terminal-receipt/1',
+    outbox_id: item.outboxId,
+    operation_key: item.operationKey,
+    platform: item.platform,
+    conversation_id: item.conversation_id,
+    exchange_id: item.exchange_id,
+    delivery_terminal_revision: item.delivery_terminal_revision,
+    delivery: item.delivery,
+    text_status: item.adapterResult.textStatus,
+    attachment_states: item.adapterResult.attachments,
+    known_failure: item.adapterResult.knownFailure,
+    adapter_receipt_ref: item.adapterResult.adapterReceiptRef,
+    delivery_committed_at: item.deliveryCommittedAt,
+    content_digest: item.contentDigest,
+    route: item.route,
+  };
+  const delivery_terminal_receipt_id = `dtr_${hash(canonicalStringify({
+    outbox_id: item.outboxId,
+    delivery_terminal_revision: item.delivery_terminal_revision,
+    delivery: item.delivery,
+    content_digest: item.contentDigest,
+  })).slice(0, 32)}`;
+  const receipt = {
+    ...material,
+    delivery_terminal_receipt_id,
+  };
+  receipt.receipt_digest = `sha256:${hash(canonicalStringify(receipt))}`;
+  item.deliveryTerminalReceipts.push(receipt);
+  item.delivery_terminal_receipt_id = delivery_terminal_receipt_id;
+}
+
+function legacyContentDigest(item) {
+  const content = {
+    operationKey: item.operationKey,
+    jobResultKey: item.jobResultKey,
+    route: item.route,
+    text: item.text,
+    attachments: item.attachments,
+    idempotent: item.idempotent,
+    maxAttempts: item.maxAttempts,
+  };
+  return `sha256:${hash(JSON.stringify(content))}`;
+}
+
+function reservationMatches(existing, normalized) {
+  return existing.contentDigest === normalized.contentDigest
+    || (existing.contentDigest === legacyContentDigest(existing)
+      && existing.platform === normalized.platform
+      && existing.conversation_id === normalized.conversation_id
+      && existing.exchange_id === normalized.exchange_id
+      && legacyContentDigest(normalized) === existing.contentDigest);
 }
 
 async function inject(options, stage, item) {
@@ -400,6 +553,21 @@ function boundedReference(value) {
 
 function hash(value) {
   return createHash('sha256').update(String(value), 'utf8').digest('hex');
+}
+
+function currentTerminal(item) {
+  if (!item?.delivery_terminal_receipt_id || !Array.isArray(item.deliveryTerminalReceipts)) return null;
+  return item.deliveryTerminalReceipts.find(
+    (entry) => entry.delivery_terminal_receipt_id === item.delivery_terminal_receipt_id,
+  ) || null;
+}
+
+function canonicalStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalStringify(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function currentDate(now) {

@@ -4,6 +4,8 @@
 set -euo pipefail
 
 ROOT_DIR="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+CALLER_STATE_DIR="${RAN_AGENT_STATE_DIR:-}"
+CALLER_OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-}"
 HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="${HERMES_LITE_HOME:-$HERMES_HOME/lite}"
 FULL_HOME="$HERMES_HOME"
@@ -20,12 +22,19 @@ done
 HERMES_HOME="$FULL_HOME"
 HERMES_LITE_HOME="$LITE_HOME"
 
+RAN_AGENT_STATE_DIR="${CALLER_STATE_DIR:-${RAN_AGENT_STATE_DIR:-/opt/ran_agent/.ran_agent_state}}"
+[[ -z "$CALLER_OMBRE_BRAIN_HOME" ]] || OMBRE_BRAIN_HOME="$CALLER_OMBRE_BRAIN_HOME"
+DERIVED_OMBRE_BRAIN_HOME="$RAN_AGENT_STATE_DIR/ombre-brain"
+if [[ -n "${OMBRE_BRAIN_HOME:-}" && "$OMBRE_BRAIN_HOME" != "$DERIVED_OMBRE_BRAIN_HOME" ]]; then
+  echo "ERROR: Ombre Brain home must derive from RAN_AGENT_STATE_DIR" >&2
+  exit 1
+fi
 OMBRE_BRAIN_REPO_URL="${OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Brain}"
 OMBRE_BRAIN_ENABLED="${OMBRE_BRAIN_ENABLED:-true}"
 OMBRE_BRAIN_MCP_ENABLED="${OMBRE_BRAIN_MCP_ENABLED:-true}"
 OMBRE_BRAIN_RUNNER="${OMBRE_BRAIN_RUNNER:-source}"
 OMBRE_BRAIN_COMMIT="${OMBRE_BRAIN_COMMIT:-0e83d4671ce1629e03ad36bb9160235bf60dbd34}"
-OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$ROOT_DIR/.ran_agent_state/ombre-brain}"
+OMBRE_BRAIN_HOME="$DERIVED_OMBRE_BRAIN_HOME"
 OMBRE_BRAIN_SOURCE_DIR="${OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME/upstream}"
 OMBRE_BRAIN_VENV="${OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME/.venv}"
 OMBRE_BUCKETS_DIR="${OMBRE_BUCKETS_DIR:-$ROOT_DIR/vault/ombre}"
@@ -40,7 +49,22 @@ OMBRE_RECALL_HEALTH_URL="${OMBRE_RECALL_HEALTH_URL:-http://127.0.0.1:$OMBRE_RECA
 OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-compose.yml}"
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
 OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
+OMBRE_STEWARD_IDENTITY_FILE="${RAN_AGENT_STEWARD_IDENTITY_FILE:-$OMBRE_BRAIN_HOME/steward-identity.v1.json}"
+OMBRE_STEWARD_ENDPOINT="${RAN_AGENT_STEWARD_ENDPOINT:-http://127.0.0.1:$OMBRE_BRAIN_PORT/internal/ran-agent/steward/v1}"
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
+
+for actual_expected in \
+  "$OMBRE_BRAIN_SOURCE_DIR|$OMBRE_BRAIN_HOME/upstream" \
+  "$OMBRE_BRAIN_VENV|$OMBRE_BRAIN_HOME/.venv" \
+  "$OMBRE_BRAIN_COMPOSE_FILE|$OMBRE_BRAIN_HOME/docker-compose.yml" \
+  "$OMBRE_BRAIN_CONFIG_FILE|$OMBRE_BRAIN_HOME/config.yaml" \
+  "$OMBRE_BRAIN_STATUS_FILE|$OMBRE_BRAIN_HOME/status.json" \
+  "$OMBRE_STEWARD_IDENTITY_FILE|$OMBRE_BRAIN_HOME/steward-identity.v1.json"; do
+  [[ "${actual_expected%%|*}" == "${actual_expected#*|}" ]] || {
+    echo "ERROR: Ombre runtime path must derive from RAN_AGENT_STATE_DIR" >&2
+    exit 1
+  }
+done
 
 if [ "$OMBRE_BRAIN_ENABLED" != "false" ] && [ "$OMBRE_BRAIN_ENABLED" != "0" ]; then
   env \
@@ -188,6 +212,14 @@ if command -v systemctl >/dev/null 2>&1; then
       echo "$unit ownership: INVALID"
     fi
   done
+  for unit in ran-agent-node.service ran-agent-ombre-brain.service; do
+    if bash "$ROOT_DIR/scripts/verify-ran-agent-runtime-identity.sh" \
+      --verify-process "$unit" >/dev/null 2>&1; then
+      echo "$unit steward identity: VALID"
+    else
+      echo "$unit steward identity: INVALID"
+    fi
+  done
 else
   echo "systemctl: NOT FOUND"
 fi
@@ -202,6 +234,18 @@ else
   sed 's/[[:cntrl:]]//g' /tmp/ombre-brain-health.err.$$ 2>/dev/null || true
 fi
 rm -f /tmp/ombre-brain-health.$$ /tmp/ombre-brain-health.err.$$
+
+echo ""
+echo "=== Patched Steward identity/auth ==="
+if id ran-agent >/dev/null 2>&1 &&
+  "$PYTHON_BIN" "$ROOT_DIR/scripts/verify-ombre-steward-runtime.py" \
+    --state-dir "$RAN_AGENT_STATE_DIR" \
+    --identity-file "$OMBRE_STEWARD_IDENTITY_FILE" \
+    --endpoint "$OMBRE_STEWARD_ENDPOINT" >/dev/null 2>&1; then
+  echo "steward runtime contract: VALID"
+else
+  echo "steward runtime contract: INVALID_OR_UNAVAILABLE"
+fi
 
 echo ""
 echo "=== Recall adapter health ==="

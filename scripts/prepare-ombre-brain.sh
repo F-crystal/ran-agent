@@ -6,9 +6,15 @@ set -euo pipefail
 
 ROOT_DIR="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
+RAN_AGENT_STATE_DIR="${RAN_AGENT_STATE_DIR:-/opt/ran_agent/.ran_agent_state}"
+DERIVED_OMBRE_BRAIN_HOME="$RAN_AGENT_STATE_DIR/ombre-brain"
+if [[ -n "${OMBRE_BRAIN_HOME:-}" && "$OMBRE_BRAIN_HOME" != "$DERIVED_OMBRE_BRAIN_HOME" ]]; then
+  echo "ERROR: Ombre Brain home must derive from RAN_AGENT_STATE_DIR" >&2
+  exit 1
+fi
+OMBRE_BRAIN_HOME="$DERIVED_OMBRE_BRAIN_HOME"
 OMBRE_BRAIN_REPO_URL="${OMBRE_BRAIN_REPO_URL:-https://github.com/P0luz/Ombre-Brain}"
 OMBRE_BRAIN_SOURCE_COMMIT="${OMBRE_BRAIN_COMMIT:-${OMBRE_BRAIN_SOURCE_COMMIT:-0e83d4671ce1629e03ad36bb9160235bf60dbd34}}"
-OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$ROOT_DIR/.ran_agent_state/ombre-brain}"
 OMBRE_BRAIN_RUNNER="${OMBRE_BRAIN_RUNNER:-source}"
 OMBRE_BRAIN_SOURCE_DIR="${OMBRE_BRAIN_SOURCE_DIR:-$OMBRE_BRAIN_HOME/upstream}"
 OMBRE_BRAIN_VENV="${OMBRE_BRAIN_VENV:-$OMBRE_BRAIN_HOME/.venv}"
@@ -20,9 +26,32 @@ OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-c
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
 OMBRE_BRAIN_ENV_EXAMPLE_FILE="${OMBRE_BRAIN_ENV_EXAMPLE_FILE:-$OMBRE_BRAIN_HOME/.env.example}"
 OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
+OMBRE_STEWARD_IDENTITY_FILE="${RAN_AGENT_STEWARD_IDENTITY_FILE:-$OMBRE_BRAIN_HOME/steward-identity.v1.json}"
+OMBRE_STEWARD_ROTATE="${RAN_AGENT_ROTATE_STEWARD_TOKEN:-0}"
+OMBRE_PATCH_PYTHON_BIN="${RAN_AGENT_OMBRE_PATCH_PYTHON_BIN:-${RAN_AGENT_PYTHON_BIN:-python3}}"
 OMBRE_BRAIN_PULL_IMAGE="${OMBRE_BRAIN_PULL_IMAGE:-false}"
 OMBRE_BRAIN_UPDATE_SOURCE="${OMBRE_BRAIN_UPDATE_SOURCE:-true}"
 OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS="${OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS:-300}"
+
+require_derived_path() {
+  [[ "$2" == "$3" ]] || {
+    echo "ERROR: $1 must derive from RAN_AGENT_STATE_DIR" >&2
+    exit 1
+  }
+}
+
+require_derived_path OMBRE_BRAIN_SOURCE_DIR "$OMBRE_BRAIN_SOURCE_DIR" "$OMBRE_BRAIN_HOME/upstream"
+require_derived_path OMBRE_BRAIN_VENV "$OMBRE_BRAIN_VENV" "$OMBRE_BRAIN_HOME/.venv"
+require_derived_path OMBRE_BRAIN_COMPOSE_FILE "$OMBRE_BRAIN_COMPOSE_FILE" "$OMBRE_BRAIN_HOME/docker-compose.yml"
+require_derived_path OMBRE_BRAIN_CONFIG_FILE "$OMBRE_BRAIN_CONFIG_FILE" "$OMBRE_BRAIN_HOME/config.yaml"
+require_derived_path OMBRE_BRAIN_ENV_EXAMPLE_FILE "$OMBRE_BRAIN_ENV_EXAMPLE_FILE" "$OMBRE_BRAIN_HOME/.env.example"
+require_derived_path OMBRE_BRAIN_STATUS_FILE "$OMBRE_BRAIN_STATUS_FILE" "$OMBRE_BRAIN_HOME/status.json"
+require_derived_path RAN_AGENT_STEWARD_IDENTITY_FILE "$OMBRE_STEWARD_IDENTITY_FILE" "$OMBRE_BRAIN_HOME/steward-identity.v1.json"
+
+if [ "$OMBRE_STEWARD_ROTATE" = "1" ] && [ "${RAN_AGENT_STEWARD_ROTATION_QUIESCED:-0}" != "1" ]; then
+  echo "ERROR: Steward token rotation requires a quiesced release transaction" >&2
+  exit 1
+fi
 
 FORCE_CONFIG=0
 FORCE_COMPOSE=0
@@ -271,6 +300,21 @@ prepare_source_runner() {
     echo "ERROR: Ombre Brain source is not the fixed reviewed commit" >&2
     exit 1
   fi
+  if ! "$OMBRE_PATCH_PYTHON_BIN" "$ROOT_DIR/scripts/apply_ombre_steward_patch.py" \
+    --checkout "$OMBRE_BRAIN_SOURCE_DIR" \
+    --identity-output "$OMBRE_STEWARD_IDENTITY_FILE" \
+    --verify >/dev/null 2>&1; then
+    if [ -n "$(git -C "$OMBRE_BRAIN_SOURCE_DIR" status --porcelain)" ]; then
+      echo "ERROR: patched Ombre effective tree identity mismatch" >&2
+      exit 1
+    fi
+    "$OMBRE_PATCH_PYTHON_BIN" "$ROOT_DIR/scripts/apply_ombre_steward_patch.py" \
+      --checkout "$OMBRE_BRAIN_SOURCE_DIR" \
+      --identity-output "$OMBRE_STEWARD_IDENTITY_FILE" >/dev/null
+  fi
+  local -a token_args=(--state-dir "$RAN_AGENT_STATE_DIR")
+  if [ "$OMBRE_STEWARD_ROTATE" = "1" ]; then token_args+=(--rotate); fi
+  "$OMBRE_PATCH_PYTHON_BIN" "$ROOT_DIR/scripts/install-ombre-steward-token.py" "${token_args[@]}"
 
   if [ ! -e "$OMBRE_BRAIN_SOURCE_DIR/config.yaml" ]; then
     ln -s "$OMBRE_BRAIN_CONFIG_FILE" "$OMBRE_BRAIN_SOURCE_DIR/config.yaml" 2>/dev/null || cp "$OMBRE_BRAIN_CONFIG_FILE" "$OMBRE_BRAIN_SOURCE_DIR/config.yaml"
@@ -279,7 +323,7 @@ prepare_source_runner() {
 
   if [ ! -x "$OMBRE_BRAIN_VENV/bin/python" ]; then
     log "creating source venv $OMBRE_BRAIN_VENV"
-    python3 -m venv "$OMBRE_BRAIN_VENV"
+    "$OMBRE_PATCH_PYTHON_BIN" -m venv "$OMBRE_BRAIN_VENV"
   fi
 
   install_source_requirements_if_changed

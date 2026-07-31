@@ -1,0 +1,56 @@
+{
+  "schema_version": "ran-agent-ombre-patch-manifest/1",
+  "base_repository": "https://github.com/P0luz/Ombre-Brain.git",
+  "base_upstream_commit": "0e83d4671ce1629e03ad36bb9160235bf60dbd34",
+  "apply_algorithm": {
+    "version": "ran-agent-deterministic-overlay/1",
+    "order": [
+      "git apply --check and git apply patches in manifest order",
+      "copy overlay files in manifest order with declared mode"
+    ],
+    "requires_clean_base": true
+  },
+  "identity_algorithm": {
+    "version": "ran-agent-effective-source-tree/1",
+    "roots": [
+      "src",
+      "VERSION"
+    ],
+    "exclude_directories": [
+      ".git",
+      ".venv",
+      "__pycache__",
+      "buckets",
+      "logs"
+    ],
+    "exclude_files": [
+      "config.yaml"
+    ],
+    "exclude_suffixes": [
+      ".pyc"
+    ],
+    "record": [
+      "relative_path",
+      "sha256:file-bytes"
+    ],
+    "sort": "relative_path UTF-8 raw bytes ascending",
+    "digest": "sha256:canonical-json(records)"
+  },
+  "patches": [
+    {
+      "path": "0001-register-steward-api.patch",
+      "sha256": "sha256:f4068e31c3c0d720d4e413be68a1019c10d73445117b3471ee40d132a9b26e86"
+    }
+  ],
+  "overlay_files": [
+    {
+      "path": "src/web/steward_api.py",
+      "sha256": "sha256:542a86bb4c711aead181496a933e691c1933e58dbec933134d14fdaced677c12",
+      "mode": 420
+    }
+  ],
+  "api_schema": {
+    "path": "schema/steward-api-v1.schema.json",
+    "sha256": "sha256:6900bbe2ef44c161ddb75050693d9d854e37e0e42b559d572b9f7518fbe1d429"
+  }
+}
