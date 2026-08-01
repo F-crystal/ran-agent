@@ -10,7 +10,7 @@ import test from 'node:test';
 
 const root = new URL('../..', import.meta.url).pathname;
 const nodeBin = process.execPath;
-const pythonBin = process.env.RAN_AGENT_PYTHON_BIN || '/Users/fengran/anaconda3/bin/python3.10';
+const pythonBin = process.env.RAN_AGENT_PYTHON_BIN || realpathSync(execFileSync('/bin/sh', ['-c', 'command -v python3'], { encoding: 'utf8' }).trim());
 const runtimeUser = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
 const runtimeGroup = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
 
@@ -1614,6 +1614,7 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   const source = readFileSync(join(root, 'scripts', 'hermes-release-gate.sh'), 'utf8');
   const hermesResolver = readFileSync(join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs'), 'utf8');
   const providerBoundary = readFileSync(join(root, 'node_bridge', 'tests', 'hermesGatewayProviderBoundary.integration.test.mjs'), 'utf8');
+  const ombreContract = readFileSync(join(root, 'node_bridge', 'tests', 'ombreO1Contract.test.mjs'), 'utf8');
   assert.match(source, /--core\|--all\|--preflight-only/);
   assert.match(source, /hermes-release-smoke\.mjs/);
   assert.match(source, /--all/);
@@ -1640,6 +1641,8 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(providerBoundary, /Hermes Agent v0\\\.13/);
   assert.match(providerBoundary, /timeout: 30_000/);
   assert.doesNotMatch(providerBoundary, /\/Users\/fengran/);
+  assert.match(ombreContract, /process\.env\.RAN_AGENT_PYTHON_BIN/);
+  assert.doesNotMatch(ombreContract, /\/Users\/fengran/);
   assert.ok(source.indexOf('chmod -R a-w') < source.indexOf('hermes-release-smoke.mjs'));
   for (const name of ['RAN_AGENT_STATE_DIR', 'RAN_AGENT_GLOBAL_TIMELINE_PATH', 'RAN_AGENT_TIMELINE_ARCHIVE_DIR']) {
     assert.match(source.match(/run_node_test\(\)[\s\S]*?\n\}/)?.[0] || '', new RegExp(name));

@@ -7,16 +7,18 @@ import path from 'node:path';
 import test from 'node:test';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
-const PYTHON = '/Users/fengran/anaconda3/bin/python3.10';
+const PYTHON = process.env.RAN_AGENT_PYTHON_BIN || 'python3';
 const CONTRACT = path.join(ROOT, 'scripts', 'ombre_o1_contract.py');
 const PIN = '0e83d4671ce1629e03ad36bb9160235bf60dbd34';
 
 function run(args, env = {}) {
-  return spawnSync(PYTHON, [CONTRACT, ...args], {
+  const result = spawnSync(PYTHON, [CONTRACT, ...args], {
     cwd: ROOT,
     env: { ...process.env, ...env },
     encoding: 'utf8',
   });
+  assert.ifError(result.error);
+  return result;
 }
 
 function config(url = 'http://127.0.0.1:18002/mcp', extras = '') {

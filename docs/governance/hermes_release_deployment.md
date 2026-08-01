@@ -1,6 +1,6 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-01)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
@@ -54,6 +54,16 @@ Hermes only through an interactive `PATH`. Before another deployable candidate
 is produced, the complete local staged `--all` gate must end with 377/377
 Python tests, `hermes-release-smoke: all-ok`, and
 `hermes-release-gate: ok`; an ordinary checkout test pass is not equivalent.
+
+Candidate `8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77` reached the O1 contract
+tests and stopped because that test file ignored the gate-provided
+`RAN_AGENT_PYTHON_BIN` and named a desktop-only Python executable. On the
+server every contract subprocess therefore returned a spawn failure. This was
+also an immutable pre-mutation gate failure: no snapshot, service interruption,
+checkout activation, runtime mutation, rollback, Hermes upgrade, or model
+switch occurred. The corrected test consumes the validated explicit Python
+input, fails clearly on spawn errors, and has a regression assertion excluding
+developer-machine paths.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. Every other step below is read-only except

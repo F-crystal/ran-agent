@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-01)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -15,7 +15,7 @@ local_o1_online_revalidation: not performed
 production_worktree: clean in owner-supplied 2026-07-31 preflight
 production_services: four core units active in owner-supplied 2026-07-31 preflight
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
-rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); both stopped at immutable pre-mutation gate
+rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); all stopped at the immutable pre-mutation gate
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -100,6 +100,14 @@ contract:
   the fixture privilege seam independently of EUID, and codifies Git-less,
   read-only, root/non-root, `env -i` portability in `AGENTS.md`. It changes no
   production runtime or model policy.
+- Candidate `8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77` is also not deployable. The
+  next server gate exposed `ombreO1Contract.test.mjs` hard-coding a desktop
+  Python executable instead of consuming the already validated
+  `RAN_AGENT_PYTHON_BIN`. Every child process therefore failed to spawn on the
+  server. The correction uses the explicit gate input, rejects spawn errors
+  immediately, and keeps a regression assertion against developer-machine
+  paths. This gate also failed before snapshot, service interruption, checkout
+  activation, or runtime mutation; no rollback or Hermes/model change occurred.
 - Fresh production-wiring evidence: 137 focused Node tests passed under Node
   22.22.2, including O2 runtime, tool-less Curator/Reviewer, managed env,
   release residue, model policy, and gateway fallback checks. Shell/Python
@@ -128,6 +136,13 @@ contract:
   every admitted Node test file, passed the real Hermes v0.13 provider boundary
   and release smoke, passed all 377 Python tests, printed
   `hermes-release-gate: ok`, and received a `passed` workflow-guard result.
+- O1 contract Python-path remediation evidence: the server-shaped isolated O1
+  contract file passed 42/42 with an explicit absolute Python input; a missing
+  input now reports `ENOENT` instead of silently using a desktop fallback. The
+  full release-script file passed 50/50. The complete `--all` release gate then
+  passed every admitted Node file, printed `hermes-release-smoke: all-ok`,
+  passed all 377 Python tests, printed `hermes-release-gate: ok`, and received a
+  `passed` workflow-guard result.
 
 ## Mainline
 
