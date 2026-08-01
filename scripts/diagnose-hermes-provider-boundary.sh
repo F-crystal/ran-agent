@@ -27,7 +27,7 @@ printf '%s\n' "$version_output" | grep -Eq '^Hermes Agent v0\.13\.' || {
   exit 1
 }
 project="$(printf '%s\n' "$version_output" | sed -n 's/^Project:[[:space:]]*//p' | tail -n 1)"
-python_bin="${HERMES_RUNTIME_PYTHON:-$project/venv/bin/python}"
+python_bin="${HERMES_RUNTIME_PYTHON:-${HERMES_BIN%/*}/python}"
 if [[ -z "$project" || ! -x "$python_bin" ]]; then
   echo 'diagnose-hermes-provider-boundary: failed:runtime_python_unavailable' >&2
   exit 1

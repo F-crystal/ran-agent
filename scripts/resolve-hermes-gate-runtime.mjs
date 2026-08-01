@@ -45,4 +45,11 @@ if (liteReal !== fullReal) fail('runtime_mismatch');
 if (!/^Hermes Agent v0\.13\./.test(run(liteReal, ['version'], 'version_probe_failed'))) {
   fail('Hermes_v0.13_required');
 }
-process.stdout.write(`${liteReal}\n`);
+const runtimePython = path.join(path.dirname(liteReal), 'python');
+try {
+  fs.accessSync(runtimePython, fs.constants.X_OK);
+} catch {
+  fail('runtime_python_required');
+}
+run(runtimePython, ['-c', 'import gateway, hermes_cli, httpx, openai'], 'runtime_python_invalid');
+process.stdout.write(`${liteReal}\t${runtimePython}\n`);

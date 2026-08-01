@@ -98,17 +98,22 @@ fi
 [[ "$RELEASE_CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail release_candidate_invalid
 
 HERMES_TEST_BIN=''
+HERMES_TEST_PYTHON_BIN=''
 resolve_test_hermes_bin() {
-  local resolver version
+  local resolver version runtime_pair extra project
   [[ -n "$HERMES_TEST_BIN" ]] && return
   if [[ "$STAGED_CANDIDATE" == 1 ]]; then
     resolver="$REPO_ROOT/scripts/resolve-hermes-gate-runtime.mjs"
     [[ -f "$resolver" && ! -L "$resolver" && -x /usr/bin/systemctl ]] ||
       fail hermes_runtime_resolver_required
-    HERMES_TEST_BIN="$(run_clean "$NODE_BIN" "$resolver" /usr/bin/systemctl)" ||
+    runtime_pair="$(run_clean "$NODE_BIN" "$resolver" /usr/bin/systemctl)" ||
       fail hermes_v0_13_runtime_required
+    [[ "$runtime_pair" != *$'\n'* ]] || fail hermes_runtime_identity_invalid
+    IFS=$'\t' read -r HERMES_TEST_BIN HERMES_TEST_PYTHON_BIN extra <<<"$runtime_pair"
+    [[ -z "$extra" ]] || fail hermes_runtime_identity_invalid
   else
     HERMES_TEST_BIN="${RAN_AGENT_HERMES_TEST_BIN:-$HOME/.local/bin/hermes}"
+    HERMES_TEST_PYTHON_BIN="${RAN_AGENT_HERMES_TEST_PYTHON_BIN:-}"
   fi
   [[ "$HERMES_TEST_BIN" == /* && -x "$HERMES_TEST_BIN" ]] || fail hermes_v0_13_runtime_required
   version="$(run_clean "$NODE_BIN" -e '
@@ -118,6 +123,13 @@ resolve_test_hermes_bin() {
     process.stdout.write(result.stdout);
   ' "$HERMES_TEST_BIN")" || fail hermes_v0_13_runtime_required
   [[ "$version" =~ ^Hermes\ Agent\ v0\.13\. ]] || fail hermes_v0_13_runtime_required
+  project="$(printf '%s\n' "$version" | sed -n 's/^Project:[[:space:]]*//p' | tail -n 1)"
+  [[ "$project" == /* && -d "$project" ]] || fail hermes_runtime_project_required
+  [[ "$HERMES_TEST_PYTHON_BIN" == /* && -x "$HERMES_TEST_PYTHON_BIN" ]] ||
+    fail hermes_runtime_python_required
+  run_clean /usr/bin/env PYTHONPATH="$project" "$HERMES_TEST_PYTHON_BIN" \
+    -c 'import gateway, hermes_cli, httpx, openai' >/dev/null 2>&1 ||
+    fail hermes_runtime_python_invalid
 }
 
 SOURCE_ROOT="$SANDBOX_ROOT/source"
@@ -280,6 +292,7 @@ mkdir -p "$PYTHON_ROOT/home" "$PYTHON_ROOT/tmp/state" "$PYTHON_ROOT/cache" \
     RAN_AGENT_SKIP_ENV_FILE_LOAD=1 \
     RAN_AGENT_NODE_BIN="$NODE_BIN" \
     RAN_AGENT_HERMES_TEST_BIN="$HERMES_TEST_BIN" \
+    RAN_AGENT_HERMES_TEST_PYTHON_BIN="$HERMES_TEST_PYTHON_BIN" \
     PYTHONPATH="$SOURCE_ROOT/src" \
     PYTHONSAFEPATH=1 \
     PYTHONDONTWRITEBYTECODE=1 \

@@ -119,10 +119,13 @@ test('manual rollback changes Lite and Full together to Flash and keeps non-thin
 
 test('O1 provider canary and final HTTP body proof are both blocking acceptance', () => {
   const accept = readProjectFile('scripts/accept-hermes-release.sh');
+  const diagnose = readProjectFile('scripts/diagnose-hermes-provider-boundary.sh');
   assert.match(accept, /hermesProviderBoundaryCanary\.mjs/);
   assert.match(accept, /diagnose-hermes-provider-boundary\.sh/);
   assert.match(accept, /lite_provider_http_body_proof_failed/);
   assert.match(accept, /full_provider_http_body_proof_failed/);
+  assert.match(diagnose, /\$\{HERMES_BIN%\/\*\}\/python/);
+  assert.doesNotMatch(diagnose, /\$project\/venv\/bin\/python/);
 });
 
 test('model rollback is an input to the existing O1 release transaction', () => {

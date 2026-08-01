@@ -51,7 +51,7 @@ root/non-root, `env -i` execution as required by the repository `AGENTS.md`.
 The remediated staged gate also fixes host-dependent temporary-directory group
 inheritance, nested-shell state-directory leakage, and Python tests that found
 Hermes only through an interactive `PATH`. Before another deployable candidate
-is produced, the complete local staged `--all` gate must end with 377/377
+is produced, the complete local staged `--all` gate must end with 378/378
 Python tests, `hermes-release-smoke: all-ok`, and
 `hermes-release-gate: ok`; an ordinary checkout test pass is not equivalent.
 
@@ -64,6 +64,17 @@ checkout activation, runtime mutation, rollback, Hermes upgrade, or model
 switch occurred. The corrected test consumes the validated explicit Python
 input, fails clearly on spawn errors, and has a regression assertion excluding
 developer-machine paths.
+
+Candidate `62fca911a09ea7246393cdedece048ee91b4abb5` then passed release smoke but
+stopped in the immutable Python gate because the provider tests treated the
+Hermes `Project:` source path as a virtual-environment path. On this host the
+service-managed Hermes executable is under `/opt/ran_agent/.venv/bin` while its
+editable source project is elsewhere; those paths are not required to share a
+parent. The corrected gate derives the Hermes runtime Python from the verified
+Lite/Full service executable's sibling, validates its provider imports, and
+passes it explicitly to both provider tests and the acceptance diagnostic. A
+missing runtime interpreter or service drift now fails before mutation. This
+does not upgrade Hermes v0.13 or switch the Flash model.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. Every other step below is read-only except
@@ -103,9 +114,12 @@ upstream and recall-adapter units before Python/Lite/Full/Node. That apply step
 does not use an interactive-shell `hermes`. Before mutation, the staged gate
 resolves the installed Hermes v0.13 executable from both Lite and Full systemd
 units in a clean, bounded environment, requires both units to resolve to the
-same canonical executable, and passes that absolute path to the isolated real
-provider-boundary test. A missing, mismatched, or non-v0.13 runtime stops the
-release; it is not repaired or upgraded implicitly. The ordinary non-preserve
+same canonical executable, and binds the isolated real provider-boundary test
+to that executable plus the `python` in the same service venv. The `Project:`
+field reported by Hermes identifies source only and is never used to infer the
+runtime venv. A missing interpreter, incompatible provider import closure,
+mismatched service runtime, or non-v0.13 Hermes stops the release; it is not
+repaired or upgraded implicitly. The ordinary non-preserve
 drift-repair path still requires Hermes because it installs profiles and writes
 Hermes units.
 

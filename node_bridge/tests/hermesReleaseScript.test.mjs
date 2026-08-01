@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { accessSync, chmodSync, chownSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 
@@ -1621,6 +1621,8 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /RAN_AGENT_PYTHON_BIN="\$PYTHON_BIN"/);
   assert.match(source, /tests\/test_hermes_deepseek_provider\.py[\s\S]*resolve_test_hermes_bin/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$HERMES_TEST_BIN"[\s\S]*-m pytest/);
+  assert.match(source, /RAN_AGENT_HERMES_TEST_PYTHON_BIN="\$HERMES_TEST_PYTHON_BIN"[\s\S]*-m pytest/);
+  assert.doesNotMatch(source, /HERMES_TEST_PYTHON_BIN="\$project\/venv\/bin\/python"/);
   assert.match(source, /resolve-hermes-gate-runtime\.mjs/);
   assert.match(source, /STAGED_CANDIDATE.*RAN_AGENT_RELEASE_STAGED_CANDIDATE/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\]; then\s+PATH=\/usr\/bin:\/bin/);
@@ -1635,6 +1637,7 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(hermesResolver, /timeout: 10_000/);
   assert.match(hermesResolver, /fs\.realpathSync/);
   assert.match(hermesResolver, /liteReal !== fullReal/);
+  assert.match(hermesResolver, /path\.join\(path\.dirname\(liteReal\), 'python'\)/);
   assert.doesNotMatch(hermesResolver, /process\.env\.RAN_AGENT_(?:HERMES_TEST_BIN|SYSTEMCTL_BIN)/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$hermes_test_bin"/);
   assert.match(providerBoundary, /process\.env\.RAN_AGENT_HERMES_TEST_BIN/);
@@ -1871,19 +1874,25 @@ test('release Hermes resolver accepts only an executable service-managed v0.13 r
   }
 });
 
-test('staged Hermes gate runtime ignores inherited overrides and rejects Lite/Full drift', () => {
+test('staged Hermes gate runtime binds the service venv and rejects Lite/Full drift', () => {
   const gateResolver = join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs');
   const runtime = mkdtempSync(join(tmpdir(), 'ran-agent-hermes-gate-runtime-'));
-  const makeHermes = (name, version) => {
+  const makeHermes = (name, version, withPython = true) => {
     const bin = join(runtime, name, 'hermes');
     mkdirSync(join(runtime, name), { recursive: true });
     writeFileSync(bin, `#!/bin/sh\nprintf "Hermes Agent ${version}\\n"\n`);
     chmodSync(bin, 0o755);
+    if (withPython) {
+      const python = join(runtime, name, 'python');
+      writeFileSync(python, '#!/bin/sh\nexit 0\n');
+      chmodSync(python, 0o755);
+    }
     return bin;
   };
   const valid = makeHermes('valid', 'v0.13.0');
   const other = makeHermes('other', 'v0.13.1');
   const wrongVersion = makeHermes('wrong-version', 'v0.14.0');
+  const missingPython = makeHermes('missing-python', 'v0.13.0', false);
   const missing = join(runtime, 'missing', 'hermes');
   const makeServiceMap = (lite, full) => {
     const dir = mkdtempSync(join(tmpdir(), 'ran-agent-hermes-gate-systemctl-'));
@@ -1895,6 +1904,7 @@ test('staged Hermes gate runtime ignores inherited overrides and rejects Lite/Fu
   const same = makeServiceMap(valid, valid);
   const mismatch = makeServiceMap(valid, other);
   const badVersion = makeServiceMap(valid, wrongVersion);
+  const badPython = makeServiceMap(missingPython, missingPython);
   const absent = makeServiceMap(valid, missing);
   const maliciousSystemctl = makeServiceMap(other, other);
   const runGateResolver = (fixture, env = {}) => execFileSync(nodeBin, [gateResolver, fixture.path], {
@@ -1907,13 +1917,14 @@ test('staged Hermes gate runtime ignores inherited overrides and rejects Lite/Fu
       PATH: join(runtime, 'attacker-bin'),
       RAN_AGENT_HERMES_TEST_BIN: other,
       RAN_AGENT_SYSTEMCTL_BIN: maliciousSystemctl.path,
-    }), realpathSync(valid));
+    }), `${realpathSync(valid)}\t${join(dirname(realpathSync(valid)), 'python')}`);
     assert.throws(() => runGateResolver(mismatch), /Command failed/);
     assert.throws(() => runGateResolver(badVersion), /Command failed/);
+    assert.throws(() => runGateResolver(badPython), /Command failed/);
     assert.throws(() => runGateResolver(absent), /Command failed/);
   } finally {
     rmSync(runtime, { recursive: true, force: true });
-    for (const fixture of [same, mismatch, badVersion, absent, maliciousSystemctl]) {
+    for (const fixture of [same, mismatch, badVersion, badPython, absent, maliciousSystemctl]) {
       rmSync(fixture.dir, { recursive: true, force: true });
     }
   }
