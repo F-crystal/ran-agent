@@ -513,13 +513,13 @@ ensure_runtime_dirs() {
     "$OMBRE_BRAIN_HOME_DEFAULT"
     "$OMBRE_BRAIN_SOURCE_DIR_DEFAULT"
     "$OMBRE_BRAIN_VENV_DEFAULT"
-    "$OMBRE_BUCKETS_DIR_DEFAULT"
   )
   local media_dir
   while IFS= read -r media_dir; do
     dirs+=("$media_dir")
   done < <(trusted_runtime_media_dirs)
   "${SUDO[@]}" mkdir -p "${dirs[@]}"
+  "${SUDO[@]}" mkdir -p "$OMBRE_BUCKETS_DIR_DEFAULT"
   local dir
   for dir in "${dirs[@]}"; do
     chown_if_user_exists "$dir"
@@ -1482,6 +1482,8 @@ EOF
 }
 
 write_ombre_brain_unit() {
+  local buckets_dir
+  buckets_dir="$(effective_env_value OMBRE_BUCKETS_DIR "$OMBRE_BUCKETS_DIR_DEFAULT")"
   write_file 0644 "$OMBRE_SERVICE" <<EOF
 [Unit]
 Description=Ran Agent Ombre Brain Memory Service (port $OMBRE_BRAIN_PORT_DEFAULT)
@@ -1507,6 +1509,9 @@ Environment=OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
 Environment=OMBRE_BRAIN_HEALTH_URL=http://127.0.0.1:18001/health
 Environment=RAN_AGENT_STATE_DIR=$RUNTIME_STATE_DIR
 Environment=OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME_DEFAULT
+Environment=RAN_AGENT_MANAGED_OMBRE_RUNTIME=1
+Environment=RAN_AGENT_MANAGED_OMBRE_STATE_DIR=$RUNTIME_STATE_DIR
+Environment=RAN_AGENT_MANAGED_OMBRE_BUCKETS_DIR=$buckets_dir
 Environment=RAN_AGENT_STEWARD_IDENTITY_FILE=$RUNTIME_STATE_DIR/ombre-brain/steward-identity.v1.json
 Environment=RAN_AGENT_STEWARD_TOKEN_FILE=$RUNTIME_STATE_DIR/ombre-compat/secrets/steward-api-token
 ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec bash scripts/start_ombre_brain_service.sh'
@@ -1787,6 +1792,28 @@ prepare_ombre_runtime() {
   if ! ombre_brain_enabled; then
     return 0
   fi
+  local buckets_dir
+  buckets_dir="$(effective_env_value OMBRE_BUCKETS_DIR "$OMBRE_BUCKETS_DIR_DEFAULT")"
+  local buckets_parent="${buckets_dir%/*}"
+  local buckets_grandparent="${buckets_parent%/*}"
+  if [[ "$buckets_dir" != /* || -z "$buckets_grandparent" || "$buckets_grandparent" = / ||
+    "$buckets_dir" =~ (^|/)\.\.?(/|$) || "$buckets_dir" = *//* || "$buckets_dir" = */ ||
+    "$buckets_dir" = "$REPO_ROOT" || "$buckets_dir" = "$RUNTIME_STATE_DIR" ||
+    "$buckets_dir" = "$OMBRE_BRAIN_HOME_DEFAULT" ]]; then
+    echo "ERROR: unsafe Ombre buckets directory" >&2
+    return 1
+  fi
+  if [ "${RAN_AGENT_TEST_MODE:-0}" != 1 ]; then
+    local checked_path="$buckets_dir"
+    while [ "$checked_path" != / ]; do
+      if "${SUDO[@]}" test -L "$checked_path"; then
+        echo "ERROR: Ombre buckets path must not contain symlinks" >&2
+        return 1
+      fi
+      checked_path="${checked_path%/*}"
+      [ -n "$checked_path" ] || checked_path=/
+    done
+  fi
   log "preparing Ombre Brain runtime"
   if env \
     OMBRE_BRAIN_ENABLED="$(effective_env_value OMBRE_BRAIN_ENABLED "$OMBRE_BRAIN_ENABLED_DEFAULT")" \
@@ -1794,20 +1821,28 @@ prepare_ombre_runtime() {
     OMBRE_BRAIN_RUNNER="$(effective_env_value OMBRE_BRAIN_RUNNER "$OMBRE_BRAIN_RUNNER_DEFAULT")" \
     OMBRE_BRAIN_COMMIT="$(effective_env_value OMBRE_BRAIN_COMMIT "$OMBRE_BRAIN_COMMIT_DEFAULT")" \
     OMBRE_BRAIN_REPO_URL="$(effective_env_value OMBRE_BRAIN_REPO_URL "$OMBRE_BRAIN_REPO_URL_DEFAULT")" \
-    OMBRE_BRAIN_HOME="$(effective_env_value OMBRE_BRAIN_HOME "$OMBRE_BRAIN_HOME_DEFAULT")" \
-    OMBRE_BRAIN_SOURCE_DIR="$(effective_env_value OMBRE_BRAIN_SOURCE_DIR "$OMBRE_BRAIN_SOURCE_DIR_DEFAULT")" \
-    OMBRE_BRAIN_VENV="$(effective_env_value OMBRE_BRAIN_VENV "$OMBRE_BRAIN_VENV_DEFAULT")" \
-    OMBRE_BUCKETS_DIR="$(effective_env_value OMBRE_BUCKETS_DIR "$OMBRE_BUCKETS_DIR_DEFAULT")" \
+    OMBRE_BRAIN_HOME="$OMBRE_BRAIN_HOME_DEFAULT" \
+    OMBRE_BRAIN_SOURCE_DIR="$OMBRE_BRAIN_SOURCE_DIR_DEFAULT" \
+    OMBRE_BRAIN_VENV="$OMBRE_BRAIN_VENV_DEFAULT" \
+    OMBRE_BUCKETS_DIR="$buckets_dir" \
     OMBRE_BRAIN_IMAGE="$(effective_env_value OMBRE_BRAIN_IMAGE "$OMBRE_BRAIN_IMAGE_DEFAULT")" \
     OMBRE_BIND_HOST="$(effective_env_value OMBRE_BIND_HOST "$OMBRE_BIND_HOST_DEFAULT")" \
     OMBRE_MCP_REQUIRE_AUTH="$(effective_env_value OMBRE_MCP_REQUIRE_AUTH "$OMBRE_MCP_REQUIRE_AUTH_DEFAULT")" \
     OMBRE_BRAIN_PORT="$(effective_env_value OMBRE_BRAIN_PORT "$OMBRE_BRAIN_PORT_DEFAULT")" \
-    OMBRE_BRAIN_COMPOSE_FILE="$(effective_env_value OMBRE_BRAIN_COMPOSE_FILE "$OMBRE_BRAIN_COMPOSE_FILE_DEFAULT")" \
-    OMBRE_BRAIN_CONFIG_FILE="$(effective_env_value OMBRE_BRAIN_CONFIG_FILE "$OMBRE_BRAIN_CONFIG_FILE_DEFAULT")" \
-    OMBRE_BRAIN_STATUS_FILE="$(effective_env_value OMBRE_BRAIN_STATUS_FILE "$OMBRE_BRAIN_STATUS_FILE_DEFAULT")" \
+    OMBRE_BRAIN_COMPOSE_FILE="$OMBRE_BRAIN_COMPOSE_FILE_DEFAULT" \
+    OMBRE_BRAIN_CONFIG_FILE="$OMBRE_BRAIN_CONFIG_FILE_DEFAULT" \
+    OMBRE_BRAIN_STATUS_FILE="$OMBRE_BRAIN_STATUS_FILE_DEFAULT" \
     RAN_AGENT_STATE_DIR="$RUNTIME_STATE_DIR" \
     RAN_AGENT_ROTATE_STEWARD_TOKEN="${RAN_AGENT_ROTATE_STEWARD_TOKEN:-0}" \
     bash "$REPO_ROOT/scripts/prepare-ombre-brain.sh" 2>&1; then
+    if "${SUDO[@]}" test -L "$OMBRE_BRAIN_HOME_DEFAULT" ||
+      ! "${SUDO[@]}" test -d "$OMBRE_BRAIN_HOME_DEFAULT" ||
+      ! "${SUDO[@]}" test -d "$buckets_dir"; then
+      echo "ERROR: prepared Ombre runtime paths are not real directories" >&2
+      return 1
+    fi
+    "${SUDO[@]}" chown -R "$STEWARD_RUNTIME_USER:$STEWARD_RUNTIME_GROUP" "$OMBRE_BRAIN_HOME_DEFAULT"
+    "${SUDO[@]}" chown -R "$STEWARD_RUNTIME_USER:$STEWARD_RUNTIME_GROUP" "$buckets_dir"
     log "Ombre Brain runtime prepared"
   else
     echo "ERROR: Ombre Brain preparation failed" >&2

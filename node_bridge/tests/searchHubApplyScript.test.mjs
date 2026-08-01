@@ -240,6 +240,21 @@ test('apply script creates runtime trusted media directories', () => {
   assert.equal(existsSync(join(debugDir, 'mimo_inbound')), true);
 });
 
+test('prepare_ombre_runtime refuses a broad recursive ownership target', () => {
+  for (const target of ['/', '/opt/ran_agent/vault/ombre/../../../..']) {
+    assert.throws(() => execFileSync('bash', ['-lc', [
+      'set -euo pipefail',
+      'export RAN_AGENT_NO_SUDO=1',
+      'source scripts/apply-hermes-runtime-split.sh',
+      'prepare_ombre_runtime',
+    ].join('\n')], {
+      cwd: new URL('../..', import.meta.url).pathname,
+      env: { ...process.env, OMBRE_BUCKETS_DIR: target },
+      stdio: 'pipe',
+    }), /Command failed/);
+  }
+});
+
 test('apply script keeps Node and Hermes marker path env consistent', () => {
   const scriptPath = new URL('../../scripts/apply-hermes-runtime-split.sh', import.meta.url).pathname;
   const script = readFileSync(scriptPath, 'utf8');
@@ -805,7 +820,7 @@ test('apply script skips reset-failed for systemd units that are not loaded yet'
   assert.doesNotMatch(log, /reset-failed ran-agent-ombre-brain\.service/);
 });
 
-test('start_ombre_brain_service.sh supports source runner without docker', () => {
+test('start_ombre_brain_service.sh runs the prepared managed source without preparing again', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-source-runner-'));
   const rootDir = join(dir, 'repo');
   const stateDir = join(dir, 'custom-live-state');
@@ -824,7 +839,7 @@ test('start_ombre_brain_service.sh supports source runner without docker', () =>
     '',
   ].join('\n'));
   chmodSync(join(venvDir, 'bin', 'python'), 0o755);
-  writeFileSync(join(rootDir, 'scripts', 'prepare-ombre-brain.sh'), '#!/bin/sh\nexit 0\n');
+  writeFileSync(join(rootDir, 'scripts', 'prepare-ombre-brain.sh'), '#!/bin/sh\nexit 99\n');
   chmodSync(join(rootDir, 'scripts', 'prepare-ombre-brain.sh'), 0o755);
 
   execFileSync('bash', ['scripts/start_ombre_brain_service.sh'], {
@@ -833,9 +848,14 @@ test('start_ombre_brain_service.sh supports source runner without docker', () =>
       ...process.env,
       RAN_AGENT_REPO_ROOT: rootDir,
       RAN_AGENT_STATE_DIR: stateDir,
+      RAN_AGENT_MANAGED_OMBRE_RUNTIME: '1',
+      RAN_AGENT_MANAGED_OMBRE_STATE_DIR: stateDir,
+      RAN_AGENT_MANAGED_OMBRE_BUCKETS_DIR: join(dir, 'buckets'),
+      OMBRE_BRAIN_ENABLED: 'false',
+      OMBRE_BRAIN_HOME: '/conflicting/home',
       OMBRE_BRAIN_RUNNER: 'source',
-      OMBRE_BRAIN_SOURCE_DIR: sourceDir,
-      OMBRE_BRAIN_VENV: venvDir,
+      OMBRE_BRAIN_SOURCE_DIR: '/conflicting/source',
+      OMBRE_BRAIN_VENV: '/conflicting/venv',
       OMBRE_TEST_LOG: logFile,
       PATH: `/no-docker-here:${process.env.PATH}`,
     },

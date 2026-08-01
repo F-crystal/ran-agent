@@ -403,6 +403,7 @@ test('Steward release separates staged source from canonical live state and invo
   assert.match(prepare, /token_args\+=\(--rotate\)/);
   assert.match(start, /CALLER_STATE_DIR="\$\{RAN_AGENT_STATE_DIR:-\}"/);
   assert.match(start, /\/opt\/ran_agent\/\.ran_agent_state/);
+  assert.doesNotMatch(start, /prepare-ombre-brain\.sh/);
   assert.match(diagnose, /CALLER_STATE_DIR="\$\{RAN_AGENT_STATE_DIR:-\}"/);
   assert.match(diagnose, /\/opt\/ran_agent\/\.ran_agent_state/);
 });
@@ -467,6 +468,9 @@ test('custom live state executes prepare and start without writing into the stag
     OMBRE_BUCKETS_DIR: join(dir, 'buckets'),
   };
   try {
+    execFileSync('bash', [join(stage, 'scripts', 'prepare-ombre-brain.sh')], {
+      env, encoding: 'utf8', stdio: 'pipe',
+    });
     const output = execFileSync('bash', [join(stage, 'scripts', 'start_ombre_brain_service.sh')], {
       env, encoding: 'utf8', stdio: 'pipe',
     });
@@ -1187,6 +1191,9 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
     for (const expected of [
       `Environment=RAN_AGENT_STATE_DIR=${state}`,
       `Environment=OMBRE_BRAIN_HOME=${ombreHome}`,
+      'Environment=RAN_AGENT_MANAGED_OMBRE_RUNTIME=1',
+      `Environment=RAN_AGENT_MANAGED_OMBRE_STATE_DIR=${state}`,
+      `Environment=RAN_AGENT_MANAGED_OMBRE_BUCKETS_DIR=${join(dir, 'buckets')}`,
       `Environment=RAN_AGENT_STEWARD_TOKEN_FILE=${join(state, 'ombre-compat', 'secrets', 'steward-api-token')}`,
     ]) assert.match(installedOmbreUnit, new RegExp(expected.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(installedNodeDropin, new RegExp(`Environment=RAN_AGENT_STATE_DIR=${state}`.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
@@ -1209,6 +1216,8 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
       assert.equal(metadata.gid, process.getgid());
     }
     assert.match(log, new RegExp(`chown ${runtimeUser}:${runtimeGroup} .*\\/hermes`));
+    assert.match(log, new RegExp(`chown -R ran-agent:ran-agent ${ombreHome.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    assert.match(log, new RegExp(`chown -R ran-agent:ran-agent ${join(dir, 'buckets').replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
 
     for (const mode of ['lite', 'full']) {
       writeFileSync(trace, '');
