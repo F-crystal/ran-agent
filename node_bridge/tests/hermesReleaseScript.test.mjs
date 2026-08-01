@@ -506,9 +506,9 @@ test('Node and Ombre use fixed ran-agent identity while Lite and Full keep their
   assert.doesNotMatch(apply, /RUNTIME_USER="\$\{RAN_AGENT_RUNTIME_USER:-ubuntu\}"/);
   assert.match(identity, /groupadd --system "\$STEWARD_GROUP"/);
   assert.match(identity, /useradd --system --gid "\$STEWARD_GROUP"/);
-  for (const key of ['SYS_UID_MIN', 'SYS_UID_MAX', 'SYS_GID_MIN', 'SYS_GID_MAX']) {
-    assert.match(identity, new RegExp(key));
-  }
+  assert.doesNotMatch(identity, /login\.defs|SYS_(?:UID|GID)_(?:MIN|MAX)/);
+  assert.match(identity, /uid != 0/);
+  assert.match(identity, /gid != 0/);
   assert.match(identity, /\/usr\/sbin\/nologin/);
   assert.match(identity, /\/opt\/ran_agent/);
   assert.match(identity, /process_uid_mismatch/);
@@ -577,12 +577,10 @@ test('Steward acceptance checks effective names and shared numeric MainPID ident
   const dir = mkdtempSync(join(tmpdir(), 'steward-accept-identity-'));
   const bin = join(dir, 'bin');
   const proc = join(dir, 'proc');
-  const loginDefs = join(dir, 'login.defs');
   const accept = readFileSync(join(root, 'scripts', 'accept-hermes-release.sh'), 'utf8');
   const contract = accept.match(/release_steward_identity_contract\(\) \{([\s\S]*?)\n\}/)?.[0] || '';
   mkdirSync(bin);
   mkdirSync(join(proc, '123'), { recursive: true });
-  writeFileSync(loginDefs, 'SYS_UID_MIN 100\nSYS_UID_MAX 999\nSYS_GID_MIN 100\nSYS_GID_MAX 999\n');
   writeFileSync(join(proc, '123', 'status'), 'Uid:\t999\t999\t999\t999\nGid:\t999\t999\t999\t999\n');
   writeFileSync(join(bin, 'systemctl'), [
     '#!/bin/sh',
@@ -612,7 +610,6 @@ test('Steward acceptance checks effective names and shared numeric MainPID ident
     env: {
       PATH: `${bin}:/usr/bin:/bin`,
       RAN_AGENT_TEST_MODE: '1',
-      RAN_AGENT_TEST_LOGIN_DEFS_FILE: loginDefs,
       RAN_AGENT_TEST_PROC_ROOT: proc,
       ...extra,
     },
@@ -1033,10 +1030,8 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   chmodSync(join(bin, 'git'), 0o755);
   mkdirSync(join(state, 'core'), { recursive: true });
   const proc = join(dir, 'proc');
-  const loginDefs = join(dir, 'login.defs');
   mkdirSync(join(proc, '123'), { recursive: true });
   writeFileSync(join(proc, '123', 'status'), 'Uid:\t999\t999\t999\t999\nGid:\t999\t999\t999\t999\n');
-  writeFileSync(loginDefs, 'SYS_UID_MIN 100\nSYS_UID_MAX 999\nSYS_GID_MIN 100\nSYS_GID_MAX 999\n');
   const core = new DatabaseSync(join(state, 'core', 'core-state.sqlite3'));
   core.exec('CREATE TABLE activity (activity_id TEXT PRIMARY KEY, title TEXT NOT NULL, domain TEXT NOT NULL, state TEXT NOT NULL, contract_revision INTEGER NOT NULL, updated_at TEXT NOT NULL)');
   core.close();
@@ -1109,7 +1104,6 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
     RAN_AGENT_OMBRE_PATCH_PYTHON_BIN: join(bin, 'ombre-patch-python'),
     RAN_AGENT_NODE_BIN: nodeBin,
     RAN_AGENT_TEST_MODE: '1',
-    RAN_AGENT_TEST_LOGIN_DEFS_FILE: loginDefs,
     RAN_AGENT_TEST_PROC_ROOT: proc,
     RAN_AGENT_PROVIDER_CANARY_TEST_COMMAND: join(bin, 'provider-canary'),
     RAN_AGENT_STEWARD_VERIFY_TEST_COMMAND: join(bin, 'steward-verify'),

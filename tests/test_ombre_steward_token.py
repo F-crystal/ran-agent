@@ -176,14 +176,8 @@ class OmbreStewardTokenTest(unittest.TestCase):
             root = Path(directory)
             bin_dir = root / "bin"
             proc = root / "proc"
-            login_defs = root / "login.defs"
             bin_dir.mkdir()
             (proc / "123").mkdir(parents=True)
-            login_defs.write_text(
-                "SYS_UID_MIN 100\nSYS_UID_MAX 999\n"
-                "SYS_GID_MIN 100\nSYS_GID_MAX 999\n",
-                encoding="ascii",
-            )
             (bin_dir / "id").write_text(
                 "#!/bin/sh\n"
                 'case "$1" in\n'
@@ -221,7 +215,6 @@ class OmbreStewardTokenTest(unittest.TestCase):
                 **os.environ,
                 "PATH": f"{bin_dir}:/usr/bin:/bin",
                 "RAN_AGENT_TEST_MODE": "1",
-                "RAN_AGENT_TEST_LOGIN_DEFS_FILE": str(login_defs),
                 "RAN_AGENT_TEST_PROC_ROOT": str(proc),
                 "MOCK_UID": "999",
                 "MOCK_GID": "999",
@@ -243,7 +236,6 @@ class OmbreStewardTokenTest(unittest.TestCase):
             conflicts = [
                 {"MOCK_UID": 0, "MOCK_PASSWD_UID": 0},
                 {"MOCK_GID": 0, "MOCK_PASSWD_GID": 0, "MOCK_GROUP_GID": 0},
-                {"MOCK_UID": 1000, "MOCK_PASSWD_UID": 1000},
                 {"MOCK_PASSWD_GID": 998},
                 {"MOCK_SHELL": "/bin/bash"},
                 {"MOCK_HOME": "/home/ran-agent"},
@@ -251,13 +243,15 @@ class OmbreStewardTokenTest(unittest.TestCase):
             for values in conflicts:
                 with self.subTest(values=values):
                     self.assertNotEqual(verify(**values).returncode, 0)
-
-            login_defs.write_text("SYS_UID_MIN invalid\n", encoding="ascii")
-            self.assertNotEqual(verify().returncode, 0)
-            login_defs.write_text(
-                "SYS_UID_MIN 100\nSYS_UID_MAX 999\n"
-                "SYS_GID_MIN 100\nSYS_GID_MAX 999\n",
-                encoding="ascii",
+            self.assertEqual(
+                verify(
+                    MOCK_UID=60001,
+                    MOCK_GID=60001,
+                    MOCK_PASSWD_UID=60001,
+                    MOCK_PASSWD_GID=60001,
+                    MOCK_GROUP_GID=60001,
+                ).returncode,
+                0,
             )
 
             status = proc / "123/status"
@@ -292,15 +286,9 @@ class OmbreStewardTokenTest(unittest.TestCase):
             root = Path(directory)
             bin_dir = root / "bin"
             bin_dir.mkdir()
-            login_defs = root / "login.defs"
             group_marker = root / "group-created"
             user_marker = root / "user-created"
             calls = root / "calls"
-            login_defs.write_text(
-                "SYS_UID_MIN 100\nSYS_UID_MAX 999\n"
-                "SYS_GID_MIN 100\nSYS_GID_MAX 999\n",
-                encoding="ascii",
-            )
             (bin_dir / "id").write_text(
                 "#!/bin/sh\n"
                 'test -e "$MOCK_USER_MARKER" || exit 1\n'
@@ -346,7 +334,6 @@ class OmbreStewardTokenTest(unittest.TestCase):
                     **os.environ,
                     "PATH": f"{bin_dir}:/usr/bin:/bin",
                     "RAN_AGENT_TEST_MODE": "1",
-                    "RAN_AGENT_TEST_LOGIN_DEFS_FILE": str(login_defs),
                     "MOCK_GROUP_MARKER": str(group_marker),
                     "MOCK_USER_MARKER": str(user_marker),
                     "MOCK_CALLS": str(calls),

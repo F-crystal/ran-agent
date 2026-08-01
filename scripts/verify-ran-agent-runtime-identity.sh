@@ -6,10 +6,8 @@ readonly STEWARD_USER=ran-agent
 readonly STEWARD_GROUP=ran-agent
 readonly STEWARD_HOME=/opt/ran_agent
 readonly STEWARD_SHELL=/usr/sbin/nologin
-LOGIN_DEFS=/etc/login.defs
 PROC_ROOT=/proc
 if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 ]]; then
-  LOGIN_DEFS="${RAN_AGENT_TEST_LOGIN_DEFS_FILE:-$LOGIN_DEFS}"
   PROC_ROOT="${RAN_AGENT_TEST_PROC_ROOT:-$PROC_ROOT}"
 fi
 
@@ -22,39 +20,16 @@ decimal() {
   [[ "$1" =~ ^[0-9]+$ ]]
 }
 
-range_value() {
-  local key="$1" values
-  [[ -r "$LOGIN_DEFS" && ! -L "$LOGIN_DEFS" ]] || conflict login_defs_unavailable
-  values="$(awk -v key="$key" '$1 == key { print $2 }' "$LOGIN_DEFS")" ||
-    conflict login_defs_unreadable
-  [[ "$values" != *$'\n'* && -n "$values" ]] || conflict "login_defs_${key}_invalid"
-  decimal "$values" || conflict "login_defs_${key}_invalid"
-  printf '%s' "$values"
-}
-
-load_ranges() {
-  SYS_UID_MIN_VALUE="$(range_value SYS_UID_MIN)"
-  SYS_UID_MAX_VALUE="$(range_value SYS_UID_MAX)"
-  SYS_GID_MIN_VALUE="$(range_value SYS_GID_MIN)"
-  SYS_GID_MAX_VALUE="$(range_value SYS_GID_MAX)"
-  (( SYS_UID_MIN_VALUE <= SYS_UID_MAX_VALUE )) || conflict login_defs_uid_range_invalid
-  (( SYS_GID_MIN_VALUE <= SYS_GID_MAX_VALUE )) || conflict login_defs_gid_range_invalid
-}
-
 verify_group() {
   local entry gid
-  load_ranges
   entry="$(getent group "$STEWARD_GROUP")" || conflict group_missing
   IFS=: read -r _ _ gid _ <<<"$entry"
   decimal "$gid" || conflict group_gid_invalid
   (( gid != 0 )) || conflict group_gid_root
-  (( gid >= SYS_GID_MIN_VALUE && gid <= SYS_GID_MAX_VALUE )) ||
-    conflict group_gid_outside_system_range
 }
 
 verify_account() {
   local passwd_entry group_entry passwd_uid passwd_gid group_gid uid gid home shell
-  load_ranges
   passwd_entry="$(getent passwd "$STEWARD_USER")" || conflict user_missing
   group_entry="$(getent group "$STEWARD_GROUP")" || conflict group_missing
   IFS=: read -r _ _ passwd_uid passwd_gid _ home shell <<<"$passwd_entry"
@@ -69,10 +44,6 @@ verify_account() {
   [[ "$uid" == "$passwd_uid" ]] || conflict passwd_uid_mismatch
   [[ "$gid" == "$passwd_gid" && "$gid" == "$group_gid" ]] ||
     conflict primary_gid_mismatch
-  (( uid >= SYS_UID_MIN_VALUE && uid <= SYS_UID_MAX_VALUE )) ||
-    conflict user_uid_outside_system_range
-  (( gid >= SYS_GID_MIN_VALUE && gid <= SYS_GID_MAX_VALUE )) ||
-    conflict user_gid_outside_system_range
   [[ "$home" == "$STEWARD_HOME" ]] || conflict user_home_mismatch
   [[ "$shell" == "$STEWARD_SHELL" ]] || conflict user_shell_mismatch
 }

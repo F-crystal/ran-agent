@@ -76,6 +76,17 @@ passes it explicitly to both provider tests and the acceptance diagnostic. A
 missing runtime interpreter or service drift now fails before mutation. This
 does not upgrade Hermes v0.13 or switch the Flash model.
 
+Candidate `414210f238215d0f8ef83175851b5ed311ad5d06` passed the complete immutable
+gate, then stopped because the Steward identity verifier treated
+`/etc/login.defs` allocation defaults as authority over an existing account.
+The transaction reported `rollback-complete`, including optional-unit restore
+handling, so the active production revision remained unchanged. The corrected
+verifier leaves allocation to `groupadd --system` and `useradd --system`, then
+validates the resulting or pre-existing account directly: non-root numeric
+UID/GID, exact NSS/passwd/group agreement, frozen home and nologin shell, fixed
+systemd names, and matching live process effective identity. It no longer
+depends on host-specific `login.defs` contents.
+
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. Every other step below is read-only except
 `git fetch`, which updates local remote tracking objects only.
@@ -178,11 +189,12 @@ conflicting existing identities, and installs effective `User=ran-agent` and
 runtime-user variables are consistency assertions and cannot override this
 identity. Creation uses the host system-account entry points with the frozen
 home `/opt/ran_agent` and shell `/usr/sbin/nologin`; an existing account must
-have nonzero numeric UID/GID inside the host's explicit
-`SYS_UID_MIN..SYS_UID_MAX` and `SYS_GID_MIN..SYS_GID_MAX` ranges from
-`/etc/login.defs`, with its primary GID equal to the `ran-agent` group GID.
-Missing or ambiguous ranges and any account mismatch are blocking identity
-conflicts. Lite and Full retain their separately configured identity.
+have nonzero numeric UID/GID that agree across `id`, passwd, and group NSS
+records, with its primary GID equal to the `ran-agent` group GID. The verifier
+does not reinterpret `/etc/login.defs`: those values govern ID allocation by
+the system account tools, not the authority of an already resolved account.
+Any identity, home, shell, systemd, or live-process mismatch remains blocking.
+Lite and Full retain their separately configured identity.
 
 The transaction also refuses to begin if its private
 `98-ombre-steward-rotation.conf` drop-in already exists or is a broken symlink.

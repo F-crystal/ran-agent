@@ -15,7 +15,7 @@ local_o1_online_revalidation: not performed
 production_worktree: clean in owner-supplied 2026-07-31 preflight
 production_services: four core units active in owner-supplied 2026-07-31 preflight
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
-rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); all stopped at the immutable pre-mutation gate
+rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); first four stopped at the immutable pre-mutation gate; 414210f rolled back completely
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -30,10 +30,11 @@ This production statement is `USER_SUPPLIED_RUNTIME`, not revalidated by this
 local integration line. The formal production release does not contain the
 archived O1 baseline, V4+O1 baseline, or O2 implementation.
 The owner-supplied preflight showed no tracked or untracked worktree changes.
-The failed candidate gate ran before snapshots, service interruption, checkout
-activation, or runtime mutation, so production remains on the recorded SHA and
-does not require rollback. Server acceptance remains the authority after the
-next apply.
+The first four failed candidate gates ran before snapshots, service
+interruption, checkout activation, or runtime mutation. Candidate `414210f`
+passed that gate, then its transaction rejected a host identity-policy
+assumption and reported `rollback-complete`. Production therefore remains on
+the recorded SHA. Server acceptance remains the authority after the next apply.
 
 The repository mainline keeps every O1 invariant from
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2`, keeps Lite/Full on
@@ -117,6 +118,14 @@ contract:
   its provider import closure, and uses the same boundary in the acceptance
   diagnostic. This gate also stopped before production mutation; Hermes remains
   v0.13 and the model remains Flash.
+- Candidate `414210f238215d0f8ef83175851b5ed311ad5d06` is also not deployable. It
+  passed the complete immutable gate, then the transaction treated
+  `/etc/login.defs` system-ID allocation defaults as authority over an existing
+  `ran-agent` account and rejected a valid host layout. The transaction reported
+  `rollback-complete`; production stayed on its previous revision. The
+  correction removes that policy-file dependency while retaining `--system`
+  account creation, non-root numeric identity, NSS/passwd/group consistency,
+  fixed home and nologin shell, systemd names, and live process UID/GID checks.
 - Fresh production-wiring evidence: 137 focused Node tests passed under Node
   22.22.2, including O2 runtime, tool-less Curator/Reviewer, managed env,
   release residue, model policy, and gateway fallback checks. Shell/Python
@@ -159,6 +168,10 @@ contract:
   staged `--all` gate passed every admitted Node file, printed
   `hermes-release-smoke: all-ok`, passed all 378 Python tests, and printed
   `hermes-release-gate: ok`.
+- Steward identity portability evidence: all 8 focused Python token/identity
+  tests and 3 release transaction/acceptance tests passed, including a matching
+  non-root UID/GID outside conventional system allocation ranges and the full
+  preserve-runtime-shape path.
 
 ## Mainline
 
