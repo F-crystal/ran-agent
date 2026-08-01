@@ -361,20 +361,33 @@ validate_ombre_compat_model_endpoint() {
 
 wait_for_managed_endpoint() {
   local unit="$1" health_url="$2" port="$3" label="$4" waited=0 pid listeners
+  local active=0 pid_valid=0 listener_owned=0 health_ok=0
   while [ "$waited" -le "$OMBRE_HEALTH_TIMEOUT_SECONDS" ]; do
+    active=0
+    pid_valid=0
+    listener_owned=0
+    health_ok=0
     pid="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null || true)"
-    listeners="$(ss -ltnp 2>/dev/null || true)"
-    if "${SUDO[@]}" systemctl is-active --quiet "$unit" &&
-      [[ "$pid" =~ ^[1-9][0-9]*$ ]] &&
-      printf '%s\n' "$listeners" | grep -Eq "127\\.0\\.0\\.1:$port([^0-9]|$).*pid=$pid([^0-9]|$)" &&
-      curl --fail --silent --show-error --max-time 3 "$health_url" >/dev/null; then
+    listeners="$("${SUDO[@]}" ss -ltnp 2>/dev/null || true)"
+    if "${SUDO[@]}" systemctl is-active --quiet "$unit"; then active=1; fi
+    if [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then pid_valid=1; fi
+    if [ "$pid_valid" -eq 1 ] &&
+      printf '%s\n' "$listeners" | grep -Eq "127\\.0\\.0\\.1:$port([^0-9]|$).*pid=$pid([^0-9]|$)"; then
+      listener_owned=1
+    fi
+    if [ "$active" -eq 1 ] &&
+      curl --fail --silent --show-error --max-time 3 "$health_url" >/dev/null 2>&1; then
+      health_ok=1
+    fi
+    if [ "$active" -eq 1 ] && [ "$pid_valid" -eq 1 ] &&
+      [ "$listener_owned" -eq 1 ] && [ "$health_ok" -eq 1 ]; then
       log "$label unit/PID/listener/health contract passed"
       return 0
     fi
     sleep 3
     waited=$((waited + 3))
   done
-  echo "ERROR: $label unit/PID/listener/health contract did not pass before dependent startup" >&2
+  echo "ERROR: $label unit/PID/listener/health contract did not pass before dependent startup (active=$active pid=$pid pid_valid=$pid_valid listener_owned=$listener_owned health=$health_ok)" >&2
   return 1
 }
 
@@ -1880,7 +1893,7 @@ print_failure_context() {
   echo "--- recent Hermes logs ---" >&2
   "${SUDO[@]}" journalctl -u ran-agent-hermes.service -u ran-agent-hermes-full.service -u ran-agent-xhs-public-sidecar.service -n 120 --no-pager >&2 || true
   echo "--- listening sockets ---" >&2
-  ss -ltnp >&2 || true
+  "${SUDO[@]}" ss -ltnp >&2 || true
 }
 
 pid_has_env() {

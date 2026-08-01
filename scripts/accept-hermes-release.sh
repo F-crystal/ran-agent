@@ -287,7 +287,7 @@ release_managed_endpoint_health() {
   pid="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" ||
     fail "${label}_main_pid_unavailable"
   [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail "${label}_main_pid_invalid"
-  listeners="$(ss -ltnp 2>/dev/null)" || fail "${label}_listener_probe_failed"
+  listeners="$("${SUDO[@]}" ss -ltnp 2>/dev/null)" || fail "${label}_listener_probe_failed"
   printf '%s\n' "$listeners" |
     grep -Eq "127\\.0\\.0\\.1:$port([^0-9]|$).*pid=$pid([^0-9]|$)" ||
     fail "${label}_listener_not_owned_by_main_pid"

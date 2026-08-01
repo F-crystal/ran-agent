@@ -15,7 +15,7 @@ local_o1_online_revalidation: not performed
 production_worktree: clean in owner-supplied 2026-07-31 preflight
 production_services: four core units active in owner-supplied 2026-07-31 preflight
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
-rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); first four stopped at the immutable pre-mutation gate; 414210f rolled back completely
+rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); 7649a9471b15b09e9aac25bed269a0e5d8b254dc (cross-user Ombre socket ownership was probed without the existing privilege seam); first four stopped at the immutable pre-mutation gate; 414210f rolled back completely; the supplied 7649a94 trace ends at the bounded startup failure before dependent services and does not yet establish rollback completion
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -34,7 +34,12 @@ The first four failed candidate gates ran before snapshots, service
 interruption, checkout activation, or runtime mutation. Candidate `414210f`
 passed that gate, then its transaction rejected a host identity-policy
 assumption and reported `rollback-complete`. Production therefore remains on
-the recorded SHA. Server acceptance remains the authority after the next apply.
+the recorded SHA at that evidence point. Candidate `7649a94` later passed the
+immutable gate and prepared Ombre, but its startup check mixed privileged
+systemd PID discovery with an unprivileged `ss -p` process view. The supplied
+trace ends when that bounded check stopped dependent startup; it does not show
+the transaction's final rollback result. Server acceptance remains the
+authority after the next apply.
 
 The repository mainline keeps every O1 invariant from
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2`, keeps Lite/Full on
@@ -126,6 +131,17 @@ contract:
   correction removes that policy-file dependency while retaining `--system`
   account creation, non-root numeric identity, NSS/passwd/group consistency,
   fixed home and nologin shell, systemd names, and live process UID/GID checks.
+- Candidate `7649a9471b15b09e9aac25bed269a0e5d8b254dc` is also not deployable.
+  Its apply path read the Ombre unit MainPID through `sudo systemctl` but read
+  socket process metadata through the deployment user's unprivileged `ss -p`.
+  Linux can hide another account's socket PID, so a healthy `ran-agent` listener
+  was indistinguishable from a wrong owner. The correction preserves the strict
+  MainPID/listener/health contract, obtains socket metadata through the same
+  privilege seam in startup, acceptance, failure context, and diagnostics, and
+  reports active/PID/listener/health dimensions on a bounded startup failure.
+  This is a release-observability portability fix, not an Ombre, Hermes, or
+  model change. Rollback completion for the supplied failed run is not yet
+  evidenced.
 - Fresh production-wiring evidence: 137 focused Node tests passed under Node
   22.22.2, including O2 runtime, tool-less Curator/Reviewer, managed env,
   release residue, model policy, and gateway fallback checks. Shell/Python
@@ -172,6 +188,14 @@ contract:
   tests and 3 release transaction/acceptance tests passed, including a matching
   non-root UID/GID outside conventional system allocation ranges and the full
   preserve-runtime-shape path.
+- Cross-user listener portability evidence: the regression hides PID metadata
+  from ordinary `ss` and exposes it only through the deployment privilege seam;
+  both startup and acceptance checks pass in that shape. The full release-script
+  file passed 51/51 with explicit Node and Python runtimes. The complete
+  read-only isolated `--all` gate then passed every admitted Node test, the real
+  Hermes v0.13 provider boundary, `hermes-release-smoke: all-ok`, and all 378
+  Python tests; it printed `hermes-release-gate: ok` and received a `passed`
+  workflow-guard result.
 
 ## Mainline
 

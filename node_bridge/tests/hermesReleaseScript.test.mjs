@@ -626,6 +626,41 @@ test('Steward acceptance checks effective names and shared numeric MainPID ident
   }
 });
 
+test('managed Ombre endpoint checks obtain cross-user socket ownership through the privilege seam', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-ombre-socket-'));
+  const bin = join(dir, 'bin');
+  const apply = readFileSync(join(root, 'scripts', 'apply-hermes-runtime-split.sh'), 'utf8');
+  const accept = readFileSync(join(root, 'scripts', 'accept-hermes-release.sh'), 'utf8');
+  const waitContract = apply.match(/wait_for_managed_endpoint\(\) \{([\s\S]*?)\n\}/)?.[0] || '';
+  const acceptContract = accept.match(/release_managed_endpoint_health\(\) \{([\s\S]*?)\n\}/)?.[0] || '';
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'sudo'), '#!/bin/sh\nexport PRIVILEGED_SOCKET_PROBE=1\nexec "$@"\n');
+  writeFileSync(join(bin, 'systemctl'), '#!/bin/sh\ncase "$1" in show) printf "123\\n";; is-active) exit 0;; *) exit 1;; esac\n');
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nif [ "${PRIVILEGED_SOCKET_PROBE:-}" = 1 ]; then printf "LISTEN 0 128 127.0.0.1:18001 users:((x,pid=123,fd=3))\\n"; else printf "LISTEN 0 128 127.0.0.1:18001\\n"; fi\n');
+  for (const command of ['curl', 'sleep']) writeFileSync(join(bin, command), '#!/bin/sh\nexit 0\n');
+  for (const command of ['sudo', 'systemctl', 'ss', 'curl', 'sleep']) chmodSync(join(bin, command), 0o755);
+  const source = [
+    'set -euo pipefail',
+    'SUDO=(sudo)',
+    'OMBRE_HEALTH_TIMEOUT_SECONDS=0',
+    'log() { :; }',
+    'fail() { printf "%s\\n" "$1" >&2; return 1; }',
+    waitContract,
+    acceptContract,
+    'wait_for_managed_endpoint ran-agent-ombre-brain.service http://127.0.0.1:18001/health 18001 upstream',
+    'release_managed_endpoint_health ran-agent-ombre-brain.service 18001 http://127.0.0.1:18001/health upstream',
+  ].join('\n');
+  try {
+    assert.doesNotThrow(() => execFileSync('bash', ['-c', source], {
+      env: { PATH: `${bin}:/usr/bin:/bin` },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    }));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('transaction retention keeps current production and only deletes explicitly accepted rollbackable history', () => {
   const fixture = makeDeployServiceFixture();
   const snapshotRoot = join(fixture.dir, 'artifacts', 'snapshots');

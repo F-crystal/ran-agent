@@ -60,6 +60,7 @@ OMBRE_COMPAT_CURATOR_MODEL="${OMBRE_COMPAT_CURATOR_MODEL:-${HERMES_DEFAULT_MODEL
 OMBRE_COMPAT_REVIEWER_BASE_URL="${OMBRE_COMPAT_REVIEWER_BASE_URL:-https://api.deepseek.com/v1}"
 OMBRE_COMPAT_REVIEWER_MODEL="${OMBRE_COMPAT_REVIEWER_MODEL:-${HERMES_DEFAULT_MODEL:-deepseek-v4-flash}}"
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
+if [[ "${EUID}" -eq 0 ]] || ! command -v sudo >/dev/null 2>&1; then SUDO=(); else SUDO=(sudo); fi
 
 for actual_expected in \
   "$OMBRE_BRAIN_SOURCE_DIR|$OMBRE_BRAIN_HOME/upstream" \
@@ -234,15 +235,15 @@ echo ""
 echo "=== Managed source services ==="
 
 if command -v systemctl >/dev/null 2>&1; then
-  upstream_status=$(systemctl is-active ran-agent-ombre-brain.service 2>/dev/null || echo "unknown")
-  recall_status=$(systemctl is-active ran-agent-ombre-recall.service 2>/dev/null || echo "unknown")
+  upstream_status=$("${SUDO[@]}" systemctl is-active ran-agent-ombre-brain.service 2>/dev/null || echo "unknown")
+  recall_status=$("${SUDO[@]}" systemctl is-active ran-agent-ombre-recall.service 2>/dev/null || echo "unknown")
   echo "ran-agent-ombre-brain.service: $upstream_status"
   echo "ran-agent-ombre-recall.service: $recall_status"
   for spec in "ran-agent-ombre-brain.service:18001" "ran-agent-ombre-recall.service:18002"; do
     unit="${spec%%:*}"; port="${spec##*:}"
-    pid="$(systemctl show "$unit" --property=MainPID --value 2>/dev/null || true)"
+    pid="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null || true)"
     if [[ "$pid" =~ ^[1-9][0-9]*$ ]] &&
-      ss -ltnp 2>/dev/null | grep -Eq "127\\.0\\.0\\.1:$port([^0-9]|$).*pid=$pid([^0-9]|$)"; then
+      "${SUDO[@]}" ss -ltnp 2>/dev/null | grep -Eq "127\\.0\\.0\\.1:$port([^0-9]|$).*pid=$pid([^0-9]|$)"; then
       echo "$unit ownership: MainPID=$pid owns loopback:$port"
     else
       echo "$unit ownership: INVALID"

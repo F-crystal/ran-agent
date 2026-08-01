@@ -1,14 +1,15 @@
 # Documentation Status
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-01)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
 revalidated it online. The owner-supplied 2026-07-31 preflight reported a clean
-worktree and all four core units active. Candidates
-`834eabef5a2e8883d3237f7b35c96f70d1fac7a9` and
-`f6f6048029de6e4c73b5b8b11f1441069770786c` stopped at their immutable
-pre-mutation gates and did not change production. Ombre O1 baseline
+worktree and all four core units active. Rejected candidate lineage, including
+immutable-gate failures and the later transactional `414210f` and `7649a94`
+apply failures, is maintained in `docs/governance/current_runtime_status.md`.
+The supplied `7649a94` trace stops before the transaction's final rollback
+result and is not production acceptance evidence. Ombre O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
 V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
 pushed but undeployed. Node Receipt is deferred and its failed source is not

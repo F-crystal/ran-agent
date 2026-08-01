@@ -87,6 +87,17 @@ UID/GID, exact NSS/passwd/group agreement, frozen home and nologin shell, fixed
 systemd names, and matching live process effective identity. It no longer
 depends on host-specific `login.defs` contents.
 
+Candidate `7649a9471b15b09e9aac25bed269a0e5d8b254dc` passed the immutable gate
+and reached Ombre startup, then stopped before dependent services because the
+startup contract obtained MainPID through `sudo systemctl` but socket process
+metadata through unprivileged `ss -p`. A deployment account cannot reliably see
+another service account's socket PID, so the ownership predicate could reject a
+healthy listener. The corrected startup, acceptance, failure-context, and
+specialty-diagnostic probes obtain socket metadata through the existing
+privilege seam and keep the strict MainPID ownership requirement. The supplied
+trace does not include the transaction's final rollback result; do not infer an
+active candidate from it.
+
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. Every other step below is read-only except
 `git fetch`, which updates local remote tracking objects only.
@@ -315,6 +326,12 @@ paths, exact DeepSeek endpoint/model values, a nonempty shared provider key,
 and `ran-agent:ran-agent:0700` state ownership without making a model or memory
 write canary. Any mismatch fails the release and restores the snapshot's prior
 O2 posture without weakening O1 recall-only behavior.
+
+Ombre listener ownership checks must run `ss -ltnp` through the same privilege
+seam used for `systemctl show MainPID`; an unprivileged process view is not
+authoritative across the `ubuntu` deployment account and `ran-agent` service
+account. Startup remains bounded and reports separate active, PID-valid,
+MainPID-listener, and HTTP-health results before dependent services start.
 
 ## 5. Difference Record And Acceptance Evidence
 
