@@ -20,6 +20,12 @@ are archived and pushed but undeployed. The current reviewed line adds
 owner-authorized production wiring: the source remains fail-off, while the
 formal release defaults to Flash with O2 enabled. Commands below describe
 that target state, not behavior already asserted in production.
+The later candidate `8c259ddcd2a34e80400ac39e444876807960f689`
+passed the immutable gate but failed Ombre startup and rolled back completely;
+production therefore remains on the recorded SHA. The owner reported
+`56.6GB/60GB` used after repeated failed transactions retained large completed
+rollback payloads. Use only the verified pruner below; do not manually remove
+snapshot directories.
 
 ## Source Of Truth
 
@@ -52,6 +58,13 @@ that target state, not behavior already asserted in production.
   `bash scripts/prepare-xhs-public-sidecar.sh`
 - Clean UV cache safely:
   `bash scripts/clean-uv-cache-safe.sh`
+- After this reviewed script exists in the active checkout, inspect
+  reclaimable completed-release payloads:
+  `sudo bash scripts/prune-hermes-release-artifacts.sh --dry-run`
+- After this reviewed script exists in the active checkout, reclaim only
+  payloads classified as completed `rollback_used` while keeping transaction
+  evidence:
+  `sudo bash scripts/prune-hermes-release-artifacts.sh --apply`
 - Immutable Hermes release transaction and rollback:
   `docs/governance/hermes_release_deployment.md`
 - Explicit Pro evaluation, still through the same immutable transaction:
@@ -59,6 +72,24 @@ that target state, not behavior already asserted in production.
 
 Do not publish one-off pasteable repair blocks in this file. If a repeated
 operation is needed, turn it into a script and reference it here.
+
+The old production checkout does not contain the pruner. Its immediate recovery
+authority is the reviewed bootstrap/apply transaction, which uses the
+candidate-staged pruner under the global release lock before it creates a new
+snapshot. It then performs a fresh mandatory capacity gate before any snapshot
+copy or service stop. Do not expect `git fetch` alone to add the script to the
+worktree.
+
+The artifact pruner fails closed for the current production transaction,
+unknown/corrupt state, symlinks, mount boundaries, path or inode drift, and a
+concurrent payload cleanup. It removes only a verified snapshot's `files/` payload;
+`transaction-state.json`, manifest, service state, and other evidence remain.
+Deploy also runs this pruner while holding the global release lock before the
+next runtime snapshot. It then measures the complete snapshot source set and
+requires its apparent size plus the larger of 25% or 2 GiB on the artifact
+filesystem. Insufficient capacity fails before a snapshot directory, service
+stop, or checkout change. Pre-prune `df` is an observation, not permission to
+delete uncertain artifacts by hand and not the final capacity authority.
 
 Agents changing or operating server runtime should first load
 `skills/server-runtime/SKILL.md`. That skill owns the virtualenv activation

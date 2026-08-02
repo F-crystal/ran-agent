@@ -294,6 +294,21 @@ def classify_snapshot(
                 "reason": "verified_accepted_rollbackable",
                 "completed_at": state["completed_at"],
             }
+        rollback_used = (
+            state["status"] == "rollback_used"
+            and state["acceptance_state"] == "not_accepted"
+            and state["rollback_state"] == "rollback_used"
+            and state["rollbackable"] is False
+            and bool(state["completed_at"])
+        )
+        if state["status"] == "rollback_used" and not rollback_used:
+            raise ValueError("rollback-used transaction is incomplete")
+        if rollback_used:
+            return {
+                "decision": "PRUNE_PAYLOAD",
+                "reason": "verified_completed_rollback_used",
+                "completed_at": state["completed_at"],
+            }
         return {"decision": "SKIP_UNCERTAIN", "reason": f"non_prunable_status:{state['status']}"}
     except Exception as error:
         return {"decision": "SKIP_UNCERTAIN", "reason": str(error)}
@@ -339,7 +354,9 @@ def main() -> int:
     retention_parser.add_argument("--format", choices=("json", "tsv"), default="json")
     pointer_parser = subparsers.add_parser("read-production-pointer")
     pointer_parser.add_argument("path", type=Path)
-    pointer_parser.add_argument("--format", choices=("json", "transaction-id"), default="json")
+    pointer_parser.add_argument(
+        "--format", choices=("json", "transaction-id", "candidate-sha", "tsv"), default="json"
+    )
     args = parser.parse_args()
     try:
         if args.command == "validate-config":
@@ -357,6 +374,10 @@ def main() -> int:
             result = read_production_pointer(args.path)
         if args.command == "read-production-pointer" and args.format == "transaction-id":
             print(result["transaction_id"])
+        elif args.command == "read-production-pointer" and args.format == "candidate-sha":
+            print(result["candidate_sha"])
+        elif args.command == "read-production-pointer" and args.format == "tsv":
+            print(f"{result['transaction_id']}\t{result['candidate_sha']}")
         elif args.command == "classify-snapshot" and args.format == "tsv":
             print(
                 "\t".join(

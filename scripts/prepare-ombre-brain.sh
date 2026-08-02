@@ -28,7 +28,17 @@ OMBRE_BRAIN_ENV_EXAMPLE_FILE="${OMBRE_BRAIN_ENV_EXAMPLE_FILE:-$OMBRE_BRAIN_HOME/
 OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
 OMBRE_STEWARD_IDENTITY_FILE="${RAN_AGENT_STEWARD_IDENTITY_FILE:-$OMBRE_BRAIN_HOME/steward-identity.v1.json}"
 OMBRE_STEWARD_ROTATE="${RAN_AGENT_ROTATE_STEWARD_TOKEN:-0}"
-OMBRE_PATCH_PYTHON_BIN="${RAN_AGENT_OMBRE_PATCH_PYTHON_BIN:-${RAN_AGENT_PYTHON_BIN:-python3}}"
+if [[ -n "${RAN_AGENT_OMBRE_PATCH_PYTHON_BIN:-}" ]]; then
+  OMBRE_PATCH_PYTHON_BIN="$RAN_AGENT_OMBRE_PATCH_PYTHON_BIN"
+elif [[ -x /usr/bin/python3.12 ]]; then
+  OMBRE_PATCH_PYTHON_BIN=/usr/bin/python3.12
+else
+  OMBRE_PATCH_PYTHON_BIN="$(command -v python3.12 || true)"
+fi
+[[ -n "$OMBRE_PATCH_PYTHON_BIN" ]] || {
+  echo "ERROR: Ombre Brain source preparation requires a Python 3.12 executable" >&2
+  exit 1
+}
 OMBRE_BRAIN_PULL_IMAGE="${OMBRE_BRAIN_PULL_IMAGE:-false}"
 OMBRE_BRAIN_UPDATE_SOURCE="${OMBRE_BRAIN_UPDATE_SOURCE:-true}"
 OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS="${OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS:-300}"
@@ -210,24 +220,40 @@ requirements_fingerprint() {
   fi
 }
 
+python_minor_version() {
+  "$1" -I -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")'
+}
+
+verify_source_runtime() {
+  [ "$(python_minor_version "$OMBRE_BRAIN_VENV/bin/python")" = 3.12 ] || {
+    echo "ERROR: Ombre Brain source venv requires Python 3.12" >&2
+    return 1
+  }
+  "$OMBRE_BRAIN_VENV/bin/python" -m pip check >/dev/null
+  "$OMBRE_BRAIN_VENV/bin/python" -I -c \
+    'import frontmatter, httpx, jieba, mcp, numpy, openai, rapidfuzz, rank_bm25, sklearn, uvicorn, yaml, zstandard'
+}
+
 install_source_requirements_if_changed() {
-  local requirements="$OMBRE_BRAIN_SOURCE_DIR/requirements.txt"
+  local requirements="$OMBRE_BRAIN_SOURCE_DIR/requirements.lock.txt"
   if [ ! -f "$requirements" ]; then
-    REQUIREMENTS_INSTALL="skipped_missing"
-    return 0
+    echo "ERROR: missing official Ombre Brain requirements.lock.txt" >&2
+    exit 1
   fi
-  local stamp="$OMBRE_BRAIN_VENV/.requirements.fingerprint"
+  local stamp="$OMBRE_BRAIN_VENV/.requirements.lock.fingerprint"
   local current
   current="$(requirements_fingerprint "$requirements")"
   REQUIREMENTS_FINGERPRINT="sha256:$current"
   if [ -f "$stamp" ] && [ "$(cat "$stamp")" = "$current" ]; then
     log "source requirements unchanged; skipping pip install"
     REQUIREMENTS_INSTALL="skipped_unchanged"
+    verify_source_runtime
     return 0
   fi
   log "installing source requirements"
   REQUIREMENTS_INSTALL="installed"
-  "$OMBRE_BRAIN_VENV/bin/python" -m pip install -r "$requirements"
+  "$OMBRE_BRAIN_VENV/bin/python" -m pip install --require-hashes -r "$requirements"
+  verify_source_runtime
   printf '%s\n' "$current" > "$stamp"
 }
 
@@ -239,6 +265,11 @@ prepare_source_runner() {
       return 0
       ;;
   esac
+
+  [ "$(python_minor_version "$OMBRE_PATCH_PYTHON_BIN")" = 3.12 ] || {
+    echo "ERROR: Ombre Brain source preparation requires Python 3.12" >&2
+    exit 1
+  }
 
   if [ -f "$OMBRE_BRAIN_SOURCE_DIR/src/server.py" ]; then
     log "preserving existing source checkout $OMBRE_BRAIN_SOURCE_DIR"
@@ -321,10 +352,19 @@ prepare_source_runner() {
     log "linked source config $OMBRE_BRAIN_SOURCE_DIR/config.yaml"
   fi
 
+  if [ -x "$OMBRE_BRAIN_VENV/bin/python" ] &&
+    [ "$(python_minor_version "$OMBRE_BRAIN_VENV/bin/python")" != 3.12 ]; then
+    log "recreating source venv with Python 3.12"
+    rm -rf -- "$OMBRE_BRAIN_VENV"
+  fi
   if [ ! -x "$OMBRE_BRAIN_VENV/bin/python" ]; then
     log "creating source venv $OMBRE_BRAIN_VENV"
     "$OMBRE_PATCH_PYTHON_BIN" -m venv "$OMBRE_BRAIN_VENV"
   fi
+  [ "$(python_minor_version "$OMBRE_BRAIN_VENV/bin/python")" = 3.12 ] || {
+    echo "ERROR: Ombre Brain source venv creation did not produce Python 3.12" >&2
+    exit 1
+  }
 
   install_source_requirements_if_changed
 }

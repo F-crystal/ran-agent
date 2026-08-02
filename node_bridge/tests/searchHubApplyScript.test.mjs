@@ -756,14 +756,19 @@ test('apply script writes the pinned source/loopback/auth Ombre systemd contract
   const fullUnit = readFileSync(join(systemdDir, 'ran-agent-hermes-full.service'), 'utf8');
   assert.match(unit, /Description=Ran Agent Ombre Brain Memory Service/);
   assert.match(unit, /EnvironmentFile=-\/opt\/ran_agent\/\.env\.local/);
-  assert.match(unit, /source \/opt\/ran_agent\/\.venv\/bin\/activate/);
-  assert.match(unit, /scripts\/start_ombre_brain_service\.sh/);
+  assert.match(unit, /^ExecStart=\/usr\/bin\/bash \/opt\/ran_agent\/scripts\/start_ombre_brain_service\.sh --managed \/opt\/ran_agent \/opt\/ran_agent\/\.ran_agent_state \/opt\/ran_agent\/vault\/ombre$/m);
+  assert.doesNotMatch(unit, /bash -lc|source \/opt\/ran_agent\/\.venv\/bin\/activate/);
+  assert.match(unit, /^UnsetEnvironment=BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH$/m);
   assert.match(unit, /^Environment=OMBRE_BRAIN_RUNNER=source$/m);
   assert.match(unit, /^Environment=OMBRE_BRAIN_COMMIT=0e83d4671ce1629e03ad36bb9160235bf60dbd34$/m);
   assert.match(unit, /^Environment=OMBRE_BIND_HOST=127\.0\.0\.1$/m);
   assert.match(unit, /^Environment=OMBRE_MCP_REQUIRE_AUTH=false$/m);
-  assert.doesNotMatch(unit, /^Environment=OMBRE_BRAIN_PORT=/m);
-  assert.doesNotMatch(unit, /^Environment=OMBRE_BUCKETS_DIR=/m);
+  assert.match(unit, /^Environment=OMBRE_TRANSPORT=streamable-http$/m);
+  assert.match(unit, /^Environment=OMBRE_PORT=18001$/m);
+  assert.match(unit, /^Environment=OMBRE_CONFIG_PATH=\/opt\/ran_agent\/\.ran_agent_state\/ombre-brain\/config\.yaml$/m);
+  assert.match(unit, /^Environment=OMBRE_VAULT_DIR=\/opt\/ran_agent\/vault\/ombre$/m);
+  assert.match(unit, /^StartLimitIntervalSec=30$/m);
+  assert.match(unit, /^StartLimitBurst=3$/m);
   assert.match(liteUnit, /After=.*ran-agent-ombre-brain\.service/);
   assert.match(fullUnit, /After=.*ran-agent-ombre-brain\.service/);
 });
@@ -829,12 +834,16 @@ test('start_ombre_brain_service.sh runs the prepared managed source without prep
   const venvDir = join(homeDir, '.venv');
   const logFile = join(dir, 'python.log');
   mkdirSync(join(rootDir, 'scripts'), { recursive: true });
+  mkdirSync(join(rootDir, 'node_bridge'), { recursive: true });
   mkdirSync(join(sourceDir, 'src'), { recursive: true });
   mkdirSync(join(venvDir, 'bin'), { recursive: true });
+  writeFileSync(join(rootDir, '.env.local'), 'exit 97\n');
+  writeFileSync(join(rootDir, 'node_bridge', '.env.local'), 'exit 98\n');
+  writeFileSync(join(homeDir, 'config.yaml'), 'transport: stdio\n');
   writeFileSync(join(sourceDir, 'src', 'server.py'), 'print("server placeholder")\n');
   writeFileSync(join(venvDir, 'bin', 'python'), [
     '#!/bin/sh',
-    'printf "%s\\n" "$PWD|$*" > "$OMBRE_TEST_LOG"',
+    'printf "%s\\n" "$PWD|$*|$OMBRE_TRANSPORT|$OMBRE_PORT|$OMBRE_CONFIG_PATH|$OMBRE_VAULT_DIR|$OMBRE_BUCKETS_DIR" > "$OMBRE_TEST_LOG"',
     'exit 0',
     '',
   ].join('\n'));
@@ -842,28 +851,34 @@ test('start_ombre_brain_service.sh runs the prepared managed source without prep
   writeFileSync(join(rootDir, 'scripts', 'prepare-ombre-brain.sh'), '#!/bin/sh\nexit 99\n');
   chmodSync(join(rootDir, 'scripts', 'prepare-ombre-brain.sh'), 0o755);
 
-  execFileSync('bash', ['scripts/start_ombre_brain_service.sh'], {
+  execFileSync('/bin/bash', [
+    'scripts/start_ombre_brain_service.sh',
+    '--managed', rootDir, stateDir, join(dir, 'buckets'),
+  ], {
     cwd: new URL('../..', import.meta.url).pathname,
     env: {
       ...process.env,
-      RAN_AGENT_REPO_ROOT: rootDir,
-      RAN_AGENT_STATE_DIR: stateDir,
-      RAN_AGENT_MANAGED_OMBRE_RUNTIME: '1',
-      RAN_AGENT_MANAGED_OMBRE_STATE_DIR: stateDir,
-      RAN_AGENT_MANAGED_OMBRE_BUCKETS_DIR: join(dir, 'buckets'),
+      RAN_AGENT_REPO_ROOT: '',
+      RAN_AGENT_STATE_DIR: '/ignored/env/state',
+      RAN_AGENT_MANAGED_OMBRE_RUNTIME: '0',
       OMBRE_BRAIN_ENABLED: 'false',
-      OMBRE_BRAIN_HOME: '/conflicting/home',
+      OMBRE_BRAIN_HOME: '/ignored/env/home',
       OMBRE_BRAIN_RUNNER: 'source',
       OMBRE_BRAIN_SOURCE_DIR: '/conflicting/source',
       OMBRE_BRAIN_VENV: '/conflicting/venv',
       OMBRE_TEST_LOG: logFile,
-      PATH: `/no-docker-here:${process.env.PATH}`,
+      PYTHONHOME: '/poison/python-home',
+      PYTHONPATH: '/poison/python-path',
+      PATH: '/poison/path',
     },
     stdio: 'pipe',
   });
 
   const log = readFileSync(logFile, 'utf8');
-  assert.match(log, new RegExp(`${sourceDir.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\|src/server\\.py`));
+  assert.equal(
+    log.trim(),
+    `${sourceDir}|-E -s src/server.py|streamable-http|18001|${homeDir}/config.yaml|${join(dir, 'buckets')}|${join(dir, 'buckets')}`,
+  );
 });
 
 test('diagnose-ombre-memory.sh keeps full config path separate from lite env HERMES_HOME', () => {
@@ -964,6 +979,8 @@ test('prepare-ombre-brain.sh fails closed when timed-out source cannot prove the
     'exit 124',
   ].join('\n'));
   chmodSync(join(binDir, 'timeout'), 0o755);
+  writeFileSync(join(binDir, 'python312'), '#!/bin/sh\nprintf "3.12\\n"\n');
+  chmodSync(join(binDir, 'python312'), 0o755);
 
   assert.throws(() => execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {
     cwd: new URL('../..', import.meta.url).pathname,
@@ -975,6 +992,7 @@ test('prepare-ombre-brain.sh fails closed when timed-out source cannot prove the
       OMBRE_BRAIN_HOME: homeDir,
       OMBRE_BRAIN_SOURCE_DIR: sourceDir,
       OMBRE_BRAIN_VENV: join(homeDir, '.venv'),
+      RAN_AGENT_OMBRE_PATCH_PYTHON_BIN: join(binDir, 'python312'),
     },
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -984,7 +1002,7 @@ test('prepare-ombre-brain.sh fails closed when timed-out source cannot prove the
   assert.equal(existsSync(join(homeDir, 'status.json')), false);
 });
 
-test('prepare-ombre-brain.sh skips pip install when requirements are unchanged', () => {
+test('prepare-ombre-brain.sh installs the official hashed lock once and caches its fingerprint', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-requirements-cache-'));
   const rootDir = join(dir, 'repo');
   const stateDir = join(dir, 'custom-live-state');
@@ -995,21 +1013,22 @@ test('prepare-ombre-brain.sh skips pip install when requirements are unchanged',
   mkdirSync(join(sourceDir, 'src'), { recursive: true });
   mkdirSync(join(venvDir, 'bin'), { recursive: true });
   writeFileSync(join(sourceDir, 'src', 'server.py'), '');
-  writeFileSync(join(sourceDir, 'requirements.txt'), 'fastapi==0.1\n');
+  writeFileSync(join(sourceDir, 'requirements.lock.txt'), 'fastapi==0.1 \\\n+    --hash=sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n');
   execFileSync('git', ['init'], { cwd: sourceDir, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.email', 'ombre-test@example.invalid'], { cwd: sourceDir });
   execFileSync('git', ['config', 'user.name', 'Ombre test'], { cwd: sourceDir });
-  execFileSync('git', ['add', 'src/server.py', 'requirements.txt'], { cwd: sourceDir });
+  execFileSync('git', ['add', 'src/server.py', 'requirements.lock.txt'], { cwd: sourceDir });
   execFileSync('git', ['commit', '-m', 'fixed fixture'], { cwd: sourceDir, stdio: 'pipe' });
   const fixedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf8' }).trim();
   writeFileSync(join(venvDir, 'bin', 'python'), [
     '#!/usr/bin/env bash',
+    'if [[ "$*" == *"sys.version_info"* ]]; then printf "3.12\\n"; exit 0; fi',
     `printf '%s\\n' "$*" >> ${JSON.stringify(pipLog)}`,
     'exit 0',
   ].join('\n'));
   chmodSync(join(venvDir, 'bin', 'python'), 0o755);
   const patchPython = join(dir, 'ombre-patch-python');
-  writeFileSync(patchPython, '#!/usr/bin/env bash\nexit 0\n');
+  writeFileSync(patchPython, '#!/usr/bin/env bash\nif [[ "$*" == *"sys.version_info"* ]]; then printf "3.12\\n"; fi\nexit 0\n');
   chmodSync(patchPython, 0o755);
   const gitShim = join(dir, 'git');
   writeFileSync(gitShim, [
@@ -1048,7 +1067,18 @@ test('prepare-ombre-brain.sh skips pip install when requirements are unchanged',
   const pipCalls = readFileSync(pipLog, 'utf8')
     .split('\n')
     .filter((line) => line.includes('-m pip install'));
+  const healthChecks = readFileSync(pipLog, 'utf8')
+    .split('\n')
+    .filter((line) => line.includes('-m pip check'));
+  const importChecks = readFileSync(pipLog, 'utf8')
+    .split('\n')
+    .filter((line) => line.includes('-I -c'));
   assert.equal(pipCalls.length, 1);
+  assert.equal(pipCalls[0], `-m pip install --require-hashes -r ${join(sourceDir, 'requirements.lock.txt')}`);
+  assert.equal(healthChecks.length, 2);
+  assert.equal(importChecks.length, 2);
+  assert.equal(existsSync(join(venvDir, '.requirements.lock.fingerprint')), true);
+  assert.equal(existsSync(join(venvDir, '.requirements.fingerprint')), false);
 });
 
 test('start_obsidian_memory_mcp.sh does not contain uv tool install --force', () => {

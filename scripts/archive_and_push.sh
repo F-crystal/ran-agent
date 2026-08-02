@@ -16,7 +16,8 @@ PYTHON_TIMEOUT="${ARCHIVE_PYTHON_TEST_TIMEOUT_SECONDS:-900}"
 NODE_TIMEOUT="${ARCHIVE_NODE_TEST_TIMEOUT_SECONDS:-1800}"
 HEARTBEAT_SECONDS="${ARCHIVE_TEST_HEARTBEAT_SECONDS:-25}"
 PYTHON_TEST_COMMAND="${ARCHIVE_PYTHON_TEST_COMMAND:-PYTHONPATH='$ROOT_DIR/src' '$PYTHON_BIN' -m pytest -q '$ROOT_DIR/tests/test_http_server.py' '$ROOT_DIR/tests/test_knowledge_agent.py' '$ROOT_DIR/tests/test_config.py'}"
-NODE_TEST_COMMAND="${ARCHIVE_NODE_TEST_COMMAND:-npm --prefix '$ROOT_DIR/node_bridge' test}"
+NODE_BIN="${ARCHIVE_NODE_BIN:-${RAN_AGENT_NODE_BIN:-}}"
+NODE_TEST_COMMAND="${ARCHIVE_NODE_TEST_COMMAND:-}"
 ARCHIVE_RECORD="${ARCHIVE_RECORD:-$ROOT_DIR/local_archive/docs/governance/archive/$(date +%F)-archive-and-push.md}"
 REUSE_VALIDATION=""
 SKIP_TESTS_REASON=""
@@ -46,6 +47,7 @@ EFFECTIVE_FEATURE_TIP=""
 RECOVERY_MERGE_MESSAGE="merge: integrate main for archive recovery"
 RECOVERY_PYTHON_COMMAND=""
 RECOVERY_NODE_COMMAND=""
+RECOVERY_NODE_VERSION=""
 RECOVERY_ORIGINAL_EVIDENCE_PATH=""
 RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM=""
 RECOVERY_VALIDATION_FAILURE_REASON=""
@@ -96,6 +98,51 @@ realpath_of() { cd "$1" && pwd -P; }
 helper() { "$PYTHON_BIN" "$HELPER" "$@"; }
 journal_update() { helper journal-update --path "$JOURNAL" "$@"; }
 journal_get() { helper journal-get --path "$JOURNAL" --field "$1"; }
+
+node_supported() {
+  local executable="$1" version major minor patch
+  [ "${executable#/}" != "$executable" ] && [ -x "$executable" ] || return 1
+  version="$("$executable" -p 'process.versions.node' 2>/dev/null)" || return 1
+  IFS=. read -r major minor patch <<EOF
+$version
+EOF
+  [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]] || return 1
+  (( major > 22 || (major == 22 && minor >= 13) ))
+}
+
+resolve_archive_node() {
+  local candidate found=''
+  if [ -n "$NODE_BIN" ]; then
+    node_supported "$NODE_BIN" || die "ARCHIVE_NODE_BIN/RAN_AGENT_NODE_BIN must be an absolute executable Node >=22.13"
+    return 0
+  fi
+  candidate="$(command -v node 2>/dev/null || true)"
+  if [ -n "$candidate" ] && node_supported "$candidate"; then
+    NODE_BIN="$candidate"
+    return 0
+  fi
+  if [ -n "${NVM_DIR:-}" ] && [ "${NVM_DIR#/}" != "$NVM_DIR" ] && [ -d "$NVM_DIR/versions/node" ]; then
+    for candidate in "$NVM_DIR"/versions/node/*/bin/node; do
+      [ -e "$candidate" ] || continue
+      node_supported "$candidate" && found="$candidate"
+    done
+  fi
+  [ -n "$found" ] || die "no absolute Node >=22.13 available; set ARCHIVE_NODE_BIN"
+  NODE_BIN="$found"
+}
+
+configure_node_test_command() {
+  local quoted_node quoted_bridge
+  [ -z "$NODE_TEST_COMMAND" ] || return 0
+  resolve_archive_node
+  printf -v quoted_node '%q' "$NODE_BIN"
+  printf -v quoted_bridge '%q' "$ROOT_DIR/node_bridge"
+  NODE_TEST_COMMAND="cd $quoted_bridge && $quoted_node --test"
+}
+
+archive_node_version() {
+  if [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ]; then "$NODE_BIN" --version 2>/dev/null || printf unavailable; else printf unavailable; fi
+}
 
 parse_args() {
   while [ "$#" -gt 0 ]; do
@@ -347,11 +394,12 @@ validate() {
     persist_validation_provenance skipped "" operator_skip "" "" "" "$SKIP_TESTS_REASON" || fail validation 35
     journal_update --set-json "test_results={\"status\":\"skipped\",\"reason\":$(json_quote "$SKIP_TESTS_REASON")}" || fail validation 35
   else
+    configure_node_test_command
     run_one_test python "$PYTHON_TEST_COMMAND" "$PYTHON_TIMEOUT"
     run_one_test node "$NODE_TEST_COMMAND" "$NODE_TIMEOUT"
     [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$SOURCE_HEAD" ] || fail validation 36
     local created="$TRANSACTION_DIR/validation-record.json" checksum completed
-    helper validation-create --journal "$JOURNAL" --output "$created" --repository "$ROOT_DIR" --branch "$SOURCE_BRANCH" --base-sha "$EXPECTED_ORIGIN_MAIN" --head "$SOURCE_HEAD" --worktree-clean "$(worktree_clean && printf true || printf false)" --node-version "$(node --version 2>/dev/null || printf unavailable)" --python-version "$($PYTHON_BIN --version 2>&1)" --commands-json "$(printf '[%s,%s]' "$(json_quote "$PYTHON_TEST_COMMAND")" "$(json_quote "$NODE_TEST_COMMAND")")" || fail validation 35
+    helper validation-create --journal "$JOURNAL" --output "$created" --repository "$ROOT_DIR" --branch "$SOURCE_BRANCH" --base-sha "$EXPECTED_ORIGIN_MAIN" --head "$SOURCE_HEAD" --worktree-clean "$(worktree_clean && printf true || printf false)" --node-version "$(archive_node_version)" --python-version "$($PYTHON_BIN --version 2>&1)" --commands-json "$(printf '[%s,%s]' "$(json_quote "$PYTHON_TEST_COMMAND")" "$(json_quote "$NODE_TEST_COMMAND")")" || fail validation 35
     checksum="$(accepted_validation_field checksum "$created")"; completed="$(accepted_validation_field completed_at "$created")"
     persist_validation_provenance ran "$SOURCE_HEAD" executed "$(repo_relative_path "$created")" "$checksum" "$completed" "" || fail validation 35
   fi
@@ -634,6 +682,7 @@ bind_recovery_validation_commands() {
   [ "$record_checksum" = "$checksum" ] || recovery_fail "original validation evidence checksum does not match the journal" 95
   RECOVERY_PYTHON_COMMAND="$(validation_record_command "$record" 0)" || recovery_fail "original validation record does not contain two replayable commands" 95
   RECOVERY_NODE_COMMAND="$(validation_record_command "$record" 1)" || recovery_fail "original validation record does not contain two replayable commands" 95
+  RECOVERY_NODE_VERSION="$(accepted_validation_field node_version "$record")" || recovery_fail "original validation record has no Node version provenance" 95
   RECOVERY_ORIGINAL_EVIDENCE_PATH="$path"
   RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM="$checksum"
   RECOVERY_OVERRIDE_PYTHON=0
@@ -959,6 +1008,7 @@ recovery_validation_valid() {
   json_arrays_equal "$expected_commands" "$(journal_get recovery_validation_record.commands)" || return 1
   expected_checksums="$(printf '[%s,%s]' "$(json_quote "$(command_sha256 "${RECOVERY_PYTHON_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}")")" "$(json_quote "$(command_sha256 "${RECOVERY_NODE_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}")")")"
   json_arrays_equal "$expected_checksums" "$(journal_get recovery_validation_record.command_checksums)" || return 1
+  [ "$(accepted_validation_field node_version "$record")" = "transaction-bound:$RECOVERY_NODE_VERSION" ] || return 1
   [ "$(journal_optional recovery_validation_record.original_evidence_path)" = "$RECOVERY_ORIGINAL_EVIDENCE_PATH" ] || return 1
   [ "$(journal_optional recovery_validation_record.original_evidence_checksum)" = "$RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM" ] || return 1
   manifest_path="$(local_archive_path "$manifest_path")" || { RECOVERY_VALIDATION_FAILURE_REASON="manifest integrity failure: manifest path is outside local_archive"; return 1; }
@@ -993,7 +1043,7 @@ ensure_recovery_validation() {
   record="$TRANSACTION_DIR/recovery-validation-record.json"
   python_command="${RECOVERY_PYTHON_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}"
   node_command="${RECOVERY_NODE_COMMAND//$ROOT_DIR/$RECOVERY_WORKTREE}"
-  helper validation-create --journal "$temporary_journal" --output "$record" --repository "$ROOT_DIR" --branch "$ORIGINAL_FEATURE_BRANCH" --base-sha "$RECOVERY_MAIN_COMMIT" --head "$EFFECTIVE_FEATURE_TIP" --worktree-clean true --node-version "$(node --version 2>/dev/null || printf unavailable)" --python-version "$($PYTHON_BIN --version 2>&1)" --commands-json "$(printf '[%s,%s]' "$(json_quote "$python_command")" "$(json_quote "$node_command")")" || recovery_fail "unable to create recovery validation record" 93
+  helper validation-create --journal "$temporary_journal" --output "$record" --repository "$ROOT_DIR" --branch "$ORIGINAL_FEATURE_BRANCH" --base-sha "$RECOVERY_MAIN_COMMIT" --head "$EFFECTIVE_FEATURE_TIP" --worktree-clean true --node-version "transaction-bound:$RECOVERY_NODE_VERSION" --python-version "$($PYTHON_BIN --version 2>&1)" --commands-json "$(printf '[%s,%s]' "$(json_quote "$python_command")" "$(json_quote "$node_command")")" || recovery_fail "unable to create recovery validation record" 93
   helper validation-verify --record "$record" --repository "$ROOT_DIR" --head "$EFFECTIVE_FEATURE_TIP" --worktree-clean true >/dev/null || recovery_fail "recovery validation record verification failed" 93
   checksum="$(accepted_validation_field checksum "$record")"
   record_json="$(printf '{"status":"passed","path":%s,"checksum":%s,"manifest_path":%s,"manifest_checksum":%s,"command_source":"original_validation_record","commands":[%s,%s],"command_checksums":[%s,%s],"original_evidence_path":%s,"original_evidence_checksum":%s}' "$(json_quote "$(repo_relative_path "$record")")" "$(json_quote "$checksum")" "$(json_quote "$(repo_relative_path "$manifest")")" "$(json_quote "$manifest_checksum")" "$(json_quote "$python_command")" "$(json_quote "$node_command")" "$(json_quote "$(command_sha256 "$python_command")")" "$(json_quote "$(command_sha256 "$node_command")")" "$(json_quote "$RECOVERY_ORIGINAL_EVIDENCE_PATH")" "$(json_quote "$RECOVERY_ORIGINAL_EVIDENCE_CHECKSUM")")"

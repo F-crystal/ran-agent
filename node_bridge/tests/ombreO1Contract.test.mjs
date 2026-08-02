@@ -187,6 +187,19 @@ test('retention schema yields eligible only for fully verified accepted rollback
   assert.equal(classify(item, '', item.transactionId).decision, 'KEEP');
 });
 
+test('retention schema compacts only a completed and verified rollback-used payload', () => {
+  const item = snapshotFixture({
+    status: 'rollback_used',
+    acceptance_state: 'not_accepted',
+    rollback_state: 'rollback_used',
+    rollbackable: false,
+    current_production_identity: 'transaction:prior-production',
+  });
+  assert.equal(classify(item).decision, 'PRUNE_PAYLOAD');
+  assert.equal(classify(item, item.transactionId).decision, 'KEEP');
+  assert.equal(classify(item, '', item.transactionId).decision, 'KEEP');
+});
+
 for (const [name, overrides] of [
   ['unsupported schema', { schema_version: 999 }],
   ['unknown field', { future_field: true }],
@@ -195,7 +208,7 @@ for (const [name, overrides] of [
   ['empty completed time', { completed_at: '' }],
   ['manifest checksum mismatch', { manifest_digest: '0'.repeat(64) }],
   ['contradictory rollback failed', { rollback_state: 'rollback_failed' }],
-  ['rollback used', { status: 'rollback_used', acceptance_state: 'not_accepted', rollback_state: 'rollback_used' }],
+  ['incomplete rollback used', { status: 'rollback_used', acceptance_state: 'not_accepted', rollback_state: 'rollback_used', rollbackable: false, completed_at: '' }],
   ['resumable', { status: 'resumable', acceptance_state: 'not_accepted', rollback_state: 'not_used' }],
 ]) {
   test(`retention schema skips uncertain ${name}`, () => {

@@ -9,7 +9,7 @@ const url = process.env.OMBRE_PATCHED_PROCESS_URL || '';
 const tokenFile = process.env.RAN_AGENT_STEWARD_TOKEN_FILE || '';
 const identityFile = process.env.RAN_AGENT_STEWARD_IDENTITY_FILE || '';
 
-test('real patched Ombre process satisfies Steward API v1 contract', {
+test('real patched Ombre process satisfies the authenticated Steward boundary', {
   skip: !url || !tokenFile || !identityFile,
 }, async () => {
   const tokenInfo = fs.lstatSync(tokenFile);
@@ -20,6 +20,9 @@ test('real patched Ombre process satisfies Steward API v1 contract', {
   const token = fs.readFileSync(tokenFile, 'ascii').trim();
   const identity = JSON.parse(fs.readFileSync(identityFile, 'utf8'));
 
+  const unauthenticated = await fetch(`${url.replace(/\/+$/, '')}/health`);
+  assert.equal(unauthenticated.status, 401);
+
   const health = await call('health', { method: 'GET' });
   assert.equal(health.status, 200);
   assert.deepEqual(health.body, {
@@ -27,6 +30,7 @@ test('real patched Ombre process satisfies Steward API v1 contract', {
     schema_version: 'ombre.steward-api/1',
     ...identity,
   });
+  if (process.env.OMBRE_PATCHED_PROCESS_MUTATION_TEST !== '1') return;
 
   const targets = [];
   for (const [index, method] of [

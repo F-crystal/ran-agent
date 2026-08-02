@@ -15,7 +15,8 @@ local_o1_online_revalidation: not performed
 production_worktree: clean in owner-supplied 2026-07-31 preflight
 production_services: four core units active in owner-supplied 2026-07-31 preflight
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
-rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); 7649a9471b15b09e9aac25bed269a0e5d8b254dc (cross-user Ombre socket ownership was probed without the existing privilege seam); first four stopped at the immutable pre-mutation gate; 414210f rolled back completely; the supplied 7649a94 trace ends at the bounded startup failure before dependent services and does not yet establish rollback completion
+rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); 7649a9471b15b09e9aac25bed269a0e5d8b254dc (cross-user Ombre socket ownership was probed without the existing privilege seam); 8c259ddcd2a34e80400ac39e444876807960f689 (ran-agent wrapper re-read deployment-user env and exited before PID/listener); first four stopped at the immutable pre-mutation gate; 414210f and 8c259dd rolled back completely; the supplied 7649a94 trace alone does not establish its rollback completion
+production_storage: owner reported 56.6GB/60GB used after repeated failed transactions retained large completed rollback payloads; governed recovery prunes only verified rollback-used payloads and then requires full-snapshot headroom before mutation; not yet revalidated or reclaimed on server
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -38,8 +39,11 @@ the recorded SHA at that evidence point. Candidate `7649a94` later passed the
 immutable gate and prepared Ombre, but its startup check mixed privileged
 systemd PID discovery with an unprivileged `ss -p` process view. The supplied
 trace ends when that bounded check stopped dependent startup; it does not show
-the transaction's final rollback result. Server acceptance remains the
-authority after the next apply.
+that transaction's final rollback result. Candidate `8c259dd` later reached a
+zero-PID/zero-listener Ombre failure because its `ran-agent` wrapper re-sourced
+deployment-user `0600` env files under `set -e`; its owner-supplied trace does
+show `rollback-complete`. Production therefore remains on the recorded SHA.
+Server acceptance remains the authority after the next apply.
 
 The repository mainline keeps every O1 invariant from
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2`, keeps Lite/Full on
@@ -142,6 +146,30 @@ contract:
   This is a release-observability portability fix, not an Ombre, Hermes, or
   model change. Rollback completion for the supplied failed run is not yet
   evidenced.
+- Candidate `8c259ddcd2a34e80400ac39e444876807960f689` is also not deployable. It
+  passed the immutable gate and prepared the pinned Ombre 2.8.8 checkout, but
+  the managed `ran-agent` process exited before obtaining a PID/listener because
+  its wrapper re-read deployment-user env files. The corrected launcher uses
+  explicit managed argv/systemd inputs only; prepare and live source/venv/real
+  process checks execute as `ran-agent`, while root only validates ownership
+  and orchestrates the transaction. Python 3.12 and all real-process assets now
+  fail before snapshot. Completed rollback payload cleanup is classified,
+  locked, symlink/mount/inode checked, and evidence-preserving. A fresh
+  post-prune gate requires the complete snapshot's apparent size plus the
+  larger of 25% or 2 GiB before any copy or service stop. Snapshot cp/tar data
+  is atomically committed before its manifest entry, so partial payloads cannot
+  become rollback authority. The supplied
+  `8c259dd` trace ends with `rollback-complete`; neither O1/O2 nor the Flash
+  target is deployed.
+- Current zero-PID/disk-pressure remediation evidence: the three focused Node
+  release files passed 147/147 under Node 22.22.2; all 9 Steward token/identity
+  tests passed as Linux root on the server in an isolated `/tmp` fixture,
+  including a real root-to-`ran-agent` venv sentinel and clean-environment
+  assertion; the full patched official Ombre 2.8.8 process contract passed
+  locally against commit `0e83d4671ce1629e03ad36bb9160235bf60dbd34` and
+  Python 3.12. Adversarial review caught and corrected the post-prune capacity
+  and partial-manifest rollback hazards. This is pre-deployment evidence only;
+  it does not claim server cleanup or acceptance.
 - Fresh production-wiring evidence: 137 focused Node tests passed under Node
   22.22.2, including O2 runtime, tool-less Curator/Reviewer, managed env,
   release residue, model policy, and gateway fallback checks. Shell/Python

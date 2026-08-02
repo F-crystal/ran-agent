@@ -710,6 +710,28 @@ def test_normal_transaction_persists_replayable_validation_evidence(tmp_path: Pa
     assert verified.returncode == 0, (verified.stdout, verified.stderr)
 
 
+def test_recovery_uses_bound_node_provenance_without_current_node(tmp_path: Path) -> None:
+    repo, _remote, journal, _base, _feature, _main = failed_divergent_transaction(tmp_path)
+    original = json.loads(
+        (repo / str(read_journal(journal)["validation_record_path"])).read_text(encoding="utf-8")
+    )
+
+    result = recover(
+        repo,
+        journal,
+        extra_env={
+            "ARCHIVE_NODE_TEST_COMMAND": "",
+            "ARCHIVE_NODE_BIN": str(tmp_path / "missing-node"),
+        },
+    )
+
+    assert result.returncode == 0, (result.stdout, result.stderr)
+    recovered = json.loads(
+        (journal.parent / "recovery-validation-record.json").read_text(encoding="utf-8")
+    )
+    assert recovered["node_version"] == f"transaction-bound:{original['node_version']}"
+
+
 def completed_recovery(tmp_path: Path) -> tuple[Path, Path, Path, str, str, str, str]:
     repo, remote, journal, base, feature, main = failed_divergent_transaction(tmp_path)
     result = recover(repo, journal)

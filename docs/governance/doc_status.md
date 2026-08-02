@@ -6,10 +6,16 @@ Status: CURRENT (2026-08-01)
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
 revalidated it online. The owner-supplied 2026-07-31 preflight reported a clean
 worktree and all four core units active. Rejected candidate lineage, including
-immutable-gate failures and the later transactional `414210f` and `7649a94`
-apply failures, is maintained in `docs/governance/current_runtime_status.md`.
-The supplied `7649a94` trace stops before the transaction's final rollback
-result and is not production acceptance evidence. Ombre O1 baseline
+immutable-gate failures and the later transactional `414210f`, `7649a94`, and
+`8c259dd` apply failures, is maintained in
+`docs/governance/current_runtime_status.md`. The supplied `8c259dd` trace shows
+a complete rollback after a zero-PID Ombre startup failure; it is not production
+acceptance evidence. The owner-reported `56.6GB/60GB` usage is attributed to
+large completed rollback payloads and remains unrevalidated until the governed
+artifact pruner runs on the server. The reviewed recovery path prunes only
+verified completed payloads, then requires fresh full-snapshot headroom before
+any copy or service stop; partial copies cannot enter the rollback manifest.
+Ombre O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
 V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
 pushed but undeployed. Node Receipt is deferred and its failed source is not

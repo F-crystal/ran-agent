@@ -257,6 +257,24 @@ run_as_runtime_identity() {
   "${SUDO[@]}" "$runuser_bin" --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- "$@"
 }
 
+run_as_steward_identity() {
+  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 ]]; then
+    "$@"
+    return
+  fi
+  local steward_uid runuser_bin
+  steward_uid="$(id -u "$STEWARD_RUNTIME_USER" 2>/dev/null)" ||
+    { echo "ERROR: Steward runtime identity is unresolved" >&2; return 1; }
+  if [ "$(id -u)" = "$steward_uid" ]; then
+    "$@"
+    return
+  fi
+  runuser_bin="$(command -v runuser 2>/dev/null || true)"
+  [ -n "$runuser_bin" ] ||
+    { echo "ERROR: runuser is required to prepare Ombre as ran-agent" >&2; return 1; }
+  "${SUDO[@]}" "$runuser_bin" --user "$STEWARD_RUNTIME_USER" --group "$STEWARD_RUNTIME_GROUP" -- "$@"
+}
+
 chown_if_user_exists() {
   local path="$1"
   if id "$RUNTIME_USER" >/dev/null 2>&1; then
@@ -359,8 +377,27 @@ validate_ombre_compat_model_endpoint() {
   fi
 }
 
+print_managed_endpoint_failure() {
+  local unit="$1" journal hint=see_root_journal
+  echo "--- $unit startup state ---" >&2
+  "${SUDO[@]}" systemctl show "$unit" --no-pager \
+    --property=ActiveState --property=SubState --property=Result \
+    --property=ExecMainCode --property=ExecMainStatus --property=NRestarts >&2 || true
+  journal="$("${SUDO[@]}" journalctl -u "$unit" -n 40 --no-pager --output=cat 2>/dev/null || true)"
+  if grep -qi 'permission denied' <<<"$journal"; then
+    hint=permission_denied
+  elif grep -Eq 'ModuleNotFoundError|ImportError' <<<"$journal"; then
+    hint=python_dependency_error
+  elif grep -qi 'address already in use' <<<"$journal"; then
+    hint=listener_conflict
+  elif grep -qi 'no such file or directory' <<<"$journal"; then
+    hint=path_missing
+  fi
+  printf '%s\n' "startup_hint=$hint" >&2
+}
+
 wait_for_managed_endpoint() {
-  local unit="$1" health_url="$2" port="$3" label="$4" waited=0 pid listeners
+  local unit="$1" health_url="$2" port="$3" label="$4" waited=0 pid listeners active_state
   local active=0 pid_valid=0 listener_owned=0 health_ok=0
   while [ "$waited" -le "$OMBRE_HEALTH_TIMEOUT_SECONDS" ]; do
     active=0
@@ -384,9 +421,16 @@ wait_for_managed_endpoint() {
       log "$label unit/PID/listener/health contract passed"
       return 0
     fi
+    active_state="$("${SUDO[@]}" systemctl show "$unit" --property=ActiveState --value 2>/dev/null || true)"
+    if [ "$active_state" = failed ]; then
+      print_managed_endpoint_failure "$unit"
+      echo "ERROR: $label exited before its listener and health contract became ready" >&2
+      return 1
+    fi
     sleep 3
     waited=$((waited + 3))
   done
+  print_managed_endpoint_failure "$unit"
   echo "ERROR: $label unit/PID/listener/health contract did not pass before dependent startup (active=$active pid=$pid pid_valid=$pid_valid listener_owned=$listener_owned health=$health_ok)" >&2
   return 1
 }
@@ -1489,6 +1533,8 @@ write_ombre_brain_unit() {
 Description=Ran Agent Ombre Brain Memory Service (port $OMBRE_BRAIN_PORT_DEFAULT)
 After=network-online.target
 Wants=network-online.target
+StartLimitIntervalSec=30
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -1500,11 +1546,14 @@ EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
 EnvironmentFile=-$HERMES_GLOBAL_ENV_FILE
 EnvironmentFile=-$FULL_HOME/.env
 EnvironmentFile=-$FULL_HOME/profiles/$FULL_PROFILE/.env
+UnsetEnvironment=BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH
 Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
 Environment=OMBRE_BRAIN_RUNNER=source
 Environment=OMBRE_BRAIN_COMMIT=$OMBRE_BRAIN_COMMIT_DEFAULT
 Environment=OMBRE_BIND_HOST=127.0.0.1
 Environment=OMBRE_MCP_REQUIRE_AUTH=false
+Environment=OMBRE_TRANSPORT=streamable-http
+Environment=OMBRE_PORT=$OMBRE_BRAIN_PORT_DEFAULT
 Environment=OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
 Environment=OMBRE_BRAIN_HEALTH_URL=http://127.0.0.1:18001/health
 Environment=RAN_AGENT_STATE_DIR=$RUNTIME_STATE_DIR
@@ -1512,11 +1561,14 @@ Environment=OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME_DEFAULT
 Environment=RAN_AGENT_MANAGED_OMBRE_RUNTIME=1
 Environment=RAN_AGENT_MANAGED_OMBRE_STATE_DIR=$RUNTIME_STATE_DIR
 Environment=RAN_AGENT_MANAGED_OMBRE_BUCKETS_DIR=$buckets_dir
+Environment=OMBRE_CONFIG_PATH=$OMBRE_BRAIN_HOME_DEFAULT/config.yaml
+Environment=OMBRE_VAULT_DIR=$buckets_dir
+Environment=OMBRE_BUCKETS_DIR=$buckets_dir
 Environment=RAN_AGENT_STEWARD_IDENTITY_FILE=$RUNTIME_STATE_DIR/ombre-brain/steward-identity.v1.json
 Environment=RAN_AGENT_STEWARD_TOKEN_FILE=$RUNTIME_STATE_DIR/ombre-compat/secrets/steward-api-token
-ExecStart=/usr/bin/env bash -lc 'cd /opt/ran_agent && source /opt/ran_agent/.venv/bin/activate && exec bash scripts/start_ombre_brain_service.sh'
+ExecStart=/usr/bin/bash /opt/ran_agent/scripts/start_ombre_brain_service.sh --managed /opt/ran_agent $RUNTIME_STATE_DIR $buckets_dir
 Restart=on-failure
-RestartSec=10
+RestartSec=2
 TimeoutStopSec=120
 
 [Install]
@@ -1792,7 +1844,8 @@ prepare_ombre_runtime() {
   if ! ombre_brain_enabled; then
     return 0
   fi
-  local buckets_dir
+  local buckets_dir prepare_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 ]]; then prepare_path="$PATH"; fi
   buckets_dir="$(effective_env_value OMBRE_BUCKETS_DIR "$OMBRE_BUCKETS_DIR_DEFAULT")"
   local buckets_parent="${buckets_dir%/*}"
   local buckets_grandparent="${buckets_parent%/*}"
@@ -1814,8 +1867,17 @@ prepare_ombre_runtime() {
       [ -n "$checked_path" ] || checked_path=/
     done
   fi
+  if "${SUDO[@]}" test -L "$OMBRE_BRAIN_HOME_DEFAULT" || "${SUDO[@]}" test -L "$buckets_dir"; then
+    echo "ERROR: Ombre runtime paths must not be symlinks" >&2
+    return 1
+  fi
+  "${SUDO[@]}" mkdir -p "$OMBRE_BRAIN_HOME_DEFAULT" "$buckets_dir"
+  "${SUDO[@]}" chown -R "$STEWARD_RUNTIME_USER:$STEWARD_RUNTIME_GROUP" "$OMBRE_BRAIN_HOME_DEFAULT" "$buckets_dir"
   log "preparing Ombre Brain runtime"
-  if env \
+  if run_as_steward_identity /usr/bin/env -i \
+    HOME="$OMBRE_BRAIN_HOME_DEFAULT" \
+    PATH="$prepare_path" \
+    TMPDIR=/tmp \
     OMBRE_BRAIN_ENABLED="$(effective_env_value OMBRE_BRAIN_ENABLED "$OMBRE_BRAIN_ENABLED_DEFAULT")" \
     OMBRE_BRAIN_MCP_ENABLED="$(effective_env_value OMBRE_BRAIN_MCP_ENABLED "$OMBRE_BRAIN_MCP_ENABLED_DEFAULT")" \
     OMBRE_BRAIN_RUNNER="$(effective_env_value OMBRE_BRAIN_RUNNER "$OMBRE_BRAIN_RUNNER_DEFAULT")" \
@@ -1833,16 +1895,19 @@ prepare_ombre_runtime() {
     OMBRE_BRAIN_CONFIG_FILE="$OMBRE_BRAIN_CONFIG_FILE_DEFAULT" \
     OMBRE_BRAIN_STATUS_FILE="$OMBRE_BRAIN_STATUS_FILE_DEFAULT" \
     RAN_AGENT_STATE_DIR="$RUNTIME_STATE_DIR" \
+    RAN_AGENT_TEST_MODE="${RAN_AGENT_TEST_MODE:-0}" \
+    RAN_AGENT_OMBRE_PATCH_PYTHON_BIN="${RAN_AGENT_OMBRE_PATCH_PYTHON_BIN:-}" \
     RAN_AGENT_ROTATE_STEWARD_TOKEN="${RAN_AGENT_ROTATE_STEWARD_TOKEN:-0}" \
-    bash "$REPO_ROOT/scripts/prepare-ombre-brain.sh" 2>&1; then
+    RAN_AGENT_STEWARD_ROTATION_QUIESCED="${RAN_AGENT_STEWARD_ROTATION_QUIESCED:-0}" \
+    OMBRE_BRAIN_UPDATE_SOURCE="${OMBRE_BRAIN_UPDATE_SOURCE:-true}" \
+    OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS="${OMBRE_BRAIN_UPDATE_TIMEOUT_SECONDS:-300}" \
+    /bin/bash "$REPO_ROOT/scripts/prepare-ombre-brain.sh" 2>&1; then
     if "${SUDO[@]}" test -L "$OMBRE_BRAIN_HOME_DEFAULT" ||
       ! "${SUDO[@]}" test -d "$OMBRE_BRAIN_HOME_DEFAULT" ||
       ! "${SUDO[@]}" test -d "$buckets_dir"; then
       echo "ERROR: prepared Ombre runtime paths are not real directories" >&2
       return 1
     fi
-    "${SUDO[@]}" chown -R "$STEWARD_RUNTIME_USER:$STEWARD_RUNTIME_GROUP" "$OMBRE_BRAIN_HOME_DEFAULT"
-    "${SUDO[@]}" chown -R "$STEWARD_RUNTIME_USER:$STEWARD_RUNTIME_GROUP" "$buckets_dir"
     log "Ombre Brain runtime prepared"
   else
     echo "ERROR: Ombre Brain preparation failed" >&2

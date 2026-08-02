@@ -1,8 +1,11 @@
 import importlib.util
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import pwd
+import shlex
 import stat
 import subprocess
 import sys
@@ -24,6 +27,71 @@ IDENTITY_SCRIPT = SCRIPT.with_name("verify-ran-agent-runtime-identity.sh")
 
 
 class OmbreStewardTokenTest(unittest.TestCase):
+    @unittest.skipUnless(
+        os.geteuid() == 0 and Path("/usr/sbin/runuser").is_file(),
+        "cross-UID verifier boundary requires Linux root",
+    )
+    def test_root_verifier_executes_live_venv_only_as_ran_agent_with_clean_env(self):
+        try:
+            account = pwd.getpwnam("ran-agent")
+        except KeyError:
+            self.skipTest("ran-agent account is unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.chmod(0o755)
+            state = root / "state"
+            source = state / "ombre-brain/upstream"
+            venv = state / "ombre-brain/.venv"
+            token = state / MODULE.TOKEN_RELATIVE_PATH
+            identity_file = root / "identity.json"
+            marker = venv / "sentinel"
+            source.mkdir(parents=True)
+            (venv / "bin").mkdir(parents=True)
+            token.parent.mkdir(parents=True)
+            subprocess.run(["git", "init"], cwd=source, check=True, stdout=subprocess.DEVNULL)
+            subprocess.run(["git", "config", "user.email", "sentinel@example.invalid"], cwd=source, check=True)
+            subprocess.run(["git", "config", "user.name", "sentinel"], cwd=source, check=True)
+            lock = source / "requirements.lock.txt"
+            lock.write_text("fixture==1\n", encoding="ascii")
+            subprocess.run(["git", "add", "."], cwd=source, check=True)
+            subprocess.run(["git", "commit", "-m", "fixture"], cwd=source, check=True, stdout=subprocess.DEVNULL)
+            head = subprocess.run(
+                ["git", "rev-parse", "HEAD"], cwd=source, check=True,
+                capture_output=True, text=True,
+            ).stdout.strip()
+            stamp = venv / ".requirements.lock.fingerprint"
+            stamp.write_text(hashlib.sha256(lock.read_bytes()).hexdigest() + "\n", encoding="ascii")
+            fake_python = venv / "bin/python"
+            fake_python.write_text(
+                "#!/bin/sh\n"
+                f"printf '%s:%s\\n' \"$(id -u)\" \"${{RAN_AGENT_SENTINEL_SECRET-unset}}\" > {shlex.quote(str(marker))}\n"
+                "exit 91\n",
+                encoding="ascii",
+            )
+            fake_python.chmod(0o755)
+            token.write_text(("a" * 64) + "\n", encoding="ascii")
+            token.chmod(0o600)
+            identity_file.write_text(json.dumps({"base_upstream_commit": head}), encoding="utf-8")
+            for owned_root in (source, venv):
+                for path in [owned_root, *owned_root.rglob("*")]:
+                    os.chown(path, account.pw_uid, account.pw_gid)
+            os.chown(token, account.pw_uid, account.pw_gid)
+
+            result = subprocess.run(
+                [
+                    sys.executable, str(VERIFY_SCRIPT),
+                    "--state-dir", str(state),
+                    "--identity-file", str(identity_file),
+                    "--source-dir", str(source),
+                    "--venv", str(venv),
+                ],
+                env={**os.environ, "RAN_AGENT_SENTINEL_SECRET": "must-not-leak"},
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual(marker.read_text(encoding="ascii"), f"{account.pw_uid}:unset\n")
+
     def test_atomic_install_and_rotation_are_owner_only(self):
         with tempfile.TemporaryDirectory() as directory:
             target = Path(directory) / "steward-api-token"
@@ -121,8 +189,17 @@ class OmbreStewardTokenTest(unittest.TestCase):
             root.chmod(0o700)
             state = root / "live-state"
             token = state / MODULE.TOKEN_RELATIVE_PATH
+            source = state / "ombre-brain/upstream"
+            venv = state / "ombre-brain/.venv"
             identity_file = root / "identity.json"
             token.parent.mkdir(parents=True)
+            source.mkdir(parents=True)
+            (source / ".git").mkdir()
+            (venv / "bin").mkdir(parents=True)
+            lock = source / "requirements.lock.txt"
+            lock.write_text("fixture==1\n", encoding="ascii")
+            stamp = venv / ".requirements.lock.fingerprint"
+            stamp.write_text(hashlib.sha256(lock.read_bytes()).hexdigest() + "\n", encoding="ascii")
             current = ("a" * 64) + "\n"
             old = ("b" * 64) + "\n"
             token.write_text(current, encoding="ascii")
@@ -130,7 +207,10 @@ class OmbreStewardTokenTest(unittest.TestCase):
             token.chmod(0o600)
             old_file = root / "old-token"
             old_file.write_text(old, encoding="ascii")
-            identity = {"effective_tree_digest": "sha256:" + ("c" * 64)}
+            identity = {
+                "effective_tree_digest": "sha256:" + ("c" * 64),
+                "base_upstream_commit": "d" * 40,
+            }
             identity_file.write_text(json.dumps(identity), encoding="utf-8")
 
             class Response(io.BytesIO):
@@ -153,21 +233,38 @@ class OmbreStewardTokenTest(unittest.TestCase):
                 }
                 return Response(json.dumps(payload).encode("utf-8"))
 
-            account = type("Account", (), {"pw_uid": os.getuid(), "pw_gid": os.getgid()})()
-            group = type("Group", (), {"gr_gid": os.getgid()})()
+            account = type("Account", (), {
+                "pw_uid": os.getuid(), "pw_gid": os.getgid(), "pw_name": "ran-agent",
+            })()
+            group = type("Group", (), {"gr_gid": os.getgid(), "gr_name": "ran-agent"})()
             output = io.StringIO()
             argv = [
                 "verify-ombre-steward-runtime.py",
                 "--state-dir", str(state),
                 "--identity-file", str(identity_file),
+                "--source-dir", str(source),
+                "--venv", str(venv),
                 "--rejected-token-file", str(old_file),
             ]
+            def run(command, **_):
+                if command[0] == "git":
+                    stdout = identity["base_upstream_commit"] + "\n"
+                elif "sys.version_info" in command[-1]:
+                    stdout = "3.12\n"
+                else:
+                    stdout = ""
+                return subprocess.CompletedProcess(command, 0, stdout=stdout)
+
             with mock.patch.object(sys, "argv", argv), \
                     mock.patch.object(VERIFY_MODULE.pwd, "getpwnam", return_value=account), \
                     mock.patch.object(VERIFY_MODULE.grp, "getgrnam", return_value=group), \
+                    mock.patch.object(VERIFY_MODULE.subprocess, "run", side_effect=run), \
                     mock.patch.object(VERIFY_MODULE.urllib.request, "urlopen", side_effect=urlopen), \
                     mock.patch("sys.stdout", output):
                 self.assertEqual(VERIFY_MODULE.main(), 0)
+                stamp.write_text("0" * 64 + "\n", encoding="ascii")
+                with self.assertRaisesRegex(SystemExit, "lock fingerprint mismatch"):
+                    VERIFY_MODULE.main()
             self.assertNotIn(current.strip(), output.getvalue())
             self.assertNotIn(old.strip(), output.getvalue())
 

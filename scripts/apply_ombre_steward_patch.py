@@ -154,9 +154,14 @@ def main() -> int:
     parser.add_argument("--identity-output", required=True, type=Path)
     parser.add_argument("--verify", action="store_true")
     args = parser.parse_args()
+    if args.checkout.is_symlink():
+        raise SystemExit("checkout symlink is forbidden")
+    checkout = args.checkout.resolve(strict=True)
+    if checkout.stat().st_uid != os.geteuid() or (checkout / ".git").lstat().st_uid != os.geteuid():
+        raise SystemExit("checkout must be owned by the executing identity")
     action = verify if args.verify else apply
     print(json.dumps(action(
-        args.checkout.resolve(),
+        checkout,
         args.manifest.resolve(),
         args.identity_output.resolve(),
     ), sort_keys=True))

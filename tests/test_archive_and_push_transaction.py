@@ -55,6 +55,53 @@ def setup_feature_repo(tmp_path: Path) -> tuple[Path, Path]:
     return repo, remote
 
 
+def test_default_node_baseline_binds_supported_absolute_nvm_runtime(tmp_path: Path) -> None:
+    repo, remote = setup_feature_repo(tmp_path)
+    old_bin = tmp_path / "old-bin"
+    supported_bin = tmp_path / "nvm" / "versions" / "node" / "v22.22.2" / "bin"
+    marker = tmp_path / "node-test-ran"
+    old_bin.mkdir()
+    supported_bin.mkdir(parents=True)
+    old_node = old_bin / "node"
+    supported_node = supported_bin / "node"
+    old_node.write_text(
+        "#!/bin/sh\ncase \"${1:-}\" in -p) printf '16.17.0\\n';; --version) printf 'v16.17.0\\n';; *) exit 64;; esac\n",
+        encoding="utf-8",
+    )
+    supported_node.write_text(
+        "#!/bin/sh\ncase \"${1:-}\" in -p) printf '22.22.2\\n';; --version) printf 'v22.22.2\\n';; --test) printf 'ok\\n' > \"$NODE_TEST_MARKER\";; *) exit 64;; esac\n",
+        encoding="utf-8",
+    )
+    old_node.chmod(0o755)
+    supported_node.chmod(0o755)
+    (repo / "node_bridge").mkdir()
+    (repo / "node_bridge" / ".keep").write_text("fixture\n", encoding="utf-8")
+    env = os.environ | {
+        "ARCHIVE_ROOT": str(repo),
+        "ARCHIVE_HELPER": str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+        "ARCHIVE_PYTHON_TEST_COMMAND": "printf python-ok",
+        "ARCHIVE_TEST_HEARTBEAT_SECONDS": "1",
+        "NVM_DIR": str(tmp_path / "nvm"),
+        "NODE_TEST_MARKER": str(marker),
+        "PATH": f"{old_bin}:/usr/bin:/bin:/usr/local/bin",
+    }
+    for key in ("ARCHIVE_NODE_BIN", "ARCHIVE_NODE_TEST_COMMAND", "RAN_AGENT_NODE_BIN"):
+        env.pop(key, None)
+
+    result = subprocess.run(
+        [str(SCRIPT), "--push"], text=True, capture_output=True, env=env, timeout=30
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert marker.read_text(encoding="utf-8") == "ok\n"
+    transaction, journal = journal_for(repo)
+    record = json.loads((transaction.parent / "validation-record.json").read_text(encoding="utf-8"))
+    assert record["node_version"] == "v22.22.2"
+    assert str(supported_node) in record["commands"][1]
+    assert "npm --prefix" not in record["commands"][1]
+    assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == git(repo, "rev-parse", "HEAD")
+
+
 def configure_fallback_push_targets(repo: Path, primary_target: Path, alternate_target: Path) -> None:
     """Point origin at the GitHub URLs, rewritten to the local push targets.
 
@@ -175,7 +222,16 @@ def test_reused_validation_is_durable_before_merge_and_rendered_from_journal(tmp
     record = write_validation_record(repo, source_head)
     checksum = json.loads(record.read_text(encoding="utf-8"))["checksum"]
 
-    result = run_archive(repo, "--push", "--reuse-validation", str(record))
+    result = run_archive(
+        repo,
+        "--push",
+        "--reuse-validation",
+        str(record),
+        extra_env={
+            "ARCHIVE_NODE_TEST_COMMAND": "",
+            "ARCHIVE_NODE_BIN": str(tmp_path / "missing-node"),
+        },
+    )
 
     assert result.returncode == 0, result.stderr
     transaction, journal = journal_for(repo)
@@ -363,7 +419,15 @@ def test_push_failure_resumes_only_the_push(tmp_path: Path) -> None:
     assert journal["push_result"]["local_main_advanced"] is True
     reject.unlink()
 
-    resumed = run_archive(repo, "--resume", transaction.parent.name)
+    resumed = run_archive(
+        repo,
+        "--resume",
+        transaction.parent.name,
+        extra_env={
+            "ARCHIVE_NODE_TEST_COMMAND": "",
+            "ARCHIVE_NODE_BIN": str(tmp_path / "missing-node"),
+        },
+    )
 
     assert resumed.returncode == 0, resumed.stderr
     assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == git(repo, "rev-parse", "HEAD")

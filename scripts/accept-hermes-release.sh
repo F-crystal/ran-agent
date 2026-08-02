@@ -243,8 +243,8 @@ while chunk := sys.stdin.buffer.read(1024 * 1024):
 }
 
 release_ombre_unit_contract() {
-  local unit_text pid process_env
-  local -a rejected_token_args=()
+  local unit_text pid process_env effective_exec dropins
+  local -a rejected_token_args=() run_as_steward=()
   unit_text="$("${SUDO[@]}" systemctl cat ran-agent-ombre-brain.service 2>/dev/null)" ||
     fail ombre_upstream_unit_unavailable
   for setting in \
@@ -252,6 +252,12 @@ release_ombre_unit_contract() {
     'Environment=OMBRE_BRAIN_COMMIT=0e83d4671ce1629e03ad36bb9160235bf60dbd34' \
     'Environment=OMBRE_BIND_HOST=127.0.0.1' \
     'Environment=OMBRE_MCP_REQUIRE_AUTH=false' \
+    'Environment=OMBRE_TRANSPORT=streamable-http' \
+    'Environment=OMBRE_PORT=18001' \
+    "Environment=OMBRE_CONFIG_PATH=$OMBRE_BRAIN_HOME/config.yaml" \
+    'Environment=OMBRE_VAULT_DIR=/opt/ran_agent/vault/ombre' \
+    'UnsetEnvironment=BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH' \
+    "ExecStart=/usr/bin/bash /opt/ran_agent/scripts/start_ombre_brain_service.sh --managed /opt/ran_agent $RAN_AGENT_STATE_DIR /opt/ran_agent/vault/ombre" \
     'Environment=OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp' \
     "Environment=RAN_AGENT_STATE_DIR=$RAN_AGENT_STATE_DIR" \
     "Environment=OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME" \
@@ -259,6 +265,17 @@ release_ombre_unit_contract() {
     "Environment=RAN_AGENT_STEWARD_TOKEN_FILE=$RAN_AGENT_STATE_DIR/ombre-compat/secrets/steward-api-token"; do
     grep -qF "$setting" <<<"$unit_text" || fail ombre_upstream_unit_contract
   done
+  dropins="$("${SUDO[@]}" systemctl show ran-agent-ombre-brain.service --property=DropInPaths --value 2>/dev/null)" ||
+    fail ombre_upstream_dropin_probe_failed
+  [[ -z "$dropins" ]] || fail ombre_upstream_dropin_override_present
+  effective_exec="$("${SUDO[@]}" systemctl show ran-agent-ombre-brain.service --property=ExecStart --value 2>/dev/null)" ||
+    fail ombre_upstream_effective_exec_unavailable
+  case "$effective_exec" in
+    '{ path=/usr/bin/bash ; argv[]=/usr/bin/bash /opt/ran_agent/scripts/start_ombre_brain_service.sh --managed /opt/ran_agent /opt/ran_agent/.ran_agent_state /opt/ran_agent/vault/ombre ; ignore_errors='*) ;;
+    *) fail ombre_upstream_effective_exec_contract ;;
+  esac
+  [[ "$effective_exec" != *'} ; {'* && "$effective_exec" != *$'\n'* ]] ||
+    fail ombre_upstream_effective_exec_contract
   pid="$("${SUDO[@]}" systemctl show ran-agent-ombre-brain.service --property=MainPID --value 2>/dev/null)" ||
     fail ombre_upstream_main_pid_unavailable
   process_env="$("${SUDO[@]}" cat "/proc/$pid/environ" 2>/dev/null | tr '\0' '\n')" ||
@@ -268,17 +285,36 @@ release_ombre_unit_contract() {
     'OMBRE_BRAIN_COMMIT=0e83d4671ce1629e03ad36bb9160235bf60dbd34' \
     'OMBRE_BIND_HOST=127.0.0.1' \
     'OMBRE_MCP_REQUIRE_AUTH=false' \
+    'OMBRE_TRANSPORT=streamable-http' \
+    'OMBRE_PORT=18001' \
+    "OMBRE_CONFIG_PATH=$OMBRE_BRAIN_HOME/config.yaml" \
+    'OMBRE_VAULT_DIR=/opt/ran_agent/vault/ombre' \
     "RAN_AGENT_STATE_DIR=$RAN_AGENT_STATE_DIR" \
     "OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME"; do
     grep -qxF "$setting" <<<"$process_env" || fail ombre_upstream_process_environment_contract
+  done
+  for rejected in BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH; do
+    ! grep -q "^$rejected=" <<<"$process_env" || fail "ombre_upstream_process_environment_injection:$rejected"
   done
   [[ -z "$OLD_STEWARD_TOKEN_FILE" ]] ||
     rejected_token_args=(--rejected-token-file "$OLD_STEWARD_TOKEN_FILE")
   "${SUDO[@]}" "$PYTHON_BIN" "$SOURCE_ROOT/scripts/verify-ombre-steward-runtime.py" \
     --state-dir "$RAN_AGENT_STATE_DIR" \
     --identity-file "$RAN_AGENT_STATE_DIR/ombre-brain/steward-identity.v1.json" \
+    --source-dir "$OMBRE_BRAIN_HOME/upstream" \
+    --venv "$OMBRE_BRAIN_HOME/.venv" \
     "${rejected_token_args[@]}" \
     >/dev/null || fail ombre_steward_runtime_contract
+  [[ -x /usr/sbin/runuser ]] || fail ombre_steward_runuser_required
+  "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+    HOME="$OMBRE_BRAIN_HOME" \
+    PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin" \
+    TMPDIR=/tmp \
+    OMBRE_PATCHED_PROCESS_URL=http://127.0.0.1:18001/internal/ran-agent/steward/v1 \
+    RAN_AGENT_STEWARD_TOKEN_FILE="$RAN_AGENT_STATE_DIR/ombre-compat/secrets/steward-api-token" \
+    RAN_AGENT_STEWARD_IDENTITY_FILE="$RAN_AGENT_STATE_DIR/ombre-brain/steward-identity.v1.json" \
+    "$NODE_BIN" --test "$SOURCE_ROOT/node_bridge/tests/ombreCompatPatchedProcess.test.mjs" \
+    >/dev/null || fail ombre_steward_real_process_contract
   release_steward_secret_boundary
 }
 
@@ -463,10 +499,25 @@ HEAD="$(git -C "$CONTROL_ROOT" rev-parse --verify HEAD)" || fail current_head_un
 git -C "$CONTROL_ROOT" diff --quiet || fail worktree_dirty
 git -C "$CONTROL_ROOT" diff --cached --quiet || fail index_dirty
 require_acceptance_prerequisites
-# Direct acceptance still executes the candidate gate.  Deploy passes the
-# already-completed marker so it is never possible to mutate first and gate later.
+# Direct acceptance executes both the immutable code gate and the real Ombre
+# process gate. Deploy completes the code gate before mutation, then runs the
+# real gate here only after the transaction has prepared the pinned runtime.
 if [[ "${RAN_AGENT_RELEASE_PREMUTATION_GATE:-0}" != 1 ]]; then
-  bash "$SOURCE_ROOT/scripts/hermes-release-gate.sh" --all || fail release_gate
+  RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=required \
+  RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$OMBRE_BRAIN_HOME/upstream" \
+  RAN_AGENT_OMBRE_UPSTREAM_VENV="$OMBRE_BRAIN_HOME/.venv" \
+    bash "$SOURCE_ROOT/scripts/hermes-release-gate.sh" --all || fail release_gate
+else
+  [[ -x /usr/sbin/runuser ]] || fail ombre_steward_runuser_required
+  "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+    HOME="$OMBRE_BRAIN_HOME" PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin" TMPDIR=/tmp \
+    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
+    RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
+    RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$OMBRE_BRAIN_HOME/upstream" \
+    RAN_AGENT_OMBRE_UPSTREAM_VENV="$OMBRE_BRAIN_HOME/.venv" \
+    RAN_AGENT_NODE_BIN="$NODE_BIN" \
+    /bin/bash "$SOURCE_ROOT/scripts/verify-ombre-steward-real-process.sh" >/dev/null ||
+    fail ombre_steward_candidate_real_process_gate
 fi
 release_semantic_verifier_preflight
 foreign_owner_binding_denied

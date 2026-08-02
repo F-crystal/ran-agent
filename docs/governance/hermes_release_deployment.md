@@ -98,9 +98,34 @@ privilege seam and keep the strict MainPID ownership requirement. The supplied
 trace does not include the transaction's final rollback result; do not infer an
 active candidate from it.
 
+Candidate `8c259ddcd2a34e80400ac39e444876807960f689` then passed the immutable
+gate and prepared the pinned Ombre 2.8.8 source, but the managed unit exited
+before it acquired a PID or listener. The owner-supplied trace records
+`rollback-complete`, so production again remained on the recorded SHA. The
+root cause was not Ombre's health API: the `ran-agent` unit launched a wrapper
+that re-read deployment-user `0600` repository env files under `set -e` and
+exited on permission denial. The managed launcher now receives only explicit
+validated argv/systemd inputs and never re-sources repository env files.
+Preparation follows the exact upstream 2.8.8 commit, its hashed
+`requirements.lock.txt`, and explicit `OMBRE_TRANSPORT=streamable-http` as
+documented by the [pinned official README](https://github.com/P0luz/Ombre-Brain/blob/0e83d4671ce1629e03ad36bb9160235bf60dbd34/README.md).
+
+Repeated failed transactions also copied the large live Ombre source, venv,
+and cache state into each rollback payload. Completed `rollback_used`
+transactions were previously retained indefinitely, contributing to the
+owner-reported `56.6GB/60GB` usage. The reviewed transaction now classifies and
+removes only those completed payloads while preserving evidence; corrupt,
+mounted, symlinked, current-production, or concurrently changing snapshots
+remain untouched. Immediately after that staged prune, a mandatory capacity
+gate measures all sources copied by the new snapshot, including the duplicated
+SQLite migration evidence, and adds the larger of 25% or 2 GiB headroom. An
+insufficient result stops before snapshot creation or service interruption.
+
 `--apply` and `--rollback` interrupt the four core services and any active
-managed optional service briefly. Every other step below is read-only except
-`git fetch`, which updates local remote tracking objects only.
+managed optional service briefly. The verified payload-prune apply deletes only
+classified completed rollback payloads. `git fetch` updates local remote
+tracking objects only; the remaining observation and dry-run steps are
+read-only.
 
 ## 0. First Enablement Bootstrap
 
@@ -168,6 +193,37 @@ without printing the path, identity, hash, or secret. A missing owner binding
 or incompatible candidate module therefore fails dry-run before service,
 state, code, or checkout mutation.
 
+Apply and explicit rollback hold one non-blocking global release lock from
+their first artifact/pointer read through success or rollback cleanup. Apply
+also requires a concrete Python 3.12 executable and all real-process gate
+assets before snapshot, service interruption, or checkout activation. The
+immutable pre-mutation gate runs in `code-only` mode and forbids live Ombre
+inputs; after prepare, a required real-process gate runs the pinned source,
+venv, Git, patch, and server probes as `ran-agent`, never as root. Root remains
+only the transaction/ownership orchestrator and does not execute bytes writable
+by the service account.
+
+## 0.1 Completed Rollback Payload Recovery
+
+Use the repository script only. Do not delete snapshot directories or `files/`
+trees by hand.
+
+| Purpose | Command | Expected result / stop condition |
+|---|---|---|
+| Inspect reclaimable payloads after the script is active | `sudo bash scripts/prune-hermes-release-artifacts.sh --dry-run` | Use only after this reviewed script exists in the active checkout. Only completed, verified `rollback_used` snapshots may say `PRUNE_PAYLOAD`; current production and uncertain state must say keep/skip. Stop on any error. |
+| Reclaim verified payloads after the script is active | `sudo bash scripts/prune-hermes-release-artifacts.sh --apply` | Use only after this reviewed script exists in the active checkout. Removes only each eligible `files/` payload. Transaction state, manifest, service evidence, and other audit files remain. |
+| Observe capacity | `df -h /opt /opt/ran_agent /opt/ran_agent-release` | Record the usage. A low pre-prune value is not the final decision: bootstrap/apply first reclaims only verified payloads, then its mandatory gate decides whether a complete new snapshot plus headroom fits. Do not delete uncertain artifacts manually. |
+
+The old production checkout does not contain this script, and `git fetch` does
+not place candidate files in the worktree. Its immediate recovery authority is
+the reviewed bootstrap/apply path: that transaction runs the candidate-staged
+pruner while already holding the global release lock and before creating its
+new snapshot. A fresh post-prune capacity gate then either proves enough space
+or stops before any snapshot copy, service stop, or checkout change. The
+transaction can therefore recover eligible failed payloads without first
+making another large state copy, while still failing safely if recovery is not
+enough.
+
 ## 1. Deployment Preflight
 
 Run these one at a time from the server. Stop on an unexpected result; do not
@@ -183,7 +239,7 @@ repair the checkout with a Git reset.
 | Check the resolved Node | `ABSOLUTE_NODE_PATH --version` | **Need server confirmation:** replace `ABSOLUTE_NODE_PATH` with the previous result; Node must be 22.13 or later. |
 | Check Python runtime | `/opt/ran_agent/.venv/bin/python --version` | Python 3.10 or later. Stop otherwise. |
 | Check core services | `systemctl is-active ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service` | Each line says `active`. Stop and investigate otherwise. |
-| Check filesystem capacity | `df -h /opt /opt/ran_agent /opt/ran_agent-release` | Enough space for a full state snapshot plus candidate archive. Stop if any target is unavailable or space is insufficient. |
+| Observe filesystem capacity | `df -h /opt /opt/ran_agent /opt/ran_agent-release` | Record the value and stop if a target is unavailable. The apply transaction's post-prune capacity gate is authoritative; it may reclaim verified completed payloads first and otherwise fails before interruption. |
 | Confirm real environment sources without values | `sudo systemctl cat ran-agent-node.service | sed -n 's/^[[:space:]]*EnvironmentFile=-\\?\\([^[:space:]]*\\).*$/\\1/p'` | One or more owner-readable environment-file paths. Stop if absent. |
 | Confirm required secret is nonempty without printing it | `sudo systemctl cat ran-agent-node.service | sed -n 's/^[[:space:]]*EnvironmentFile=-\\?\\([^[:space:]]*\\).*$/\\1/p' | while read -r f; do sudo awk -F= '$1=="RAN_AGENT_INTERNAL_CONTROL_SECRET" && length(substr($0,length($1)+2))>0 {ok=1} END{exit !ok}' "$f" && echo present; done` | At least one `present`. Do not replace this with a command that prints the value. |
 
@@ -226,6 +282,11 @@ The apply transaction creates one owner-only snapshot under
   excluding `ombre-compat/secrets`;
 - SQLite/WAL/SHM migration files under `/opt/ran_agent/data`.
 
+Every `present` or `migration-present` entry is committed only after its copy
+finishes in a temporary path and is atomically renamed inside the snapshot.
+The complete durable-state tar follows the same rule. A partial cp/tar result
+therefore never enters the manifest and rollback never treats it as authority.
+
 The transaction resolves one canonical live state directory from
 `RAN_AGENT_RELEASE_STATE_DIR`, defaulting to
 `/opt/ran_agent/.ran_agent_state`. The patched checkout/home and Steward token
@@ -256,6 +317,11 @@ does not restore the retired account-backed browse service.
 `/opt/ran_agent-release` is deliberately outside `STATE_DIR`; do not set
 `RAN_AGENT_RELEASE_ARTIFACT_ROOT` or any manual `BACKUP_DIR` beneath the state
 directory, or the release fails closed to prevent recursive archives.
+After a complete rollback, the transaction marks the snapshot
+`rollback_used`, runs the verified payload pruner, and retains the small
+evidence files. Successful apply performs this cleanup before the next large
+snapshot, runs the mandatory headroom gate, and later retains only the
+configured accepted rollback points.
 
 | Purpose | Command | Expected result / stop condition |
 |---|---|---|
@@ -358,8 +424,8 @@ service enable/active state as one transaction.
 | Purpose | Command | Expected result / stop condition |
 |---|---|---|
 | Validate the snapshot before interruption | `sudo test -s SNAPSHOT_DIR/prior-head -a -f SNAPSHOT_DIR/manifest -a -f SNAPSHOT_DIR/services && echo ready` | Substitute the exact snapshot path; expect `ready`. Stop if not. |
-| Restore complete snapshot (**service interruption**) | `bash scripts/deploy-hermes-release.sh --rollback SNAPSHOT_DIR` | Prints `rollback-ok snapshot=… restored=OLD_SHA`. Stop if it fails; do not attempt a partial Git-only restore. |
-| Check restored revision | `git rev-parse HEAD` | Equals `OLD_SHA` in rollback output. Stop if different. |
+| Restore complete snapshot (**service interruption**) | `bash scripts/deploy-hermes-release.sh --rollback SNAPSHOT_DIR` | Prints `rollback-complete deployment_status=0 candidate=… snapshot=…`. Stop if it fails; do not attempt a partial Git-only restore. |
+| Check restored revision | `git rev-parse HEAD` | Equals the snapshot's `prior-head`. Stop if different. |
 | Check restored core services | `systemctl is-active ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service` | Must match saved service state; investigate any mismatch. |
 | Re-run blocking confirmation | `bash scripts/verify-hermes-release.sh --release` | Must print `blocking-ok` when the previous runtime was healthy. |
 

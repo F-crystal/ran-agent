@@ -173,6 +173,56 @@ if find "$SOURCE_ROOT" -name sitecustomize.py -print -quit | grep -q .; then
 fi
 chmod -R a-w "$SOURCE_ROOT"
 
+run_ombre_real_process_gate() {
+  local upstream="${RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR:-}" venv="${RAN_AGENT_OMBRE_UPSTREAM_VENV:-}"
+  case "${RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE:-required}" in
+    code-only)
+      [[ -z "$upstream" && -z "$venv" ]] || fail ombre_code_gate_live_inputs_forbidden
+      return 0
+      ;;
+    required) ;;
+    *) fail ombre_real_process_phase_invalid ;;
+  esac
+  [[ -n "$upstream" && -n "$venv" ]] || fail ombre_real_process_inputs_required
+  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 ]]; then
+    run_clean /usr/bin/env \
+      RAN_AGENT_TEST_MODE=1 \
+      RAN_AGENT_TEST_OMBRE_EXPECTED_SOURCE_UID="$(id -u)" \
+      RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
+      RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$upstream" \
+      RAN_AGENT_OMBRE_UPSTREAM_VENV="$venv" \
+      RAN_AGENT_NODE_BIN="$NODE_BIN" \
+      bash "$SOURCE_ROOT/scripts/verify-ombre-steward-real-process.sh" >/dev/null ||
+      fail ombre_real_process_gate
+    return 0
+  fi
+  [[ "${EUID}" -eq 0 && -x /usr/sbin/runuser ]] || fail ombre_real_process_root_runner_required
+  id -u ran-agent >/dev/null 2>&1 || fail ran_agent_runtime_account_required
+  chmod 711 "$SANDBOX_ROOT"
+  chmod -R a+rX "$SOURCE_ROOT"
+  install -d -o ran-agent -g ran-agent -m 700 "$SANDBOX_ROOT/ombre-steward-home"
+  /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+    HOME="$SANDBOX_ROOT/ombre-steward-home" \
+    PATH="$(dirname "$NODE_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
+    TMPDIR=/tmp \
+    GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_CONFIG_NOSYSTEM=1 \
+    RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
+    RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$upstream" \
+    RAN_AGENT_OMBRE_UPSTREAM_VENV="$venv" \
+    RAN_AGENT_NODE_BIN="$NODE_BIN" \
+    /bin/bash "$SOURCE_ROOT/scripts/verify-ombre-steward-real-process.sh" >/dev/null ||
+    fail ombre_real_process_gate
+}
+
+if [[ "$MODE" == --all ]]; then
+  run_ombre_real_process_gate
+  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 && "${RAN_AGENT_TEST_OMBRE_GATE_PHASE_ONLY:-0}" == 1 ]]; then
+    printf 'hermes-release-gate: ombre-phase-ok\n'
+    exit 0
+  fi
+fi
+
 run_node_test() {
   local test_file="$1"
   local test_name case_root hermes_test_bin=''
