@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
+ORIGINAL_ARGS=("$@")
 
 ROOT_DIR="${ARCHIVE_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
-PYTHON_BIN="${ARCHIVE_PYTHON_BIN:-python3}"
+if [ -n "${ARCHIVE_PYTHON_BIN:-}" ]; then
+  PYTHON_BIN="$ARCHIVE_PYTHON_BIN"
+elif [ -x "$ROOT_DIR/.venv/bin/python" ]; then
+  PYTHON_BIN="$ROOT_DIR/.venv/bin/python"
+else
+  PYTHON_BIN="$(command -v python3 2>/dev/null || true)"
+fi
 HELPER="${ARCHIVE_HELPER:-$ROOT_DIR/scripts/archive_transaction_helper.py}"
 TARGET_BRANCH="main"
 REMOTE_NAME="origin"
@@ -19,6 +26,7 @@ PYTHON_TEST_COMMAND="${ARCHIVE_PYTHON_TEST_COMMAND:-PYTHONPATH='$ROOT_DIR/src' '
 NODE_BIN="${ARCHIVE_NODE_BIN:-${RAN_AGENT_NODE_BIN:-}}"
 NODE_TEST_COMMAND="${ARCHIVE_NODE_TEST_COMMAND:-}"
 ARCHIVE_RECORD="${ARCHIVE_RECORD:-$ROOT_DIR/local_archive/docs/governance/archive/$(date +%F)-archive-and-push.md}"
+ARCHIVE_RECORD_EXPLICIT=0
 REUSE_VALIDATION=""
 SKIP_TESTS_REASON=""
 RESUME_ID=""
@@ -27,8 +35,7 @@ STAGE_PATHS=()
 TRANSACTION_ID=""
 TRANSACTION_DIR=""
 JOURNAL=""
-LOCK_DIR="$ROOT_DIR/local_archive/runtime/archive-and-push/.lock"
-LOCK_HELD=0
+LOCK_FILE="$ROOT_DIR/local_archive/runtime/archive-and-push/.flock"
 TEMPORARY_REMOTE_SWITCHED=0
 TEMPORARY_ORIGINAL_REMOTE=""
 SOURCE_BRANCH=""
@@ -66,9 +73,37 @@ repo_relative_path() {
 canonical_path() { "$PYTHON_BIN" -c 'import os,sys; print(os.path.realpath(os.path.abspath(sys.argv[1])))' "$1"; }
 ensure_archive_record_path() {
   local archive_root resolved
-  archive_root="$(canonical_path "$ROOT_DIR/local_archive")"
-  resolved="$(canonical_path "$ARCHIVE_RECORD")"
-  case "$resolved" in "$archive_root"/*) ARCHIVE_RECORD="$resolved" ;; *) die "archive record must be inside $archive_root" ;; esac
+  archive_root="$(canonical_path "$ROOT_DIR/local_archive")" || return 1
+  resolved="$(canonical_path "$ARCHIVE_RECORD")" || return 1
+  case "$resolved" in "$archive_root"/*) ARCHIVE_RECORD="$resolved" ;; *) return 1 ;; esac
+}
+archive_record_for_transaction() {
+  case "$1" in
+    *.md) printf '%s-%s.md\n' "${1%.md}" "$TRANSACTION_ID" ;;
+    *) printf '%s-%s\n' "$1" "$TRANSACTION_ID" ;;
+  esac
+}
+select_default_archive_record() {
+  [ ! -e "$ARCHIVE_RECORD" ] || [ "$ARCHIVE_RECORD_EXPLICIT" -eq 0 ] || die "archive record already exists: $ARCHIVE_RECORD"
+  [ ! -e "$ARCHIVE_RECORD" ] || ARCHIVE_RECORD="$(archive_record_for_transaction "$ARCHIVE_RECORD")"
+  ensure_archive_record_path || die "archive record must stay inside $ROOT_DIR/local_archive"
+  [ ! -e "$ARCHIVE_RECORD" ] || die "transaction archive record already exists: $ARCHIVE_RECORD"
+}
+select_resumable_archive_record() {
+  [ -e "$ARCHIVE_RECORD" ] || return 0
+  helper archive-verify --journal "$JOURNAL" --record "$ARCHIVE_RECORD" >/dev/null 2>&1 && return 0
+  case "$ARCHIVE_RECORD" in *-"$TRANSACTION_ID".md|*-"$TRANSACTION_ID") return 1 ;; esac
+  local previous candidate relative
+  previous="$(repo_relative_path "$ARCHIVE_RECORD")" || return 1
+  candidate="$(archive_record_for_transaction "$ARCHIVE_RECORD")"
+  ARCHIVE_RECORD="$candidate"
+  ensure_archive_record_path || return 1
+  candidate="$ARCHIVE_RECORD"
+  if [ -e "$candidate" ]; then
+    helper archive-verify --journal "$JOURNAL" --record "$candidate" >/dev/null 2>&1 || return 1
+  fi
+  relative="$(repo_relative_path "$ARCHIVE_RECORD")" || return 1
+  journal_update --set-json "archive_record_previous_path=$(json_quote "$previous")" --set-json "archive_record_path=$(json_quote "$relative")"
 }
 local_archive_path() {
   case "$1" in local_archive/*) ;; *) return 1 ;; esac
@@ -143,6 +178,10 @@ configure_node_test_command() {
 archive_node_version() {
   if [ -n "$NODE_BIN" ] && [ -x "$NODE_BIN" ]; then "$NODE_BIN" --version 2>/dev/null || printf unavailable; else printf unavailable; fi
 }
+archive_python_supported() {
+  [ "${PYTHON_BIN#/}" != "$PYTHON_BIN" ] && [ -x "$PYTHON_BIN" ] || return 1
+  "$PYTHON_BIN" -c 'import fcntl,os,sys; raise SystemExit(0 if sys.version_info >= (3,9) and hasattr(os,"link") and hasattr(os,"O_DIRECTORY") else 1)' >/dev/null 2>&1
+}
 
 parse_args() {
   while [ "$#" -gt 0 ]; do
@@ -156,7 +195,7 @@ parse_args() {
       --integrate-main-into-feature) INTEGRATE_MAIN_INTO_FEATURE=1 ;;
       --remote-url) shift; [ "$#" -gt 0 ] || die "--remote-url requires a URL"; REMOTE_URL="$1" ;;
       --commit-message) shift; [ "$#" -gt 0 ] || die "--commit-message requires text"; COMMIT_MESSAGE="$1" ;;
-      --record) shift; [ "$#" -gt 0 ] || die "--record requires a path"; ARCHIVE_RECORD="$1" ;;
+      --record) shift; [ "$#" -gt 0 ] || die "--record requires a path"; ARCHIVE_RECORD="$1"; ARCHIVE_RECORD_EXPLICIT=1 ;;
       --path) shift; [ "$#" -gt 0 ] || die "--path requires a path"; STAGE_PATHS+=("$1") ;;
       --no-merge-current-branch) MERGE_CURRENT_BRANCH=0 ;;
       --self-test) SELF_TEST=1 ;;
@@ -192,27 +231,6 @@ fetch_and_check_origin() {
   [ "$remote_sha" = "$EXPECTED_ORIGIN_MAIN" ] || fail remote_race 40
 }
 
-acquire_lock() {
-  mkdir -p "$(dirname "$LOCK_DIR")"
-  if mkdir "$LOCK_DIR" 2>/dev/null; then
-    printf 'pid=%s\ntransaction_id=%s\nstarted_at=%s\nrepository_realpath=%s\n' "$$" "$TRANSACTION_ID" "$(date -u +%FT%TZ)" "$(realpath_of "$ROOT_DIR")" >"$LOCK_DIR/owner"
-    LOCK_HELD=1
-    return 0
-  fi
-  local pid=""
-  [ -f "$LOCK_DIR/owner" ] && pid="$(sed -n 's/^pid=//p' "$LOCK_DIR/owner" | head -n1)"
-  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then die "archive transaction lock is active (pid $pid)"; fi
-  [ -n "$RESUME_ID" ] || die "archive transaction lock is stale; inspect it and resume explicitly with --resume"
-  rm -rf "$LOCK_DIR"
-  mkdir "$LOCK_DIR" || die "unable to recover stale transaction lock"
-  printf 'pid=%s\ntransaction_id=%s\nstarted_at=%s\nrepository_realpath=%s\n' "$$" "$TRANSACTION_ID" "$(date -u +%FT%TZ)" "$(realpath_of "$ROOT_DIR")" >"$LOCK_DIR/owner"
-  LOCK_HELD=1
-}
-release_lock() {
-  if [ "$LOCK_HELD" -eq 1 ]; then
-    rm -rf "$LOCK_DIR"
-  fi
-}
 restore_temporary_remote() {
   [ "$TEMPORARY_REMOTE_SWITCHED" -eq 1 ] || return 0
   git -C "$ROOT_DIR" remote set-url "$REMOTE_NAME" "$TEMPORARY_ORIGINAL_REMOTE" || return 1
@@ -220,8 +238,10 @@ restore_temporary_remote() {
 }
 
 write_archive_record() {
-  [ ! -e "$ARCHIVE_RECORD" ] || return 1
-  mkdir -p "$(dirname "$ARCHIVE_RECORD")" || return 1
+  if [ -e "$ARCHIVE_RECORD" ] || [ -L "$ARCHIVE_RECORD" ]; then
+    helper archive-verify --journal "$JOURNAL" --record "$ARCHIVE_RECORD" >/dev/null 2>&1
+    return
+  fi
   local changed_file="$TRANSACTION_DIR/changed-files.txt" commits_file="$TRANSACTION_DIR/included-commits.txt" temporary="$TRANSACTION_DIR/archive-record.md"
   rm -f "$temporary" || return 1
   local archive_head
@@ -230,7 +250,13 @@ write_archive_record() {
   git -C "$ROOT_DIR" log --reverse --format='%H %s' "$EXPECTED_ORIGIN_MAIN..$archive_head" >"$commits_file" || return 1
   helper archive-render --journal "$JOURNAL" --output "$temporary" --included-commits-file "$commits_file" --changed-files-file "$changed_file" --remote "$REMOTE_NAME" || return 1
   helper archive-verify --journal "$JOURNAL" --record "$temporary" || return 1
-  mv "$temporary" "$ARCHIVE_RECORD" || return 1
+  local publish_status=0
+  helper archive-publish --root "$ROOT_DIR" --source "$temporary" --target "$ARCHIVE_RECORD" || publish_status=$?
+  case "$publish_status" in
+    0) ;;
+    17) helper archive-verify --journal "$JOURNAL" --record "$ARCHIVE_RECORD" >/dev/null 2>&1 || return 1 ;;
+    *) return 1 ;;
+  esac
 }
 
 write_failure_summary() {
@@ -262,7 +288,6 @@ on_signal() {
   fi
   exit 130
 }
-trap release_lock EXIT
 trap on_signal INT TERM
 
 begin_transaction() {
@@ -272,16 +297,16 @@ begin_transaction() {
   [ -n "$SOURCE_BRANCH" ] || die "detached HEAD is not resumable"
   [ "$SOURCE_BRANCH" = "$TARGET_BRANCH" ] || [ "$MERGE_CURRENT_BRANCH" -eq 1 ] || die "--no-merge-current-branch is unsafe for a non-main source branch"
   SOURCE_HEAD="$(git -C "$ROOT_DIR" rev-parse HEAD)"
+  TRANSACTION_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+  select_default_archive_record
   run_cmd git -C "$ROOT_DIR" fetch "$REMOTE_NAME"
   EXPECTED_ORIGIN_MAIN="$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")"
   LOCAL_MAIN_BEFORE="$(git -C "$ROOT_DIR" rev-parse "$TARGET_BRANCH")"
-  TRANSACTION_ID="$(date -u +%Y%m%dT%H%M%SZ)-$$"
   TRANSACTION_DIR="$ROOT_DIR/local_archive/runtime/archive-and-push/$TRANSACTION_ID"
   JOURNAL="$TRANSACTION_DIR/transaction.json"
-  mkdir -p "$TRANSACTION_DIR/logs"
   helper journal-init --path "$JOURNAL" --transaction-id "$TRANSACTION_ID" --repository "$ROOT_DIR" --source-branch "$SOURCE_BRANCH" --source-head "$SOURCE_HEAD" --target-branch "$TARGET_BRANCH" --expected-origin-main "$EXPECTED_ORIGIN_MAIN" --local-main-before "$LOCAL_MAIN_BEFORE" --archive-record-path "$(repo_relative_path "$ARCHIVE_RECORD")"
+  mkdir -p "$TRANSACTION_DIR/logs"
   FINAL_HEAD="$SOURCE_HEAD"
-  acquire_lock
   journal_update --phase-status succeeded
 }
 
@@ -293,8 +318,7 @@ resume_transaction() {
   [ -f "$JOURNAL" ] || die "transaction journal not found: $TRANSACTION_ID"
   [ "$(journal_get repository_realpath)" = "$(realpath_of "$ROOT_DIR")" ] || die "journal repository does not match"
   SOURCE_BRANCH="$(journal_get source_branch)"; SOURCE_HEAD="$(journal_get source_head)"; EXPECTED_ORIGIN_MAIN="$(journal_get expected_origin_main)"; LOCAL_MAIN_BEFORE="$(journal_get local_main_before)"
-  ARCHIVE_RECORD="$ROOT_DIR/$(journal_get archive_record_path)"; ensure_archive_record_path
-  acquire_lock
+  ARCHIVE_RECORD="$ROOT_DIR/$(journal_get archive_record_path)"; ensure_archive_record_path || die "journal archive record is outside local_archive"
   ensure_repo; ensure_origin
   if [ "$INTEGRATE_MAIN_INTO_FEATURE" -eq 1 ]; then
     if [ "$(journal_optional recovery_phase)" != recovery/completed ]; then
@@ -1180,7 +1204,7 @@ resume() {
     staging:failed|staging:interrupted|commit:failed|commit:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; [ "$(git -C "$ROOT_DIR" branch --show-current)" = "$SOURCE_BRANCH" ] && [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$SOURCE_HEAD" ] || die "unsafe resume before commit"; stage_and_commit; merge_to_main; push_main; archive_success ;;
     merge:failed|merge:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; FINAL_HEAD="$(journal_get commit_result.commit_sha)"; [ -n "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" branch --show-current)" = "$SOURCE_BRANCH" ] && [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$FINAL_HEAD" ] || die "unsafe merge resume"; [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$EXPECTED_ORIGIN_MAIN" ] || die "origin changed; refusing resume"; merge_to_main; push_main; archive_success ;;
     push:failed|push:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; FINAL_HEAD="$(journal_get merge_result.head)"; [ -n "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" = "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$EXPECTED_ORIGIN_MAIN" ] || die "unsafe push resume"; push_main; archive_success ;;
-    archive:failed|archive:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; FINAL_HEAD="$(journal_get push_result.head)"; [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$FINAL_HEAD" ] || die "unsafe archive resume"; archive_success ;;
+    archive:running|archive:failed|archive:interrupted) validate_persisted_provenance || die "validation provenance is not safely resumable"; FINAL_HEAD="$(journal_get push_result.head)"; [ "$(journal_get push_result.status)" = succeeded ] && [ -n "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse HEAD)" = "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" = "$FINAL_HEAD" ] && [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" = "$FINAL_HEAD" ] || die "unsafe archive resume"; select_resumable_archive_record || fail archive 81; archive_success ;;
     *) die "journal phase is not safely resumable: $phase/$status" ;;
   esac
 }
@@ -1200,11 +1224,17 @@ main() {
     log "dry-run: no Git mutation; use --push for a journaled transaction"
     return
   fi
+  archive_python_supported || die "no supported Python available; set ARCHIVE_PYTHON_BIN to Python >=3.9"
+  ensure_archive_record_path || die "archive record must stay inside $ROOT_DIR/local_archive"
+  if [ -z "${ARCHIVE_TRANSACTION_LOCK_FD:-}" ]; then
+    exec "$PYTHON_BIN" "$HELPER" lock-exec --root "$ROOT_DIR" --lock "$LOCK_FILE" -- "$0" "${ORIGINAL_ARGS[@]}"
+  fi
+  "$PYTHON_BIN" "$HELPER" lock-verify --root "$ROOT_DIR" --lock "$LOCK_FILE" --fd "$ARCHIVE_TRANSACTION_LOCK_FD" || exit $?
   if [ -n "$RESUME_ID" ]; then
     resume_transaction
     if [ "$INTEGRATE_MAIN_INTO_FEATURE" -eq 1 ]; then recovery_resume; else resume; fi
   else
-    ensure_archive_record_path; begin_transaction; validate; stage_and_commit; merge_to_main; push_main; archive_success
+    begin_transaction; validate; stage_and_commit; merge_to_main; push_main; archive_success
   fi
   printf 'archive transaction completed: %s\n' "$TRANSACTION_ID"
 }

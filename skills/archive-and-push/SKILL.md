@@ -19,6 +19,14 @@ Status: CURRENT (2026-07-18)
 ./scripts/archive_and_push.sh --push
 ```
 
+默认归档名支持同一天重复执行：首个事务使用日期名，后续事务保留旧记录并自动追加 transaction ID。操作者不需要为了日常多次提交手工传 `--record`。若事务停在 `archive/running`、`archive/failed` 或 `archive/interrupted`，使用同一个 `--resume <transaction-id>`；脚本必须先验证已推送提交与本地、远端引用，并且只能在验证现有记录不属于该事务后选择事务专属路径，不得覆盖、移动或删除旧记录。
+
+事务互斥使用 macOS/Linux 内核文件锁；最后一个继承同一 lock FD 的进程退出后，内核自动释放锁，锁文件中的旧 PID 仅供诊断，不得要求操作者手工删除“stale lock”。脚本不信任环境 marker：进入事务前必须验证继承 FD 与 owner-only regular lock inode 一致且实际持锁。并发第二个调用必须在创建 journal、选择 archive path 或执行 Git 操作前失败。
+
+Python 解析顺序是显式 `ARCHIVE_PYTHON_BIN`、仓库 `.venv/bin/python`、最后才是 `PATH` 中的 `python3`；执行真实事务前必须通过 Python 版本门禁。不要让旧系统 Python 在运行中途用环境异常替代受控失败。
+
+正式 archive record 必须留在 canonical `local_archive` 目录内，以标准库 hard-link 原子 no-replace 方式发布；目标已存在时只允许验证同一事务记录，不得覆盖。跨文件系统发布必须 fail-closed。
+
 脚本会持久化三类不同用途的本地记录：
 
 - `local_archive/docs/governance/archive/*.md` 是供维护者阅读的正式 Markdown archive record；

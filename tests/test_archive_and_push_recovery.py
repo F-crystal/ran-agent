@@ -29,6 +29,7 @@ def run_archive(
     env = os.environ | {
         "ARCHIVE_ROOT": str(repo),
         "ARCHIVE_HELPER": str(HELPER),
+        "ARCHIVE_PYTHON_BIN": sys.executable,
         "ARCHIVE_PYTHON_TEST_COMMAND": "printf python-ok",
         "ARCHIVE_NODE_TEST_COMMAND": "printf node-ok",
         "ARCHIVE_TEST_HEARTBEAT_SECONDS": "1",

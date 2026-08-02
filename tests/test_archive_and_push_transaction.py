@@ -5,7 +5,9 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import stat
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -28,6 +30,7 @@ def run_archive(
     env = os.environ | {
         "ARCHIVE_ROOT": str(repo),
         "ARCHIVE_HELPER": str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+        "ARCHIVE_PYTHON_BIN": sys.executable,
         "ARCHIVE_PYTHON_TEST_COMMAND": "printf python-ok",
         "ARCHIVE_NODE_TEST_COMMAND": "printf node-ok",
         "ARCHIVE_TEST_HEARTBEAT_SECONDS": "1",
@@ -79,6 +82,7 @@ def test_default_node_baseline_binds_supported_absolute_nvm_runtime(tmp_path: Pa
     env = os.environ | {
         "ARCHIVE_ROOT": str(repo),
         "ARCHIVE_HELPER": str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+        "ARCHIVE_PYTHON_BIN": sys.executable,
         "ARCHIVE_PYTHON_TEST_COMMAND": "printf python-ok",
         "ARCHIVE_TEST_HEARTBEAT_SECONDS": "1",
         "NVM_DIR": str(tmp_path / "nvm"),
@@ -211,6 +215,26 @@ def test_precommitted_feature_pushes_and_writes_resumable_journal(tmp_path: Path
     assert f"Validated head: {feature_head}" in contents
     assert "feature.txt" in contents
     assert "feature: archive transaction" in contents
+
+
+def test_same_day_default_archives_use_transaction_specific_records(tmp_path: Path) -> None:
+    repo, remote = setup_feature_repo(tmp_path)
+    (repo / "first.txt").write_text("first\n", encoding="utf-8")
+    first = run_archive(repo, "--push")
+    assert first.returncode == 0, first.stderr
+
+    (repo / "second.txt").write_text("second\n", encoding="utf-8")
+    second = run_archive(repo, "--push", extra_env={"ARCHIVE_TRANSACTION_LOCK_HELD": "1"})
+    assert second.returncode == 0, second.stderr
+
+    journals = [
+        json.loads(path.read_text(encoding="utf-8"))
+        for path in (repo / "local_archive" / "runtime" / "archive-and-push").glob("*/transaction.json")
+    ]
+    records = {str(journal["archive_record_path"]) for journal in journals}
+    assert len(journals) == len(records) == 2
+    assert all((repo / record).is_file() for record in records)
+    assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == git(repo, "rev-parse", "HEAD")
 
 
 def test_reused_validation_is_durable_before_merge_and_rendered_from_journal(tmp_path: Path) -> None:
@@ -660,6 +684,9 @@ def test_archive_failure_resumes_without_repeating_push(tmp_path: Path) -> None:
     assert journal["phase"] == "archive"
     assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == merged_head
     blocked_parent.unlink()
+    blocked_parent.mkdir()
+    original_record = blocked_parent / "record.md"
+    original_record.write_text("older archive\n", encoding="utf-8")
 
     resumed = run_archive(repo, "--resume", transaction.parent.name)
     assert resumed.returncode == 0, resumed.stderr
@@ -669,24 +696,282 @@ def test_archive_failure_resumes_without_repeating_push(tmp_path: Path) -> None:
     assert journal["validation_status"] == "reused"
     assert journal["validated_head"] == source_head
     assert journal["validation_record_checksum"] == checksum
-    record = blocked_parent / "record.md"
+    record = repo / str(journal["archive_record_path"])
+    assert journal["archive_record_previous_path"] == original_record.relative_to(repo).as_posix()
+    assert record != original_record
+    assert original_record.read_text(encoding="utf-8") == "older archive\n"
     assert record.is_file()
     assert f"- Validated head: {source_head}" in record.read_text(encoding="utf-8")
 
 
+def test_archive_running_resumes_before_or_after_record_publish(tmp_path: Path) -> None:
+    for published in (False, True):
+        repo, remote = setup_feature_repo(tmp_path / str(published).lower())
+        (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+        completed = run_archive(repo, "--push")
+        assert completed.returncode == 0, completed.stderr
+        transaction, journal = journal_for(repo)
+        head = git(repo, "rev-parse", "HEAD")
+        record = repo / str(journal["archive_record_path"])
+        if not published:
+            record.unlink()
+        journal["phase"] = "archive"
+        journal["phase_status"] = "running"
+        journal["archive_result"] = {"status": "pending"}
+        transaction.write_text(json.dumps(journal), encoding="utf-8")
+
+        resumed = run_archive(repo, "--resume", transaction.parent.name)
+
+        assert resumed.returncode == 0, resumed.stderr
+        journal = json.loads(transaction.read_text(encoding="utf-8"))
+        assert journal["phase"] == "completed"
+        assert journal["phase_status"] == "succeeded"
+        assert journal["archive_result"]["status"] == "succeeded"
+        assert record.is_file()
+        assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == head
+
+
+def test_archive_resume_rejects_transaction_record_symlink_escape(tmp_path: Path) -> None:
+    for matching in (False, True):
+        repo, _remote = setup_feature_repo(tmp_path / str(matching).lower())
+        (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+        git(repo, "add", "feature.txt")
+        git(repo, "commit", "-m", "feature")
+        source_head = git(repo, "rev-parse", "HEAD")
+        validation = write_validation_record(repo, source_head)
+        blocked_parent = repo / "local_archive" / "blocked-parent"
+        blocked_parent.parent.mkdir(parents=True, exist_ok=True)
+        blocked_parent.write_text("not a directory", encoding="utf-8")
+        failed = run_archive(
+            repo,
+            "--push",
+            "--reuse-validation",
+            str(validation),
+            "--record",
+            str(blocked_parent / "record.md"),
+        )
+        assert failed.returncode != 0
+        transaction, journal = journal_for(repo)
+        blocked_parent.unlink()
+        blocked_parent.mkdir()
+        original_record = blocked_parent / "record.md"
+        original_record.write_text("older archive\n", encoding="utf-8")
+        candidate = blocked_parent / f"record-{transaction.parent.name}.md"
+        escaped = repo.parent / "escaped-record.md"
+        if matching:
+            included = transaction.parent / "included.txt"
+            changed = transaction.parent / "changed.txt"
+            included.write_text("none\n", encoding="utf-8")
+            changed.write_text("none\n", encoding="utf-8")
+            rendered = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+                    "archive-render",
+                    "--journal",
+                    str(transaction),
+                    "--output",
+                    str(escaped),
+                    "--included-commits-file",
+                    str(included),
+                    "--changed-files-file",
+                    str(changed),
+                    "--remote",
+                    "origin",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            assert rendered.returncode == 0, rendered.stderr
+        candidate.symlink_to(escaped)
+
+        resumed = run_archive(repo, "--resume", transaction.parent.name)
+
+        assert resumed.returncode == 81
+        journal = json.loads(transaction.read_text(encoding="utf-8"))
+        assert journal["phase"] == "archive"
+        assert journal["phase_status"] == "failed"
+        assert journal["archive_record_path"] == original_record.relative_to(repo).as_posix()
+        assert original_record.read_text(encoding="utf-8") == "older archive\n"
+        assert candidate.is_symlink()
+        assert escaped.is_file() is matching
+
+
 def test_active_lock_rejects_a_second_transaction(tmp_path: Path) -> None:
     repo, _remote = setup_feature_repo(tmp_path)
-    lock = repo / "local_archive" / "runtime" / "archive-and-push" / ".lock"
-    lock.mkdir(parents=True)
-    lock_owner = subprocess.Popen(["sleep", "5"])
-    try:
-        (lock / "owner").write_text(f"pid={lock_owner.pid}\ntransaction_id=other\n", encoding="utf-8")
+    process_env = os.environ | {
+        "ARCHIVE_ROOT": str(repo),
+        "ARCHIVE_HELPER": str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+        "ARCHIVE_PYTHON_BIN": sys.executable,
+        "ARCHIVE_PYTHON_TEST_COMMAND": "sleep 3",
+        "ARCHIVE_NODE_TEST_COMMAND": "printf node-ok",
+    }
+    first = subprocess.Popen(
+        [str(SCRIPT), "--push"], text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=process_env
+    )
+    assert first.stdout is not None
+    while True:
+        line = first.stdout.readline()
+        if "test started:" in line:
+            break
+        if not line and first.poll() is not None:
+            _stdout, stderr = first.communicate()
+            raise AssertionError(f"first archive transaction exited before validation: {stderr}")
+    runtime = repo / "local_archive" / "runtime" / "archive-and-push"
+
+    second = run_archive(repo, "--push")
+
+    assert second.returncode == 73
+    assert "lock is active" in second.stderr
+    assert len(list(runtime.glob("*/transaction.json"))) == 1
+    first.communicate(timeout=30)
+    assert first.returncode == 0, first.stderr
+    journal = json.loads(next(runtime.glob("*/transaction.json")).read_text(encoding="utf-8"))
+    assert journal["phase"] == "completed"
+    assert len(list((repo / "local_archive" / "docs" / "governance" / "archive").glob("*.md"))) == 1
+
+
+def test_dead_prejournal_lock_is_recovered_without_an_orphan_transaction(tmp_path: Path) -> None:
+    repo, remote = setup_feature_repo(tmp_path)
+    runtime = repo / "local_archive" / "runtime" / "archive-and-push"
+    lock = runtime / ".flock"
+    lock.parent.mkdir(parents=True)
+    lock.write_text("pid=999999999\nstarted_at=stale\n", encoding="utf-8")
+    lock.chmod(0o600)
+
+    result = run_archive(repo, "--push")
+
+    assert result.returncode == 0, result.stderr
+    journals = list(runtime.glob("*/transaction.json"))
+    assert len(journals) == 1
+    assert json.loads(journals[0].read_text(encoding="utf-8"))["phase"] == "completed"
+    assert lock.is_file()
+    assert "pid=999999999" not in lock.read_text(encoding="utf-8")
+    assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == git(repo, "rev-parse", "HEAD")
+
+
+def test_archive_lock_rejects_non_regular_paths_before_transaction(tmp_path: Path) -> None:
+    for kind in ("fifo", "directory", "symlink", "world-writable"):
+        repo, _remote = setup_feature_repo(tmp_path / kind)
+        runtime = repo / "local_archive" / "runtime" / "archive-and-push"
+        runtime.mkdir(parents=True)
+        lock = runtime / ".flock"
+        target = runtime / "lock-target"
+        if kind == "fifo":
+            os.mkfifo(lock)
+        elif kind == "directory":
+            lock.mkdir()
+        elif kind == "symlink":
+            target.write_text("do not touch\n", encoding="utf-8")
+            lock.symlink_to(target)
+        else:
+            lock.write_text("pid=none\n", encoding="utf-8")
+            lock.chmod(0o666)
+
         result = run_archive(repo, "--push")
-        assert result.returncode != 0
-        assert "lock is active" in result.stderr
-    finally:
-        lock_owner.terminate()
-        lock_owner.wait(timeout=5)
+
+        assert result.returncode == 74
+        assert "archive transaction lock" in result.stderr
+        assert not list(runtime.glob("*/transaction.json"))
+        if kind == "symlink":
+            assert target.read_text(encoding="utf-8") == "do not touch\n"
+        if kind == "world-writable":
+            assert stat.S_IMODE(lock.stat().st_mode) == 0o666
+
+
+def test_archive_lock_rejects_symlinked_runtime_parent(tmp_path: Path) -> None:
+    repo, _remote = setup_feature_repo(tmp_path)
+    runtime = repo / "local_archive" / "runtime"
+    runtime.mkdir(parents=True)
+    outside = tmp_path / "outside-runtime"
+    outside.mkdir()
+    (runtime / "archive-and-push").symlink_to(outside)
+
+    result = run_archive(repo, "--push")
+
+    assert result.returncode == 74
+    assert not (outside / ".flock").exists()
+    assert not list(outside.glob("*/transaction.json"))
+
+
+def test_archive_lock_rejects_missing_or_unrelated_inherited_fd(tmp_path: Path) -> None:
+    repo, _remote = setup_feature_repo(tmp_path)
+    runtime = repo / "local_archive" / "runtime" / "archive-and-push"
+    invalid = run_archive(repo, "--push", extra_env={"ARCHIVE_TRANSACTION_LOCK_FD": "999999"})
+    assert invalid.returncode == 74
+    assert not list(runtime.glob("*/transaction.json"))
+
+    unrelated = tmp_path / "unrelated.lock"
+    with unrelated.open("w+") as descriptor:
+        env = os.environ | {
+            "ARCHIVE_ROOT": str(repo),
+            "ARCHIVE_HELPER": str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "ARCHIVE_PYTHON_BIN": sys.executable,
+            "ARCHIVE_PYTHON_TEST_COMMAND": "printf python-ok",
+            "ARCHIVE_NODE_TEST_COMMAND": "printf node-ok",
+            "ARCHIVE_TRANSACTION_LOCK_FD": str(descriptor.fileno()),
+        }
+        result = subprocess.run(
+            [str(SCRIPT), "--push"],
+            text=True,
+            capture_output=True,
+            env=env,
+            pass_fds=(descriptor.fileno(),),
+            timeout=30,
+        )
+    assert result.returncode == 74
+    assert not list(runtime.glob("*/transaction.json"))
+
+
+def test_archive_publish_never_replaces_and_rejects_symlinked_parent(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    source = root / "local_archive" / "runtime" / "source.md"
+    target = root / "local_archive" / "docs" / "record.md"
+    source.parent.mkdir(parents=True)
+    target.parent.mkdir(parents=True)
+    source.write_text("new\n", encoding="utf-8")
+    target.write_text("old\n", encoding="utf-8")
+    existing = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "archive-publish",
+            "--root",
+            str(root),
+            "--source",
+            str(source),
+            "--target",
+            str(target),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert existing.returncode == 17
+    assert target.read_text(encoding="utf-8") == "old\n"
+    assert source.read_text(encoding="utf-8") == "new\n"
+
+    outside = tmp_path / "outside-archive"
+    outside.mkdir()
+    escaped_parent = root / "local_archive" / "escaped"
+    escaped_parent.symlink_to(outside)
+    escaped = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "archive-publish",
+            "--root",
+            str(root),
+            "--source",
+            str(source),
+            "--target",
+            str(escaped_parent / "record.md"),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert escaped.returncode == 82
+    assert not (outside / "record.md").exists()
+    assert source.read_text(encoding="utf-8") == "new\n"
 
 
 def test_origin_change_after_validation_fails_closed(tmp_path: Path) -> None:
@@ -694,6 +979,7 @@ def test_origin_change_after_validation_fails_closed(tmp_path: Path) -> None:
     process_env = os.environ | {
         "ARCHIVE_ROOT": str(repo),
         "ARCHIVE_HELPER": str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+        "ARCHIVE_PYTHON_BIN": sys.executable,
         "ARCHIVE_PYTHON_TEST_COMMAND": "sleep 2",
         "ARCHIVE_NODE_TEST_COMMAND": "printf node-ok",
     }
@@ -709,7 +995,7 @@ def test_origin_change_after_validation_fails_closed(tmp_path: Path) -> None:
     git(racer, "add", "race.txt")
     git(racer, "commit", "-m", "race")
     git(racer, "push", "origin", "main")
-    process.communicate(timeout=10)
+    process.communicate(timeout=30)
 
     assert process.returncode != 0
     _path, journal = journal_for(repo)

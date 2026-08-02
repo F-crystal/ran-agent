@@ -9,11 +9,13 @@ safe on macOS and Linux using the Python standard library.
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
 import selectors
 import signal
+import stat
 import subprocess
 import sys
 import time
@@ -42,6 +44,14 @@ def atomic_json(path: Path, value: dict[str, Any]) -> None:
 
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def local_archive_path(root: str, path: str) -> Path:
+    archive_root = Path(root).resolve() / "local_archive"
+    resolved = Path(path).resolve()
+    if resolved == archive_root or archive_root not in resolved.parents:
+        raise OSError("path is outside repository local_archive")
+    return resolved
 
 
 def command_journal_init(args: argparse.Namespace) -> int:
@@ -113,6 +123,121 @@ def command_journal_get(args: argparse.Namespace) -> int:
     else:
         print(value)
     return 0
+
+
+def command_lock_exec(args: argparse.Namespace) -> int:
+    command = args.command[1:] if args.command[:1] == ["--"] else args.command
+    if not command:
+        raise SystemExit("lock-exec requires a command after --")
+    flags = os.O_RDWR | os.O_CREAT
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        lock_path = Path(args.lock)
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        lock_path = local_archive_path(args.root, str(lock_path))
+        descriptor = os.open(lock_path, flags, 0o600)
+    except OSError as error:
+        print(f"ERROR: unable to open archive transaction lock: {error.strerror or error}", file=sys.stderr)
+        return 74
+    status = os.fstat(descriptor)
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or stat.S_IMODE(status.st_mode) != 0o600
+        or status.st_nlink != 1
+        or status.st_uid != os.geteuid()
+    ):
+        print("ERROR: archive transaction lock must be an owner-only regular file", file=sys.stderr)
+        os.close(descriptor)
+        return 74
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        owner = os.read(descriptor, 4096).decode(errors="replace")
+        pid = next((line.split("=", 1)[1] for line in owner.splitlines() if line.startswith("pid=")), "unknown")
+        print(f"ERROR: archive transaction lock is active (pid {pid})", file=sys.stderr)
+        os.close(descriptor)
+        return 73
+    os.fchmod(descriptor, 0o600)
+    owner = f"pid={os.getpid()}\nstarted_at={now()}\n"
+    os.ftruncate(descriptor, 0)
+    os.write(descriptor, owner.encode())
+    os.fsync(descriptor)
+    os.set_inheritable(descriptor, True)
+    os.environ["ARCHIVE_TRANSACTION_LOCK_FD"] = str(descriptor)
+    os.execvpe(command[0], command, os.environ)
+    return 1
+
+
+def command_lock_verify(args: argparse.Namespace) -> int:
+    try:
+        descriptor = int(args.fd)
+        status = os.fstat(descriptor)
+        lock_path = local_archive_path(args.root, args.lock)
+        path_status = os.stat(lock_path, follow_symlinks=False)
+    except (OSError, ValueError):
+        print("ERROR: inherited archive transaction lock is invalid", file=sys.stderr)
+        return 74
+    if (
+        not stat.S_ISREG(status.st_mode)
+        or stat.S_IMODE(status.st_mode) != 0o600
+        or status.st_nlink != 1
+        or status.st_uid != os.geteuid()
+        or not stat.S_ISREG(path_status.st_mode)
+        or (status.st_dev, status.st_ino) != (path_status.st_dev, path_status.st_ino)
+    ):
+        print("ERROR: inherited archive transaction lock does not match the lock file", file=sys.stderr)
+        return 74
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        print("ERROR: inherited archive transaction lock is not held", file=sys.stderr)
+        return 74
+    return 0
+
+
+def command_archive_publish(args: argparse.Namespace) -> int:
+    source_descriptor = target_directory = source_directory = None
+    try:
+        source = local_archive_path(args.root, args.source)
+        requested_target = Path(args.target)
+        requested_target.parent.mkdir(parents=True, exist_ok=True)
+        target = local_archive_path(args.root, str(requested_target))
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        source_descriptor = os.open(source, flags)
+        source_status = os.fstat(source_descriptor)
+        if not stat.S_ISREG(source_status.st_mode) or source_status.st_uid != os.geteuid() or source_status.st_nlink != 1:
+            raise OSError("archive source is not an owner-controlled regular file")
+        os.fsync(source_descriptor)
+        try:
+            os.link(source, target, follow_symlinks=False)
+        except FileExistsError:
+            return 17
+        target_status = os.stat(target, follow_symlinks=False)
+        if not stat.S_ISREG(target_status.st_mode) or (
+            source_status.st_dev,
+            source_status.st_ino,
+        ) != (target_status.st_dev, target_status.st_ino):
+            raise OSError("published archive inode does not match source")
+        target_directory = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY)
+        os.fsync(target_directory)
+        source.unlink()
+        source_directory = os.open(source.parent, os.O_RDONLY | os.O_DIRECTORY)
+        os.fsync(source_directory)
+        return 0
+    except OSError as error:
+        print(f"ERROR: unable to publish archive record without replacement: {error}", file=sys.stderr)
+        return 82
+    finally:
+        if source_descriptor is not None:
+            os.close(source_descriptor)
+        if target_directory is not None:
+            os.close(target_directory)
+        if source_directory is not None:
+            os.close(source_directory)
 
 
 def terminate_group(process: subprocess.Popen[bytes], grace_seconds: float) -> None:
@@ -307,7 +432,16 @@ def atomic_text(path: Path, value: str) -> None:
 
 def command_archive_verify(args: argparse.Namespace) -> int:
     journal = read_json(Path(args.journal))
-    content = Path(args.record).read_text(encoding="utf-8")
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(args.record, flags)
+    status = os.fstat(descriptor)
+    if not stat.S_ISREG(status.st_mode):
+        os.close(descriptor)
+        raise SystemExit("archive record is not a regular file")
+    with os.fdopen(descriptor, encoding="utf-8") as record_file:
+        content = record_file.read()
     expected = {
         "Transaction ID": journal["transaction_id"],
         "Source branch": journal["source_branch"],
@@ -389,6 +523,21 @@ def parser() -> argparse.ArgumentParser:
     get.add_argument("--path", required=True)
     get.add_argument("--field", required=True)
     get.set_defaults(function=command_journal_get)
+    lock_exec = sub.add_parser("lock-exec")
+    lock_exec.add_argument("--root", required=True)
+    lock_exec.add_argument("--lock", required=True)
+    lock_exec.add_argument("command", nargs=argparse.REMAINDER)
+    lock_exec.set_defaults(function=command_lock_exec)
+    lock_verify = sub.add_parser("lock-verify")
+    lock_verify.add_argument("--root", required=True)
+    lock_verify.add_argument("--lock", required=True)
+    lock_verify.add_argument("--fd", required=True)
+    lock_verify.set_defaults(function=command_lock_verify)
+    archive_publish = sub.add_parser("archive-publish")
+    archive_publish.add_argument("--root", required=True)
+    archive_publish.add_argument("--source", required=True)
+    archive_publish.add_argument("--target", required=True)
+    archive_publish.set_defaults(function=command_archive_publish)
     run = sub.add_parser("run")
     run.add_argument("--log", required=True)
     run.add_argument("--result-file", required=True)
