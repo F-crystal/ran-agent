@@ -133,5 +133,5 @@ test('model rollback is an input to the existing O1 release transaction', () => 
   assert.match(deploy, /RAN_AGENT_DEPLOY_HERMES_MODEL="\$DEPLOY_MODEL"/);
   assert.match(deploy, /RAN_AGENT_EXPECTED_HERMES_MODEL="\$DEPLOY_MODEL"/);
   assert.match(deploy, /deepseek-v4-pro\|deepseek-v4-flash/);
-  assert.match(deploy, /trap 'rollback_transaction \$\?' EXIT/);
+  assert.match(deploy, /trap 'release_exit \$\?' EXIT/);
 });

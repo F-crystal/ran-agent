@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-02)
 
 ## Scope
 
@@ -66,6 +66,13 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 - Identity-sensitive fixtures must explicitly establish the owner, group, and
   mode of their scratch/runtime root; do not rely on host-specific temporary
   directory group inheritance.
+- Checkout-permission regressions must exercise real root-owned `0600/0700`
+  tracked paths, repair them as the non-root checkout owner, and prove access
+  as the service identity. Same-user chmod-only fixtures are insufficient.
+- Shell harnesses that source release controllers must prove the intended
+  command ran and preserve its failure status. Under `set -u`, branch around
+  empty privilege-command arrays instead of expanding them; cover both the
+  desktop Bash 3.2 harness and the Linux root/non-root staged gate.
 - Real-process integration probes must keep bounded timeouts sized for the
   repository's full-suite concurrency load, not only isolated-file latency.
 - A local full-suite pass is insufficient for release-gate changes. Keep and

@@ -36,4 +36,11 @@ case "$#" in
 esac
 [[ "$MODE" == --dry-run || "$MODE" == --apply ]] || { printf 'deploy-hermes-candidate: failed:mode_invalid\n' >&2; exit 1; }
 [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || { printf 'deploy-hermes-candidate: failed:candidate_digest_invalid\n' >&2; exit 1; }
-exec env RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_SOURCE="$SOURCE" bash "$REPO_ROOT/scripts/deploy-hermes-release.sh" "$MODE"
+BOOTSTRAP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ran-agent-candidate-bootstrap.XXXXXX")"
+trap 'rm -rf "$BOOTSTRAP_ROOT"' EXIT
+git show "$CANDIDATE:scripts/bootstrap-hermes-release.sh" > "$BOOTSTRAP_ROOT/bootstrap-hermes-release.sh" || {
+  printf 'deploy-hermes-candidate: failed:bootstrap_missing\n' >&2
+  exit 1
+}
+chmod 700 "$BOOTSTRAP_ROOT/bootstrap-hermes-release.sh"
+env RAN_AGENT_RELEASE_SOURCE="$SOURCE" bash "$BOOTSTRAP_ROOT/bootstrap-hermes-release.sh" "$MODE" "$CANDIDATE"

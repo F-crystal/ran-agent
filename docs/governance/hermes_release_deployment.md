@@ -1,6 +1,6 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-08-01)
+Status: CURRENT (2026-08-02)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
@@ -51,9 +51,10 @@ root/non-root, `env -i` execution as required by the repository `AGENTS.md`.
 The remediated staged gate also fixes host-dependent temporary-directory group
 inheritance, nested-shell state-directory leakage, and Python tests that found
 Hermes only through an interactive `PATH`. Before another deployable candidate
-is produced, the complete local staged `--all` gate must end with 378/378
-Python tests, `hermes-release-smoke: all-ok`, and
-`hermes-release-gate: ok`; an ordinary checkout test pass is not equivalent.
+is produced, the complete local staged `--all` gate must have no failures, any
+skip must be an explicit server/root-only check, and it must end with
+`hermes-release-smoke: all-ok` and `hermes-release-gate: ok`; an ordinary
+checkout test pass is not equivalent.
 
 Candidate `8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77` reached the O1 contract
 tests and stopped because that test file ignored the gate-provided
@@ -113,13 +114,25 @@ documented by the [pinned official README](https://github.com/P0luz/Ombre-Brain/
 Repeated failed transactions also copied the large live Ombre source, venv,
 and cache state into each rollback payload. Completed `rollback_used`
 transactions were previously retained indefinitely, contributing to the
-owner-reported `56.6GB/60GB` usage. The reviewed transaction now classifies and
+owner-reported disk pressure; the latest trace showed `54GB/59GB` used and
+`3.3GB` available. The reviewed transaction now classifies and
 removes only those completed payloads while preserving evidence; corrupt,
 mounted, symlinked, current-production, or concurrently changing snapshots
 remain untouched. Immediately after that staged prune, a mandatory capacity
-gate measures all sources copied by the new snapshot, including the duplicated
-SQLite migration evidence, and adds the larger of 25% or 2 GiB headroom. An
-insufficient result stops before snapshot creation or service interruption.
+gate measures allocated blocks and inodes for every snapshot source, including
+the duplicated SQLite migration evidence, reserves candidate staging, and adds
+the larger of 25% or 2 GiB byte headroom plus inode headroom. An insufficient
+result stops before snapshot creation or service interruption.
+
+The release lock is a root-owned `flock` acquired through a caller-owned FIFO,
+so an `ubuntu` bootstrap never asks root to overwrite an unprivileged `/tmp`
+regular file. Candidate and rollback checkouts run with `umask 022`; every
+tracked regular file and parent directory is then verified against the Git
+mode and `ubuntu` ownership contract. Historical root-owned restrictive paths
+are repaired through no-follow file descriptors and revalidated, and the
+actual Node entry plus dynamic dependencies are imported as `ran-agent` before
+runtime apply. The immutable stage runs its full Git-less gate under both root
+and `ran-agent`; a same-user local pass is not deployable evidence.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. The verified payload-prune apply deletes only
@@ -129,11 +142,13 @@ read-only.
 
 ## 0. First Enablement Bootstrap
 
-Use this section exactly once when the active checkout predates the deployment
-entry scripts. It extracts a small, verified framework from the already-fetched
-candidate into a private temporary directory; it does not add files to
-`/opt/ran_agent`, switch HEAD, or make the production worktree dirty. All
-later releases use the normal main/candidate entries below.
+Use the enablement steps when the active checkout predates the deployment entry
+scripts. They extract a small, verified framework from the already-fetched
+candidate into a private temporary directory; they do not add files to
+`/opt/ran_agent`, switch HEAD, or make the production worktree dirty. Normal
+later releases use the main/candidate entries below; explicit rollback reuses
+the same candidate-extracted bootstrap authority so recovery never depends on
+the checkout revision being restored.
 
 | Purpose | Command | Expected result / stop condition |
 |---|---|---|
@@ -143,15 +158,15 @@ later releases use the normal main/candidate entries below.
 | Fetch only the reviewed candidate object | `git fetch --no-tags origin codex/hermes-dual-spec-implementation` | Fetch succeeds; production HEAD and files remain unchanged. |
 | Resolve its immutable SHA | `git rev-parse --verify refs/remotes/origin/codex/hermes-dual-spec-implementation^{commit}` | Record the full SHA as `CANDIDATE`; stop on failure. |
 | Extract the bootstrap source outside the checkout | `git show CANDIDATE:scripts/bootstrap-hermes-release.sh > /tmp/ran-agent-bootstrap.sh` | Replace `CANDIDATE` with the recorded SHA. Only `/tmp` changes. |
-| Verify bootstrap source digest | `printf '%s  %s\n' '073ddecae4336e9be457f6e9c1aef14d2877d9f35e14045a12eedacf424d14c6' /tmp/ran-agent-bootstrap.sh | sha256sum -c -` | Expect `OK`. Stop on any mismatch; do not execute the file. |
+| Verify bootstrap source digest | `printf '%s  %s\n' 'b6800f3e23e7c448c463c4b9c52e4e16dbb5a662d28bc28551251d08fce0bb3b' /tmp/ran-agent-bootstrap.sh | sha256sum -c -` | Expect `OK`. Stop on any mismatch; do not execute the file. |
 | Make the temporary file owner-only | `chmod 700 /tmp/ran-agent-bootstrap.sh` | Succeeds. |
 | Validate the staged framework without service interruption | `bash /tmp/ran-agent-bootstrap.sh --dry-run CANDIDATE` | Prints `bootstrap-ok candidate=…`; stop on failure. |
 | Apply through the common transaction (**service interruption**) | `bash /tmp/ran-agent-bootstrap.sh --apply CANDIDATE` | Prints the ordinary transaction result and then `bootstrap-ok`. Retain its snapshot path; any failure auto-rolls back once snapshotting begins. |
 
 The bootstrap validates the exact SHA, rejects every dirty worktree, obtains
-only `bootstrap-hermes-release.sh`, `deploy-hermes-release.sh`, and
-`resolve-hermes-service-node.sh` from that commit, and checks each source
-against `docs/governance/hermes_release_bootstrap.v1.sha256` in the candidate.
+only the six files named by
+`docs/governance/hermes_release_bootstrap.v1.sha256` from that commit, and
+checks every source against that candidate-owned manifest.
 It invokes the same `deploy-hermes-release.sh` transaction as normal releases;
 there is no second persistent deployment mechanism.
 
@@ -286,6 +301,10 @@ Every `present` or `migration-present` entry is committed only after its copy
 finishes in a temporary path and is atomically renamed inside the snapshot.
 The complete durable-state tar follows the same rule. A partial cp/tar result
 therefore never enters the manifest and rollback never treats it as authority.
+After services stop and the Node/state-migration payloads are added, apply
+atomically rewrites the in-progress transaction state with the final manifest
+digest and verifies the complete published snapshot again. Candidate checkout
+cannot begin while that quiesced rollback authority is stale or incomplete.
 
 The transaction resolves one canonical live state directory from
 `RAN_AGENT_RELEASE_STATE_DIR`, defaulting to
@@ -424,10 +443,19 @@ service enable/active state as one transaction.
 | Purpose | Command | Expected result / stop condition |
 |---|---|---|
 | Validate the snapshot before interruption | `sudo test -s SNAPSHOT_DIR/prior-head -a -f SNAPSHOT_DIR/manifest -a -f SNAPSHOT_DIR/services && echo ready` | Substitute the exact snapshot path; expect `ready`. Stop if not. |
-| Restore complete snapshot (**service interruption**) | `bash scripts/deploy-hermes-release.sh --rollback SNAPSHOT_DIR` | Prints `rollback-complete deployment_status=0 candidate=… snapshot=…`. Stop if it fails; do not attempt a partial Git-only restore. |
+| Read the immutable controller SHA | `CANDIDATE="$(sudo cat SNAPSHOT_DIR/candidate)" && git cat-file -e "$CANDIDATE^{commit}"` | Substitute the exact snapshot path. Stop if the value is not one local 40-hex commit. |
+| Extract rollback bootstrap outside the checkout | `git show "$CANDIDATE:scripts/bootstrap-hermes-release.sh" > /tmp/ran-agent-rollback-bootstrap.sh && chmod 700 /tmp/ran-agent-rollback-bootstrap.sh` | Succeeds without changing HEAD or the worktree. Stop on failure. |
+| Restore complete snapshot (**service interruption**) | `bash /tmp/ran-agent-rollback-bootstrap.sh --rollback "$CANDIDATE" SNAPSHOT_DIR` | Prints `rollback-complete …` and `bootstrap-ok`. On interruption, rerun this exact command; do not invoke the restored checkout's older deploy script or attempt a partial Git-only restore. |
 | Check restored revision | `git rev-parse HEAD` | Equals the snapshot's `prior-head`. Stop if different. |
 | Check restored core services | `systemctl is-active ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service` | Must match saved service state; investigate any mismatch. |
 | Re-run blocking confirmation | `bash scripts/verify-hermes-release.sh --release` | Must print `blocking-ok` when the previous runtime was healthy. |
+
+An interrupted explicit rollback keeps the accepted snapshot and production
+pointer eligible. The candidate-extracted bootstrap remains the recovery path
+even after code restoration changes the active checkout. If restoration
+finished but pointer cleanup was interrupted, the same command recognizes the
+verified `rollback_used` state, finalizes the stale pointer, and runs governed
+payload cleanup without restoring twice.
 
 ## 7. Candidate To Main Closure
 

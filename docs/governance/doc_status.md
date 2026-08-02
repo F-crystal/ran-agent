@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-01)
+Status: CURRENT (2026-08-02)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
@@ -10,11 +10,20 @@ immutable-gate failures and the later transactional `414210f`, `7649a94`, and
 `8c259dd` apply failures, is maintained in
 `docs/governance/current_runtime_status.md`. The supplied `8c259dd` trace shows
 a complete rollback after a zero-PID Ombre startup failure; it is not production
-acceptance evidence. The owner-reported `56.6GB/60GB` usage is attributed to
-large completed rollback payloads and remains unrevalidated until the governed
-artifact pruner runs on the server. The reviewed recovery path prunes only
-verified completed payloads, then requires fresh full-snapshot headroom before
-any copy or service stop; partial copies cannot enter the rollback manifest.
+acceptance evidence. The owner's latest trace reported `54GB/59GB` used,
+`3.3GB` available, and `95%` utilization; it remains unrevalidated until the
+governed artifact pruner runs on the server. The reviewed recovery path prunes
+only verified completed payloads, then requires fresh allocated-block, inode,
+candidate-stage, and full-snapshot headroom before any copy or service stop;
+partial copies cannot enter the rollback manifest.
+Candidate `e0b20b172955af175004ac8a7a3cdc0018a2b698` also remains rejected: its
+bootstrap stopped before production mutation on service-Node resolution and an
+unsafe cross-UID temporary lock. The current controller remediation is local
+pre-deployment evidence, not a production-state claim. Its final Git-less,
+read-only desktop `--all` gate passed the real patched Ombre and Hermes v0.13
+boundaries, `hermes-release-smoke: all-ok`, 380 Python tests with one explicit
+Linux-root verifier skip, and `workflow_guard`; server root checks remain part
+of pre-mutation deployment acceptance.
 Ombre O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
 V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
@@ -23,7 +32,7 @@ reintroduced. Ombre O2 implementation
 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` passed independent v0.7
 implementation review and is archived and pushed to `main`. It remains
 the independently reviewed implementation baseline. The current line adds
-three-round-reviewed, owner-authorized production wiring: source remains
+adversarially reviewed, owner-authorized production wiring: source remains
 fail-off, formal release defaults to Flash with O2 enabled, and production is
 still undeployed. Gate 5 is neither executed nor authorized, and
 `total_delete` remains typed unsupported.

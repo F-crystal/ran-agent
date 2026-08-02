@@ -4,8 +4,9 @@ set -euo pipefail
 
 cd "$(dirname "$0")"
 
-# Load environment variables from .env.local if it exists
-if [ -f ".env.local" ]; then
+# systemd injects production EnvironmentFile values before dropping identity.
+# Interactive operator runs may still load a directly readable local file.
+if [ -r ".env.local" ]; then
   echo "📄 Loading environment from .env.local..."
   set -a
   source ".env.local"
@@ -36,4 +37,9 @@ export WEIXIN_PREFLIGHT_REQUIRED="${WEIXIN_PREFLIGHT_REQUIRED:-false}"
 export WEIXIN_START_MAX_RETRIES="${WEIXIN_START_MAX_RETRIES:-0}"
 export WEIXIN_START_RETRY_DELAY_MS="${WEIXIN_START_RETRY_DELAY_MS:-5000}"
 
-npm start
+NODE_BIN="${RAN_AGENT_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
+[[ "$NODE_BIN" == /* && -x "$NODE_BIN" ]] || {
+  echo "ERROR: managed absolute Node executable is required" >&2
+  exit 1
+}
+exec "$NODE_BIN" src/index.mjs

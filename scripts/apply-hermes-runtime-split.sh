@@ -1520,6 +1520,7 @@ write_node_steward_identity_dropin() {
 User=$STEWARD_RUNTIME_USER
 Group=$STEWARD_RUNTIME_GROUP
 Environment=RAN_AGENT_STATE_DIR=$RUNTIME_STATE_DIR
+Environment=RAN_AGENT_NODE_BIN=${RAN_AGENT_NODE_BIN:-/opt/nodejs/node-v22.22.2-linux-x64/bin/node}
 Environment=RAN_AGENT_STEWARD_TOKEN_FILE=$RUNTIME_STATE_DIR/ombre-compat/secrets/steward-api-token
 Environment=OMBRE_COMPAT_STEWARD_IDENTITY_FILE=$OMBRE_BRAIN_HOME_DEFAULT/steward-identity.v1.json
 EOF

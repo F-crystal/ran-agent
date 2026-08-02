@@ -52,12 +52,17 @@ CORE_RUNTIME_UNITS=(ran-agent-python.service ran-agent-node.service ran-agent-he
 ALL_RUNTIME_UNITS=("${CORE_RUNTIME_UNITS[@]}" ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-xhs-browse.service ran-agent-xhs-public-sidecar.service)
 SERVICE_TRANSACTION_UNITS=(ran-agent-python.service ran-agent-ombre-brain.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-recall.service ran-agent-xhs-browse.service ran-agent-xhs-public-sidecar.service)
 SNAPSHOT_DIR=''
+SNAPSHOT_BUILD_ACTIVE=0
+SNAPSHOT_FINAL_DIR=''
+SNAPSHOT_TRANSACTION_ID=''
 STAGE_DIR=''
 CANDIDATE_ARCHIVE=''
 PRODUCTION_HEAD=''
 DELTA_FILE=''
 TRANSACTION_STARTED=0
+TRANSACTION_ACCEPTED=0
 EXPLICIT_ROLLBACK=0
+ROLLBACK_METADATA_FINALIZE=0
 SECRET_ROLLBACK_DIR=''
 STEWARD_TOKEN_HAD_PRIOR=0
 STEWARD_TOKEN_RESTORED=1
@@ -71,24 +76,34 @@ DEPLOY_OMBRE_COMPAT_CURATOR_MODEL='deepseek-v4-flash'
 DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL='https://api.deepseek.com/v1'
 DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL='deepseek-v4-flash'
 RELEASE_LOCK_HELPER_PID=''
-RELEASE_LOCK_STATUS_FILE=''
+RELEASE_LOCK_READY_FD_OPEN=0
+RELEASE_LOCK_READY_DIR=''
+RELEASE_LOCK_READY_FIFO=''
+RELEASE_EPHEMERA_CLEANED=0
 
 stop_release_transaction_lock() {
-  [[ -z "$RELEASE_LOCK_STATUS_FILE" ]] || rm -f -- "$RELEASE_LOCK_STATUS_FILE"
+  if [[ "$RELEASE_LOCK_READY_FD_OPEN" -eq 1 ]]; then
+    exec 9<&-
+    RELEASE_LOCK_READY_FD_OPEN=0
+  fi
+  [[ -z "$RELEASE_LOCK_READY_FIFO" ]] || rm -f -- "$RELEASE_LOCK_READY_FIFO" 2>/dev/null || true
+  [[ -z "$RELEASE_LOCK_READY_DIR" ]] || rmdir -- "$RELEASE_LOCK_READY_DIR" 2>/dev/null || true
+  RELEASE_LOCK_READY_FIFO=''
+  RELEASE_LOCK_READY_DIR=''
   if [[ "$RELEASE_LOCK_HELPER_PID" =~ ^[1-9][0-9]*$ ]]; then
-    for _ in {1..20}; do
+    # The helper releases flock when the caller-owned FIFO is unlinked.  Do
+    # not signal a privileged PID from stale shell state.
+    for _ in {1..25}; do
       kill -0 "$RELEASE_LOCK_HELPER_PID" 2>/dev/null || break
-      sleep 0.05
+      sleep 0.2
     done
-    kill "$RELEASE_LOCK_HELPER_PID" 2>/dev/null || true
-    wait "$RELEASE_LOCK_HELPER_PID" 2>/dev/null || true
+    kill -0 "$RELEASE_LOCK_HELPER_PID" 2>/dev/null || wait "$RELEASE_LOCK_HELPER_PID" 2>/dev/null || true
   fi
   RELEASE_LOCK_HELPER_PID=''
-  RELEASE_LOCK_STATUS_FILE=''
 }
 
 acquire_release_transaction_lock() {
-  local lock_required=0 lock_python=/usr/bin/python3 status='' canonical_artifact=''
+  local lock_required=0 lock_python=/usr/bin/python3 ready='' helper_status=0 canonical_artifact='' ready_received=0
   local -a lock_runner=("${SUDO[@]}" /usr/bin/env)
   if [[ "$REPO_ROOT" == "$SERVER_ROOT" && ( "$MODE" == --apply || "$MODE" == --rollback ) ]]; then
     lock_required=1
@@ -100,9 +115,11 @@ acquire_release_transaction_lock() {
     fail release_lock_artifact_root_invalid
   if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 && -d "$ARTIFACT_ROOT" && -w "$ARTIFACT_ROOT" ]]; then
     lock_runner=(/usr/bin/env)
-    "${lock_runner[@]}" install -d -m 700 "$ARTIFACT_ROOT" || fail release_lock_artifact_root_unavailable
+    chmod 700 "$ARTIFACT_ROOT" || fail release_lock_artifact_root_unavailable
   else
-    "${lock_runner[@]}" install -d -o root -g root -m 700 "$ARTIFACT_ROOT" || fail release_lock_artifact_root_unavailable
+    if ! "${lock_runner[@]}" test -e "$ARTIFACT_ROOT"; then
+      "${lock_runner[@]}" install -d -o root -g root -m 700 "$ARTIFACT_ROOT" || fail release_lock_artifact_root_unavailable
+    fi
   fi
   "${lock_runner[@]}" test ! -L "$ARTIFACT_ROOT" || fail release_lock_artifact_root_symlink
   canonical_artifact="$("${lock_runner[@]}" sh -c 'cd "$1" && pwd -P' sh "$ARTIFACT_ROOT")" ||
@@ -110,61 +127,97 @@ acquire_release_transaction_lock() {
   [[ "$canonical_artifact" == "$ARTIFACT_ROOT" ]] || fail release_lock_artifact_root_noncanonical
   [[ -x "$lock_python" ]] || lock_python="$PYTHON_BIN"
   [[ "$lock_python" == /* && -x "$lock_python" ]] || fail release_lock_python_unavailable
-  status="$(mktemp "${TMPDIR:-/tmp}/ran-agent-release-lock.XXXXXX")" || fail release_lock_status_unavailable
-  : >"$status"
   "${lock_runner[@]}" "$lock_python" -I -c '
-import fcntl, os, pathlib, stat, sys, time
-lock_path, parent_pid, status_path = sys.argv[1], int(sys.argv[2]), pathlib.Path(sys.argv[3])
+import os, stat, sys
+value = os.lstat(sys.argv[1])
+expected = os.geteuid()
+if not stat.S_ISDIR(value.st_mode) or value.st_uid != expected or value.st_gid != os.getegid() or stat.S_IMODE(value.st_mode) != 0o700:
+    raise SystemExit(1)
+' "$ARTIFACT_ROOT" || fail release_lock_artifact_root_identity_invalid
+  RELEASE_LOCK_READY_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ran-agent-release-lock.XXXXXX")" || fail release_lock_status_unavailable
+  trap stop_release_transaction_lock EXIT
+  chmod 700 "$RELEASE_LOCK_READY_DIR" || fail release_lock_status_unavailable
+  RELEASE_LOCK_READY_FIFO="$RELEASE_LOCK_READY_DIR/ready"
+  mkfifo -m 600 "$RELEASE_LOCK_READY_FIFO" || fail release_lock_status_unavailable
+  exec 9<>"$RELEASE_LOCK_READY_FIFO"
+  RELEASE_LOCK_READY_FD_OPEN=1
+  "${lock_runner[@]}" "$lock_python" -I -c '
+import fcntl, os, stat, sys, time
+lock_path, parent_pid, ready_path, ready_uid = sys.argv[1], int(sys.argv[2]), sys.argv[3], int(sys.argv[4])
 flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
-descriptor = os.open(lock_path, flags, 0o600)
+try:
+    descriptor = os.open(lock_path, flags, 0o600)
+except OSError:
+    raise SystemExit(74)
 value = os.fstat(descriptor)
 if not stat.S_ISREG(value.st_mode):
     raise SystemExit(74)
-if os.geteuid() == 0 and value.st_uid != 0:
+if stat.S_IMODE(value.st_mode) != 0o600:
+    raise SystemExit(74)
+if os.geteuid() == 0 and (value.st_uid != 0 or value.st_gid != 0):
     raise SystemExit(74)
 try:
     fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
 except BlockingIOError:
     raise SystemExit(73)
-status_path.write_text("locked\n", encoding="utf-8")
-while status_path.exists():
+ready_flags = os.O_WRONLY | getattr(os, "O_NOFOLLOW", 0)
+try:
+    ready_descriptor = os.open(ready_path, ready_flags)
+except OSError:
+    raise SystemExit(75)
+ready_value = os.fstat(ready_descriptor)
+if not stat.S_ISFIFO(ready_value.st_mode) or ready_value.st_uid != ready_uid:
+    raise SystemExit(75)
+with os.fdopen(ready_descriptor, "w", encoding="utf-8") as handle:
+    handle.write("locked\n")
+    handle.flush()
+while os.path.exists(ready_path):
     try:
         os.kill(parent_pid, 0)
     except ProcessLookupError:
         break
     time.sleep(0.2)
-' "$ARTIFACT_ROOT/.release-transaction.lock" "$$" "$status" &
+' "$ARTIFACT_ROOT/.release-transaction.lock" "$$" "$RELEASE_LOCK_READY_FIFO" "$EUID" &
   RELEASE_LOCK_HELPER_PID=$!
-  RELEASE_LOCK_STATUS_FILE="$status"
-  for _ in {1..100}; do
-    [[ "$(cat "$status" 2>/dev/null || true)" == locked ]] && break
-    if ! kill -0 "$RELEASE_LOCK_HELPER_PID" 2>/dev/null; then
-      wait "$RELEASE_LOCK_HELPER_PID" 2>/dev/null || true
-      stop_release_transaction_lock
-      fail release_transaction_locked
-    fi
-    sleep 0.05
+  for _ in {1..5}; do
+    if IFS= read -r -t 1 -u 9 ready; then ready_received=1; break; fi
+    if ! kill -0 "$RELEASE_LOCK_HELPER_PID" 2>/dev/null; then break; fi
   done
-  [[ "$(cat "$status" 2>/dev/null || true)" == locked ]] || {
+  exec 9<&-
+  RELEASE_LOCK_READY_FD_OPEN=0
+  if [[ "$ready_received" -ne 1 ]]; then
+    if jobs -pr | grep -qx "$RELEASE_LOCK_HELPER_PID"; then
+      rm -f -- "$RELEASE_LOCK_READY_FIFO" 2>/dev/null || true
+      helper_status=76
+    elif wait "$RELEASE_LOCK_HELPER_PID"; then helper_status=0; else helper_status=$?; fi
+    RELEASE_LOCK_HELPER_PID=''
+    rm -f -- "$RELEASE_LOCK_READY_FIFO"
+    rmdir -- "$RELEASE_LOCK_READY_DIR" 2>/dev/null || true
+    RELEASE_LOCK_READY_FIFO=''
+    RELEASE_LOCK_READY_DIR=''
+    case "$helper_status" in
+      73) fail release_transaction_locked ;;
+      74) fail release_lock_identity_invalid ;;
+      75) fail release_lock_readiness_invalid ;;
+      76) fail release_lock_timeout ;;
+      *) fail release_lock_protocol_failed ;;
+    esac
+  fi
+  [[ "$ready" == locked ]] || {
     stop_release_transaction_lock
-    fail release_lock_timeout
+    fail release_lock_protocol_failed
   }
-  trap stop_release_transaction_lock EXIT
   if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 && "${RAN_AGENT_TEST_RELEASE_LOCK_HOLD_SECONDS:-0}" != 0 ]]; then
     sleep "$RAN_AGENT_TEST_RELEASE_LOCK_HOLD_SECONDS"
   fi
 }
 
 acquire_release_transaction_lock
-
-if [[ -n "${RAN_AGENT_NODE_BIN:-}" ]]; then
-  NODE_BIN="$(RAN_AGENT_NODE_BIN="$RAN_AGENT_NODE_BIN" bash "$SCRIPT_ROOT/scripts/resolve-hermes-service-node.sh")" || fail node_service_path_unavailable
-else
-  NODE_BIN="$("${SUDO[@]}" env RAN_AGENT_SYSTEMCTL_BIN="${RAN_AGENT_SYSTEMCTL_BIN:-}" bash "$SCRIPT_ROOT/scripts/resolve-hermes-service-node.sh")" || fail node_service_path_unavailable
-fi
+NODE_BIN=''
+CONTROLLER_CANDIDATE="${RAN_AGENT_RELEASE_CANDIDATE:-}"
 
 [[ "$MODE" == --rollback ]] || {
-  CANDIDATE="${RAN_AGENT_RELEASE_CANDIDATE:-}"
+  CANDIDATE="$CONTROLLER_CANDIDATE"
   [[ "$CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail candidate_digest_invalid
   git -C "$REPO_ROOT" cat-file -e "${CANDIDATE}^{commit}" 2>/dev/null || fail candidate_object_missing
   DEPLOY_MODEL="${RAN_AGENT_DEPLOY_HERMES_MODEL:-deepseek-v4-flash}"
@@ -186,7 +239,74 @@ fi
       *) fail ombre_compat_model_endpoint_invalid ;;
     esac
   done
+  local_node_runner=(/usr/bin/env)
+  [[ "$REPO_ROOT" != "$SERVER_ROOT" ]] || local_node_runner=("${SUDO[@]}" /usr/bin/env)
+  NODE_BIN="$("${local_node_runner[@]}" RAN_AGENT_NODE_BIN="${RAN_AGENT_NODE_BIN:-}" \
+    RAN_AGENT_SYSTEMCTL_BIN="${RAN_AGENT_SYSTEMCTL_BIN:-}" \
+    bash "$SCRIPT_ROOT/scripts/resolve-hermes-service-node.sh")" || fail node_service_path_unavailable
 }
+
+cleanup_pretransaction_artifacts() {
+  [[ "$RELEASE_EPHEMERA_CLEANED" -eq 0 ]] || return 0
+  RELEASE_EPHEMERA_CLEANED=1
+  if [[ -n "$STAGE_DIR" && "$STAGE_DIR" == "$STAGE_ROOT"/release-stage.* ]]; then
+    "${SUDO[@]}" rm -rf -- "$STAGE_DIR" 2>/dev/null || true
+  fi
+  if [[ -n "$CANDIDATE_ARCHIVE" && "$CANDIDATE_ARCHIVE" == "$ARCHIVE_ROOT"/release-candidate.*.tar ]]; then
+    "${SUDO[@]}" rm -f -- "$CANDIDATE_ARCHIVE" 2>/dev/null || true
+  fi
+  if [[ -n "$DELTA_FILE" && "$DELTA_FILE" == "$ARCHIVE_ROOT"/release-delta.*.txt ]]; then
+    "${SUDO[@]}" rm -f -- "$DELTA_FILE" 2>/dev/null || true
+  fi
+  if [[ "$TRANSACTION_STARTED" -eq 0 && "$TRANSACTION_ACCEPTED" -eq 0 && "$SNAPSHOT_BUILD_ACTIVE" -eq 1 && -n "$SNAPSHOT_DIR" &&
+    "$SNAPSHOT_DIR" == "$SNAPSHOT_ROOT"/.release-incomplete.* ]]; then
+    "${SUDO[@]}" rm -rf -- "$SNAPSHOT_DIR" 2>/dev/null || true
+  fi
+}
+
+verify_in_progress_snapshot() {
+  local contract_root="${STAGE_DIR:-$SCRIPT_ROOT}"
+  "${SUDO[@]}" "$PYTHON_BIN" "$contract_root/scripts/ombre_o1_contract.py" \
+    verify-in-progress-snapshot "$1" --candidate "$CANDIDATE" --require-root-owned >/dev/null
+}
+
+durable_acceptance_confirmed() {
+  [[ -n "$SNAPSHOT_DIR" && -n "${CANDIDATE:-}" ]] || return 1
+  local contract_root="${STAGE_DIR:-$SCRIPT_ROOT}" decision reason completed pointer_transaction pointer_candidate
+  IFS=$'\t' read -r decision reason completed < <(
+    "${SUDO[@]}" "$PYTHON_BIN" "$contract_root/scripts/ombre_o1_contract.py" \
+      classify-snapshot "$SNAPSHOT_DIR" --format tsv
+  ) || return 1
+  [[ "$decision" == ELIGIBLE ]] || return 1
+  IFS=$'\t' read -r pointer_transaction pointer_candidate < <(
+    "${SUDO[@]}" "$PYTHON_BIN" "$contract_root/scripts/ombre_o1_contract.py" \
+      read-production-pointer "$CURRENT_PRODUCTION_POINTER" --format tsv
+  ) || return 1
+  [[ "$pointer_transaction" == "$(basename "$SNAPSHOT_DIR")" && "$pointer_candidate" == "$CANDIDATE" ]]
+}
+
+release_exit() {
+  local status="$1"
+  trap - EXIT INT TERM
+  if [[ "$TRANSACTION_STARTED" -eq 0 && "$TRANSACTION_ACCEPTED" -eq 0 && "$SNAPSHOT_BUILD_ACTIVE" -eq 1 &&
+    -n "$SNAPSHOT_FINAL_DIR" && "$SNAPSHOT_FINAL_DIR" == "$SNAPSHOT_ROOT"/release-transaction.* ]] &&
+    "${SUDO[@]}" test -d "$SNAPSHOT_FINAL_DIR" && verify_in_progress_snapshot "$SNAPSHOT_FINAL_DIR"; then
+    SNAPSHOT_DIR="$SNAPSHOT_FINAL_DIR"
+    TRANSACTION_STARTED=1
+  fi
+  if [[ "$TRANSACTION_STARTED" -eq 1 && "$TRANSACTION_ACCEPTED" -eq 0 ]] && durable_acceptance_confirmed; then
+    TRANSACTION_ACCEPTED=1
+    TRANSACTION_STARTED=0
+  fi
+  if [[ "$TRANSACTION_STARTED" -eq 1 ]]; then
+    rollback_transaction "$status"
+  fi
+  [[ "$status" -eq 0 ]] || cleanup_pretransaction_artifacts
+  stop_release_transaction_lock
+  exit "$status"
+}
+
+trap 'release_exit $?' EXIT
 
 require_node_sqlite() {
   [[ "$NODE_BIN" == /* && -x "$NODE_BIN" ]] || fail node_binary_required
@@ -229,11 +349,38 @@ require_artifact_layout() {
   ! inside_path "$SECRET_ROLLBACK_ROOT" "$REPO_ROOT" || fail secret_rollback_inside_repo
   ! inside_path "$SECRET_ROLLBACK_ROOT" "$STATE_DIR" || fail secret_rollback_inside_state_dir
   ! inside_path "$SECRET_ROLLBACK_ROOT" "$ARTIFACT_ROOT" || fail secret_rollback_inside_artifact_root
-  "${SUDO[@]}" install -d -m 700 "$SNAPSHOT_ROOT" "$STAGE_ROOT" "$ARCHIVE_ROOT" || fail artifact_root_unavailable
-  "${SUDO[@]}" install -d -o root -g root -m 700 "$SECRET_ROLLBACK_ROOT" || fail secret_rollback_root_unavailable
+  require_artifact_directory "$SNAPSHOT_ROOT" "$ARTIFACT_ROOT" || fail snapshot_root_identity_invalid
+  require_artifact_directory "$STAGE_ROOT" "$ARTIFACT_ROOT" || fail stage_root_identity_invalid
+  require_artifact_directory "$ARCHIVE_ROOT" "$ARTIFACT_ROOT" || fail archive_root_identity_invalid
+  require_artifact_directory "$SECRET_ROLLBACK_ROOT" '' || fail secret_rollback_root_unavailable
   if "${SUDO[@]}" find "$SECRET_ROLLBACK_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .; then
     fail secret_rollback_residue
   fi
+}
+
+require_artifact_directory() {
+  local path="$1" same_filesystem_root="$2" expected_uid=0 expected_gid=0
+  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 && "${#SUDO[@]}" -eq 0 ]]; then
+    expected_uid="$EUID"
+    expected_gid="$(id -g)"
+  fi
+  if ! "${SUDO[@]}" test -e "$path"; then
+    if [[ "$expected_uid" -eq 0 ]]; then
+      "${SUDO[@]}" install -d -o root -g root -m 700 "$path" || return 1
+    else
+      install -d -m 700 "$path" || return 1
+    fi
+  fi
+  "${SUDO[@]}" /usr/bin/python3 -I -c '
+import os, stat, sys
+path, filesystem_root, expected_uid, expected_gid = sys.argv[1:]
+expected_uid, expected_gid = int(expected_uid), int(expected_gid)
+value = os.lstat(path)
+if not stat.S_ISDIR(value.st_mode) or value.st_uid != expected_uid or value.st_gid != expected_gid or stat.S_IMODE(value.st_mode) != 0o700:
+    raise SystemExit(1)
+if filesystem_root and value.st_dev != os.lstat(filesystem_root).st_dev:
+    raise SystemExit(1)
+' "$path" "$same_filesystem_root" "$expected_uid" "$expected_gid"
 }
 
 # systemctl cat is the authority for the active service's EnvironmentFile
@@ -287,6 +434,26 @@ candidate_stage_preflight() {
   fi
 }
 
+runtime_checkout_access() {
+  local runuser_bin=/usr/sbin/runuser
+  "${SUDO[@]}" test -x "$runuser_bin" || fail runtime_access_runuser_unavailable
+  "${SUDO[@]}" "$runuser_bin" --user ran-agent --group ran-agent -- /usr/bin/env -i \
+    PATH=/usr/bin:/bin "$NODE_BIN" --input-type=module -e '
+import { accessSync, constants } from "node:fs";
+import { pathToFileURL } from "node:url";
+const root = process.argv[1];
+for (const path of [root, `${root}/node_bridge`, `${root}/node_bridge/src`, `${root}/node_bridge/src/index.mjs`, `${root}/node_bridge/vendor/weixin-agent-sdk/dist/index.mjs`]) {
+  accessSync(path, constants.R_OK);
+}
+await import(pathToFileURL(`${root}/node_bridge/src/webStructuredExtract.mjs`));
+await import(pathToFileURL(`${root}/node_bridge/src/index.mjs`));
+await import("playwright-core");
+await import("undici");
+await import("qrcode-terminal");
+await import("silk-wasm");
+' "$REPO_ROOT" >/dev/null || fail runtime_checkout_access_invalid
+}
+
 require_atomic_state() {
   # A root atomic probe would rename a root-owned file into live runtime state.
   # State creation and writes stay with the service user after the transaction.
@@ -317,13 +484,16 @@ require_plan_prerequisites() {
 
 require_apply_prerequisites() {
   [[ "$REPO_ROOT" == "$SERVER_ROOT" ]] || fail server_root_required
+  [[ "$EUID" -ne 0 ]] || fail checkout_operator_root_forbidden
   require_ombre_ingress_dropin_absent
+  require_python_runtime
+  require_candidate_bootstrap_authority
+  project_checkout_permissions repair
   PRODUCTION_HEAD="$(git -C "$REPO_ROOT" rev-parse --verify HEAD)" || fail current_head_unavailable
   git -C "$REPO_ROOT" diff --quiet || fail worktree_dirty
   git -C "$REPO_ROOT" diff --cached --quiet || fail index_dirty
   [[ -z "$(git -C "$REPO_ROOT" ls-files --others --exclude-standard)" ]] || fail worktree_untracked
   require_node_sqlite
-  require_python_runtime
   require_ombre_patch_python_runtime
   CANONICAL_LIVE_STATE_DIR="$("${SUDO[@]}" sh -c 'cd "$1" && pwd -P' sh "$CANONICAL_LIVE_STATE_DIR")" ||
     fail state_dir_unavailable
@@ -331,6 +501,87 @@ require_apply_prerequisites() {
   require_artifact_layout
   require_service_environment
   require_atomic_state
+  runtime_checkout_access
+}
+
+require_candidate_bootstrap_authority() {
+  local bootstrap_root="${RAN_AGENT_RELEASE_BOOTSTRAP_ROOT:-}"
+  [[ -n "$bootstrap_root" && "$bootstrap_root" == "$SCRIPT_ROOT" && "$bootstrap_root" != "$REPO_ROOT" &&
+    "$bootstrap_root" == "${TMPDIR:-/tmp}"/ran-agent-release-bootstrap.* ]] || fail candidate_bootstrap_required
+  git -C "$REPO_ROOT" show "$CANDIDATE:docs/governance/hermes_release_bootstrap.v1.sha256" |
+    cmp -s - "$bootstrap_root/manifest" || fail candidate_bootstrap_required
+  "$PYTHON_BIN" -I -c '
+import hashlib, os, stat, sys
+root = os.path.realpath(sys.argv[1])
+expected = set(sys.argv[2:])
+value = os.lstat(root)
+if value.st_uid != os.geteuid() or stat.S_IMODE(value.st_mode) != 0o700 or os.path.lexists(os.path.join(root, ".git")):
+    raise SystemExit(1)
+actual = set()
+for directory, names, files in os.walk(root, followlinks=False):
+    for name in names + files:
+        path = os.path.join(directory, name)
+        if stat.S_ISLNK(os.lstat(path).st_mode):
+            raise SystemExit(1)
+    for name in files:
+        actual.add(os.path.relpath(os.path.join(directory, name), root))
+if actual != expected | {"manifest"}:
+    raise SystemExit(1)
+entries = {}
+for line in open(os.path.join(root, "manifest"), encoding="utf-8"):
+    digest, path = line.rstrip("\n").split("  ", 1)
+    if path in entries or len(digest) != 64:
+        raise SystemExit(1)
+    entries[path] = digest
+if set(entries) != expected:
+    raise SystemExit(1)
+for path, digest in entries.items():
+    target = os.path.join(root, path)
+    if hashlib.sha256(open(target, "rb").read()).hexdigest() != digest:
+        raise SystemExit(1)
+' "$bootstrap_root" \
+    scripts/bootstrap-hermes-release.sh \
+    scripts/deploy-hermes-release.sh \
+    scripts/resolve-hermes-service-node.sh \
+    scripts/prune-hermes-release-artifacts.sh \
+    scripts/check-hermes-snapshot-capacity.py \
+    scripts/ombre_o1_contract.py || fail candidate_bootstrap_required
+}
+
+prune_release_artifacts() {
+  local cleanup_root="${1:-$SCRIPT_ROOT}"
+  "${SUDO[@]}" env RAN_AGENT_RELEASE_ARTIFACT_ROOT="$ARTIFACT_ROOT" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
+    RAN_AGENT_RELEASE_TRANSACTION_CONTEXT=1 \
+    bash "$cleanup_root/scripts/prune-hermes-release-artifacts.sh" --apply-under-transaction
+}
+
+candidate_stage_reserve() {
+  local archive_bytes tree_usage
+  archive_bytes="$(git -C "$REPO_ROOT" archive --format=tar "$CANDIDATE" | wc -c | tr -d '[:space:]')" ||
+    fail candidate_size_unavailable
+  tree_usage="$(git -C "$REPO_ROOT" ls-tree -rl "$CANDIDATE" | "$PYTHON_BIN" -I -c '
+import sys
+
+blob_bytes = 0
+files = 0
+directories = set()
+for line in sys.stdin:
+    metadata, path = line.rstrip("\n").split("\t", 1)
+    mode, kind, _, size = metadata.split()
+    if kind != "blob":
+        continue
+    blob_bytes += int(size)
+    files += 1
+    parts = path.split("/")[:-1]
+    directories.update("/".join(parts[:index]) for index in range(1, len(parts) + 1))
+print(blob_bytes, files + len(directories) + 1)
+')" || fail candidate_size_unavailable
+  local tree_bytes tree_inodes
+  read -r tree_bytes tree_inodes <<<"$tree_usage"
+  [[ "$archive_bytes" =~ ^[0-9]+$ && "$tree_bytes" =~ ^[0-9]+$ && "$tree_inodes" =~ ^[0-9]+$ ]] ||
+    fail candidate_size_invalid
+  # One tar plus one extracted immutable stage; per-entry blocks cover tiny files.
+  printf '%s\t%s\n' "$((archive_bytes + tree_bytes + tree_inodes * 4096))" "$((tree_inodes + 1))"
 }
 
 require_ombre_ingress_dropin_absent() {
@@ -373,7 +624,7 @@ stage_candidate() {
   local digest
   digest="$("${SUDO[@]}" sha256sum "$CANDIDATE_ARCHIVE" | awk '{ print $1 }')" || fail candidate_stage_digest_unavailable
   printf '%s %s\n' "$CANDIDATE" "$digest" | "${SUDO[@]}" tee "$STAGE_DIR/candidate" >/dev/null
-  "${SUDO[@]}" chmod 600 "$STAGE_DIR/candidate"
+  "${SUDO[@]}" chmod 444 "$STAGE_DIR/candidate"
   "${SUDO[@]}" chmod -R a-w "$STAGE_DIR"
   # The immutable candidate contains no secrets and acceptance executes its
   # probes as ran-agent; keep the root-owned stage readable but never writable.
@@ -474,8 +725,9 @@ snapshot_runtime_paths() {
 }
 
 snapshot_capacity_gate() {
-  local helper="$STAGE_DIR/scripts/check-hermes-snapshot-capacity.py" output status path
-  local -a arguments=(--artifact-root "$ARTIFACT_ROOT" --source "$STATE_DIR" --source "$REPO_ROOT/data" --migration-root "$REPO_ROOT/data")
+  local helper_root="${1:-$STAGE_DIR}" fixed_bytes="${2:-0}" fixed_inodes="${3:-0}" output status path
+  local helper="$helper_root/scripts/check-hermes-snapshot-capacity.py"
+  local -a arguments=(--artifact-root "$ARTIFACT_ROOT" --source "$STATE_DIR" --source "$REPO_ROOT/data" --migration-root "$REPO_ROOT/data" --fixed-bytes "$fixed_bytes" --fixed-inodes "$fixed_inodes")
   [[ -x /usr/bin/python3 ]] || fail snapshot_capacity_python_unavailable
   "${SUDO[@]}" test -f "$helper" || fail snapshot_capacity_probe_missing
   while IFS= read -r path; do arguments+=(--source "$path"); done < <(snapshot_runtime_paths)
@@ -491,7 +743,10 @@ snapshot_capacity_gate() {
 }
 
 snapshot_runtime_state() {
-  SNAPSHOT_DIR="$("${SUDO[@]}" mktemp -d "$SNAPSHOT_ROOT/release-transaction.${CANDIDATE:0:12}.XXXXXX")" || fail snapshot_create_failed
+  SNAPSHOT_DIR="$("${SUDO[@]}" mktemp -d "$SNAPSHOT_ROOT/.release-incomplete.${CANDIDATE:0:12}.XXXXXX")" || fail snapshot_create_failed
+  SNAPSHOT_BUILD_ACTIVE=1
+  SNAPSHOT_TRANSACTION_ID="release-transaction.${CANDIDATE:0:12}.${SNAPSHOT_DIR##*.}"
+  SNAPSHOT_FINAL_DIR="$SNAPSHOT_ROOT/$SNAPSHOT_TRANSACTION_ID"
   "${SUDO[@]}" chmod 700 "$SNAPSHOT_DIR"
   "${SUDO[@]}" mkdir -p "$SNAPSHOT_DIR/files"
   printf '%s\n' "$CANDIDATE" | "${SUDO[@]}" tee "$SNAPSHOT_DIR/candidate" >/dev/null
@@ -503,6 +758,18 @@ snapshot_runtime_state() {
   for path in "${paths[@]}"; do snapshot_path "$path" "$index"; index=$((index + 1)); done
   for unit in "${SERVICE_TRANSACTION_UNITS[@]}"; do snapshot_service_state "$unit"; done
   write_transaction_state snapshot-created false
+  "${SUDO[@]}" "$PYTHON_BIN" -I -c '
+import os, sys
+source, target = sys.argv[1:]
+os.rename(source, target)
+directory = os.open(os.path.dirname(target), os.O_RDONLY)
+try: os.fsync(directory)
+finally: os.close(directory)
+' "$SNAPSHOT_DIR" "$SNAPSHOT_FINAL_DIR" || fail snapshot_publish_failed
+  SNAPSHOT_DIR="$SNAPSHOT_FINAL_DIR"
+  verify_in_progress_snapshot "$SNAPSHOT_DIR" || fail snapshot_authority_invalid
+  TRANSACTION_STARTED=1
+  SNAPSHOT_BUILD_ACTIVE=0
 }
 
 write_transaction_state() {
@@ -516,7 +783,7 @@ write_transaction_state() {
     rolled-back) status=rollback_used; acceptance_state=not_accepted; rollback_state=rollback_used ;;
     *) fail transaction_state_status_invalid ;;
   esac
-  transaction_id="$(basename "$SNAPSHOT_DIR")"
+  transaction_id="${SNAPSHOT_TRANSACTION_ID:-$(basename "$SNAPSHOT_DIR")}"
   base_sha="$("${SUDO[@]}" cat "$SNAPSHOT_DIR/prior-head")"
   [[ "$base_sha" =~ ^[0-9a-f]{40}$ ]] || fail transaction_state_base_invalid
   manifest_digest="$("${SUDO[@]}" sha256sum "$SNAPSHOT_DIR/manifest" | awk '{print $1}')"
@@ -535,7 +802,7 @@ write_transaction_state() {
     TX_ROLLBACKABLE="$rollbackable" TX_PRODUCTION="$production_identity" \
     TX_COMPLETED="$completed_at" TX_MANIFEST="$manifest_digest" TX_SERVICES="$service_state_digest" \
     "$PYTHON_BIN" -c '
-import json, os
+import json, os, tempfile
 from pathlib import Path
 target = Path(os.environ["TX_TARGET"])
 value = {
@@ -552,13 +819,17 @@ value = {
   "manifest_digest": os.environ["TX_MANIFEST"],
   "service_state_digest": os.environ["TX_SERVICES"],
 }
-temporary = target.with_name("." + target.name + ".tmp")
-with open(temporary, "x", encoding="utf-8") as handle:
-    json.dump(value, handle, sort_keys=True)
-    handle.write("\n")
-    handle.flush()
-    os.fsync(handle.fileno())
-os.replace(temporary, target)
+descriptor, temporary = tempfile.mkstemp(prefix="." + target.name + ".", dir=target.parent)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, sort_keys=True)
+        handle.write("\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, target)
+finally:
+    try: os.unlink(temporary)
+    except FileNotFoundError: pass
 directory = os.open(target.parent, os.O_RDONLY)
 try: os.fsync(directory)
 finally: os.close(directory)
@@ -571,14 +842,18 @@ mark_snapshot_accepted() {
   transaction_id="$(basename "$SNAPSHOT_DIR")"
   "${SUDO[@]}" env TX_POINTER="$CURRENT_PRODUCTION_POINTER" TX_ID="$transaction_id" TX_CANDIDATE="$CANDIDATE" \
     "$PYTHON_BIN" -c '
-import json, os
+import json, os, tempfile
 from pathlib import Path
 target = Path(os.environ["TX_POINTER"])
-temporary = target.with_name("." + target.name + ".tmp")
-with open(temporary, "x", encoding="utf-8") as handle:
-    json.dump({"schema_version": 1, "transaction_id": os.environ["TX_ID"], "candidate_sha": os.environ["TX_CANDIDATE"]}, handle, sort_keys=True)
-    handle.write("\n"); handle.flush(); os.fsync(handle.fileno())
-os.replace(temporary, target)
+descriptor, temporary = tempfile.mkstemp(prefix="." + target.name + ".", dir=target.parent)
+try:
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump({"schema_version": 1, "transaction_id": os.environ["TX_ID"], "candidate_sha": os.environ["TX_CANDIDATE"]}, handle, sort_keys=True)
+        handle.write("\n"); handle.flush(); os.fsync(handle.fileno())
+    os.replace(temporary, target)
+finally:
+    try: os.unlink(temporary)
+    except FileNotFoundError: pass
 directory = os.open(target.parent, os.O_RDONLY)
 try: os.fsync(directory)
 finally: os.close(directory)
@@ -764,9 +1039,109 @@ destroy_secret_rollback() {
   ! "${SUDO[@]}" find "$SECRET_ROLLBACK_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
 }
 
+project_checkout_permissions() {
+  local mode="$1" repo_gid
+  local -a permission_runner=("$PYTHON_BIN")
+  case "$mode" in repair|verify) ;; *) fail checkout_permission_mode_invalid ;; esac
+  repo_gid="$("$PYTHON_BIN" -I -c 'import os,sys; print(os.lstat(sys.argv[1]).st_gid)' "$REPO_ROOT")" ||
+    fail checkout_permission_contract
+  if [[ "$mode" == repair ]]; then
+    if [[ "${#SUDO[@]}" -eq 0 ]]; then permission_runner=(/usr/bin/python3)
+    else permission_runner=("${SUDO[@]}" /usr/bin/python3)
+    fi
+  fi
+  git -C "$REPO_ROOT" ls-files --stage -z |
+    "${permission_runner[@]}" -I -c '
+import os, stat, sys
+
+root = os.path.realpath(sys.argv[1])
+operation = sys.argv[2]
+expected = (int(sys.argv[3]), int(sys.argv[4]))
+root_value = os.lstat(root)
+if not stat.S_ISDIR(root_value.st_mode) or root_value.st_uid == 0 or (root_value.st_uid, root_value.st_gid) != expected:
+    raise SystemExit(1)
+directories = {root}
+files = []
+for record in sys.stdin.buffer.read().split(b"\0"):
+    if not record:
+        continue
+    metadata, encoded = record.split(b"\t", 1)
+    git_mode, _, stage = metadata.split()
+    if stage != b"0" or git_mode not in (b"100644", b"100755"):
+        raise SystemExit(1)
+    target = os.path.abspath(os.path.join(root, os.fsdecode(encoded)))
+    if os.path.commonpath((root, target)) != root:
+        raise SystemExit(1)
+    value = os.lstat(target)
+    owner = (value.st_uid, value.st_gid)
+    if not stat.S_ISREG(value.st_mode) or value.st_nlink != 1 or (owner != expected and not (operation == "repair" and value.st_uid == 0)):
+        raise SystemExit(1)
+    files.append((target, 0o755 if git_mode == b"100755" else 0o644))
+    parent = os.path.dirname(target)
+    while parent != root:
+        directories.add(parent)
+        parent = os.path.dirname(parent)
+for directory in directories:
+    value = os.lstat(directory)
+    owner = (value.st_uid, value.st_gid)
+    if not stat.S_ISDIR(value.st_mode) or (owner != expected and not (operation == "repair" and value.st_uid == 0)):
+        raise SystemExit(1)
+if operation == "repair":
+    nofollow = getattr(os, "O_NOFOLLOW", 0)
+    directory_flag = getattr(os, "O_DIRECTORY", 0)
+    root_fd = os.open(root, os.O_RDONLY | nofollow | directory_flag)
+    def open_beneath(path, is_directory):
+        relative = os.path.relpath(path, root)
+        descriptor = os.dup(root_fd)
+        if relative == ".":
+            return descriptor
+        try:
+            parts = relative.split(os.sep)
+            for index, part in enumerate(parts):
+                flags = os.O_RDONLY | nofollow
+                if index < len(parts) - 1 or is_directory:
+                    flags |= directory_flag
+                next_descriptor = os.open(part, flags, dir_fd=descriptor)
+                os.close(descriptor)
+                descriptor = next_descriptor
+            return descriptor
+        except Exception:
+            os.close(descriptor)
+            raise
+    try:
+        for path, expected_mode, is_directory in [
+            *((path, 0o755, True) for path in sorted(directories, key=lambda item: (len(item.split(os.sep)), item))),
+            *((path, mode, False) for path, mode in files),
+        ]:
+            descriptor = open_beneath(path, is_directory)
+            try:
+                value = os.fstat(descriptor)
+                valid_type = stat.S_ISDIR(value.st_mode) if is_directory else stat.S_ISREG(value.st_mode) and value.st_nlink == 1
+                if not valid_type or ((value.st_uid, value.st_gid) != expected and value.st_uid != 0):
+                    raise SystemExit(1)
+                os.fchmod(descriptor, expected_mode)
+                if value.st_uid == 0:
+                    os.fchown(descriptor, *expected)
+                value = os.fstat(descriptor)
+                if (value.st_uid, value.st_gid) != expected or stat.S_IMODE(value.st_mode) != expected_mode:
+                    raise SystemExit(1)
+            finally:
+                os.close(descriptor)
+    finally:
+        os.close(root_fd)
+elif operation == "verify":
+    if any(stat.S_IMODE(os.lstat(directory).st_mode) != 0o755 for directory in directories):
+        raise SystemExit(1)
+    if any(stat.S_IMODE(os.lstat(target).st_mode) != expected for target, expected in files):
+        raise SystemExit(1)
+' "$REPO_ROOT" "$mode" "$EUID" "$repo_gid" || fail checkout_permission_contract
+}
+
 activate_candidate_checkout() {
-  git -C "$REPO_ROOT" checkout --detach "$CANDIDATE" >/dev/null 2>&1 || fail candidate_checkout_failed
+  (umask 022; git -C "$REPO_ROOT" checkout --detach "$CANDIDATE" >/dev/null 2>&1) || fail candidate_checkout_failed
   [[ "$(git -C "$REPO_ROOT" rev-parse --verify HEAD)" == "$CANDIDATE" ]] || fail candidate_checkout_mismatch
+  project_checkout_permissions repair
+  project_checkout_permissions verify
 }
 
 restore_code_revision() {
@@ -779,8 +1154,10 @@ restore_code_revision() {
     current_ref="$(git -C "$REPO_ROOT" rev-parse --verify "$prior_ref" 2>/dev/null || true)"
     [[ "$current_ref" == "$prior_head" ]] || return 1
   fi
-  git -C "$REPO_ROOT" checkout --detach "$prior_head" >/dev/null 2>&1 || return 1
-  [[ "$prior_ref" != refs/heads/* ]] || git -C "$REPO_ROOT" checkout "${prior_ref#refs/heads/}" >/dev/null 2>&1
+  (umask 022; git -C "$REPO_ROOT" checkout --detach "$prior_head" >/dev/null 2>&1) || return 1
+  [[ "$prior_ref" != refs/heads/* ]] || (umask 022; git -C "$REPO_ROOT" checkout "${prior_ref#refs/heads/}" >/dev/null 2>&1) || return 1
+  project_checkout_permissions repair || return 1
+  project_checkout_permissions verify
 }
 
 restore_runtime_files() {
@@ -881,9 +1258,12 @@ restore_service_state() {
 rollback_transaction() {
   local deployment_status="$1" rollback_failed=0
   trap - EXIT INT TERM
+  trap 'rollback_failed=1' INT TERM
   set +e
   if [[ "$TRANSACTION_STARTED" -eq 1 ]]; then
-    write_transaction_state rollback-in-progress false || rollback_failed=1
+    if [[ "$EXPLICIT_ROLLBACK" -eq 0 ]]; then
+      write_transaction_state rollback-in-progress false || rollback_failed=1
+    fi
     local stage
     for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress clear_ombre_ingress_block restore_service_state; do
       if "$stage"; then
@@ -906,26 +1286,30 @@ rollback_transaction() {
       rollback_failed=1
     fi
     if [[ "$rollback_failed" -ne 0 ]]; then
-      write_transaction_state rollback-incomplete false || :
+      if [[ "$EXPLICIT_ROLLBACK" -eq 0 ]]; then write_transaction_state rollback-incomplete false || :; fi
       printf 'deploy-hermes-release: rollback-incomplete deployment_status=%s candidate=%s snapshot=%s\n' "$deployment_status" "$CANDIDATE" "$SNAPSHOT_DIR" >&2
+      stop_release_transaction_lock
       exit 70
     fi
     write_transaction_state rolled-back false "$(date -u +%s)" || {
       printf 'deploy-hermes-release: rollback-incomplete deployment_status=%s candidate=%s snapshot=%s\n' "$deployment_status" "$CANDIDATE" "$SNAPSHOT_DIR" >&2
+      stop_release_transaction_lock
       exit 70
     }
-    if [[ "$EXPLICIT_ROLLBACK" -eq 1 ]] && ! clear_current_production_pointer; then
-      write_transaction_state rollback-incomplete false || :
-      printf 'deploy-hermes-release: rollback-incomplete deployment_status=%s candidate=%s snapshot=%s reason=production-pointer\n' "$deployment_status" "$CANDIDATE" "$SNAPSHOT_DIR" >&2
+    if ! clear_current_production_pointer "$EXPLICIT_ROLLBACK"; then
+      printf 'deploy-hermes-release: rollback-incomplete deployment_status=%s candidate=%s snapshot=%s reason=production-pointer-finalization\n' "$deployment_status" "$CANDIDATE" "$SNAPSHOT_DIR" >&2
+      stop_release_transaction_lock
       exit 70
     fi
     cleanup_root="${STAGE_DIR:-$SCRIPT_ROOT}"
     if "${SUDO[@]}" env RAN_AGENT_RELEASE_ARTIFACT_ROOT="$ARTIFACT_ROOT" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
-      bash "$cleanup_root/scripts/prune-hermes-release-artifacts.sh" --apply >&2; then
+      RAN_AGENT_RELEASE_TRANSACTION_CONTEXT=1 \
+      bash "$cleanup_root/scripts/prune-hermes-release-artifacts.sh" --apply-under-transaction >&2; then
       printf 'deploy-hermes-release: rollback-stage=artifact-payload-cleanup result=ok\n' >&2
     else
       printf 'deploy-hermes-release: rollback-stage=artifact-payload-cleanup result=warning\n' >&2
     fi
+    cleanup_pretransaction_artifacts
     printf 'deploy-hermes-release: rollback-complete deployment_status=%s candidate=%s snapshot=%s\n' "$deployment_status" "$CANDIDATE" "$SNAPSHOT_DIR" >&2
   fi
   stop_release_transaction_lock
@@ -950,7 +1334,11 @@ load_rollback_snapshot() {
     "${SUDO[@]}" "$PYTHON_BIN" "$SCRIPT_ROOT/scripts/ombre_o1_contract.py" classify-snapshot \
       "$SNAPSHOT_DIR" --format tsv
   ) || fail rollback_snapshot_not_eligible
-  [[ "$decision" == ELIGIBLE ]] || fail rollback_snapshot_not_eligible
+  if [[ "$decision" == PRUNE_PAYLOAD && "$reason" == verified_completed_rollback_used ]]; then
+    ROLLBACK_METADATA_FINALIZE=1
+  else
+    [[ "$decision" == ELIGIBLE ]] || fail rollback_snapshot_not_eligible
+  fi
   "${SUDO[@]}" test -s "$SNAPSHOT_DIR/prior-head" || fail rollback_manifest_invalid
   "${SUDO[@]}" test -f "$SNAPSHOT_DIR/manifest" || fail rollback_manifest_invalid
   "${SUDO[@]}" test -f "$SNAPSHOT_DIR/services" || fail rollback_manifest_invalid
@@ -960,13 +1348,20 @@ load_rollback_snapshot() {
 }
 
 clear_current_production_pointer() {
-  local production_transaction production_candidate
+  local strict="${1:-1}" production_transaction production_candidate contract_root="${STAGE_DIR:-$SCRIPT_ROOT}"
+  if ! "${SUDO[@]}" test -e "$CURRENT_PRODUCTION_POINTER"; then
+    [[ "$strict" -eq 0 ]]
+    return
+  fi
   "${SUDO[@]}" test -f "$CURRENT_PRODUCTION_POINTER" && "${SUDO[@]}" test ! -L "$CURRENT_PRODUCTION_POINTER" || return 1
   IFS=$'\t' read -r production_transaction production_candidate < <(
-    "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/ombre_o1_contract.py" read-production-pointer \
+    "${SUDO[@]}" "$PYTHON_BIN" "$contract_root/scripts/ombre_o1_contract.py" read-production-pointer \
       "$CURRENT_PRODUCTION_POINTER" --format tsv 2>/dev/null
   ) || return 1
-  [[ "$production_transaction" == "$(basename "$SNAPSHOT_DIR")" && "$production_candidate" == "$CANDIDATE" ]] || return 1
+  if [[ "$production_transaction" != "$(basename "$SNAPSHOT_DIR")" || "$production_candidate" != "$CANDIDATE" ]]; then
+    [[ "$strict" -eq 0 ]]
+    return
+  fi
   "${SUDO[@]}" "$PYTHON_BIN" -I -c '
 import os, pathlib, sys
 target = pathlib.Path(sys.argv[1])
@@ -979,13 +1374,31 @@ finally: os.close(directory)
 
 explicit_rollback() {
   [[ "$REPO_ROOT" == "$SERVER_ROOT" ]] || fail server_root_required
+  [[ "$EUID" -ne 0 ]] || fail checkout_operator_root_forbidden
+  [[ "$CONTROLLER_CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail rollback_controller_candidate_invalid
+  git -C "$REPO_ROOT" cat-file -e "${CONTROLLER_CANDIDATE}^{commit}" 2>/dev/null || fail candidate_object_missing
+  require_python_runtime
   CANONICAL_LIVE_STATE_DIR="$("${SUDO[@]}" sh -c 'cd "$1" && pwd -P' sh "$CANONICAL_LIVE_STATE_DIR")" ||
     fail state_dir_unavailable
   STATE_DIR="$CANONICAL_LIVE_STATE_DIR"
   require_artifact_layout
   load_rollback_snapshot "$2"
+  [[ "$CONTROLLER_CANDIDATE" == "$CANDIDATE" ]] || fail rollback_controller_candidate_mismatch
+  require_candidate_bootstrap_authority
+  if [[ "$ROLLBACK_METADATA_FINALIZE" -eq 1 ]]; then
+    clear_current_production_pointer 1 || fail rollback_pointer_finalization_failed
+    if ! "${SUDO[@]}" env RAN_AGENT_RELEASE_ARTIFACT_ROOT="$ARTIFACT_ROOT" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
+      RAN_AGENT_RELEASE_TRANSACTION_CONTEXT=1 \
+      bash "$SCRIPT_ROOT/scripts/prune-hermes-release-artifacts.sh" --apply-under-transaction >&2; then
+      printf 'deploy-hermes-release: rollback-stage=artifact-payload-cleanup result=warning\n' >&2
+    fi
+    stop_release_transaction_lock
+    printf 'deploy-hermes-release: rollback-complete candidate=%s snapshot=%s metadata-finalized=1\n' "$CANDIDATE" "$SNAPSHOT_DIR"
+    return 0
+  fi
   stage_candidate
   verify_stage_candidate
+  project_checkout_permissions repair
   "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --verify-account ||
     fail steward_identity_conflict
   backup_steward_token
@@ -1000,19 +1413,26 @@ if [[ "$MODE" == --rollback ]]; then explicit_rollback "$@"; exit 0; fi
 if [[ "$MODE" == --dry-run ]]; then require_plan_prerequisites; printf 'deploy-hermes-release: dry-run-ok candidate=%s plan=server-local-transaction-redacted\n' "$CANDIDATE"; exit 0; fi
 
 require_apply_prerequisites
+prune_release_artifacts "$SCRIPT_ROOT"
+PRE_STAGE_RESERVE="$(candidate_stage_reserve)" || fail candidate_size_unavailable
+IFS=$'\t' read -r PRE_STAGE_RESERVE_BYTES PRE_STAGE_RESERVE_INODES <<<"$PRE_STAGE_RESERVE"
+snapshot_capacity_gate "$SCRIPT_ROOT" "$PRE_STAGE_RESERVE_BYTES" "$PRE_STAGE_RESERVE_INODES"
 report_release_delta
 stage_candidate
 verify_stage_candidate
 candidate_stage_preflight owner
 # Gate runs in immutable stage before any checkout/config/runtime mutation.
 "${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only bash "$STAGE_DIR/scripts/hermes-release-gate.sh" --all
-"${SUDO[@]}" env RAN_AGENT_RELEASE_ARTIFACT_ROOT="$ARTIFACT_ROOT" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
-  bash "$STAGE_DIR/scripts/prune-hermes-release-artifacts.sh" --apply
-snapshot_capacity_gate
+"${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --verify-account || fail steward_identity_conflict
+"${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+  PATH=/usr/bin:/bin HOME=/nonexistent \
+  RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 \
+  RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" \
+  RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only \
+  bash "$STAGE_DIR/scripts/hermes-release-gate.sh" --all
+snapshot_capacity_gate "$STAGE_DIR" 0 0
 snapshot_runtime_state
-TRANSACTION_STARTED=1
 record_protected_capability_evidence before || fail protected_capability_evidence_before
-trap 'rollback_transaction $?' EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --ensure-account
@@ -1020,10 +1440,14 @@ block_ombre_ingress
 quiesce_runtime_services
 snapshot_node_durable_state
 snapshot_state_migrations
+write_transaction_state snapshot-created false
+verify_in_progress_snapshot "$SNAPSHOT_DIR" || fail snapshot_authority_invalid
 backup_steward_token
 STEWARD_ROTATION_ACTIVE=1
 activate_candidate_checkout
-"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR/ombre-compat" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_ENDPOINT=http://127.0.0.1:18001/internal/ran-agent/steward/v1 RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_IDENTITY_FILE="$CANONICAL_LIVE_STATE_DIR/ombre-brain/steward-identity.v1.json" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_DEPLOY_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_OMBRE_PATCH_PYTHON_BIN="$OMBRE_PATCH_PYTHON_BIN" RAN_AGENT_ROTATE_STEWARD_TOKEN=1 RAN_AGENT_STEWARD_ROTATION_QUIESCED=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
+runtime_checkout_access
+"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR/ombre-compat" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_ENDPOINT=http://127.0.0.1:18001/internal/ran-agent/steward/v1 RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_IDENTITY_FILE="$CANONICAL_LIVE_STATE_DIR/ombre-brain/steward-identity.v1.json" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_DEPLOY_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_OMBRE_PATCH_PYTHON_BIN="$OMBRE_PATCH_PYTHON_BIN" RAN_AGENT_ROTATE_STEWARD_TOKEN=1 RAN_AGENT_STEWARD_ROTATION_QUIESCED=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
+project_checkout_permissions verify
 restore_ombre_ingress
 OLD_STEWARD_TOKEN_FILE=''
 [[ "$STEWARD_TOKEN_HAD_PRIOR" -ne 1 ]] || OLD_STEWARD_TOKEN_FILE="$SECRET_ROLLBACK_DIR/steward-api-token.rollback"
@@ -1031,8 +1455,13 @@ OLD_STEWARD_TOKEN_FILE=''
 record_protected_capability_evidence after || fail protected_capability_evidence_after
 destroy_secret_rollback || fail secret_rollback_cleanup_failed
 mark_snapshot_accepted
+TRANSACTION_ACCEPTED=1
 TRANSACTION_STARTED=0
-trap - EXIT INT TERM
 prune_accepted_snapshots
+if ! prune_release_artifacts "$STAGE_DIR" >&2; then
+  printf 'deploy-hermes-release: accepted artifact cleanup warning candidate=%s\n' "$CANDIDATE" >&2
+fi
+cleanup_pretransaction_artifacts
+trap - EXIT INT TERM
 stop_release_transaction_lock
 printf 'deploy-hermes-release: apply-ok candidate=%s model=%s snapshot=%s\n' "$CANDIDATE" "$DEPLOY_MODEL" "$SNAPSHOT_DIR"

@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-08-01)
+Status: CURRENT (2026-08-02)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -15,8 +15,8 @@ local_o1_online_revalidation: not performed
 production_worktree: clean in owner-supplied 2026-07-31 preflight
 production_services: four core units active in owner-supplied 2026-07-31 preflight
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
-rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); 7649a9471b15b09e9aac25bed269a0e5d8b254dc (cross-user Ombre socket ownership was probed without the existing privilege seam); 8c259ddcd2a34e80400ac39e444876807960f689 (ran-agent wrapper re-read deployment-user env and exited before PID/listener); first four stopped at the immutable pre-mutation gate; 414210f and 8c259dd rolled back completely; the supplied 7649a94 trace alone does not establish its rollback completion
-production_storage: owner reported 56.6GB/60GB used after repeated failed transactions retained large completed rollback payloads; governed recovery prunes only verified rollback-used payloads and then requires full-snapshot headroom before mutation; not yet revalidated or reclaimed on server
+rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); 7649a9471b15b09e9aac25bed269a0e5d8b254dc (cross-user Ombre socket ownership was probed without the existing privilege seam); 8c259ddcd2a34e80400ac39e444876807960f689 (ran-agent wrapper re-read deployment-user env and exited before PID/listener); e0b20b172955af175004ac8a7a3cdc0018a2b698 (bootstrap could not resolve the service-managed Node path and later hit an unsafe cross-UID temporary lock); first four and e0b20b stopped before production mutation; 414210f and 8c259dd rolled back completely; the supplied 7649a94 trace alone does not establish its rollback completion
+production_storage: owner reported 54GB/59GB used, 3.3GB available, 95% utilization after repeated failed transactions; governed recovery prunes only verified rollback-used payloads and then requires allocated-block, inode, candidate-stage, and full-snapshot headroom before mutation; not yet revalidated or reclaimed on server
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -155,8 +155,9 @@ contract:
   and orchestrates the transaction. Python 3.12 and all real-process assets now
   fail before snapshot. Completed rollback payload cleanup is classified,
   locked, symlink/mount/inode checked, and evidence-preserving. A fresh
-  post-prune gate requires the complete snapshot's apparent size plus the
-  larger of 25% or 2 GiB before any copy or service stop. Snapshot cp/tar data
+  post-prune gate requires allocated blocks and inodes for the complete
+  snapshot plus candidate staging and the larger of 25% or 2 GiB byte
+  headroom before any copy or service stop. Snapshot cp/tar data
   is atomically committed before its manifest entry, so partial payloads cannot
   become rollback authority. The supplied
   `8c259dd` trace ends with `rollback-complete`; neither O1/O2 nor the Flash
@@ -170,6 +171,24 @@ contract:
   Python 3.12. Adversarial review caught and corrected the post-prune capacity
   and partial-manifest rollback hazards. This is pre-deployment evidence only;
   it does not claim server cleanup or acceptance.
+- Current release-controller remediation is also pre-deployment. It resolves
+  the service-managed Node executable from the active MainPID descendant tree,
+  holds the root release lock through a caller-owned cross-UID FIFO, projects
+  Git modes and `ubuntu` ownership through no-follow descriptors for root-owned
+  tracked residue, and checks runtime imports as `ran-agent`. Capacity uses
+  allocated blocks, inodes, and candidate staging; the quiesced snapshot is
+  resealed before checkout. Explicit rollback preserves accepted authority on
+  interruption, can finalize stale pointer metadata without a second live
+  restore, and re-extracts its candidate-pinned six-file controller outside the
+  checkout. The local release-script suite collected 80 tests: 78 passed,
+  0 failed, and 2 Linux/root-only staged checks were skipped. The Ombre contract
+  collected 45 tests: 44 passed, 0 failed, and 1 Linux/root-only ownership check
+  was skipped. The final Git-less, read-only desktop `--all` gate ran the real
+  patched Ombre 2.8.8 process and Hermes v0.13 Lite/Full boundary, printed
+  `hermes-release-smoke: all-ok`, passed 380 Python tests with the single
+  Linux-root verifier check skipped, printed `hermes-release-gate: ok`, and
+  received a `passed` workflow-guard result. These root-only skips are not
+  server acceptance or cleanup evidence.
 - Fresh production-wiring evidence: 137 focused Node tests passed under Node
   22.22.2, including O2 runtime, tool-less Curator/Reviewer, managed env,
   release residue, model policy, and gateway fallback checks. Shell/Python

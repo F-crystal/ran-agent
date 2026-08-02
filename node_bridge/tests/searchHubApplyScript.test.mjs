@@ -738,6 +738,7 @@ test('apply script keeps full recall-only Ombre MCP when source runner is prepar
 test('apply script writes the pinned source/loopback/auth Ombre systemd contract', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ombre-systemd-'));
   const systemdDir = join(dir, 'systemd');
+  const expectedStateDir = process.env.RAN_AGENT_STATE_DIR || '/opt/ran_agent/.ran_agent_state';
   mkdirSync(systemdDir, { recursive: true });
 
   execFileSync('bash', ['-lc', [
@@ -756,7 +757,7 @@ test('apply script writes the pinned source/loopback/auth Ombre systemd contract
   const fullUnit = readFileSync(join(systemdDir, 'ran-agent-hermes-full.service'), 'utf8');
   assert.match(unit, /Description=Ran Agent Ombre Brain Memory Service/);
   assert.match(unit, /EnvironmentFile=-\/opt\/ran_agent\/\.env\.local/);
-  assert.match(unit, /^ExecStart=\/usr\/bin\/bash \/opt\/ran_agent\/scripts\/start_ombre_brain_service\.sh --managed \/opt\/ran_agent \/opt\/ran_agent\/\.ran_agent_state \/opt\/ran_agent\/vault\/ombre$/m);
+  assert.equal(unit.match(/^ExecStart=.*$/m)?.[0], `ExecStart=/usr/bin/bash /opt/ran_agent/scripts/start_ombre_brain_service.sh --managed /opt/ran_agent ${expectedStateDir} /opt/ran_agent/vault/ombre`);
   assert.doesNotMatch(unit, /bash -lc|source \/opt\/ran_agent\/\.venv\/bin\/activate/);
   assert.match(unit, /^UnsetEnvironment=BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH$/m);
   assert.match(unit, /^Environment=OMBRE_BRAIN_RUNNER=source$/m);
@@ -765,7 +766,7 @@ test('apply script writes the pinned source/loopback/auth Ombre systemd contract
   assert.match(unit, /^Environment=OMBRE_MCP_REQUIRE_AUTH=false$/m);
   assert.match(unit, /^Environment=OMBRE_TRANSPORT=streamable-http$/m);
   assert.match(unit, /^Environment=OMBRE_PORT=18001$/m);
-  assert.match(unit, /^Environment=OMBRE_CONFIG_PATH=\/opt\/ran_agent\/\.ran_agent_state\/ombre-brain\/config\.yaml$/m);
+  assert.equal(unit.match(/^Environment=OMBRE_CONFIG_PATH=.*$/m)?.[0], `Environment=OMBRE_CONFIG_PATH=${expectedStateDir}/ombre-brain/config.yaml`);
   assert.match(unit, /^Environment=OMBRE_VAULT_DIR=\/opt\/ran_agent\/vault\/ombre$/m);
   assert.match(unit, /^StartLimitIntervalSec=30$/m);
   assert.match(unit, /^StartLimitBurst=3$/m);

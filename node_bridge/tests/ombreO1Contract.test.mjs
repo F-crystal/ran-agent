@@ -169,6 +169,37 @@ function snapshotFixture(overrides = {}, rawState = null) {
   return { root, directory, transactionId };
 }
 
+function inProgressFixture(overrides = {}) {
+  const candidate = 'c'.repeat(40);
+  const base = 'd'.repeat(40);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ombre-in-progress-'));
+  const transactionId = 'release-transaction.cccccccccccc.fixture';
+  const directory = path.join(root, transactionId);
+  fs.mkdirSync(path.join(directory, 'files'), { recursive: true });
+  const manifest = 'absent\t0\t/example\n';
+  const services = 'ran-agent-node.service\tactive\tenabled\tloaded\n';
+  fs.writeFileSync(path.join(directory, 'manifest'), manifest);
+  fs.writeFileSync(path.join(directory, 'services'), services);
+  fs.writeFileSync(path.join(directory, 'prior-head'), `${base}\n`);
+  fs.writeFileSync(path.join(directory, 'candidate'), `${candidate}\n`);
+  fs.writeFileSync(path.join(directory, 'transaction-state.json'), JSON.stringify({
+    schema_version: 1,
+    transaction_id: transactionId,
+    candidate_sha: candidate,
+    base_sha: base,
+    status: 'in_progress',
+    acceptance_state: 'not_accepted',
+    rollback_state: 'not_used',
+    rollbackable: false,
+    current_production_identity: 'unknown',
+    completed_at: '',
+    manifest_digest: sha256(manifest),
+    service_state_digest: sha256(services),
+    ...overrides,
+  }));
+  return { root, directory, candidate };
+}
+
 function classify(item, current = '', production = '') {
   const result = run([
     'classify-snapshot',
@@ -229,5 +260,44 @@ test('retention schema skips empty manifest and service evidence', () => {
     const item = snapshotFixture();
     fs.writeFileSync(path.join(item.directory, name), '');
     assert.equal(classify(item).decision, 'SKIP_UNCERTAIN');
+  }
+});
+
+test('published in-progress snapshot is rollback authority only with complete consistent evidence', () => {
+  const valid = inProgressFixture();
+  const wrongCandidate = inProgressFixture();
+  const contradictory = inProgressFixture({ rollbackable: true });
+  const badBase = inProgressFixture({ base_sha: 'e'.repeat(40) });
+  const staleManifest = inProgressFixture();
+  try {
+    assert.equal(run(['verify-in-progress-snapshot', valid.directory, '--candidate', valid.candidate]).status, 0);
+    assert.notEqual(run(['verify-in-progress-snapshot', wrongCandidate.directory, '--candidate', 'f'.repeat(40)]).status, 0);
+    assert.notEqual(run(['verify-in-progress-snapshot', contradictory.directory, '--candidate', contradictory.candidate]).status, 0);
+    assert.notEqual(run(['verify-in-progress-snapshot', badBase.directory, '--candidate', badBase.candidate]).status, 0);
+    fs.appendFileSync(path.join(staleManifest.directory, 'manifest'), 'present\t900\t/state\n');
+    assert.notEqual(run(['verify-in-progress-snapshot', staleManifest.directory, '--candidate', staleManifest.candidate]).status, 0);
+    const candidatePath = path.join(valid.directory, 'candidate');
+    fs.unlinkSync(candidatePath);
+    fs.symlinkSync(path.join(valid.directory, 'prior-head'), candidatePath);
+    assert.notEqual(run(['verify-in-progress-snapshot', valid.directory, '--candidate', valid.candidate]).status, 0);
+  } finally {
+    for (const fixture of [valid, wrongCandidate, contradictory, badBase, staleManifest]) fs.rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test('root-owned in-progress snapshot contract enforces private directory and evidence modes', {
+  skip: process.platform !== 'linux' || process.geteuid?.() !== 0,
+}, () => {
+  const item = inProgressFixture();
+  try {
+    for (const pathName of ['', 'files']) fs.chmodSync(path.join(item.directory, pathName), 0o700);
+    for (const name of ['transaction-state.json', 'manifest', 'services', 'prior-head', 'candidate']) {
+      fs.chmodSync(path.join(item.directory, name), 0o600);
+    }
+    assert.equal(run(['verify-in-progress-snapshot', item.directory, '--candidate', item.candidate, '--require-root-owned']).status, 0);
+    fs.chmodSync(path.join(item.directory, 'manifest'), 0o644);
+    assert.notEqual(run(['verify-in-progress-snapshot', item.directory, '--candidate', item.candidate, '--require-root-owned']).status, 0);
+  } finally {
+    fs.rmSync(item.root, { recursive: true, force: true });
   }
 });

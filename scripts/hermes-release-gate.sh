@@ -22,6 +22,8 @@ case "$MODE" in
 esac
 
 SANDBOX_ROOT="$(mktemp -d /tmp/ran-agent-release-gate.XXXXXX)"
+/usr/bin/chgrp "$(/usr/bin/id -g)" "$SANDBOX_ROOT" || fail sandbox_identity_unavailable
+/bin/chmod 700 "$SANDBOX_ROOT" || fail sandbox_identity_unavailable
 cleanup() {
   chmod -R u+w "$SANDBOX_ROOT" 2>/dev/null || true
   rm -rf "$SANDBOX_ROOT"

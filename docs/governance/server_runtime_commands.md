@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-02)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -22,10 +22,10 @@ formal release defaults to Flash with O2 enabled. Commands below describe
 that target state, not behavior already asserted in production.
 The later candidate `8c259ddcd2a34e80400ac39e444876807960f689`
 passed the immutable gate but failed Ombre startup and rolled back completely;
-production therefore remains on the recorded SHA. The owner reported
-`56.6GB/60GB` used after repeated failed transactions retained large completed
-rollback payloads. Use only the verified pruner below; do not manually remove
-snapshot directories.
+production therefore remains on the recorded SHA. The owner's latest trace
+reported `54GB/59GB` used, `3.3GB` available, and `95%` utilization after
+repeated failed transactions. Use only the verified pruner below; do not
+manually remove snapshot directories.
 
 ## Source Of Truth
 
@@ -84,12 +84,13 @@ The artifact pruner fails closed for the current production transaction,
 unknown/corrupt state, symlinks, mount boundaries, path or inode drift, and a
 concurrent payload cleanup. It removes only a verified snapshot's `files/` payload;
 `transaction-state.json`, manifest, service state, and other evidence remain.
-Deploy also runs this pruner while holding the global release lock before the
-next runtime snapshot. It then measures the complete snapshot source set and
-requires its apparent size plus the larger of 25% or 2 GiB on the artifact
-filesystem. Insufficient capacity fails before a snapshot directory, service
-stop, or checkout change. Pre-prune `df` is an observation, not permission to
-delete uncertain artifacts by hand and not the final capacity authority.
+Deploy also runs this pruner while holding the cross-UID global release lock
+before the next runtime snapshot. It measures allocated blocks and inodes for
+the complete snapshot source set, adds the candidate archive/stage reserve,
+and requires the larger of 25% or 2 GiB byte headroom plus inode headroom.
+Insufficient capacity fails before a snapshot directory, service stop, or
+checkout change. Pre-prune `df` is an observation, not permission to delete
+uncertain artifacts by hand and not the final capacity authority.
 
 Agents changing or operating server runtime should first load
 `skills/server-runtime/SKILL.md`. That skill owns the virtualenv activation
@@ -110,6 +111,19 @@ switch`, or `git checkout` in `/opt/ran_agent` as a pre-deploy step. The
 transaction fetches a source ref only to resolve one SHA, gates an immutable
 stage, snapshots the active runtime, then changes the checkout only inside the
 apply transaction.
+
+The gate runs the same Git-less read-only candidate as root and as
+`ran-agent`. Before and after checkout activation, tracked paths are projected
+to their Git modes and the `ubuntu` checkout owner; root-owned restrictive
+residue is repaired through no-follow file descriptors, then the Node entry and
+runtime dependencies are imported as `ran-agent`. Do not manually `chown -R`
+or loosen repository env-file modes.
+
+After the quiesced Node and migration payloads extend the snapshot manifest,
+deploy reseals and re-verifies the in-progress snapshot before checkout. An
+interrupted explicit rollback remains eligible for the same rollback command;
+a completed rollback with only stale pointer metadata is finalized by that
+command rather than by manual Git or file deletion.
 
 `apply-hermes-runtime-split.sh` owns:
 

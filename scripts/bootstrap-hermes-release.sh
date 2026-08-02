@@ -23,7 +23,12 @@ sha256_file() {
 
 MODE="${1:---refuse-mutation}"
 CANDIDATE_INPUT="${2:-}"
-[[ $# -eq 2 && ( "$MODE" == --dry-run || "$MODE" == --apply ) ]] || fail usage
+ROLLBACK_SNAPSHOT=''
+case "$MODE" in
+  --dry-run|--apply) [[ $# -eq 2 ]] || fail usage ;;
+  --rollback) [[ $# -eq 3 ]] || fail usage; ROLLBACK_SNAPSHOT="$3" ;;
+  *) fail usage ;;
+esac
 [[ "$CANDIDATE_INPUT" =~ ^[0-9a-f]{40}$ ]] || fail candidate_digest_invalid
 
 REPO_ROOT="${RAN_AGENT_RELEASE_CONTROL_ROOT:-/opt/ran_agent}"
@@ -42,7 +47,14 @@ trap 'rm -rf "$TMP_ROOT"' EXIT
 MANIFEST_PATH="docs/governance/hermes_release_bootstrap.v1.sha256"
 git show "$CANDIDATE:$MANIFEST_PATH" > "$TMP_ROOT/manifest" || fail bootstrap_manifest_missing
 
-required=(scripts/bootstrap-hermes-release.sh scripts/deploy-hermes-release.sh scripts/resolve-hermes-service-node.sh)
+required=(
+  scripts/bootstrap-hermes-release.sh
+  scripts/deploy-hermes-release.sh
+  scripts/resolve-hermes-service-node.sh
+  scripts/prune-hermes-release-artifacts.sh
+  scripts/check-hermes-snapshot-capacity.py
+  scripts/ombre_o1_contract.py
+)
 for path in "${required[@]}"; do
   expected="$(awk -v path="$path" '$2 == path { print $1 }' "$TMP_ROOT/manifest")"
   [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || fail bootstrap_manifest_invalid
@@ -55,13 +67,24 @@ for path in "${required[@]}"; do
   chmod 700 "$target"
 done
 [[ "$(awk 'NF && $1 !~ /^[0-9a-f]{64}$/ { invalid=1 } END { print invalid + 0 }' "$TMP_ROOT/manifest")" == 0 ]] || fail bootstrap_manifest_invalid
+[[ "$(awk 'NF { count += 1 } END { print count + 0 }' "$TMP_ROOT/manifest")" == "${#required[@]}" ]] || fail bootstrap_manifest_invalid
 
+NODE_BIN_INPUT="${RAN_AGENT_NODE_BIN:-}"
+# The server bootstrap contract owns this legacy compatibility path.  The
+# resolver itself never guesses when a wrapper-based old unit is inactive.
+if [[ -z "$NODE_BIN_INPUT" && -x /opt/nodejs/node-v22.22.2-linux-x64/bin/node ]]; then
+  NODE_BIN_INPUT=/opt/nodejs/node-v22.22.2-linux-x64/bin/node
+fi
+
+deploy_args=("$MODE")
+[[ "$MODE" != --rollback ]] || deploy_args+=("$ROLLBACK_SNAPSHOT")
 env \
   RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" \
   RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" \
   RAN_AGENT_RELEASE_ARTIFACT_ROOT="$ARTIFACT_ROOT" \
-  RAN_AGENT_NODE_BIN="${RAN_AGENT_NODE_BIN:-}" \
+  RAN_AGENT_RELEASE_BOOTSTRAP_ROOT="$TMP_ROOT" \
+  RAN_AGENT_NODE_BIN="$NODE_BIN_INPUT" \
   RAN_AGENT_SYSTEMCTL_BIN="${RAN_AGENT_SYSTEMCTL_BIN:-}" \
   RAN_AGENT_PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-}" \
-  bash "$TMP_ROOT/scripts/deploy-hermes-release.sh" "$MODE"
+  bash "$TMP_ROOT/scripts/deploy-hermes-release.sh" "${deploy_args[@]}"
 printf 'bootstrap-hermes-release: bootstrap-ok candidate=%s\n' "$CANDIDATE"

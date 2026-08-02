@@ -9,6 +9,7 @@ import json
 import os
 import ipaddress
 import re
+import stat
 import sys
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -314,6 +315,58 @@ def classify_snapshot(
         return {"decision": "SKIP_UNCERTAIN", "reason": str(error)}
 
 
+def verify_in_progress_snapshot(
+    directory: Path, candidate: str, require_root_owned: bool
+) -> dict:
+    if not directory.name.startswith("release-transaction."):
+        raise ValueError("snapshot directory namespace invalid")
+    result = classify_snapshot(directory, "", "")
+    if result != {
+        "decision": "SKIP_UNCERTAIN",
+        "reason": "non_prunable_status:in_progress",
+    }:
+        raise ValueError(f"snapshot is not verified in-progress: {result['reason']}")
+    state = json.loads(
+        (directory / "transaction-state.json").read_text(encoding="utf-8"),
+        object_pairs_hook=_json_no_duplicates,
+    )
+    if state["candidate_sha"] != candidate:
+        raise ValueError("candidate mismatch")
+    if state["base_sha"] != (directory / "prior-head").read_text(encoding="utf-8").strip():
+        raise ValueError("base revision mismatch")
+    if (directory / "candidate").read_text(encoding="utf-8").strip() != candidate:
+        raise ValueError("candidate evidence mismatch")
+    if (
+        state["acceptance_state"] != "not_accepted"
+        or state["rollback_state"] != "not_used"
+        or state["rollbackable"] is not False
+        or state["completed_at"]
+    ):
+        raise ValueError("in-progress state is contradictory")
+    paths = {
+        directory: 0o700,
+        directory / "files": 0o700,
+        directory / "transaction-state.json": 0o600,
+        directory / "manifest": 0o600,
+        directory / "services": 0o600,
+        directory / "prior-head": 0o600,
+        directory / "candidate": 0o600,
+    }
+    for path, expected_mode in paths.items():
+        value = path.lstat()
+        if stat.S_ISLNK(value.st_mode):
+            raise ValueError(f"snapshot path is symlink: {path.name}")
+        if path in (directory, directory / "files") and not stat.S_ISDIR(value.st_mode):
+            raise ValueError(f"snapshot path is not a directory: {path.name}")
+        if path not in (directory, directory / "files") and not stat.S_ISREG(value.st_mode):
+            raise ValueError(f"snapshot path is not a regular file: {path.name}")
+        if require_root_owned and (value.st_uid != 0 or value.st_gid != 0):
+            raise ValueError(f"snapshot path is not root-owned: {path.name}")
+        if require_root_owned and stat.S_IMODE(value.st_mode) != expected_mode:
+            raise ValueError(f"snapshot path mode invalid: {path.name}")
+    return {"verified": True, "transaction_id": state["transaction_id"]}
+
+
 def parse_env_assignments(values: list[str]) -> dict[str, str]:
     result = dict(os.environ)
     for value in values:
@@ -357,6 +410,10 @@ def main() -> int:
     pointer_parser.add_argument(
         "--format", choices=("json", "transaction-id", "candidate-sha", "tsv"), default="json"
     )
+    progress_parser = subparsers.add_parser("verify-in-progress-snapshot")
+    progress_parser.add_argument("directory", type=Path)
+    progress_parser.add_argument("--candidate", required=True)
+    progress_parser.add_argument("--require-root-owned", action="store_true")
     args = parser.parse_args()
     try:
         if args.command == "validate-config":
@@ -370,8 +427,12 @@ def main() -> int:
                 args.current_transaction,
                 args.production_transaction,
             )
-        else:
+        elif args.command == "read-production-pointer":
             result = read_production_pointer(args.path)
+        else:
+            result = verify_in_progress_snapshot(
+                args.directory, args.candidate, args.require_root_owned
+            )
         if args.command == "read-production-pointer" and args.format == "transaction-id":
             print(result["transaction_id"])
         elif args.command == "read-production-pointer" and args.format == "candidate-sha":

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
-import { accessSync, chmodSync, chownSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, chownSync, closeSync, constants, copyFileSync, existsSync, mkdtempSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, realpathSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -13,6 +13,14 @@ const nodeBin = process.execPath;
 const pythonBin = process.env.RAN_AGENT_PYTHON_BIN || realpathSync(execFileSync('/bin/sh', ['-c', 'command -v python3'], { encoding: 'utf8' }).trim());
 const runtimeUser = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
 const runtimeGroup = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
+const bootstrapFrameworkFiles = [
+  'bootstrap-hermes-release.sh',
+  'deploy-hermes-release.sh',
+  'resolve-hermes-service-node.sh',
+  'prune-hermes-release-artifacts.sh',
+  'check-hermes-snapshot-capacity.py',
+  'ombre_o1_contract.py',
+];
 
 function candidate() {
   const explicit = process.env.RAN_AGENT_RELEASE_CANDIDATE;
@@ -28,6 +36,7 @@ function run(script, args = [], extraEnv = {}) {
     cwd: root,
     env: {
       PATH: '/usr/bin:/bin',
+      TMPDIR: tmpdir(),
       RAN_AGENT_NODE_BIN: nodeBin,
       RAN_AGENT_PYTHON_BIN: pythonBin,
       RAN_AGENT_RELEASE_CANDIDATE: candidate(),
@@ -63,6 +72,13 @@ function writeRetentionState(directory, overrides = {}) {
     service_state_digest: sha256(services),
     ...overrides,
   }));
+}
+
+function secureArtifactLayout(artifactRoot) {
+  for (const path of [artifactRoot, join(artifactRoot, 'snapshots'), join(artifactRoot, 'stages'), join(artifactRoot, 'archives')]) {
+    mkdirSync(path, { recursive: true });
+    chmodSync(path, 0o700);
+  }
 }
 
 function requiredGatePython() {
@@ -102,8 +118,7 @@ function makeBootstrapFixture({ corruptManifest = false } = {}) {
 
   mkdirSync(join(repo, 'scripts'), { recursive: true });
   mkdirSync(join(repo, 'docs', 'governance'), { recursive: true });
-  const frameworkFiles = ['bootstrap-hermes-release.sh', 'deploy-hermes-release.sh', 'resolve-hermes-service-node.sh'];
-  for (const file of frameworkFiles) {
+  for (const file of bootstrapFrameworkFiles) {
     copyFileSync(join(root, 'scripts', file), join(repo, 'scripts', file));
     chmodSync(join(repo, 'scripts', file), 0o755);
   }
@@ -116,7 +131,7 @@ function makeBootstrapFixture({ corruptManifest = false } = {}) {
   ].join('\n'));
   copyFileSync(join(root, 'scripts', 'hermes-release-candidate-preflight.mjs'), join(repo, 'scripts', 'hermes-release-candidate-preflight.mjs'));
   chmodSync(join(repo, 'scripts', 'hermes-release-candidate-preflight.mjs'), 0o755);
-  const manifest = frameworkFiles.map((file) => {
+  const manifest = bootstrapFrameworkFiles.map((file) => {
     const contents = readFileSync(join(repo, 'scripts', file));
     return `${corruptManifest ? '0'.repeat(64) : sha256(contents)}  scripts/${file}`;
   }).join('\n');
@@ -211,7 +226,7 @@ function runDeployServiceFixture(fixture, commands, extraEnv = {}) {
     'SUDO=(sudo)',
     `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
     'for unit in "${ALL_RUNTIME_UNITS[@]}"; do snapshot_service_state "$unit"; done',
-    'printf "%s\\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$SNAPSHOT_DIR/prior-head"',
+    '[ -f "$SNAPSHOT_DIR/prior-head" ] || printf "%s\\n" aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa > "$SNAPSHOT_DIR/prior-head"',
     '[ -f "$SNAPSHOT_DIR/manifest" ] || printf "%s\\n" fixture-manifest > "$SNAPSHOT_DIR/manifest"',
     commands,
   ].join('\n')], {
@@ -544,6 +559,8 @@ test('Node and Ombre use fixed ran-agent identity while Lite and Full keep their
   assert.match(apply, /STEWARD_RUNTIME_GROUP=ran-agent/);
   assert.match(nodeDropin, /User=\$STEWARD_RUNTIME_USER/);
   assert.match(nodeDropin, /Group=\$STEWARD_RUNTIME_GROUP/);
+  assert.match(nodeDropin, /Environment=RAN_AGENT_NODE_BIN=/);
+  assert.match(readFileSync(join(root, 'node_bridge', 'start_node.sh'), 'utf8'), /exec "\$NODE_BIN" src\/index\.mjs/);
   assert.match(ombreUnit, /User=\$STEWARD_RUNTIME_USER/);
   assert.match(ombreUnit, /Group=\$STEWARD_RUNTIME_GROUP/);
   assert.match(systemdUnits, /User=\$RUNTIME_USER/);
@@ -839,6 +856,85 @@ test('rollback is fail-loud, continues later stages, and preserves incomplete ev
   }
 });
 
+test('interrupted explicit rollback preserves accepted authority for a retry', () => {
+  const fixture = makeDeployServiceFixture();
+  const snapshotRoot = join(fixture.dir, 'artifacts', 'snapshots');
+  const snapshot = join(snapshotRoot, 'release-transaction.interrupted.fixture');
+  const pointer = join(snapshotRoot, 'current-production.json');
+  try {
+    mkdirSync(join(snapshot, 'files'), { recursive: true });
+    writeFileSync(join(snapshot, 'files', '900'), 'payload\n');
+    writeFileSync(join(snapshot, 'candidate'), `${'b'.repeat(40)}\n`);
+    writeRetentionState(snapshot);
+    writeFileSync(pointer, JSON.stringify({
+      schema_version: 1,
+      transaction_id: snapshot.split('/').at(-1),
+      candidate_sha: 'b'.repeat(40),
+    }));
+    secureArtifactLayout(join(fixture.dir, 'artifacts'));
+    assert.throws(() => runDeployServiceFixture(fixture, [
+      `SNAPSHOT_ROOT=${JSON.stringify(snapshotRoot)}`,
+      `CURRENT_PRODUCTION_POINTER=${JSON.stringify(pointer)}`,
+      `SNAPSHOT_DIR=${JSON.stringify(snapshot)}`,
+      `CANDIDATE=${JSON.stringify('b'.repeat(40))}`,
+      'EXPLICIT_ROLLBACK=1',
+      'TRANSACTION_STARTED=1',
+      'quiesce_runtime_services() { return 0; }',
+      'restore_runtime_files() { kill -TERM "$$"; return 1; }',
+      'restore_state_migrations() { return 0; }',
+      'restore_steward_token() { return 0; }',
+      'restore_code_revision() { return 0; }',
+      'block_ombre_ingress() { return 0; }',
+      'clear_ombre_ingress_block() { return 0; }',
+      'restore_service_state() { return 0; }',
+      'destroy_secret_rollback() { return 0; }',
+      'record_protected_capability_evidence() { return 0; }',
+      'rollback_transaction 0',
+    ].join('\n')), (error) => error.status === 70);
+    assert.equal(JSON.parse(readFileSync(join(snapshot, 'transaction-state.json'), 'utf8')).status, 'accepted');
+    assert.doesNotThrow(() => runDeployServiceFixture(fixture, [
+      `SNAPSHOT_ROOT=${JSON.stringify(snapshotRoot)}`,
+      `CURRENT_PRODUCTION_POINTER=${JSON.stringify(pointer)}`,
+      `load_rollback_snapshot ${JSON.stringify(snapshot)}`,
+      'test "$ROLLBACK_METADATA_FINALIZE" -eq 0',
+    ].join('\n')));
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('completed rollback with a stale production pointer remains metadata-finalizable', () => {
+  const fixture = makeDeployServiceFixture();
+  const snapshotRoot = join(fixture.dir, 'artifacts', 'snapshots');
+  const snapshot = join(snapshotRoot, 'release-transaction.finalize.fixture');
+  const pointer = join(snapshotRoot, 'current-production.json');
+  try {
+    mkdirSync(join(snapshot, 'files'), { recursive: true });
+    writeFileSync(join(snapshot, 'files', '900'), 'payload\n');
+    writeFileSync(join(snapshot, 'candidate'), `${'b'.repeat(40)}\n`);
+    writeRetentionState(snapshot, {
+      status: 'rollback_used', acceptance_state: 'not_accepted', rollback_state: 'rollback_used',
+      rollbackable: false, current_production_identity: 'transaction:prior-production',
+    });
+    writeFileSync(pointer, JSON.stringify({
+      schema_version: 1,
+      transaction_id: snapshot.split('/').at(-1),
+      candidate_sha: 'b'.repeat(40),
+    }));
+    secureArtifactLayout(join(fixture.dir, 'artifacts'));
+    runDeployServiceFixture(fixture, [
+      `SNAPSHOT_ROOT=${JSON.stringify(snapshotRoot)}`,
+      `CURRENT_PRODUCTION_POINTER=${JSON.stringify(pointer)}`,
+      `load_rollback_snapshot ${JSON.stringify(snapshot)}`,
+      'test "$ROLLBACK_METADATA_FINALIZE" -eq 1',
+      'clear_current_production_pointer 1',
+    ].join('\n'));
+    assert.equal(existsSync(pointer), false);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
 test('successful rollback reports complete and records a non-retainable rolled-back state', () => {
   const fixture = makeDeployServiceFixture();
   const rollbackSnapshot = join(fixture.dir, 'artifacts', 'snapshots', 'release-transaction.rollback.fixture');
@@ -1007,6 +1103,7 @@ test('artifact cleanup removes only verified rollback-used payloads and retains 
     mkdirSync(outside);
     writeFileSync(join(outside, 'keep'), 'must survive\n');
     symlinkSync(outside, join(symlinked, 'files'));
+    secureArtifactLayout(artifactRoot);
 
     const env = {
       RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot,
@@ -1048,6 +1145,7 @@ test('artifact cleanup preserves the current production transaction', () => {
       transaction_id: current.split('/').at(-1),
       candidate_sha: 'b'.repeat(40),
     }));
+    secureArtifactLayout(artifactRoot);
     const output = run('prune-hermes-release-artifacts.sh', ['--apply'], {
       RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot,
       RAN_AGENT_NO_SUDO: '1',
@@ -1056,6 +1154,132 @@ test('artifact cleanup preserves the current production transaction', () => {
     assert.equal(existsSync(join(current, 'files', '900')), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('artifact cleanup bounds failed-release stages, archives, and deltas', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-release-ephemera-'));
+  const artifactRoot = join(dir, 'artifacts');
+  const stage = join(artifactRoot, 'stages', 'release-stage.fixture');
+  const archive = join(artifactRoot, 'archives', `release-candidate.${'a'.repeat(40)}.tar`);
+  const delta = join(artifactRoot, 'archives', `release-delta.${'b'.repeat(40)}..${'a'.repeat(40)}.txt`);
+  const incomplete = join(artifactRoot, 'snapshots', '.release-incomplete.fixture');
+  const protectedIncomplete = join(artifactRoot, 'snapshots', '.release-incomplete.current.fixture');
+  const unknownFinal = join(artifactRoot, 'snapshots', 'release-transaction.unknown-no-state.fixture');
+  try {
+    mkdirSync(stage, { recursive: true });
+    mkdirSync(join(incomplete, 'files'), { recursive: true });
+    mkdirSync(join(protectedIncomplete, 'files'), { recursive: true });
+    mkdirSync(join(unknownFinal, 'files'), { recursive: true });
+    mkdirSync(dirname(archive), { recursive: true });
+    writeFileSync(join(stage, 'payload'), 'stage residue\n');
+    writeFileSync(join(incomplete, 'files', 'payload'), 'incomplete snapshot residue\n');
+    writeFileSync(join(protectedIncomplete, 'files', 'payload'), 'pointer-protected residue\n');
+    writeFileSync(join(unknownFinal, 'files', 'payload'), 'unknown final snapshot\n');
+    writeFileSync(join(artifactRoot, 'snapshots', 'current-production.json'), JSON.stringify({
+      schema_version: 1,
+      transaction_id: protectedIncomplete.split('/').at(-1),
+      candidate_sha: 'c'.repeat(40),
+    }));
+    writeFileSync(archive, 'archive residue\n');
+    writeFileSync(delta, 'delta residue\n');
+    secureArtifactLayout(artifactRoot);
+    const env = { RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot, RAN_AGENT_NO_SUDO: '1' };
+    const preview = run('prune-hermes-release-artifacts.sh', ['--dry-run'], env);
+    assert.match(preview, /ephemera=3/);
+    assert.match(preview, /incomplete=1/);
+    assert.equal(existsSync(stage), true);
+    const output = run('prune-hermes-release-artifacts.sh', ['--apply'], env);
+    assert.match(output, /ephemera=3/);
+    assert.equal(existsSync(stage), false);
+    assert.equal(existsSync(archive), false);
+    assert.equal(existsSync(delta), false);
+    assert.equal(existsSync(incomplete), false);
+    assert.equal(existsSync(protectedIncomplete), true);
+    assert.equal(existsSync(unknownFinal), true);
+    assert.match(run('prune-hermes-release-artifacts.sh', ['--apply'], env), /ephemera=0/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('failed pre-transaction release removes only its own partial artifacts', () => {
+  const fixture = makeDeployServiceFixture();
+  const artifactRoot = join(fixture.dir, 'artifacts');
+  const stage = join(artifactRoot, 'stages', 'release-stage.partial.fixture');
+  const archive = join(artifactRoot, 'archives', `release-candidate.${'a'.repeat(40)}.tar`);
+  const delta = join(artifactRoot, 'archives', `release-delta.${'b'.repeat(40)}..${'a'.repeat(40)}.txt`);
+  const snapshot = join(artifactRoot, 'snapshots', '.release-incomplete.partial.fixture');
+  try {
+    assert.throws(() => runDeployServiceFixture(fixture, [
+      `STAGE_DIR=${JSON.stringify(stage)}`,
+      `CANDIDATE_ARCHIVE=${JSON.stringify(archive)}`,
+      `DELTA_FILE=${JSON.stringify(delta)}`,
+      `SNAPSHOT_DIR=${JSON.stringify(snapshot)}`,
+      'SNAPSHOT_BUILD_ACTIVE=1',
+      'mkdir -p "$STAGE_DIR" "$(dirname "$CANDIDATE_ARCHIVE")" "$SNAPSHOT_DIR/files"',
+      'printf residue > "$STAGE_DIR/payload"',
+      'printf residue > "$CANDIDATE_ARCHIVE"',
+      'printf residue > "$DELTA_FILE"',
+      'printf partial > "$SNAPSHOT_DIR/files/0"',
+      'exit 28',
+    ].join('\n')), /Command failed/);
+    for (const path of [stage, archive, delta, snapshot]) assert.equal(existsSync(path), false);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('a corrupt unpublished transaction state is cleaned without becoming rollback authority', () => {
+  const fixture = makeDeployServiceFixture();
+  const snapshot = join(fixture.dir, 'artifacts', 'snapshots', '.release-incomplete.corrupt.fixture');
+  const marker = join(fixture.dir, 'rollback-boundary');
+  try {
+    assert.throws(() => runDeployServiceFixture(fixture, [
+      `SNAPSHOT_DIR=${JSON.stringify(snapshot)}`,
+      'SNAPSHOT_BUILD_ACTIVE=1',
+      `SNAPSHOT_FINAL_DIR=${JSON.stringify(join(fixture.dir, 'artifacts', 'snapshots', 'release-transaction.never-published.fixture'))}`,
+      'mkdir -p "$SNAPSHOT_DIR/files"',
+      'printf prior > "$SNAPSHOT_DIR/prior-head"',
+      'printf manifest > "$SNAPSHOT_DIR/manifest"',
+      'printf services > "$SNAPSHOT_DIR/services"',
+      'printf "{}" > "$SNAPSHOT_DIR/transaction-state.json"',
+      `rollback_transaction() { printf '%s' "$1" > ${JSON.stringify(marker)}; stop_release_transaction_lock; exit "$1"; }`,
+      'exit 28',
+    ].join('\n')), /Command failed/);
+    assert.equal(existsSync(marker), false);
+    assert.equal(existsSync(snapshot), false);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('durable accepted state plus production pointer suppresses signal-window rollback', () => {
+  const fixture = makeDeployServiceFixture();
+  const snapshot = join(fixture.dir, 'artifacts', 'snapshots', 'release-transaction.accepted-window.fixture');
+  const pointer = join(fixture.dir, 'artifacts', 'snapshots', 'current-production.json');
+  const marker = join(fixture.dir, 'unexpected-rollback');
+  try {
+    mkdirSync(join(snapshot, 'files'), { recursive: true });
+    writeRetentionState(snapshot, { candidate_sha: 'b'.repeat(40) });
+    writeFileSync(pointer, JSON.stringify({
+      schema_version: 1,
+      transaction_id: snapshot.split('/').at(-1),
+      candidate_sha: 'b'.repeat(40),
+    }));
+    assert.throws(() => runDeployServiceFixture(fixture, [
+      `SNAPSHOT_DIR=${JSON.stringify(snapshot)}`,
+      `CURRENT_PRODUCTION_POINTER=${JSON.stringify(pointer)}`,
+      `CANDIDATE=${JSON.stringify('b'.repeat(40))}`,
+      'TRANSACTION_STARTED=1',
+      'TRANSACTION_ACCEPTED=0',
+      `rollback_transaction() { printf rollback > ${JSON.stringify(marker)}; exit 70; }`,
+      'exit 28',
+    ].join('\n')), /Command failed/);
+    assert.equal(existsSync(marker), false);
+    assert.equal(existsSync(pointer), true);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
   }
 });
 
@@ -1074,6 +1298,7 @@ test('artifact cleanup rejects snapshot mount boundaries and production-pointer 
       status: 'rollback_used', acceptance_state: 'not_accepted', rollback_state: 'rollback_used',
       rollbackable: false, current_production_identity: 'transaction:prior-production',
     });
+    secureArtifactLayout(artifactRoot);
     const encodedSnapshot = realpathSync(snapshot).replaceAll('\\', '\\134').replaceAll(' ', '\\040');
     writeFileSync(mountinfo, `36 25 0:32 / ${encodedSnapshot} rw,relatime - ext4 /dev/root rw\n`);
     run('prune-hermes-release-artifacts.sh', ['--apply'], {
@@ -1096,6 +1321,21 @@ test('artifact cleanup rejects snapshot mount boundaries and production-pointer 
       RAN_AGENT_NO_SUDO: '1',
     }), /production_pointer_invalid/);
     assert.equal(existsSync(join(snapshot, 'files', '900')), true);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('artifact cleanup rejects permissive or foreign release subroots', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-release-layout-'));
+  const artifactRoot = join(dir, 'artifacts');
+  try {
+    secureArtifactLayout(artifactRoot);
+    chmodSync(join(artifactRoot, 'stages'), 0o755);
+    assert.throws(() => run('prune-hermes-release-artifacts.sh', ['--dry-run'], {
+      RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot,
+      RAN_AGENT_NO_SUDO: '1',
+    }), /artifact_layout_identity_invalid/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1153,6 +1393,42 @@ test('post-prune capacity gate stops before snapshot, service stop, or checkout 
     assert.equal(readFileSync(mutation, 'utf8'), 'snapshot\nstop\ncheckout\n');
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('capacity admission counts filesystem blocks, inodes, and fixed candidate reserves', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-capacity-fixed-'));
+  const helper = join(root, 'scripts', 'check-hermes-snapshot-capacity.py');
+  try {
+    const tiny = join(dir, 'tiny');
+    mkdirSync(tiny);
+    for (let index = 0; index < 8; index += 1) writeFileSync(join(tiny, String(index)), 'x');
+    const output = execFileSync(pythonBin, ['-I', helper, '--artifact-root', dir, '--fixed-bytes', '4096'], {
+      env: { PATH: '/usr/bin:/bin', RAN_AGENT_TEST_MODE: '1', RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_BYTES: String(3 * 1024 ** 3) },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    assert.match(output, new RegExp(`required_bytes=${2 * 1024 ** 3 + 4096}`));
+    const allocated = execFileSync(pythonBin, ['-I', helper, '--artifact-root', dir, '--source', tiny], {
+      env: { PATH: '/usr/bin:/bin', RAN_AGENT_TEST_MODE: '1', RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_BYTES: String(3 * 1024 ** 3) },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    const requiredBytes = Number(allocated.match(/required_bytes=(\d+)/)?.[1]);
+    assert.ok(requiredBytes > 2 * 1024 ** 3 + 8, 'one-byte files must reserve allocated blocks, not only logical bytes');
+    assert.throws(() => execFileSync(pythonBin, ['-I', helper, '--artifact-root', dir, '--fixed-inodes', '1'], {
+      env: {
+        PATH: '/usr/bin:/bin', RAN_AGENT_TEST_MODE: '1',
+        RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_BYTES: String(3 * 1024 ** 3),
+        RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_INODES: '0',
+      },
+      stdio: 'pipe',
+    }), /Command failed/);
+    assert.throws(() => execFileSync(pythonBin, ['-I', helper, '--artifact-root', dir, '--fixed-bytes', '-1'], {
+      env: { PATH: '/usr/bin:/bin' }, stdio: 'pipe',
+    }), /Command failed/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
@@ -1286,6 +1562,7 @@ test('successful explicit rollback consumes its current-production pointer and p
       transaction_id: snapshot.split('/').at(-1),
       candidate_sha: 'b'.repeat(40),
     }));
+    secureArtifactLayout(join(fixture.dir, 'artifacts'));
     runDeployServiceFixture(fixture, [
       `SNAPSHOT_DIR=${JSON.stringify(snapshot)}`,
       `CURRENT_PRODUCTION_POINTER=${JSON.stringify(pointer)}`,
@@ -1320,6 +1597,7 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
   const state = join(dir, 'state');
   const secretRoot = join(dir, 'secrets');
   const bin = join(dir, 'bin');
+  const authorityMarker = join(dir, 'rollback-authority');
   try {
     mkdirSync(repo);
     mkdirSync(bin);
@@ -1356,6 +1634,8 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
     mkdirSync(join(artifactRoot, 'archives'), { recursive: true });
     mkdirSync(state);
     mkdirSync(secretRoot);
+    secureArtifactLayout(artifactRoot);
+    chmodSync(secretRoot, 0o700);
     writeFileSync(join(snapshot, 'files', '900'), 'payload\n');
     writeRetentionState(snapshot, {
       candidate_sha: candidateSha,
@@ -1374,6 +1654,30 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
     chmodSync(join(bin, 'sudo'), 0o755);
     chmodSync(join(bin, 'sha256sum'), 0o755);
 
+    assert.throws(() => execFileSync('bash', ['-c', [
+      'set -euo pipefail',
+      `set -- --rollback ${JSON.stringify(snapshot)}`,
+      `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
+      'SERVER_ROOT="$REPO_ROOT"',
+      `CANONICAL_LIVE_STATE_DIR=${JSON.stringify(state)}`,
+      'STATE_DIR="$CANONICAL_LIVE_STATE_DIR"',
+      'SUDO=(sudo)',
+      'require_artifact_layout() { return 0; }',
+      `explicit_rollback --rollback ${JSON.stringify(snapshot)}`,
+    ].join('\n')], {
+      cwd: repo,
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        RAN_AGENT_PYTHON_BIN: pythonBin,
+        RAN_AGENT_RELEASE_CONTROL_ROOT: repo,
+        RAN_AGENT_RELEASE_CANDIDATE: prior,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot,
+        RAN_AGENT_RELEASE_STATE_DIR: state,
+        RAN_AGENT_NO_SUDO: '1',
+      },
+      stdio: 'pipe',
+    }), /rollback_controller_candidate_mismatch/);
+
     execFileSync('bash', ['-c', [
       'set -euo pipefail',
       `set -- --rollback ${JSON.stringify(snapshot)}`,
@@ -1384,6 +1688,7 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
       `SECRET_ROLLBACK_ROOT=${JSON.stringify(secretRoot)}`,
       'SUDO=(sudo)',
       'require_artifact_layout() { return 0; }',
+      `require_candidate_bootstrap_authority() { printf verified > ${JSON.stringify(authorityMarker)}; }`,
       'backup_steward_token() { SECRET_ROLLBACK_DIR=""; STEWARD_TOKEN_HAD_PRIOR=0; STEWARD_TOKEN_RESTORED=1; }',
       'restore_steward_token() { STEWARD_TOKEN_RESTORED=1; return 0; }',
       'destroy_secret_rollback() { return 0; }',
@@ -1402,6 +1707,7 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
         RAN_AGENT_NODE_BIN: nodeBin,
         RAN_AGENT_PYTHON_BIN: pythonBin,
         RAN_AGENT_RELEASE_CONTROL_ROOT: repo,
+        RAN_AGENT_RELEASE_CANDIDATE: candidateSha,
         RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot,
         RAN_AGENT_RELEASE_STATE_DIR: state,
         RAN_AGENT_RELEASE_SECRET_ROLLBACK_ROOT: secretRoot,
@@ -1410,6 +1716,7 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
       stdio: 'pipe',
     });
     assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), prior);
+    assert.equal(readFileSync(authorityMarker, 'utf8'), 'verified');
     assert.equal(existsSync(join(repo, 'scripts', 'prune-hermes-release-artifacts.sh')), false);
     assert.equal(existsSync(join(snapshot, 'files')), false);
     assert.equal(existsSync(pointer), false);
@@ -1432,6 +1739,7 @@ test('artifact cleanup serializes destructive cleanup processes', async () => {
       status: 'rollback_used', acceptance_state: 'not_accepted', rollback_state: 'rollback_used',
       rollbackable: false, current_production_identity: 'transaction:prior-production',
     });
+    secureArtifactLayout(artifactRoot);
     holder = spawn(pythonBin, ['-c', [
       'import fcntl,sys,time',
       'handle=open(sys.argv[1], "w")',
@@ -1501,12 +1809,152 @@ test('release apply and rollback share one non-blocking transaction lock', async
       env: { ...env, RAN_AGENT_TEST_RELEASE_LOCK_HOLD_SECONDS: '0' },
       stdio: 'pipe',
     }), /release_transaction_locked/);
+    assert.throws(() => execFileSync('bash', [join(root, 'scripts', 'prune-hermes-release-artifacts.sh'), '--apply'], {
+      cwd: repo,
+      env: {
+        ...process.env,
+        PATH: '/usr/bin:/bin',
+        RAN_AGENT_PYTHON_BIN: pythonBin,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot,
+        RAN_AGENT_NO_SUDO: '1',
+      },
+      stdio: 'pipe',
+    }), /release_transaction_locked/);
   } finally {
     if (holder?.exitCode === null) {
       holder.kill('SIGTERM');
       await once(holder, 'exit').catch(() => {});
     }
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('rollback control path does not resolve Node before loading its snapshot', () => {
+  const fixture = makeDeployServiceFixture();
+  try {
+    const output = runDeployServiceFixture(fixture, 'printf "rollback-node-independent\\n"', {
+      RAN_AGENT_NODE_BIN: '',
+      RAN_AGENT_SYSTEMCTL_BIN: '/definitely/missing/systemctl',
+    });
+    assert.match(output, /rollback-node-independent/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('release lock reports identity corruption separately from contention', () => {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ran-agent-release-lock-identity-')));
+  const repo = join(dir, 'repo');
+  const scripts = join(repo, 'scripts');
+  const artifactRoot = join(dir, 'artifacts');
+  try {
+    mkdirSync(scripts, { recursive: true });
+    mkdirSync(artifactRoot);
+    mkdirSync(join(artifactRoot, '.release-transaction.lock'));
+    for (const name of ['deploy-hermes-release.sh', 'resolve-hermes-service-node.sh']) {
+      copyFileSync(join(root, 'scripts', name), join(scripts, name));
+      chmodSync(join(scripts, name), 0o755);
+    }
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'release-lock@example.invalid'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'release lock'], { cwd: repo });
+    writeFileSync(join(repo, 'README.md'), 'fixture\n');
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: repo, stdio: 'pipe' });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    assert.throws(() => execFileSync('bash', [join(scripts, 'deploy-hermes-release.sh'), '--apply'], {
+      cwd: repo,
+      env: {
+        ...process.env,
+        PATH: '/usr/bin:/bin',
+        RAN_AGENT_NODE_BIN: nodeBin,
+        RAN_AGENT_PYTHON_BIN: pythonBin,
+        RAN_AGENT_RELEASE_CANDIDATE: sha,
+        RAN_AGENT_RELEASE_CONTROL_ROOT: repo,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot,
+        RAN_AGENT_TEST_MODE: '1',
+        RAN_AGENT_TEST_RELEASE_LOCK: '1',
+      },
+      stdio: 'pipe',
+    }), /release_lock_identity_invalid/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Linux root release gate proves cross-UID regular-file denial and FIFO readiness', {
+  skip: process.platform !== 'linux' || process.geteuid?.() !== 0,
+}, () => {
+  const runuser = '/usr/sbin/runuser';
+  assert.equal(existsSync(runuser), true, 'release host requires runuser');
+  const uid = Number(execFileSync('id', ['-u', 'ran-agent'], { encoding: 'utf8' }).trim());
+  const gid = Number(execFileSync('id', ['-g', 'ran-agent'], { encoding: 'utf8' }).trim());
+  const protectedRegular = Number(readFileSync('/proc/sys/fs/protected_regular', 'utf8').trim());
+  const regular = execFileSync(runuser, ['-u', 'ran-agent', '--', 'mktemp', '/tmp/ran-agent-release-lock-test.XXXXXX'], { encoding: 'utf8' }).trim();
+  const dir = mkdtempSync('/tmp/ran-agent-release-fifo-test.');
+  const fifo = join(dir, 'ready');
+  try {
+    if (protectedRegular > 0) {
+      assert.throws(() => execFileSync('/usr/bin/python3', ['-I', '-c', 'import pathlib,sys; pathlib.Path(sys.argv[1]).write_text("locked\\n")', regular], { stdio: 'pipe' }));
+    }
+    chownSync(dir, uid, gid);
+    chmodSync(dir, 0o700);
+    execFileSync(runuser, ['-u', 'ran-agent', '--', 'mkfifo', '-m', '600', fifo]);
+    const descriptor = openSync(fifo, 'r+');
+    try {
+      execFileSync('/usr/bin/python3', ['-I', '-c', 'import os,sys; fd=os.open(sys.argv[1], os.O_WRONLY|os.O_NOFOLLOW); os.write(fd,b"locked\\n"); os.close(fd)', fifo]);
+      const value = Buffer.alloc(7);
+      assert.equal(readSync(descriptor, value, 0, value.length, null), 7);
+      assert.equal(value.toString(), 'locked\n');
+    } finally {
+      closeSync(descriptor);
+    }
+  } finally {
+    rmSync(regular, { force: true });
+    rmSync(dir, { recursive: true, force: true });
+  }
+
+  const cross = mkdtempSync('/tmp/ran-agent-release-cross-uid.');
+  const repo = join(cross, 'repo');
+  const artifactRoot = join(cross, 'artifacts');
+  try {
+    const ubuntuUid = Number(execFileSync('id', ['-u', 'ubuntu'], { encoding: 'utf8' }).trim());
+    const ubuntuGid = Number(execFileSync('id', ['-g', 'ubuntu'], { encoding: 'utf8' }).trim());
+    mkdirSync(join(repo, 'scripts'), { recursive: true });
+    mkdirSync(artifactRoot);
+    chmodSync(artifactRoot, 0o700);
+    for (const name of ['deploy-hermes-release.sh', 'resolve-hermes-service-node.sh']) {
+      copyFileSync(join(root, 'scripts', name), join(repo, 'scripts', name));
+      chmodSync(join(repo, 'scripts', name), 0o755);
+    }
+    writeFileSync(join(repo, 'README.md'), 'fixture\n');
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'lock@example.invalid'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'lock'], { cwd: repo });
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: repo, stdio: 'pipe' });
+    const sha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim();
+    execFileSync('chown', ['-R', `${ubuntuUid}:${ubuntuGid}`, repo]);
+    chmodSync(cross, 0o755);
+    const result = spawnSync(runuser, ['--user', 'ubuntu', '--group', 'ubuntu', '--', '/usr/bin/env',
+      'PATH=/usr/bin:/bin', `RAN_AGENT_NODE_BIN=${nodeBin}`, `RAN_AGENT_PYTHON_BIN=${pythonBin}`,
+      `RAN_AGENT_RELEASE_CANDIDATE=${sha}`, `RAN_AGENT_RELEASE_CONTROL_ROOT=${repo}`,
+      `RAN_AGENT_RELEASE_ARTIFACT_ROOT=${artifactRoot}`, 'RAN_AGENT_TEST_MODE=1',
+      'RAN_AGENT_TEST_RELEASE_LOCK=1', 'bash', join(repo, 'scripts', 'deploy-hermes-release.sh'), '--apply'], {
+      encoding: 'utf8',
+    });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /server_root_required/);
+    assert.doesNotMatch(result.stderr, /release_(?:transaction_locked|lock_protocol_failed|lock_timeout)/);
+    const lock = statSync(join(artifactRoot, '.release-transaction.lock'));
+    assert.equal(lock.uid, 0);
+    assert.equal(lock.gid, 0);
+    assert.equal(lock.mode & 0o777, 0o600);
+    assert.doesNotThrow(() => execFileSync('/usr/bin/python3', ['-I', '-c',
+      'import fcntl,sys; f=open(sys.argv[1], "a"); fcntl.flock(f, fcntl.LOCK_EX|fcntl.LOCK_NB)',
+      join(artifactRoot, '.release-transaction.lock')], { stdio: 'pipe' }));
+  } finally {
+    rmSync(cross, { recursive: true, force: true });
   }
 });
 
@@ -1674,6 +2122,8 @@ test('apply rejects a missing Python 3.12 before snapshot or checkout side effec
         'require_ombre_ingress_dropin_absent() { :; }',
         'require_node_sqlite() { :; }',
         'require_python_runtime() { :; }',
+        'project_checkout_permissions() { :; }',
+        'require_candidate_bootstrap_authority() { :; }',
         'require_artifact_layout() { :; }',
         'require_service_environment() { :; }',
         'require_atomic_state() { :; }',
@@ -1705,6 +2155,116 @@ test('apply rejects a missing Python 3.12 before snapshot or checkout side effec
     assert.ok(applyFlow.indexOf('require_apply_prerequisites') < applyFlow.indexOf('snapshot_node_durable_state'));
     assert.ok(applyFlow.indexOf('require_apply_prerequisites') < applyFlow.indexOf('activate_candidate_checkout'));
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('checkout permission projection reverses restrictive release umask without changing ownership', {
+  skip: process.geteuid?.() === 0,
+}, () => {
+  const repo = mkdtempSync(join(tmpdir(), 'ran-agent-checkout-permissions-'));
+  const scripts = join(repo, 'scripts');
+  const nested = join(repo, 'node_bridge', 'src');
+  try {
+    mkdirSync(scripts, { recursive: true });
+    mkdirSync(nested, { recursive: true });
+    const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+    writeFileSync(join(scripts, 'deploy-hermes-release.sh'), deploy.slice(0, deploy.lastIndexOf('if [[ "$MODE" == --rollback ]]')));
+    copyFileSync(join(root, 'scripts', 'resolve-hermes-service-node.sh'), join(scripts, 'resolve-hermes-service-node.sh'));
+    for (const name of ['deploy-hermes-release.sh', 'resolve-hermes-service-node.sh']) chmodSync(join(scripts, name), 0o755);
+    writeFileSync(join(nested, 'index.mjs'), 'export {};\n');
+    writeFileSync(join(repo, 'run.sh'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(repo, 'run.sh'), 0o755);
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'permissions@example.invalid'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'permissions'], { cwd: repo });
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: repo, stdio: 'pipe' });
+    const owner = statSync(repo);
+    assert.match(execFileSync('git', ['ls-files'], { cwd: repo, encoding: 'utf8' }), /node_bridge\/src\/index\.mjs/);
+    for (const path of [repo, join(repo, 'node_bridge'), nested]) chmodSync(path, 0o700);
+    for (const path of [join(nested, 'index.mjs'), join(repo, 'run.sh')]) chmodSync(path, 0o600);
+    execFileSync('bash', ['-c', [
+      'set -euo pipefail',
+      'set -- --rollback fixture',
+      `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
+      'SUDO=()',
+      'project_checkout_permissions repair',
+      'project_checkout_permissions verify',
+    ].join('\n')], {
+      cwd: repo,
+      env: {
+        PATH: '/usr/bin:/bin',
+        RAN_AGENT_PYTHON_BIN: pythonBin,
+        RAN_AGENT_RELEASE_CONTROL_ROOT: repo,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(repo, '..', 'permission-artifacts'),
+      },
+      stdio: 'pipe',
+    });
+    assert.equal(statSync(join(nested, 'index.mjs')).mode & 0o777, 0o644);
+    assert.equal(statSync(join(repo, 'run.sh')).mode & 0o777, 0o755);
+    assert.equal(statSync(nested).mode & 0o777, 0o755);
+    assert.equal(statSync(join(nested, 'index.mjs')).uid, owner.uid);
+    assert.equal(statSync(join(nested, 'index.mjs')).gid, owner.gid);
+    assert.match(readFileSync(join(root, 'node_bridge', 'start_node.sh'), 'utf8'), /\[ -r "\.env\.local" \]/);
+  } finally {
+    rmSync(repo, { recursive: true, force: true });
+  }
+});
+
+test('Linux root gate repairs only root-owned tracked paths back to the ubuntu checkout owner', {
+  skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !existsSync('/usr/sbin/runuser'),
+}, () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-root-owned-checkout-'));
+  const repo = join(dir, 'repo');
+  const scripts = join(repo, 'scripts');
+  const nested = join(repo, 'node_bridge', 'src');
+  try {
+    const uid = Number(execFileSync('id', ['-u', 'ubuntu'], { encoding: 'utf8' }).trim());
+    const gid = Number(execFileSync('id', ['-g', 'ubuntu'], { encoding: 'utf8' }).trim());
+    assert.notEqual(gid, 0, 'ubuntu checkout group must be non-root');
+    mkdirSync(scripts, { recursive: true });
+    mkdirSync(nested, { recursive: true });
+    const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+    writeFileSync(join(scripts, 'deploy-hermes-release.sh'), deploy.slice(0, deploy.lastIndexOf('if [[ "$MODE" == --rollback ]]')));
+    copyFileSync(join(root, 'scripts', 'resolve-hermes-service-node.sh'), join(scripts, 'resolve-hermes-service-node.sh'));
+    writeFileSync(join(nested, 'index.mjs'), 'export {};\n');
+    for (const file of [join(scripts, 'deploy-hermes-release.sh'), join(scripts, 'resolve-hermes-service-node.sh')]) chmodSync(file, 0o755);
+    execFileSync('git', ['init'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'permissions@example.invalid'], { cwd: repo });
+    execFileSync('git', ['config', 'user.name', 'permissions'], { cwd: repo });
+    execFileSync('git', ['add', '.'], { cwd: repo });
+    execFileSync('git', ['commit', '-m', 'fixture'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('chown', ['-R', `${uid}:${gid}`, dir]);
+    chmodSync(dir, 0o755);
+    chownSync(join(repo, 'node_bridge'), 0, gid);
+    chmodSync(join(repo, 'node_bridge'), 0o700);
+    chownSync(join(nested, 'index.mjs'), 0, 0);
+    chmodSync(join(nested, 'index.mjs'), 0o600);
+    const command = [
+      'set -euo pipefail',
+      'set -- --rollback fixture',
+      `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
+      'project_checkout_permissions repair',
+      'project_checkout_permissions verify',
+    ].join('\n');
+    const args = ['--user', 'ubuntu', '--group', 'ubuntu', '--', 'env',
+      `RAN_AGENT_PYTHON_BIN=${pythonBin}`, `RAN_AGENT_RELEASE_CONTROL_ROOT=${repo}`,
+      `RAN_AGENT_RELEASE_ARTIFACT_ROOT=${join(dir, 'artifacts')}`, 'PATH=/usr/bin:/bin',
+      'bash', '-c', command];
+    execFileSync('/usr/sbin/runuser', args, { stdio: 'pipe' });
+    assert.equal(statSync(join(repo, 'node_bridge')).uid, uid);
+    assert.equal(statSync(join(repo, 'node_bridge')).gid, gid);
+    assert.equal(statSync(join(repo, 'node_bridge')).mode & 0o777, 0o755);
+    assert.equal(statSync(join(nested, 'index.mjs')).uid, uid);
+    assert.equal(statSync(join(nested, 'index.mjs')).gid, gid);
+    assert.equal(statSync(join(nested, 'index.mjs')).mode & 0o777, 0o644);
+    execFileSync('/usr/sbin/runuser', ['--user', 'ran-agent', '--group', 'ran-agent', '--',
+      '/usr/bin/test', '-r', join(nested, 'index.mjs')], { stdio: 'pipe' });
+    assert.throws(() => execFileSync('/usr/sbin/runuser', ['--user', 'ran-agent', '--group', 'ran-agent', '--',
+      '/usr/bin/test', '-w', join(nested, 'index.mjs')], { stdio: 'pipe' }));
+  } finally {
+    execFileSync('chmod', ['-R', 'u+w', dir], { stdio: 'ignore' });
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -2002,6 +2562,7 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
       `Environment=RAN_AGENT_STEWARD_TOKEN_FILE=${join(state, 'ombre-compat', 'secrets', 'steward-api-token')}`,
     ]) assert.match(installedOmbreUnit, new RegExp(expected.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.match(installedNodeDropin, new RegExp(`Environment=RAN_AGENT_STATE_DIR=${state}`.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+    assert.match(installedNodeDropin, new RegExp(`Environment=RAN_AGENT_NODE_BIN=${nodeBin}`.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.equal(readFileSync(config, 'utf8'), 'operator-owned-config\n');
     const projection = join(state, 'hermes', 'published-memory-context.json');
     const pointer = JSON.parse(readFileSync(projection, 'utf8'));
@@ -2475,6 +3036,8 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /STAGED_CANDIDATE.*RAN_AGENT_RELEASE_STAGED_CANDIDATE/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\]; then\s+PATH=\/usr\/bin:\/bin/);
   assert.ok(source.indexOf('STAGED_CANDIDATE=') < source.indexOf('SOURCE_ROOT_INPUT='));
+  assert.match(source, /\/usr\/bin\/chgrp "\$\(\/usr\/bin\/id -g\)" "\$SANDBOX_ROOT"/);
+  assert.ok(source.indexOf('/usr/bin/chgrp') < source.indexOf('mkdir -p "$SANDBOX_ROOT/home"'));
   assert.doesNotMatch(source, /(^|[^/])\benv -i/);
   assert.match(source, /run_clean "\$NODE_BIN" "\$resolver" \/usr\/bin\/systemctl/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\][\s\S]*\/usr\/bin\/systemctl[\s\S]*else\s+HERMES_TEST_BIN="\$\{RAN_AGENT_HERMES_TEST_BIN:-\$HOME\/\.local\/bin\/hermes\}"/);
@@ -2628,6 +3191,7 @@ test('release gate executes a git-less staged candidate from its explicit immuta
 
 test('release transaction snapshots the live production checkout before activating an immutable candidate', () => {
   const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+  const applyFlow = deploy.slice(deploy.lastIndexOf('require_apply_prerequisites'));
 
   assert.match(deploy, /CANDIDATE.*\^\[0-9a-f\]\{40\}\$/);
   assert.doesNotMatch(deploy, /candidate_not_checked_out/);
@@ -2640,13 +3204,23 @@ test('release transaction snapshots the live production checkout before activati
   assert.ok(deploy.indexOf('snapshot_runtime_state') < deploy.indexOf('activate_candidate_checkout'));
   assert.ok(deploy.indexOf('snapshot_state_migrations') < deploy.indexOf('activate_candidate_checkout'));
   assert.ok(deploy.indexOf('hermes-release-gate.sh" --all') < deploy.lastIndexOf('snapshot_runtime_state'));
-  assert.ok(deploy.lastIndexOf('prune-hermes-release-artifacts.sh" --apply') < deploy.lastIndexOf('snapshot_capacity_gate'));
-  assert.ok(deploy.lastIndexOf('snapshot_capacity_gate') < deploy.lastIndexOf('snapshot_runtime_state'));
+  assert.ok(deploy.indexOf('prune_release_artifacts "$SCRIPT_ROOT"') < deploy.lastIndexOf('snapshot_capacity_gate "$STAGE_DIR" 0'));
+  assert.ok(deploy.lastIndexOf('snapshot_capacity_gate "$STAGE_DIR" 0') < deploy.lastIndexOf('snapshot_runtime_state'));
+  assert.ok(applyFlow.indexOf('prune_release_artifacts "$SCRIPT_ROOT"') < applyFlow.indexOf('snapshot_capacity_gate "$SCRIPT_ROOT" "$PRE_STAGE_RESERVE_BYTES"'));
+  assert.ok(applyFlow.indexOf('snapshot_capacity_gate "$SCRIPT_ROOT" "$PRE_STAGE_RESERVE_BYTES"') < applyFlow.indexOf('report_release_delta'));
+  assert.ok(applyFlow.indexOf('snapshot_capacity_gate "$SCRIPT_ROOT" "$PRE_STAGE_RESERVE_BYTES"') < applyFlow.indexOf('stage_candidate'));
+  assert.match(deploy.match(/snapshot_runtime_state\(\) \{([\s\S]*?)\n\}/)?.[1] || '', /write_transaction_state snapshot-created false[\s\S]*TRANSACTION_STARTED=1/);
+  const quiescedSnapshot = applyFlow.indexOf('snapshot_state_migrations');
+  const resealedState = applyFlow.indexOf('write_transaction_state snapshot-created false', quiescedSnapshot);
+  const resealedVerification = applyFlow.indexOf('verify_in_progress_snapshot "$SNAPSHOT_DIR"', resealedState);
+  assert.ok(quiescedSnapshot < resealedState);
+  assert.ok(resealedState < resealedVerification);
+  assert.ok(resealedVerification < applyFlow.indexOf('activate_candidate_checkout'));
   assert.ok(deploy.indexOf('snapshot_code_revision') < deploy.lastIndexOf('activate_candidate_checkout'));
   assert.match(deploy, /--rollback/);
   assert.match(deploy, /rollback-complete deployment_status=/);
   assert.match(deploy, /rollback-incomplete deployment_status=/);
-  assert.match(deploy, /trap 'rollback_transaction \$\?' EXIT/);
+  assert.match(deploy, /trap 'release_exit \$\?' EXIT/);
   assert.match(deploy, /for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress clear_ombre_ingress_block restore_service_state/);
   assert.doesNotMatch(deploy, /restore_(?:code_revision|runtime_files|state_migrations|service_state) \|\| true/);
   assert.match(deploy, /service_env_source_unavailable/);
@@ -2661,13 +3235,13 @@ test('main and release-candidate entry points resolve remote refs to immutable c
 
   assert.match(main, /git fetch --no-tags origin main/);
   assert.match(main, /refs\/remotes\/origin\/main/);
-  assert.match(main, /RAN_AGENT_RELEASE_CANDIDATE="\$CANDIDATE"/);
+  assert.match(main, /git show "\$CANDIDATE:scripts\/bootstrap-hermes-release\.sh"/);
   assert.match(main, /worktree_dirty/);
   assert.doesNotMatch(main, /git pull|git checkout|git switch/);
   assert.match(candidateEntry, /--branch\)[\s\S]*--commit\)/);
   assert.match(candidateEntry, /git fetch --no-tags origin/);
   assert.match(candidateEntry, /git check-ref-format --branch/);
-  assert.match(candidateEntry, /RAN_AGENT_RELEASE_CANDIDATE="\$CANDIDATE"/);
+  assert.match(candidateEntry, /git show "\$CANDIDATE:scripts\/bootstrap-hermes-release\.sh"/);
   assert.match(candidateEntry, /worktree_dirty/);
   assert.doesNotMatch(candidateEntry, /git pull|git checkout|git switch/);
 });
@@ -2712,6 +3286,88 @@ test('first-release bootstrap runs an extracted immutable framework while the pr
   }
 });
 
+test('rollback bootstrap re-extracts the candidate controller after checkout returned to the prior commit', () => {
+  const fixture = makeBootstrapFixture();
+  const extracted = join(fixture.repo, '..', `rollback-bootstrap-${fixture.candidateSha}.sh`);
+  try {
+    assert.equal(existsSync(join(fixture.repo, 'scripts', 'deploy-hermes-release.sh')), false);
+    writeFileSync(extracted, execFileSync('git', ['show', `${fixture.candidateSha}:scripts/bootstrap-hermes-release.sh`], {
+      cwd: fixture.repo,
+      encoding: 'utf8',
+    }));
+    chmodSync(extracted, 0o755);
+    let failure;
+    try {
+      execFileSync('bash', [extracted, '--rollback', fixture.candidateSha, join(fixture.repo, '..', 'snapshot')], {
+        cwd: fixture.repo,
+        env: {
+          PATH: '/usr/bin:/bin',
+          RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+          RAN_AGENT_NODE_BIN: nodeBin,
+          RAN_AGENT_PYTHON_BIN: pythonBin,
+          RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(fixture.repo, '..', 'release-artifacts'),
+        },
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    } catch (error) {
+      failure = error;
+    }
+    assert.match(String(failure?.stderr), /deploy-hermes-release: failed:server_root_required/);
+    assert.doesNotMatch(String(failure?.stderr), /bootstrap-hermes-release: failed/);
+    assert.equal(fixture.runGit(['rev-parse', 'HEAD']).trim(), fixture.prior);
+    assert.equal(fixture.runGit(['status', '--short']).trim(), '');
+  } finally {
+    rmSync(extracted, { force: true });
+    rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
+test('apply authority accepts only the complete candidate-extracted bootstrap root', () => {
+  const fixture = makeBootstrapFixture();
+  const bootstrapRoot = mkdtempSync(join(tmpdir(), 'ran-agent-release-bootstrap.'));
+  const scripts = join(bootstrapRoot, 'scripts');
+  const harness = join(fixture.repo, '..', `authority-harness-${fixture.candidateSha}.sh`);
+  mkdirSync(scripts);
+  chmodSync(bootstrapRoot, 0o700);
+  for (const file of bootstrapFrameworkFiles) {
+    writeFileSync(join(scripts, file), fixture.runGit(['show', `${fixture.candidateSha}:scripts/${file}`]));
+  }
+  writeFileSync(join(bootstrapRoot, 'manifest'), fixture.runGit(['show', `${fixture.candidateSha}:docs/governance/hermes_release_bootstrap.v1.sha256`]));
+  const deploySource = readFileSync(join(scripts, 'deploy-hermes-release.sh'), 'utf8');
+  writeFileSync(harness, deploySource.slice(0, deploySource.lastIndexOf('if [[ "$MODE" == --rollback ]]')));
+  const verify = (authorityRoot) => execFileSync('bash', ['-c', [
+    'set -euo pipefail',
+    'set -- --rollback fixture',
+    `source ${JSON.stringify(harness)}`,
+    `SCRIPT_ROOT=${JSON.stringify(bootstrapRoot)}`,
+    `CANDIDATE=${JSON.stringify(fixture.candidateSha)}`,
+    'require_candidate_bootstrap_authority',
+  ].join('\n')], {
+    cwd: fixture.repo,
+    env: {
+      PATH: '/usr/bin:/bin',
+      TMPDIR: tmpdir(),
+      RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_PYTHON_BIN: pythonBin,
+      RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+      RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(fixture.repo, '..', 'release-artifacts'),
+      RAN_AGENT_RELEASE_BOOTSTRAP_ROOT: authorityRoot,
+    },
+    stdio: 'pipe',
+  });
+  try {
+    assert.doesNotThrow(() => verify(bootstrapRoot));
+    assert.throws(() => verify(fixture.repo), /candidate_bootstrap_required/);
+    writeFileSync(join(scripts, 'resolve-hermes-service-node.sh'), '\n# tampered after extraction\n', { flag: 'a' });
+    assert.throws(() => verify(bootstrapRoot), /candidate_bootstrap_required/);
+  } finally {
+    rmSync(harness, { force: true });
+    rmSync(bootstrapRoot, { recursive: true, force: true });
+    rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
 test('bootstrap fails closed for an invalid candidate, digest mismatch, and a dirty production checkout', () => {
   const invalid = makeBootstrapFixture();
   const mismatch = makeBootstrapFixture({ corruptManifest: true });
@@ -2741,19 +3397,65 @@ test('bootstrap fails closed for an invalid candidate, digest mismatch, and a di
 
 test('release node resolver uses explicit input, systemctl show, systemctl cat, and fails closed without an absolute node executable', () => {
   const resolver = join(root, 'scripts', 'resolve-hermes-service-node.sh');
+  const byEnvironment = makeSystemctlFixture({ show: `RAN_AGENT_NODE_BIN=${nodeBin}` });
   const byShow = makeSystemctlFixture({ show: `{ path=${nodeBin} ; argv[]=${nodeBin} /opt/ran_agent/node_bridge/src/index.mjs ; }` });
   const byCat = makeSystemctlFixture({ cat: `ExecStart=${nodeBin} /opt/ran_agent/node_bridge/src/index.mjs` });
   const unresolved = makeSystemctlFixture({ show: '{ path=/usr/bin/env ; argv[]=/usr/bin/env bash -lc node ; }', cat: 'ExecStart=/usr/bin/env bash -lc node' });
+  const active = mkdtempSync(join(tmpdir(), 'ran-agent-active-node-'));
+  const activeSystemctl = join(active, 'systemctl');
+  const wrongNode = join(active, 'node');
+  const ambiguousNode = join(active, 'other', 'node');
+  mkdirSync(join(active, 'proc', '123', 'task', '123'), { recursive: true });
+  mkdirSync(join(active, 'proc', '456', 'task', '456'), { recursive: true });
+  symlinkSync('/bin/bash', join(active, 'proc', '123', 'exe'));
+  symlinkSync(nodeBin, join(active, 'proc', '456', 'exe'));
+  writeFileSync(join(active, 'proc', '123', 'task', '123', 'children'), '456\n');
+  writeFileSync(join(active, 'proc', '456', 'task', '456', 'children'), '');
+  symlinkSync('/bin/sh', wrongNode);
+  writeFileSync(activeSystemctl, `#!/bin/sh
+case "$*" in
+  *--property=Environment*) printf '%s\\n' 'RAN_AGENT_NODE_BIN=${nodeBin}' ;;
+  *--property=MainPID*) printf '%s\\n' 123 ;;
+  *--property=ExecStart*) printf '%s\\n' '{ path=${nodeBin} ; }' ;;
+  cat*) printf '%s\\n' 'ExecStart=${nodeBin} /opt/ran_agent/node_bridge/src/index.mjs' ;;
+esac
+`);
+  chmodSync(activeSystemctl, 0o755);
   const runResolver = (env) => execFileSync('bash', [resolver], {
     env: { PATH: '/usr/bin:/bin', ...env }, encoding: 'utf8', stdio: 'pipe',
   }).trim();
   try {
     assert.equal(runResolver({ RAN_AGENT_NODE_BIN: nodeBin, RAN_AGENT_SYSTEMCTL_BIN: '/missing/systemctl' }), nodeBin);
+    assert.equal(runResolver({ RAN_AGENT_SYSTEMCTL_BIN: byEnvironment.path }), nodeBin);
     assert.equal(runResolver({ RAN_AGENT_SYSTEMCTL_BIN: byShow.path }), nodeBin);
     assert.equal(runResolver({ RAN_AGENT_SYSTEMCTL_BIN: byCat.path }), nodeBin);
     assert.throws(() => runResolver({ RAN_AGENT_SYSTEMCTL_BIN: unresolved.path }), /Command failed/);
+    assert.equal(runResolver({
+      RAN_AGENT_SYSTEMCTL_BIN: activeSystemctl,
+      RAN_AGENT_TEST_MODE: '1',
+      RAN_AGENT_TEST_PROC_ROOT: join(active, 'proc'),
+    }), nodeBin);
+    assert.throws(() => runResolver({
+      RAN_AGENT_NODE_BIN: wrongNode,
+      RAN_AGENT_SYSTEMCTL_BIN: activeSystemctl,
+      RAN_AGENT_TEST_MODE: '1',
+      RAN_AGENT_TEST_PROC_ROOT: join(active, 'proc'),
+    }), /node_service_(?:explicit_environment|process_environment)_mismatch/);
+    mkdirSync(join(active, 'proc', '789', 'task', '789'), { recursive: true });
+    mkdirSync(join(active, 'other'));
+    writeFileSync(ambiguousNode, '#!/bin/sh\nexit 0\n');
+    chmodSync(ambiguousNode, 0o755);
+    symlinkSync(ambiguousNode, join(active, 'proc', '789', 'exe'));
+    writeFileSync(join(active, 'proc', '789', 'task', '789', 'children'), '');
+    writeFileSync(join(active, 'proc', '123', 'task', '123', 'children'), '456 789\n');
+    assert.throws(() => runResolver({
+      RAN_AGENT_SYSTEMCTL_BIN: activeSystemctl,
+      RAN_AGENT_TEST_MODE: '1',
+      RAN_AGENT_TEST_PROC_ROOT: join(active, 'proc'),
+    }), /node_service_process_ambiguous/);
   } finally {
-    for (const fixture of [byShow, byCat, unresolved]) rmSync(fixture.dir, { recursive: true, force: true });
+    for (const fixture of [byEnvironment, byShow, byCat, unresolved]) rmSync(fixture.dir, { recursive: true, force: true });
+    rmSync(active, { recursive: true, force: true });
   }
 });
 
@@ -2853,6 +3555,9 @@ test('bootstrap manifest pins the exact candidate framework sources', () => {
     'scripts/bootstrap-hermes-release.sh',
     'scripts/deploy-hermes-release.sh',
     'scripts/resolve-hermes-service-node.sh',
+    'scripts/prune-hermes-release-artifacts.sh',
+    'scripts/check-hermes-snapshot-capacity.py',
+    'scripts/ombre_o1_contract.py',
   ]) {
     assert.match(entries.get(path) || '', /^[0-9a-f]{64}$/);
     assert.equal(entries.get(path), sha256(readFileSync(join(root, path))));
