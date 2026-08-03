@@ -36,8 +36,11 @@ class OmbreStewardTokenTest(unittest.TestCase):
             account = pwd.getpwnam("ran-agent")
         except KeyError:
             self.skipTest("ran-agent account is unavailable")
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(
+            prefix="ran-agent-steward-root-verifier-", dir="/tmp"
+        ) as directory:
             root = Path(directory)
+            os.chown(root, os.geteuid(), os.getegid())
             root.chmod(0o755)
             state = root / "state"
             source = state / "ombre-brain/upstream"
@@ -72,10 +75,10 @@ class OmbreStewardTokenTest(unittest.TestCase):
             token.write_text(("a" * 64) + "\n", encoding="ascii")
             token.chmod(0o600)
             identity_file.write_text(json.dumps({"base_upstream_commit": head}), encoding="utf-8")
-            for owned_root in (source, venv):
-                for path in [owned_root, *owned_root.rglob("*")]:
-                    os.chown(path, account.pw_uid, account.pw_gid)
-            os.chown(token, account.pw_uid, account.pw_gid)
+            for path in [state, *state.rglob("*")]:
+                os.chown(path, account.pw_uid, account.pw_gid)
+            for path in (state, state / "ombre-brain"):
+                path.chmod(0o700)
 
             result = subprocess.run(
                 [
