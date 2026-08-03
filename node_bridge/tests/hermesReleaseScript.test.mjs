@@ -1846,7 +1846,10 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
       },
       stdio: 'pipe',
     }, dir);
-    assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), prior);
+    assert.equal(runAsCheckoutOperator('git', ['rev-parse', 'HEAD'], {
+      cwd: repo,
+      encoding: 'utf8',
+    }, dir).trim(), prior);
     assert.equal(readFileSync(authorityMarker, 'utf8'), 'verified');
     assert.equal(existsSync(join(repo, 'scripts', 'prune-hermes-release-artifacts.sh')), false);
     assert.equal(existsSync(join(snapshot, 'files')), false);
