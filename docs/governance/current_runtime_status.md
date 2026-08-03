@@ -16,7 +16,7 @@ production_worktree: clean in owner-supplied 2026-07-31 preflight
 production_services: four core units active in owner-supplied 2026-07-31 preflight
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
 rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); 7649a9471b15b09e9aac25bed269a0e5d8b254dc (cross-user Ombre socket ownership was probed without the existing privilege seam); 8c259ddcd2a34e80400ac39e444876807960f689 (ran-agent wrapper re-read deployment-user env and exited before PID/listener); e0b20b172955af175004ac8a7a3cdc0018a2b698 (bootstrap could not resolve the service-managed Node path and later hit an unsafe cross-UID temporary lock); first four and e0b20b stopped before production mutation; 414210f and 8c259dd rolled back completely; the supplied 7649a94 trace alone does not establish its rollback completion
-production_storage: owner reported 54GB/59GB used, 3.3GB available, 95% utilization after repeated failed transactions; governed recovery prunes only verified rollback-used payloads and then requires allocated-block, inode, candidate-stage, and full-snapshot headroom before mutation; not yet revalidated or reclaimed on server
+production_storage: owner reported 38GB/59GB used, 19GB available, 68% utilization after removing seven verified state-less legacy transaction directories; governed recovery prunes only verified rollback-used payloads or verified state-less non-current transaction directories and then requires allocated-block, inode, candidate-stage, and full-snapshot headroom before mutation
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -184,12 +184,20 @@ contract:
   resealed before checkout. Explicit rollback preserves accepted authority on
   interruption, can finalize stale pointer metadata without a second live
   restore, and re-extracts its candidate-pinned six-file controller outside the
-  checkout. The local release-script suite collected 80 tests: 78 passed,
+  checkout. A later Linux-root immutable gate exposed five test-fixture identity
+  leaks: checkout-operator scenarios inherited root EUID, cross-UID children
+  inherited a root-private gate `TMPDIR`, and staged-read fixtures lacked
+  traversable parent directories. Production rejected those fixtures before
+  transaction mutation. The correction is test-only: identity-sensitive
+  fixtures use randomized literal `/tmp` roots with explicit ownership/modes,
+  checkout scenarios run as `ubuntu`, and cross-UID lock children receive
+  `TMPDIR=/tmp`; production checkout, lock, and permission policy is unchanged.
+  The local release-script suite collected 83 tests: 81 passed,
   0 failed, and 2 Linux/root-only staged checks were skipped. The Ombre contract
   collected 45 tests: 44 passed, 0 failed, and 1 Linux/root-only ownership check
   was skipped. The final Git-less, read-only desktop `--all` gate ran the real
   patched Ombre 2.8.8 process and Hermes v0.13 Lite/Full boundary, printed
-  `hermes-release-smoke: all-ok`, passed 380 Python tests with the single
+  `hermes-release-smoke: all-ok`, passed 388 Python tests with the single
   Linux-root verifier check skipped, printed `hermes-release-gate: ok`, and
   received a `passed` workflow-guard result. These root-only skips are not
   server acceptance or cleanup evidence.

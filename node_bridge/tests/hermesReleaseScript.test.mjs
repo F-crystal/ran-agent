@@ -13,6 +13,7 @@ const nodeBin = process.execPath;
 const pythonBin = process.env.RAN_AGENT_PYTHON_BIN || realpathSync(execFileSync('/bin/sh', ['-c', 'command -v python3'], { encoding: 'utf8' }).trim());
 const runtimeUser = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
 const runtimeGroup = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
+const linuxRoot = process.platform === 'linux' && process.geteuid?.() === 0;
 const bootstrapFrameworkFiles = [
   'bootstrap-hermes-release.sh',
   'deploy-hermes-release.sh',
@@ -49,6 +50,24 @@ function run(script, args = [], extraEnv = {}) {
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function identityFixturePrefix(name) {
+  return linuxRoot ? `/tmp/${name}` : join(tmpdir(), name);
+}
+
+function runAsCheckoutOperator(command, args, options, fixtureRoot) {
+  if (!linuxRoot) return execFileSync(command, args, options);
+  const uid = execFileSync('id', ['-u', 'ubuntu'], { encoding: 'utf8' }).trim();
+  const gid = execFileSync('id', ['-g', 'ubuntu'], { encoding: 'utf8' }).trim();
+  execFileSync('chown', ['-R', `${uid}:${gid}`, fixtureRoot]);
+  chmodSync(fixtureRoot, 0o755);
+  const { env = {}, ...runOptions } = options;
+  const assignments = Object.entries(env).map(([key, value]) => `${key}=${value}`);
+  return execFileSync('/usr/sbin/runuser', [
+    '--user', 'ubuntu', '--group', 'ubuntu', '--', '/usr/bin/env', '-i',
+    'HOME=/tmp', 'TMPDIR=/tmp', ...assignments, command, ...args,
+  ], runOptions);
 }
 
 test('Node runtime imports are direct, lock-synchronized production dependencies', () => {
@@ -1699,7 +1718,7 @@ test('successful explicit rollback consumes its current-production pointer and p
 });
 
 test('explicit rollback keeps immutable candidate helpers after checking out a prior commit without the pruner', () => {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'ran-agent-explicit-rollback-stage-')));
+  const dir = realpathSync(mkdtempSync(identityFixturePrefix('ran-agent-explicit-rollback-stage-')));
   const repo = join(dir, 'repo');
   const scripts = join(repo, 'scripts');
   const artifactRoot = join(dir, 'artifacts');
@@ -1766,7 +1785,7 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
     chmodSync(join(bin, 'sudo'), 0o755);
     chmodSync(join(bin, 'sha256sum'), 0o755);
 
-    assert.throws(() => execFileSync('bash', ['-c', [
+    assert.throws(() => runAsCheckoutOperator('bash', ['-c', [
       'set -euo pipefail',
       `set -- --rollback ${JSON.stringify(snapshot)}`,
       `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
@@ -1788,9 +1807,9 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
         RAN_AGENT_NO_SUDO: '1',
       },
       stdio: 'pipe',
-    }), /rollback_controller_candidate_mismatch/);
+    }, dir), /rollback_controller_candidate_mismatch/);
 
-    execFileSync('bash', ['-c', [
+    runAsCheckoutOperator('bash', ['-c', [
       'set -euo pipefail',
       `set -- --rollback ${JSON.stringify(snapshot)}`,
       `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
@@ -1826,7 +1845,7 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
         RAN_AGENT_NO_SUDO: '1',
       },
       stdio: 'pipe',
-    });
+    }, dir);
     assert.equal(execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).trim(), prior);
     assert.equal(readFileSync(authorityMarker, 'utf8'), 'verified');
     assert.equal(existsSync(join(repo, 'scripts', 'prune-hermes-release-artifacts.sh')), false);
@@ -2052,7 +2071,8 @@ test('Linux root release gate proves cross-UID regular-file denial and FIFO read
       'PATH=/usr/bin:/bin', `RAN_AGENT_NODE_BIN=${nodeBin}`, `RAN_AGENT_PYTHON_BIN=${pythonBin}`,
       `RAN_AGENT_RELEASE_CANDIDATE=${sha}`, `RAN_AGENT_RELEASE_CONTROL_ROOT=${repo}`,
       `RAN_AGENT_RELEASE_ARTIFACT_ROOT=${artifactRoot}`, 'RAN_AGENT_TEST_MODE=1',
-      'RAN_AGENT_TEST_RELEASE_LOCK=1', 'bash', join(repo, 'scripts', 'deploy-hermes-release.sh'), '--apply'], {
+      'RAN_AGENT_TEST_RELEASE_LOCK=1', 'TMPDIR=/tmp',
+      'bash', join(repo, 'scripts', 'deploy-hermes-release.sh'), '--apply'], {
       encoding: 'utf8',
     });
     assert.notEqual(result.status, 0);
@@ -2124,7 +2144,7 @@ test('release scripts make an immutable staged candidate the only apply authorit
 });
 
 test('candidate staging fails closed on missing real-process assets and remains readable but immutable to ran-agent', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-stage-completeness-'));
+  const dir = mkdtempSync(identityFixturePrefix('ran-agent-stage-completeness-'));
   const repo = join(dir, 'repo');
   const scripts = join(repo, 'scripts');
   const bin = join(dir, 'bin');
@@ -2191,6 +2211,10 @@ test('candidate staging fails closed on missing real-process assets and remains 
     assert.equal(statSync(completeStage).mode & 0o777, 0o755);
     assert.equal(statSync(join(completeStage, 'scripts', 'verify-ombre-steward-real-process.sh')).mode & 0o222, 0);
     if (process.getuid?.() === 0 && existsSync('/usr/sbin/runuser')) {
+      for (const path of [dir, artifacts, join(artifacts, 'stages')]) {
+        chmodSync(path, 0o711);
+        assert.equal(statSync(path).mode & 0o777, 0o711);
+      }
       assert.doesNotThrow(() => execFileSync('/usr/sbin/runuser', [
         '--user', 'ran-agent', '--group', 'ran-agent', '--',
         '/usr/bin/test', '-r', join(completeStage, 'node_bridge', 'tests', 'ombreCompatPatchedProcess.test.mjs'),
@@ -2208,7 +2232,7 @@ test('candidate staging fails closed on missing real-process assets and remains 
 });
 
 test('apply rejects a missing Python 3.12 before snapshot or checkout side effects', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-ombre-python-preflight-'));
+  const dir = mkdtempSync(identityFixturePrefix('ran-agent-ombre-python-preflight-'));
   const repo = join(dir, 'repo');
   const scripts = join(repo, 'scripts');
   const marker = join(dir, 'mutation-marker');
@@ -2226,7 +2250,7 @@ test('apply rejects a missing Python 3.12 before snapshot or checkout side effec
     execFileSync('git', ['commit', '-m', 'fixture'], { cwd: repo, stdio: 'pipe' });
     let failure;
     try {
-      execFileSync('/bin/bash', ['-c', [
+      runAsCheckoutOperator('/bin/bash', ['-c', [
         'set -euo pipefail',
         'set -- --rollback fixture',
         `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
@@ -2256,7 +2280,7 @@ test('apply rejects a missing Python 3.12 before snapshot or checkout side effec
         },
         encoding: 'utf8',
         stdio: 'pipe',
-      });
+      }, dir);
     } catch (error) {
       failure = error;
     }
@@ -2327,7 +2351,7 @@ test('checkout permission projection reverses restrictive release umask without 
 test('Linux root gate repairs only root-owned tracked paths back to the ubuntu checkout owner', {
   skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !existsSync('/usr/sbin/runuser'),
 }, () => {
-  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-root-owned-checkout-'));
+  const dir = mkdtempSync(identityFixturePrefix('ran-agent-root-owned-checkout-'));
   const repo = join(dir, 'repo');
   const scripts = join(repo, 'scripts');
   const nested = join(repo, 'node_bridge', 'src');

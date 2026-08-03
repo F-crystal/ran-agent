@@ -141,6 +141,17 @@ actual Node entry plus dynamic dependencies are imported as `ran-agent` before
 runtime apply. The immutable stage runs its full Git-less gate under both root
 and `ran-agent`; a same-user local pass is not deployable evidence.
 
+A later server root gate failed five release-script tests before transaction
+mutation because their identity-sensitive fixtures inherited the root gate's
+private temporary tree and, in two cases, root EUID while modeling `ubuntu`
+checkout actions. This was a test-fixture portability defect, not permission
+drift in `/opt/ran_agent`. Such fixtures now use randomized literal `/tmp`
+roots, explicitly establish owner and traversal modes, run checkout operations
+as `ubuntu`, and pass `/tmp` explicitly to the cross-UID lock child. Do not
+weaken the production root/`ubuntu`/`ran-agent` boundaries to make a fixture
+pass. The corrected candidate still requires a fresh Linux-root staged gate
+before apply.
+
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. The verified payload-prune apply deletes only
 classified completed rollback payloads. `git fetch` updates local remote
