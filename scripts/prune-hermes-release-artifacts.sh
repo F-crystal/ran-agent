@@ -114,6 +114,7 @@ fi
 
 payloads=0
 incomplete=0
+orphans=0
 ephemera=0
 reclaimed_kib=0
 while IFS= read -r directory; do
@@ -144,6 +145,36 @@ done < <(
 
 while IFS= read -r directory; do
   [[ "$directory" == "$SNAPSHOT_ROOT"/release-transaction.* ]] || continue
+  state="$directory/transaction-state.json"
+  if run_privileged test -L "$state"; then
+    printf 'prune-hermes-release-artifacts: decision=SKIP_UNCERTAIN snapshot=%s reason=state_symlink\n' "$directory" >&2
+    continue
+  fi
+  if ! run_privileged test -e "$state"; then
+    if [[ "$(basename "$directory")" == "$production_transaction" ]]; then
+      printf 'prune-hermes-release-artifacts: decision=KEEP snapshot=%s reason=current_production\n' "$directory"
+      continue
+    fi
+    if run_privileged test -L "$directory" || snapshot_tree_has_mounts "$directory"; then
+      printf 'prune-hermes-release-artifacts: decision=SKIP_UNCERTAIN snapshot=%s reason=orphan_identity\n' "$directory" >&2
+      continue
+    fi
+    identity="$(path_identity "$directory")" || fail orphan_identity_unavailable
+    size_kib="$(run_privileged du -sk "$directory" | awk '{print $1}')" || fail orphan_size_unavailable
+    printf 'prune-hermes-release-artifacts: decision=PRUNE_ORPHAN snapshot=%s reclaimed_kib=%s mode=%s\n' \
+      "$directory" "$size_kib" "$MODE_LABEL"
+    if [[ "$MODE" != --dry-run ]]; then
+      fresh_production="$(read_production_transaction)" || fail production_pointer_invalid
+      [[ "$(basename "$directory")" != "$fresh_production" ]] &&
+        ! run_privileged test -e "$state" && ! run_privileged test -L "$state" &&
+        [[ "$(path_identity "$directory")" == "$identity" ]] &&
+        ! snapshot_tree_has_mounts "$directory" || fail orphan_identity_changed
+      run_privileged rm -rf -- "$directory"
+    fi
+    orphans=$((orphans + 1))
+    reclaimed_kib=$((reclaimed_kib + size_kib))
+    continue
+  fi
   IFS=$'\t' read -r decision reason _ < <(
     classify "$directory" "$production_transaction"
   )
@@ -243,5 +274,5 @@ done < <(
   fi
 )
 
-printf 'prune-hermes-release-artifacts: ok mode=%s payloads=%s incomplete=%s ephemera=%s reclaimed_kib=%s\n' \
-  "$MODE_LABEL" "$payloads" "$incomplete" "$ephemera" "$reclaimed_kib"
+printf 'prune-hermes-release-artifacts: ok mode=%s payloads=%s incomplete=%s orphans=%s ephemera=%s reclaimed_kib=%s\n' \
+  "$MODE_LABEL" "$payloads" "$incomplete" "$orphans" "$ephemera" "$reclaimed_kib"

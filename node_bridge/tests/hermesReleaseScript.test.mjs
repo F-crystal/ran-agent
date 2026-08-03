@@ -1150,7 +1150,9 @@ test('artifact cleanup removes only verified rollback-used payloads and retains 
   const rolledBack = join(snapshotRoot, 'release-transaction.rolled-back.fixture');
   const damaged = join(snapshotRoot, 'release-transaction.damaged.fixture');
   const symlinked = join(snapshotRoot, 'release-transaction.symlinked.fixture');
+  const stateSymlinked = join(snapshotRoot, 'release-transaction.state-symlinked.fixture');
   const outside = join(dir, 'outside-payload');
+  const outsideState = join(dir, 'outside-state.json');
   try {
     for (const directory of [rolledBack, damaged]) {
       mkdirSync(join(directory, 'files'), { recursive: true });
@@ -1177,6 +1179,15 @@ test('artifact cleanup removes only verified rollback-used payloads and retains 
     mkdirSync(outside);
     writeFileSync(join(outside, 'keep'), 'must survive\n');
     symlinkSync(outside, join(symlinked, 'files'));
+    mkdirSync(join(stateSymlinked, 'files'), { recursive: true });
+    writeFileSync(join(stateSymlinked, 'files', '900'), 'must survive\n');
+    writeRetentionState(stateSymlinked, {
+      status: 'rollback_used', acceptance_state: 'not_accepted', rollback_state: 'rollback_used',
+      rollbackable: false, current_production_identity: 'transaction:prior-production',
+    });
+    copyFileSync(join(stateSymlinked, 'transaction-state.json'), outsideState);
+    rmSync(join(stateSymlinked, 'transaction-state.json'));
+    symlinkSync(outsideState, join(stateSymlinked, 'transaction-state.json'));
     secureArtifactLayout(artifactRoot);
 
     const env = {
@@ -1195,6 +1206,7 @@ test('artifact cleanup removes only verified rollback-used payloads and retains 
     assert.equal(existsSync(join(damaged, 'files', '900')), true);
     assert.equal(existsSync(join(outside, 'keep')), true);
     assert.equal(existsSync(join(symlinked, 'files')), true);
+    assert.equal(existsSync(join(stateSymlinked, 'files', '900')), true);
     assert.match(output, /decision=SKIP_UNCERTAIN/);
     assert.match(readFileSync(join(root, 'scripts', 'prune-hermes-release-artifacts.sh'), 'utf8'), /\/proc\/self\/mountinfo/);
   } finally {
@@ -1231,7 +1243,7 @@ test('artifact cleanup preserves the current production transaction', () => {
   }
 });
 
-test('artifact cleanup bounds failed-release stages, archives, and deltas', () => {
+test('artifact cleanup bounds failed-release stages, archives, deltas, and state-less final snapshots', () => {
   const dir = mkdtempSync(join(tmpdir(), 'ran-agent-release-ephemera-'));
   const artifactRoot = join(dir, 'artifacts');
   const stage = join(artifactRoot, 'stages', 'release-stage.fixture');
@@ -1265,13 +1277,39 @@ test('artifact cleanup bounds failed-release stages, archives, and deltas', () =
     assert.equal(existsSync(stage), true);
     const output = run('prune-hermes-release-artifacts.sh', ['--apply'], env);
     assert.match(output, /ephemera=3/);
+    assert.match(output, /orphans=1/);
     assert.equal(existsSync(stage), false);
     assert.equal(existsSync(archive), false);
     assert.equal(existsSync(delta), false);
     assert.equal(existsSync(incomplete), false);
     assert.equal(existsSync(protectedIncomplete), true);
-    assert.equal(existsSync(unknownFinal), true);
+    assert.equal(existsSync(unknownFinal), false);
     assert.match(run('prune-hermes-release-artifacts.sh', ['--apply'], env), /ephemera=0/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('artifact cleanup preserves a current production transaction whose legacy state is missing', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-release-prune-current-orphan-'));
+  const artifactRoot = join(dir, 'artifacts');
+  const snapshotRoot = join(artifactRoot, 'snapshots');
+  const current = join(snapshotRoot, 'release-transaction.current-no-state.fixture');
+  try {
+    mkdirSync(join(current, 'files'), { recursive: true });
+    writeFileSync(join(current, 'files', '900'), 'must remain\n');
+    writeFileSync(join(snapshotRoot, 'current-production.json'), JSON.stringify({
+      schema_version: 1,
+      transaction_id: current.split('/').at(-1),
+      candidate_sha: 'b'.repeat(40),
+    }));
+    secureArtifactLayout(artifactRoot);
+    const output = run('prune-hermes-release-artifacts.sh', ['--apply'], {
+      RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifactRoot,
+      RAN_AGENT_NO_SUDO: '1',
+    });
+    assert.match(output, /decision=KEEP/);
+    assert.equal(existsSync(join(current, 'files', '900')), true);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

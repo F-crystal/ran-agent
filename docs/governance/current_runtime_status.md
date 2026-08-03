@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-08-02)
+Status: CURRENT (2026-08-03)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -154,7 +154,11 @@ contract:
   process checks execute as `ran-agent`, while root only validates ownership
   and orchestrates the transaction. Python 3.12 and all real-process assets now
   fail before snapshot. Completed rollback payload cleanup is classified,
-  locked, symlink/mount/inode checked, and evidence-preserving. A fresh
+  locked, symlink/mount/inode checked, and evidence-preserving. Final
+  transaction directories without state cannot be rollback authority and are
+  removed under the same checks; manual recovery of seven such legacy
+  directories reclaimed about 15.7 GiB and restored 19GB available without
+  touching the live checkout or services. A fresh
   post-prune gate requires allocated blocks and inodes for the complete
   snapshot plus candidate staging and the larger of 25% or 2 GiB byte
   headroom before any copy or service stop. Snapshot cp/tar data

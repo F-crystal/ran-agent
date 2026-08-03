@@ -116,12 +116,16 @@ documented by the [pinned official README](https://github.com/P0luz/Ombre-Brain/
 
 Repeated failed transactions also copied the large live Ombre source, venv,
 and cache state into each rollback payload. Completed `rollback_used`
-transactions were previously retained indefinitely, contributing to the
-owner-reported disk pressure; the latest trace showed `54GB/59GB` used and
-`3.3GB` available. The reviewed transaction now classifies and
-removes only those completed payloads while preserving evidence; corrupt,
-mounted, symlinked, current-production, or concurrently changing snapshots
-remain untouched. Immediately after that staged prune, a mandatory capacity
+transactions and legacy published directories without transaction state were
+previously retained indefinitely, contributing to the
+owner-reported disk pressure; the failed trace showed `54GB/59GB` used and
+`3.3GB` available, while removal of seven state-less transactions reclaimed
+about 15.7 GiB and restored 19GB available. The reviewed transaction now
+classifies and
+removes completed rollback payloads while preserving evidence and removes only
+state-less final transaction directories that cannot be rollback authority;
+corrupt-state, mounted, symlinked, current-production, or concurrently changing
+snapshots remain untouched. Immediately after that staged prune, a mandatory capacity
 gate measures allocated blocks and inodes for every snapshot source, including
 the duplicated SQLite migration evidence, reserves candidate staging, and adds
 the larger of 25% or 2 GiB byte headroom plus inode headroom. An insufficient

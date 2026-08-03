@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-02)
+Status: CURRENT (2026-08-03)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -81,9 +81,11 @@ copy or service stop. Do not expect `git fetch` alone to add the script to the
 worktree.
 
 The artifact pruner fails closed for the current production transaction,
-unknown/corrupt state, symlinks, mount boundaries, path or inode drift, and a
-concurrent payload cleanup. It removes only a verified snapshot's `files/` payload;
-`transaction-state.json`, manifest, service state, and other evidence remain.
+corrupt state, symlinks, mount boundaries, path or inode drift, and a concurrent
+payload cleanup. It removes a verified rollback-used snapshot's `files/` payload
+while retaining its evidence. A final `release-transaction.*` directory with no
+`transaction-state.json` cannot be rollback authority and is removed only after
+the same identity, production-pointer, and mount checks.
 Deploy also runs this pruner while holding the cross-UID global release lock
 before the next runtime snapshot. It measures allocated blocks and inodes for
 the complete snapshot source set, adds the candidate archive/stage reserve,
