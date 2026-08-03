@@ -75,7 +75,7 @@ require_node_sqlite() {
   version="$($NODE_BIN -p 'process.versions.node' 2>/dev/null)" || fail node_version_probe
   IFS=. read -r major minor patch <<<"$version"
   [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]] || fail node_version_invalid
-  (( major > 22 || (major == 22 && minor >= 13) )) || fail node_version_unsupported
+  (( major > 22 || (major == 22 && minor >= 19) )) || fail node_version_unsupported
   "$NODE_BIN" --input-type=module -e 'import { DatabaseSync } from "node:sqlite"; const db = new DatabaseSync(":memory:"); if (db.prepare("SELECT 1 AS ok").get().ok !== 1) process.exit(1); db.close();' >/dev/null 2>&1 || fail node_sqlite_unavailable
 }
 

@@ -1167,12 +1167,12 @@ test('apply script systemd units include OBSIDIAN_MEMORY_MCP_ENABLED=false', () 
   assert.match(fullUnit, /Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false/);
 });
 
-test('Hermes release gate requires Node 22.13.0 or newer', () => {
+test('Hermes release gate requires Node 22.19.0 or newer', () => {
   const dir = mkdtempSync(join(tmpdir(), 'hermes-release-old-node-'));
   const fakeNode = join(dir, 'node');
   writeFileSync(fakeNode, [
     '#!/usr/bin/env bash',
-    'if [ "$1" = "-p" ]; then echo 22.12.0; exit 0; fi',
+    'if [ "$1" = "-p" ]; then echo 22.18.0; exit 0; fi',
     'exit 0',
   ].join('\n'));
   chmodSync(fakeNode, 0o755);

@@ -229,7 +229,7 @@ test('rejects non-JSON or oversized scopes without making a request', async () =
   assert.equal(calls, 0);
 });
 
-test('uses the supported Node 22.13+ runtime floor for this suite', () => {
+test('uses the supported Node 22.19+ runtime floor for this suite', () => {
   const [major, minor] = process.versions.node.split('.').map(Number);
-  assert.equal(major > 22 || (major === 22 && minor >= 13), true);
+  assert.equal(major > 22 || (major === 22 && minor >= 19), true);
 });

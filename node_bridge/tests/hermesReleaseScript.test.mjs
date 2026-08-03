@@ -51,6 +51,23 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+test('Node runtime imports are direct, lock-synchronized production dependencies', () => {
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+  const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+  const expected = [
+    '@mozilla/readability',
+    'linkedom',
+    'playwright-core',
+    'qrcode-terminal',
+    'silk-wasm',
+    'undici',
+    'weixin-agent-sdk',
+  ];
+  assert.deepEqual(Object.keys(manifest.dependencies).sort(), expected);
+  assert.deepEqual(lock.packages[''].dependencies, manifest.dependencies);
+  assert.equal(Object.hasOwn(lock.packages, 'node_modules/openclaw'), false);
+});
+
 function writeRetentionState(directory, overrides = {}) {
   const manifest = 'fixture manifest\n';
   const services = 'ran-agent-ombre-brain.service\tactive\tenabled\tloaded\n';
@@ -601,6 +618,63 @@ test('ordinary release snapshot excludes Steward secrets and retains non-secret 
     assert.equal(existsSync(join(fixture.snapshot, 'files', '900', 'ombre-compat', 'queue.jsonl')), true);
     assert.equal(existsSync(join(fixture.snapshot, 'files', '900', 'ombre-compat', 'secrets')), false);
     assert.doesNotMatch(readFileSync(join(fixture.snapshot, 'manifest'), 'utf8'), /steward-api-token|ombre-compat\/secrets/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('candidate Node dependency activation is rollback-complete', () => {
+  const fixture = makeDeployServiceFixture();
+  const stage = join(fixture.dir, 'stage');
+  try {
+    mkdirSync(join(stage, 'node_modules'), { recursive: true });
+    mkdirSync(join(fixture.repo, 'node_modules'), { recursive: true });
+    writeFileSync(join(stage, 'node_modules', 'candidate.txt'), 'candidate\n');
+    writeFileSync(join(fixture.repo, 'node_modules', 'prior.txt'), 'prior\n');
+    writeFileSync(join(fixture.bin, 'chown'), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(fixture.bin, 'chown'), 0o755);
+    runDeployServiceFixture(fixture, [
+      'SUDO=(/usr/bin/env)',
+      `PYTHON_BIN=${JSON.stringify(pythonBin)}`,
+      `STAGE_DIR=${JSON.stringify(stage)}`,
+      `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
+      'activate_candidate_node_dependencies',
+    ].join('\n'));
+    assert.equal(existsSync(join(fixture.repo, 'node_modules', 'candidate.txt')), true);
+    assert.equal(existsSync(join(fixture.snapshot, 'node_modules.rollback', 'prior.txt')), true);
+    runDeployServiceFixture(fixture, [
+      'SUDO=(/usr/bin/env)',
+      `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
+      'restore_node_dependencies',
+    ].join('\n'));
+    assert.equal(existsSync(join(fixture.repo, 'node_modules', 'prior.txt')), true);
+    assert.equal(existsSync(join(fixture.repo, 'node_modules', 'candidate.txt')), false);
+
+    rmSync(join(fixture.repo, 'node_modules'), { recursive: true });
+    mkdirSync(join(stage, 'node_modules'), { recursive: true });
+    writeFileSync(join(stage, 'node_modules', 'candidate.txt'), 'candidate\n');
+    runDeployServiceFixture(fixture, [
+      'SUDO=(/usr/bin/env)',
+      `PYTHON_BIN=${JSON.stringify(pythonBin)}`,
+      `STAGE_DIR=${JSON.stringify(stage)}`,
+      `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
+      'activate_candidate_node_dependencies',
+      'restore_node_dependencies',
+    ].join('\n'));
+    assert.equal(existsSync(join(fixture.repo, 'node_modules')), false);
+
+    const sharedModules = join(fixture.dir, 'shared-node-modules');
+    mkdirSync(sharedModules);
+    mkdirSync(join(stage, 'node_modules'), { recursive: true });
+    symlinkSync(sharedModules, join(fixture.repo, 'node_modules'), 'dir');
+    assert.throws(() => runDeployServiceFixture(fixture, [
+      'SUDO=(/usr/bin/env)',
+      `PYTHON_BIN=${JSON.stringify(pythonBin)}`,
+      `STAGE_DIR=${JSON.stringify(stage)}`,
+      `SNAPSHOT_DIR=${JSON.stringify(fixture.snapshot)}`,
+      'activate_candidate_node_dependencies',
+    ].join('\n')), /Command failed/);
+    assert.equal(realpathSync(join(fixture.repo, 'node_modules')), realpathSync(sharedModules));
   } finally {
     rmSync(fixture.dir, { recursive: true, force: true });
   }
@@ -3217,11 +3291,18 @@ test('release transaction snapshots the live production checkout before activati
   assert.ok(resealedState < resealedVerification);
   assert.ok(resealedVerification < applyFlow.indexOf('activate_candidate_checkout'));
   assert.ok(deploy.indexOf('snapshot_code_revision') < deploy.lastIndexOf('activate_candidate_checkout'));
+  assert.ok(applyFlow.indexOf('prepare_candidate_node_dependencies') < applyFlow.indexOf('snapshot_runtime_state'));
+  assert.ok(applyFlow.indexOf('runtime_checkout_access "$STAGE_DIR" modules') < applyFlow.indexOf('snapshot_runtime_state'));
+  assert.ok(applyFlow.indexOf('activate_candidate_checkout') < applyFlow.indexOf('activate_candidate_node_dependencies'));
+  assert.ok(applyFlow.indexOf('activate_candidate_node_dependencies') < applyFlow.indexOf('runtime_checkout_access "$REPO_ROOT" modules'));
+  assert.match(deploy, /runtime_checkout_access "\$REPO_ROOT" files/);
+  assert.match(deploy, /npm_config_engine_strict=true/);
+  assert.match(deploy, /npm[^\n]* ci --omit=dev --ignore-scripts --prefix "\$STAGE_DIR"/);
   assert.match(deploy, /--rollback/);
   assert.match(deploy, /rollback-complete deployment_status=/);
   assert.match(deploy, /rollback-incomplete deployment_status=/);
   assert.match(deploy, /trap 'release_exit \$\?' EXIT/);
-  assert.match(deploy, /for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress clear_ombre_ingress_block restore_service_state/);
+  assert.match(deploy, /for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_node_dependencies restore_code_revision block_ombre_ingress clear_ombre_ingress_block restore_service_state/);
   assert.doesNotMatch(deploy, /restore_(?:code_revision|runtime_files|state_migrations|service_state) \|\| true/);
   assert.match(deploy, /service_env_source_unavailable/);
   assert.match(deploy, /RAN_AGENT_INTERNAL_CONTROL_SECRET/);

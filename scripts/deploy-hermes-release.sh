@@ -80,6 +80,8 @@ RELEASE_LOCK_READY_FD_OPEN=0
 RELEASE_LOCK_READY_DIR=''
 RELEASE_LOCK_READY_FIFO=''
 RELEASE_EPHEMERA_CLEANED=0
+NODE_MODULES_ROLLBACK=''
+NODE_MODULES_ABSENT_MARKER=''
 
 stop_release_transaction_lock() {
   if [[ "$RELEASE_LOCK_READY_FD_OPEN" -eq 1 ]]; then
@@ -314,7 +316,7 @@ require_node_sqlite() {
   version="$($NODE_BIN -p 'process.versions.node' 2>/dev/null)" || fail node_version_probe
   IFS=. read -r major minor patch <<<"$version"
   [[ "$major" =~ ^[0-9]+$ && "$minor" =~ ^[0-9]+$ && "$patch" =~ ^[0-9]+$ ]] || fail node_version_invalid
-  (( major > 22 || (major == 22 && minor >= 13) )) || fail node_version_unsupported
+  (( major > 22 || (major == 22 && minor >= 19) )) || fail node_version_unsupported
   "$NODE_BIN" --input-type=module -e 'import { DatabaseSync } from "node:sqlite"; const db = new DatabaseSync(":memory:"); if (db.prepare("SELECT 1 AS ok").get().ok !== 1) process.exit(1); db.close();' >/dev/null 2>&1 || fail node_sqlite_unavailable
 }
 
@@ -435,23 +437,29 @@ candidate_stage_preflight() {
 }
 
 runtime_checkout_access() {
-  local runuser_bin=/usr/sbin/runuser
+  local root="${1:-$REPO_ROOT}" mode="${2:-modules}" runuser_bin=/usr/sbin/runuser
+  case "$mode" in files|modules) ;; *) fail runtime_access_mode_invalid ;; esac
   "${SUDO[@]}" test -x "$runuser_bin" || fail runtime_access_runuser_unavailable
   "${SUDO[@]}" "$runuser_bin" --user ran-agent --group ran-agent -- /usr/bin/env -i \
     PATH=/usr/bin:/bin "$NODE_BIN" --input-type=module -e '
 import { accessSync, constants } from "node:fs";
+import { createRequire } from "node:module";
 import { pathToFileURL } from "node:url";
 const root = process.argv[1];
 for (const path of [root, `${root}/node_bridge`, `${root}/node_bridge/src`, `${root}/node_bridge/src/index.mjs`, `${root}/node_bridge/vendor/weixin-agent-sdk/dist/index.mjs`]) {
   accessSync(path, constants.R_OK);
 }
+if (process.argv[2] !== "modules") process.exit(0);
 await import(pathToFileURL(`${root}/node_bridge/src/webStructuredExtract.mjs`));
 await import(pathToFileURL(`${root}/node_bridge/src/index.mjs`));
-await import("playwright-core");
-await import("undici");
-await import("qrcode-terminal");
-await import("silk-wasm");
-' "$REPO_ROOT" >/dev/null || fail runtime_checkout_access_invalid
+const require = createRequire(`${root}/package.json`);
+for (const name of ["playwright-core", "undici", "qrcode-terminal", "silk-wasm"]) {
+  await import(pathToFileURL(require.resolve(name)));
+}
+' "$root" "$mode" >/dev/null || {
+    [[ "$mode" == files ]] && fail runtime_checkout_access_invalid
+    fail runtime_checkout_dependencies_invalid
+  }
 }
 
 require_atomic_state() {
@@ -501,7 +509,7 @@ require_apply_prerequisites() {
   require_artifact_layout
   require_service_environment
   require_atomic_state
-  runtime_checkout_access
+  runtime_checkout_access "$REPO_ROOT" files
 }
 
 require_candidate_bootstrap_authority() {
@@ -636,6 +644,32 @@ verify_stage_candidate() {
   read -r expected_candidate expected_digest < <("${SUDO[@]}" cat "$STAGE_DIR/candidate") || fail candidate_stage_manifest_invalid
   actual_digest="$("${SUDO[@]}" sha256sum "$CANDIDATE_ARCHIVE" | awk '{ print $1 }')" || fail candidate_stage_digest_unavailable
   [[ "$expected_candidate" == "$CANDIDATE" && "$expected_digest" == "$actual_digest" ]] || fail candidate_stage_digest_mismatch
+}
+
+prepare_candidate_node_dependencies() {
+  local node_dir npm_bin npm_cli cache
+  node_dir="$(dirname "$NODE_BIN")"
+  npm_bin="$node_dir/npm"
+  npm_cli="$node_dir/../lib/node_modules/npm/bin/npm-cli.js"
+  cache="$STAGE_DIR/.npm-cache"
+  stage_run test -f "$STAGE_DIR/package.json" || fail candidate_node_manifest_missing
+  stage_run test -f "$STAGE_DIR/package-lock.json" || fail candidate_node_lock_missing
+  stage_run chmod u+w "$STAGE_DIR" || fail candidate_node_stage_unavailable
+  if stage_run test -x "$npm_bin"; then
+    stage_run /usr/bin/env HOME=/nonexistent PATH="$node_dir:/usr/bin:/bin" \
+      npm_config_cache="$cache" npm_config_audit=false npm_config_engine_strict=true npm_config_fund=false npm_config_update_notifier=false \
+      "$npm_bin" ci --omit=dev --ignore-scripts --prefix "$STAGE_DIR" >/dev/null || fail candidate_node_install_failed
+  elif stage_run test -f "$npm_cli"; then
+    stage_run /usr/bin/env HOME=/nonexistent PATH="$node_dir:/usr/bin:/bin" \
+      npm_config_cache="$cache" npm_config_audit=false npm_config_engine_strict=true npm_config_fund=false npm_config_update_notifier=false \
+      "$NODE_BIN" "$npm_cli" ci --omit=dev --ignore-scripts --prefix "$STAGE_DIR" >/dev/null || fail candidate_node_install_failed
+  else
+    fail node_service_npm_unavailable
+  fi
+  stage_run rm -rf -- "$cache"
+  stage_run test -d "$STAGE_DIR/node_modules" || fail candidate_node_install_incomplete
+  stage_run chmod -R a-w "$STAGE_DIR"
+  stage_run chmod 755 "$STAGE_DIR"
 }
 
 protected_manifest_digest() {
@@ -1144,6 +1178,49 @@ activate_candidate_checkout() {
   project_checkout_permissions verify
 }
 
+activate_candidate_node_dependencies() {
+  local candidate_modules="$STAGE_DIR/node_modules" live_modules="$REPO_ROOT/node_modules"
+  NODE_MODULES_ROLLBACK="$SNAPSHOT_DIR/node_modules.rollback"
+  NODE_MODULES_ABSENT_MARKER="$SNAPSHOT_DIR/node-modules.absent"
+  "${SUDO[@]}" test -d "$candidate_modules" || fail candidate_node_install_incomplete
+  "${SUDO[@]}" "$PYTHON_BIN" -I -c '
+import os, sys
+values = [os.lstat(path).st_dev for path in sys.argv[1:]]
+raise SystemExit(0 if len(set(values)) == 1 else 1)
+' "$candidate_modules" "$REPO_ROOT" "$SNAPSHOT_DIR" || fail node_modules_filesystem_mismatch
+  if "${SUDO[@]}" test -L "$live_modules" || { "${SUDO[@]}" test -e "$live_modules" && ! "${SUDO[@]}" test -d "$live_modules"; }; then
+    fail node_modules_type_invalid
+  fi
+  if "${SUDO[@]}" test -d "$live_modules"; then
+    "${SUDO[@]}" mv -- "$live_modules" "$NODE_MODULES_ROLLBACK" || fail node_modules_backup_failed
+  else
+    "${SUDO[@]}" touch "$NODE_MODULES_ABSENT_MARKER" || fail node_modules_backup_failed
+    "${SUDO[@]}" chmod 600 "$NODE_MODULES_ABSENT_MARKER"
+  fi
+  if ! "${SUDO[@]}" mv -- "$candidate_modules" "$live_modules"; then
+    restore_node_dependencies || fail node_modules_restore_failed
+    fail node_modules_activate_failed
+  fi
+  if ! "${SUDO[@]}" chown -R --reference="$REPO_ROOT" "$live_modules" ||
+    ! "${SUDO[@]}" chmod -R u+rwX,go+rX "$live_modules"; then
+    restore_node_dependencies || fail node_modules_restore_failed
+    fail node_modules_projection_failed
+  fi
+}
+
+restore_node_dependencies() {
+  local live_modules="$REPO_ROOT/node_modules"
+  [[ -n "$NODE_MODULES_ROLLBACK" ]] || NODE_MODULES_ROLLBACK="$SNAPSHOT_DIR/node_modules.rollback"
+  [[ -n "$NODE_MODULES_ABSENT_MARKER" ]] || NODE_MODULES_ABSENT_MARKER="$SNAPSHOT_DIR/node-modules.absent"
+  if "${SUDO[@]}" test -d "$NODE_MODULES_ROLLBACK"; then
+    "${SUDO[@]}" rm -rf -- "$live_modules" && "${SUDO[@]}" mv -- "$NODE_MODULES_ROLLBACK" "$live_modules"
+  elif "${SUDO[@]}" test -f "$NODE_MODULES_ABSENT_MARKER"; then
+    "${SUDO[@]}" rm -rf -- "$live_modules" && "${SUDO[@]}" rm -f -- "$NODE_MODULES_ABSENT_MARKER"
+  else
+    return 0
+  fi
+}
+
 restore_code_revision() {
   [[ -n "$SNAPSHOT_DIR" ]] && "${SUDO[@]}" test -s "$SNAPSHOT_DIR/prior-head" || return 1
   local prior_head prior_ref current_ref
@@ -1265,7 +1342,7 @@ rollback_transaction() {
       write_transaction_state rollback-in-progress false || rollback_failed=1
     fi
     local stage
-    for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_code_revision block_ombre_ingress clear_ombre_ingress_block restore_service_state; do
+    for stage in quiesce_runtime_services restore_runtime_files restore_state_migrations restore_steward_token restore_node_dependencies restore_code_revision block_ombre_ingress clear_ombre_ingress_block restore_service_state; do
       if "$stage"; then
         printf 'deploy-hermes-release: rollback-stage=%s result=ok\n' "$stage" >&2
       else
@@ -1430,6 +1507,8 @@ candidate_stage_preflight owner
   RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" \
   RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only \
   bash "$STAGE_DIR/scripts/hermes-release-gate.sh" --all
+prepare_candidate_node_dependencies
+runtime_checkout_access "$STAGE_DIR" modules
 snapshot_capacity_gate "$STAGE_DIR" 0 0
 snapshot_runtime_state
 record_protected_capability_evidence before || fail protected_capability_evidence_before
@@ -1445,7 +1524,8 @@ verify_in_progress_snapshot "$SNAPSHOT_DIR" || fail snapshot_authority_invalid
 backup_steward_token
 STEWARD_ROTATION_ACTIVE=1
 activate_candidate_checkout
-runtime_checkout_access
+activate_candidate_node_dependencies
+runtime_checkout_access "$REPO_ROOT" modules
 "${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR/ombre-compat" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_ENDPOINT=http://127.0.0.1:18001/internal/ran-agent/steward/v1 RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_IDENTITY_FILE="$CANONICAL_LIVE_STATE_DIR/ombre-brain/steward-identity.v1.json" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_DEPLOY_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_OMBRE_PATCH_PYTHON_BIN="$OMBRE_PATCH_PYTHON_BIN" RAN_AGENT_ROTATE_STEWARD_TOKEN=1 RAN_AGENT_STEWARD_ROTATION_QUIESCED=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
 project_checkout_permissions verify
 restore_ombre_ingress

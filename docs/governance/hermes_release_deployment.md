@@ -1,11 +1,14 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-08-02)
+Status: CURRENT (2026-08-03)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is
-`bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
-revalidated it online. The owner-supplied 2026-07-31 preflight reported a clean
-worktree and all four core units active. Ombre O1 baseline
+`USER_SUPPLIED_RUNTIME`: the 2026-08-03 apply attempt for candidate
+`e85301fef053dd02d920af61fa5db01f2b381d3b` stopped before service mutation
+because the old checkout did not contain the transitive-only
+`@mozilla/readability` package. The active server SHA has not been re-observed
+after that failure. The current release line declares the complete direct Node
+runtime dependency closure, installs it from the candidate lock before the
+snapshot boundary, and switches it with the candidate checkout. Ombre O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
 V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
 pushed but undeployed. Node Receipt is deferred. O2 implementation
@@ -251,7 +254,7 @@ repair the checkout with a Git reset.
 | Record active symbolic ref | `git symbolic-ref -q HEAD || true` | A branch ref or no output for detached HEAD; both are valid observations. |
 | Check worktree | `git status --short` | No output. Any output stops the release. |
 | Resolve the service Node | `bash scripts/resolve-hermes-service-node.sh` | Prints an absolute Node path from `ran-agent-node.service`; do not substitute interactive-shell `node`. |
-| Check the resolved Node | `ABSOLUTE_NODE_PATH --version` | **Need server confirmation:** replace `ABSOLUTE_NODE_PATH` with the previous result; Node must be 22.13 or later. |
+| Check the resolved Node | `ABSOLUTE_NODE_PATH --version` | **Need server confirmation:** replace `ABSOLUTE_NODE_PATH` with the previous result; Node must be 22.19 or later. |
 | Check Python runtime | `/opt/ran_agent/.venv/bin/python --version` | Python 3.10 or later. Stop otherwise. |
 | Check core services | `systemctl is-active ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service` | Each line says `active`. Stop and investigate otherwise. |
 | Observe filesystem capacity | `df -h /opt /opt/ran_agent /opt/ran_agent-release` | Record the value and stop if a target is unavailable. The apply transaction's post-prune capacity gate is authoritative; it may reclaim verified completed payloads first and otherwise fails before interruption. |
@@ -481,6 +484,6 @@ server's unit has been inspected. Before first apply, confirm on the server:
   Node dynamically), use the confirmed production executable
   `/opt/nodejs/node-v22.22.2-linux-x64/bin/node` as `RAN_AGENT_NODE_BIN` for the
   deploy command; do not use `command -v node` from an interactive shell;
-- that the selected executable reports Node 22.13+ and supports `node:sqlite`;
+- that the selected executable reports Node 22.19+ and supports `node:sqlite`;
 - that the candidate SHA and the bootstrap SHA-256 above are the reviewed
   release values before executing `/tmp/ran-agent-bootstrap.sh`.

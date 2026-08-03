@@ -305,7 +305,7 @@ test('returns no receipt unless supervisor state and first wake are committed wi
   }
 });
 
-test('uses a runtime supported by the Node 22.13 production floor', () => {
+test('uses a runtime supported by the Node 22.19 production floor', () => {
   const [major, minor] = process.versions.node.split('.').map(Number);
-  assert.equal(major > 22 || (major === 22 && minor >= 13), true);
+  assert.equal(major > 22 || (major === 22 && minor >= 19), true);
 });

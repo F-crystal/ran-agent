@@ -59,7 +59,7 @@ IFS=. read -r NODE_MAJOR NODE_MINOR NODE_PATCH <<<"$NODE_VERSION"
 if [[ ! "$NODE_MAJOR" =~ ^[0-9]+$ || ! "$NODE_MINOR" =~ ^[0-9]+$ || ! "$NODE_PATCH" =~ ^[0-9]+$ ]]; then
   fail node_version_invalid
 fi
-if (( NODE_MAJOR < 22 || (NODE_MAJOR == 22 && NODE_MINOR < 13) )); then
+if (( NODE_MAJOR < 22 || (NODE_MAJOR == 22 && NODE_MINOR < 19) )); then
   fail node_version_unsupported
 fi
 

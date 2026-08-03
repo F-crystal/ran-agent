@@ -339,9 +339,9 @@ test('projection and restart faults replay only projections with the same outbox
   await restarted.recover(callbacks);
 });
 
-test('uses the supported Node 22.13+ runtime floor for this suite', () => {
+test('uses the supported Node 22.19+ runtime floor for this suite', () => {
   const [major, minor] = process.versions.node.split('.').map(Number);
-  assert.equal(major > 22 || (major === 22 && minor >= 13), true);
+  assert.equal(major > 22 || (major === 22 && minor >= 19), true);
 });
 
 test('legacy O1 terminal items are adopted with immutable terminal observation without changing their content digest', async (t) => {
