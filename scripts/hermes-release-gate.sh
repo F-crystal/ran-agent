@@ -22,13 +22,26 @@ case "$MODE" in
 esac
 
 # Explicit identity-scoped skip: the deploy transaction sets this only for the
-# ran-agent gate, whose identity cannot read the ubuntu-owned Hermes runtime.
-# The root gate never sets it and keeps full provider-boundary coverage.
-SKIP_HERMES_RUNTIME_TESTS="${RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS:-0}"
-case "$SKIP_HERMES_RUNTIME_TESTS" in
+# ran-agent gate, whose identity cannot perform root-only apply tooling or read
+# the ubuntu-owned Hermes runtime. The root gate never sets it and keeps full
+# coverage; every skip is printed, never silent, and unlisted files always run.
+SKIP_PRIVILEGED_TESTS="${RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS:-0}"
+case "$SKIP_PRIVILEGED_TESTS" in
   0|1) ;;
-  *) fail invalid_hermes_runtime_skip_flag ;;
+  *) fail invalid_privileged_skip_flag ;;
 esac
+
+privileged_test_skip_reason() {
+  [[ "$SKIP_PRIVILEGED_TESTS" == 1 ]] || return 1
+  case "$(basename "$1")" in
+    hermesGatewayProviderBoundary.integration.test.mjs)
+      printf 'requires the ubuntu-owned Hermes v0.13 runtime; covered by the root gate' ;;
+    hermesModelCutover.test.mjs|searchHubApplyScript.test.mjs|ombreCompatProductionWiring.test.mjs)
+      printf 'exercises root-only apply tooling that chowns to the ubuntu runtime user; covered by the root gate' ;;
+    *)
+      return 1 ;;
+  esac
+}
 
 SANDBOX_ROOT="$(mktemp -d /tmp/ran-agent-release-gate.XXXXXX)"
 /usr/bin/chgrp "$(/usr/bin/id -g)" "$SANDBOX_ROOT" || fail sandbox_identity_unavailable
@@ -285,8 +298,8 @@ run_node_test() {
 }
 
 for test_file in "$SOURCE_ROOT"/node_bridge/tests/*.test.mjs; do
-  if [[ "$SKIP_HERMES_RUNTIME_TESTS" == 1 && "$(basename "$test_file")" == hermesGatewayProviderBoundary.integration.test.mjs ]]; then
-    printf 'hermes-release-gate: skip hermesGatewayProviderBoundary.integration.test.mjs (gate identity cannot read the ubuntu-owned Hermes runtime; covered by the root gate)\n'
+  if skip_reason="$(privileged_test_skip_reason "$test_file")"; then
+    printf 'hermes-release-gate: skip %s (%s)\n' "$(basename "$test_file")" "$skip_reason"
     continue
   fi
   run_node_test "$test_file" || fail "node_test:$(basename "$test_file")"
@@ -339,11 +352,11 @@ else
   run_node_smoke --all || fail all_smoke
 fi
 
-if [[ -f "$SOURCE_ROOT/tests/test_hermes_deepseek_provider.py" && "$SKIP_HERMES_RUNTIME_TESTS" == 0 ]]; then
+if [[ -f "$SOURCE_ROOT/tests/test_hermes_deepseek_provider.py" && "$SKIP_PRIVILEGED_TESTS" == 0 ]]; then
   resolve_test_hermes_bin
 fi
-if [[ "$SKIP_HERMES_RUNTIME_TESTS" == 1 && -f "$SOURCE_ROOT/tests/test_hermes_deepseek_provider.py" ]]; then
-  printf 'hermes-release-gate: skip tests/test_hermes_deepseek_provider.py (gate identity cannot read the ubuntu-owned Hermes runtime; covered by the root gate)\n'
+if [[ "$SKIP_PRIVILEGED_TESTS" == 1 && -f "$SOURCE_ROOT/tests/test_hermes_deepseek_provider.py" ]]; then
+  printf 'hermes-release-gate: skip tests/test_hermes_deepseek_provider.py (requires the ubuntu-owned Hermes v0.13 runtime; covered by the root gate)\n'
 fi
 
 PYTHON_ROOT="$SANDBOX_ROOT/python-test"
@@ -351,7 +364,7 @@ mkdir -p "$PYTHON_ROOT/home" "$PYTHON_ROOT/tmp/state" "$PYTHON_ROOT/cache" \
   "$PYTHON_ROOT/config" "$PYTHON_ROOT/data" "$PYTHON_ROOT/uv-cache" \
   "$PYTHON_ROOT/uv-tools" "$PYTHON_ROOT/pip-cache" "$PYTHON_ROOT/pytest"
 PYTEST_TARGETS=(tests)
-if [[ "$SKIP_HERMES_RUNTIME_TESTS" == 1 ]]; then
+if [[ "$SKIP_PRIVILEGED_TESTS" == 1 ]]; then
   PYTEST_TARGETS=(--ignore tests/test_hermes_deepseek_provider.py tests)
 fi
 (

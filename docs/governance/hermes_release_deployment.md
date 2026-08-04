@@ -182,10 +182,16 @@ root gates read production state silently while `ran-agent` received
 `RAN_AGENT_IDENTITY_MAP_PATH` into each sandbox. The same rehearsal then
 reached the Hermes runtime resolution: the production v0.13 runtime is
 editable-installed from the ubuntu home and unreadable to `ran-agent`, an
-identity that never executes Hermes in production. The `ran-agent` gate now
-carries an explicit, printed skip for the provider-boundary and DeepSeek
-provider checks — both remain mandatory in the root gate — while every other
-check still executes as `ran-agent`.
+identity that never executes Hermes in production. A full classification of
+the suite found five checks that require a non-`ran-agent` identity: the
+provider-boundary and DeepSeek provider checks (ubuntu-owned Hermes
+runtime), plus `hermesModelCutover`, `searchHubApplyScript`, and
+`ombreCompatProductionWiring` (root-only apply tooling that chowns to the
+ubuntu runtime user). The `ran-agent` gate carries an explicit flag that
+prints a reasoned skip for exactly these five — all mandatory in the root
+gate and in acceptance, both pinned off against environment inheritance —
+while every other check still executes as `ran-agent`; unlisted files always
+run.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. The verified payload-prune apply deletes only

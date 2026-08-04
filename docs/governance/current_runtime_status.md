@@ -193,12 +193,17 @@ contract:
   `RAN_AGENT_IDENTITY_MAP_PATH` into each sandbox. The rehearsal then reached
   the Hermes runtime resolution: the production v0.13 runtime is
   editable-installed from the ubuntu home and unreadable to `ran-agent`, an
-  identity that never executes Hermes in production. The `ran-agent` gate now
-  carries an explicit, printed skip for the provider-boundary and DeepSeek
-  provider checks — both remain mandatory in the root gate — while every
-  other check still executes as `ran-agent`. A fresh `ran-agent` full-gate
-  rehearsal on the pushed remediation commit is still required before any
-  apply.
+  identity that never executes Hermes in production. A full classification of
+  the suite found five checks that require a non-`ran-agent` identity: the
+  provider-boundary and DeepSeek provider checks (ubuntu-owned Hermes
+  runtime), plus `hermesModelCutover`, `searchHubApplyScript`, and
+  `ombreCompatProductionWiring` (root-only apply tooling that chowns to the
+  ubuntu runtime user). The `ran-agent` gate carries an explicit flag that
+  prints a reasoned skip for exactly these five — all mandatory in the root
+  gate and in acceptance, both pinned off against environment inheritance —
+  while every other check still executes as `ran-agent`; unlisted files
+  always run. A fresh `ran-agent` full-gate rehearsal on the pushed
+  remediation commit is still required before any apply.
 - Current zero-PID/disk-pressure remediation evidence: the three focused Node
   release files passed 147/147 under Node 22.22.2; all 9 Steward token/identity
   tests passed as Linux root on the server in an isolated `/tmp` fixture,

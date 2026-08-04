@@ -504,6 +504,7 @@ require_acceptance_prerequisites
 # real gate here only after the transaction has prepared the pinned runtime.
 if [[ "${RAN_AGENT_RELEASE_PREMUTATION_GATE:-0}" != 1 ]]; then
   RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=required \
+  RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=0 \
   RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$OMBRE_BRAIN_HOME/upstream" \
   RAN_AGENT_OMBRE_UPSTREAM_VENV="$OMBRE_BRAIN_HOME/.venv" \
     bash "$SOURCE_ROOT/scripts/hermes-release-gate.sh" --all || fail release_gate

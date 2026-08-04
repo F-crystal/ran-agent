@@ -714,14 +714,14 @@ run_candidate_gates() {
     /usr/bin/test -w "$GATE_DIR/scripts/hermes-release-gate.sh"; then
     fail candidate_gate_copy_writable
   fi
-  "${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all
+  "${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=0 bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all
   "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --verify-account || fail steward_identity_conflict
   "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
     PATH=/usr/bin:/bin HOME=/nonexistent \
     RAN_AGENT_RELEASE_SOURCE_ROOT="$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 \
     RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" \
     RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only \
-    RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS=1 \
+    RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=1 \
     bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all
 }
 
