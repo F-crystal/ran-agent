@@ -414,6 +414,9 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.ok(gateRunner.indexOf('/usr/bin/test -w "$GATE_DIR/scripts/hermes-release-gate.sh"') < gateRunner.indexOf('bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all'));
   assert.match(gateRunner, /candidate_gate_copy_unreadable/);
   assert.match(gateRunner, /candidate_gate_copy_writable/);
+  assert.ok(gateRunner.indexOf('runuser --user ran-agent --group ran-agent') > -1);
+  assert.ok(gateRunner.indexOf('runuser --user ran-agent --group ran-agent') < gateRunner.indexOf('RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS=1'));
+  assert.ok(gateRunner.indexOf('bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all') < gateRunner.indexOf('RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS=1'));
   assert.match(deploy, /require_gate_copy_capacity estimate "\$SCRIPT_ROOT" "\$PRE_STAGE_TREE_BYTES" "\$PRE_STAGE_TREE_INODES"/);
   assert.match(deploy, /require_gate_copy_capacity measured "\$STAGE_DIR"[\s\S]*project_gate_copy_node_modules/);
   assert.match(deploy, /project_gate_copy_node_modules\(\) \{[\s\S]*cp -a "\$STAGE_DIR\/node_modules" "\$GATE_DIR\/node_modules"[\s\S]*chmod -R a-w,go\+rX/);
@@ -3456,6 +3459,11 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
     assert.match(source.match(/run_node_test\(\)[\s\S]*?\n\}/)?.[0] || '', new RegExp(name));
     assert.match(source.match(/run_node_smoke\(\)[\s\S]*?\n\}/)?.[0] || '', new RegExp(name));
   }
+  assert.match(source, /RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS/);
+  assert.match(source, /invalid_hermes_runtime_skip_flag/);
+  assert.match(source, /skip hermesGatewayProviderBoundary\.integration\.test\.mjs \(gate identity cannot read the ubuntu-owned Hermes runtime; covered by the root gate\)/);
+  assert.match(source, /skip tests\/test_hermes_deepseek_provider\.py \(gate identity cannot read the ubuntu-owned Hermes runtime; covered by the root gate\)/);
+  assert.match(source, /PYTEST_TARGETS=\(--ignore tests\/test_hermes_deepseek_provider\.py tests\)/);
 });
 
 test('real Ombre gate rejects a requirements lock mutation staged in the upstream index', () => {
@@ -3578,6 +3586,77 @@ test('release gate executes a git-less staged candidate from its explicit immuta
       /Command failed/,
       'git-less stage must fail closed for an invalid absolute Python path',
     );
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+});
+
+test('identity-scoped gate skips ubuntu-owned Hermes runtime tests only with the explicit flag', () => {
+  const pythonBin = requiredGatePython();
+  const stage = mkdtempSync(join(tmpdir(), 'ran-agent-gate-skip-'));
+  try {
+    mkdirSync(join(stage, 'scripts'), { recursive: true });
+    mkdirSync(join(stage, 'node_bridge', 'tests'), { recursive: true });
+    mkdirSync(join(stage, 'tests'), { recursive: true });
+    copyFileSync(join(root, 'scripts', 'hermes-release-gate.sh'), join(stage, 'scripts', 'hermes-release-gate.sh'));
+    chmodSync(join(stage, 'scripts', 'hermes-release-gate.sh'), 0o755);
+    writeFileSync(join(stage, 'node_bridge', 'tests', 'coreReliabilityJourney.test.mjs'), [
+      "import test from 'node:test';",
+      "test('covered suite passes', () => {});",
+      '',
+    ].join('\n'));
+    writeFileSync(join(stage, 'node_bridge', 'tests', 'hermesGatewayProviderBoundary.integration.test.mjs'), [
+      "import test from 'node:test';",
+      "test('must be skipped by the identity-scoped gate', () => { throw new Error('must not run'); });",
+      '',
+    ].join('\n'));
+    writeFileSync(join(stage, 'scripts', 'hermes-release-smoke.mjs'), 'process.exit(0);\n');
+    writeFileSync(join(stage, 'tests', 'test_stage.py'), 'def test_gitless_stage():\n    assert True\n');
+    writeFileSync(join(stage, 'tests', 'test_hermes_deepseek_provider.py'), 'def test_deepseek_provider():\n    raise AssertionError("must not run")\n');
+    const baseEnv = {
+      PATH: '/usr/bin:/bin',
+      RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_PYTHON_BIN: pythonBin,
+      RAN_AGENT_RELEASE_CANDIDATE: 'b'.repeat(40),
+      RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
+      RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
+      RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE: 'code-only',
+    };
+    const skipped = execFileSync('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--all'], {
+      cwd: stage,
+      env: { ...baseEnv, RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS: '1' },
+      encoding: 'utf8',
+      stdio: 'pipe',
+    });
+    assert.match(skipped, /skip hermesGatewayProviderBoundary\.integration\.test\.mjs \(gate identity cannot read the ubuntu-owned Hermes runtime; covered by the root gate\)/);
+    assert.match(skipped, /skip tests\/test_hermes_deepseek_provider\.py \(gate identity cannot read the ubuntu-owned Hermes runtime; covered by the root gate\)/);
+    assert.match(skipped, /hermes-release-gate: ok/);
+    let failure;
+    try {
+      execFileSync('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--all'], {
+        cwd: stage,
+        env: baseEnv,
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    } catch (error) {
+      failure = error;
+    }
+    assert.ok(failure, 'gate without the explicit flag must attempt the Hermes runtime resolution');
+    assert.match(String(failure.stderr || failure.message), /hermes_(runtime_resolver_required|v0_13_runtime_required|lite_runtime_required)/);
+    let invalid;
+    try {
+      execFileSync('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--all'], {
+        cwd: stage,
+        env: { ...baseEnv, RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS: 'yes' },
+        encoding: 'utf8',
+        stdio: 'pipe',
+      });
+    } catch (error) {
+      invalid = error;
+    }
+    assert.ok(invalid);
+    assert.match(String(invalid.stderr || invalid.message), /invalid_hermes_runtime_skip_flag/);
   } finally {
     rmSync(stage, { recursive: true, force: true });
   }

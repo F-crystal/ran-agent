@@ -179,7 +179,13 @@ write. A follow-up `ran-agent` gate rehearsal exposed an identity-map
 test-isolation leak: the default identity map path bypassed every sandbox, so
 root gates read production state silently while `ran-agent` received
 `EACCES`; the isolated test env and the gate env matrix now pin
-`RAN_AGENT_IDENTITY_MAP_PATH` into each sandbox.
+`RAN_AGENT_IDENTITY_MAP_PATH` into each sandbox. The same rehearsal then
+reached the Hermes runtime resolution: the production v0.13 runtime is
+editable-installed from the ubuntu home and unreadable to `ran-agent`, an
+identity that never executes Hermes in production. The `ran-agent` gate now
+carries an explicit, printed skip for the provider-boundary and DeepSeek
+provider checks — both remain mandatory in the root gate — while every other
+check still executes as `ran-agent`.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. The verified payload-prune apply deletes only
