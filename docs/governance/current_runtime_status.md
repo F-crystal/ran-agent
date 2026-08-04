@@ -183,8 +183,16 @@ contract:
   during, a copy, and the copy is probed as `ran-agent` for readability and
   non-writability before the expensive root gate. Desktop evidence: the full
   release-script suite passes with Linux-root-only checks skipped and a
-  `passed` workflow-guard result. This remains pre-deployment evidence: the
-  Linux-root dual-gate regression must pass on the server before any apply.
+  `passed` workflow-guard result. On the server the Linux-root release-script
+  suite passed 84/85 as root (the sole skip is the non-root-only
+  umask-projection check), proving the dual-gate copy, capacity gates, and
+  cleanup under the real `0700` topology. The first `ran-agent` full-gate
+  rehearsal then exposed a test-isolation leak: identity-map lookups defaulted
+  to the production path, which root reads silently but `ran-agent` cannot
+  open; the isolated test env and the gate env matrix now pin
+  `RAN_AGENT_IDENTITY_MAP_PATH` into each sandbox. A fresh `ran-agent`
+  full-gate rehearsal on the pushed remediation commit is still required
+  before any apply.
 - Current zero-PID/disk-pressure remediation evidence: the three focused Node
   release files passed 147/147 under Node 22.22.2; all 9 Steward token/identity
   tests passed as Linux root on the server in an isolated `/tmp` fixture,

@@ -246,6 +246,7 @@ run_node_test() {
       NODE_ENV=test \
       RAN_AGENT_ALLOW_TEST_STATE_DIR=1 \
       RAN_AGENT_STATE_DIR="$case_root/tmp/state" \
+      RAN_AGENT_IDENTITY_MAP_PATH="$case_root/tmp/state/identity-map.json" \
       RAN_AGENT_SKIP_ENV_FILE_LOAD=1 \
       RAN_AGENT_NODE_BIN="$NODE_BIN" \
       RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
@@ -293,6 +294,7 @@ run_node_smoke() {
       NODE_ENV=test \
       RAN_AGENT_ALLOW_TEST_STATE_DIR=1 \
       RAN_AGENT_STATE_DIR="$case_root/tmp/state" \
+      RAN_AGENT_IDENTITY_MAP_PATH="$case_root/tmp/state/identity-map.json" \
       RAN_AGENT_SKIP_ENV_FILE_LOAD=1 \
       RAN_AGENT_NODE_BIN="$NODE_BIN" \
       SOCIAL_READER_NODE_BIN="$NODE_BIN" \

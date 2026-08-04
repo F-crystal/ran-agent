@@ -175,7 +175,11 @@ also probed as the `ran-agent` identity for readability and non-writability
 before the expensive root gate runs. The Linux-root regression keeps the
 artifact store at `0700`, proves the stage unreadable to `ran-agent`, proves
 the copy readable yet unwritable, and executes both gates before any runtime
-write.
+write. A follow-up `ran-agent` gate rehearsal exposed an identity-map
+test-isolation leak: the default identity map path bypassed every sandbox, so
+root gates read production state silently while `ran-agent` received
+`EACCES`; the isolated test env and the gate env matrix now pin
+`RAN_AGENT_IDENTITY_MAP_PATH` into each sandbox.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. The verified payload-prune apply deletes only

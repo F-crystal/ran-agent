@@ -3452,7 +3452,7 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(ombreContract, /process\.env\.RAN_AGENT_PYTHON_BIN/);
   assert.doesNotMatch(ombreContract, /\/Users\/fengran/);
   assert.ok(source.indexOf('chmod -R a-w') < source.indexOf('hermes-release-smoke.mjs'));
-  for (const name of ['RAN_AGENT_STATE_DIR', 'RAN_AGENT_GLOBAL_TIMELINE_PATH', 'RAN_AGENT_TIMELINE_ARCHIVE_DIR']) {
+  for (const name of ['RAN_AGENT_STATE_DIR', 'RAN_AGENT_IDENTITY_MAP_PATH', 'RAN_AGENT_GLOBAL_TIMELINE_PATH', 'RAN_AGENT_TIMELINE_ARCHIVE_DIR']) {
     assert.match(source.match(/run_node_test\(\)[\s\S]*?\n\}/)?.[0] || '', new RegExp(name));
     assert.match(source.match(/run_node_smoke\(\)[\s\S]*?\n\}/)?.[0] || '', new RegExp(name));
   }
