@@ -402,7 +402,24 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.match(deploy, /RAN_AGENT_RELEASE_SOURCE_ROOT="\$STAGE_DIR"/);
   assert.match(deploy, /RAN_AGENT_NODE_BIN="\$NODE_BIN"/);
   assert.match(deploy, /RAN_AGENT_PYTHON_BIN="\$PYTHON_BIN"/);
-  assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*RAN_AGENT_RELEASE_STAGED_CANDIDATE=1[\s\S]*\$STAGE_DIR\/scripts\/hermes-release-gate\.sh/);
+  assert.match(deploy, /"\$\{SUDO\[@\]\}" env RAN_AGENT_RELEASE_SOURCE_ROOT="\$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1[\s\S]*\$GATE_DIR\/scripts\/hermes-release-gate\.sh" --all/);
+  assert.match(deploy, /runuser --user ran-agent --group ran-agent -- \/usr\/bin\/env -i[\s\S]*RAN_AGENT_RELEASE_SOURCE_ROOT="\$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1[\s\S]*\$GATE_DIR\/scripts\/hermes-release-gate\.sh" --all/);
+  assert.doesNotMatch(deploy, /bash "\$STAGE_DIR\/scripts\/hermes-release-gate\.sh"/);
+  assert.match(deploy, /stage_gate_copy\(\) \{[\s\S]*mktemp -d \/tmp\/ran-agent-release-runtime-gate\.XXXXXX[\s\S]*diff -r "\$STAGE_DIR" "\$GATE_DIR"/);
+  assert.match(deploy, /stage_gate_copy\(\) \{[\s\S]*find -P "\$GATE_DIR" -type l[\s\S]*chmod -R a=rX "\$GATE_DIR"/);
+  assert.doesNotMatch(deploy, /RAN_AGENT_RELEASE_GATE_ROOT/);
+  const gateRunner = deploy.match(/run_candidate_gates\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.ok(gateRunner.indexOf('/usr/bin/test -r "$GATE_DIR/scripts/hermes-release-gate.sh"') > -1);
+  assert.ok(gateRunner.indexOf('/usr/bin/test -r "$GATE_DIR/scripts/hermes-release-gate.sh"') < gateRunner.indexOf('/usr/bin/test -w "$GATE_DIR/scripts/hermes-release-gate.sh"'));
+  assert.ok(gateRunner.indexOf('/usr/bin/test -w "$GATE_DIR/scripts/hermes-release-gate.sh"') < gateRunner.indexOf('bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all'));
+  assert.match(gateRunner, /candidate_gate_copy_unreadable/);
+  assert.match(gateRunner, /candidate_gate_copy_writable/);
+  assert.match(deploy, /require_gate_copy_capacity estimate "\$SCRIPT_ROOT" "\$PRE_STAGE_TREE_BYTES" "\$PRE_STAGE_TREE_INODES"/);
+  assert.match(deploy, /require_gate_copy_capacity measured "\$STAGE_DIR"[\s\S]*project_gate_copy_node_modules/);
+  assert.match(deploy, /project_gate_copy_node_modules\(\) \{[\s\S]*cp -a "\$STAGE_DIR\/node_modules" "\$GATE_DIR\/node_modules"[\s\S]*chmod -R a-w,go\+rX/);
+  const cleanupBody = deploy.match(/cleanup_pretransaction_artifacts\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+  assert.match(cleanupBody, /"\$GATE_DIR" == \/tmp\/ran-agent-release-runtime-gate\.\*/);
+  assert.match(cleanupBody, /rm -rf -- "\$GATE_DIR"/);
   assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*\$STAGE_DIR\/scripts\/apply-hermes-runtime-split\.sh/);
   assert.match(deploy, /"\$\{SUDO\[@\]\}" env[\s\S]*\$STAGE_DIR\/scripts\/verify-hermes-release\.sh/);
   assert.match(deploy, /read -r expected_candidate expected_digest < <\("\$\{SUDO\[@\]\}" cat "\$STAGE_DIR\/candidate"\)/);
@@ -2153,6 +2170,7 @@ test('candidate staging fails closed on missing real-process assets and remains 
   const bin = join(dir, 'bin');
   const artifacts = join(dir, 'artifacts');
   const runGit = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
+  let gateCopy = '';
   try {
     mkdirSync(scripts, { recursive: true });
     mkdirSync(join(repo, 'node_bridge', 'tests'), { recursive: true });
@@ -2164,6 +2182,7 @@ test('candidate staging fails closed on missing real-process assets and remains 
     for (const name of [
       'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
       'hermes-release-candidate-preflight.mjs', 'verify-ombre-steward-real-process.sh',
+      'hermes-release-gate.sh',
     ]) writeFileSync(join(scripts, name), '#!/bin/sh\nexit 0\n');
     for (const name of [
       'check-hermes-snapshot-capacity.py', 'prune-hermes-release-artifacts.sh', 'ombre_o1_contract.py',
@@ -2175,6 +2194,7 @@ test('candidate staging fails closed on missing real-process assets and remains 
       'deploy-hermes-release.sh', 'resolve-hermes-service-node.sh',
       'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
       'hermes-release-candidate-preflight.mjs', 'verify-ombre-steward-real-process.sh',
+      'hermes-release-gate.sh',
     ]) chmodSync(join(scripts, name), 0o755);
     writeFileSync(join(bin, 'sha256sum'), '#!/bin/sh\nexec /usr/bin/shasum -a 256 "$@"\n');
     chmodSync(join(bin, 'sha256sum'), 0o755);
@@ -2197,7 +2217,8 @@ test('candidate staging fails closed on missing real-process assets and remains 
       'mkdir -p "$STAGE_ROOT" "$ARCHIVE_ROOT"',
       'stage_candidate',
       'verify_stage_candidate',
-      'printf "%s\\n" "$STAGE_DIR"',
+      'stage_gate_copy',
+      'printf "%s\\n%s\\n" "$STAGE_DIR" "$GATE_DIR"',
     ].join('\n')], {
       cwd: repo,
       env: {
@@ -2209,27 +2230,261 @@ test('candidate staging fails closed on missing real-process assets and remains 
       },
       encoding: 'utf8',
       stdio: 'pipe',
-    }).trim();
-    const completeStage = runStage(complete);
+    }).trim().split('\n');
+    const [completeStage, completeGateCopy] = runStage(complete);
+    gateCopy = completeGateCopy;
     assert.equal(statSync(completeStage).mode & 0o777, 0o755);
     assert.equal(statSync(join(completeStage, 'scripts', 'verify-ombre-steward-real-process.sh')).mode & 0o222, 0);
+    assert.equal(statSync(completeGateCopy).mode & 0o777, 0o555);
+    assert.equal(statSync(join(completeGateCopy, 'scripts', 'hermes-release-gate.sh')).mode & 0o222, 0);
+    assert.equal(
+      readFileSync(join(completeGateCopy, 'candidate'), 'utf8'),
+      readFileSync(join(completeStage, 'candidate'), 'utf8'),
+      'gate copy must carry the verified candidate manifest byte-identically',
+    );
     if (process.getuid?.() === 0 && existsSync('/usr/sbin/runuser')) {
+      // Production topology: the artifact store stays root-private (0700), so
+      // the ran-agent identity can never read the stage directly and must use
+      // the traversable read-only gate copy instead.
       for (const path of [dir, artifacts, join(artifacts, 'stages')]) {
-        chmodSync(path, 0o711);
-        assert.equal(statSync(path).mode & 0o777, 0o711);
+        chmodSync(path, 0o700);
+        assert.equal(statSync(path).mode & 0o777, 0o700);
       }
-      assert.doesNotThrow(() => execFileSync('/usr/sbin/runuser', [
+      assert.throws(() => execFileSync('/usr/sbin/runuser', [
         '--user', 'ran-agent', '--group', 'ran-agent', '--',
         '/usr/bin/test', '-r', join(completeStage, 'node_bridge', 'tests', 'ombreCompatPatchedProcess.test.mjs'),
+      ], { stdio: 'pipe' }), /Command failed/, 'private stage must stay unreadable to the ran-agent identity');
+      assert.doesNotThrow(() => execFileSync('/usr/sbin/runuser', [
+        '--user', 'ran-agent', '--group', 'ran-agent', '--',
+        '/usr/bin/test', '-r', join(completeGateCopy, 'node_bridge', 'tests', 'ombreCompatPatchedProcess.test.mjs'),
       ], { stdio: 'pipe' }));
+      assert.throws(() => execFileSync('/usr/sbin/runuser', [
+        '--user', 'ran-agent', '--group', 'ran-agent', '--',
+        '/usr/bin/test', '-w', join(completeGateCopy, 'scripts', 'hermes-release-gate.sh'),
+      ], { stdio: 'pipe' }), /Command failed/, 'gate copy must stay read-only to the ran-agent identity');
     }
 
     runGit(['rm', 'scripts/verify-ombre-steward-real-process.sh']);
     runGit(['commit', '-m', 'incomplete candidate']);
     const incomplete = runGit(['rev-parse', 'HEAD']).trim();
     assert.throws(() => runStage(incomplete), /Command failed/);
+
+    execFileSync('/bin/bash', ['-c', [
+      'set -euo pipefail',
+      'set -- --rollback fixture',
+      `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
+      'SUDO=(/usr/bin/env)',
+      `STAGE_DIR=${JSON.stringify(completeStage)}`,
+      `GATE_DIR=${JSON.stringify(completeGateCopy)}`,
+      `CANDIDATE_ARCHIVE=${JSON.stringify(join(artifacts, 'archives', `release-candidate.${complete}.tar`))}`,
+      'cleanup_pretransaction_artifacts',
+      'test ! -e "$GATE_DIR"',
+      'test ! -e "$CANDIDATE_ARCHIVE"',
+    ].join('\n')], {
+      env: {
+        PATH: `${bin}:/usr/bin:/bin`,
+        RAN_AGENT_NODE_BIN: nodeBin,
+        RAN_AGENT_PYTHON_BIN: pythonBin,
+        RAN_AGENT_RELEASE_CONTROL_ROOT: repo,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifacts,
+      },
+      stdio: 'pipe',
+    });
   } finally {
     execFileSync('chmod', ['-R', 'u+w', dir], { stdio: 'ignore' });
+    rmSync(dir, { recursive: true, force: true });
+    if (gateCopy && existsSync(gateCopy)) {
+      execFileSync('chmod', ['-R', 'u+w', gateCopy], { stdio: 'ignore' });
+      rmSync(gateCopy, { recursive: true, force: true });
+    }
+  }
+});
+
+test('Linux root gates execute the same read-only copy as root and ran-agent under the production 0700 artifact topology', {
+  skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !existsSync('/usr/sbin/runuser'),
+}, () => {
+  const dir = mkdtempSync(identityFixturePrefix('ran-agent-gate-copy-'));
+  const repo = join(dir, 'repo');
+  const scripts = join(repo, 'scripts');
+  const artifacts = join(dir, 'artifacts');
+  const trace = join(dir, 'gate-trace');
+  const runGit = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
+  let gateCopy = '';
+  try {
+    mkdirSync(scripts, { recursive: true });
+    mkdirSync(join(repo, 'node_bridge', 'tests'), { recursive: true });
+    const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+    writeFileSync(join(scripts, 'deploy-hermes-release.sh'), deploy.slice(0, deploy.lastIndexOf('if [[ "$MODE" == --rollback ]]')));
+    copyFileSync(join(root, 'scripts', 'resolve-hermes-service-node.sh'), join(scripts, 'resolve-hermes-service-node.sh'));
+    writeFileSync(join(scripts, 'hermes-release-gate.sh'), [
+      '#!/bin/sh',
+      'digest=$(/usr/bin/sha256sum "$RAN_AGENT_RELEASE_SOURCE_ROOT/candidate")',
+      'printf \'%s %s\\n\' "$(/usr/bin/id -un)" "${digest%% *}" >> ' + JSON.stringify(trace),
+      'exit 0',
+    ].join('\n') + '\n');
+    for (const name of [
+      'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
+      'hermes-release-candidate-preflight.mjs', 'verify-ombre-steward-real-process.sh',
+    ]) writeFileSync(join(scripts, name), '#!/bin/sh\nexit 0\n');
+    for (const name of [
+      'check-hermes-snapshot-capacity.py', 'prune-hermes-release-artifacts.sh', 'ombre_o1_contract.py',
+      'install-ombre-steward-token.py', 'verify-ran-agent-runtime-identity.sh',
+      'apply_ombre_steward_patch.py',
+    ]) writeFileSync(join(scripts, name), '# fixture\n');
+    writeFileSync(join(repo, 'node_bridge', 'tests', 'ombreCompatPatchedProcess.test.mjs'), '// fixture\n');
+    for (const name of [
+      'deploy-hermes-release.sh', 'resolve-hermes-service-node.sh', 'hermes-release-gate.sh',
+      'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
+      'hermes-release-candidate-preflight.mjs', 'verify-ombre-steward-real-process.sh',
+    ]) chmodSync(join(scripts, name), 0o755);
+    runGit(['init']);
+    runGit(['config', 'user.email', 'gate-copy@example.invalid']);
+    runGit(['config', 'user.name', 'gate copy']);
+    runGit(['add', '.']);
+    runGit(['commit', '-m', 'gate copy candidate']);
+    const complete = runGit(['rev-parse', 'HEAD']).trim();
+    writeFileSync(trace, '');
+    chmodSync(trace, 0o666);
+    chmodSync(dir, 0o755);
+    mkdirSync(artifacts);
+    chmodSync(artifacts, 0o700);
+    const fixtureEnv = {
+      PATH: '/usr/bin:/bin',
+      RAN_AGENT_NODE_BIN: nodeBin,
+      RAN_AGENT_PYTHON_BIN: pythonBin,
+      RAN_AGENT_RELEASE_CONTROL_ROOT: repo,
+      RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifacts,
+    };
+    const [completeStage, completeGateCopy] = execFileSync('/bin/bash', ['-c', [
+      'set -euo pipefail',
+      'set -- --rollback fixture',
+      `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
+      'MODE=--apply',
+      'SUDO=()',
+      'STAGE_USE_SUDO=1',
+      `CANDIDATE=${JSON.stringify(complete)}`,
+      `STAGE_ROOT=${JSON.stringify(join(artifacts, 'stages'))}`,
+      `ARCHIVE_ROOT=${JSON.stringify(join(artifacts, 'archives'))}`,
+      'mkdir -p "$STAGE_ROOT" "$ARCHIVE_ROOT"',
+      'chmod 700 "$STAGE_ROOT" "$ARCHIVE_ROOT"',
+      'stage_candidate',
+      'verify_stage_candidate',
+      'stage_gate_copy',
+      'printf "%s\\n%s\\n" "$STAGE_DIR" "$GATE_DIR"',
+    ].join('\n')], { cwd: repo, env: fixtureEnv, encoding: 'utf8', stdio: 'pipe' }).trim().split('\n');
+    gateCopy = completeGateCopy;
+    assert.equal(statSync(completeStage).mode & 0o777, 0o755);
+    assert.equal(statSync(completeGateCopy).mode & 0o777, 0o555);
+    assert.equal(statSync(completeGateCopy).uid, 0);
+    assert.equal(statSync(completeGateCopy).gid, 0);
+    // The ran-agent identity can never traverse the root-private store into
+    // the stage; it reads the traversable read-only gate copy instead.
+    assert.throws(() => execFileSync('/usr/sbin/runuser', [
+      '--user', 'ran-agent', '--group', 'ran-agent', '--',
+      '/usr/bin/test', '-r', join(completeStage, 'scripts', 'hermes-release-gate.sh'),
+    ], { stdio: 'pipe' }), /Command failed/, 'private stage must stay unreadable to the ran-agent identity');
+    assert.doesNotThrow(() => execFileSync('/usr/sbin/runuser', [
+      '--user', 'ran-agent', '--group', 'ran-agent', '--',
+      '/usr/bin/test', '-r', join(completeGateCopy, 'scripts', 'hermes-release-gate.sh'),
+    ], { stdio: 'pipe' }));
+    assert.throws(() => execFileSync('/usr/sbin/runuser', [
+      '--user', 'ran-agent', '--group', 'ran-agent', '--',
+      '/usr/bin/test', '-w', join(completeGateCopy, 'scripts', 'hermes-release-gate.sh'),
+    ], { stdio: 'pipe' }), /Command failed/, 'gate copy must stay read-only to the ran-agent identity');
+    // Both gates succeed against the same read-only copy before any snapshot,
+    // checkout, service stop, or runtime write.
+    execFileSync('/bin/bash', ['-c', [
+      'set -euo pipefail',
+      'set -- --rollback fixture',
+      `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
+      'MODE=--apply',
+      'SUDO=()',
+      'STAGE_USE_SUDO=1',
+      `CANDIDATE=${JSON.stringify(complete)}`,
+      `STAGE_DIR=${JSON.stringify(completeStage)}`,
+      `GATE_DIR=${JSON.stringify(completeGateCopy)}`,
+      `NODE_BIN=${JSON.stringify(nodeBin)}`,
+      'run_candidate_gates',
+    ].join('\n')], { cwd: repo, env: fixtureEnv, stdio: 'pipe' });
+    const gateRuns = readFileSync(trace, 'utf8').trim().split('\n').map((line) => line.split(' '));
+    assert.equal(gateRuns.length, 2, 'root gate and ran-agent gate must both execute');
+    assert.equal(gateRuns[0][0], 'root');
+    assert.equal(gateRuns[1][0], 'ran-agent');
+    assert.match(gateRuns[0][1], /^[a-f0-9]{64}$/);
+    assert.equal(gateRuns[0][1], gateRuns[1][1], 'both gates must read the identical verified copy');
+    // The copy is removed by the transaction cleanup on every outcome.
+    execFileSync('/bin/bash', ['-c', [
+      'set -euo pipefail',
+      'set -- --rollback fixture',
+      `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
+      'SUDO=()',
+      `STAGE_ROOT=${JSON.stringify(join(artifacts, 'stages'))}`,
+      `ARCHIVE_ROOT=${JSON.stringify(join(artifacts, 'archives'))}`,
+      `STAGE_DIR=${JSON.stringify(completeStage)}`,
+      `GATE_DIR=${JSON.stringify(completeGateCopy)}`,
+      `CANDIDATE_ARCHIVE=${JSON.stringify(join(artifacts, 'archives', `release-candidate.${complete}.tar`))}`,
+      'cleanup_pretransaction_artifacts',
+      'test ! -e "$GATE_DIR"',
+      'test ! -e "$STAGE_DIR"',
+      'test ! -e "$CANDIDATE_ARCHIVE"',
+    ].join('\n')], { cwd: repo, env: fixtureEnv, stdio: 'pipe' });
+  } finally {
+    execFileSync('chmod', ['-R', 'u+w', dir], { stdio: 'ignore' });
+    rmSync(dir, { recursive: true, force: true });
+    if (gateCopy && existsSync(gateCopy)) {
+      execFileSync('chmod', ['-R', 'u+w', gateCopy], { stdio: 'ignore' });
+      rmSync(gateCopy, { recursive: true, force: true });
+    }
+  }
+});
+
+test('gate copy capacity gate budgets the gate filesystem before large copies and fails closed when full', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ran-agent-gate-capacity-'));
+  const repo = join(dir, 'repo');
+  const scripts = join(repo, 'scripts');
+  const stage = join(dir, 'stage');
+  try {
+    mkdirSync(scripts, { recursive: true });
+    mkdirSync(join(stage, 'node_modules', 'pkg'), { recursive: true });
+    writeFileSync(join(stage, 'node_modules', 'pkg', 'index.mjs'), `export {};\n${'// payload\n'.repeat(512)}`);
+    const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+    writeFileSync(join(scripts, 'deploy-hermes-release.sh'), deploy.slice(0, deploy.lastIndexOf('if [[ "$MODE" == --rollback ]]')));
+    copyFileSync(join(root, 'scripts', 'check-hermes-snapshot-capacity.py'), join(scripts, 'check-hermes-snapshot-capacity.py'));
+    copyFileSync(join(root, 'scripts', 'resolve-hermes-service-node.sh'), join(scripts, 'resolve-hermes-service-node.sh'));
+    const runCapacity = (extraEnv, mode = 'measured') => spawnSync('/bin/bash', ['-c', [
+      'set -euo pipefail',
+      'set -- --rollback fixture',
+      `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
+      'SUDO=(/usr/bin/env)',
+      `STAGE_DIR=${JSON.stringify(stage)}`,
+      `require_gate_copy_capacity ${mode} "$SCRIPT_ROOT" 4096 16`,
+    ].join('\n')], {
+      env: {
+        PATH: '/usr/bin:/bin',
+        RAN_AGENT_NODE_BIN: nodeBin,
+        RAN_AGENT_PYTHON_BIN: pythonBin,
+        RAN_AGENT_RELEASE_CONTROL_ROOT: repo,
+        RAN_AGENT_TEST_MODE: '1',
+        ...extraEnv,
+      },
+      encoding: 'utf8',
+    });
+    const fullMeasured = runCapacity({ RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_BYTES: '0' });
+    assert.notEqual(fullMeasured.status, 0);
+    assert.match(fullMeasured.stderr, /free_bytes=0 required_bytes=[1-9][0-9]*/);
+    assert.match(fullMeasured.stderr, /gate_copy_capacity_insufficient/);
+    const roomyMeasured = runCapacity({ RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_BYTES: String(10 * 1024 ** 4) });
+    assert.equal(roomyMeasured.status, 0, roomyMeasured.stderr);
+    assert.match(roomyMeasured.stdout, /gate-copy-capacity free_bytes=/);
+    const fullEstimate = runCapacity({ RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_BYTES: '0' }, 'estimate');
+    assert.notEqual(fullEstimate.status, 0);
+    assert.match(fullEstimate.stderr, /gate_copy_capacity_insufficient/);
+    const roomyEstimate = runCapacity({ RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_BYTES: String(10 * 1024 ** 4) }, 'estimate');
+    assert.equal(roomyEstimate.status, 0, roomyEstimate.stderr);
+    const probeFailure = runCapacity({ RAN_AGENT_TEST_SNAPSHOT_CAPACITY_FREE_BYTES: 'not-a-number' });
+    assert.notEqual(probeFailure.status, 0);
+    assert.match(probeFailure.stderr, /gate_copy_capacity_probe_failed/);
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
@@ -3356,8 +3611,19 @@ test('release transaction snapshots the live production checkout before activati
   assert.ok(resealedState < resealedVerification);
   assert.ok(resealedVerification < applyFlow.indexOf('activate_candidate_checkout'));
   assert.ok(deploy.indexOf('snapshot_code_revision') < deploy.lastIndexOf('activate_candidate_checkout'));
+  assert.ok(applyFlow.indexOf('snapshot_capacity_gate "$SCRIPT_ROOT" "$PRE_STAGE_RESERVE_BYTES"') < applyFlow.indexOf('require_gate_copy_capacity estimate'));
+  assert.ok(applyFlow.indexOf('require_gate_copy_capacity estimate') < applyFlow.indexOf('stage_candidate'));
   assert.ok(applyFlow.indexOf('prepare_candidate_node_dependencies') < applyFlow.indexOf('snapshot_runtime_state'));
-  assert.ok(applyFlow.indexOf('runtime_checkout_access "$STAGE_DIR" modules') < applyFlow.indexOf('snapshot_runtime_state'));
+  assert.ok(applyFlow.indexOf('candidate_stage_preflight owner') < applyFlow.indexOf('stage_gate_copy'));
+  assert.ok(applyFlow.indexOf('stage_gate_copy') < applyFlow.indexOf('run_candidate_gates'));
+  assert.ok(applyFlow.indexOf('run_candidate_gates') < applyFlow.indexOf('prepare_candidate_node_dependencies'));
+  assert.ok(applyFlow.indexOf('run_candidate_gates') < applyFlow.indexOf('snapshot_runtime_state'));
+  assert.ok(applyFlow.indexOf('run_candidate_gates') < applyFlow.indexOf('quiesce_runtime_services'));
+  assert.ok(applyFlow.indexOf('run_candidate_gates') < applyFlow.indexOf('activate_candidate_checkout'));
+  assert.ok(applyFlow.indexOf('prepare_candidate_node_dependencies') < applyFlow.indexOf('require_gate_copy_capacity measured'));
+  assert.ok(applyFlow.indexOf('require_gate_copy_capacity measured') < applyFlow.indexOf('project_gate_copy_node_modules'));
+  assert.ok(applyFlow.indexOf('project_gate_copy_node_modules') < applyFlow.indexOf('runtime_checkout_access "$GATE_DIR" modules'));
+  assert.ok(applyFlow.indexOf('runtime_checkout_access "$GATE_DIR" modules') < applyFlow.indexOf('snapshot_runtime_state'));
   assert.ok(applyFlow.indexOf('activate_candidate_checkout') < applyFlow.indexOf('activate_candidate_node_dependencies'));
   assert.ok(applyFlow.indexOf('activate_candidate_node_dependencies') < applyFlow.indexOf('runtime_checkout_access "$REPO_ROOT" modules'));
   assert.match(deploy, /runtime_checkout_access "\$REPO_ROOT" files/);

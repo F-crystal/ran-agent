@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-08-03)
+Status: CURRENT (2026-08-04)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -166,6 +166,25 @@ contract:
   become rollback authority. The supplied
   `8c259dd` trace ends with `rollback-complete`; neither O1/O2 nor the Flash
   target is deployed.
+- Candidate `3ba6d712ceb464bcbb3068617212979c02bd0e9e` is also not deployable
+  yet. It passed the root gate from a manual `/tmp` extraction, but its apply
+  stopped before snapshot, service, or checkout mutation when the second
+  pre-mutation gate ran as `ran-agent`: the immutable stage lives under the
+  root-private `0700` artifact store, so the runtime identity received
+  `Permission denied` before opening the gate script. Release tests had masked
+  the boundary by chmodding fixture artifact parents to `0711`, a topology
+  production never allows. The remediation keeps the store root-private,
+  extracts a secret-free copy of the verified candidate archive under `/tmp`,
+  seals it root-owned and read-only, proves it byte-identical to the verified
+  stage, and runs both gates plus the pre-mutation module-loadability probe
+  against that copy. The gate filesystem is budgeted twice — an upfront
+  estimate covering the copy plus the node_modules projection, and a measured
+  check after `npm ci` — so a full disk stops the transaction before, not
+  during, a copy, and the copy is probed as `ran-agent` for readability and
+  non-writability before the expensive root gate. Desktop evidence: the full
+  release-script suite passes with Linux-root-only checks skipped and a
+  `passed` workflow-guard result. This remains pre-deployment evidence: the
+  Linux-root dual-gate regression must pass on the server before any apply.
 - Current zero-PID/disk-pressure remediation evidence: the three focused Node
   release files passed 147/147 under Node 22.22.2; all 9 Steward token/identity
   tests passed as Linux root on the server in an isolated `/tmp` fixture,

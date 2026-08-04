@@ -56,6 +56,7 @@ SNAPSHOT_BUILD_ACTIVE=0
 SNAPSHOT_FINAL_DIR=''
 SNAPSHOT_TRANSACTION_ID=''
 STAGE_DIR=''
+GATE_DIR=''
 CANDIDATE_ARCHIVE=''
 PRODUCTION_HEAD=''
 DELTA_FILE=''
@@ -253,6 +254,10 @@ cleanup_pretransaction_artifacts() {
   RELEASE_EPHEMERA_CLEANED=1
   if [[ -n "$STAGE_DIR" && "$STAGE_DIR" == "$STAGE_ROOT"/release-stage.* ]]; then
     "${SUDO[@]}" rm -rf -- "$STAGE_DIR" 2>/dev/null || true
+  fi
+  if [[ -n "$GATE_DIR" && "$GATE_DIR" == /tmp/ran-agent-release-runtime-gate.* ]]; then
+    "${SUDO[@]}" chmod -R u+w "$GATE_DIR" 2>/dev/null || true
+    "${SUDO[@]}" rm -rf -- "$GATE_DIR" 2>/dev/null || true
   fi
   if [[ -n "$CANDIDATE_ARCHIVE" && "$CANDIDATE_ARCHIVE" == "$ARCHIVE_ROOT"/release-candidate.*.tar ]]; then
     "${SUDO[@]}" rm -f -- "$CANDIDATE_ARCHIVE" 2>/dev/null || true
@@ -588,8 +593,39 @@ print(blob_bytes, files + len(directories) + 1)
   read -r tree_bytes tree_inodes <<<"$tree_usage"
   [[ "$archive_bytes" =~ ^[0-9]+$ && "$tree_bytes" =~ ^[0-9]+$ && "$tree_inodes" =~ ^[0-9]+$ ]] ||
     fail candidate_size_invalid
-  # One tar plus one extracted immutable stage; per-entry blocks cover tiny files.
-  printf '%s\t%s\n' "$((archive_bytes + tree_bytes + tree_inodes * 4096))" "$((tree_inodes + 1))"
+  # Callers combine one tar plus extracted trees into per-filesystem budgets;
+  # per-entry blocks cover tiny files.
+  printf '%s\t%s\t%s\n' "$archive_bytes" "$tree_bytes" "$tree_inodes"
+}
+
+# The gate copy and the node_modules projection live on the /tmp filesystem,
+# outside the artifact store; budget that filesystem before creating large
+# copies so a full disk stops the transaction before, not during, a copy.
+require_gate_copy_capacity() {
+  local mode="$1" helper_root="$2" tree_bytes="${3:-0}" tree_inodes="${4:-0}"
+  local output status check_root helper
+  case "$mode" in estimate|measured) ;; *) fail gate_copy_capacity_mode_invalid ;; esac
+  check_root="$(cd /tmp && pwd -P)" || fail gate_copy_capacity_probe_failed
+  helper="$helper_root/scripts/check-hermes-snapshot-capacity.py"
+  [[ -x /usr/bin/python3 ]] || fail snapshot_capacity_python_unavailable
+  "${SUDO[@]}" test -f "$helper" || fail snapshot_capacity_probe_missing
+  local -a arguments=(--artifact-root "$check_root")
+  if [[ "$mode" == estimate ]]; then
+    # The live checkout's node_modules approximates the coming projection;
+    # the candidate tree copy is fixed from the verified archive shape.
+    arguments+=(--source "$REPO_ROOT/node_modules" --fixed-bytes "$((tree_bytes + tree_inodes * 4096))" --fixed-inodes "$((tree_inodes + 1))")
+  else
+    arguments+=(--source "$STAGE_DIR/node_modules")
+  fi
+  if output="$("${SUDO[@]}" /usr/bin/python3 -I "$helper" "${arguments[@]}")"; then
+    printf 'deploy-hermes-release: gate-copy-capacity %s\n' "$output"
+    return 0
+  else
+    status=$?
+  fi
+  [[ -z "$output" ]] || printf 'deploy-hermes-release: gate-copy-capacity %s\n' "$output" >&2
+  [[ "$status" -ne 3 ]] || fail gate_copy_capacity_insufficient
+  fail gate_copy_capacity_probe_failed
 }
 
 require_ombre_ingress_dropin_absent() {
@@ -644,6 +680,59 @@ verify_stage_candidate() {
   read -r expected_candidate expected_digest < <("${SUDO[@]}" cat "$STAGE_DIR/candidate") || fail candidate_stage_manifest_invalid
   actual_digest="$("${SUDO[@]}" sha256sum "$CANDIDATE_ARCHIVE" | awk '{ print $1 }')" || fail candidate_stage_digest_unavailable
   [[ "$expected_candidate" == "$CANDIDATE" && "$expected_digest" == "$actual_digest" ]] || fail candidate_stage_digest_mismatch
+}
+
+# The artifact store stays root-private (0700), so the ran-agent acceptance
+# identity cannot traverse into the immutable stage.  Both acceptance gates
+# therefore execute an identical root-owned, read-only copy of the verified
+# candidate placed under a traversable parent.  The copy contains only git
+# archive payload (no secrets), carries the verified candidate manifest, and
+# is removed by cleanup_pretransaction_artifacts on every outcome.
+stage_gate_copy() {
+  GATE_DIR="$("${SUDO[@]}" mktemp -d /tmp/ran-agent-release-runtime-gate.XXXXXX)" ||
+    fail candidate_gate_copy_unavailable
+  "${SUDO[@]}" tar -xf "$CANDIDATE_ARCHIVE" -C "$GATE_DIR" || fail candidate_gate_copy_failed
+  "${SUDO[@]}" cp "$STAGE_DIR/candidate" "$GATE_DIR/candidate" || fail candidate_gate_copy_failed
+  if "${SUDO[@]}" find -P "$GATE_DIR" -type l -print -quit | grep -q .; then
+    fail candidate_gate_copy_symlink
+  fi
+  "${SUDO[@]}" chmod -R a=rX "$GATE_DIR" || fail candidate_gate_copy_failed
+  "${SUDO[@]}" test -x "$GATE_DIR/scripts/hermes-release-gate.sh" || fail candidate_gate_copy_incomplete
+  "${SUDO[@]}" diff -r "$STAGE_DIR" "$GATE_DIR" >/dev/null || fail candidate_gate_copy_mismatch
+}
+
+# Gates execute the same read-only copy as root and as the ran-agent runtime
+# identity before any snapshot, checkout, service, or runtime mutation.
+run_candidate_gates() {
+  [[ -n "$GATE_DIR" && -d "$GATE_DIR" ]] || fail candidate_gate_copy_missing
+  # Prove the traversable read-only contract with the real acceptance identity
+  # before spending the expensive root gate.
+  "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- \
+    /usr/bin/test -r "$GATE_DIR/scripts/hermes-release-gate.sh" ||
+    fail candidate_gate_copy_unreadable
+  if "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- \
+    /usr/bin/test -w "$GATE_DIR/scripts/hermes-release-gate.sh"; then
+    fail candidate_gate_copy_writable
+  fi
+  "${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all
+  "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --verify-account || fail steward_identity_conflict
+  "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+    PATH=/usr/bin:/bin HOME=/nonexistent \
+    RAN_AGENT_RELEASE_SOURCE_ROOT="$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 \
+    RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" \
+    RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only \
+    bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all
+}
+
+# Staged node_modules stay in the root-private store for same-filesystem
+# activation; the pre-mutation ran-agent loadability probe runs against a
+# read-only projection in the traversable gate copy.
+project_gate_copy_node_modules() {
+  [[ -n "$GATE_DIR" && -d "$GATE_DIR" ]] || fail candidate_gate_copy_missing
+  "${SUDO[@]}" cp -a "$STAGE_DIR/node_modules" "$GATE_DIR/node_modules" ||
+    fail candidate_gate_modules_projection_failed
+  "${SUDO[@]}" chmod -R a-w,go+rX "$GATE_DIR/node_modules" ||
+    fail candidate_gate_modules_projection_failed
 }
 
 prepare_candidate_node_dependencies() {
@@ -1492,23 +1581,22 @@ if [[ "$MODE" == --dry-run ]]; then require_plan_prerequisites; printf 'deploy-h
 require_apply_prerequisites
 prune_release_artifacts "$SCRIPT_ROOT"
 PRE_STAGE_RESERVE="$(candidate_stage_reserve)" || fail candidate_size_unavailable
-IFS=$'\t' read -r PRE_STAGE_RESERVE_BYTES PRE_STAGE_RESERVE_INODES <<<"$PRE_STAGE_RESERVE"
+IFS=$'\t' read -r PRE_STAGE_ARCHIVE_BYTES PRE_STAGE_TREE_BYTES PRE_STAGE_TREE_INODES <<<"$PRE_STAGE_RESERVE"
+PRE_STAGE_RESERVE_BYTES=$((PRE_STAGE_ARCHIVE_BYTES + PRE_STAGE_TREE_BYTES + PRE_STAGE_TREE_INODES * 4096))
+PRE_STAGE_RESERVE_INODES=$((PRE_STAGE_TREE_INODES + 1))
 snapshot_capacity_gate "$SCRIPT_ROOT" "$PRE_STAGE_RESERVE_BYTES" "$PRE_STAGE_RESERVE_INODES"
+require_gate_copy_capacity estimate "$SCRIPT_ROOT" "$PRE_STAGE_TREE_BYTES" "$PRE_STAGE_TREE_INODES"
 report_release_delta
 stage_candidate
 verify_stage_candidate
 candidate_stage_preflight owner
-# Gate runs in immutable stage before any checkout/config/runtime mutation.
-"${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only bash "$STAGE_DIR/scripts/hermes-release-gate.sh" --all
-"${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --verify-account || fail steward_identity_conflict
-"${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
-  PATH=/usr/bin:/bin HOME=/nonexistent \
-  RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 \
-  RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" \
-  RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only \
-  bash "$STAGE_DIR/scripts/hermes-release-gate.sh" --all
+stage_gate_copy
+# Gates run on the traversable read-only copy before any checkout/config/runtime mutation.
+run_candidate_gates
 prepare_candidate_node_dependencies
-runtime_checkout_access "$STAGE_DIR" modules
+require_gate_copy_capacity measured "$STAGE_DIR"
+project_gate_copy_node_modules
+runtime_checkout_access "$GATE_DIR" modules
 snapshot_capacity_gate "$STAGE_DIR" 0 0
 snapshot_runtime_state
 record_protected_capability_evidence before || fail protected_capability_evidence_before

@@ -1,6 +1,6 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-08-03)
+Status: CURRENT (2026-08-04)
 
 `USER_SUPPLIED_RUNTIME`: the 2026-08-03 apply attempt for candidate
 `e85301fef053dd02d920af61fa5db01f2b381d3b` stopped before service mutation
@@ -22,9 +22,12 @@ Package B.2/B.3 have not started.
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable
 40-character commit SHA. The transaction uses **stage-and-switch** (option A):
-it archives the SHA to `/opt/ran_agent-release/stages`, gates that stage,
-snapshots the active checkout and runtime, then changes `/opt/ran_agent` only
-inside the transaction. This is smaller and safer than adding a second
+it archives the SHA to `/opt/ran_agent-release/stages`, verifies the immutable
+stage, and gates an identical root-owned read-only copy of that stage placed
+under a traversable parent, because the artifact store itself stays
+root-private (`0700`) and the `ran-agent` acceptance identity cannot traverse
+it. The transaction then snapshots the active checkout and runtime, and
+changes `/opt/ran_agent` only inside the transaction. This is smaller and safer than adding a second
 worktree/service-pointer topology to the existing systemd deployment.
 The staged checkout is source-only. Persistent runtime state is resolved once
 as `/opt/ran_agent/.ran_agent_state` (or the explicit
@@ -137,9 +140,10 @@ regular file. Candidate and rollback checkouts run with `umask 022`; every
 tracked regular file and parent directory is then verified against the Git
 mode and `ubuntu` ownership contract. Historical root-owned restrictive paths
 are repaired through no-follow file descriptors and revalidated, and the
-actual Node entry plus dynamic dependencies are imported as `ran-agent` before
-runtime apply. The immutable stage runs its full Git-less gate under both root
-and `ran-agent`; a same-user local pass is not deployable evidence.
+actual Node entry plus dynamic dependencies are imported as `ran-agent` from
+the read-only gate copy before runtime apply. The full Git-less gate executes
+that verified copy under both root and `ran-agent`; a same-user local pass is
+not deployable evidence.
 
 A later server root gate failed five release-script tests before transaction
 mutation because their identity-sensitive fixtures inherited the root gate's
@@ -151,6 +155,27 @@ as `ubuntu`, and pass `/tmp` explicitly to the cross-UID lock child. Do not
 weaken the production root/`ubuntu`/`ran-agent` boundaries to make a fixture
 pass. The corrected candidate still requires a fresh Linux-root staged gate
 before apply.
+
+Candidate `3ba6d712ceb464bcbb3068617212979c02bd0e9e` passed the root gate from
+a manual `/tmp` extraction, but its apply stopped before snapshot, service, or
+checkout mutation when the second pre-mutation gate ran as `ran-agent`: the
+immutable stage lives under the root-private `0700` artifact store, so the
+runtime identity received `Permission denied` before opening the gate script.
+The release tests had masked this boundary by chmodding fixture artifact
+parents to `0711`, proving a permission topology production never allows. The
+reviewed transaction now extracts a second, secret-free copy of the verified
+candidate archive under `/tmp`, seals it root-owned and read-only, proves it
+byte-identical to the verified stage, and runs both the root and the
+`ran-agent` gates plus the pre-mutation module-loadability probe against that
+same copy; the copy is removed on every transaction outcome. The gate
+filesystem is budgeted twice — an upfront estimate covering the copy and the
+node_modules projection, and a measured check after dependency installation —
+so a full disk stops the transaction before, not during, a copy. The copy is
+also probed as the `ran-agent` identity for readability and non-writability
+before the expensive root gate runs. The Linux-root regression keeps the
+artifact store at `0700`, proves the stage unreadable to `ran-agent`, proves
+the copy readable yet unwritable, and executes both gates before any runtime
+write.
 
 `--apply` and `--rollback` interrupt the four core services and any active
 managed optional service briefly. The verified payload-prune apply deletes only
