@@ -53,7 +53,7 @@ Keep the reviewed SHA, artifact, controller, and rollback snapshot explicit:
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
 RUNTIME_CANDIDATE=<reviewed-40-char-sha>
-RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/scripts/deploy-hermes-runtime-release.py
+RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/deploy-hermes-runtime-release-<reviewed-40-char-sha>.py
 RUNTIME_ARTIFACT=/opt/ran_agent-release/runtime-artifacts/hermes-runtime-<candidate-short-sha>.tar.gz
 sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode dry-run
 sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode apply

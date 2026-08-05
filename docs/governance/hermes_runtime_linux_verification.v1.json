@@ -35,11 +35,11 @@
     },
     "runtimeReleaseController": {
       "path": "scripts/deploy-hermes-runtime-release.py",
-      "sha256": "5f0302162e9bfb22d94c81fc224fd8b08c65911e0efd1dcc0b502950ae6d307d"
+      "sha256": "85648d24128e86274c97a24919042b5db6dc63f1adcd4818ca3ccb2445cfd86c"
     },
     "runtimeReleaseTests": {
       "path": "tests/test_hermes_runtime_release.py",
-      "sha256": "c4f5ff4216f0531660eaa6c580d3396f0427b1ff70c7e7cf100b4ad7916f711b"
+      "sha256": "b294e3c35250635b61f87eaac8cb8382df696591e1202a395ba1535c761e7ac3"
     },
     "runtimeSplitInterlock": {
       "path": "scripts/apply-hermes-runtime-split.sh",
@@ -84,12 +84,12 @@
       "stdoutRawSha256WithNewline": "33b6d810dfef35b1eab7326b6c06f168eb0869b157dcbf0613300c658b245dee"
     },
     "runtimeControllerStagedGate": {
-      "verifiedAt": "2026-08-06T03:18:04+08:00",
+      "verifiedAt": "2026-08-06T03:47:51+08:00",
       "source": "Git-less read-only copy under /tmp; removed after verification",
-      "environment": {"HOME": "/tmp", "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1"},
+      "environment": {"HOME": "/tmp", "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": "<gitless-source>/src"},
       "argv": ["/opt/ran_agent/.venv/bin/python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_hermes_runtime_release.py"],
-      "nonRoot": {"identity": "ubuntu", "result": "18 passed in 0.62s"},
-      "root": {"identity": "root via sudo env -i", "result": "18 passed in 0.61s"}
+      "nonRoot": {"identity": "ubuntu", "result": "19 passed in 0.69s"},
+      "root": {"identity": "root via sudo env -i", "result": "19 passed in 0.69s"}
     }
   },
   "checks": {

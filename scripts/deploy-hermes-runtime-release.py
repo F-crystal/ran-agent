@@ -213,6 +213,12 @@ def check_candidate(repo: Path, candidate: str) -> None:
         raise ReleaseError("production worktree is dirty")
 
 
+def validate_candidate_controller(repo: Path, candidate: str) -> None:
+    check_candidate(repo, candidate)
+    if Path(__file__).read_bytes() != candidate_blob(repo, candidate, CONTROLLER_PATH):
+        raise ReleaseError("running controller is not the candidate controller")
+
+
 def require_private_root(path: Path) -> None:
     if path.is_symlink() or not path.is_dir():
         raise ReleaseError(f"private root is not a regular directory: {path}")
@@ -306,10 +312,6 @@ def validate_manifests(
     profile = candidate_blob(repo, candidate, PROFILE_PATH)
     unit = candidate_blob(repo, candidate, UNIT_SOURCE_PATH)
     builder = candidate_blob(repo, candidate, BUILDER_PATH)
-    controller = candidate_blob(repo, candidate, CONTROLLER_PATH)
-
-    if Path(__file__).read_bytes() != controller:
-        raise ReleaseError("running controller is not the candidate controller")
     if mutation.get("phase") != "runtime-only" or mutation.get("schemaVersion") != 1:
         raise ReleaseError("runtime mutation contract is invalid")
     require_release_candidate_status(mutation.get("status"))
@@ -1181,6 +1183,7 @@ def main() -> int:
         raise ReleaseError("authorized release artifact root is absent")
     require_private_root(ARTIFACT_ROOT)
     with release_lock():
+        validate_candidate_controller(REPO, args.candidate)
         if args.mode == "rollback":
             if args.snapshot is None:
                 raise ReleaseError("rollback requires --snapshot")

@@ -316,6 +316,20 @@ def test_release_candidate_status_is_exact() -> None:
             MODULE.require_release_candidate_status(rejected)
 
 
+def test_candidate_controller_binding_rejects_a_floating_rollback_controller(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(MODULE, "check_candidate", lambda *_: None)
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda *_: b"different-controller")
+    with pytest.raises(MODULE.ReleaseError, match="running controller is not the candidate controller"):
+        MODULE.validate_candidate_controller(Path("/fixture"), "a" * 40)
+
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert source.index("validate_candidate_controller(REPO, args.candidate)") < source.index(
+        'if args.mode == "rollback":'
+    )
+
+
 def test_privileged_replace_rejects_symlink_target(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.write_text("keep")
