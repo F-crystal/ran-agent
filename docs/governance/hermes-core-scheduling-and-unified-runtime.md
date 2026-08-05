@@ -1,0 +1,444 @@
+# Hermes Core Scheduling and Unified Runtime
+
+Status: CURRENT (2026-08-05)
+
+Lifecycle: `DESIGNED` — not implemented, archived, deployed, or
+production-verified.
+
+This decision record amends the implementation direction of the archived v0.4 cutover
+contract. It does not modify frozen Schema v1, authorize a production Core
+write path, or describe the current production runtime.
+
+## Decision
+
+ran-agent will converge on one companion Hermes gateway and one wake clock.
+Hermes cron may own the clock edge, but Core remains the only authority for
+schedule intent, occurrence identity, Work Run authority, effects,
+presentation outbox, and delivery truth.
+
+The production target is:
+
+```text
+one managed-core-tick
+  -> idempotent Core wake_due(now)
+  -> ScheduleSpec + WakeOccurrence transaction
+  -> WorkRun claim/fence
+  -> Hermes draft and governed effects
+  -> Core final/effect/presentation commit
+  -> adapter receipt or durable ambiguous
+```
+
+Hermes `jobs.json`, `executions.db`, output files, and direct-delivery state are
+not Canon and are never migrated as Core truth.
+
+## First-principles boundary
+
+A clock answers only "check what is due now." It cannot decide that a logical
+occurrence exists, that work acquired authority, that an external effect
+happened, or that a message was delivered. Those facts must survive process
+death and must compose with the existing Core transaction, fence, effect, and
+outbox contracts.
+
+Therefore the managed tick:
+
+- does not invoke an agent;
+- does not create user-visible text;
+- does not call a presentation adapter;
+- carries no private memory or destination payload;
+- may be duplicated, delayed, or missed without duplicating an occurrence;
+- cannot make an occurrence successful by itself.
+
+The Core endpoint accepts a trigger identity, reads time from the Core-owned
+clock, then returns only counts and opaque Journal IDs for mutations. An empty
+tick writes only a redacted runtime metric. Caller time, when supplied, is
+diagnostic only. It never returns private schedule content.
+
+## Authority split
+
+| Concern | Authority |
+|---|---|
+| clock edge | one deploy-owned Hermes managed job |
+| goal, scope, grant, budget, pause/cancel | Core `Activity` |
+| recurrence and next due instant | Core `ScheduleSpec` |
+| logical due instance | Core `WakeOccurrence` |
+| execution authority | Core `WorkRun` revision, lease, and fence |
+| external action truth | Core Action Intent / Effect Attempt / receipt |
+| assistant semantic final | Core Package B final transaction |
+| physical delivery | Core presentation outbox and adapter receipt |
+| Hermes job/config files | deploy projection only |
+
+Same-UID operator CLI and authenticated job API remain an operator trust
+boundary, not a second runtime writer. The companion profile must not expose
+the cronjob, terminal, file, delegation, or Playwright toolsets.
+
+The deploy-owned managed-job manifest is exact: `no_agent=true`,
+`deliver=local`, one owner-only absolute script path, fixed working directory,
+bounded timeout, and no private arguments. Success writes no private stdout;
+failure writes only redacted local diagnostics. When the candidate selects the
+Hermes projection, startup and release acceptance require exactly one job and
+compare its immutable managed fields with the manifest. Hermes may update an
+allowlisted set of runtime fields such as next
+run and execution timestamps and may retain local output/execution diagnostics;
+those are short-lived non-Canon and never Core input. Ordinary agent and
+external-delivery job paths are not valid substitutes.
+
+Hermes cron is the only clock projection over the owner-only idempotent
+`core-wake` command. Core catch-up makes a second timer unnecessary; add a
+fallback only after an observed availability requirement justifies it.
+
+## Schema v2 contract
+
+Schema v1 remains byte-for-byte frozen. A new immutable `1 -> 2` migration
+adds only the scheduling objects required by current product behavior.
+
+### ScheduleSpec
+
+A ScheduleSpec is the canonical recurrence attached to exactly one Activity,
+including an explicit system Activity for system-owned work. Activity remains
+the only authority for goal, owner, scope, Grant, budget, product lifecycle,
+pause/cancel, and contract revision. A ScheduleSpec stores recurrence,
+catch-up, and next-due state only. The first implementation supports only:
+
+- `one_shot` at one UTC instant;
+- `interval` with a positive whole-second period;
+- `daily` at one local wall time plus an IANA timezone.
+
+Full cron syntax, calendars, and arbitrary recurrence DSLs are out of scope
+until a real use case cannot be represented by these three forms.
+
+Each spec has stable identity, required Activity identity, current immutable
+revision pointer, next due instant, scheduling state, and timestamps.
+Scheduling state is only `enabled | exhausted | retired`; Activity state is
+the sole product pause/cancel authority. A separate append-only `ScheduleSpecRevision`
+stores normalized recurrence, allowlisted task kind, payload reference,
+catch-up policy, Activity contract revision, semantic digest, causation,
+optional existing conversation/presentation-binding identities plus expected
+binding revision, and creation time. Old occurrences bind the exact immutable
+revision.
+
+Create, revise, enable, exhaust, and retire use a parent-scoped operation key
+plus versioned semantic digest, expected current revision, CAS, and the existing
+Journal/typed operation replay primitives; no new receipt table is added. Exact
+key+digest replay returns the original result before current-state validation;
+equal key with different semantics fails with zero mutation.
+
+Catch-up is one of:
+
+- `skip`: advance without creating an overdue occurrence;
+- `latest`: create only the most recent due occurrence;
+- `bounded`: create at most the configured recovery limit, hard-capped at eight.
+
+One recovery consumes at most that limit, atomically advances `next_due_at` to
+the first future instant, and writes one aggregate Journal skip event for all
+remaining elapsed windows. Later ticks never continue draining old backlog.
+
+### WakeOccurrence
+
+A WakeOccurrence is the immutable scheduling fact that one ScheduleSpec
+revision became due. It does not summarize execution, effects, or delivery.
+Its uniqueness key is `(schedule_spec_id, scheduled_for)`; the row records the
+immutable ScheduleSpec revision that produced it. The occurrence ID is
+deterministic from that pair and a versioned domain separator. Repeated ticks
+and later Schedule revisions therefore cannot recreate the same logical slot.
+Revision sets its next due strictly after Core `now` and every existing
+occurrence for that spec; a committed occurrence is never replaced.
+
+WakeOccurrence has no lifecycle state. In one transaction, `wake_due` inserts
+the immutable occurrence, creates its initial queued WorkRun, creates the
+optional scheduled Exchange, and advances `next_due_at`. Schema v2 adds a
+nullable `wake_occurrence_id` reference to WorkRun; explicit retry creates a
+new WorkRun bound to the same occurrence and optional Exchange while retaining
+the Activity-wide `work_run.attempt_no` required by Schema v1. WorkRun alone
+owns lease/fence and execution state; EffectAttempt/receipt alone owns external
+effect truth; presentation_outbox alone owns delivery truth.
+
+Every message-capable Schedule revision references an existing Conversation,
+PresentationBinding, and expected binding revision. The occurrence transaction
+verifies Conversation and binding are active and unchanged; mismatch creates
+no visible WorkRun/Exchange and atomically retires the Schedule head with one
+reconciliation Journal event; reenabling requires a new valid revision. A
+valid occurrence has exactly one deterministic scheduled Exchange, and all
+later attempts bind it. Visible final and presentation operation identity
+derives from occurrence/Exchange, never from attempt identity. A silent/system
+Schedule has no Exchange and can never enter the final/presentation path.
+Before any recovery attempt dispatch, Core reads the existing final, effect,
+and presentation ledgers. A committed final, confirmed effect, or any
+ambiguous effect/delivery forbids redispatch and requires reconciliation.
+
+Creating occurrence/WorkRun/optional Exchange and advancing `next_due_at`
+happen in the same transaction. A crash cannot advance the schedule without
+creating the work or recording one aggregate Journal skip event. Skip creates
+no WakeOccurrence. A one-shot spec becomes exhausted in that transaction;
+recurring specs compute their next instant from the previous scheduled instant,
+not from worker completion time.
+
+`scheduled_for` is canonical UTC with whole-second precision. Interval
+recurrence advances from its immutable anchor, never from tick or worker
+completion time. Daily recurrence uses its revision's IANA timezone: a missing
+local time resolves to the first valid instant after the gap, and a repeated
+local time resolves to the earlier instant exactly once. Core's injected clock
+is authoritative in tests and Core's process clock is authoritative at
+runtime; caller timestamps never decide due state.
+
+## Required transactions
+
+1. Create or revise a ScheduleSpec and its next due instant.
+2. For each due spec, atomically create/deduplicate WakeOccurrence, queued
+   WorkRun, optional Exchange, and next due; or append one aggregate Journal
+   skip event and advance directly to the first future instant.
+3. That transaction CAS-checks Activity is active at the bound contract
+   revision and, for visible work, Conversation/PresentationBinding are active
+   at the expected revision. Terminal/stale Activity authority or binding
+   mismatch retires the Schedule once and creates no occurrence, WorkRun,
+   Exchange, effect, final, or outbox. A merely paused Activity produces no
+   mutation and is reconsidered after resume under catch-up policy. Every later
+   WorkRun lease claim repeats the Activity state/revision check before
+   authority is granted.
+4. Stop/cancel remains Activity/WorkRun authority: WorkRun stop rotates only
+   that run's fence; any Activity contract revision change fences active runs
+   from the old revision. `wake_due` simply refuses non-active or stale
+   Activity authority. Schedule revise switches the immutable head revision;
+   retire disables future recurrence. There is no pending occurrence to cancel.
+   Stale results cannot create another occurrence, effect, final turn, or
+   presentation item.
+5. Package C adds a typed scheduled instruction Exchange path bound to a
+   verified Conversation, Activity, WakeOccurrence, and PresentationBinding.
+   It never fabricates user ingress or writes ordinary chat history. Only a
+   message-capable decision that produces visible speech enters an additive
+   Package B final + presentation transaction; a silent/system Schedule has no
+   Exchange and commits only WorkRun/effect state.
+6. Final/effect/presentation commits use existing Core authority. The cron
+   adapter never writes those outcomes.
+
+The endpoint processes a bounded batch and returns promptly. Remaining due
+specs wait for the next tick. No network, model, MCP, or adapter call occurs
+inside a Core SQLite transaction.
+
+## Unified companion runtime
+
+Lite/Full is retired as a deployment topology because it duplicates state,
+gateway processes, cron tickers, cache/history policy, and release gates
+without providing a security boundary. The target has one Hermes home, one
+gateway, one provider policy, and one companion profile.
+
+The profile starts from the current Lite surface and adds the current product
+surfaces `media_generation` and `co_reading`. Terminal, file, debugging, coding,
+delegation, cronjob, and Playwright remain outside the companion runtime and
+are handled through Codex or a future explicitly governed Core broker.
+
+Transition has two releases and only one Core write-path cutover.
+
+### Runtime Phase
+
+Implementation checkpoint (2026-08-06): the immutable build-provenance
+manifest remains `LOCAL_BUILT_NOT_LINUX_VERIFIED`, while the separately
+append-only verification record now marks that exact artifact
+`LINUX_VERIFIED`. The final local build produced a
+133,517,442-byte archive with tree SHA256
+`0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317`,
+and archive SHA256
+`c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5`.
+Two clean offline rebuilds were byte-identical after removing uv's
+install-time metadata from each installed wheel and its RECORD entry.
+The exact provenance is in `hermes_runtime_artifact.v1.json`; the designed
+topology mutation is in `hermes_runtime_mutation.v1.json`. Native Linux,
+relocation, read-only, compiled-import, system-terminfo, offline unified-profile,
+zero-lazy-install, and zero-Tirith gates passed on the target Linux host at
+2026-08-06 02:04; exact evidence is in
+`hermes_runtime_linux_verification.v1.json`. Rollback, exact-candidate capacity,
+topology transaction, and immutable-release gates remain pending, so this
+checkpoint does not authorize staging or deploy.
+
+1. Build a candidate-SHA-bound offline v0.20 runtime artifact. Its manifest
+   records upstream version/source digest, dependency lock digest, every wheel
+   digest, interpreter digest, and final tree digest. Install it under a
+   versioned read-only root; systemd uses its absolute executable. It must not
+   depend on the P3 tree, a user cache, or an online install. Keep the v0.13
+   runtime path intact for rollback.
+2. Build the unified profile from the digest-bound
+   `hermes/profile/config.companion.yaml`. During the bounded transition its
+   compatibility profile ID remains `ran-assistant-lite`, but all Node profile
+   selectors resolve to that one ID and both base URLs resolve to one gateway;
+   the old name does not represent a second capability tier. Validate it in an
+   isolated home with Tirith auto-download
+   disabled. A production candidate must either use a pinned verified Tirith
+   binary by absolute path or explicitly accept the disabled scanner; startup
+   may not download it.
+3. Point both compatibility base URLs at the same gateway while Node routing
+   code remains unchanged. Use the current Lite subdirectory as the candidate
+   canonical home only through an exact path manifest. The real Full parent is
+   `/home/ubuntu/.hermes-ran-agent` and Lite is its `lite/` child: never
+   recursively chmod/archive the parent. Preserve only enumerated Full-specific
+   paths; do not merge or delete them.
+4. Keep the Hermes cron store empty and retain the existing legacy wake owners.
+   The v0.20 ticker may run but cannot fire work, so this phase creates no dual
+   visible wake and no Core write.
+5. Run the Runtime observation gate. Failure may restore the complete runtime
+   snapshot and v0.13 absolute executable because Core has not accepted writes.
+
+The current split apply/release path is not configuration authority for this
+phase: it hard-codes v0.13, Lite/Full, and undeployed O1/O2 policy. The exact
+candidate must instead carry a machine-readable mutation manifest for every
+unit, env key, home, schema, runtime artifact, and file. Unlisted production
+configuration is preserved. O1/O2, identity, and model policy may not change
+as a side effect. The candidate updates its topology-aware release controller,
+acceptance, rollback, runbook, and server-runtime skill together; all validate
+the same manifest.
+
+### Core Phase
+
+1. Preinstall the deploy-owned Hermes managed job disabled. Create/migrate an inactive
+   Schema v2 Core candidate and validate it without enabling a business writer.
+2. Acquire the cutover lock, stop new ingress and legacy visible wake, and let
+   in-flight provider/effect/outbox work reach a terminal or ambiguous state.
+3. Record a legacy cutover watermark, source DB/file hashes, writer/handle
+   inventory, count/digest reconciliation, and an exact migration manifest.
+4. Stage decoded todo/reminder and paused external-activity rows as paused
+   candidates without Core business writes. Never catch up or auto-activate
+   them. `last_reminded_at`, any
+   ambiguous delivery, and the already-observed 2026-08-05 digest occurrence
+   create suppression/reconciliation Journal evidence rather than new delivery work.
+5. In one SQLite transaction, import the accepted state, seed system
+   schedules, and append one canonical `core_cutover_committed_at` Journal
+   event. This commit is the sole formal Core write-path cutover and the only
+   irreversible boundary.
+6. After that commit, start/verify Core writer health, enable exactly one clock
+   projection, then resume ingress. Clock activation is ordered after the
+   SQLite commit and is not falsely described as atomic with it. Failure after
+   the commit uses Core catch-up plus forward repair, never legacy wake.
+7. After that commit, rollback may
+   never restore a pre-Core database or restart a legacy visible scheduler.
+   Allowed recovery is limited to a runtime-only Hermes artifact/unit rollback,
+   or stopped ingress plus Core catch-up, forward repair, and reconciliation.
+   The cutover event is the single durable interlock that makes destructive full
+   rollback fail closed.
+
+Before Core Phase, every existing scheduled component has a reviewed row with
+exactly one disposition:
+
+```text
+MIGRATE_TO_SCHEDULE
+RETAIN_NON_VISIBLE_MAINTENANCE
+REPLACE_WITH_CORE_WORKER
+RETIRE_EMPTY
+```
+
+APScheduler maintenance and the Lite soft-reset timer are not visible wake and
+are not retired by the one-clock rule. The legacy durable dispatcher is an
+executor, not merely a clock; it stops only after its queue is proven empty and
+the Core WorkRun worker is accepted. The Node external poller is decomposed
+into scan, execution, and system-queue responsibilities before each part is
+migrated or retired.
+
+A machine-readable system-schedule manifest creates every replacement active
+system ScheduleSpec, including the opt-in daily digest. Initial `next_due_at`
+is strictly later than the cutover watermark. Any elapsed window at or before
+the watermark receives one aggregate skip/suppression Journal event and is never backfilled, so
+stopping old wake neither loses the next future run nor replays an old one.
+
+## A-E amendment
+
+- Package A and frozen Schema v1 remain accepted.
+- Package B/B.1 final-turn and presentation transaction semantics remain
+  accepted. Package C adds a typed scheduled/system instruction and optional
+  visible-final entry; it does not weaken or impersonate the existing user-turn
+  path. Current source is still inactive in production.
+- Package C gains Schema v2 ScheduleSpec/WakeOccurrence repositories,
+  `wake_due`, WorkRun creation, cancel/fence composition, and the managed clock
+  adapter.
+- Package D performs the watermark/quiesce/manifest migration above, imports
+  legacy candidates paused with suppression/reconciliation Journal evidence, and uses
+  the per-job disposition inventory before any old component stops. Long-lived
+  dual visible wake is forbidden.
+- Package E adds duplicate/missed tick, long downtime, clock rollback/DST,
+  crash before/after occurrence commit, stale WorkRun fence, stop/cancel,
+  timeout ambiguous, restart no-resend, and one real synthetic delivery.
+
+The dual gateway/profile contract, regex Full routing, Full-to-Lite fallback,
+and duplicated history/cache/cron stores are removed from the target. Existing
+compatibility code may remain only during the bounded transition.
+
+## Hard acceptance gates
+
+Every production mutation is bound to one exact immutable candidate and one
+machine-readable mutation manifest.
+
+Capacity admission uses the stricter existing release reserve or:
+
+```text
+free_before >= 15 GiB + peak_new_allocated_bytes
+```
+
+`peak_new_allocated_bytes` includes candidate archive/tree, gate copy,
+dependencies, v0.20 runtime, snapshot, migration copy, and temporary files.
+A 2026-08-06 03:25 post-cleanup observation found 19,527,106,560 free bytes after the
+separately authorized 1,642,651,648-byte P3 validation tree was removed. The
+current-HEAD preliminary peak inventory is 1,714,864,682 bytes, leaving
+1,706,114,518 bytes above the 15 GiB floor plus peak requirement. This is a
+preliminary pass, not admission: free space is time-varying and the same
+inventory is recomputed against the exact candidate immediately before apply.
+
+Runtime pre-mutation admission proves the immutable artifact, mutation
+manifest, capacity, isolated smoke, and complete runtime rollback. Its atomic
+apply starts one unified gateway with one home/provider policy and an empty cron
+store while legacy wake remains authoritative. Immediate blocking acceptance
+proves the exact audited production baseline is still checked out, the running
+Node MainPID has all four compatibility URLs set to the one `8642` gateway, the
+single listener belongs to the Hermes MainPID, `8643` is absent, the
+profile/unit/runtime digests match, Full is persistently no-start, and the cron
+jobs/execution stores remain empty. Exact-candidate source-contract tests prove
+the unchanged Node router consumes those four keys; this phase does not claim a
+second black-box Node request.
+
+Runtime observation then requires at least 7 days, 30 normal Exchanges, one
+media generation, one co-reading operation, and one gateway restart, with zero
+Full fallback. Before Core pre-mutation admission it also performs black-box
+tool enumeration/negative calls and real recall, proactive-decision, digest,
+media and co-reading paths, with zero Tirith download and zero unexpected tool.
+
+Core pre-mutation admission proves the schema/migration candidate, cutover and
+system-schedule manifests, per-job disposition inventory, capacity, isolated
+`core-wake` projections, duplicate/missed tick, crash/restart, fence, ambiguous,
+and no-resend tests, plus independent adversarial CLEAR. Fault tests and
+runtime smoke use only synthetic, non-delivering schedules/targets; production
+fault injection still requires separate authorization.
+
+The Core ordered cutover has one irreversible SQLite transaction as defined in
+`Core Phase` above. Core becomes authoritative at that commit, not after clock
+activation or observation. Immediate
+blocking acceptance proves:
+
+- one gateway and exactly one active work-producing clock projection: one
+  deploy-owned Hermes managed job, zero unmanaged job, and zero legacy visible
+  wake;
+- zero Hermes agent or external-delivery path for any managed job;
+- cutover watermark/hash/count/digest reconciliation;
+- Core schema/writer health and one occurrence for repeated synthetic ticks;
+- the cutover Journal interlock rejects legacy scheduler/database
+  restoration;
+- one allowlisted synthetic Feishu target receives exactly one message.
+
+Core observation then requires at least 7 days, one managed-tick restart, one
+missed/duplicate synthetic tick probe, zero duplicate delivery, and no
+ambiguous auto-retry. Observation decides cleanup eligibility, not Core
+authority.
+
+Runtime/Core observation must pass before Full-specific state, legacy
+scheduler code, or split compatibility routing is considered for separately
+authorized deletion. P3 test artifacts are different: after their evidence is
+archived, separate deletion authorization may reclaim them to increase
+admission headroom before staging; this does not depend on Runtime observation.
+
+If the Hermes managed-job projection later misses a measured availability SLO,
+design a fallback from that evidence. No second timer is prebuilt in the MVP.
+
+## Production and deletion boundary
+
+This design does not authorize production Core writes, service stop/restart,
+state migration, Full-home deletion, P3 staging deletion, or legacy scheduler
+retirement. Those remain explicit release/cutover operations. Production stays
+on Hermes v0.13 until the exact Runtime candidate passes admission, atomic
+apply, and immediate acceptance. Legacy wake owners remain authoritative
+through Runtime observation and stop only at the separate Core atomic cutover;
+Core is authoritative immediately after that cutover and its blocking
+acceptance, while observation controls later cleanup.

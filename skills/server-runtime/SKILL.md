@@ -29,13 +29,14 @@ cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
 ```
 
-For an authorized configuration-drift repair inside an already selected
-release transaction, use:
+Standalone Lite/Full drift repair is retired. An authorized repair must use an
+exact immutable release transaction; that transaction may invoke the staged
+split compatibility script internally while production still runs v0.13:
 
 ```bash
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
-bash scripts/apply-hermes-runtime-split.sh
+bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-run
 ```
 
 Do not run `git pull`, `git switch`, or `git checkout` in the production
@@ -51,7 +52,8 @@ block or make the script self-sufficient.
 
 Default to reusing existing runtime configuration.
 
-- New optional env keys in `apply-hermes-runtime-split.sh` should use
+- New optional env keys in the release-internal
+  `apply-hermes-runtime-split.sh` should use
   `?KEY=value` in `upsert_env_file` when an existing value is safe to keep.
 - Use plain `KEY=value` only for canonical routing and safety keys that the
   deploy script intentionally owns, or when the user explicitly asks to

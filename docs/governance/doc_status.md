@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-06)
 
 `POINT_IN_TIME_AUDIT`
 (`2026-08-05T13:30:09+08:00..13:35:11+08:00`) revalidated production SHA
@@ -9,9 +9,11 @@ units, Hermes v0.13.0 with `deepseek-v4-flash`, the existing direct Ombre path
 on `18001`, and 68% storage utilization (39/59 GB used, 19 GB available).
 Recall-only O1 on `18002` was inactive and O2 was absent from the active
 revision/configuration. All observed runtime processes used `ubuntu:ubuntu`.
-Several historical env backups and the personal memory database also had
-over-broad read modes. Contents were not inspected; containment is pending
-separate authorization.
+The separately authorized permission containment completed at
+`2026-08-05T17:09:04+08:00`: seven files are now `ubuntu:ubuntu 0600` and
+`/opt/ran_agent/data` is `0700`; services and Python health remained good.
+Only secret-like key counts were collected, never values. Five backups matched
+secret-like patterns; rotation and deletion remain separately unauthorised.
 
 A separate `POINT_IN_TIME_AUDIT`
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) confirmed that the
@@ -74,9 +76,11 @@ evidence, and time. A separately recorded known blocker prevents advancement.
 | `AGENTS.md` | Repo-root operating rules |
 | `CLAUDE.md` | Claude shim that points to canonical `AGENTS.md` |
 | `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
+| `hermes/profile/config.companion.yaml` | DESIGNED least-privilege single companion profile for the Hermes v0.20 Runtime candidate; not installed in production |
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
 | `docs/governance/hermes-core-foundation.md` | Local-only Core Package A boundary and frozen Schema v1 |
+| `docs/governance/hermes-core-scheduling-and-unified-runtime.md` | DESIGNED Schema v2 scheduling, single clock projection, and unified Hermes runtime target |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/hermes_release_deployment.md` | Immutable-SHA Hermes deployment, acceptance, rollback, and RC-to-main closure |
 | `docs/governance/hermes_release_bootstrap.v1.sha256` | Bootstrap framework source-digest manifest |
@@ -94,6 +98,9 @@ evidence, and time. A separately recorded known blocker prevents advancement.
 | `docs/governance/hermes-action-contract-gate.md` | Hermes action contract validation, repair, and pending-action rules |
 | `docs/governance/hermes_action_compatibility.v1.json` | Versioned closed registry of protected compatibility evidence signals |
 | `docs/governance/hermes_protected_capabilities.v1.json` | Versioned protected-capability digest manifest |
+| `docs/governance/hermes_runtime_artifact.v1.json` | Immutable LOCAL_BUILT provenance and digest manifest for the pinned Hermes v0.20 artifact; later Linux verification is recorded separately and neither document alone is deployment approval |
+| `docs/governance/hermes_runtime_linux_verification.v1.json` | LOCAL_VERIFIED native Linux artifact/profile plus Git-less read-only ubuntu/root controller evidence for the exact v0.20 inputs; not a release candidate or deployment approval |
+| `docs/governance/hermes_runtime_mutation.v1.json` | RELEASE_CANDIDATE machine-readable Runtime Phase topology/mutation/rollback contract with Linux-verified artifact/controller evidence; production apply still requires exact-SHA dry-run admission |
 | `docs/governance/hermes-context-optimization.md` | Hermes context optimization, cache-friendly history, and soft reset |
 | `docs/governance/external-mcp-gateway.md` | External MCP gateway, admission, evidence, and proactive system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |

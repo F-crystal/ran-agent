@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "status": "RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY",
+  "phase": "runtime-only",
+  "requiredProductionHead": "bb66f1e6a8a400d599c7f86139107742bbedddc8",
+  "artifactManifest": {
+    "path": "docs/governance/hermes_runtime_artifact.v1.json",
+    "tarGzSha256": "c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5",
+    "treeSha256": "0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317",
+    "installRoot": "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff",
+    "executable": "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff/bin/hermes",
+    "mode": "read-only-after-install"
+  },
+  "linuxVerification": {
+    "path": "docs/governance/hermes_runtime_linux_verification.v1.json",
+    "stage": "LOCAL_VERIFIED",
+    "result": "LINUX_VERIFIED",
+    "verifiedAt": "2026-08-06T02:04:41+08:00",
+    "tarGzSha256": "c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5",
+    "treeSha256": "0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317"
+  },
+  "companionProfile": {
+    "compatibilityName": "ran-assistant-lite",
+    "source": "hermes/profile/config.companion.yaml",
+    "sourceSha256": "acbaea3396ae4c4711bb55186d8ae66b4d6a2c23a1add6262f0c01eda34424e6",
+    "destinations": [
+      "/home/ubuntu/.hermes-ran-agent/lite/config.yaml",
+      "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml"
+    ],
+    "destinationSha256": "acbaea3396ae4c4711bb55186d8ae66b4d6a2c23a1add6262f0c01eda34424e6",
+    "requiredToolsets": ["mcp-co_reading", "mcp-media_generation"],
+    "forbiddenToolsets": ["browser", "code_execution", "cronjob", "delegation", "file", "session_search", "terminal"],
+    "lazyInstalls": false,
+    "tirithEnabled": false
+  },
+  "unifiedUnit": {
+    "source": "hermes/systemd/ran-agent-hermes-unified.service",
+    "sourceSha256": "12d91ca6d8bff25845442f1adbe507c3f830b25a6ca16e6c2e11f7cbe93632ce",
+    "destination": "/etc/systemd/system/ran-agent-hermes.service"
+  },
+  "topology": {
+    "before": {
+      "gateways": [
+        {"unit": "ran-agent-hermes.service", "port": 8642, "home": "/home/ubuntu/.hermes-ran-agent/lite", "profile": "ran-assistant-lite"},
+        {"unit": "ran-agent-hermes-full.service", "port": 8643, "home": "/home/ubuntu/.hermes-ran-agent", "profile": "ran-assistant"}
+      ]
+    },
+    "after": {
+      "gateways": [
+        {"unit": "ran-agent-hermes.service", "port": 8642, "home": "/home/ubuntu/.hermes-ran-agent/lite", "profile": "ran-assistant-lite"}
+      ],
+      "compatibilityBaseUrls": {
+        "HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "HERMES_LITE_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "HERMES_FULL_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "CO_READING_HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1"
+      }
+    }
+  },
+  "unitMutations": [
+    {
+      "unit": "ran-agent-node.service",
+      "action": "quiesce-before-env-mutation-and-restart-after-direct-gateway-acceptance",
+      "before": "snapshot-exact-unit-enabled-active-state",
+      "after": "active-with-new-environment"
+    },
+    {
+      "unit": "ran-agent-hermes.service",
+      "action": "replace-and-restart",
+      "before": "snapshot-exact-unit-and-absolute-executable",
+      "afterExecutable": "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff/bin/hermes",
+      "afterHome": "/home/ubuntu/.hermes-ran-agent/lite",
+      "afterProfile": "ran-assistant-lite",
+      "afterPort": 8642,
+      "afterEnvironment": {
+        "HERMES_DISABLE_LAZY_INSTALLS": "1",
+        "TIRITH_ENABLED": "false"
+      }
+    },
+    {
+      "unit": "ran-agent-hermes-full.service",
+      "action": "stop-disable-and-install-persistent-no-start-drop-in",
+      "before": "snapshot-exact-unit-enabled-active-state",
+      "after": "inactive-disabled-and-condition-blocked",
+      "dropIn": "/etc/systemd/system/ran-agent-hermes-full.service.d/99-unified-topology.conf"
+    }
+  ],
+  "envMutations": [
+    {
+      "files": ["/opt/ran_agent/.env.local", "/opt/ran_agent/node_bridge/.env.local"],
+      "keys": ["HERMES_API_BASE_URL", "HERMES_LITE_API_BASE_URL", "HERMES_FULL_API_BASE_URL", "CO_READING_HERMES_API_BASE_URL", "HERMES_PROFILE", "HERMES_LITE_PROFILE", "HERMES_FULL_PROFILE"],
+      "values": {
+        "HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "HERMES_LITE_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "HERMES_FULL_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "CO_READING_HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "HERMES_PROFILE": "ran-assistant-lite",
+        "HERMES_LITE_PROFILE": "ran-assistant-lite",
+        "HERMES_FULL_PROFILE": "ran-assistant-lite"
+      },
+      "preserveUnlistedKeys": true
+    }
+  ],
+  "homeMutations": [
+    {
+      "path": "/home/ubuntu/.hermes-ran-agent/lite",
+      "action": "quiesce-snapshot-entire-home-then-install-two-digest-bound-config-files",
+      "rollbackSemantics": "Hermes home is non-Canon and may be restored in full; ran-agent conversation, Core, effect and delivery stores are never rewound",
+      "cronStore": {
+        "paths": ["cron/jobs.json", "cron/executions.db"],
+        "requiredBefore": "no jobs; execution ledger absent or empty",
+        "requiredAfterStartup": "no jobs; no work-producing execution",
+        "requiredDuringObservation": "no jobs until separately authorized Core Phase"
+      }
+    },
+    {
+      "path": "/home/ubuntu/.hermes-ran-agent",
+      "action": "preserve-parent-and-all-full-specific-paths",
+      "recursiveOwnershipOrModeMutation": false
+    }
+  ],
+  "schemaMutations": [],
+  "coreWritePathMutations": [],
+  "fileMutations": [
+    "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff",
+    "/etc/systemd/system/ran-agent-hermes.service",
+    "/etc/systemd/system/multi-user.target.wants/ran-agent-hermes.service",
+    "/etc/systemd/system/multi-user.target.wants/ran-agent-hermes-full.service",
+    "/etc/systemd/system/ran-agent-hermes-full.service.d/99-unified-topology.conf",
+    "/opt/ran_agent/.env.local",
+    "/opt/ran_agent/node_bridge/.env.local",
+    "/home/ubuntu/.hermes-ran-agent/lite/config.yaml",
+    "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml",
+    "/opt/ran_agent-release/runtime-topology.v1.json"
+  ],
+  "preserveWithoutMutation": [
+    "runtime Unix user/group/ownership policy",
+    "model and provider policy",
+    "O1/O2 configuration and data",
+    "legacy wake owners",
+    "Core schema and writer authority",
+    "v0.13 absolute runtime path",
+    "all unlisted units, env keys, homes, schemas and files"
+  ],
+  "admission": {
+    "capacity": "free_before >= max(existing_release_reserve, 15 GiB + peak_new_allocated_bytes)",
+    "peakNewAllocatedBytes": 1714864682,
+    "peakInventoryBytes": {
+      "artifactArchive": 133517442,
+      "expandedRuntimeExt4UpperBound": 454537216,
+      "currentHeadCandidateArchive": 7495680,
+      "currentHeadStageAndGateTrees": 19407272,
+      "currentNodeModulesStageAndGateCopies": 1646592,
+      "completeLiteHomeSnapshot": 829825024,
+      "temporaryApplyMargin": 268435456
+    },
+    "peakInventoryRequired": ["artifact archive", "expanded runtime tree", "immutable gate copy", "complete lite-home rollback snapshot", "temporary apply files"],
+    "capacityObservation": {
+      "timestamp": "2026-08-06T03:25:33+08:00",
+      "freeBytes": 19527106560,
+      "floorBytes": 16106127360,
+      "requiredBytes": 17820992042,
+      "headroomBytes": 1706114518,
+      "existingP3Bytes": 0,
+      "existingP3DeletionAuthorized": true
+    },
+    "current": "PRELIMINARY_PASS_WITH_1_7GB_HEADROOM_NOT_ADMISSION_EXACT_APPLY_RECHECK_REQUIRED",
+    "requiredArtifactStatus": "LINUX_VERIFIED",
+    "requiredCandidate": "exact-40-character-SHA",
+    "requiredGates": "artifact manifest, Linux native/relocation/offline smoke, topology preflight, complete rollback, immutable root and runtime acceptance"
+  },
+  "applyOrder": [
+    "verify exact candidate SHA, controller digest, artifact digest, mutation-manifest digest and numeric capacity admission",
+    "snapshot unit files and enabled/active state, env key presence/values, complete lite home and v0.13 executable identity",
+    "quiesce ran-agent-node.service and both Hermes units; prove no in-flight gateway request",
+    "install immutable runtime root with separately authorized owner/group/mode policy and verify it read-only",
+    "install and digest-check the two companion profile configs",
+    "write exact Hermes unit, daemon-reload, enable/start only ran-agent-hermes.service on 8642 and directly accept it",
+    "write exact env keys, stop-disable ran-agent-hermes-full.service, restart ran-agent-node.service",
+    "prove one listener on 8642, none on 8643, one profile identity, empty cron store and both compatibility routes",
+    "on any failure run rollback before reopening ingress"
+  ],
+  "rollback": {
+    "allowedBecauseCoreWritesRemainLegacy": true,
+    "restore": [
+      "snapshotted exact unit files and active/enabled states",
+      "snapshotted env key presence and values",
+      "complete snapshotted lite home; its state is non-Canon",
+      "retained v0.13 absolute executable path and digest",
+      "both legacy gateway ports and Node environment",
+      "systemd enabled symlink and active state"
+    ],
+    "retainNewArtifact": "allowed-but-unreferenced; deletion requires separate authorization"
+  }
+}

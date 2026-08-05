@@ -179,6 +179,42 @@ else
   SUDO=(sudo)
 fi
 
+require_release_authority() {
+  if [[ "$REPO_ROOT" == /opt/ran_agent && "${RAN_AGENT_RELEASE_STAGED_CANDIDATE:-0}" != 1 ]]; then
+    echo "ERROR: standalone lite/full repair is retired; use an immutable release transaction" >&2
+    exit 1
+  fi
+  if [[ "${RAN_AGENT_RELEASE_STAGED_CANDIDATE:-0}" != 1 ]] && {
+    [[ "$SYSTEMD_DIR" == /etc/systemd/system ]] ||
+    [[ "$NODE_ENV_FILE" == /opt/ran_agent/.env.local ]] ||
+    [[ "$NODE_BRIDGE_ENV_FILE" == /opt/ran_agent/node_bridge/.env.local ]] ||
+    [[ "$FULL_HOME" == /home/ubuntu/.hermes-ran-agent ]];
+  }; then
+    echo "ERROR: canonical production targets require an immutable staged release" >&2
+    exit 1
+  fi
+  if [[ "$REPO_ROOT" != /opt/ran_agent ]]; then
+    return
+  fi
+  if ! "${SUDO[@]}" /usr/bin/python3 -I -c '
+import json, pathlib
+root = pathlib.Path("/opt/ran_agent-release/runtime-snapshots")
+for path in root.glob("*/state.json") if root.is_dir() else ():
+    state = json.loads(path.read_text(encoding="utf-8"))
+    if state.get("phase") not in {"accepted", "rolled-back"}:
+        raise SystemExit(1)
+'; then
+    "${SUDO[@]}" systemctl stop ran-agent-node.service 2>/dev/null || true
+    echo "ERROR: unfinished unified Hermes transaction requires rollback" >&2
+    exit 1
+  fi
+  if "${SUDO[@]}" test -e /opt/ran_agent-release/runtime-topology.v1.json ||
+    "${SUDO[@]}" test -L /opt/ran_agent-release/runtime-topology.v1.json; then
+    echo "ERROR: unified Hermes topology is active; lite/full repair is retired" >&2
+    exit 1
+  fi
+}
+
 cleanup() {
   rm -rf "$BACKUP_DIR"
 }
@@ -2396,6 +2432,7 @@ verify_runtime() {
 }
 
 main() {
+  require_release_authority
   case "${1:-}" in
     '') ;;
     --preserve-runtime-shape) PRESERVE_RUNTIME_SHAPE=1 ;;

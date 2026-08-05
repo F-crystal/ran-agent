@@ -100,7 +100,11 @@ mkdir -p "$(dirname "$HOME_UV_DIR")"
 ln -sfn "$UV_CACHE_DIR" "$HOME_UV_DIR"
 
 echo "Restarting services..."
-sudo systemctl start ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-node.service 2>/dev/null || true
+if [ -e /opt/ran_agent-release/runtime-topology.v1.json ]; then
+  sudo systemctl start ran-agent-hermes.service ran-agent-node.service 2>/dev/null || true
+else
+  sudo systemctl start ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-node.service 2>/dev/null || true
+fi
 
 echo ""
 echo "=== Post-cleanup disk usage ==="

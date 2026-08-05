@@ -1,6 +1,6 @@
 name: ran-assistant
 version: 0.1.0
-description: "ran-agent Hermes front shell using DeepSeek V4 Pro in non-thinking mode"
+description: "ran-agent Hermes front shell using DeepSeek V4 Flash in non-thinking mode"
 hermes_requires: ">=0.13.0"
 author: "fengran"
 license: "Private"
@@ -51,6 +51,7 @@ distribution_owned:
   - SOUL.md
   - AGENTS.md
   - config.yaml
+  - config.companion.yaml
   - config.template.yaml
   - config.pro.template.yaml
   - mcp.json

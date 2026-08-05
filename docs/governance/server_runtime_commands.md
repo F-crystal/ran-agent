@@ -33,8 +33,9 @@ the account without separate authorization.
 - Validate an exact reviewed release: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-run`
 - Apply that same exact release after separate authorization: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply`
 - `deploy-hermes-main.sh --dry-run` may discover and test the then-current main head, but it is not apply authority; record and review its resolved SHA, then use the exact `--commit` path above.
-- Deploy or repair lite/full runtime drift within an existing release
-  transaction: `bash scripts/apply-hermes-runtime-split.sh`
+- Lite/Full drift repair is release-internal only. Do not invoke
+  `apply-hermes-runtime-split.sh` standalone; use the exact candidate
+  transaction above.
 - Diagnose lite/full convergence:
   `bash scripts/diagnose-lite-full.sh`
 - Prove the final Hermes v0.13 provider HTTP body without network access:
@@ -106,8 +107,9 @@ Hermes configuration prerequisites:
 
 - Run from the server checkout at `/opt/ran_agent`.
 - Activate `/opt/ran_agent/.venv` before deploy or diagnostic commands.
-- Use `scripts/apply-hermes-runtime-split.sh` as the unified Hermes runtime
-  configuration script; do not hand-edit systemd or env as the normal path.
+- Do not invoke `scripts/apply-hermes-runtime-split.sh` standalone. It is a
+  legacy v0.13 compatibility step callable only by the immutable release
+  controller. Do not hand-edit systemd or env as the normal path.
 
 Code releases use the immutable-SHA transaction in
 `docs/governance/hermes_release_deployment.md`. Do not run `git pull`, `git
@@ -130,6 +132,7 @@ interrupted explicit rollback remains eligible for the same rollback command;
 a completed rollback with only stale pointer metadata is finalized by that
 command rather than by manual Git or file deletion.
 
+While production remains on v0.13, the release-internal
 `apply-hermes-runtime-split.sh` owns:
 
 - Hermes profile install for lite and full.
@@ -222,7 +225,7 @@ deploy with:
 
 ```bash
 RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY=cache_first \
-bash scripts/apply-hermes-runtime-split.sh
+bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
 ```
 
 Rollback to telemetry-only behavior:
@@ -231,7 +234,7 @@ Rollback to telemetry-only behavior:
 RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY=balanced \
 RAN_AGENT_DEPLOY_HERMES_CACHE_FRIENDLY_HISTORY=false \
 RAN_AGENT_DEPLOY_HERMES_CACHE_TELEMETRY_ENABLED=true \
-bash scripts/apply-hermes-runtime-split.sh
+bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
 ```
 
 ## Runtime Services

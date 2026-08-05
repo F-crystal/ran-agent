@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-06)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -19,7 +19,7 @@ production_hermes: v0.13.0; Lite/Full deepseek-v4-flash via official DeepSeek en
 production_runtime_identity: observed ubuntu:ubuntu; core units declare User=ubuntu
 legacy_ran_agent_account_followup: POINT_IN_TIME_AUDIT (2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00); present UID 999/GID 988, nologin; no ran-agent-owned runtime process was observed in the base audit window
 production_storage: 39GB/59GB used, 19GB available, 68% utilization; inode use 23%
-permission_exposure: historical env backups observed at 0644/0664; personal_agent.db observed at 0644 under data directory 0755; contents not inspected; containment pending separate authorization
+permission_containment_followup: COMPLETE (2026-08-05T17:07:16+08:00..17:09:04+08:00); seven authorized files ubuntu:ubuntu 0600; /opt/ran_agent/data 0700; five backups matched secret-like key patterns without exposing values; core services and Python health passed; deletion/rotation not authorized
 production_memory_surface: existing direct Ombre Brain 18001 active/healthy; recall-only O1 18002 inactive; O2 absent
 digest_2026_08_05_followup: POINT_IN_TIME_AUDIT (2026-08-05T13:42:01.034+08:00..13:46:55.750+08:00); EXACTLY_ONCE_OBSERVED externally; Node about 66s; outbox sent attempt 1; one Feishu message; Python 30s timeout left no marker/timeline; do not retry occurrence
 digest_deadline_inputs_followup: POINT_IN_TIME_AUDIT (2026-08-05T14:24:21+08:00); Python service environment exposed HERMES_REPLY_TIMEOUT_SECONDS=1200 and FEISHU_SEND_TIMEOUT_SECONDS=30
@@ -34,6 +34,7 @@ unified_identity_o2_rollback: b5b4ff43f8c3d5706192cabefcece49408b73558; ARCHIVED
 ombre_o2_total_delete: typed unsupported
 gate_5: not started, not authorized
 package_b_2_b_3: not started
+hermes_v020_unified_runtime_candidate: RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY for exact artifact c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5 / tree 0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317; one offline gateway, 62 ELF, 34 compiled imports, relocation/read-only/terminfo/zero-cron/zero-lazy/zero-Tirith passed, the corrected production-recall/non-thinking profile was reverified at 2026-08-06T03:16:43+08:00, the staged controller passed Git-less read-only Linux tests as ubuntu and root, and removal of the authorized P3 validation tree restored about 1.7GB preliminary capacity headroom; not deployed
 ```
 
 This production statement is a bounded `POINT_IN_TIME_AUDIT`, not a promise

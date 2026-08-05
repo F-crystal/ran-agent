@@ -1,0 +1,178 @@
+# Single ran-agent companion profile for Hermes v0.20.
+# Runtime topology is unified; "lite" below names downstream least-privilege
+# policy modes only, not a second gateway or Hermes home.
+
+model:
+  provider: deepseek
+  default: deepseek-v4-flash
+  model: deepseek-v4-flash
+  base_url: https://api.deepseek.com/v1
+  api_mode: chat_completions
+
+agent:
+  reasoning_effort: none
+
+compression:
+  enabled: true
+  threshold: 0.35
+  target_ratio: 0.12
+  protect_last_n: 8
+  hygiene_hard_message_limit: 160
+
+security:
+  allow_lazy_installs: false
+  tirith_enabled: false
+
+# Defense in depth: the allowlists below are authoritative; these individual
+# tools remain denied even if an upstream default toolset changes.
+disabled_tools:
+  - browser_vision
+  - image_generate
+  - text_to_speech
+  - video_analyze
+  - vision_analyze
+  - terminal
+  - process
+  - read_file
+  - write_file
+  - patch
+  - search_files
+  - session_search
+  - cronjob
+  - delegate_task
+  - execute_code
+  - browser_navigate
+  - browser_snapshot
+  - browser_click
+  - browser_type
+  - browser_scroll
+  - browser_back
+  - browser_press
+  - browser_get_images
+  - browser_console
+  - browser_cdp
+  - browser_dialog
+
+platform_toolsets:
+  cli: &companion_toolsets
+    - web
+    - skills
+    - memory
+    - safe
+    - mcp-time
+    - mcp-social_reader
+    - mcp-media_reader
+    - mcp-search_hub
+    - mcp-co_reading
+    - mcp-sticker_catalog
+    - mcp-media_generation
+    - mcp-personal_memory
+    - mcp-obsidian_memory
+    - mcp-ombre_memory
+    - mcp-external_mcp_gateway
+  api_server: *companion_toolsets
+
+mcp_servers:
+  time:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_time_mcp.sh
+    env:
+      LOCAL_TIMEZONE: Asia/Shanghai
+    timeout: 120
+    connect_timeout: 60
+
+  social_reader:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_social_reader_mcp.sh
+    timeout: 1200
+    connect_timeout: 90
+
+  media_reader:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_reader_mcp.sh
+    timeout: 1200
+    connect_timeout: 90
+
+  media_generation:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_generation_mcp.sh
+    timeout: 1200
+    connect_timeout: 60
+
+  co_reading:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_co_reading_mcp.sh
+    timeout: 180
+    connect_timeout: 60
+
+  sticker_catalog:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_sticker_catalog_mcp.sh
+    env:
+      STICKER_CATALOG_PROFILE_MODE: lite
+      STICKER_CATALOG_ALLOW_RUNTIME_SAVE: "true"
+    timeout: 120
+    connect_timeout: 60
+
+  search_hub:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_search_hub_mcp.sh
+    env:
+      SEARCH_HUB_PROFILE_MODE: lite
+      SEARCH_HUB_ENABLE_OPENCLI_BROWSER: "false"
+      SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK: "false"
+      SEARCH_HUB_PUBLIC_ONLY_DEFAULT: "true"
+    timeout: 120
+    connect_timeout: 60
+
+  personal_memory:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh
+    timeout: 120
+    connect_timeout: 60
+
+  obsidian_memory:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_obsidian_memory_mcp.sh
+    timeout: 180
+    connect_timeout: 90
+
+  ombre_memory:
+    url: "${OMBRE_BRAIN_MCP_URL}"
+    timeout: 120
+    connect_timeout: 30
+
+  external_mcp_gateway:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_external_mcp_gateway.sh
+    env:
+      EXTERNAL_MCP_GATEWAY_PROFILE: "lite"
+      EXTERNAL_MCP_GATEWAY_ENABLED: "false"
+      EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "false"
+    timeout: 120
+    connect_timeout: 60
+
+  tavily:
+    url: "https://mcp.tavily.com/mcp/?tavilyApiKey=${TAVILY_API_KEY}"
+    timeout: 60
+    connect_timeout: 30

@@ -1,6 +1,6 @@
 # Hermes Core Foundation
 
-Status: CURRENT (2026-07-19)
+Status: CURRENT (2026-08-05)
 
 This document records the public source-level status of Hermes Core Package A
 and the owner-accepted Package B.1 typed business transactions. It is not a
@@ -31,6 +31,20 @@ by `docs/governance/current_runtime_status.md`.
   legacy writers remain active in the current runtime.
 - No Core write path has been deployed or enabled in production. Package B.2
   has not started, and the one-time production cutover is not authorized.
+
+## Scheduling And Runtime Target
+
+`docs/governance/hermes-core-scheduling-and-unified-runtime.md` is the current
+`DESIGNED` v0.5 amendment for Package C scheduling and the eventual single
+Hermes companion runtime. It keeps Schema v1 and Package B/B.1 frozen, proposes
+an additive Schema v2, and treats one deploy-owned Hermes cron job only as the
+managed clock edge over the same idempotent `core-wake` command. The MVP does
+not prebuild a second timer fallback.
+
+That document is not implementation or deployment evidence. Current source has
+no Schema v2 ScheduleSpec/WakeOccurrence repository, no composed `core-wake`
+service, and no unified production gateway. Production remains governed by
+`docs/governance/current_runtime_status.md`.
 
 ## Frozen Schema v1
 

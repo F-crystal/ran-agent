@@ -282,6 +282,23 @@ while os.path.exists(ready_path):
 }
 
 acquire_release_transaction_lock
+if [[ "$REPO_ROOT" == "$SERVER_ROOT" ]]; then
+  "${SUDO[@]}" /usr/bin/python3 -I -c '
+import json, pathlib, sys
+root = pathlib.Path("/opt/ran_agent-release/runtime-snapshots")
+for path in root.glob("*/state.json") if root.is_dir() else ():
+    try:
+        state = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        raise SystemExit(1)
+    if state.get("phase") not in {"accepted", "rolled-back"}:
+        raise SystemExit(1)
+' || fail unfinished_unified_runtime_transaction
+  if "${SUDO[@]}" test -e /opt/ran_agent-release/runtime-topology.v1.json ||
+    "${SUDO[@]}" test -L /opt/ran_agent-release/runtime-topology.v1.json; then
+    fail unified_runtime_requires_topology_aware_release
+  fi
+fi
 NODE_BIN=''
 CONTROLLER_CANDIDATE="${RAN_AGENT_RELEASE_CANDIDATE:-}"
 
