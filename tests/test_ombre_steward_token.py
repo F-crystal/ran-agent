@@ -4,6 +4,7 @@ import io
 import json
 import os
 from pathlib import Path
+import grp
 import pwd
 import shlex
 import stat
@@ -23,19 +24,17 @@ VERIFY_SCRIPT = SCRIPT.with_name("verify-ombre-steward-runtime.py")
 VERIFY_SPEC = importlib.util.spec_from_file_location("ombre_steward_verify", VERIFY_SCRIPT)
 VERIFY_MODULE = importlib.util.module_from_spec(VERIFY_SPEC)
 VERIFY_SPEC.loader.exec_module(VERIFY_MODULE)
-IDENTITY_SCRIPT = SCRIPT.with_name("verify-ran-agent-runtime-identity.sh")
-
-
 class OmbreStewardTokenTest(unittest.TestCase):
     @unittest.skipUnless(
         os.geteuid() == 0 and Path("/usr/sbin/runuser").is_file(),
         "cross-UID verifier boundary requires Linux root",
     )
-    def test_root_verifier_executes_live_venv_only_as_ran_agent_with_clean_env(self):
+    def test_root_verifier_executes_live_venv_only_as_runtime_user_with_clean_env(self):
         try:
-            account = pwd.getpwnam("ran-agent")
+            account = pwd.getpwnam("ubuntu")
+            group = grp.getgrgid(account.pw_gid)
         except KeyError:
-            self.skipTest("ran-agent account is unavailable")
+            self.skipTest("ubuntu account is unavailable")
         with tempfile.TemporaryDirectory(
             prefix="ran-agent-steward-root-verifier-", dir="/tmp"
         ) as directory:
@@ -87,6 +86,8 @@ class OmbreStewardTokenTest(unittest.TestCase):
                     "--identity-file", str(identity_file),
                     "--source-dir", str(source),
                     "--venv", str(venv),
+                    "--runtime-user", account.pw_name,
+                    "--runtime-group", group.gr_name,
                 ],
                 env={**os.environ, "RAN_AGENT_SENTINEL_SECRET": "must-not-leak"},
                 capture_output=True,
@@ -248,6 +249,7 @@ class OmbreStewardTokenTest(unittest.TestCase):
                 "--source-dir", str(source),
                 "--venv", str(venv),
                 "--rejected-token-file", str(old_file),
+                "--runtime-user", "ran-agent",
             ]
             def run(command, **_):
                 if command[0] == "git":
@@ -260,7 +262,7 @@ class OmbreStewardTokenTest(unittest.TestCase):
 
             with mock.patch.object(sys, "argv", argv), \
                     mock.patch.object(VERIFY_MODULE.pwd, "getpwnam", return_value=account), \
-                    mock.patch.object(VERIFY_MODULE.grp, "getgrnam", return_value=group), \
+                    mock.patch.object(VERIFY_MODULE.grp, "getgrnam", return_value=group) as get_group, \
                     mock.patch.object(VERIFY_MODULE.subprocess, "run", side_effect=run), \
                     mock.patch.object(VERIFY_MODULE.urllib.request, "urlopen", side_effect=urlopen), \
                     mock.patch("sys.stdout", output):
@@ -268,188 +270,49 @@ class OmbreStewardTokenTest(unittest.TestCase):
                 stamp.write_text("0" * 64 + "\n", encoding="ascii")
                 with self.assertRaisesRegex(SystemExit, "lock fingerprint mismatch"):
                     VERIFY_MODULE.main()
+            self.assertEqual(get_group.call_args_list, [mock.call("ran-agent"), mock.call("ran-agent")])
             self.assertNotIn(current.strip(), output.getvalue())
             self.assertNotIn(old.strip(), output.getvalue())
 
-    def test_system_account_and_numeric_process_identity_fail_closed(self):
+    def test_cli_uses_requested_existing_runtime_identity(self):
         with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            bin_dir = root / "bin"
-            proc = root / "proc"
-            bin_dir.mkdir()
-            (proc / "123").mkdir(parents=True)
-            (bin_dir / "id").write_text(
-                "#!/bin/sh\n"
-                'case "$1" in\n'
-                '  -u) printf "%s\\n" "$MOCK_UID" ;;\n'
-                '  -g) printf "%s\\n" "$MOCK_GID" ;;\n'
-                '  ran-agent) exit 0 ;;\n'
-                "  *) exit 1 ;;\n"
-                "esac\n",
-                encoding="ascii",
-            )
-            (bin_dir / "getent").write_text(
-                "#!/bin/sh\n"
-                'case "$1" in\n'
-                '  passwd) printf "ran-agent:x:%s:%s::%s:%s\\n" '
-                '"$MOCK_PASSWD_UID" "$MOCK_PASSWD_GID" "$MOCK_HOME" "$MOCK_SHELL" ;;\n'
-                '  group) printf "ran-agent:x:%s:\\n" "$MOCK_GROUP_GID" ;;\n'
-                "  *) exit 1 ;;\n"
-                "esac\n",
-                encoding="ascii",
-            )
-            (bin_dir / "systemctl").write_text(
-                "#!/bin/sh\n"
-                'case "$*" in\n'
-                '  *"--property=User"*) printf "%s\\n" "${MOCK_SYSTEMD_USER:-ran-agent}" ;;\n'
-                '  *"--property=Group"*) printf "%s\\n" "${MOCK_SYSTEMD_GROUP:-ran-agent}" ;;\n'
-                '  *"--property=MainPID"*) printf "%s\\n" "${MOCK_PID:-123}" ;;\n'
-                "  *) exit 1 ;;\n"
-                "esac\n",
-                encoding="ascii",
-            )
-            for executable in bin_dir.iterdir():
-                executable.chmod(0o755)
-
-            base = {
-                **os.environ,
-                "PATH": f"{bin_dir}:/usr/bin:/bin",
-                "RAN_AGENT_TEST_MODE": "1",
-                "RAN_AGENT_TEST_PROC_ROOT": str(proc),
-                "MOCK_UID": "999",
-                "MOCK_GID": "999",
-                "MOCK_PASSWD_UID": "999",
-                "MOCK_PASSWD_GID": "999",
-                "MOCK_GROUP_GID": "999",
-                "MOCK_HOME": "/opt/ran_agent",
-                "MOCK_SHELL": "/usr/sbin/nologin",
-            }
-
-            def verify(mode="--verify-account", unit=None, **changes):
-                env = {**base, **{key: str(value) for key, value in changes.items()}}
-                command = ["bash", str(IDENTITY_SCRIPT), mode]
-                if unit:
-                    command.append(unit)
-                return subprocess.run(command, env=env, capture_output=True, text=True)
-
-            self.assertEqual(verify().returncode, 0)
-            conflicts = [
-                {"MOCK_UID": 0, "MOCK_PASSWD_UID": 0},
-                {"MOCK_GID": 0, "MOCK_PASSWD_GID": 0, "MOCK_GROUP_GID": 0},
-                {"MOCK_PASSWD_GID": 998},
-                {"MOCK_SHELL": "/bin/bash"},
-                {"MOCK_HOME": "/home/ran-agent"},
+            account = type("Account", (), {
+                "pw_uid": os.getuid(), "pw_gid": os.getgid(), "pw_name": "runtime-user",
+            })()
+            group = type("Group", (), {"gr_gid": os.getgid(), "gr_name": "runtime-user"})()
+            argv = [
+                "install-ombre-steward-token.py",
+                "--state-dir", directory,
+                "--runtime-user", "runtime-user",
             ]
-            for values in conflicts:
-                with self.subTest(values=values):
-                    self.assertNotEqual(verify(**values).returncode, 0)
-            self.assertEqual(
-                verify(
-                    MOCK_UID=60001,
-                    MOCK_GID=60001,
-                    MOCK_PASSWD_UID=60001,
-                    MOCK_PASSWD_GID=60001,
-                    MOCK_GROUP_GID=60001,
-                ).returncode,
-                0,
-            )
+            with mock.patch.object(sys, "argv", argv), \
+                    mock.patch.object(MODULE.pwd, "getpwnam", return_value=account), \
+                    mock.patch.object(MODULE.grp, "getgrnam", return_value=group) as get_group, \
+                    mock.patch.object(
+                        MODULE,
+                        "ensure_token_directory",
+                        side_effect=lambda path, _gid: path.mkdir(parents=True, exist_ok=True),
+                    ):
+                self.assertEqual(MODULE.main(), 0)
+            get_group.assert_called_once_with("runtime-user")
+            target = Path(directory) / MODULE.TOKEN_RELATIVE_PATH
+            self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+            self.assertEqual((target.stat().st_uid, target.stat().st_gid), (os.getuid(), os.getgid()))
 
-            status = proc / "123/status"
-            status.write_text(
-                "Name:\tfixture\nUid:\t999\t999\t999\t999\n"
-                "Gid:\t999\t999\t999\t999\n",
-                encoding="ascii",
-            )
-            for unit in ("ran-agent-node.service", "ran-agent-ombre-brain.service"):
-                self.assertEqual(verify("--verify-process", unit).returncode, 0)
-            status.write_text(
-                "Name:\tfixture\nUid:\t999\t998\t999\t999\n"
-                "Gid:\t999\t999\t999\t999\n",
-                encoding="ascii",
-            )
-            self.assertNotEqual(
-                verify("--verify-process", "ran-agent-node.service").returncode,
-                0,
-            )
-            status.write_text(
-                "Name:\tfixture\nUid:\t999\t999\t999\t999\n"
-                "Gid:\t999\t998\t999\t999\n",
-                encoding="ascii",
-            )
-            self.assertNotEqual(
-                verify("--verify-process", "ran-agent-ombre-brain.service").returncode,
-                0,
-            )
-
-    def test_system_account_creation_uses_frozen_system_contract(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            bin_dir = root / "bin"
-            bin_dir.mkdir()
-            group_marker = root / "group-created"
-            user_marker = root / "user-created"
-            calls = root / "calls"
-            (bin_dir / "id").write_text(
-                "#!/bin/sh\n"
-                'test -e "$MOCK_USER_MARKER" || exit 1\n'
-                'case "$1" in\n'
-                '  -u) echo 999 ;;\n'
-                '  -g) echo 999 ;;\n'
-                "  ran-agent) exit 0 ;;\n"
-                "  *) exit 1 ;;\n"
-                "esac\n",
-                encoding="ascii",
-            )
-            (bin_dir / "getent").write_text(
-                "#!/bin/sh\n"
-                'if test "$1" = group && test -e "$MOCK_GROUP_MARKER"; then\n'
-                '  echo "ran-agent:x:999:"; exit 0\n'
-                "fi\n"
-                'if test "$1" = passwd && test -e "$MOCK_USER_MARKER"; then\n'
-                '  echo "ran-agent:x:999:999::/opt/ran_agent:/usr/sbin/nologin"; exit 0\n'
-                "fi\n"
-                "exit 2\n",
-                encoding="ascii",
-            )
-            (bin_dir / "groupadd").write_text(
-                "#!/bin/sh\n"
-                'printf "groupadd:%s\\n" "$*" >> "$MOCK_CALLS"\n'
-                'test "$*" = "--system ran-agent" || exit 2\n'
-                'touch "$MOCK_GROUP_MARKER"\n',
-                encoding="ascii",
-            )
-            (bin_dir / "useradd").write_text(
-                "#!/bin/sh\n"
-                'printf "useradd:%s\\n" "$*" >> "$MOCK_CALLS"\n'
-                'test "$*" = "--system --gid ran-agent --home-dir /opt/ran_agent '
-                '--shell /usr/sbin/nologin ran-agent" || exit 2\n'
-                'touch "$MOCK_USER_MARKER"\n',
-                encoding="ascii",
-            )
-            for executable in bin_dir.iterdir():
-                executable.chmod(0o755)
-            result = subprocess.run(
-                ["bash", str(IDENTITY_SCRIPT), "--ensure-account"],
-                env={
-                    **os.environ,
-                    "PATH": f"{bin_dir}:/usr/bin:/bin",
-                    "RAN_AGENT_TEST_MODE": "1",
-                    "MOCK_GROUP_MARKER": str(group_marker),
-                    "MOCK_USER_MARKER": str(user_marker),
-                    "MOCK_CALLS": str(calls),
-                },
-                capture_output=True,
-                text=True,
-            )
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(
-                calls.read_text(encoding="ascii").splitlines(),
-                [
-                    "groupadd:--system ran-agent",
-                    "useradd:--system --gid ran-agent --home-dir /opt/ran_agent "
-                    "--shell /usr/sbin/nologin ran-agent",
-                ],
-            )
+    def test_deployment_sources_do_not_create_or_pin_a_service_account(self):
+        patterns = r"useradd|groupadd|User=ran-agent|Group=ran-agent|--user ran-agent|--ensure-account"
+        root = SCRIPT.parents[1]
+        for relative in (
+            "scripts/apply-hermes-runtime-split.sh",
+            "scripts/deploy-hermes-release.sh",
+            "scripts/accept-hermes-release.sh",
+            "scripts/hermes-release-gate.sh",
+            "scripts/verify-ran-agent-runtime-identity.sh",
+        ):
+            with self.subTest(relative=relative):
+                path = root / relative
+                text = path.read_text(encoding="utf-8") if path.exists() else ""
+                self.assertNotRegex(text, patterns)
 
 
 if __name__ == "__main__":

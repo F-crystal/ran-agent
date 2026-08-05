@@ -2,9 +2,11 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-05)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses DeepSeek V4 Flash. The owner-supplied 2026-07-31 preflight reported a clean worktree and all four core services active; this local line has not revalidated the host online. Candidates `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` and `f6f6048029de6e4c73b5b8b11f1441069770786c` both stopped at the immutable pre-mutation gate and did not change production. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 baseline `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. The current candidate has completed three production-wiring review rounds: the formal release keeps Flash and enables O2 by default. Production remains undeployed; `total_delete` is still typed unsupported and Gate 5 has not started. Node Receipt is deferred and the failed delta is not restored; Package B.2/B.3 have not started.
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses DeepSeek V4 Flash. The owner-supplied 2026-07-31 preflight reported a clean worktree and all four core services active; this local line has not revalidated the host online. Candidates `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` and `f6f6048029de6e4c73b5b8b11f1441069770786c` both stopped at the immutable pre-mutation gate and did not change production. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 baseline `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. The formal release still keeps Flash and enables O2 by default. Production remains undeployed; `total_delete` is still typed unsupported and Gate 5 has not started. Node Receipt is deferred and the failed delta is not restored; Package B.2/B.3 have not started.
+
+The repository has reverted the added `ran-agent` Linux service identity: the target steady state makes Node, Ombre, and Hermes reuse `RAN_AGENT_RUNTIME_USER/GROUP` (default `ubuntu`). Local transaction tests cover backup under the old identity, cutover to the target identity, and rollback under the snapshot source identity. O2 behavior is preserved; the production account state is `SERVER_UNKNOWN` and remains undeployed.
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 

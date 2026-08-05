@@ -22,8 +22,8 @@ case "$MODE" in
 esac
 
 # Explicit identity-scoped skip: the deploy transaction sets this only for the
-# ran-agent gate, whose identity cannot perform root-only apply tooling or read
-# the ubuntu-owned Hermes runtime. The root gate never sets it and keeps full
+# non-root gate, whose identity cannot perform root-only apply tooling. The root
+# gate never sets it and keeps full
 # coverage; every skip is printed, never silent, and unlisted files always run.
 SKIP_PRIVILEGED_TESTS="${RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS:-0}"
 case "$SKIP_PRIVILEGED_TESTS" in
@@ -34,8 +34,6 @@ esac
 privileged_test_skip_reason() {
   [[ "$SKIP_PRIVILEGED_TESTS" == 1 ]] || return 1
   case "$(basename "$1")" in
-    hermesGatewayProviderBoundary.integration.test.mjs)
-      printf 'requires the ubuntu-owned Hermes v0.13 runtime; covered by the root gate' ;;
     hermesModelCutover.test.mjs|searchHubApplyScript.test.mjs|ombreCompatProductionWiring.test.mjs)
       printf 'exercises root-only apply tooling that chowns to the ubuntu runtime user; covered by the root gate' ;;
     *)
@@ -94,6 +92,11 @@ if [[ "$MODE" == "--preflight-only" ]]; then
 fi
 
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-}"
+RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
+RUNTIME_GROUP="${RAN_AGENT_RUNTIME_GROUP:-$RUNTIME_USER}"
+bash "$REPO_ROOT/scripts/verify-runtime-service-identity.sh" \
+  --identity "$RUNTIME_USER" "$RUNTIME_GROUP" >/dev/null ||
+  fail runtime_identity_must_be_existing_non_root
 if [[ -z "$PYTHON_BIN" ]]; then
   for candidate in "$(command -v python 2>/dev/null || true)" "$(command -v python3 2>/dev/null || true)"; do
     if [[ -n "$candidate" && "$candidate" == /* && -x "$candidate" ]] \
@@ -221,11 +224,11 @@ run_ombre_real_process_gate() {
     return 0
   fi
   [[ "${EUID}" -eq 0 && -x /usr/sbin/runuser ]] || fail ombre_real_process_root_runner_required
-  id -u ran-agent >/dev/null 2>&1 || fail ran_agent_runtime_account_required
+  id -u "$RUNTIME_USER" >/dev/null 2>&1 || fail runtime_account_required
   chmod 711 "$SANDBOX_ROOT"
   chmod -R a+rX "$SOURCE_ROOT"
-  install -d -o ran-agent -g ran-agent -m 700 "$SANDBOX_ROOT/ombre-steward-home"
-  /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+  install -d -o "$RUNTIME_USER" -g "$RUNTIME_GROUP" -m 700 "$SANDBOX_ROOT/ombre-steward-home"
+  /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- /usr/bin/env -i \
     HOME="$SANDBOX_ROOT/ombre-steward-home" \
     PATH="$(dirname "$NODE_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
     TMPDIR=/tmp \
@@ -235,6 +238,7 @@ run_ombre_real_process_gate() {
     RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$upstream" \
     RAN_AGENT_OMBRE_UPSTREAM_VENV="$venv" \
     RAN_AGENT_NODE_BIN="$NODE_BIN" \
+    RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" \
     /bin/bash "$SOURCE_ROOT/scripts/verify-ombre-steward-real-process.sh" >/dev/null ||
     fail ombre_real_process_gate
 }
@@ -352,11 +356,8 @@ else
   run_node_smoke --all || fail all_smoke
 fi
 
-if [[ -f "$SOURCE_ROOT/tests/test_hermes_deepseek_provider.py" && "$SKIP_PRIVILEGED_TESTS" == 0 ]]; then
+if [[ -f "$SOURCE_ROOT/tests/test_hermes_deepseek_provider.py" ]]; then
   resolve_test_hermes_bin
-fi
-if [[ "$SKIP_PRIVILEGED_TESTS" == 1 && -f "$SOURCE_ROOT/tests/test_hermes_deepseek_provider.py" ]]; then
-  printf 'hermes-release-gate: skip tests/test_hermes_deepseek_provider.py (requires the ubuntu-owned Hermes v0.13 runtime; covered by the root gate)\n'
 fi
 
 PYTHON_ROOT="$SANDBOX_ROOT/python-test"
@@ -364,9 +365,6 @@ mkdir -p "$PYTHON_ROOT/home" "$PYTHON_ROOT/tmp/state" "$PYTHON_ROOT/cache" \
   "$PYTHON_ROOT/config" "$PYTHON_ROOT/data" "$PYTHON_ROOT/uv-cache" \
   "$PYTHON_ROOT/uv-tools" "$PYTHON_ROOT/pip-cache" "$PYTHON_ROOT/pytest"
 PYTEST_TARGETS=(tests)
-if [[ "$SKIP_PRIVILEGED_TESTS" == 1 ]]; then
-  PYTEST_TARGETS=(--ignore tests/test_hermes_deepseek_provider.py tests)
-fi
 (
   cd "$SOURCE_ROOT"
   /usr/bin/env -i \

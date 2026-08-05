@@ -2,9 +2,11 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-05)
 
-`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 Flash；2026-07-31 的用户预检显示工作树干净、四个核心服务均为 active，本地未在线复核。候选 `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` 与 `f6f6048029de6e4c73b5b8b11f1441069770786c` 均在不可变预变更门禁停止，未改变生产。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 基线 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。当前候选已完成三轮 O2 生产接线审查，正式发布默认保持 Flash 并启用 O2；生产仍未部署，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred；Package B.2/B.3 未开始。
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 Flash；2026-07-31 的用户预检显示工作树干净、四个核心服务均为 active，本地未在线复核。候选 `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` 与 `f6f6048029de6e4c73b5b8b11f1441069770786c` 均在不可变预变更门禁停止，未改变生产。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 基线 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。正式发布仍默认保持 Flash 并启用 O2；生产未部署，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred；Package B.2/B.3 未开始。
+
+当前仓库撤销新增 Linux 服务身份，Node、Ombre、Hermes 统一复用默认 `ubuntu` 的 runtime identity；O2 保留，生产账号状态仍为 `SERVER_UNKNOWN`。
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 

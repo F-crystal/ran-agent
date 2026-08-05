@@ -28,6 +28,8 @@ fi
 if [[ "${EUID}" -eq 0 ]]; then SUDO=(); else command -v sudo >/dev/null 2>&1 || fail sudo_required; SUDO=(sudo); fi
 NODE_BIN="${RAN_AGENT_NODE_BIN:-$(command -v node 2>/dev/null || true)}"
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-/opt/ran_agent/.venv/bin/python}"
+RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
+RUNTIME_GROUP="${RAN_AGENT_RUNTIME_GROUP:-$RUNTIME_USER}"
 RAN_AGENT_STATE_DIR="${RAN_AGENT_STATE_DIR:-/opt/ran_agent/.ran_agent_state}"
 OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$RAN_AGENT_STATE_DIR/ombre-brain}"
 [[ "$OMBRE_BRAIN_HOME" == "$RAN_AGENT_STATE_DIR/ombre-brain" ]] ||
@@ -160,7 +162,7 @@ release_ombre_compat_contract() {
   done
   grep -Eq '^DEEPSEEK_API_KEY=.+$' <<<"$process_env" ||
     fail ombre_compat_deepseek_auth_unavailable
-  [[ "$("${SUDO[@]}" stat -c '%U:%G:%a' "$state_dir")" == ran-agent:ran-agent:700 ]] ||
+  [[ "$("${SUDO[@]}" stat -c '%U:%G:%a' "$state_dir")" == "$RUNTIME_USER:$RUNTIME_GROUP:700" ]] ||
     fail ombre_compat_state_identity_contract
   "${SUDO[@]}" test -f "$identity_file" && "${SUDO[@]}" test ! -L "$identity_file" ||
     fail ombre_compat_steward_identity_file_contract
@@ -168,8 +170,12 @@ release_ombre_compat_contract() {
 
 release_steward_identity_contract() {
   local unit="$1" pid_before pid_after process_env token_path
-  "${SUDO[@]}" bash "$SOURCE_ROOT/scripts/verify-ran-agent-runtime-identity.sh" \
-    --verify-process "$unit" || fail "steward_numeric_identity_contract:$unit"
+  "${SUDO[@]}" env \
+    RAN_AGENT_TEST_MODE="${RAN_AGENT_TEST_MODE:-0}" \
+    RAN_AGENT_TEST_PROC_ROOT="${RAN_AGENT_TEST_PROC_ROOT:-/proc}" \
+    bash "$SOURCE_ROOT/scripts/verify-runtime-service-identity.sh" \
+    --service "$unit" --expect "$RUNTIME_USER" "$RUNTIME_GROUP" >/dev/null ||
+    fail "runtime_identity_contract:$unit"
   pid_before="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" ||
     fail "steward_identity_pid_unavailable:$unit"
   [[ "$pid_before" =~ ^[1-9][0-9]*$ ]] || fail "steward_identity_pid_invalid:$unit"
@@ -199,7 +205,8 @@ release_steward_secret_boundary() {
   [[ "$("${SUDO[@]}" stat -c '%U:%G:%a' "$SECRET_ROLLBACK_DIR")" == root:root:700 ]] ||
     fail secret_rollback_identity_contract
   "${SUDO[@]}" "$PYTHON_BIN" "$SOURCE_ROOT/scripts/install-ombre-steward-token.py" \
-    --state-dir "$RAN_AGENT_STATE_DIR" --verify >/dev/null ||
+    --state-dir "$RAN_AGENT_STATE_DIR" --runtime-user "$RUNTIME_USER" \
+    --runtime-group "$RUNTIME_GROUP" --verify >/dev/null ||
     fail steward_token_file_contract
   release_artifact_root="$(dirname "$(dirname "$RELEASE_SNAPSHOT_DIR")")"
   "${SUDO[@]}" "$PYTHON_BIN" - "$token_path" "$OLD_STEWARD_TOKEN_FILE" "$RELEASE_SNAPSHOT_DIR" "$release_artifact_root/archives" <<'PY' ||
@@ -303,10 +310,11 @@ release_ombre_unit_contract() {
     --identity-file "$RAN_AGENT_STATE_DIR/ombre-brain/steward-identity.v1.json" \
     --source-dir "$OMBRE_BRAIN_HOME/upstream" \
     --venv "$OMBRE_BRAIN_HOME/.venv" \
+    --runtime-user "$RUNTIME_USER" --runtime-group "$RUNTIME_GROUP" \
     "${rejected_token_args[@]}" \
     >/dev/null || fail ombre_steward_runtime_contract
   [[ -x /usr/sbin/runuser ]] || fail ombre_steward_runuser_required
-  "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+  "${SUDO[@]}" /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- /usr/bin/env -i \
     HOME="$OMBRE_BRAIN_HOME" \
     PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin" \
     TMPDIR=/tmp \
@@ -505,18 +513,21 @@ require_acceptance_prerequisites
 if [[ "${RAN_AGENT_RELEASE_PREMUTATION_GATE:-0}" != 1 ]]; then
   RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=required \
   RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=0 \
+  RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" \
+  RAN_AGENT_RUNTIME_GROUP="$RUNTIME_GROUP" \
   RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$OMBRE_BRAIN_HOME/upstream" \
   RAN_AGENT_OMBRE_UPSTREAM_VENV="$OMBRE_BRAIN_HOME/.venv" \
     bash "$SOURCE_ROOT/scripts/hermes-release-gate.sh" --all || fail release_gate
 else
   [[ -x /usr/sbin/runuser ]] || fail ombre_steward_runuser_required
-  "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+  "${SUDO[@]}" /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- /usr/bin/env -i \
     HOME="$OMBRE_BRAIN_HOME" PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin" TMPDIR=/tmp \
     GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
     RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
     RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$OMBRE_BRAIN_HOME/upstream" \
     RAN_AGENT_OMBRE_UPSTREAM_VENV="$OMBRE_BRAIN_HOME/.venv" \
     RAN_AGENT_NODE_BIN="$NODE_BIN" \
+    RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" \
     /bin/bash "$SOURCE_ROOT/scripts/verify-ombre-steward-real-process.sh" >/dev/null ||
     fail ombre_steward_candidate_real_process_gate
 fi

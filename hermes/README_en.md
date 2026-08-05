@@ -2,9 +2,11 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-05)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses Flash. The owner-supplied 2026-07-31 preflight reported a clean worktree and all four core services active; this local line has not revalidated the host online. Candidates `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` and `f6f6048029de6e4c73b5b8b11f1441069770786c` both stopped at the immutable pre-mutation gate and did not change production. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 baseline `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. The current candidate completed three O2 production-wiring review rounds; the formal release keeps Flash and enables O2 by default. Production remains undeployed; `total_delete` is still typed unsupported and Gate 5 has not started. Node Receipt is deferred; Package B.2/B.3 have not started.
+`USER_SUPPLIED_RUNTIME`: the known production repository SHA is `bb66f1e6a8a400d599c7f86139107742bbedddc8`; production still uses Flash. The owner-supplied 2026-07-31 preflight reported a clean worktree and all four core services active; this local line has not revalidated the host online. Candidates `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` and `f6f6048029de6e4c73b5b8b11f1441069770786c` both stopped at the immutable pre-mutation gate and did not change production. V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently reviewed O2 baseline `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` are archived and pushed but undeployed. The formal release still keeps Flash and enables O2 by default. Production remains undeployed; `total_delete` is still typed unsupported and Gate 5 has not started. Node Receipt is deferred; Package B.2/B.3 have not started.
+
+The added Linux service identity is reverted: Node, Ombre, and Hermes reuse the existing runtime identity (default `ubuntu`). O2 is preserved and the production account state remains `SERVER_UNKNOWN`.
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 

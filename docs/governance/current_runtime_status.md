@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-08-04)
+Status: CURRENT (2026-08-05)
 
 This is the compact source of truth for current production behavior. Detailed
 commands live in `docs/governance/server_runtime_commands.md`; focused runtime
@@ -21,7 +21,9 @@ ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
 node_receipt: deferred
-ombre_o2: a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7; independently reviewed implementation baseline; current line adds owner-authorized production wiring; source fail-off; official release default enabled; non-authoritative, projection-only, pre-Gate-5; not deployed
+ombre_o2: a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7; independently reviewed implementation baseline; preserved while the Linux identity split is reverted; source fail-off; official release default enabled; non-authoritative, projection-only, pre-Gate-5; not deployed
+linux_runtime_identity: one existing RAN_AGENT_RUNTIME_USER/GROUP identity; default ubuntu; no account creation
+production_account_state: SERVER_UNKNOWN
 ombre_o2_total_delete: typed unsupported
 gate_5: not started, not authorized
 package_b_2_b_3: not started
@@ -87,8 +89,8 @@ contract:
   unsupported; O2 contains no Core source-deletion signer or private key.
 - Its release candidate separates staged source from the canonical live
   state directory (including a non-default release state root and its derived
-  Ombre home), fixes Node and the patched Ombre runner to the verified
-  `ran-agent:ran-agent` system account and numeric MainPID identity, rotates
+  Ombre home), runs Node and the patched Ombre runner under the same existing
+  runtime identity as Hermes (default `ubuntu`), rotates
   the owner-only Steward token transactionally, excludes it from retained
   snapshots/archives, rejects a stale rotation drop-in before mutation, and
   keeps O2 ingress disabled during token rotation and critical rollback.
@@ -476,6 +478,13 @@ media assets, parser/sidecar markers, private `vault/` content,
 `local_archive/`, `.venv/`, caches, or `node_modules/`.
 
 ## Known Follow-Up Boundaries
+
+The authorized production sequence is: cut over and accept the unified
+`ubuntu` runtime first; keep any now-idle `ran-agent` account only for old
+rollback compatibility; after old-identity rollback authority is retired,
+no process or file residue remains, and an accepted `ubuntu` rollback point
+exists, request separate approval to delete that account without `-r` or
+`--remove-home`.
 
 Hermes Core Package A and frozen Schema v1 exist in repository source. Package
 B.1 typed business transactions are also implemented there and have received

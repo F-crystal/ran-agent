@@ -54,6 +54,7 @@ required=(
   scripts/prune-hermes-release-artifacts.sh
   scripts/check-hermes-snapshot-capacity.py
   scripts/ombre_o1_contract.py
+  scripts/verify-runtime-service-identity.sh
 )
 for path in "${required[@]}"; do
   expected="$(awk -v path="$path" '$2 == path { print $1 }' "$TMP_ROOT/manifest")"

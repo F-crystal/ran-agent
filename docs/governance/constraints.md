@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-08-05)
 
 ## Split Of Responsibility
 
@@ -15,6 +15,8 @@ Status: CURRENT (2026-07-27)
 ## Real Mainlines
 
 - Production chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
+- Node, Ombre, and Hermes share the existing `RAN_AGENT_RUNTIME_USER/GROUP`
+  identity (default `ubuntu`); O2 does not authorize creating a second Linux account.
 - Local integration candidate: the same Lite/Full mainline selects
   `DeepSeek V4 Pro` and adds explicit `thinking.type=disabled` only at the
   provider boundary; it does not change O1 identity, recall, startup, rollback,

@@ -21,6 +21,7 @@ const bootstrapFrameworkFiles = [
   'prune-hermes-release-artifacts.sh',
   'check-hermes-snapshot-capacity.py',
   'ombre_o1_contract.py',
+  'verify-runtime-service-identity.sh',
 ];
 
 function candidate() {
@@ -207,7 +208,9 @@ function makeDeployServiceFixture(initialStates = {}) {
   copyFileSync(join(root, 'scripts', 'ombre_o1_contract.py'), join(scripts, 'ombre_o1_contract.py'));
   copyFileSync(join(root, 'scripts', 'prune-hermes-release-artifacts.sh'), join(scripts, 'prune-hermes-release-artifacts.sh'));
   copyFileSync(join(root, 'scripts', 'resolve-hermes-service-node.sh'), join(scripts, 'resolve-hermes-service-node.sh'));
+  copyFileSync(join(root, 'scripts', 'verify-runtime-service-identity.sh'), join(scripts, 'verify-runtime-service-identity.sh'));
   chmodSync(join(scripts, 'resolve-hermes-service-node.sh'), 0o755);
+  chmodSync(join(scripts, 'verify-runtime-service-identity.sh'), 0o755);
 
   for (const [unit, values] of Object.entries(initialStates)) {
     writeFileSync(join(state, `${unit}.load`), `${values.load}\n`);
@@ -227,7 +230,12 @@ function makeDeployServiceFixture(initialStates = {}) {
     '  [ "$(load_state "$1")" != not-found ] || { printf "Unit %s not loaded\\n" "$1" >&2; exit 5; }',
     '}',
     'case "$1" in',
-    '  show) load_state "$2" ;;',
+    '  show) case "$*" in',
+    '    *"--property=User"*) require_loaded "$2"; cat "$SYSTEMCTL_STATE/$2.user" 2>/dev/null || printf "%s\\n" "${MOCK_SERVICE_USER:-ubuntu}" ;;',
+    '    *"--property=Group"*) require_loaded "$2"; cat "$SYSTEMCTL_STATE/$2.group" 2>/dev/null || printf "%s\\n" "${MOCK_SERVICE_GROUP:-ubuntu}" ;;',
+    '    *"--property=MainPID"*) require_loaded "$2"; cat "$SYSTEMCTL_STATE/$2.pid" 2>/dev/null || printf "%s\\n" "${MOCK_MAIN_PID:-123}" ;;',
+    '    *) load_state "$2" ;;',
+    '  esac ;;',
     '  is-active)',
     '    [ "$(cat "$SYSTEMCTL_STATE/$unit.active" 2>/dev/null || printf inactive)" = active ]',
     '    ;;',
@@ -281,6 +289,24 @@ function runDeployServiceFixture(fixture, commands, extraEnv = {}) {
     encoding: 'utf8',
     stdio: 'pipe',
   });
+}
+
+function prepareTokenIdentityFixture(fixture, stage) {
+  mkdirSync(join(stage, 'scripts'), { recursive: true });
+  writeFileSync(join(stage, 'scripts', 'install-ombre-steward-token.py'), '# fixture\n');
+  writeFileSync(join(fixture.bin, 'token-python'), '#!/bin/sh\nprintf "%s\\n" "$*" >> "$TOKEN_TRACE"\nexit 0\n');
+  writeFileSync(join(fixture.bin, 'id'), [
+    '#!/bin/sh',
+    'case "$*" in',
+    '  "-u ran-agent"|"-g ran-agent") printf "%s\\n" 999 ;;',
+    '  "-gn ran-agent") printf "%s\\n" ran-agent ;;',
+    '  "-u ubuntu"|"-g ubuntu") printf "%s\\n" 1000 ;;',
+    '  "-gn ubuntu") printf "%s\\n" ubuntu ;;',
+    '  *) exec /usr/bin/id "$@" ;;',
+    'esac',
+    '',
+  ].join('\n'));
+  for (const name of ['token-python', 'id']) chmodSync(join(fixture.bin, name), 0o755);
 }
 
 function makeAcceptanceReadinessFixture({ liteEnv = 'HERMES_API_KEY=lite-key', fullEnv = 'HERMES_API_KEY=full-key' } = {}) {
@@ -402,8 +428,8 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.match(deploy, /RAN_AGENT_RELEASE_SOURCE_ROOT="\$STAGE_DIR"/);
   assert.match(deploy, /RAN_AGENT_NODE_BIN="\$NODE_BIN"/);
   assert.match(deploy, /RAN_AGENT_PYTHON_BIN="\$PYTHON_BIN"/);
-  assert.match(deploy, /"\$\{SUDO\[@\]\}" env RAN_AGENT_RELEASE_SOURCE_ROOT="\$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1[\s\S]*\$GATE_DIR\/scripts\/hermes-release-gate\.sh" --all/);
-  assert.match(deploy, /runuser --user ran-agent --group ran-agent -- \/usr\/bin\/env -i[\s\S]*RAN_AGENT_RELEASE_SOURCE_ROOT="\$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1[\s\S]*\$GATE_DIR\/scripts\/hermes-release-gate\.sh" --all/);
+  assert.match(deploy, /"\$\{SUDO\[@\]\}" env RAN_AGENT_RUNTIME_USER="\$RUNTIME_USER" RAN_AGENT_RUNTIME_GROUP="\$RUNTIME_GROUP"[\s\S]*\$GATE_DIR\/scripts\/hermes-release-gate\.sh" --all/);
+  assert.match(deploy, /runuser --user "\$RUNTIME_USER" --group "\$RUNTIME_GROUP" -- \/usr\/bin\/env -i[\s\S]*RAN_AGENT_RELEASE_SOURCE_ROOT="\$GATE_DIR"[\s\S]*\$GATE_DIR\/scripts\/hermes-release-gate\.sh" --all/);
   assert.doesNotMatch(deploy, /bash "\$STAGE_DIR\/scripts\/hermes-release-gate\.sh"/);
   assert.match(deploy, /stage_gate_copy\(\) \{[\s\S]*mktemp -d \/tmp\/ran-agent-release-runtime-gate\.XXXXXX[\s\S]*diff -r "\$STAGE_DIR" "\$GATE_DIR"/);
   assert.match(deploy, /stage_gate_copy\(\) \{[\s\S]*find -P "\$GATE_DIR" -type l[\s\S]*chmod -R a=rX "\$GATE_DIR"/);
@@ -414,8 +440,8 @@ test('release apply is a server-only, rollback-capable transaction that preserve
   assert.ok(gateRunner.indexOf('/usr/bin/test -w "$GATE_DIR/scripts/hermes-release-gate.sh"') < gateRunner.indexOf('bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all'));
   assert.match(gateRunner, /candidate_gate_copy_unreadable/);
   assert.match(gateRunner, /candidate_gate_copy_writable/);
-  assert.ok(gateRunner.indexOf('runuser --user ran-agent --group ran-agent') > -1);
-  assert.ok(gateRunner.indexOf('runuser --user ran-agent --group ran-agent') < gateRunner.indexOf('RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=1'));
+  assert.ok(gateRunner.indexOf('runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP"') > -1);
+  assert.ok(gateRunner.indexOf('runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP"') < gateRunner.indexOf('RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=1'));
   assert.match(gateRunner, /RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=0 bash "\$GATE_DIR\/scripts\/hermes-release-gate\.sh" --all/);
   assert.match(gateRunner, /RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=1 \\\n    bash "\$GATE_DIR\/scripts\/hermes-release-gate\.sh" --all/);
   assert.doesNotMatch(gateRunner, /RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS/);
@@ -607,38 +633,23 @@ test('custom live state executes prepare and start without writing into the stag
   }
 });
 
-test('Node and Ombre use fixed ran-agent identity while Lite and Full keep their own runtime identity', () => {
+test('Node, Ombre, Lite, and Full reuse one existing runtime identity', () => {
   const apply = readFileSync(join(root, 'scripts', 'apply-hermes-runtime-split.sh'), 'utf8');
-  const identity = readFileSync(join(root, 'scripts', 'verify-ran-agent-runtime-identity.sh'), 'utf8');
   const nodeDropin = apply.match(/write_node_steward_identity_dropin\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
   const ombreUnit = apply.match(/write_ombre_brain_unit\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
   const systemdUnits = apply.match(/write_systemd_units\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
 
-  assert.match(apply, /STEWARD_RUNTIME_USER=ran-agent/);
-  assert.match(apply, /STEWARD_RUNTIME_GROUP=ran-agent/);
-  assert.match(nodeDropin, /User=\$STEWARD_RUNTIME_USER/);
-  assert.match(nodeDropin, /Group=\$STEWARD_RUNTIME_GROUP/);
+  assert.match(apply, /RUNTIME_USER="\$\{RAN_AGENT_RUNTIME_USER:-ubuntu\}"/);
+  assert.match(apply, /RUNTIME_GROUP="\$\{RAN_AGENT_RUNTIME_GROUP:-\$RUNTIME_USER\}"/);
+  assert.match(nodeDropin, /User=\$RUNTIME_USER/);
+  assert.match(nodeDropin, /Group=\$RUNTIME_GROUP/);
   assert.match(nodeDropin, /Environment=RAN_AGENT_NODE_BIN=/);
   assert.match(readFileSync(join(root, 'node_bridge', 'start_node.sh'), 'utf8'), /exec "\$NODE_BIN" src\/index\.mjs/);
-  assert.match(ombreUnit, /User=\$STEWARD_RUNTIME_USER/);
-  assert.match(ombreUnit, /Group=\$STEWARD_RUNTIME_GROUP/);
+  assert.match(ombreUnit, /User=\$RUNTIME_USER/);
+  assert.match(ombreUnit, /Group=\$RUNTIME_GROUP/);
   assert.match(systemdUnits, /User=\$RUNTIME_USER/);
   assert.match(systemdUnits, /Group=\$RUNTIME_GROUP/);
-  assert.match(apply, /legacy runtime identity override must equal ran-agent/);
-  assert.match(apply, /verify-ran-agent-runtime-identity\.sh/);
-  assert.match(apply, /--ensure-account/);
-  assert.match(apply, /--verify-process/);
-  assert.doesNotMatch(apply, /RUNTIME_USER="\$\{RAN_AGENT_RUNTIME_USER:-ubuntu\}"/);
-  assert.match(identity, /groupadd --system "\$STEWARD_GROUP"/);
-  assert.match(identity, /useradd --system --gid "\$STEWARD_GROUP"/);
-  assert.doesNotMatch(identity, /login\.defs|SYS_(?:UID|GID)_(?:MIN|MAX)/);
-  assert.match(identity, /uid != 0/);
-  assert.match(identity, /gid != 0/);
-  assert.match(identity, /\/usr\/sbin\/nologin/);
-  assert.match(identity, /\/opt\/ran_agent/);
-  assert.match(identity, /process_uid_mismatch/);
-  assert.match(identity, /process_gid_mismatch/);
-  assert.match(identity, /main_pid_drift/);
+  assert.doesNotMatch(apply, /STEWARD_RUNTIME_(?:USER|GROUP)|--ensure-account|verify-ran-agent-runtime-identity/);
 });
 
 test('ordinary release snapshot excludes Steward secrets and retains non-secret state', () => {
@@ -732,10 +743,156 @@ test('Steward rollback restores the token before services and always destroys th
   assert.ok(rollback.indexOf('restore_service_state') < rollback.indexOf('destroy_secret_rollback'));
   assert.ok(deploy.indexOf('ran-agent-ombre-brain.service ran-agent-node.service') > 0);
   assert.match(deploy, /verify_restored_steward_service "\$unit"/);
-  assert.match(deploy, /verify-ran-agent-runtime-identity\.sh"[\s\\\n]*--verify-process "\$unit"/);
+  assert.match(deploy, /runtime_identity_verifier --service "\$unit"/);
+  assert.match(deploy, /--expect "\$ROLLBACK_RUNTIME_USER" "\$ROLLBACK_RUNTIME_GROUP"/);
   assert.match(deploy, /--state-dir "\$STATE_DIR"[\s\\\n]*--identity-file "\$STATE_DIR\/ombre-brain\/steward-identity\.v1\.json"/);
   assert.match(deploy, /steward-token-not-restored/);
   assert.match(deploy, /rollback-incomplete/);
+});
+
+test('Steward token backup uses the verified live source identity before ubuntu cutover', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-node.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-ombre-brain.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+  });
+  const stage = join(fixture.dir, 'stage');
+  const tokenTrace = join(fixture.dir, 'token.trace');
+  const proc = join(fixture.dir, 'proc');
+  try {
+    prepareTokenIdentityFixture(fixture, stage);
+    mkdirSync(join(proc, '123'), { recursive: true });
+    writeFileSync(join(proc, '123', 'status'), 'Uid:\t999\t999\t999\t999\nGid:\t999\t999\t999\t999\n');
+    runDeployServiceFixture(fixture, [
+      'SUDO=(env)',
+      `STAGE_DIR=${JSON.stringify(stage)}`,
+      `PYTHON_BIN=${JSON.stringify(join(fixture.bin, 'token-python'))}`,
+      `SECRET_ROLLBACK_ROOT=${JSON.stringify(join(fixture.dir, 'secret-rollback'))}`,
+      'mkdir -p "$SECRET_ROLLBACK_ROOT"',
+      'RUNTIME_USER=ubuntu',
+      'RUNTIME_GROUP=ubuntu',
+      'resolve_source_runtime_identity',
+      'backup_steward_token',
+      '[ "$STEWARD_TOKEN_HAD_PRIOR" -eq 1 ]',
+    ].join('\n'), {
+      TOKEN_TRACE: tokenTrace,
+      MOCK_SERVICE_USER: 'ran-agent',
+      MOCK_SERVICE_GROUP: 'ran-agent',
+      RAN_AGENT_TEST_MODE: '1',
+      RAN_AGENT_TEST_PROC_ROOT: proc,
+    });
+    const trace = readFileSync(tokenTrace, 'utf8');
+    assert.match(trace, /--runtime-user ran-agent --runtime-group ran-agent --backup-to/);
+    assert.doesNotMatch(trace, /--runtime-user ubuntu --runtime-group ubuntu --backup-to/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('rollback derives the old snapshot identity before restoring token ownership', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-node.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-ombre-brain.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+  });
+  const stage = join(fixture.dir, 'stage');
+  const tokenTrace = join(fixture.dir, 'token.trace');
+  try {
+    prepareTokenIdentityFixture(fixture, stage);
+    writeFileSync(join(fixture.snapshot, 'runtime-source-identity'), 'ran-agent\tran-agent\t999\t999\n');
+    runDeployServiceFixture(fixture, [
+      'SUDO=(env)',
+      `STAGE_DIR=${JSON.stringify(stage)}`,
+      `PYTHON_BIN=${JSON.stringify(join(fixture.bin, 'token-python'))}`,
+      `SECRET_ROLLBACK_DIR=${JSON.stringify(join(fixture.dir, 'secret-copy'))}`,
+      'STEWARD_TOKEN_HAD_PRIOR=1',
+      'STEWARD_TOKEN_RESTORED=0',
+      'RUNTIME_USER=ubuntu',
+      'RUNTIME_GROUP=ubuntu',
+      'restore_steward_token',
+    ].join('\n'), {
+      TOKEN_TRACE: tokenTrace,
+      MOCK_SERVICE_USER: 'ran-agent',
+      MOCK_SERVICE_GROUP: 'ran-agent',
+    });
+    const trace = readFileSync(tokenTrace, 'utf8');
+    assert.match(trace, /--runtime-user ran-agent --runtime-group ran-agent --restore-from/);
+    assert.doesNotMatch(trace, /--runtime-user ubuntu --runtime-group ubuntu --restore-from/);
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('source identity accepts absent optional Ombre while keeping Node mandatory', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-node.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-ombre-brain.service': { load: 'not-found', active: 'inactive', enabled: 'disabled' },
+  });
+  const stage = join(fixture.dir, 'stage');
+  const proc = join(fixture.dir, 'proc');
+  try {
+    prepareTokenIdentityFixture(fixture, stage);
+    mkdirSync(join(proc, '123'), { recursive: true });
+    writeFileSync(join(proc, '123', 'status'), 'Uid:\t999\t999\t999\t999\nGid:\t999\t999\t999\t999\n');
+    runDeployServiceFixture(fixture, [
+      'SUDO=(env)',
+      'resolve_source_runtime_identity',
+      '[ "$SOURCE_RUNTIME_USER:$SOURCE_RUNTIME_GROUP:$SOURCE_RUNTIME_UID:$SOURCE_RUNTIME_GID" = ran-agent:ran-agent:999:999 ]',
+      'printf "%s\\n" not-found >| "$SYSTEMCTL_STATE/ran-agent-node.service.load"',
+      'if (resolve_source_runtime_identity) 2>/dev/null; then exit 91; fi',
+      'printf "%s\\n" loaded >| "$SYSTEMCTL_STATE/ran-agent-node.service.load"',
+      'printf "%s\\n" loaded >| "$SYSTEMCTL_STATE/ran-agent-ombre-brain.service.load"',
+      'printf "%s\\n" active >| "$SYSTEMCTL_STATE/ran-agent-ombre-brain.service.active"',
+      'if (verify_source_runtime_identity_unchanged) 2>/dev/null; then exit 92; fi',
+      'printf "%s\\n" ubuntu >| "$SYSTEMCTL_STATE/ran-agent-ombre-brain.service.user"',
+      'printf "%s\\n" ubuntu >| "$SYSTEMCTL_STATE/ran-agent-ombre-brain.service.group"',
+      'if (resolve_source_runtime_identity) 2>/dev/null; then exit 93; fi',
+    ].join('\n'), {
+      MOCK_SERVICE_USER: 'ran-agent',
+      MOCK_SERVICE_GROUP: 'ran-agent',
+      RAN_AGENT_TEST_MODE: '1',
+      RAN_AGENT_TEST_PROC_ROOT: proc,
+    });
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
+});
+
+test('rollback restores snapshot with absent optional Ombre', () => {
+  const fixture = makeDeployServiceFixture({
+    'ran-agent-python.service': { load: 'loaded', active: 'inactive', enabled: 'enabled' },
+    'ran-agent-node.service': { load: 'loaded', active: 'active', enabled: 'enabled' },
+    'ran-agent-hermes.service': { load: 'loaded', active: 'inactive', enabled: 'enabled' },
+    'ran-agent-hermes-full.service': { load: 'loaded', active: 'inactive', enabled: 'enabled' },
+    'ran-agent-ombre-brain.service': { load: 'not-found', active: 'inactive', enabled: 'disabled' },
+  });
+  const stage = join(fixture.dir, 'stage');
+  const tokenTrace = join(fixture.dir, 'token.trace');
+  try {
+    prepareTokenIdentityFixture(fixture, stage);
+    writeFileSync(join(fixture.snapshot, 'runtime-source-identity'), 'ran-agent\tran-agent\t999\t999\n');
+    const output = runDeployServiceFixture(fixture, [
+      'SUDO=(env)',
+      `STAGE_DIR=${JSON.stringify(stage)}`,
+      `PYTHON_BIN=${JSON.stringify(join(fixture.bin, 'token-python'))}`,
+      `SECRET_ROLLBACK_DIR=${JSON.stringify(join(fixture.dir, 'secret-copy'))}`,
+      'STEWARD_TOKEN_HAD_PRIOR=1',
+      'STEWARD_TOKEN_RESTORED=0',
+      'restore_steward_token',
+      'restore_service_state',
+      'printf "rollback-complete\\n"',
+    ].join('\n'), {
+      TOKEN_TRACE: tokenTrace,
+      MOCK_SERVICE_USER: 'ran-agent',
+      MOCK_SERVICE_GROUP: 'ran-agent',
+    });
+    assert.match(output, /rollback-complete/);
+    assert.doesNotMatch(output, /rollback-incomplete/);
+    assert.match(readFileSync(tokenTrace, 'utf8'), /--runtime-user ran-agent --runtime-group ran-agent --restore-from/);
+    const systemctlTrace = readFileSync(fixture.log, 'utf8');
+    assert.doesNotMatch(systemctlTrace, /show ran-agent-ombre-brain\.service --property=(?:User|Group|MainPID)/);
+    assert.equal(readFileSync(join(fixture.state, 'ran-agent-node.service.active'), 'utf8'), 'active\n');
+  } finally {
+    rmSync(fixture.dir, { recursive: true, force: true });
+  }
 });
 
 test('Steward acceptance blocks on effective identity, process identity, path, snapshot and old-token rejection', () => {
@@ -743,8 +900,7 @@ test('Steward acceptance blocks on effective identity, process identity, path, s
   for (const pattern of [
     /release_steward_identity_contract ran-agent-node\.service/,
     /release_steward_identity_contract ran-agent-ombre-brain\.service/,
-    /verify-ran-agent-runtime-identity\.sh/,
-    /--verify-process/,
+    /runtime_identity_contract/,
     /steward_identity_pid_drift/,
     /steward_token_in_staged_checkout/,
     /steward_secret_in_release_snapshot/,
@@ -755,7 +911,7 @@ test('Steward acceptance blocks on effective identity, process identity, path, s
   ]) assert.match(accept, pattern);
 });
 
-test('Steward acceptance checks effective names and shared numeric MainPID identity', () => {
+test('Steward acceptance checks the shared runtime identity and stable MainPID', () => {
   const dir = mkdtempSync(join(tmpdir(), 'steward-accept-identity-'));
   const bin = join(dir, 'bin');
   const proc = join(dir, 'proc');
@@ -763,12 +919,12 @@ test('Steward acceptance checks effective names and shared numeric MainPID ident
   const contract = accept.match(/release_steward_identity_contract\(\) \{([\s\S]*?)\n\}/)?.[0] || '';
   mkdirSync(bin);
   mkdirSync(join(proc, '123'), { recursive: true });
-  writeFileSync(join(proc, '123', 'status'), 'Uid:\t999\t999\t999\t999\nGid:\t999\t999\t999\t999\n');
+  writeFileSync(join(proc, '123', 'status'), `Uid:\t${process.getuid()}\t${process.getuid()}\t${process.getuid()}\t${process.getuid()}\nGid:\t${process.getgid()}\t${process.getgid()}\t${process.getgid()}\t${process.getgid()}\n`);
   writeFileSync(join(bin, 'systemctl'), [
     '#!/bin/sh',
     'case "$*" in',
-    '  *"--property=User"*) printf "%s\\n" "${MOCK_USER:-ran-agent}" ;;',
-    '  *"--property=Group"*) printf "%s\\n" "${MOCK_GROUP:-ran-agent}" ;;',
+    '  *"--property=User"*) printf "%s\\n" "${MOCK_USER:-ubuntu}" ;;',
+    '  *"--property=Group"*) printf "%s\\n" "${MOCK_GROUP:-ubuntu}" ;;',
     '  *"--property=MainPID"*) printf "%s\\n" 123 ;;',
     '  *) exit 1 ;;',
     'esac',
@@ -776,13 +932,25 @@ test('Steward acceptance checks effective names and shared numeric MainPID ident
   ].join('\n'));
   writeFileSync(join(bin, 'stat'), '#!/bin/sh\nprintf "%s\\n" "${MOCK_OWNER:-ran-agent:ran-agent}"\n');
   writeFileSync(join(bin, 'cat'), '#!/bin/sh\nprintf "RAN_AGENT_STEWARD_TOKEN_FILE=%s/ombre-compat/secrets/steward-api-token\\n" "$RAN_AGENT_STATE_DIR"\n');
-  writeFileSync(join(bin, 'id'), '#!/bin/sh\ncase "$1" in -u|-g) printf "%s\\n" 999;; ran-agent) exit 0;; *) exit 1;; esac\n');
+  writeFileSync(join(bin, 'id'), [
+    '#!/bin/sh',
+    'case "$*" in',
+    '  "-u ubuntu"|"-g ubuntu") printf "%s\\n" 1000 ;;',
+    '  "-gn ubuntu") printf "%s\\n" ubuntu ;;',
+    '  "-u ran-agent"|"-g ran-agent") printf "%s\\n" 999 ;;',
+    '  "-gn ran-agent") printf "%s\\n" ran-agent ;;',
+    '  *) exit 1 ;;',
+    'esac',
+    '',
+  ].join('\n'));
   writeFileSync(join(bin, 'getent'), '#!/bin/sh\ncase "$1" in passwd) printf "ran-agent:x:999:999::/opt/ran_agent:/usr/sbin/nologin\\n";; group) printf "ran-agent:x:999:\\n";; *) exit 1;; esac\n');
   for (const command of ['systemctl', 'stat', 'cat', 'id', 'getent']) chmodSync(join(bin, command), 0o755);
   const source = [
     'set -euo pipefail',
     'fail() { printf "%s\\n" "$1" >&2; return 1; }',
     'SUDO=(env)',
+    'RUNTIME_USER=ubuntu',
+    'RUNTIME_GROUP=ubuntu',
     `SOURCE_ROOT=${JSON.stringify(root)}`,
     `export RAN_AGENT_STATE_DIR=${JSON.stringify(join(dir, 'live-state'))}`,
     contract,
@@ -799,10 +967,11 @@ test('Steward acceptance checks effective names and shared numeric MainPID ident
     stdio: 'pipe',
   });
   try {
-    assert.doesNotThrow(() => runContract());
-    assert.throws(() => runContract({ MOCK_USER: 'ubuntu' }), /Command failed/);
-    writeFileSync(join(proc, '123', 'status'), 'Uid:\t999\t998\t999\t999\nGid:\t999\t999\t999\t999\n');
     assert.throws(() => runContract(), /Command failed/);
+    writeFileSync(join(proc, '123', 'status'), 'Uid:\t1000\t1000\t1000\t1000\nGid:\t1000\t1000\t1000\t1000\n');
+    assert.doesNotThrow(() => runContract());
+    assert.throws(() => runContract({ MOCK_USER: 'ran-agent' }), /Command failed/);
+    assert.throws(() => runContract({ MOCK_GROUP: 'ran-agent' }), /Command failed/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -1770,10 +1939,11 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
     for (const name of [
       'resolve-hermes-service-node.sh', 'prune-hermes-release-artifacts.sh',
       'ombre_o1_contract.py', 'install-ombre-steward-token.py', 'apply_ombre_steward_patch.py',
+      'verify-runtime-service-identity.sh',
     ]) copyFileSync(join(root, 'scripts', name), join(scripts, name));
     for (const name of [
       'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
-      'hermes-release-candidate-preflight.mjs', 'verify-ran-agent-runtime-identity.sh',
+      'hermes-release-candidate-preflight.mjs',
       'verify-ombre-steward-real-process.sh',
     ]) writeFileSync(join(scripts, name), '#!/bin/sh\nexit 0\n');
     mkdirSync(join(repo, 'node_bridge', 'tests'), { recursive: true });
@@ -1843,6 +2013,7 @@ test('explicit rollback keeps immutable candidate helpers after checking out a p
       'SUDO=(sudo)',
       'require_artifact_layout() { return 0; }',
       `require_candidate_bootstrap_authority() { printf verified > ${JSON.stringify(authorityMarker)}; }`,
+      'resolve_source_runtime_identity() { SOURCE_RUNTIME_USER=ubuntu; SOURCE_RUNTIME_GROUP=ubuntu; SOURCE_RUNTIME_UID=1000; SOURCE_RUNTIME_GID=1000; }',
       'backup_steward_token() { SECRET_ROLLBACK_DIR=""; STEWARD_TOKEN_HAD_PRIOR=0; STEWARD_TOKEN_RESTORED=1; }',
       'restore_steward_token() { STEWARD_TOKEN_RESTORED=1; return 0; }',
       'destroy_secret_rollback() { return 0; }',
@@ -2192,15 +2363,16 @@ test('candidate staging fails closed on missing real-process assets and remains 
     ]) writeFileSync(join(scripts, name), '#!/bin/sh\nexit 0\n');
     for (const name of [
       'check-hermes-snapshot-capacity.py', 'prune-hermes-release-artifacts.sh', 'ombre_o1_contract.py',
-      'install-ombre-steward-token.py', 'verify-ran-agent-runtime-identity.sh',
+      'install-ombre-steward-token.py',
       'apply_ombre_steward_patch.py',
+      'verify-runtime-service-identity.sh',
     ]) writeFileSync(join(scripts, name), '# fixture\n');
     writeFileSync(join(repo, 'node_bridge', 'tests', 'ombreCompatPatchedProcess.test.mjs'), '// fixture\n');
     for (const name of [
       'deploy-hermes-release.sh', 'resolve-hermes-service-node.sh',
       'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
       'hermes-release-candidate-preflight.mjs', 'verify-ombre-steward-real-process.sh',
-      'hermes-release-gate.sh',
+      'hermes-release-gate.sh', 'verify-runtime-service-identity.sh',
     ]) chmodSync(join(scripts, name), 0o755);
     writeFileSync(join(bin, 'sha256sum'), '#!/bin/sh\nexec /usr/bin/shasum -a 256 "$@"\n');
     chmodSync(join(bin, 'sha256sum'), 0o755);
@@ -2334,7 +2506,7 @@ test('Linux root gates execute the same read-only copy as root and ran-agent und
     ]) writeFileSync(join(scripts, name), '#!/bin/sh\nexit 0\n');
     for (const name of [
       'check-hermes-snapshot-capacity.py', 'prune-hermes-release-artifacts.sh', 'ombre_o1_contract.py',
-      'install-ombre-steward-token.py', 'verify-ran-agent-runtime-identity.sh',
+      'install-ombre-steward-token.py',
       'apply_ombre_steward_patch.py',
     ]) writeFileSync(join(scripts, name), '# fixture\n');
     writeFileSync(join(repo, 'node_bridge', 'tests', 'ombreCompatPatchedProcess.test.mjs'), '// fixture\n');
@@ -2520,6 +2692,8 @@ test('apply rejects a missing Python 3.12 before snapshot or checkout side effec
         `source ${JSON.stringify(join(scripts, 'deploy-hermes-release.sh'))}`,
         'SERVER_ROOT="$REPO_ROOT"',
         'require_ombre_ingress_dropin_absent() { :; }',
+        'resolve_target_runtime_identity() { :; }',
+        'resolve_source_runtime_identity() { :; }',
         'require_node_sqlite() { :; }',
         'require_python_runtime() { :; }',
         'project_checkout_permissions() { :; }',
@@ -2835,7 +3009,7 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   mkdirSync(join(state, 'core'), { recursive: true });
   const proc = join(dir, 'proc');
   mkdirSync(join(proc, '123'), { recursive: true });
-  writeFileSync(join(proc, '123', 'status'), 'Uid:\t999\t999\t999\t999\nGid:\t999\t999\t999\t999\n');
+  writeFileSync(join(proc, '123', 'status'), `Uid:\t${process.getuid()}\t${process.getuid()}\t${process.getuid()}\t${process.getuid()}\nGid:\t${process.getgid()}\t${process.getgid()}\t${process.getgid()}\t${process.getgid()}\n`);
   const core = new DatabaseSync(join(state, 'core', 'core-state.sqlite3'));
   core.exec('CREATE TABLE activity (activity_id TEXT PRIMARY KEY, title TEXT NOT NULL, domain TEXT NOT NULL, state TEXT NOT NULL, contract_revision INTEGER NOT NULL, updated_at TEXT NOT NULL)');
   core.close();
@@ -2845,8 +3019,8 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
     'case "$1" in',
     '  show) case "$*" in',
     '    *"--property=MainPID"*) printf "%s\\n" 123 ;;',
-    '    *"--property=User"*) case "$2" in ran-agent-node.service|ran-agent-ombre-brain.service) printf "%s\\n" ran-agent ;; *) printf "%s\\n" "$MOCK_RUNTIME_USER" ;; esac ;;',
-    '    *"--property=Group"*) case "$2" in ran-agent-node.service|ran-agent-ombre-brain.service) printf "%s\\n" ran-agent ;; *) printf "%s\\n" "$MOCK_RUNTIME_GROUP" ;; esac ;;',
+    '    *"--property=User"*) printf "%s\\n" "${MOCK_SERVICE_USER:-$MOCK_RUNTIME_USER}" ;;',
+    '    *"--property=Group"*) printf "%s\\n" "${MOCK_SERVICE_GROUP:-$MOCK_RUNTIME_GROUP}" ;;',
     '    *) printf "%s\\n" loaded ;;',
     '  esac ;;',
     '  is-active) exit 0 ;;',
@@ -2902,8 +3076,8 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   const baseEnv = {
     PATH: `${bin}:/usr/bin:/bin`,
     RAN_AGENT_NO_SUDO: '1',
-    RAN_AGENT_HERMES_RUNTIME_USER: runtimeUser,
-    RAN_AGENT_HERMES_RUNTIME_GROUP: runtimeGroup,
+    RAN_AGENT_RUNTIME_USER: runtimeUser,
+    RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
     RAN_AGENT_PYTHON_BIN: pythonBin,
     RAN_AGENT_OMBRE_PATCH_PYTHON_BIN: join(bin, 'ombre-patch-python'),
     RAN_AGENT_NODE_BIN: nodeBin,
@@ -2983,7 +3157,7 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
     }
     assert.match(log, new RegExp(`chown ${runtimeUser}:${runtimeGroup} .*\\/hermes`));
     assert.match(log, new RegExp(
-      `chown -R ran-agent:ran-agent ${ombreHome.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')} ${join(dir, 'buckets').replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+      `chown -R ${runtimeUser}:${runtimeGroup} ${ombreHome.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')} ${join(dir, 'buckets').replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
     ));
 
     for (const mode of ['lite', 'full']) {
@@ -3066,16 +3240,13 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
       assert.match(readFileSync(trace, 'utf8'), new RegExp(`restart ${unit.replace('.', '\\.')}`));
     }
 
-    writeFileSync(join(proc, '123', 'status'), 'Uid:\t999\t998\t999\t999\nGid:\t999\t999\t999\t999\n');
     writeFileSync(trace, '');
     assert.throws(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
       cwd: root,
-      env: baseEnv,
+      env: { ...baseEnv, MOCK_SERVICE_USER: 'ran-agent' },
       stdio: 'pipe',
     }), /Command failed/);
-    const numericIdentityFailureLog = readFileSync(trace, 'utf8');
-    assert.match(numericIdentityFailureLog, /restart ran-agent-ombre-brain\.service/);
-    assert.doesNotMatch(numericIdentityFailureLog, /restart ran-agent-ombre-recall\.service|restart ran-agent-hermes(?:-full)?\.service|restart ran-agent-node\.service/);
+    assert.doesNotMatch(readFileSync(trace, 'utf8'), /restart /);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -3090,6 +3261,7 @@ test('projection publisher switches to a distinct validated runtime identity and
   writeFileSync(join(bin, 'id'), [
     '#!/bin/sh',
     'if [ "${MISSING_RUNTIME_USER:-0}" = 1 ] && [ "$#" -gt 1 ]; then exit 1; fi',
+    'if [ "${ROOT_RUNTIME_USER:-0}" = 1 ] && [ "$#" -gt 1 ]; then case "$1" in -u|-g) printf "%s\\n" 0; exit 0;; esac; fi',
     'case "$1:$#" in',
     '  -u:1|-g:1) printf "%s\\n" 2000 ;;',
     '  -u:2|-g:2) printf "%s\\n" 1000 ;;',
@@ -3112,8 +3284,9 @@ test('projection publisher switches to a distinct validated runtime identity and
     ...process.env,
     PATH: `${bin}:/usr/bin:/bin`,
     RAN_AGENT_NO_SUDO: '1',
-    RAN_AGENT_HERMES_RUNTIME_USER: 'runtime-user',
-    RAN_AGENT_HERMES_RUNTIME_GROUP: 'runtime-group',
+    RAN_AGENT_RUNTIME_USER: 'runtime-user',
+    RAN_AGENT_RUNTIME_GROUP: 'runtime-group',
+    RAN_AGENT_REPO_ROOT: root,
     RUNTIME_TRACE: trace,
   };
   try {
@@ -3142,6 +3315,26 @@ test('projection publisher switches to a distinct validated runtime identity and
       env: { ...env, MISSING_RUNTIME_USER: '1' },
       stdio: 'pipe',
     }), /Command failed/);
+
+    const mutation = join(dir, 'root-target-mutation');
+    assert.throws(() => execFileSync('bash', ['-c', [
+      'source scripts/apply-hermes-runtime-split.sh',
+      'resolve_runtime_identity',
+      `printf mutation > ${JSON.stringify(mutation)}`,
+    ].join('\n')], {
+      cwd: root,
+      env: { ...env, ROOT_RUNTIME_USER: '1' },
+      stdio: 'pipe',
+    }), /Command failed/);
+    assert.equal(existsSync(mutation), false);
+    const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+    const prerequisites = deploy.match(/require_apply_prerequisites\(\) \{([\s\S]*?)\n\}/)?.[1] || '';
+    assert.ok(prerequisites.indexOf('resolve_target_runtime_identity') < prerequisites.indexOf('project_checkout_permissions repair'));
+    assert.ok(prerequisites.indexOf('resolve_source_runtime_identity') < prerequisites.indexOf('project_checkout_permissions repair'));
+    const applyFlow = deploy.slice(deploy.lastIndexOf('require_apply_prerequisites'));
+    for (const mutationName of ['snapshot_runtime_state', 'block_ombre_ingress', 'quiesce_runtime_services', 'backup_steward_token', 'activate_candidate_checkout']) {
+      assert.ok(applyFlow.indexOf('require_apply_prerequisites') < applyFlow.indexOf(mutationName));
+    }
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -3466,12 +3659,10 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.doesNotMatch(source, /RAN_AGENT_GATE_SKIP_HERMES_RUNTIME_TESTS/);
   assert.match(source, /invalid_privileged_skip_flag/);
   assert.match(source, /privileged_test_skip_reason/);
-  assert.match(source, /hermesGatewayProviderBoundary\.integration\.test\.mjs\)/);
+  assert.doesNotMatch(source.match(/privileged_test_skip_reason\(\)[\s\S]*?\n\}/)?.[0] || '', /hermesGatewayProviderBoundary/);
   assert.match(source, /hermesModelCutover\.test\.mjs\|searchHubApplyScript\.test\.mjs\|ombreCompatProductionWiring\.test\.mjs\)/);
-  assert.match(source, /requires the ubuntu-owned Hermes v0\.13 runtime; covered by the root gate/);
   assert.match(source, /exercises root-only apply tooling that chowns to the ubuntu runtime user; covered by the root gate/);
-  assert.match(source, /skip tests\/test_hermes_deepseek_provider\.py \(requires the ubuntu-owned Hermes v0\.13 runtime; covered by the root gate\)/);
-  assert.match(source, /PYTEST_TARGETS=\(--ignore tests\/test_hermes_deepseek_provider\.py tests\)/);
+  assert.doesNotMatch(source, /skip tests\/test_hermes_deepseek_provider\.py|--ignore tests\/test_hermes_deepseek_provider\.py/);
 });
 
 test('real Ombre gate rejects a requirements lock mutation staged in the upstream index', () => {
@@ -3520,7 +3711,9 @@ test('release gate executes a git-less staged candidate from its explicit immuta
     mkdirSync(join(stage, 'node_bridge', 'tests'), { recursive: true });
     mkdirSync(join(stage, 'tests'), { recursive: true });
     copyFileSync(join(root, 'scripts', 'hermes-release-gate.sh'), join(stage, 'scripts', 'hermes-release-gate.sh'));
+    copyFileSync(join(root, 'scripts', 'verify-runtime-service-identity.sh'), join(stage, 'scripts', 'verify-runtime-service-identity.sh'));
     chmodSync(join(stage, 'scripts', 'hermes-release-gate.sh'), 0o755);
+    chmodSync(join(stage, 'scripts', 'verify-runtime-service-identity.sh'), 0o755);
     writeFileSync(join(stage, 'node_bridge', 'tests', 'coreReliabilityJourney.test.mjs'), [
       "import test from 'node:test';",
       "test('gitless staged candidate fixture', () => {});",
@@ -3548,6 +3741,8 @@ test('release gate executes a git-less staged candidate from its explicit immuta
         RAN_AGENT_SYSTEMCTL_BIN: '/attacker/systemctl',
         RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
         RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
+        RAN_AGENT_RUNTIME_USER: runtimeUser,
+        RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
       },
       encoding: 'utf8',
       stdio: 'pipe',
@@ -3561,6 +3756,8 @@ test('release gate executes a git-less staged candidate from its explicit immuta
       RAN_AGENT_RELEASE_CANDIDATE: 'a'.repeat(40),
       RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
       RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
+      RAN_AGENT_RUNTIME_USER: runtimeUser,
+      RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
       RAN_AGENT_TEST_MODE: '1',
       RAN_AGENT_TEST_OMBRE_GATE_PHASE_ONLY: '1',
     };
@@ -3587,6 +3784,8 @@ test('release gate executes a git-less staged candidate from its explicit immuta
           RAN_AGENT_RELEASE_CANDIDATE: 'a'.repeat(40),
           RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
           RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
+          RAN_AGENT_RUNTIME_USER: runtimeUser,
+          RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
         },
         encoding: 'utf8',
         stdio: 'pipe',
@@ -3599,7 +3798,7 @@ test('release gate executes a git-less staged candidate from its explicit immuta
   }
 });
 
-test('identity-scoped gate skips privileged-identity tests only with the explicit flag', () => {
+test('non-root gate skips only root tooling and never skips provider checks', () => {
   const pythonBin = requiredGatePython();
   const boundaryStub = 'hermesGatewayProviderBoundary.integration.test.mjs';
   const toolingStubs = ['hermesModelCutover.test.mjs', 'searchHubApplyScript.test.mjs', 'ombreCompatProductionWiring.test.mjs'];
@@ -3609,7 +3808,9 @@ test('identity-scoped gate skips privileged-identity tests only with the explici
     mkdirSync(join(stage, 'node_bridge', 'tests'), { recursive: true });
     mkdirSync(join(stage, 'tests'), { recursive: true });
     copyFileSync(join(root, 'scripts', 'hermes-release-gate.sh'), join(stage, 'scripts', 'hermes-release-gate.sh'));
+    copyFileSync(join(root, 'scripts', 'verify-runtime-service-identity.sh'), join(stage, 'scripts', 'verify-runtime-service-identity.sh'));
     chmodSync(join(stage, 'scripts', 'hermes-release-gate.sh'), 0o755);
+    chmodSync(join(stage, 'scripts', 'verify-runtime-service-identity.sh'), 0o755);
     writeFileSync(join(stage, 'node_bridge', 'tests', 'coreReliabilityJourney.test.mjs'), [
       "import test from 'node:test';",
       "test('covered suite passes', () => {});",
@@ -3624,7 +3825,6 @@ test('identity-scoped gate skips privileged-identity tests only with the explici
     }
     writeFileSync(join(stage, 'scripts', 'hermes-release-smoke.mjs'), 'process.exit(0);\n');
     writeFileSync(join(stage, 'tests', 'test_stage.py'), 'def test_gitless_stage():\n    assert True\n');
-    writeFileSync(join(stage, 'tests', 'test_hermes_deepseek_provider.py'), 'def test_deepseek_provider():\n    raise AssertionError("must not run")\n');
     return stage;
   };
   const runGate = (stage, extraEnv = {}) => spawnSync('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--all'], {
@@ -3636,6 +3836,8 @@ test('identity-scoped gate skips privileged-identity tests only with the explici
       RAN_AGENT_RELEASE_CANDIDATE: 'b'.repeat(40),
       RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
       RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
+      RAN_AGENT_RUNTIME_USER: runtimeUser,
+      RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
       RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE: 'code-only',
       ...extraEnv,
     },
@@ -3645,16 +3847,20 @@ test('identity-scoped gate skips privileged-identity tests only with the explici
   try {
     // Flagged: every privileged check is skipped with a printed reason, the
     // covered suite still runs, and the gate passes.
-    const flagged = buildStage([boundaryStub, ...toolingStubs]);
+    const flagged = buildStage(toolingStubs);
     stages.push(flagged);
     const skipped = runGate(flagged, { RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS: '1' });
     assert.equal(skipped.status, 0, skipped.stderr);
-    assert.match(skipped.stdout, /skip hermesGatewayProviderBoundary\.integration\.test\.mjs \(requires the ubuntu-owned Hermes v0\.13 runtime; covered by the root gate\)/);
     for (const name of toolingStubs) {
       assert.match(skipped.stdout, new RegExp(`skip ${name.replace(/\./g, '\\.')} \\(exercises root-only apply tooling that chowns to the ubuntu runtime user; covered by the root gate\\)`));
     }
-    assert.match(skipped.stdout, /skip tests\/test_hermes_deepseek_provider\.py \(requires the ubuntu-owned Hermes v0\.13 runtime; covered by the root gate\)/);
     assert.match(skipped.stdout, /hermes-release-gate: ok/);
+
+    const flaggedBoundary = buildStage([boundaryStub]);
+    stages.push(flaggedBoundary);
+    const flaggedBoundaryFailure = runGate(flaggedBoundary, { RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS: '1' });
+    assert.notEqual(flaggedBoundaryFailure.status, 0);
+    assert.match(flaggedBoundaryFailure.stderr, /hermes_(runtime_resolver_required|v0_13_runtime_required|lite_runtime_required)/);
 
     // Strict boundary: without the flag the gate must attempt the Hermes
     // runtime resolution for the provider boundary.

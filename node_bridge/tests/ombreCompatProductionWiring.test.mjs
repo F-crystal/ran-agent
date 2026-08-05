@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -137,6 +137,28 @@ test('release defaults to Flash, manages O2 transactionally, and accepts it read
   assert.match(apply, /Environment=OMBRE_COMPAT_STEWARD_IDENTITY_FILE=\$OMBRE_BRAIN_HOME_DEFAULT\/steward-identity\.v1\.json/);
   assert.match(diagnose, /managed O2 config: VALID/);
   assert.match(diagnose, /managed O2 config: DISABLED/);
+
+  const dir = mkdtempSync(join(tmpdir(), 'ombre-o2-legacy-identity-'));
+  const systemd = join(dir, 'systemd');
+  const dropin = join(systemd, 'ran-agent-node.service.d', '99-ombre-steward-identity.conf');
+  mkdirSync(join(dropin, '..'), { recursive: true });
+  writeFileSync(dropin, '[Service]\nUser=ran-agent\nGroup=ran-agent\nEnvironment=OMBRE_COMPAT_ENABLED=true\n');
+  execFileSync('bash', ['-lc', [
+    'set -euo pipefail',
+    'export RAN_AGENT_NO_SUDO=1',
+    `export RAN_AGENT_REPO_ROOT=${JSON.stringify(root)}`,
+    `export SYSTEMD_DIR=${JSON.stringify(systemd)}`,
+    'export RAN_AGENT_RUNTIME_USER=ubuntu',
+    'export RAN_AGENT_RUNTIME_GROUP=ubuntu',
+    'source scripts/apply-hermes-runtime-split.sh',
+    'write_node_steward_identity_dropin',
+  ].join('\n')], { cwd: root, stdio: 'pipe' });
+  const rewrittenDropin = readFileSync(dropin, 'utf8');
+  assert.match(rewrittenDropin, /^User=ubuntu$/m);
+  assert.match(rewrittenDropin, /^Group=ubuntu$/m);
+  assert.match(rewrittenDropin, /RAN_AGENT_STEWARD_TOKEN_FILE=/);
+  assert.doesNotMatch(rewrittenDropin, /^(?:User|Group)=ran-agent$/m);
+  rmSync(dir, { recursive: true, force: true });
 
   const acceptanceBody = accept.slice(
     accept.indexOf('release_ombre_compat_contract()'),

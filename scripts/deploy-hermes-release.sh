@@ -30,7 +30,73 @@ stage_run() {
   if [[ "$STAGE_USE_SUDO" == 1 ]]; then "${SUDO[@]}" "$@"; else "$@"; fi
 }
 
+runtime_identity_verifier() {
+  "${SUDO[@]}" env \
+    RAN_AGENT_TEST_MODE="${RAN_AGENT_TEST_MODE:-0}" \
+    RAN_AGENT_TEST_PROC_ROOT="${RAN_AGENT_TEST_PROC_ROOT:-/proc}" \
+    bash "$SCRIPT_ROOT/scripts/verify-runtime-service-identity.sh" "$@"
+}
+
+resolve_target_runtime_identity() {
+  local checked_user checked_group
+  IFS=$'\t' read -r checked_user checked_group TARGET_RUNTIME_UID TARGET_RUNTIME_GID < <(
+    runtime_identity_verifier --identity "$RUNTIME_USER" "$RUNTIME_GROUP"
+  ) || fail target_runtime_identity_invalid
+  [[ "$checked_user" == "$RUNTIME_USER" && "$checked_group" == "$RUNTIME_GROUP" ]] ||
+    fail target_runtime_identity_invalid
+}
+
+resolve_source_runtime_identity() {
+  local node_load_state ombre_load_state
+  local -a verifier_args=(--service ran-agent-node.service)
+  node_load_state="$(service_load_state ran-agent-node.service)" || fail source_runtime_identity_invalid
+  [[ "$node_load_state" == loaded ]] || fail source_runtime_identity_invalid
+  "${SUDO[@]}" systemctl is-active --quiet ran-agent-node.service || fail source_runtime_identity_invalid
+  ombre_load_state="$(service_load_state ran-agent-ombre-brain.service)" || fail source_runtime_identity_invalid
+  SOURCE_OMBRE_ACTIVE=0
+  case "$ombre_load_state" in
+    loaded)
+      if "${SUDO[@]}" systemctl is-active --quiet ran-agent-ombre-brain.service; then
+        SOURCE_OMBRE_ACTIVE=1
+        verifier_args+=(--service ran-agent-ombre-brain.service)
+      fi
+      ;;
+    not-found)
+      ! "${SUDO[@]}" systemctl is-active --quiet ran-agent-ombre-brain.service ||
+        fail source_runtime_identity_invalid
+      ;;
+    *) fail source_runtime_identity_invalid ;;
+  esac
+  IFS=$'\t' read -r SOURCE_RUNTIME_USER SOURCE_RUNTIME_GROUP SOURCE_RUNTIME_UID SOURCE_RUNTIME_GID < <(
+    runtime_identity_verifier "${verifier_args[@]}"
+  ) || fail source_runtime_identity_invalid
+}
+
+verify_source_runtime_identity_unchanged() {
+  local expected_user="$SOURCE_RUNTIME_USER" expected_group="$SOURCE_RUNTIME_GROUP"
+  local expected_uid="$SOURCE_RUNTIME_UID" expected_gid="$SOURCE_RUNTIME_GID"
+  local expected_ombre_active="$SOURCE_OMBRE_ACTIVE"
+  resolve_source_runtime_identity
+  [[ "$SOURCE_RUNTIME_USER" == "$expected_user" && "$SOURCE_RUNTIME_GROUP" == "$expected_group" &&
+    "$SOURCE_RUNTIME_UID" == "$expected_uid" && "$SOURCE_RUNTIME_GID" == "$expected_gid" &&
+    "$SOURCE_OMBRE_ACTIVE" == "$expected_ombre_active" ]] ||
+    fail source_runtime_identity_drift
+}
+
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-$REPO_ROOT/.venv/bin/python}"
+RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
+RUNTIME_GROUP="${RAN_AGENT_RUNTIME_GROUP:-$RUNTIME_USER}"
+TARGET_RUNTIME_UID=''
+TARGET_RUNTIME_GID=''
+SOURCE_RUNTIME_USER=''
+SOURCE_RUNTIME_GROUP=''
+SOURCE_RUNTIME_UID=''
+SOURCE_RUNTIME_GID=''
+SOURCE_OMBRE_ACTIVE=''
+ROLLBACK_RUNTIME_USER=''
+ROLLBACK_RUNTIME_GROUP=''
+ROLLBACK_RUNTIME_UID=''
+ROLLBACK_RUNTIME_GID=''
 OMBRE_PATCH_PYTHON_BIN=''
 CANONICAL_LIVE_STATE_DIR="${RAN_AGENT_RELEASE_STATE_DIR:-/opt/ran_agent/.ran_agent_state}"
 STATE_DIR="$CANONICAL_LIVE_STATE_DIR"
@@ -445,7 +511,7 @@ runtime_checkout_access() {
   local root="${1:-$REPO_ROOT}" mode="${2:-modules}" runuser_bin=/usr/sbin/runuser
   case "$mode" in files|modules) ;; *) fail runtime_access_mode_invalid ;; esac
   "${SUDO[@]}" test -x "$runuser_bin" || fail runtime_access_runuser_unavailable
-  "${SUDO[@]}" "$runuser_bin" --user ran-agent --group ran-agent -- /usr/bin/env -i \
+  "${SUDO[@]}" "$runuser_bin" --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- /usr/bin/env -i \
     PATH=/usr/bin:/bin "$NODE_BIN" --input-type=module -e '
 import { accessSync, constants } from "node:fs";
 import { createRequire } from "node:module";
@@ -498,6 +564,8 @@ require_plan_prerequisites() {
 require_apply_prerequisites() {
   [[ "$REPO_ROOT" == "$SERVER_ROOT" ]] || fail server_root_required
   [[ "$EUID" -ne 0 ]] || fail checkout_operator_root_forbidden
+  resolve_target_runtime_identity
+  resolve_source_runtime_identity
   require_ombre_ingress_dropin_absent
   require_python_runtime
   require_candidate_bootstrap_authority
@@ -558,7 +626,8 @@ for path, digest in entries.items():
     scripts/resolve-hermes-service-node.sh \
     scripts/prune-hermes-release-artifacts.sh \
     scripts/check-hermes-snapshot-capacity.py \
-    scripts/ombre_o1_contract.py || fail candidate_bootstrap_required
+    scripts/ombre_o1_contract.py \
+    scripts/verify-runtime-service-identity.sh || fail candidate_bootstrap_required
 }
 
 prune_release_artifacts() {
@@ -660,7 +729,7 @@ stage_candidate() {
   "${SUDO[@]}" test -x "$STAGE_DIR/scripts/verify-hermes-release.sh" || fail candidate_stage_incomplete
   "${SUDO[@]}" test -x "$STAGE_DIR/scripts/hermes-release-candidate-preflight.mjs" || fail candidate_stage_incomplete
   [[ "$MODE" == --rollback ]] || "${SUDO[@]}" test -f "$STAGE_DIR/scripts/check-hermes-snapshot-capacity.py" || fail candidate_stage_incomplete
-  for helper in prune-hermes-release-artifacts.sh ombre_o1_contract.py install-ombre-steward-token.py verify-ran-agent-runtime-identity.sh apply_ombre_steward_patch.py; do
+  for helper in prune-hermes-release-artifacts.sh ombre_o1_contract.py install-ombre-steward-token.py apply_ombre_steward_patch.py verify-runtime-service-identity.sh; do
     "${SUDO[@]}" test -f "$STAGE_DIR/scripts/$helper" || fail candidate_stage_incomplete
   done
   "${SUDO[@]}" test -x "$STAGE_DIR/scripts/verify-ombre-steward-real-process.sh" || fail candidate_stage_incomplete
@@ -707,20 +776,20 @@ run_candidate_gates() {
   [[ -n "$GATE_DIR" && -d "$GATE_DIR" ]] || fail candidate_gate_copy_missing
   # Prove the traversable read-only contract with the real acceptance identity
   # before spending the expensive root gate.
-  "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- \
+  "${SUDO[@]}" /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- \
     /usr/bin/test -r "$GATE_DIR/scripts/hermes-release-gate.sh" ||
     fail candidate_gate_copy_unreadable
-  if "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- \
+  if "${SUDO[@]}" /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- \
     /usr/bin/test -w "$GATE_DIR/scripts/hermes-release-gate.sh"; then
     fail candidate_gate_copy_writable
   fi
-  "${SUDO[@]}" env RAN_AGENT_RELEASE_SOURCE_ROOT="$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=0 bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all
-  "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --verify-account || fail steward_identity_conflict
-  "${SUDO[@]}" /usr/sbin/runuser --user ran-agent --group ran-agent -- /usr/bin/env -i \
+  "${SUDO[@]}" env RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" RAN_AGENT_RUNTIME_GROUP="$RUNTIME_GROUP" RAN_AGENT_RELEASE_SOURCE_ROOT="$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=0 bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all
+  "${SUDO[@]}" /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- /usr/bin/env -i \
     PATH=/usr/bin:/bin HOME=/nonexistent \
     RAN_AGENT_RELEASE_SOURCE_ROOT="$GATE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 \
     RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_NODE_BIN="$NODE_BIN" \
     RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=code-only \
+    RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" RAN_AGENT_RUNTIME_GROUP="$RUNTIME_GROUP" \
     RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=1 \
     bash "$GATE_DIR/scripts/hermes-release-gate.sh" --all
 }
@@ -866,6 +935,16 @@ snapshot_capacity_gate() {
   fail snapshot_capacity_probe_failed
 }
 
+record_source_runtime_identity() {
+  [[ -n "$SOURCE_RUNTIME_USER" && -n "$SOURCE_RUNTIME_GROUP" &&
+    "$SOURCE_RUNTIME_UID" =~ ^[1-9][0-9]*$ && "$SOURCE_RUNTIME_GID" =~ ^[1-9][0-9]*$ ]] ||
+    fail source_runtime_identity_unresolved
+  printf '%s\t%s\t%s\t%s\n' \
+    "$SOURCE_RUNTIME_USER" "$SOURCE_RUNTIME_GROUP" "$SOURCE_RUNTIME_UID" "$SOURCE_RUNTIME_GID" |
+    "${SUDO[@]}" tee "$SNAPSHOT_DIR/runtime-source-identity" >/dev/null
+  "${SUDO[@]}" chmod 600 "$SNAPSHOT_DIR/runtime-source-identity"
+}
+
 snapshot_runtime_state() {
   SNAPSHOT_DIR="$("${SUDO[@]}" mktemp -d "$SNAPSHOT_ROOT/.release-incomplete.${CANDIDATE:0:12}.XXXXXX")" || fail snapshot_create_failed
   SNAPSHOT_BUILD_ACTIVE=1
@@ -881,6 +960,7 @@ snapshot_runtime_state() {
   while IFS= read -r path; do paths+=("$path"); done < <(snapshot_runtime_paths)
   for path in "${paths[@]}"; do snapshot_path "$path" "$index"; index=$((index + 1)); done
   for unit in "${SERVICE_TRANSACTION_UNITS[@]}"; do snapshot_service_state "$unit"; done
+  record_source_runtime_identity
   write_transaction_state snapshot-created false
   "${SUDO[@]}" "$PYTHON_BIN" -I -c '
 import os, sys
@@ -1113,10 +1193,58 @@ clear_ombre_ingress_block() {
   OMBRE_INGRESS_BLOCKED=0
 }
 
+resolve_rollback_runtime_identity() {
+  local restored_user restored_group restored_uid restored_gid
+  local unit active enabled snapshot_load_state node_seen=0 ombre_seen=0
+  local -a verifier_args=(--service ran-agent-node.service)
+  "${SUDO[@]}" systemctl daemon-reload || return 1
+  while IFS=$'\t' read -r unit active enabled snapshot_load_state; do
+    case "$unit" in
+      ran-agent-node.service)
+        [[ "$node_seen" -eq 0 && "$snapshot_load_state" != not-found ]] || return 1
+        node_seen=1
+        ;;
+      ran-agent-ombre-brain.service)
+        [[ "$ombre_seen" -eq 0 ]] || return 1
+        ombre_seen=1
+        case "$active" in
+          active)
+            [[ "$snapshot_load_state" != not-found ]] || return 1
+            verifier_args+=(--service ran-agent-ombre-brain.service)
+            ;;
+          inactive) ;;
+          *) return 1 ;;
+        esac
+        ;;
+    esac
+  done < <("${SUDO[@]}" cat "$SNAPSHOT_DIR/services")
+  [[ "$node_seen" -eq 1 ]] || return 1
+  IFS=$'\t' read -r restored_user restored_group restored_uid restored_gid < <(
+    runtime_identity_verifier "${verifier_args[@]}" --no-process
+  ) || return 1
+  if "${SUDO[@]}" test -e "$SNAPSHOT_DIR/runtime-source-identity"; then
+    "${SUDO[@]}" test -f "$SNAPSHOT_DIR/runtime-source-identity" &&
+      "${SUDO[@]}" test ! -L "$SNAPSHOT_DIR/runtime-source-identity" || return 1
+    if [[ "$REPO_ROOT" == "$SERVER_ROOT" ]]; then
+      [[ "$("${SUDO[@]}" stat -c '%u:%a' "$SNAPSHOT_DIR/runtime-source-identity")" == 0:600 ]] || return 1
+    fi
+    IFS=$'\t' read -r ROLLBACK_RUNTIME_USER ROLLBACK_RUNTIME_GROUP ROLLBACK_RUNTIME_UID ROLLBACK_RUNTIME_GID < <(
+      "${SUDO[@]}" cat "$SNAPSHOT_DIR/runtime-source-identity"
+    ) || return 1
+    [[ "$ROLLBACK_RUNTIME_USER" == "$restored_user" && "$ROLLBACK_RUNTIME_GROUP" == "$restored_group" &&
+      "$ROLLBACK_RUNTIME_UID" == "$restored_uid" && "$ROLLBACK_RUNTIME_GID" == "$restored_gid" ]] || return 1
+  else
+    ROLLBACK_RUNTIME_USER="$restored_user"
+    ROLLBACK_RUNTIME_GROUP="$restored_group"
+    ROLLBACK_RUNTIME_UID="$restored_uid"
+    ROLLBACK_RUNTIME_GID="$restored_gid"
+  fi
+}
+
 verify_restored_steward_service() {
   local unit="$1" pid_before pid_after token_path process_env
-  "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" \
-    --verify-process "$unit" || return 1
+  runtime_identity_verifier --service "$unit" \
+    --expect "$ROLLBACK_RUNTIME_USER" "$ROLLBACK_RUNTIME_GROUP" >/dev/null || return 1
   pid_before="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" || return 1
   [[ "$pid_before" =~ ^[1-9][0-9]*$ ]] || return 1
   process_env="$("${SUDO[@]}" cat "/proc/$pid_before/environ" 2>/dev/null | tr '\0' '\n')" || return 1
@@ -1132,7 +1260,8 @@ backup_steward_token() {
   "${SUDO[@]}" chmod 700 "$SECRET_ROLLBACK_DIR"
   STEWARD_TOKEN_HAD_PRIOR=0
   if "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/install-ombre-steward-token.py" \
-    --state-dir "$STATE_DIR" --backup-to "$SECRET_ROLLBACK_DIR"; then
+    --state-dir "$STATE_DIR" --runtime-user "$SOURCE_RUNTIME_USER" --runtime-group "$SOURCE_RUNTIME_GROUP" \
+    --backup-to "$SECRET_ROLLBACK_DIR"; then
     STEWARD_TOKEN_HAD_PRIOR=1
   else
     local code=$?
@@ -1146,9 +1275,11 @@ restore_steward_token() {
     STEWARD_TOKEN_RESTORED=1
     return 0
   fi
+  resolve_rollback_runtime_identity || return 1
   if [[ "$STEWARD_TOKEN_HAD_PRIOR" -eq 1 ]]; then
     "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/install-ombre-steward-token.py" \
-      --state-dir "$STATE_DIR" --restore-from "$SECRET_ROLLBACK_DIR" || return 1
+      --state-dir "$STATE_DIR" --runtime-user "$ROLLBACK_RUNTIME_USER" --runtime-group "$ROLLBACK_RUNTIME_GROUP" \
+      --restore-from "$SECRET_ROLLBACK_DIR" || return 1
   else
     "${SUDO[@]}" rm -f -- "$STATE_DIR/ombre-compat/secrets/steward-api-token" || return 1
   fi
@@ -1158,7 +1289,8 @@ restore_steward_token() {
 destroy_secret_rollback() {
   [[ -n "$SECRET_ROLLBACK_DIR" ]] || return 0
   "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/install-ombre-steward-token.py" \
-    --state-dir "$STATE_DIR" --destroy-rollback "$SECRET_ROLLBACK_DIR" || return 1
+    --state-dir "$STATE_DIR" --runtime-user "$RUNTIME_USER" --runtime-group "$RUNTIME_GROUP" \
+    --destroy-rollback "$SECRET_ROLLBACK_DIR" || return 1
   SECRET_ROLLBACK_DIR=''
   ! "${SUDO[@]}" find "$SECRET_ROLLBACK_ROOT" -mindepth 1 -maxdepth 1 -print -quit | grep -q .
 }
@@ -1403,7 +1535,8 @@ restore_service_state() {
           if [[ "$unit_failed" -eq 0 && "$STEWARD_ROTATION_ACTIVE" -eq 1 && "$STEWARD_TOKEN_HAD_PRIOR" -eq 1 && "$unit" == ran-agent-ombre-brain.service ]]; then
             "${SUDO[@]}" "$PYTHON_BIN" "$STAGE_DIR/scripts/verify-ombre-steward-runtime.py" \
               --state-dir "$STATE_DIR" \
-              --identity-file "$STATE_DIR/ombre-brain/steward-identity.v1.json" >/dev/null ||
+              --identity-file "$STATE_DIR/ombre-brain/steward-identity.v1.json" \
+              --runtime-user "$ROLLBACK_RUNTIME_USER" --runtime-group "$ROLLBACK_RUNTIME_GROUP" >/dev/null ||
               unit_failed=1
           fi
           if [[ "$unit_failed" -eq 0 && "$STEWARD_ROTATION_ACTIVE" -eq 1 && "$STEWARD_TOKEN_HAD_PRIOR" -eq 1 && "$unit" == ran-agent-node.service ]]; then
@@ -1552,6 +1685,7 @@ explicit_rollback() {
   load_rollback_snapshot "$2"
   [[ "$CONTROLLER_CANDIDATE" == "$CANDIDATE" ]] || fail rollback_controller_candidate_mismatch
   require_candidate_bootstrap_authority
+  resolve_source_runtime_identity
   if [[ "$ROLLBACK_METADATA_FINALIZE" -eq 1 ]]; then
     clear_current_production_pointer 1 || fail rollback_pointer_finalization_failed
     if ! "${SUDO[@]}" env RAN_AGENT_RELEASE_ARTIFACT_ROOT="$ARTIFACT_ROOT" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
@@ -1566,9 +1700,8 @@ explicit_rollback() {
   stage_candidate
   verify_stage_candidate
   project_checkout_permissions repair
-  "${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --verify-account ||
-    fail steward_identity_conflict
   backup_steward_token
+  STEWARD_ROTATION_ACTIVE=1
   EXPLICIT_ROLLBACK=1
   TRANSACTION_STARTED=1
   trap 'exit 130' INT
@@ -1599,11 +1732,13 @@ require_gate_copy_capacity measured "$STAGE_DIR"
 project_gate_copy_node_modules
 runtime_checkout_access "$GATE_DIR" modules
 snapshot_capacity_gate "$STAGE_DIR" 0 0
+resolve_target_runtime_identity
+resolve_source_runtime_identity
 snapshot_runtime_state
 record_protected_capability_evidence before || fail protected_capability_evidence_before
 trap 'exit 130' INT
 trap 'exit 143' TERM
-"${SUDO[@]}" bash "$STAGE_DIR/scripts/verify-ran-agent-runtime-identity.sh" --ensure-account
+verify_source_runtime_identity_unchanged
 block_ombre_ingress
 quiesce_runtime_services
 snapshot_node_durable_state
@@ -1615,12 +1750,12 @@ STEWARD_ROTATION_ACTIVE=1
 activate_candidate_checkout
 activate_candidate_node_dependencies
 runtime_checkout_access "$REPO_ROOT" modules
-"${SUDO[@]}" env RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR/ombre-compat" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_ENDPOINT=http://127.0.0.1:18001/internal/ran-agent/steward/v1 RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_IDENTITY_FILE="$CANONICAL_LIVE_STATE_DIR/ombre-brain/steward-identity.v1.json" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_DEPLOY_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_OMBRE_PATCH_PYTHON_BIN="$OMBRE_PATCH_PYTHON_BIN" RAN_AGENT_ROTATE_STEWARD_TOKEN=1 RAN_AGENT_STEWARD_ROTATION_QUIESCED=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
+"${SUDO[@]}" env RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" RAN_AGENT_RUNTIME_GROUP="$RUNTIME_GROUP" RAN_AGENT_RELEASE_PRESERVE_RUNTIME_SHAPE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_DEPLOY_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR/ombre-compat" RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_ENDPOINT=http://127.0.0.1:18001/internal/ran-agent/steward/v1 RAN_AGENT_DEPLOY_OMBRE_COMPAT_STEWARD_IDENTITY_FILE="$CANONICAL_LIVE_STATE_DIR/ombre-brain/steward-identity.v1.json" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_REPO_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_DEPLOY_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" RAN_AGENT_DEPLOY_OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_OMBRE_PATCH_PYTHON_BIN="$OMBRE_PATCH_PYTHON_BIN" RAN_AGENT_ROTATE_STEWARD_TOKEN=1 RAN_AGENT_STEWARD_ROTATION_QUIESCED=1 bash "$STAGE_DIR/scripts/apply-hermes-runtime-split.sh" --preserve-runtime-shape
 project_checkout_permissions verify
 restore_ombre_ingress
 OLD_STEWARD_TOKEN_FILE=''
 [[ "$STEWARD_TOKEN_HAD_PRIOR" -ne 1 ]] || OLD_STEWARD_TOKEN_FILE="$SECRET_ROLLBACK_DIR/steward-api-token.rollback"
-"${SUDO[@]}" env RAN_AGENT_EXPECTED_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_RELEASE_SNAPSHOT_DIR="$SNAPSHOT_DIR" RAN_AGENT_RELEASE_SECRET_ROLLBACK_ROOT="$SECRET_ROLLBACK_ROOT" RAN_AGENT_RELEASE_SECRET_ROLLBACK_DIR="$SECRET_ROLLBACK_DIR" RAN_AGENT_STEWARD_OLD_TOKEN_FILE="$OLD_STEWARD_TOKEN_FILE" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
+"${SUDO[@]}" env RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" RAN_AGENT_RUNTIME_GROUP="$RUNTIME_GROUP" RAN_AGENT_EXPECTED_HERMES_MODEL="$DEPLOY_MODEL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_ENABLED="$DEPLOY_OMBRE_COMPAT_ENABLED" RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL="$DEPLOY_OMBRE_COMPAT_CURATOR_BASE_URL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_MODEL="$DEPLOY_OMBRE_COMPAT_CURATOR_MODEL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL="$DEPLOY_OMBRE_COMPAT_REVIEWER_BASE_URL" RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL="$DEPLOY_OMBRE_COMPAT_REVIEWER_MODEL" RAN_AGENT_RELEASE_SOURCE_ROOT="$STAGE_DIR" RAN_AGENT_RELEASE_STAGED_CANDIDATE=1 RAN_AGENT_RELEASE_CONTROL_ROOT="$REPO_ROOT" RAN_AGENT_RELEASE_CANDIDATE="$CANDIDATE" RAN_AGENT_RELEASE_PREMUTATION_GATE=1 RAN_AGENT_NODE_BIN="$NODE_BIN" RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" RAN_AGENT_STATE_DIR="$CANONICAL_LIVE_STATE_DIR" OMBRE_BRAIN_HOME="$CANONICAL_LIVE_STATE_DIR/ombre-brain" RAN_AGENT_RELEASE_SNAPSHOT_DIR="$SNAPSHOT_DIR" RAN_AGENT_RELEASE_SECRET_ROLLBACK_ROOT="$SECRET_ROLLBACK_ROOT" RAN_AGENT_RELEASE_SECRET_ROLLBACK_DIR="$SECRET_ROLLBACK_DIR" RAN_AGENT_STEWARD_OLD_TOKEN_FILE="$OLD_STEWARD_TOKEN_FILE" bash "$STAGE_DIR/scripts/verify-hermes-release.sh" --release
 record_protected_capability_evidence after || fail protected_capability_evidence_after
 destroy_secret_rollback || fail secret_rollback_cleanup_failed
 mark_snapshot_accepted

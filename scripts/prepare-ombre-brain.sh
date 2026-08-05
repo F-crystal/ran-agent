@@ -343,7 +343,11 @@ prepare_source_runner() {
       --checkout "$OMBRE_BRAIN_SOURCE_DIR" \
       --identity-output "$OMBRE_STEWARD_IDENTITY_FILE" >/dev/null
   fi
-  local -a token_args=(--state-dir "$RAN_AGENT_STATE_DIR")
+  local -a token_args=(
+    --state-dir "$RAN_AGENT_STATE_DIR"
+    --runtime-user "${RAN_AGENT_RUNTIME_USER:-ubuntu}"
+    --runtime-group "${RAN_AGENT_RUNTIME_GROUP:-${RAN_AGENT_RUNTIME_USER:-ubuntu}}"
+  )
   if [ "$OMBRE_STEWARD_ROTATE" = "1" ]; then token_args+=(--rotate); fi
   "$OMBRE_PATCH_PYTHON_BIN" "$ROOT_DIR/scripts/install-ombre-steward-token.py" "${token_args[@]}"
 

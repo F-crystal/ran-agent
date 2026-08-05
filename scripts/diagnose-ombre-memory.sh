@@ -60,6 +60,8 @@ OMBRE_COMPAT_CURATOR_MODEL="${OMBRE_COMPAT_CURATOR_MODEL:-${HERMES_DEFAULT_MODEL
 OMBRE_COMPAT_REVIEWER_BASE_URL="${OMBRE_COMPAT_REVIEWER_BASE_URL:-https://api.deepseek.com/v1}"
 OMBRE_COMPAT_REVIEWER_MODEL="${OMBRE_COMPAT_REVIEWER_MODEL:-${HERMES_DEFAULT_MODEL:-deepseek-v4-flash}}"
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
+RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
+RUNTIME_GROUP="${RAN_AGENT_RUNTIME_GROUP:-$RUNTIME_USER}"
 if [[ "${EUID}" -eq 0 ]] || ! command -v sudo >/dev/null 2>&1; then SUDO=(); else SUDO=(sudo); fi
 
 for actual_expected in \
@@ -250,11 +252,11 @@ if command -v systemctl >/dev/null 2>&1; then
     fi
   done
   for unit in ran-agent-node.service ran-agent-ombre-brain.service; do
-    if bash "$ROOT_DIR/scripts/verify-ran-agent-runtime-identity.sh" \
-      --verify-process "$unit" >/dev/null 2>&1; then
-      echo "$unit steward identity: VALID"
+    if [[ "$("${SUDO[@]}" systemctl show "$unit" --property=User --value 2>/dev/null)" == "$RUNTIME_USER" &&
+      "$("${SUDO[@]}" systemctl show "$unit" --property=Group --value 2>/dev/null)" == "$RUNTIME_GROUP" ]]; then
+      echo "$unit runtime identity: VALID"
     else
-      echo "$unit steward identity: INVALID"
+      echo "$unit runtime identity: INVALID"
     fi
   done
 else
@@ -274,11 +276,12 @@ rm -f /tmp/ombre-brain-health.$$ /tmp/ombre-brain-health.err.$$
 
 echo ""
 echo "=== Patched Steward identity/auth ==="
-if id ran-agent >/dev/null 2>&1 &&
+if id "$RUNTIME_USER" >/dev/null 2>&1 &&
   "$PYTHON_BIN" "$ROOT_DIR/scripts/verify-ombre-steward-runtime.py" \
     --state-dir "$RAN_AGENT_STATE_DIR" \
     --identity-file "$OMBRE_STEWARD_IDENTITY_FILE" \
-    --endpoint "$OMBRE_STEWARD_ENDPOINT" >/dev/null 2>&1; then
+    --endpoint "$OMBRE_STEWARD_ENDPOINT" \
+    --runtime-user "$RUNTIME_USER" --runtime-group "$RUNTIME_GROUP" >/dev/null 2>&1; then
   echo "steward runtime contract: VALID"
 else
   echo "steward runtime contract: INVALID_OR_UNAVAILABLE"

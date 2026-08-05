@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-08-02)
+Status: CURRENT (2026-08-04)
 
 ## Scope
 
@@ -14,6 +14,7 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 - For time-sensitive facts, perform live lookup before answering. Weather uses `skills/weather/SKILL.md`; other online lookup uses `skills/web-search-live/SKILL.md`.
 - For unfamiliar integration/debugging work, check official docs and mature prior art before designing or coding.
 - Use absolute paths or workspace-relative paths, not `~`-prefixed paths.
+- Feature authorization does not authorize changing production service identities, Unix users/groups, ownership, permission boundaries, or storage layout; these require separate explicit user approval.
 
 ## Skills And Delegation
 
@@ -51,6 +52,8 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 - Evidence automation does not authorize commit, push, deploy, migration, risk
   acceptance, destructive action, or any side effect performed by the wrapped
   command; it is not a sandbox.
+- Gates may validate only an approved architecture; they must not introduce or
+  make mandatory an unapproved migration or security boundary.
 
 ## Release Gate Portability
 

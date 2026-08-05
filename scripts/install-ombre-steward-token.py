@@ -154,6 +154,8 @@ def destroy_rollback(rollback_dir: Path, rollback_uid: int = 0) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--state-dir", required=True, type=Path)
+    parser.add_argument("--runtime-user", default="ubuntu")
+    parser.add_argument("--runtime-group")
     parser.add_argument("--rotate", action="store_true")
     actions = parser.add_mutually_exclusive_group()
     actions.add_argument("--backup-to", type=Path)
@@ -161,10 +163,11 @@ def main() -> int:
     actions.add_argument("--destroy-rollback", type=Path)
     actions.add_argument("--verify", action="store_true")
     args = parser.parse_args()
-    account = pwd.getpwnam("ran-agent")
-    group = grp.getgrnam("ran-agent")
+    args.runtime_group = args.runtime_group or args.runtime_user
+    account = pwd.getpwnam(args.runtime_user)
+    group = grp.getgrnam(args.runtime_group)
     if account.pw_gid != group.gr_gid:
-        raise SystemExit("ran-agent primary group mismatch")
+        raise SystemExit("runtime primary group mismatch")
     path = token_path(args.state_dir)
     ensure_token_directory(path.parent, group.gr_gid)
     if args.backup_to:

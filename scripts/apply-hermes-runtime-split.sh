@@ -11,10 +11,8 @@ HERMES_BIN="${HERMES_BIN:-hermes}"
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-/opt/ran_agent/.venv/bin/python}"
 FULL_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="${HERMES_LITE_HOME:-$FULL_HOME/lite}"
-RUNTIME_USER="${RAN_AGENT_HERMES_RUNTIME_USER:-ubuntu}"
-RUNTIME_GROUP="${RAN_AGENT_HERMES_RUNTIME_GROUP:-$RUNTIME_USER}"
-STEWARD_RUNTIME_USER=ran-agent
-STEWARD_RUNTIME_GROUP=ran-agent
+RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
+RUNTIME_GROUP="${RAN_AGENT_RUNTIME_GROUP:-$RUNTIME_USER}"
 NODE_ENV_FILE="${RAN_AGENT_NODE_ENV_FILE:-/opt/ran_agent/.env.local}"
 NODE_BRIDGE_ENV_FILE="${RAN_AGENT_NODE_BRIDGE_ENV_FILE:-/opt/ran_agent/node_bridge/.env.local}"
 HERMES_GLOBAL_ENV_FILE="${HERMES_GLOBAL_ENV_FILE:-/home/ubuntu/.hermes/.env}"
@@ -197,40 +195,24 @@ require_command() {
   fi
 }
 
-validate_legacy_runtime_identity_overrides() {
-  for value in "${RAN_AGENT_RUNTIME_USER:-ran-agent}" "${RAN_AGENT_RUNTIME_GROUP:-ran-agent}"; do
-    [ "$value" = ran-agent ] ||
-      { echo "ERROR: legacy runtime identity override must equal ran-agent" >&2; return 1; }
-  done
-}
-
-ensure_steward_runtime_identity() {
-  validate_legacy_runtime_identity_overrides
-  local verifier="$REPO_ROOT/scripts/verify-ran-agent-runtime-identity.sh"
-  [ -x "$verifier" ] || { echo "ERROR: Steward identity verifier unavailable" >&2; return 1; }
-  "${SUDO[@]}" bash "$verifier" --ensure-account
-}
-
 resolve_runtime_identity() {
-  [[ "$RUNTIME_USER" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
-    { echo "ERROR: invalid Hermes runtime user" >&2; return 1; }
-  [[ "$RUNTIME_GROUP" =~ ^[a-z_][a-z0-9_-]*$ ]] ||
-    { echo "ERROR: invalid Hermes runtime group" >&2; return 1; }
-  RUNTIME_UID="$(id -u "$RUNTIME_USER" 2>/dev/null)" ||
-    { echo "ERROR: Hermes runtime user does not exist: $RUNTIME_USER" >&2; return 1; }
-  RUNTIME_GID="$(id -g "$RUNTIME_USER" 2>/dev/null)" ||
-    { echo "ERROR: cannot resolve Hermes runtime group for $RUNTIME_USER" >&2; return 1; }
-  local primary_group
-  primary_group="$(id -gn "$RUNTIME_USER" 2>/dev/null)" ||
-    { echo "ERROR: cannot resolve Hermes runtime group name for $RUNTIME_USER" >&2; return 1; }
-  [ "$primary_group" = "$RUNTIME_GROUP" ] ||
-    { echo "ERROR: Hermes runtime group must be the runtime user's primary group" >&2; return 1; }
+  local resolved_user resolved_group
+  IFS=$'\t' read -r resolved_user resolved_group RUNTIME_UID RUNTIME_GID < <(
+    "${SUDO[@]}" env \
+      RAN_AGENT_TEST_MODE="${RAN_AGENT_TEST_MODE:-0}" \
+      RAN_AGENT_TEST_PROC_ROOT="${RAN_AGENT_TEST_PROC_ROOT:-/proc}" \
+      bash "$REPO_ROOT/scripts/verify-runtime-service-identity.sh" \
+      --identity "$RUNTIME_USER" "$RUNTIME_GROUP"
+  ) || return 1
+  [[ "$resolved_user" == "$RUNTIME_USER" && "$resolved_group" == "$RUNTIME_GROUP" ]]
 }
 
-verify_steward_service_identity() {
-  local unit="$1" require_process="${2:-0}" mode=--verify-unit
-  [ "$require_process" = 1 ] && mode=--verify-process
-  "${SUDO[@]}" bash "$REPO_ROOT/scripts/verify-ran-agent-runtime-identity.sh" "$mode" "$unit"
+verify_service_runtime_identity() {
+  "${SUDO[@]}" env \
+    RAN_AGENT_TEST_MODE="${RAN_AGENT_TEST_MODE:-0}" \
+    RAN_AGENT_TEST_PROC_ROOT="${RAN_AGENT_TEST_PROC_ROOT:-/proc}" \
+    bash "$REPO_ROOT/scripts/verify-runtime-service-identity.sh" \
+    --service "$1" --expect "$RUNTIME_USER" "$RUNTIME_GROUP" >/dev/null
 }
 
 verify_steward_runtime_health() {
@@ -240,7 +222,8 @@ verify_steward_runtime_health() {
   fi
   "${SUDO[@]}" "$PYTHON_BIN" "$REPO_ROOT/scripts/verify-ombre-steward-runtime.py" \
     --state-dir "$RUNTIME_STATE_DIR" \
-    --identity-file "$RUNTIME_STATE_DIR/ombre-brain/steward-identity.v1.json" >/dev/null
+    --identity-file "$RUNTIME_STATE_DIR/ombre-brain/steward-identity.v1.json" \
+    --runtime-user "$RUNTIME_USER" --runtime-group "$RUNTIME_GROUP" >/dev/null
 }
 
 run_as_runtime_identity() {
@@ -255,24 +238,6 @@ run_as_runtime_identity() {
   [ -n "$runuser_bin" ] ||
     { echo "ERROR: runuser is required to publish as the Hermes runtime identity" >&2; return 1; }
   "${SUDO[@]}" "$runuser_bin" --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- "$@"
-}
-
-run_as_steward_identity() {
-  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 ]]; then
-    "$@"
-    return
-  fi
-  local steward_uid runuser_bin
-  steward_uid="$(id -u "$STEWARD_RUNTIME_USER" 2>/dev/null)" ||
-    { echo "ERROR: Steward runtime identity is unresolved" >&2; return 1; }
-  if [ "$(id -u)" = "$steward_uid" ]; then
-    "$@"
-    return
-  fi
-  runuser_bin="$(command -v runuser 2>/dev/null || true)"
-  [ -n "$runuser_bin" ] ||
-    { echo "ERROR: runuser is required to prepare Ombre as ran-agent" >&2; return 1; }
-  "${SUDO[@]}" "$runuser_bin" --user "$STEWARD_RUNTIME_USER" --group "$STEWARD_RUNTIME_GROUP" -- "$@"
 }
 
 chown_if_user_exists() {
@@ -576,7 +541,7 @@ ensure_ombre_compat_state_dir() {
     return 1
   }
   "${SUDO[@]}" mkdir -p "$OMBRE_COMPAT_STATE_DIR_DEFAULT"
-  "${SUDO[@]}" chown "$STEWARD_RUNTIME_USER:$STEWARD_RUNTIME_GROUP" "$OMBRE_COMPAT_STATE_DIR_DEFAULT"
+  "${SUDO[@]}" chown -R "$RUNTIME_USER:$RUNTIME_GROUP" "$OMBRE_COMPAT_STATE_DIR_DEFAULT"
   "${SUDO[@]}" chmod 700 "$OMBRE_COMPAT_STATE_DIR_DEFAULT"
 }
 
@@ -1517,8 +1482,8 @@ EOF
 write_node_steward_identity_dropin() {
   write_file 0644 "$NODE_STEWARD_DROPIN" <<EOF
 [Service]
-User=$STEWARD_RUNTIME_USER
-Group=$STEWARD_RUNTIME_GROUP
+User=$RUNTIME_USER
+Group=$RUNTIME_GROUP
 Environment=RAN_AGENT_STATE_DIR=$RUNTIME_STATE_DIR
 Environment=RAN_AGENT_NODE_BIN=${RAN_AGENT_NODE_BIN:-/opt/nodejs/node-v22.22.2-linux-x64/bin/node}
 Environment=RAN_AGENT_STEWARD_TOKEN_FILE=$RUNTIME_STATE_DIR/ombre-compat/secrets/steward-api-token
@@ -1539,8 +1504,8 @@ StartLimitBurst=3
 
 [Service]
 Type=simple
-User=$STEWARD_RUNTIME_USER
-Group=$STEWARD_RUNTIME_GROUP
+User=$RUNTIME_USER
+Group=$RUNTIME_GROUP
 WorkingDirectory=/opt/ran_agent
 EnvironmentFile=-$NODE_ENV_FILE
 EnvironmentFile=-$NODE_BRIDGE_ENV_FILE
@@ -1873,9 +1838,9 @@ prepare_ombre_runtime() {
     return 1
   fi
   "${SUDO[@]}" mkdir -p "$OMBRE_BRAIN_HOME_DEFAULT" "$buckets_dir"
-  "${SUDO[@]}" chown -R "$STEWARD_RUNTIME_USER:$STEWARD_RUNTIME_GROUP" "$OMBRE_BRAIN_HOME_DEFAULT" "$buckets_dir"
+  "${SUDO[@]}" chown -R "$RUNTIME_USER:$RUNTIME_GROUP" "$OMBRE_BRAIN_HOME_DEFAULT" "$buckets_dir"
   log "preparing Ombre Brain runtime"
-  if run_as_steward_identity /usr/bin/env -i \
+  if run_as_runtime_identity /usr/bin/env -i \
     HOME="$OMBRE_BRAIN_HOME_DEFAULT" \
     PATH="$prepare_path" \
     TMPDIR=/tmp \
@@ -1896,6 +1861,8 @@ prepare_ombre_runtime() {
     OMBRE_BRAIN_CONFIG_FILE="$OMBRE_BRAIN_CONFIG_FILE_DEFAULT" \
     OMBRE_BRAIN_STATUS_FILE="$OMBRE_BRAIN_STATUS_FILE_DEFAULT" \
     RAN_AGENT_STATE_DIR="$RUNTIME_STATE_DIR" \
+    RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" \
+    RAN_AGENT_RUNTIME_GROUP="$RUNTIME_GROUP" \
     RAN_AGENT_TEST_MODE="${RAN_AGENT_TEST_MODE:-0}" \
     RAN_AGENT_OMBRE_PATCH_PYTHON_BIN="${RAN_AGENT_OMBRE_PATCH_PYTHON_BIN:-}" \
     RAN_AGENT_ROTATE_STEWARD_TOKEN="${RAN_AGENT_ROTATE_STEWARD_TOKEN:-0}" \
@@ -1919,15 +1886,15 @@ prepare_ombre_runtime() {
 restart_services() {
   log "reloading systemd and restarting services"
   "${SUDO[@]}" systemctl daemon-reload
-  verify_steward_service_identity ran-agent-node.service
-  verify_steward_service_identity ran-agent-ombre-brain.service
+  verify_service_runtime_identity ran-agent-node.service
+  verify_service_runtime_identity ran-agent-ombre-brain.service
   sleep 1
   if [ "$PRESERVE_RUNTIME_SHAPE" = "1" ]; then
     reset_failed_if_loaded ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service
     prepare_ombre_runtime
     start_o1_dependency ran-agent-ombre-brain.service
     wait_for_ombre_health
-    verify_steward_service_identity ran-agent-ombre-brain.service 1
+    verify_service_runtime_identity ran-agent-ombre-brain.service
     verify_steward_runtime_health
     start_o1_dependency ran-agent-ombre-recall.service
     wait_for_ombre_recall_health
@@ -1940,7 +1907,7 @@ restart_services() {
     wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service
     run_gateway_provider_canary full "$FULL_PORT" "$FULL_PROFILE" ran-agent-hermes-full.service
     "${SUDO[@]}" systemctl restart ran-agent-node.service
-    verify_steward_service_identity ran-agent-node.service 1
+    verify_service_runtime_identity ran-agent-node.service
     return 0
   fi
   reset_failed_if_loaded ran-agent-python.service ran-agent-node.service ran-agent-hermes.service ran-agent-hermes-full.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-xhs-public-sidecar.service
@@ -1949,7 +1916,7 @@ restart_services() {
     if ombre_runner_available; then
       start_o1_dependency ran-agent-ombre-brain.service
       wait_for_ombre_health
-      verify_steward_service_identity ran-agent-ombre-brain.service 1
+      verify_service_runtime_identity ran-agent-ombre-brain.service
       verify_steward_runtime_health
       start_o1_dependency ran-agent-ombre-recall.service
       wait_for_ombre_recall_health
@@ -1981,7 +1948,7 @@ restart_services() {
   wait_for_gateway_port "$FULL_PORT" ran-agent-hermes-full.service
   run_gateway_provider_canary full "$FULL_PORT" "$FULL_PROFILE" ran-agent-hermes-full.service
   "${SUDO[@]}" systemctl restart ran-agent-node.service
-  verify_steward_service_identity ran-agent-node.service 1
+  verify_service_runtime_identity ran-agent-node.service
 }
 
 print_failure_context() {
@@ -2440,7 +2407,6 @@ main() {
   if [ "$PRESERVE_RUNTIME_SHAPE" = "1" ]; then
     require_command systemctl
     require_command curl
-    ensure_steward_runtime_identity
     resolve_runtime_identity
     validate_ombre_network_contract
     validate_ombre_compat_contract
@@ -2471,7 +2437,6 @@ main() {
   require_command ss
   require_command openssl
   require_command curl
-  ensure_steward_runtime_identity
   resolve_runtime_identity
   validate_ombre_network_contract
   validate_ombre_compat_contract

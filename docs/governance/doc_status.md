@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-02)
+Status: CURRENT (2026-08-05)
 
 `USER_SUPPLIED_RUNTIME`: the known production repository SHA is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
@@ -10,9 +10,9 @@ immutable-gate failures and the later transactional `414210f`, `7649a94`, and
 `8c259dd` apply failures, is maintained in
 `docs/governance/current_runtime_status.md`. The supplied `8c259dd` trace shows
 a complete rollback after a zero-PID Ombre startup failure; it is not production
-acceptance evidence. The owner's latest trace reported `54GB/59GB` used,
-`3.3GB` available, and `95%` utilization; it remains unrevalidated until the
-governed artifact pruner runs on the server. The reviewed recovery path prunes
+acceptance evidence. The owner reported `38GB/59GB` used, `19GB` available,
+and `68%` utilization after removing seven verified state-less legacy
+transaction directories. The reviewed recovery path prunes
 only verified completed payloads, then requires fresh allocated-block, inode,
 candidate-stage, and full-snapshot headroom before any copy or service stop;
 partial copies cannot enter the rollback manifest.
@@ -31,10 +31,10 @@ pushed but undeployed. Node Receipt is deferred and its failed source is not
 reintroduced. Ombre O2 implementation
 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` passed independent v0.7
 implementation review and is archived and pushed to `main`. It remains
-the independently reviewed implementation baseline. The current line adds
-adversarially reviewed, owner-authorized production wiring: source remains
-fail-off, formal release defaults to Flash with O2 enabled, and production is
-still undeployed. Gate 5 is neither executed nor authorized, and
+the independently reviewed implementation baseline. The current line preserves
+O2 while reverting the unapproved Linux identity split: all managed services
+reuse the existing runtime identity (default `ubuntu`). Production account
+state is `SERVER_UNKNOWN`; production is still undeployed. Gate 5 is neither executed nor authorized, and
 `total_delete` remains typed unsupported.
 Package B.2/B.3 have not started.
 
@@ -70,6 +70,7 @@ deployment notes belong under ignored `local_archive/`, not under
 | `docs/governance/sticker-catalog.md` | Cross-channel sticker catalog and safe `RAN_MEDIA` contract |
 | `docs/governance/hermes-action-contract-gate.md` | Hermes action contract validation, repair, and pending-action rules |
 | `docs/governance/hermes_action_compatibility.v1.json` | Versioned closed registry of protected compatibility evidence signals |
+| `docs/governance/hermes_protected_capabilities.v1.json` | Versioned protected-capability digest manifest |
 | `docs/governance/hermes-context-optimization.md` | Hermes context optimization, cache-friendly history, and soft reset |
 | `docs/governance/external-mcp-gateway.md` | External MCP gateway, admission, evidence, and proactive system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |

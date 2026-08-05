@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-03)
+Status: CURRENT (2026-08-05)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -16,16 +16,18 @@ pre-mutation gate and did not change production. O1 baseline
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed; the
 V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently
 reviewed O2 implementation `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7`
-are archived and pushed but undeployed. The current reviewed line adds
-owner-authorized production wiring: the source remains fail-off, while the
-formal release defaults to Flash with O2 enabled. Commands below describe
+are archived and pushed but undeployed. The current reviewed line keeps O2
+but reuses the existing `RAN_AGENT_RUNTIME_USER/GROUP` service identity
+(default `ubuntu`) for Node, Ombre, and Hermes. Production account state is
+`SERVER_UNKNOWN`. The source remains fail-off, while the formal release defaults to Flash with O2 enabled. Commands below describe
 that target state, not behavior already asserted in production.
 The later candidate `8c259ddcd2a34e80400ac39e444876807960f689`
 passed the immutable gate but failed Ombre startup and rolled back completely;
-production therefore remains on the recorded SHA. The owner's latest trace
-reported `54GB/59GB` used, `3.3GB` available, and `95%` utilization after
-repeated failed transactions. Use only the verified pruner below; do not
-manually remove snapshot directories.
+production therefore remains on the recorded SHA. An earlier failed trace
+reported `54GB/59GB` used, `3.3GB` available, and `95%` utilization; the owner
+later reported `38GB/59GB` used, `19GB` available, and `68%` utilization after
+removing seven verified state-less legacy transaction directories. Use only
+the verified pruner below; do not manually remove snapshot directories.
 
 ## Source Of Truth
 

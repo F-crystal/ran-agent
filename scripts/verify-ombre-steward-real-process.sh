@@ -25,12 +25,13 @@ done
 [[ -d "$UPSTREAM/.git" && ! -L "$UPSTREAM" ]] || fail official_upstream_checkout_required
 [[ -x "$VENV/bin/python" && ! -L "$VENV" ]] || fail ombre_venv_required
 [[ -x "$NODE_BIN" ]] || fail node_runtime_required
-EXPECTED_SOURCE_UID="$(id -u ran-agent 2>/dev/null || true)"
+RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
+EXPECTED_SOURCE_UID="$(id -u "$RUNTIME_USER" 2>/dev/null || true)"
 if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 && -n "${RAN_AGENT_TEST_OMBRE_EXPECTED_SOURCE_UID:-}" ]]; then
   EXPECTED_SOURCE_UID="$RAN_AGENT_TEST_OMBRE_EXPECTED_SOURCE_UID"
 fi
-[[ "$EXPECTED_SOURCE_UID" =~ ^[0-9]+$ ]] || fail ran_agent_runtime_account_required
-[[ "$(id -u)" == "$EXPECTED_SOURCE_UID" ]] || fail ran_agent_execution_identity_required
+[[ "$EXPECTED_SOURCE_UID" =~ ^[0-9]+$ ]] || fail runtime_account_required
+[[ "$(id -u)" == "$EXPECTED_SOURCE_UID" ]] || fail runtime_execution_identity_required
 path_uid() {
   /usr/bin/stat -c '%u' "$1" 2>/dev/null || /usr/bin/stat -f '%u' "$1" 2>/dev/null
 }

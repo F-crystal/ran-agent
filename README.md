@@ -2,9 +2,11 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-07-31)
+Status: CURRENT (2026-08-05)
 
-`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 DeepSeek V4 Flash；2026-07-31 的用户预检显示工作树干净、四个核心服务均为 active，本地未在线复核。候选 `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` 与 `f6f6048029de6e4c73b5b8b11f1441069770786c` 均在不可变预变更门禁停止，未改变生产。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 基线 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。当前候选已完成三轮 O2 生产接线审查：正式发布默认保持 Flash 并启用 O2；生产仍未部署，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred 且失败差量未恢复；Package B.2/B.3 未开始。
+`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 DeepSeek V4 Flash；2026-07-31 的用户预检显示工作树干净、四个核心服务均为 active，本地未在线复核。候选 `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` 与 `f6f6048029de6e4c73b5b8b11f1441069770786c` 均在不可变预变更门禁停止，未改变生产。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 基线 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。正式发布仍默认保持 Flash 并启用 O2；生产未部署，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred 且失败差量未恢复；Package B.2/B.3 未开始。
+
+当前仓库已撤销新增 `ran-agent` Linux 服务身份：Node、Ombre 与 Hermes 的目标稳态统一复用 `RAN_AGENT_RUNTIME_USER/GROUP`（默认 `ubuntu`）。本地事务测试覆盖旧身份 token 备份、目标身份切换及按快照来源身份回滚；O2 行为保留，生产账号现状为 `SERVER_UNKNOWN`，尚未部署验证。
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 

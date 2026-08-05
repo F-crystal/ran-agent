@@ -1,6 +1,6 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-08-04)
+Status: CURRENT (2026-08-05)
 
 `USER_SUPPLIED_RUNTIME`: the 2026-08-03 apply attempt for candidate
 `e85301fef053dd02d920af61fa5db01f2b381d3b` stopped before service mutation
@@ -14,8 +14,8 @@ V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
 pushed but undeployed. Node Receipt is deferred. O2 implementation
 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` passed independent v0.7
 implementation review and is archived and pushed to `main`, but remains
-undeployed. The current reviewed line adds owner-authorized production wiring:
-source remains fail-off, while the formal release defaults to Flash with O2
+undeployed. The current reviewed line preserves O2 while reverting the
+unapproved Linux identity split: source remains fail-off, while the formal release defaults to Flash with O2
 enabled (Gate 5 not started or authorized; `total_delete` typed unsupported).
 Package B.2/B.3 have not started.
 
@@ -25,7 +25,7 @@ only a way to discover a release; the deploy unit is always one immutable
 it archives the SHA to `/opt/ran_agent-release/stages`, verifies the immutable
 stage, and gates an identical root-owned read-only copy of that stage placed
 under a traversable parent, because the artifact store itself stays
-root-private (`0700`) and the `ran-agent` acceptance identity cannot traverse
+root-private (`0700`) and the non-root runtime identity cannot traverse
 it. The transaction then snapshots the active checkout and runtime, and
 changes `/opt/ran_agent` only inside the transaction. This is smaller and safer than adding a second
 worktree/service-pointer topology to the existing systemd deployment.
@@ -83,16 +83,8 @@ passes it explicitly to both provider tests and the acceptance diagnostic. A
 missing runtime interpreter or service drift now fails before mutation. This
 does not upgrade Hermes v0.13 or switch the Flash model.
 
-Candidate `414210f238215d0f8ef83175851b5ed311ad5d06` passed the complete immutable
-gate, then stopped because the Steward identity verifier treated
-`/etc/login.defs` allocation defaults as authority over an existing account.
-The transaction reported `rollback-complete`, including optional-unit restore
-handling, so the active production revision remained unchanged. The corrected
-verifier leaves allocation to `groupadd --system` and `useradd --system`, then
-validates the resulting or pre-existing account directly: non-root numeric
-UID/GID, exact NSS/passwd/group agreement, frozen home and nologin shell, fixed
-systemd names, and matching live process effective identity. It no longer
-depends on host-specific `login.defs` contents.
+The earlier dedicated-account candidate and its verifier are retired. Their
+history remains in Git and is not part of the current deployment contract.
 
 Candidate `7649a9471b15b09e9aac25bed269a0e5d8b254dc` passed the immutable gate
 and reached Ombre startup, then stopped before dependent services because the
@@ -323,19 +315,25 @@ with any legacy SQLite files under `/opt/ran_agent/data`. Their exact active
 paths are captured in each snapshot manifest; do not infer table names or copy
 an individual database while services are running.
 
-O2 uses exactly one service identity: `ran-agent:ran-agent`. The privileged
-apply path creates that system account/group when absent, rejects malformed or
-conflicting existing identities, and installs effective `User=ran-agent` and
-`Group=ran-agent` for Node and the patched Ombre source runner only. Legacy
-runtime-user variables are consistency assertions and cannot override this
-identity. Creation uses the host system-account entry points with the frozen
-home `/opt/ran_agent` and shell `/usr/sbin/nologin`; an existing account must
-have nonzero numeric UID/GID that agree across `id`, passwd, and group NSS
-records, with its primary GID equal to the `ran-agent` group GID. The verifier
-does not reinterpret `/etc/login.defs`: those values govern ID allocation by
-the system account tools, not the authority of an already resolved account.
-Any identity, home, shell, systemd, or live-process mismatch remains blocking.
-Lite and Full retain their separately configured identity.
+O2 uses the same existing service identity as Node and Hermes:
+`RAN_AGENT_RUNTIME_USER/GROUP`, defaulting to `ubuntu:ubuntu`. Apply never
+creates an account. It overwrites the legacy
+`99-ombre-steward-identity.conf` so any old `User=ran-agent`/`Group=ran-agent`
+settings are replaced while the O2 environment remains. Unit names, stable
+MainPID environment, token ownership, source paths, and the authenticated
+Steward API remain blocking acceptance contracts.
+
+The transaction keeps source and target identities distinct during cutover.
+Before any snapshot, service stop, ownership change, or token rotation, it
+rejects a missing, primary-group-mismatched, or UID/GID-zero target. It then
+anchors the source on the required active Node unit and checks its stable
+MainPID against `/proc/<pid>/status`. A loaded active Ombre unit joins the same
+verification and must resolve to the same existing non-root UID/GID; inactive
+or `not-found` Ombre is snapshotted as optional topology and does not block a
+first O2 deployment. The pre-quiesce recheck rejects Node identity drift or a
+change in whether Ombre is active, and the verified source is recorded in the
+root-private snapshot. No environment variable is accepted as source identity
+authority.
 
 The transaction also refuses to begin if its private
 `98-ombre-steward-rotation.conf` drop-in already exists or is a broken symlink.
@@ -371,18 +369,26 @@ The transaction resolves one canonical live state directory from
 then exist only at `${RAN_AGENT_STATE_DIR}/ombre-brain` and
 `${RAN_AGENT_STATE_DIR}/ombre-compat/secrets/steward-api-token`; an explicit
 `OMBRE_BRAIN_HOME` that disagrees is rejected. The token is a non-symlink
-regular file owned by `ran-agent:ran-agent` with mode `0600`.
+regular file owned by the configured runtime UID/GID with mode `0600`.
 Rotation first disables O2 ingress and stops Node, then saves the old token in
-a root-owned `0700` transaction directory under
+a backup validated against the pre-cutover source UID/GID. It stores that copy
+in a root-owned `0700` transaction directory under
 `/run/ran-agent-release-secrets`, atomically installs the new token, restarts
 and authenticates Ombre, clears the temporary block, restarts Node with the
 managed O2 posture, and runs read-only acceptance. That private
 copy is never placed in a retained snapshot, manifest, archive, or release
 record and is destroyed immediately after acceptance. On failure, ingress
-remains disabled while files, state, code, and the old token are restored; the
-temporary block is then cleared before the saved service active/inactive state
-is restored. Any failed stage retains the `rollback-incomplete` fail-loud
-result.
+remains disabled while files, state, code, and the old token are restored.
+After restored units are reloaded, rollback treats the snapshot `services`
+manifest as topology authority. The restored Node unit is mandatory and
+determines the non-root token owner; restored Ombre joins that identity check
+only when the snapshot recorded it active. Rollback checks the result against
+snapshot identity metadata when present, restores token ownership to that
+source, and verifies effective UID/GID for restarted protected processes. An
+inactive or absent snapshotted Ombre remains inactive or is skipped by the
+existing restore flow. The temporary block is then cleared before the saved
+service state is restored. Any failed stage retains the `rollback-incomplete`
+fail-loud result.
 
 The services manifest additionally records each unit's systemd load state.
 Retired optional units such as `ran-agent-xhs-browse.service` may therefore be
@@ -458,7 +464,8 @@ overrides.
 
 Blocking acceptance also checks Node and Ombre effective systemd
 `User`/`Group`, and each live MainPID's effective numeric UID/GID from
-`/proc/<MainPID>/status` against `id -u/-g ran-agent`. It rechecks MainPID and
+`/proc/<MainPID>/status` against the NSS-resolved configured identity. It rejects
+UID or GID zero, rechecks MainPID and
 numeric identity to reject process exit or drift. Apply startup, final
 acceptance, and rollback recovery use the same verifier. Acceptance also
 checks their common canonical token path,
@@ -467,7 +474,7 @@ rejection of the prior token, absence from the staged checkout and ordinary
 snapshot/archive artifacts, and the root-only in-flight rollback directory.
 For active O2 it additionally verifies canonical compatibility state/identity
 paths, exact DeepSeek endpoint/model values, a nonempty shared provider key,
-and `ran-agent:ran-agent:0700` state ownership without making a model or memory
+and configured runtime-identity `0700` state ownership without making a model or memory
 write canary. Any mismatch fails the release and restores the snapshot's prior
 O2 posture without weakening O1 recall-only behavior.
 
