@@ -345,6 +345,13 @@ def test_candidate_requires_a_persistent_rollback_ref(monkeypatch: pytest.Monkey
         MODULE.check_candidate(Path("/fixture"), candidate)
 
 
+def test_preflight_does_not_overwrite_the_candidate_unit_payload() -> None:
+    source = SCRIPT.read_text(encoding="utf-8")
+    assert "for unit, state_value in all_service_states.items()" not in source
+    assert "for service_unit, state_value in all_service_states.items()" in source
+    assert "candidate runtime payload type was corrupted during preflight" in source
+
+
 def test_privileged_replace_rejects_symlink_target(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.write_text("keep")

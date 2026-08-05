@@ -463,16 +463,16 @@ def validate_preflight(repo: Path, candidate: str, artifact_path: Path) -> dict[
         raise ReleaseError("exact runtime install root already exists")
     if cron_job_count(LITE_HOME) != 0 or cron_execution_count(LITE_HOME) != 0:
         raise ReleaseError("Runtime Phase requires empty Hermes cron jobs and execution ledger")
-    all_service_states = {unit: service_state(unit) for unit in SERVICES}
-    for unit, state_value in all_service_states.items():
+    all_service_states = {service_unit: service_state(service_unit) for service_unit in SERVICES}
+    for service_unit, state_value in all_service_states.items():
         if state_value["load"] not in {"loaded", "not-found"}:
-            raise ReleaseError(f"unsupported service load state: {unit}={state_value['load']}")
+            raise ReleaseError(f"unsupported service load state: {service_unit}={state_value['load']}")
         if state_value["load"] == "loaded" and (
             state_value["active"] not in {"active", "inactive"}
             or state_value["enabled"] not in {"enabled", "disabled"}
         ):
-            raise ReleaseError(f"unsupported service baseline state: {unit}={state_value}")
-    baseline_services = {unit: all_service_states[unit] for unit in SERVICES[:3]}
+            raise ReleaseError(f"unsupported service baseline state: {service_unit}={state_value}")
+    baseline_services = {service_unit: all_service_states[service_unit] for service_unit in SERVICES[:3]}
     if any(state["active"] != "active" for state in baseline_services.values()):
         raise ReleaseError("legacy Node/Lite/Full baseline is not fully active")
     if any(baseline_services[unit]["enabled"] != "enabled" for unit in SERVICES[1:3]):
@@ -495,6 +495,8 @@ def validate_preflight(repo: Path, candidate: str, artifact_path: Path) -> dict[
         lite_home_bytes=snapshot_capacity_bytes(LITE_HOME),
         required_inodes=artifact_members + 4096,
     )
+    if not all(isinstance(payload, bytes) for payload in (profile, unit, builder)):
+        raise ReleaseError("candidate runtime payload type was corrupted during preflight")
     return {
         "mutation": mutation,
         "manifest": manifest,
