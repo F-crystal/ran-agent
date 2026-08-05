@@ -60,6 +60,7 @@ UNIT_SOURCE_PATH = "hermes/systemd/ran-agent-hermes-unified.service"
 BUILDER_PATH = "scripts/build-hermes-runtime-artifact.py"
 CONTROLLER_PATH = "scripts/deploy-hermes-runtime-release.py"
 RELEASE_CANDIDATE_STATUS = "RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY"
+CANDIDATE_REF_ROOT = "refs/ran-agent/runtime-candidates"
 
 
 class ReleaseError(RuntimeError):
@@ -209,6 +210,13 @@ def check_candidate(repo: Path, candidate: str) -> None:
     resolved = git(repo, "rev-parse", "--verify", f"{candidate}^{{commit}}").stdout.strip()
     if resolved != candidate:
         raise ReleaseError("candidate object mismatch")
+    candidate_ref = f"{CANDIDATE_REF_ROOT}/{candidate}"
+    try:
+        referenced = git(repo, "rev-parse", "--verify", f"{candidate_ref}^{{commit}}").stdout.strip()
+    except subprocess.CalledProcessError as exc:
+        raise ReleaseError("persistent runtime candidate ref is absent") from exc
+    if referenced != candidate:
+        raise ReleaseError("persistent runtime candidate ref mismatch")
     if git(repo, "status", "--porcelain").stdout:
         raise ReleaseError("production worktree is dirty")
 

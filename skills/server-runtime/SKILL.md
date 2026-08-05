@@ -53,8 +53,11 @@ Keep the reviewed SHA, artifact, controller, and rollback snapshot explicit:
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
 RUNTIME_CANDIDATE=<reviewed-40-char-sha>
+RUNTIME_CANDIDATE_REF=refs/ran-agent/runtime-candidates/$RUNTIME_CANDIDATE
 RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/deploy-hermes-runtime-release-<reviewed-40-char-sha>.py
 RUNTIME_ARTIFACT=/opt/ran_agent-release/runtime-artifacts/hermes-runtime-<candidate-short-sha>.tar.gz
+git update-ref "$RUNTIME_CANDIDATE_REF" "$RUNTIME_CANDIDATE" 0000000000000000000000000000000000000000
+test "$(git rev-parse --verify "$RUNTIME_CANDIDATE_REF^{commit}")" = "$RUNTIME_CANDIDATE"
 sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode dry-run
 sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode apply
 ```
@@ -69,7 +72,9 @@ sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --mode rollback \
 
 Once the unified topology marker exists, never use
 `deploy-hermes-candidate.sh` or standalone `apply-hermes-runtime-split.sh` as a
-Runtime rollback path; both intentionally fail closed at that boundary.
+Runtime rollback path; both intentionally fail closed at that boundary. Retain
+the candidate-named controller, `refs/ran-agent/runtime-candidates/<SHA>`, and
+the accepted snapshot together for the complete rollback window.
 
 Do not ask the user to remember activation separately. Put it in the command
 block or make the script self-sufficient.

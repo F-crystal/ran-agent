@@ -38,8 +38,11 @@ the account without separate authorization.
   cd /opt/ran_agent
   source /opt/ran_agent/.venv/bin/activate
   RUNTIME_CANDIDATE=<reviewed-40-char-sha>
+  RUNTIME_CANDIDATE_REF=refs/ran-agent/runtime-candidates/$RUNTIME_CANDIDATE
   RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/deploy-hermes-runtime-release-<reviewed-40-char-sha>.py
   RUNTIME_ARTIFACT=/opt/ran_agent-release/runtime-artifacts/hermes-runtime-<candidate-short-sha>.tar.gz
+  git update-ref "$RUNTIME_CANDIDATE_REF" "$RUNTIME_CANDIDATE" 0000000000000000000000000000000000000000
+  test "$(git rev-parse --verify "$RUNTIME_CANDIDATE_REF^{commit}")" = "$RUNTIME_CANDIDATE"
   sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode dry-run
   sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode apply
   ```
@@ -59,7 +62,10 @@ the account without separate authorization.
 
   After the unified topology marker is published, the legacy
   `deploy-hermes-candidate.sh` and standalone Lite/Full repair intentionally
-  refuse to operate. They are not rollback paths for the unified Runtime.
+  refuse to operate. They are not rollback paths for the unified Runtime. The
+  candidate-named controller, candidate ref, and accepted snapshot are one
+  rollback authority set; do not overwrite or delete any member while that
+  Runtime or its rollback window remains active.
 - Validate an exact reviewed release: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-run`
 - Apply that same exact release after separate authorization: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply`
 - `deploy-hermes-main.sh --dry-run` may discover and test the then-current main head, but it is not apply authority; record and review its resolved SHA, then use the exact `--commit` path above.

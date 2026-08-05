@@ -330,6 +330,21 @@ def test_candidate_controller_binding_rejects_a_floating_rollback_controller(
     )
 
 
+def test_candidate_requires_a_persistent_rollback_ref(monkeypatch: pytest.MonkeyPatch) -> None:
+    candidate = "a" * 40
+
+    def fake_git(_repo: Path, *args: str, **_kwargs: object) -> subprocess.CompletedProcess:
+        if args[:2] == ("rev-parse", "--verify") and args[2] == f"{candidate}^{{commit}}":
+            return subprocess.CompletedProcess(args, 0, f"{candidate}\n", "")
+        if args[:2] == ("rev-parse", "--verify"):
+            raise subprocess.CalledProcessError(1, args)
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(MODULE, "git", fake_git)
+    with pytest.raises(MODULE.ReleaseError, match="persistent runtime candidate ref is absent"):
+        MODULE.check_candidate(Path("/fixture"), candidate)
+
+
 def test_privileged_replace_rejects_symlink_target(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.write_text("keep")
