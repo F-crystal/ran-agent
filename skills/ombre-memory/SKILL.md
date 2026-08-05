@@ -6,9 +6,9 @@ Status: CURRENT (2026-08-05)
 `bb66f1e6a8a400d599c7f86139107742bbedddc8` still uses the existing direct
 Ombre Brain path on `127.0.0.1:18001`. The recall-only O1 baseline and the O2
 baseline are archived but not deployed; `18002` was inactive and O2 was absent
-from the active revision/configuration. O1 must not advance to deployment while
-its real Python -> HTTP -> Node recall chain is not `LOCAL_VERIFIED`. V4 Pro
-is frozen; Node Receipt is deferred; Package B.2/B.3 have not started.
+from the active revision/configuration. This source revision defines the strict
+P2 recall contract but does not imply production deployment. V4 Pro is frozen;
+Node Receipt is deferred; Package B.2/B.3 have not started.
 
 ## Overview
 
@@ -119,12 +119,12 @@ memories = ombre.recall(
 
 ### MCP Server
 
-```bash
-# Recall memories
-echo '{"user_text": "query", "response_mode": "chat"}' | python src/personal_agent/ombre_brain_mcp.py breath
-
-# O1 intentionally provides no hold/grow/raw-upstream call path.
-```
+The local MCP tool boundary accepts only `{"query": "...", "limit": 5}` for
+`ombre_recall_search`. The Python backend maps its internal `user_text` input
+to `query`; `response_mode` never crosses the MCP boundary. Successful empty
+recall is logged as `outcome=empty`, while transport, JSON-RPC, and malformed
+payload failures are logged as `outcome=failed`. O1 intentionally provides no
+hold/grow/raw-upstream call path.
 
 ## Configuration
 
@@ -132,9 +132,8 @@ echo '{"user_text": "query", "response_mode": "chat"}' | python src/personal_age
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `PERSONAL_AGENT_OMBRE_BACKEND` | `recall_only` | Use the local fail-closed recall adapter; O1 has no Ombre mutation path |
+| `PERSONAL_AGENT_OMBRE_BACKEND` | `recall_only` | Use the local fail-closed recall adapter; the known production legacy value maps to this mode with a warning, and unknown values fail closed |
 | `PERSONAL_AGENT_OMBRE_MCP_URL` | `http://127.0.0.1:18002/mcp` | Local recall-only MCP endpoint |
-| `PERSONAL_AGENT_OMBRE_MCP_COMMAND` | `src/personal_agent/ombre_brain_mcp.py` | MCP server path |
 | `PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS` | 10 | Request timeout |
 | `OMBRE_VAULT_PATH` | `vault/ombre` | Primary memory storage path |
 | `OMBRE_VAULT_LEGACY_PATH` | `.ran_agent_state/ombre_vault` | Legacy vault path kept as read fallback during migration |
@@ -204,8 +203,9 @@ Ombre mutation. Those capabilities require a separately authorized later line.
 
 ## Files
 
-- `src/personal_agent/ombre_brain_mcp.py` - MCP server implementation
+- `node_bridge/src/ombreRecallMcpServer.mjs` - active local recall-only MCP server candidate
 - `src/personal_agent/ombre_mcp.py` - Python client backend
+- `src/personal_agent/ombre_brain_mcp.py` - legacy direct adapter; not the O1 Hermes MCP surface
 - `vault/ombre/` - Primary memory storage directory
 - `.ran_agent_state/ombre_vault/` - Legacy read-only fallback during migration
 

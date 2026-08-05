@@ -60,6 +60,7 @@ test('local search and read are confined to regular Markdown bucket files', () =
   }
   assert.throws(() => callOmbreRecallTool('ombre_recall_read', { path: '../outside.md' }, { bucketRoot: root }));
   assert.throws(() => callOmbreRecallTool('ombre_recall_search', { query: 'deterministic', future: true }, { bucketRoot: root }));
+  assert.equal(call('ombre_recall_search', { user_text: 'deterministic', response_mode: 'chat' }).error.code, -32002);
   assert.equal(call('ombre_recall_search', { query: 'x', limit: 21 }).error.code, -32002);
 });
 

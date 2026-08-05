@@ -229,7 +229,6 @@ class AppConfig:
     identity_path: Path = Path("IDENTITY.md")
     soul_path: Path = Path("SOUL.md")
     ombre_backend: str = "recall_only"
-    ombre_mcp_command: str = ""
     ombre_mcp_timeout_seconds: int = 10
     ombre_mcp_url: str = "http://127.0.0.1:18002/mcp"
     wechat_account_id: str = "personal_agent"
@@ -477,10 +476,6 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
             "PERSONAL_AGENT_OMBRE_BACKEND",
             "recall_only",
         ).strip().lower(),
-        ombre_mcp_command=os.getenv(
-            "PERSONAL_AGENT_OMBRE_MCP_COMMAND",
-            str(resolved_base_dir / "src" / "personal_agent" / "ombre_brain_mcp.py"),
-        ).strip(),
         ombre_mcp_timeout_seconds=int(
             os.getenv("PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS", "10").strip()
         ),

@@ -112,8 +112,13 @@ Default posture:
 - Docker is optional. Do not install Docker silently from the Hermes runtime
   split script; only use `OMBRE_BRAIN_RUNNER=docker` when the operator has made
   Docker available intentionally.
-- Python `personal_memory` should use upstream Ombre first with the repo-local
-  shim only as rollback fallback (`PERSONAL_AGENT_OMBRE_BACKEND=official_with_legacy_fallback`).
+- Python `personal_memory` uses the local recall-only HTTP adapter
+  (`PERSONAL_AGENT_OMBRE_BACKEND=recall_only`). The known production legacy
+  value `official_with_legacy_fallback` is a migration alias for recall-only
+  and logs a warning; it does not reactivate the legacy writable shim. No
+  other deploy override is valid: unknown values intentionally fail startup
+  closed and must be caught by pre-deploy validation rather than preserved as
+  a runtime option.
 - Expose direct Ombre MCP tools in full only unless there is a specific reason
   to expand lite, and only when the upstream runner is actually available.
 - Store runtime data under ignored state or private `vault/ombre`; never commit
