@@ -45,6 +45,32 @@ immutable, reviewed candidate SHA. Do not use a floating `origin/main` apply as
 the default deployment instruction; follow the candidate-specific release
 contract in `docs/governance/hermes_release_deployment.md`.
 
+For the unified Hermes v0.20 Runtime-only cutover, use the exact
+candidate-extracted controller instead of the legacy candidate controller.
+Keep the reviewed SHA, artifact, controller, and rollback snapshot explicit:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+RUNTIME_CANDIDATE=<reviewed-40-char-sha>
+RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/scripts/deploy-hermes-runtime-release.py
+RUNTIME_ARTIFACT=/opt/ran_agent-release/runtime-artifacts/hermes-runtime-<candidate-short-sha>.tar.gz
+sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode dry-run
+sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode apply
+```
+
+The apply output is the rollback authority. For an explicit rollback, pass its
+exact snapshot to the same candidate-extracted controller:
+
+```bash
+sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --mode rollback \
+  --snapshot /opt/ran_agent-release/runtime-snapshots/<exact-transaction-directory>
+```
+
+Once the unified topology marker exists, never use
+`deploy-hermes-candidate.sh` or standalone `apply-hermes-runtime-split.sh` as a
+Runtime rollback path; both intentionally fail closed at that boundary.
+
 Do not ask the user to remember activation separately. Put it in the command
 block or make the script self-sufficient.
 

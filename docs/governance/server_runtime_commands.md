@@ -30,6 +30,36 @@ the account without separate authorization.
 
 ## Source Of Truth
 
+- Unified Hermes v0.20 Runtime transactions use the candidate-extracted,
+  root-owned controller and artifact. Replace every placeholder with the exact
+  reviewed values; do not use `HEAD`, a branch, or a worktree copy:
+
+  ```bash
+  cd /opt/ran_agent
+  source /opt/ran_agent/.venv/bin/activate
+  RUNTIME_CANDIDATE=<reviewed-40-char-sha>
+  RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/scripts/deploy-hermes-runtime-release.py
+  RUNTIME_ARTIFACT=/opt/ran_agent-release/runtime-artifacts/hermes-runtime-<candidate-short-sha>.tar.gz
+  sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode dry-run
+  sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode apply
+  ```
+
+  Apply prints the exact snapshot path. If acceptance fails, the controller
+  rolls back before returning. A later explicit rollback must use that printed
+  snapshot and the same candidate-extracted controller:
+
+  ```bash
+  cd /opt/ran_agent
+  source /opt/ran_agent/.venv/bin/activate
+  RUNTIME_CANDIDATE=<deployed-40-char-sha>
+  RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/scripts/deploy-hermes-runtime-release.py
+  RUNTIME_SNAPSHOT=/opt/ran_agent-release/runtime-snapshots/<exact-transaction-directory>
+  sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --mode rollback --snapshot "$RUNTIME_SNAPSHOT"
+  ```
+
+  After the unified topology marker is published, the legacy
+  `deploy-hermes-candidate.sh` and standalone Lite/Full repair intentionally
+  refuse to operate. They are not rollback paths for the unified Runtime.
 - Validate an exact reviewed release: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-run`
 - Apply that same exact release after separate authorization: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply`
 - `deploy-hermes-main.sh --dry-run` may discover and test the then-current main head, but it is not apply authority; record and review its resolved SHA, then use the exact `--commit` path above.
@@ -117,6 +147,14 @@ switch`, or `git checkout` in `/opt/ran_agent` as a pre-deploy step. The
 transaction fetches a source ref only to resolve one SHA, gates an immutable
 stage, snapshots the active runtime, then changes the checkout only inside the
 apply transaction.
+
+The unified Hermes v0.20 Runtime transaction above is narrower than a code
+release: it leaves `/opt/ran_agent` on its current clean SHA, installs an
+immutable Runtime under `/opt/ran-agent-runtimes`, replaces only the managed
+Hermes/Node routing files, and records rollback state under
+`/opt/ran_agent-release/runtime-snapshots`. Use its controller for Runtime
+dry-run, apply, and rollback; use the ordinary candidate transaction only for
+later code releases that are compatible with the unified topology.
 
 The gate runs the same Git-less read-only candidate as root and as the
 validated non-root `RAN_AGENT_RUNTIME_USER/GROUP` identity (default
