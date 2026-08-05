@@ -35,6 +35,16 @@ PYTHON_VERSION = "3.12.13"
 PYTHON_ASSET = "cpython-3.12.13+20260804-x86_64-unknown-linux-gnu-install_only_stripped.tar.gz"
 PYTHON_SHA256 = "ce2c9c5df1b99a962a86d2f457656918ee5f01b2edea080db28416232a1fcb11"
 ARTIFACT_ROOT = "hermes-runtime"
+COMPANION_OVERLAY_PATHS = (
+    "node_bridge/src/coReading/mcpServer.mjs",
+    "node_bridge/src/externalMcp/gatewayMcpServer.mjs",
+    "node_bridge/src/mediaGenerationMcpServer.mjs",
+    "node_bridge/src/mediaReaderMcpServer.mjs",
+    "node_bridge/src/personalMemoryMcpServer.mjs",
+    "node_bridge/src/searchHubMcpServer.mjs",
+    "node_bridge/src/socialReaderMcpServer.mjs",
+    "node_bridge/src/stickerCatalogMcpServer.mjs",
+)
 
 
 def sha256_file(path: Path) -> str:
@@ -43,6 +53,26 @@ def sha256_file(path: Path) -> str:
         for chunk in iter(lambda: handle.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def install_companion_overlay(source_root: Path, runtime: Path) -> list[dict[str, str]]:
+    records = []
+    for relative in COMPANION_OVERLAY_PATHS:
+        source = source_root / relative
+        if source.is_symlink() or not source.is_file():
+            raise ValueError(f"companion overlay source invalid: {relative}")
+        artifact_path = f"companion-overlay/{relative}"
+        destination = runtime / artifact_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+        destination.chmod(0o444)
+        records.append({
+            "source": relative,
+            "sourceSha256": sha256_file(source),
+            "artifactPath": artifact_path,
+            "destination": f"/opt/ran_agent/{relative}",
+        })
+    return records
 
 
 def canonical_name(value: str) -> str:
@@ -373,6 +403,8 @@ def build(args: argparse.Namespace) -> dict[str, object]:
         )
         launcher.chmod(0o755)
 
+        companion_overlay = install_companion_overlay(args.companion_source_root, runtime)
+
         for path in [path for path in walk_tree(runtime) if path.name == "__pycache__" and path.is_dir()]:
             shutil.rmtree(path)
         if any(path.suffix == ".pyc" for path in walk_tree(runtime)) or (site_packages / "bin").exists():
@@ -405,6 +437,10 @@ def build(args: argparse.Namespace) -> dict[str, object]:
                 "asset": PYTHON_ASSET,
                 "assetSha256": PYTHON_SHA256,
                 "executableSha256": sha256_file(runtime / "python" / "bin" / "python3.12"),
+            },
+            "companionOverlay": {
+                "files": companion_overlay,
+                "mountMode": "systemd-bind-read-only",
             },
             "treeTransforms": [{
                 "excludedPrefix": "python/share/terminfo/",
@@ -465,6 +501,7 @@ def main() -> int:
     parser.add_argument("--python-asset", type=Path, required=True)
     parser.add_argument("--uv", type=Path, required=True)
     parser.add_argument("--uv-sha256", required=True)
+    parser.add_argument("--companion-source-root", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--manifest", type=Path, required=True)
     args = parser.parse_args()
@@ -473,6 +510,8 @@ def main() -> int:
             parser.error(f"file missing: {path}")
     if not args.wheelhouse.is_dir():
         parser.error(f"wheelhouse missing: {args.wheelhouse}")
+    if not args.companion_source_root.is_dir():
+        parser.error(f"companion source root missing: {args.companion_source_root}")
     try:
         result = build(args)
     except (OSError, ValueError, subprocess.CalledProcessError, tarfile.TarError, zipfile.BadZipFile) as error:

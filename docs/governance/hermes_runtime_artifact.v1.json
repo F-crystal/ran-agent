@@ -1,14 +1,67 @@
 {
   "artifact": {
     "archiveRoot": "hermes-runtime",
-    "bytes": 133517442,
-    "tarGzSha256": "c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5",
-    "treeSha256": "0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317"
+    "bytes": 133558059,
+    "tarGzSha256": "44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30",
+    "treeSha256": "3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698"
   },
   "builder": {
     "setuptoolsWheelSha256": "29b23c360f22f414dc7336bb39178cc7bcbf6021ed2733cde173f09dba19abb3",
     "uvSha256": "1bb756786175621eea70219911d02bf8d3e32203bb5a7a19b345e44d031f436e",
     "uvVersion": "uv 0.11.14 (3fdfdc7d4 2026-05-12 x86_64-apple-darwin)"
+  },
+  "companionOverlay": {
+    "files": [
+      {
+        "artifactPath": "companion-overlay/node_bridge/src/coReading/mcpServer.mjs",
+        "destination": "/opt/ran_agent/node_bridge/src/coReading/mcpServer.mjs",
+        "source": "node_bridge/src/coReading/mcpServer.mjs",
+        "sourceSha256": "455700118e12eb312499ecb7d3e6484b67cc429b5afe813f26761eaf97b2570b"
+      },
+      {
+        "artifactPath": "companion-overlay/node_bridge/src/externalMcp/gatewayMcpServer.mjs",
+        "destination": "/opt/ran_agent/node_bridge/src/externalMcp/gatewayMcpServer.mjs",
+        "source": "node_bridge/src/externalMcp/gatewayMcpServer.mjs",
+        "sourceSha256": "8f29309aaa84b4be001771bf372a1dc632ad0d02286ec43bb595faca72143688"
+      },
+      {
+        "artifactPath": "companion-overlay/node_bridge/src/mediaGenerationMcpServer.mjs",
+        "destination": "/opt/ran_agent/node_bridge/src/mediaGenerationMcpServer.mjs",
+        "source": "node_bridge/src/mediaGenerationMcpServer.mjs",
+        "sourceSha256": "6c224bc569ef40df3e18c019cbb35d0a1b05c093ad7ba6ebd40014667bd7f79d"
+      },
+      {
+        "artifactPath": "companion-overlay/node_bridge/src/mediaReaderMcpServer.mjs",
+        "destination": "/opt/ran_agent/node_bridge/src/mediaReaderMcpServer.mjs",
+        "source": "node_bridge/src/mediaReaderMcpServer.mjs",
+        "sourceSha256": "3beb916e4731c8c2d6639b1a7b76f006f38890ce1bdff0ec8b357fc5ff9b8896"
+      },
+      {
+        "artifactPath": "companion-overlay/node_bridge/src/personalMemoryMcpServer.mjs",
+        "destination": "/opt/ran_agent/node_bridge/src/personalMemoryMcpServer.mjs",
+        "source": "node_bridge/src/personalMemoryMcpServer.mjs",
+        "sourceSha256": "621976948619cfa95b11446a7e80738a061ae511c233415d39338bbaea358bd9"
+      },
+      {
+        "artifactPath": "companion-overlay/node_bridge/src/searchHubMcpServer.mjs",
+        "destination": "/opt/ran_agent/node_bridge/src/searchHubMcpServer.mjs",
+        "source": "node_bridge/src/searchHubMcpServer.mjs",
+        "sourceSha256": "7500111b190fc33b1a9fd60904db645faef2c7cb3e6ecfa6a12bce7b521be2a3"
+      },
+      {
+        "artifactPath": "companion-overlay/node_bridge/src/socialReaderMcpServer.mjs",
+        "destination": "/opt/ran_agent/node_bridge/src/socialReaderMcpServer.mjs",
+        "source": "node_bridge/src/socialReaderMcpServer.mjs",
+        "sourceSha256": "c659e5edfe31159bebfbc5e290a82b8c59e014dd7fda9e201ec0af6e0c60cddb"
+      },
+      {
+        "artifactPath": "companion-overlay/node_bridge/src/stickerCatalogMcpServer.mjs",
+        "destination": "/opt/ran_agent/node_bridge/src/stickerCatalogMcpServer.mjs",
+        "source": "node_bridge/src/stickerCatalogMcpServer.mjs",
+        "sourceSha256": "818251c9b2fa88bb03ec17fdfdb6ed4f274fd59c1caffb98bcaa161eadcd0b27"
+      }
+    ],
+    "mountMode": "systemd-bind-read-only"
   },
   "dependencies": {
     "installed": {

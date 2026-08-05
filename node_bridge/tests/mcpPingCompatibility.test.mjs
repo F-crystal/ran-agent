@@ -56,7 +56,7 @@ for (const [name, [, relativePath]] of Object.entries(servers)) {
     const request = JSON.stringify({ jsonrpc: '2.0', id: 41, method: 'ping' });
     const completed = spawnSync(process.execPath, [server], {
       encoding: 'utf8',
-      env: { ...process.env, NODE_NO_WARNINGS: '1' },
+      env: { NODE_NO_WARNINGS: '1' },
       input: `${request}\n`,
       timeout: 5000,
     });

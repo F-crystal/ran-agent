@@ -62,6 +62,18 @@ CONTROLLER_PATH = "scripts/deploy-hermes-runtime-release.py"
 RELEASE_CANDIDATE_STATUS = "RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY"
 CANDIDATE_REF_ROOT = "refs/ran-agent/runtime-candidates"
 GATEWAY_READINESS_ATTEMPTS = 300
+COMPANION_OVERLAY_PATHS = (
+    "node_bridge/src/coReading/mcpServer.mjs",
+    "node_bridge/src/externalMcp/gatewayMcpServer.mjs",
+    "node_bridge/src/mediaGenerationMcpServer.mjs",
+    "node_bridge/src/mediaReaderMcpServer.mjs",
+    "node_bridge/src/personalMemoryMcpServer.mjs",
+    "node_bridge/src/searchHubMcpServer.mjs",
+    "node_bridge/src/socialReaderMcpServer.mjs",
+    "node_bridge/src/stickerCatalogMcpServer.mjs",
+)
+COMPANION_OVERLAY_PREFIX = "companion-overlay"
+COMPANION_OVERLAY_TARGET_ROOT = Path("/opt/ran_agent")
 
 
 class ReleaseError(RuntimeError):
@@ -346,6 +358,7 @@ def validate_manifests(
     expected_unit = mutation.get("unifiedUnit", {}).get("sourceSha256")
     if expected_unit != sha256_bytes(unit):
         raise ReleaseError("mutation/unit digest mismatch")
+    validate_companion_overlay_contract(repo, candidate, manifest, mutation, unit)
 
     if artifact_path.is_symlink() or not artifact_path.is_file():
         raise ReleaseError("artifact must be a regular non-symlink file")
@@ -354,6 +367,50 @@ def validate_manifests(
     if sha256_file(artifact_path) != artifact.get("tarGzSha256"):
         raise ReleaseError("artifact archive digest mismatch")
     return mutation, manifest, profile, unit, builder
+
+
+def validate_companion_overlay_contract(
+    repo: Path,
+    candidate: str,
+    manifest: dict[str, Any],
+    mutation: dict[str, Any],
+    unit: bytes,
+) -> list[dict[str, str]]:
+    overlay = manifest.get("companionOverlay", {})
+    files = overlay.get("files")
+    if overlay.get("mountMode") != "systemd-bind-read-only" or not isinstance(files, list):
+        raise ReleaseError("companion overlay manifest is invalid")
+    if [item.get("source") for item in files if isinstance(item, dict)] != list(COMPANION_OVERLAY_PATHS):
+        raise ReleaseError("companion overlay path allowlist mismatch")
+    expected_lines = set()
+    install_root = Path(mutation.get("artifactManifest", {}).get("installRoot", ""))
+    for relative, item in zip(COMPANION_OVERLAY_PATHS, files, strict=True):
+        expected = {
+            "source": relative,
+            "sourceSha256": sha256_bytes(candidate_blob(repo, candidate, relative)),
+            "artifactPath": f"{COMPANION_OVERLAY_PREFIX}/{relative}",
+            "destination": str(COMPANION_OVERLAY_TARGET_ROOT / relative),
+        }
+        if item != expected:
+            raise ReleaseError(f"companion overlay identity mismatch: {relative}")
+        expected_lines.add(
+            f"BindReadOnlyPaths={install_root / expected['artifactPath']}:{expected['destination']}"
+        )
+    mutation_overlay = mutation.get("unifiedUnit", {}).get("companionOverlay")
+    if mutation_overlay != {
+        "mode": "systemd-bind-read-only",
+        "artifactPrefix": COMPANION_OVERLAY_PREFIX,
+        "targetRoot": str(COMPANION_OVERLAY_TARGET_ROOT),
+        "files": files,
+    }:
+        raise ReleaseError("companion overlay mutation contract mismatch")
+    actual_lines = {
+        line for line in unit.decode("utf-8").splitlines()
+        if line.startswith("BindReadOnlyPaths=")
+    }
+    if actual_lines != expected_lines:
+        raise ReleaseError("companion overlay unit bindings mismatch")
+    return files
 
 
 def capacity_admission(
@@ -458,12 +515,31 @@ def validate_preflight(repo: Path, candidate: str, artifact_path: Path) -> dict[
     if production_head != mutation.get("requiredProductionHead"):
         raise ReleaseError("production checkout is not the audited runtime-only baseline")
     install_root = Path(mutation["artifactManifest"]["installRoot"])
-    if install_root != RUNTIME_ROOT / "hermes-v0.20.0-0b8cdb8152ff":
+    if install_root != RUNTIME_ROOT / "hermes-v0.20.0-3049a082c0d1":
         raise ReleaseError("install root is outside the approved exact target")
     if install_root.exists():
         raise ReleaseError("exact runtime install root already exists")
     if cron_job_count(LITE_HOME) != 0 or cron_execution_count(LITE_HOME) != 0:
         raise ReleaseError("Runtime Phase requires empty Hermes cron jobs and execution ledger")
+    overlay_files = manifest["companionOverlay"]["files"]
+    overlay_host_baseline: dict[str, dict[str, int | str]] = {}
+    required_head = mutation["requiredProductionHead"]
+    for item in overlay_files:
+        destination = Path(item["destination"])
+        if destination.is_symlink() or not destination.is_file():
+            raise ReleaseError(f"companion overlay host target invalid: {destination}")
+        baseline_sha256 = sha256_bytes(candidate_blob(repo, required_head, item["source"]))
+        if sha256_file(destination) != baseline_sha256:
+            raise ReleaseError(f"companion overlay host baseline mismatch: {destination}")
+        value = destination.stat()
+        overlay_host_baseline[str(destination)] = {
+            "sha256": baseline_sha256,
+            "device": value.st_dev,
+            "inode": value.st_ino,
+            "uid": value.st_uid,
+            "gid": value.st_gid,
+            "mode": stat.S_IMODE(value.st_mode),
+        }
     all_service_states = {service_unit: service_state(service_unit) for service_unit in SERVICES}
     for service_unit, state_value in all_service_states.items():
         if state_value["load"] not in {"loaded", "not-found"}:
@@ -508,7 +584,69 @@ def validate_preflight(repo: Path, candidate: str, artifact_path: Path) -> dict[
         "capacity": capacity,
         "productionHead": production_head,
         "legacyRuntime": {str(path): sha256_file(path.resolve()) for path in legacy_paths},
+        "overlayHostBaseline": overlay_host_baseline,
     }
+
+
+def validate_overlay_host_baseline(context: dict[str, Any]) -> None:
+    for destination_text, expected in context.get("overlayHostBaseline", {}).items():
+        destination = Path(destination_text)
+        if destination.is_symlink() or not destination.is_file():
+            raise ReleaseError(f"companion overlay host target changed type: {destination}")
+        value = destination.stat()
+        actual = {
+            "sha256": sha256_file(destination),
+            "device": value.st_dev,
+            "inode": value.st_ino,
+            "uid": value.st_uid,
+            "gid": value.st_gid,
+            "mode": stat.S_IMODE(value.st_mode),
+        }
+        if actual != expected:
+            raise ReleaseError(f"companion overlay host baseline changed: {destination}")
+
+
+def validate_overlay_runtime_sources(context: dict[str, Any]) -> None:
+    for item in context.get("manifest", {}).get("companionOverlay", {}).get("files", []):
+        source = context["installRoot"] / item["artifactPath"]
+        if source.is_symlink() or not source.is_file() or sha256_file(source) != item["sourceSha256"]:
+            raise ReleaseError(f"companion overlay runtime source mismatch: {source}")
+
+
+def validate_overlay_service_view(context: dict[str, Any]) -> None:
+    files = context.get("manifest", {}).get("companionOverlay", {}).get("files", [])
+    if not files:
+        return
+    pid = service_main_pid("ran-agent-hermes.service")
+    mountinfo = Path(f"/proc/{pid}/mountinfo").read_text(encoding="utf-8").splitlines()
+    mounted = {
+        fields[4]: set(fields[5].split(","))
+        for line in mountinfo
+        if len(fields := line.split()) > 5
+    }
+    for item in files:
+        destination = Path(item["destination"])
+        service_view = Path(f"/proc/{pid}/root") / destination.relative_to("/")
+        if sha256_file(service_view) != item["sourceSha256"]:
+            raise ReleaseError(f"companion overlay service view mismatch: {destination}")
+        if "ro" not in mounted.get(str(destination), set()):
+            raise ReleaseError(f"companion overlay is not a read-only mount: {destination}")
+    validate_overlay_host_baseline(context)
+
+
+def validate_node_overlay_isolation(context: dict[str, Any]) -> None:
+    baseline = context.get("overlayHostBaseline", {})
+    if not baseline:
+        return
+    node_pid = service_main_pid("ran-agent-node.service")
+    hermes_pid = service_main_pid("ran-agent-hermes.service")
+    if os.readlink(f"/proc/{node_pid}/ns/mnt") == os.readlink(f"/proc/{hermes_pid}/ns/mnt"):
+        raise ReleaseError("Node inherited the Hermes mount namespace")
+    for destination_text, expected in baseline.items():
+        destination = Path(destination_text)
+        node_view = Path(f"/proc/{node_pid}/root") / destination.relative_to("/")
+        if sha256_file(node_view) != expected["sha256"]:
+            raise ReleaseError(f"Node sees a companion overlay unexpectedly: {destination}")
 
 
 def backup_path(snapshot: Path, path: Path, index: int) -> dict[str, Any]:
@@ -765,6 +903,8 @@ def validate_installed_runtime(context: dict[str, Any]) -> dict[str, str]:
     hermes_environment = validate_gateway_process(context)
     wait_for_gateway(8642, hermes_environment, "ran-assistant-lite")
     validate_listener_topology(service_main_pid("ran-agent-hermes.service"))
+    validate_overlay_runtime_sources(context)
+    validate_overlay_service_view(context)
     return hermes_environment
 
 
@@ -1133,6 +1273,8 @@ def apply(candidate: str, artifact_path: Path, context: dict[str, Any]) -> Path:
             raise ReleaseError("Hermes cron changed during quiesce")
         install_full_block()
         install_runtime(context, artifact_path, snapshot)
+        validate_overlay_runtime_sources(context)
+        validate_overlay_host_baseline(context)
         install_profile(context["profile"])
         install_unit(context["unit"])
         run(["systemctl", "daemon-reload"])
@@ -1166,6 +1308,7 @@ def apply(candidate: str, artifact_path: Path, context: dict[str, Any]) -> Path:
         if service_state("ran-agent-node.service")["active"] != "active":
             raise ReleaseError("Node bridge did not recover")
         validate_node_routes()
+        validate_node_overlay_isolation(context)
         prior_timer = state["services"]["ran-agent-hermes-lite-soft-reset.timer"]
         if prior_timer["load"] != "not-found" and prior_timer["active"] == "active":
             run(["systemctl", "start", "ran-agent-hermes-lite-soft-reset.timer"])

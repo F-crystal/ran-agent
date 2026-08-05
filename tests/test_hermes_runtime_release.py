@@ -37,12 +37,62 @@ def test_env_patch_changes_only_managed_keys_and_collapses_duplicates() -> None:
 
 def test_unified_unit_uses_exact_runtime_and_one_port() -> None:
     unit = (Path(__file__).parents[1] / "hermes/systemd/ran-agent-hermes-unified.service").read_text()
-    assert "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff/bin/hermes" in unit
+    assert "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes" in unit
     assert "ExecStart=/usr/bin/env HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite" in unit
     assert "API_SERVER_PORT=8642" in unit
     assert "8643" not in unit
     assert "HERMES_DISABLE_LAZY_INSTALLS=1" in unit
     assert "TIRITH_ENABLED=false" in unit
+    binds = {line for line in unit.splitlines() if line.startswith("BindReadOnlyPaths=")}
+    assert binds == {
+        "BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/"
+        f"{path}:/opt/ran_agent/{path}"
+        for path in MODULE.COMPANION_OVERLAY_PATHS
+    }
+
+
+def test_overlay_contract_binds_candidate_manifest_mutation_and_unit(monkeypatch: pytest.MonkeyPatch) -> None:
+    install_root = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1")
+    blobs = {path: f"payload:{path}".encode() for path in MODULE.COMPANION_OVERLAY_PATHS}
+    files = [
+        {
+            "source": path,
+            "sourceSha256": MODULE.sha256_bytes(blobs[path]),
+            "artifactPath": f"companion-overlay/{path}",
+            "destination": f"/opt/ran_agent/{path}",
+        }
+        for path in MODULE.COMPANION_OVERLAY_PATHS
+    ]
+    manifest = {"companionOverlay": {"mountMode": "systemd-bind-read-only", "files": files}}
+    overlay = {
+        "mode": "systemd-bind-read-only",
+        "artifactPrefix": "companion-overlay",
+        "targetRoot": "/opt/ran_agent",
+        "files": files,
+    }
+    mutation = {"artifactManifest": {"installRoot": str(install_root)}, "unifiedUnit": {"companionOverlay": overlay}}
+    unit = "\n".join(
+        f"BindReadOnlyPaths={install_root}/companion-overlay/{path}:/opt/ran_agent/{path}"
+        for path in MODULE.COMPANION_OVERLAY_PATHS
+    ).encode()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+
+    assert MODULE.validate_companion_overlay_contract(Path("/repo"), "a" * 40, manifest, mutation, unit) == files
+
+    manifest["companionOverlay"]["files"][0] = {**files[0], "sourceSha256": "0" * 64}
+    with pytest.raises(MODULE.ReleaseError, match="identity mismatch"):
+        MODULE.validate_companion_overlay_contract(Path("/repo"), "a" * 40, manifest, mutation, unit)
+
+
+def test_overlay_host_baseline_rejects_a_symlink(tmp_path: Path) -> None:
+    target = tmp_path / "target"
+    target.write_text("old")
+    link = tmp_path / "link"
+    link.symlink_to(target)
+    with pytest.raises(MODULE.ReleaseError, match="changed type"):
+        MODULE.validate_overlay_host_baseline({
+            "overlayHostBaseline": {str(link): {"sha256": MODULE.sha256_file(target)}}
+        })
 
 
 def test_capacity_contract_is_additive() -> None:

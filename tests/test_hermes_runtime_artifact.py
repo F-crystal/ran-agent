@@ -188,6 +188,29 @@ class HermesRuntimeArtifactTest(unittest.TestCase):
 
             self.assertTrue(cache.exists())
 
+    def test_companion_overlay_is_exact_read_only_candidate_payload(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            runtime = root / "runtime"
+            for index, relative in enumerate(MODULE.COMPANION_OVERLAY_PATHS):
+                path = source / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"payload-{index}\n", encoding="utf-8")
+
+            records = MODULE.install_companion_overlay(source, runtime)
+
+            self.assertEqual([item["source"] for item in records], list(MODULE.COMPANION_OVERLAY_PATHS))
+            for item in records:
+                installed = runtime / item["artifactPath"]
+                self.assertEqual(MODULE.sha256_file(installed), item["sourceSha256"])
+                self.assertEqual(installed.stat().st_mode & 0o777, 0o444)
+                self.assertEqual(item["destination"], f"/opt/ran_agent/{item['source']}")
+
+            (source / MODULE.COMPANION_OVERLAY_PATHS[0]).unlink()
+            with self.assertRaisesRegex(ValueError, "companion overlay source invalid"):
+                MODULE.install_companion_overlay(source, root / "rejected")
+
     def test_remove_headless_optional_extensions_requires_one_tkinter_binary(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             runtime = Path(temporary)
@@ -209,6 +232,7 @@ class HermesRuntimeArtifactTest(unittest.TestCase):
         self.assertNotIn("installed", manifest)
         self.assertEqual(len(manifest["dependencies"]["wheels"]), 77)
         self.assertEqual(len(manifest["dependencies"]["installed"]), 77)
+        self.assertEqual(len(manifest["companionOverlay"]["files"]), 8)
         self.assertEqual(manifest["status"], "LOCAL_BUILT_NOT_LINUX_VERIFIED")
 
 

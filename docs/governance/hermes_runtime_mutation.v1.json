@@ -1,23 +1,23 @@
 {
   "schemaVersion": 1,
-  "status": "RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY",
+  "status": "LOCAL_BUILT_NOT_LINUX_VERIFIED",
   "phase": "runtime-only",
   "requiredProductionHead": "bb66f1e6a8a400d599c7f86139107742bbedddc8",
   "artifactManifest": {
     "path": "docs/governance/hermes_runtime_artifact.v1.json",
-    "tarGzSha256": "c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5",
-    "treeSha256": "0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317",
-    "installRoot": "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff",
-    "executable": "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff/bin/hermes",
+    "tarGzSha256": "44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30",
+    "treeSha256": "3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698",
+    "installRoot": "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1",
+    "executable": "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes",
     "mode": "read-only-after-install"
   },
   "linuxVerification": {
     "path": "docs/governance/hermes_runtime_linux_verification.v1.json",
-    "stage": "LOCAL_VERIFIED",
-    "result": "LINUX_VERIFIED",
-    "verifiedAt": "2026-08-06T02:04:41+08:00",
-    "tarGzSha256": "c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5",
-    "treeSha256": "0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317"
+    "stage": "PENDING",
+    "result": "PENDING",
+    "verifiedAt": null,
+    "tarGzSha256": "44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30",
+    "treeSha256": "3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698"
   },
   "companionProfile": {
     "compatibilityName": "ran-assistant-lite",
@@ -35,8 +35,23 @@
   },
   "unifiedUnit": {
     "source": "hermes/systemd/ran-agent-hermes-unified.service",
-    "sourceSha256": "12d91ca6d8bff25845442f1adbe507c3f830b25a6ca16e6c2e11f7cbe93632ce",
-    "destination": "/etc/systemd/system/ran-agent-hermes.service"
+    "sourceSha256": "d160c4d2beb2fc1759f08a093b5b42cdbef9b946a195cc1683a649cc84c87d90",
+    "destination": "/etc/systemd/system/ran-agent-hermes.service",
+    "companionOverlay": {
+      "mode": "systemd-bind-read-only",
+      "artifactPrefix": "companion-overlay",
+      "targetRoot": "/opt/ran_agent",
+      "files": [
+        {"artifactPath": "companion-overlay/node_bridge/src/coReading/mcpServer.mjs", "destination": "/opt/ran_agent/node_bridge/src/coReading/mcpServer.mjs", "source": "node_bridge/src/coReading/mcpServer.mjs", "sourceSha256": "455700118e12eb312499ecb7d3e6484b67cc429b5afe813f26761eaf97b2570b"},
+        {"artifactPath": "companion-overlay/node_bridge/src/externalMcp/gatewayMcpServer.mjs", "destination": "/opt/ran_agent/node_bridge/src/externalMcp/gatewayMcpServer.mjs", "source": "node_bridge/src/externalMcp/gatewayMcpServer.mjs", "sourceSha256": "8f29309aaa84b4be001771bf372a1dc632ad0d02286ec43bb595faca72143688"},
+        {"artifactPath": "companion-overlay/node_bridge/src/mediaGenerationMcpServer.mjs", "destination": "/opt/ran_agent/node_bridge/src/mediaGenerationMcpServer.mjs", "source": "node_bridge/src/mediaGenerationMcpServer.mjs", "sourceSha256": "6c224bc569ef40df3e18c019cbb35d0a1b05c093ad7ba6ebd40014667bd7f79d"},
+        {"artifactPath": "companion-overlay/node_bridge/src/mediaReaderMcpServer.mjs", "destination": "/opt/ran_agent/node_bridge/src/mediaReaderMcpServer.mjs", "source": "node_bridge/src/mediaReaderMcpServer.mjs", "sourceSha256": "3beb916e4731c8c2d6639b1a7b76f006f38890ce1bdff0ec8b357fc5ff9b8896"},
+        {"artifactPath": "companion-overlay/node_bridge/src/personalMemoryMcpServer.mjs", "destination": "/opt/ran_agent/node_bridge/src/personalMemoryMcpServer.mjs", "source": "node_bridge/src/personalMemoryMcpServer.mjs", "sourceSha256": "621976948619cfa95b11446a7e80738a061ae511c233415d39338bbaea358bd9"},
+        {"artifactPath": "companion-overlay/node_bridge/src/searchHubMcpServer.mjs", "destination": "/opt/ran_agent/node_bridge/src/searchHubMcpServer.mjs", "source": "node_bridge/src/searchHubMcpServer.mjs", "sourceSha256": "7500111b190fc33b1a9fd60904db645faef2c7cb3e6ecfa6a12bce7b521be2a3"},
+        {"artifactPath": "companion-overlay/node_bridge/src/socialReaderMcpServer.mjs", "destination": "/opt/ran_agent/node_bridge/src/socialReaderMcpServer.mjs", "source": "node_bridge/src/socialReaderMcpServer.mjs", "sourceSha256": "c659e5edfe31159bebfbc5e290a82b8c59e014dd7fda9e201ec0af6e0c60cddb"},
+        {"artifactPath": "companion-overlay/node_bridge/src/stickerCatalogMcpServer.mjs", "destination": "/opt/ran_agent/node_bridge/src/stickerCatalogMcpServer.mjs", "source": "node_bridge/src/stickerCatalogMcpServer.mjs", "sourceSha256": "818251c9b2fa88bb03ec17fdfdb6ed4f274fd59c1caffb98bcaa161eadcd0b27"}
+      ]
+    }
   },
   "topology": {
     "before": {
@@ -68,7 +83,7 @@
       "unit": "ran-agent-hermes.service",
       "action": "replace-and-restart",
       "before": "snapshot-exact-unit-and-absolute-executable",
-      "afterExecutable": "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff/bin/hermes",
+      "afterExecutable": "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes",
       "afterHome": "/home/ubuntu/.hermes-ran-agent/lite",
       "afterProfile": "ran-assistant-lite",
       "afterPort": 8642,
@@ -122,7 +137,7 @@
   "schemaMutations": [],
   "coreWritePathMutations": [],
   "fileMutations": [
-    "/opt/ran-agent-runtimes/hermes-v0.20.0-0b8cdb8152ff",
+    "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1",
     "/etc/systemd/system/ran-agent-hermes.service",
     "/etc/systemd/system/multi-user.target.wants/ran-agent-hermes.service",
     "/etc/systemd/system/multi-user.target.wants/ran-agent-hermes-full.service",
@@ -144,10 +159,10 @@
   ],
   "admission": {
     "capacity": "free_before >= max(existing_release_reserve, 15 GiB + peak_new_allocated_bytes)",
-    "peakNewAllocatedBytes": 1714864682,
+    "peakNewAllocatedBytes": 1715167443,
     "peakInventoryBytes": {
-      "artifactArchive": 133517442,
-      "expandedRuntimeExt4UpperBound": 454537216,
+      "artifactArchive": 133558059,
+      "expandedRuntimeExt4UpperBound": 454799360,
       "currentHeadCandidateArchive": 7495680,
       "currentHeadStageAndGateTrees": 19407272,
       "currentNodeModulesStageAndGateCopies": 1646592,
@@ -159,12 +174,12 @@
       "timestamp": "2026-08-06T03:25:33+08:00",
       "freeBytes": 19527106560,
       "floorBytes": 16106127360,
-      "requiredBytes": 17820992042,
+      "requiredBytes": 17821294763,
       "headroomBytes": 1706114518,
       "existingP3Bytes": 0,
       "existingP3DeletionAuthorized": true
     },
-    "current": "PRELIMINARY_PASS_WITH_1_7GB_HEADROOM_NOT_ADMISSION_EXACT_APPLY_RECHECK_REQUIRED",
+    "current": "PENDING_NEW_ARTIFACT_LINUX_VERIFICATION_AND_EXACT_APPLY_RECHECK",
     "requiredArtifactStatus": "LINUX_VERIFIED",
     "requiredCandidate": "exact-40-character-SHA",
     "requiredGates": "artifact manifest, Linux native/relocation/offline smoke, topology preflight, complete rollback, immutable root and runtime acceptance"
@@ -173,7 +188,7 @@
     "verify exact candidate SHA, controller digest, artifact digest, mutation-manifest digest and numeric capacity admission",
     "snapshot unit files and enabled/active state, env key presence/values, complete lite home and v0.13 executable identity",
     "quiesce ran-agent-node.service and both Hermes units; prove no in-flight gateway request",
-    "install immutable runtime root with separately authorized owner/group/mode policy and verify it read-only",
+    "install immutable runtime root with separately authorized owner/group/mode policy, verify it read-only, and bind its exact eight-file companion overlay read-only inside only the Hermes unit namespace",
     "install and digest-check the two companion profile configs",
     "write exact Hermes unit, daemon-reload, enable/start only ran-agent-hermes.service on 8642 and directly accept it",
     "write exact env keys, stop-disable ran-agent-hermes-full.service, restart ran-agent-node.service",
@@ -190,6 +205,7 @@
       "both legacy gateway ports and Node environment",
       "systemd enabled symlink and active state"
     ],
-    "retainNewArtifact": "allowed-but-unreferenced; deletion requires separate authorization"
+    "retainNewArtifact": "allowed-but-unreferenced; deletion requires separate authorization",
+    "companionOverlay": "restoring the prior unit removes every service-private bind; host checkout files are never replaced"
   }
 }
