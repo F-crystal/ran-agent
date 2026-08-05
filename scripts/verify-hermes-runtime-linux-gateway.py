@@ -98,10 +98,16 @@ def main() -> int:
     shutil.copy2(args.profile, home / "config.yaml")
     shutil.copy2(args.profile, profile_dir / "config.yaml")
     marker = home / "unexpected-installer"
+    obsidian_marker = home / "unexpected-obsidian-memory"
     for name in ("uv", "pip", "pip3", "curl", "wget"):
         command = fake_bin / name
         command.write_text(f"#!/bin/sh\nprintf '%s\\n' {name} >> {marker}\nexit 91\n", encoding="utf-8")
         command.chmod(0o755)
+    obsidian_command = fake_bin / "obsidian-memory-must-not-start"
+    obsidian_command.write_text(
+        f"#!/bin/sh\nprintf started > {obsidian_marker}\nsleep 300\n", encoding="utf-8"
+    )
+    obsidian_command.chmod(0o755)
     subprocess.run(["chown", "-R", f"{args.service_user}:{args.service_user}", str(home)], check=True)
 
     port = 18765
@@ -131,6 +137,8 @@ def main() -> int:
         "DEEPSEEK_API_KEY": "synthetic-offline",
         "TAVILY_API_KEY": "synthetic-offline",
         "OMBRE_BRAIN_MCP_URL": "http://127.0.0.1:18001/mcp",
+        "OBSIDIAN_MEMORY_MCP_ENABLED": "false",
+        "OBSIDIAN_MEMORY_MCP_COMMAND": str(obsidian_command),
     }
     (home / "tmp").mkdir(mode=0o700)
     subprocess.run(["chown", f"{args.service_user}:{args.service_user}", str(home / "tmp")], check=True)
@@ -200,6 +208,8 @@ if tirith_security.ensure_installed(log_failures=False) is not None:
     )
     if marker.exists():
         raise RuntimeError(f"installer command executed: {marker.read_text(encoding='utf-8')}")
+    if obsidian_marker.exists():
+        raise RuntimeError("disabled obsidian_memory MCP was started")
     if before != builder.tree_digest(runtime):
         raise RuntimeError("read-only runtime tree changed")
     cron = home / "cron/jobs.json"

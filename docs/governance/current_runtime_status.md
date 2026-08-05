@@ -34,7 +34,7 @@ unified_identity_o2_rollback: b5b4ff43f8c3d5706192cabefcece49408b73558; ARCHIVED
 ombre_o2_total_delete: typed unsupported
 gate_5: not started, not authorized
 package_b_2_b_3: not started
-hermes_v020_unified_runtime_candidate: RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY for exact artifact c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5 / tree 0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317; one offline gateway, 62 ELF, 34 compiled imports, relocation/read-only/terminfo/zero-cron/zero-lazy/zero-Tirith passed, the corrected production-recall/non-thinking profile was reverified at 2026-08-06T03:16:43+08:00, the staged controller passed Git-less read-only Linux tests as ubuntu and root, and removal of the authorized P3 validation tree restored about 1.7GB preliminary capacity headroom; not deployed
+hermes_v020_unified_runtime_candidate: RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY for exact artifact c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5 / tree 0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317; one offline gateway, 62 ELF, 34 compiled imports, relocation/read-only/terminfo/zero-cron/zero-lazy/zero-Tirith passed, the production-recall/non-thinking/default-disabled-Obsidian profile was reverified at 2026-08-06T04:15:57+08:00, the staged controller passed Git-less read-only Linux tests as ubuntu and root, and removal of the authorized P3 validation tree restored about 1.7GB preliminary capacity headroom; not deployed
 ```
 
 This production statement is a bounded `POINT_IN_TIME_AUDIT`, not a promise

@@ -17,7 +17,6 @@ REQUIRED_MCP = {
     "sticker_catalog",
     "search_hub",
     "personal_memory",
-    "obsidian_memory",
     "ombre_memory",
     "external_mcp_gateway",
 }
@@ -33,6 +32,9 @@ def test_companion_profile_is_one_restricted_api_surface() -> None:
     assert not FORBIDDEN_TOOLSETS.intersection(api)
     assert {"mcp-media_generation", "mcp-co_reading"}.issubset(api)
     assert REQUIRED_MCP.issubset(config["mcp_servers"])
+    assert "mcp-obsidian_memory" not in api
+    assert "obsidian_memory" not in config["mcp_servers"]
+    assert "Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false" in UNIT.read_text(encoding="utf-8")
     assert config["security"]["allow_lazy_installs"] is False
     assert config["security"]["tirith_enabled"] is False
     assert config["agent"]["reasoning_effort"] == "none"

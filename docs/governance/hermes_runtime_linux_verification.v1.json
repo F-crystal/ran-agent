@@ -13,7 +13,7 @@
   },
   "profile": {
     "path": "hermes/profile/config.companion.yaml",
-    "sha256": "acbaea3396ae4c4711bb55186d8ae66b4d6a2c23a1add6262f0c01eda34424e6",
+    "sha256": "abe6430f1274cbf086109ddad799549a39c48744f83c17ad823f7f64c8b5326e",
     "name": "ran-assistant-lite",
     "nameMeaning": "bounded compatibility identifier, not a second runtime topology",
     "reasoningEffort": "none",
@@ -29,17 +29,17 @@
       "sha256": "5b35f78e28064ac6ae2026139e1dd81b0d0e85ff82a06f30b802d58cd5a3e09c"
     },
     "gateway": {
-      "profileReverifiedAt": "2026-08-06T03:16:43+08:00",
+      "profileReverifiedAt": "2026-08-06T04:15:57+08:00",
       "path": "scripts/verify-hermes-runtime-linux-gateway.py",
-      "sha256": "b5a0524976dc972903dc0f3bea91f45664391b77a116c93cc138885af233cd4d"
+      "sha256": "54f66eff75d257844b03bf29a2d68265de5f5f733d71cbe1f0bef9254011e04d"
     },
     "runtimeReleaseController": {
       "path": "scripts/deploy-hermes-runtime-release.py",
-      "sha256": "76ea26d4368270f481bdd0d4061f8eb8dfbf189e901fcb8660bb20e3bdfccc6e"
+      "sha256": "32c923b8e4f0db01d4c0c7dbab8cbf5089a2065795be9945ff8ee21fbaa27e52"
     },
     "runtimeReleaseTests": {
       "path": "tests/test_hermes_runtime_release.py",
-      "sha256": "a250a25066975d0701329356ff2eaa9bbdbbcb6d317d7ab90ef3ac1302fe6155"
+      "sha256": "8961d5ced224bd55240e92052ad17cae4695305998ed4981bf7d7c3f120869d7"
     },
     "runtimeSplitInterlock": {
       "path": "scripts/apply-hermes-runtime-split.sh",
@@ -84,12 +84,12 @@
       "stdoutRawSha256WithNewline": "33b6d810dfef35b1eab7326b6c06f168eb0869b157dcbf0613300c658b245dee"
     },
     "runtimeControllerStagedGate": {
-      "verifiedAt": "2026-08-06T04:00:47+08:00",
+      "verifiedAt": "2026-08-06T04:15:57+08:00",
       "source": "Git-less read-only copy under /tmp; removed after verification",
       "environment": {"HOME": "/tmp", "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": "<gitless-source>/src"},
       "argv": ["/opt/ran_agent/.venv/bin/python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_hermes_runtime_release.py"],
-      "nonRoot": {"identity": "ubuntu", "result": "21 passed in 0.72s"},
-      "root": {"identity": "root via sudo env -i", "result": "21 passed in 0.68s"}
+      "nonRoot": {"identity": "ubuntu", "result": "22 passed in 0.75s"},
+      "root": {"identity": "root via sudo env -i", "result": "22 passed in 0.72s"}
     }
   },
   "checks": {

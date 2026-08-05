@@ -352,6 +352,10 @@ def test_preflight_does_not_overwrite_the_candidate_unit_payload() -> None:
     assert "candidate runtime payload type was corrupted during preflight" in source
 
 
+def test_gateway_readiness_covers_hermes_mcp_discovery_ceiling() -> None:
+    assert MODULE.GATEWAY_READINESS_ATTEMPTS * 0.5 >= 150
+
+
 def test_privileged_replace_rejects_symlink_target(tmp_path: Path) -> None:
     target = tmp_path / "target"
     target.write_text("keep")

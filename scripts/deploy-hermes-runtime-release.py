@@ -61,6 +61,7 @@ BUILDER_PATH = "scripts/build-hermes-runtime-artifact.py"
 CONTROLLER_PATH = "scripts/deploy-hermes-runtime-release.py"
 RELEASE_CANDIDATE_STATUS = "RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY"
 CANDIDATE_REF_ROOT = "refs/ran-agent/runtime-candidates"
+GATEWAY_READINESS_ATTEMPTS = 300
 
 
 class ReleaseError(RuntimeError):
@@ -645,7 +646,7 @@ def update_phase(snapshot: Path, state: dict[str, Any], phase: str) -> None:
 def wait_for_gateway(port: int, env_values: dict[str, str], expected_model: str) -> None:
     key = env_values.get("API_SERVER_KEY") or env_values.get("HERMES_API_KEY")
     last_error: Exception | None = None
-    for _ in range(120):
+    for _ in range(GATEWAY_READINESS_ATTEMPTS):
         try:
             headers = {"Authorization": f"Bearer {key}"} if key else {}
             request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/models", headers=headers)
