@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-06)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -33,6 +33,13 @@ the account without separate authorization.
 - Unified Hermes v0.20 Runtime transactions use the candidate-extracted,
   root-owned controller and artifact. Replace every placeholder with the exact
   reviewed values; do not use `HEAD`, a branch, or a worktree copy:
+
+  The current Runtime candidate binds exactly the eight files enumerated in
+  `hermes_runtime_artifact.v1.json` read-only inside only the Hermes systemd
+  mount namespace. General deployment authorization does not by itself approve
+  that permission-boundary mutation: record separate authorization before
+  `--mode apply`. Dry-run and isolated transient verification do not require
+  production activation of those binds.
 
   ```bash
   cd /opt/ran_agent

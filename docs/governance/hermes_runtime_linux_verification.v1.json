@@ -2,14 +2,14 @@
   "schemaVersion": 1,
   "stage": "LOCAL_VERIFIED",
   "result": "LINUX_VERIFIED",
-  "scope": "runtime-artifact-unified-profile-and-staged-runtime-controller",
-  "verifiedAt": "2026-08-06T02:04:41+08:00",
+  "scope": "runtime-artifact-unified-profile-companion-overlay-and-staged-runtime-controller",
+  "verifiedAt": "2026-08-06T05:18:20+08:00",
   "artifact": {
     "manifest": "docs/governance/hermes_runtime_artifact.v1.json",
-    "manifestSha256": "04683c3c8fbae045807f66753cee1cc816f6d62b30f7893cb7192cf150cbf778",
-    "bytes": 133517442,
-    "tarGzSha256": "c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5",
-    "treeSha256": "0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317"
+    "manifestSha256": "6d427a63b5405cab01c08454bc2923d7f7e468e4b7e86f0670a9b68012cb2e79",
+    "bytes": 133558059,
+    "tarGzSha256": "44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30",
+    "treeSha256": "3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698"
   },
   "profile": {
     "path": "hermes/profile/config.companion.yaml",
@@ -22,24 +22,27 @@
   "verifiers": {
     "builder": {
       "path": "scripts/build-hermes-runtime-artifact.py",
-      "sha256": "527721397af67de270b2435830e9426a0edf280a9471d20757f60975366dcdd3"
+      "sha256": "6fdfb9accf0298fc65d799088991aa0a98a2c9ff1965e90fdb93b108a6be59c7"
     },
     "basic": {
       "path": "scripts/verify-hermes-runtime-linux-basic.py",
       "sha256": "5b35f78e28064ac6ae2026139e1dd81b0d0e85ff82a06f30b802d58cd5a3e09c"
     },
     "gateway": {
-      "profileReverifiedAt": "2026-08-06T04:15:57+08:00",
       "path": "scripts/verify-hermes-runtime-linux-gateway.py",
-      "sha256": "54f66eff75d257844b03bf29a2d68265de5f5f733d71cbe1f0bef9254011e04d"
+      "sha256": "2cf5da91705c7fae77c918690bb6b9446efa2f01bb8315dbd9840087c2beef8b"
     },
     "runtimeReleaseController": {
       "path": "scripts/deploy-hermes-runtime-release.py",
-      "sha256": "32c923b8e4f0db01d4c0c7dbab8cbf5089a2065795be9945ff8ee21fbaa27e52"
+      "sha256": "704507fe3cc85450a42e2ca0ef87abfed004fde95893d34ea5aaba2a41da8abb"
     },
     "runtimeReleaseTests": {
       "path": "tests/test_hermes_runtime_release.py",
-      "sha256": "8961d5ced224bd55240e92052ad17cae4695305998ed4981bf7d7c3f120869d7"
+      "sha256": "710c369a4008f5f6cd6a72b0a1e0b4d0d6dd1e359ceb42cce646788dbd6a132f"
+    },
+    "mcpPingCompatibilityTests": {
+      "path": "node_bridge/tests/mcpPingCompatibility.test.mjs",
+      "sha256": "6a9cd28e69bda6eae255b292e6f3c744f1fd04e3383f521b779d0084655fbc8d"
     },
     "runtimeSplitInterlock": {
       "path": "scripts/apply-hermes-runtime-split.sh",
@@ -50,84 +53,205 @@
     "kernel": "Linux 6.8.0-110-generic",
     "architecture": "x86_64",
     "serviceUser": "ubuntu",
-    "basicInvocation": "env -i as SSH user ubuntu",
-    "gatewayInvocation": "sudo unshare --net env -i as root; verifier drops the runtime process to ubuntu"
+    "basicInvocation": "env -i as SSH user ubuntu against an owner-readable temporary artifact copy",
+    "gatewayInvocation": "sudo unshare --mount --net env -i as root; verifier drops the runtime process to ubuntu",
+    "keepaliveInvocation": "transient systemd unit as ubuntu on synthetic port 18766 with the exact eight BindReadOnlyPaths"
   },
   "executions": {
     "basic": {
-      "environment": {"HOME": "/home/ubuntu", "LANG": "C.UTF-8", "LC_ALL": "C.UTF-8", "PATH": "/usr/bin:/bin"},
-      "argv": [
-        "python3",
-        "/tmp/ran-agent-hermes-v020-final.dOvHHX/verify-hermes-runtime-linux-basic.py",
-        "--archive", "/tmp/ran-agent-hermes-v020-final.dOvHHX/hermes-runtime.tar.gz",
-        "--manifest", "/tmp/ran-agent-hermes-v020-final.dOvHHX/hermes-runtime.manifest.json",
-        "--builder", "/tmp/ran-agent-hermes-v020-final.dOvHHX/build-hermes-runtime-artifact.py",
-        "--scratch", "/tmp/ran-agent-hermes-v020-final.dOvHHX/basic2"
-      ],
-      "stdoutJson": {"artifactTarGzSha256": "c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5", "compiledModules": 34, "elfFiles": 62, "status": "PASS", "termColors": 256, "treeSha256": "0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317", "version": "0.20.0"},
-      "stdoutRawSha256WithNewline": "ed93f6a0f96aa32705f7d1c4d9c24eb598e08be5f55491a4ef2b7b92452bba95"
+      "environment": {
+        "HOME": "/home/ubuntu",
+        "LANG": "C.UTF-8",
+        "LC_ALL": "C.UTF-8",
+        "PATH": "/usr/bin:/bin",
+        "PYTHONDONTWRITEBYTECODE": "1"
+      },
+      "source": "Git-less read-only archive of refs/ran-agent/runtime-review/c1401c0 under a removed /tmp scratch directory",
+      "stdoutJson": {
+        "artifactTarGzSha256": "44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30",
+        "compiledModules": 34,
+        "elfFiles": 62,
+        "status": "PASS",
+        "termColors": 256,
+        "treeSha256": "3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698",
+        "version": "0.20.0"
+      }
     },
     "gateway": {
-      "outerArgv": ["sudo", "-n", "unshare", "--net", "env", "-i", "PATH=/usr/sbin:/usr/bin:/bin", "HOME=/root", "LANG=C.UTF-8", "LC_ALL=C.UTF-8"],
-      "argv": [
-        "python3",
-        "/tmp/ran-agent-hermes-v020-final.dOvHHX/verify-hermes-runtime-linux-gateway.py",
-        "--archive", "/tmp/ran-agent-hermes-v020-final.dOvHHX/hermes-runtime.tar.gz",
-        "--manifest", "/tmp/ran-agent-hermes-v020-final.dOvHHX/hermes-runtime.manifest.json",
-        "--profile", "/tmp/ran-agent-hermes-v020-final.dOvHHX/config.companion.yaml",
-        "--builder", "/tmp/ran-agent-hermes-v020-final.dOvHHX/build-hermes-runtime-artifact.py",
-        "--scratch", "/tmp/ran-agent-hermes-v020-final.dOvHHX/gateway",
-        "--repo-root", "/opt/ran_agent",
-        "--service-user", "ubuntu"
-      ],
-      "stdoutJson": {"artifactManifestSha256": "04683c3c8fbae045807f66753cee1cc816f6d62b30f7893cb7192cf150cbf778", "artifactTarGzSha256": "c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5", "cronJobs": 0, "model": "ran-assistant-lite", "network": {"interfaces": ["lo"], "ipv4Routes": 0, "ipv6Routes": 0, "mode": "loopback-only"}, "status": "PASS", "treeSha256": "0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317"},
-      "stdoutRawSha256WithNewline": "33b6d810dfef35b1eab7326b6c06f168eb0869b157dcbf0613300c658b245dee"
+      "outerArgv": ["sudo", "unshare", "--mount", "--net", "env", "-i"],
+      "source": "Git-less read-only archive of refs/ran-agent/runtime-review/c1401c0 under a removed /tmp scratch directory",
+      "stdoutJson": {
+        "artifactManifestSha256": "6d427a63b5405cab01c08454bc2923d7f7e468e4b7e86f0670a9b68012cb2e79",
+        "artifactTarGzSha256": "44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30",
+        "companionOverlayFiles": 8,
+        "cronJobs": 0,
+        "model": "ran-assistant-lite",
+        "network": {
+          "interfaces": ["lo"],
+          "ipv4Routes": 0,
+          "ipv6Routes": 0,
+          "mode": "loopback-only"
+        },
+        "status": "PASS",
+        "treeSha256": "3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698"
+      }
     },
     "runtimeControllerStagedGate": {
-      "verifiedAt": "2026-08-06T04:15:57+08:00",
       "source": "Git-less read-only copy under /tmp; removed after verification",
-      "environment": {"HOME": "/tmp", "PATH": "/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONPATH": "<gitless-source>/src"},
-      "argv": ["/opt/ran_agent/.venv/bin/python", "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/test_hermes_runtime_release.py"],
-      "nonRoot": {"identity": "ubuntu", "result": "22 passed in 0.75s"},
-      "root": {"identity": "root via sudo env -i", "result": "22 passed in 0.72s"}
+      "environment": {
+        "HOME": "/tmp",
+        "PATH": "/usr/bin:/bin",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": "<gitless-source>/src"
+      },
+      "nonRoot": {
+        "identity": "ubuntu",
+        "result": "38 passed"
+      },
+      "root": {
+        "identity": "root via sudo env -i",
+        "result": "38 passed"
+      }
+    },
+    "mcpPingCompatibility": {
+      "runtime": "/opt/nodejs/node-v22.22.2-linux-x64/bin/node",
+      "result": "16 passed",
+      "coverage": "eight direct dispatch poison tests plus eight raw stdio protocol tests",
+      "environment": "minimal synthetic environment"
+    },
+    "productionLikeKeepalive": {
+      "unit": "ran-agent-hermes-overlay-preflight2.service",
+      "invocationId": "72fdc53a535248508f7d0ec29af3faad",
+      "startedAt": "2026-08-06T05:12:48+08:00",
+      "observationDurationSeconds": 218,
+      "port": 18766,
+      "apiKey": "synthetic-only-not-a-production-secret",
+      "authenticatedModelsResult": "PASS: ran-assistant-lite",
+      "mainPid": {
+        "before": 1803456,
+        "after": 1803456,
+        "restarts": 0
+      },
+      "mcpChildPids": {
+        "social_reader": 1803561,
+        "sticker_catalog": 1803564,
+        "external_mcp_gateway": 1803581,
+        "search_hub": 1803596,
+        "co_reading": 1803613,
+        "media_reader": 1803628,
+        "media_generation": 1803639,
+        "personal_memory": 1803650
+      },
+      "mcpChildPidsStableAfterKeepalive": true,
+      "hermesMountNamespace": "mnt:[4026532302]",
+      "allEightMcpChildrenInheritedHermesMountNamespace": true,
+      "productionNodeMountNamespace": "mnt:[4026531841]",
+      "productionNodeNamespaceIsolatedFromHermes": true,
+      "overlayMounts": {
+        "count": 8,
+        "allReadOnly": true,
+        "allExactDestinations": true,
+        "allCandidateSourceDigestsVisibleInsideHermes": true,
+        "hostAndProductionNodeSawOriginalBb66Digests": true
+      },
+      "journalPatternCounts": {
+        "unsupportedMcpPing": 0,
+        "connectedToDegraded": 0,
+        "keepaliveFailed": 0,
+        "reconnectRequested": 0
+      },
+      "businessStateBefore": {
+        "timelineEvents": 9513,
+        "memories": 77,
+        "durableJobs": 0,
+        "durableOutboxSha256": "ceeaa62be488a635aca72696236496ec171c85352bf40b682e8f37aaefa5613a",
+        "personalAgentDbBytes": 5132288,
+        "cronStore": "absent"
+      },
+      "businessStateAfter": {
+        "timelineEvents": 9513,
+        "memories": 77,
+        "durableJobs": 0,
+        "durableOutboxSha256": "ceeaa62be488a635aca72696236496ec171c85352bf40b682e8f37aaefa5613a",
+        "personalAgentDbBytes": 5132288,
+        "cronStore": "absent"
+      },
+      "cleanup": {
+        "unitRemoved": true,
+        "port18766Absent": true,
+        "overlayMountsRemovedWithUnit": true,
+        "temporaryScratchRemoved": true
+      }
     }
   },
   "checks": {
     "safeExtractionAndTreeDigest": "PASS",
-    "elfDependencyClosure": {"status": "PASS", "elfFiles": 62, "notFound": 0},
-    "compiledImportsBeforeAndAfterRelocation": {"status": "PASS", "modules": 34},
+    "elfDependencyClosure": {
+      "status": "PASS",
+      "elfFiles": 62,
+      "notFound": 0
+    },
+    "compiledImportsBeforeAndAfterRelocation": {
+      "status": "PASS",
+      "modules": 34
+    },
     "systemTerminfo256Color": "PASS",
-    "versionCliAndMetadata": {"status": "PASS", "version": "0.20.0"},
+    "versionCliAndMetadata": {
+      "status": "PASS",
+      "version": "0.20.0"
+    },
     "relocatedReadOnlyRuntime": "PASS",
-    "offlineUnifiedGateway": {"status": "PASS", "interfaces": ["lo"], "ipv4Routes": 0, "ipv6Routes": 0, "model": "ran-assistant-lite"},
-    "emptyCronStore": {"status": "PASS", "jobs": 0},
+    "offlineUnifiedGateway": "PASS",
+    "emptyCronStore": "PASS",
     "lazyInstallBlocked": "PASS",
     "tirithDisabledWithoutDownloadOrState": "PASS",
     "runtimeTreeUnchangedAfterGateway": "PASS",
+    "exactEightFileReadOnlyCompanionOverlay": "PASS",
+    "hostAndNodeViewsUnchanged": "PASS",
+    "mcpKeepaliveBeyond180Seconds": "PASS",
+    "zeroBusinessStateDeltaDuringKeepalive": "PASS",
     "gitlessReadOnlyRuntimeControllerAsUbuntuAndRoot": "PASS"
   },
   "productionGuard": {
     "repositorySha": "bb66f1e6a8a400d599c7f86139107742bbedddc8",
-    "servicesAfterVerification": ["ran-agent-python.service:active", "ran-agent-node.service:active", "ran-agent-hermes.service:active", "ran-agent-hermes-full.service:active", "ran-agent-ombre-brain.service:active"],
-    "portsAfterVerification": ["8642:listening", "8643:listening", "18765:not-listening"],
-    "productionMutated": false
+    "worktreeCleanAfterVerification": true,
+    "servicesAfterVerification": [
+      "ran-agent-python.service:active",
+      "ran-agent-node.service:active",
+      "ran-agent-hermes.service:active",
+      "ran-agent-hermes-full.service:active"
+    ],
+    "portsAfterVerification": [
+      "8642:listening",
+      "8643:listening",
+      "18766:not-listening"
+    ],
+    "productionBusinessDataMutated": false,
+    "productionServiceMutationObserved": true,
+    "productionServiceMutationDetail": "A superseded first transient probe allowed production EnvironmentFile values to override synthetic API_SERVER_PORT/HERMES_HOME and passed --replace. It stopped the v0.13 Lite gateway at 05:11:22; systemd restarted it successfully at 05:11:27. The corrected probe moved every isolation value into the final ExecStart /usr/bin/env position, used port 18766 and omitted --replace."
   },
   "storage": {
-    "temporaryValidationBytesBeforeCleanup": 1227567209,
+    "temporaryValidationBytesBeforeCleanup": 1250712745,
     "temporaryValidationPathRemoved": true,
-    "freeBytesAfterCleanupAt2026-08-06T02:06:29+08:00": 17904660480,
-    "freeBytesAfterProfileReverificationAt2026-08-06T03:16:43+08:00": 17819877376,
-    "authorizedP3ValidationTreeBytesRemoved": 1642651648,
-    "freeBytesAfterP3CleanupAt2026-08-06T03:25:33+08:00": 19527106560
+    "freeBytesAfterCleanupAt2026-08-06T05:18:20+08:00": 18587557888,
+    "stagedRootOnlyArtifact": {
+      "path": "/opt/ran_agent-release/runtime-artifacts/hermes-runtime-3049a082c0d1.tar.gz",
+      "bytes": 133558059,
+      "owner": "root:root",
+      "mode": "0400"
+    }
   },
   "supersededProbeFailures": [
-    "The first final basic-verifier invocation exposed an invalid curses probe expression in the verifier itself. The verifier was corrected, digest-bound, re-uploaded, and rerun from a fresh scratch path; no production file or service was mutated."
+    "The earlier artifact verifier exposed an invalid curses probe expression; the verifier was corrected and rerun against the exact digest-bound artifact.",
+    "The first overlay gateway invocation used a pre-existing scratch directory and failed closed before extraction.",
+    "The first production-like transient inherited API_SERVER_PORT=8642 and HERMES_HOME from production EnvironmentFile values after systemd-run environment assignments. Its --replace caused one v0.13 Lite gateway restart. Production recovered in five seconds; no business-state delta was observed. The accepted invocation places synthetic isolation values in the final ExecStart /usr/bin/env position, uses 18766, and omits --replace."
   ],
   "remainingBeforeProduction": [
-    "bind the full worktree to one exact 40-character candidate SHA and controller digest",
-    "recompute numeric capacity admission immediately before apply",
-    "pass immutable candidate, topology preflight, complete rollback, and release-controller gates",
-    "obtain the separately required production runtime-root owner/group/mode authorization"
+    "bind the full worktree to one exact 40-character candidate SHA and candidate-extracted controller digest",
+    "rerun the immutable Git-less controller tests and numeric capacity dry-run against that exact candidate",
+    "obtain the separately required authorization for eight service-private systemd BindReadOnlyPaths; host and Node namespaces remain unchanged",
+    "receive independent adversarial CLEAR for scope, portability and security"
   ],
-  "productionDeploymentAuthorized": false
+  "generalRuntimeDeploymentAuthorized": true,
+  "companionOverlayPermissionBoundaryAuthorized": false
 }

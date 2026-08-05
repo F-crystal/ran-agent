@@ -48,6 +48,16 @@ known blocker: its real Python -> HTTP -> Node recall contract has not passed
 end-to-end validation. Gate 5 is not authorized, `total_delete` remains
 unsupported, Node Receipt is deferred, and Package B.2/B.3 have not started.
 
+The unified Hermes v0.20 Runtime candidate is `LOCAL_VERIFIED` and not
+deployed. Its exact 133,558,059-byte artifact carries eight digest-bound MCP
+ping-compatible files as a Hermes-only read-only overlay. Native Linux and a
+218-second transient keepalive run proved stable gateway/MCP PIDs, isolated
+Hermes and Node mount views, zero cron jobs, and zero business-state delta.
+Exact final-candidate dry-run and separate authorization for the eight systemd
+`BindReadOnlyPaths` remain pending. The evidence also records a superseded
+probe that caused one five-second v0.13 Lite gateway restart; it is not hidden
+or classified as Runtime deployment.
+
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
 `docs/governance/`.
@@ -99,8 +109,8 @@ evidence, and time. A separately recorded known blocker prevents advancement.
 | `docs/governance/hermes_action_compatibility.v1.json` | Versioned closed registry of protected compatibility evidence signals |
 | `docs/governance/hermes_protected_capabilities.v1.json` | Versioned protected-capability digest manifest |
 | `docs/governance/hermes_runtime_artifact.v1.json` | Immutable LOCAL_BUILT provenance and digest manifest for the pinned Hermes v0.20 artifact; later Linux verification is recorded separately and neither document alone is deployment approval |
-| `docs/governance/hermes_runtime_linux_verification.v1.json` | LOCAL_VERIFIED native Linux artifact/profile plus Git-less read-only ubuntu/root controller evidence for the exact v0.20 inputs; not a release candidate or deployment approval |
-| `docs/governance/hermes_runtime_mutation.v1.json` | RELEASE_CANDIDATE machine-readable Runtime Phase topology/mutation/rollback contract with Linux-verified artifact/controller evidence; production apply still requires exact-SHA dry-run admission |
+| `docs/governance/hermes_runtime_linux_verification.v1.json` | LOCAL_VERIFIED native Linux artifact/profile, exact eight-file overlay, 218-second MCP keepalive, zero-business-state-delta, and Git-less ubuntu/root controller evidence; includes the disclosed superseded 8642 restart probe |
+| `docs/governance/hermes_runtime_mutation.v1.json` | RELEASE_CANDIDATE machine-readable Runtime Phase topology/mutation/rollback contract with Linux-verified artifact/overlay/controller evidence; production apply still requires exact-SHA dry-run admission and separate BindReadOnlyPaths authorization |
 | `docs/governance/hermes-context-optimization.md` | Hermes context optimization, cache-friendly history, and soft reset |
 | `docs/governance/external-mcp-gateway.md` | External MCP gateway, admission, evidence, and proactive system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |

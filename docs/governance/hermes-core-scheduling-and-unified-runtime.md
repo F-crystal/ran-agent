@@ -230,24 +230,24 @@ Transition has two releases and only one Core write-path cutover.
 
 ### Runtime Phase
 
-Implementation checkpoint (2026-08-06): the immutable build-provenance
-manifest remains `LOCAL_BUILT_NOT_LINUX_VERIFIED`, while the separately
-append-only verification record now marks that exact artifact
-`LINUX_VERIFIED`. The final local build produced a
-133,517,442-byte archive with tree SHA256
-`0b8cdb8152ff5a91aac1368f299339156cec8ba4c5bbe874b247bdc3fd785317`,
+Implementation checkpoint (2026-08-06): the superseding immutable artifact is
+`LINUX_VERIFIED` and the mutation contract is
+`RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY`. The archive is 133,558,059 bytes,
+with tree SHA256
+`3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698`
 and archive SHA256
-`c42d8f69fc432ad18e33cee612c70c6e0bc3f4ce3fe3b4cb75936e0bd06940a5`.
-Two clean offline rebuilds were byte-identical after removing uv's
-install-time metadata from each installed wheel and its RECORD entry.
-The exact provenance is in `hermes_runtime_artifact.v1.json`; the designed
-topology mutation is in `hermes_runtime_mutation.v1.json`. Native Linux,
-relocation, read-only, compiled-import, system-terminfo, offline unified-profile,
-zero-lazy-install, and zero-Tirith gates passed on the target Linux host at
-2026-08-06 02:04; exact evidence is in
-`hermes_runtime_linux_verification.v1.json`. Rollback, exact-candidate capacity,
-topology transaction, and immutable-release gates remain pending, so this
-checkpoint does not authorize staging or deploy.
+`44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30`.
+It retains the deterministic offline v0.20 runtime and adds exactly eight
+digest-bound MCP server files as a service-private read-only overlay; the host
+checkout and production Node namespace keep the active `bb66f1e6` files.
+Native Linux, relocation, read-only, compiled-import, system-terminfo, offline
+unified-profile, zero-lazy-install, zero-Tirith, exact mount-namespace, and
+218-second MCP keepalive gates passed. Exact evidence, including the disclosed
+superseded probe that restarted only the v0.13 Lite gateway before recovering,
+is in `hermes_runtime_linux_verification.v1.json`. Exact final-candidate
+capacity/dry-run, independent adversarial CLEAR, and separate authorization for
+the eight `BindReadOnlyPaths` remain pending; this checkpoint does not
+authorize production apply.
 
 1. Build a candidate-SHA-bound offline v0.20 runtime artifact. Its manifest
    records upstream version/source digest, dependency lock digest, every wheel
@@ -371,12 +371,13 @@ free_before >= 15 GiB + peak_new_allocated_bytes
 
 `peak_new_allocated_bytes` includes candidate archive/tree, gate copy,
 dependencies, v0.20 runtime, snapshot, migration copy, and temporary files.
-A 2026-08-06 03:25 post-cleanup observation found 19,527,106,560 free bytes after the
-separately authorized 1,642,651,648-byte P3 validation tree was removed. The
-current-HEAD preliminary peak inventory is 1,714,864,682 bytes, leaving
-1,706,114,518 bytes above the 15 GiB floor plus peak requirement. This is a
-preliminary pass, not admission: free space is time-varying and the same
-inventory is recomputed against the exact candidate immediately before apply.
+A 2026-08-06 05:18 post-verification cleanup observed 18,587,557,888 free
+bytes; the exact 133,558,059-byte artifact was already staged and therefore
+counts as preallocated capacity. Against the contracted 1,715,167,443-byte
+peak inventory, this leaves 899,821,144 bytes above the 15 GiB floor plus peak
+requirement. This is a preliminary pass, not admission: free space is
+time-varying and the same inventory is recomputed against the exact candidate
+immediately before apply.
 
 Runtime pre-mutation admission proves the immutable artifact, mutation
 manifest, capacity, isolated smoke, and complete runtime rollback. Its atomic

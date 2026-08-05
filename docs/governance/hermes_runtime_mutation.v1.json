@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "LOCAL_BUILT_NOT_LINUX_VERIFIED",
+  "status": "RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY",
   "phase": "runtime-only",
   "requiredProductionHead": "bb66f1e6a8a400d599c7f86139107742bbedddc8",
   "artifactManifest": {
@@ -13,9 +13,9 @@
   },
   "linuxVerification": {
     "path": "docs/governance/hermes_runtime_linux_verification.v1.json",
-    "stage": "PENDING",
-    "result": "PENDING",
-    "verifiedAt": null,
+    "stage": "LOCAL_VERIFIED",
+    "result": "LINUX_VERIFIED",
+    "verifiedAt": "2026-08-06T05:18:20+08:00",
     "tarGzSha256": "44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30",
     "treeSha256": "3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698"
   },
@@ -171,15 +171,17 @@
     },
     "peakInventoryRequired": ["artifact archive", "expanded runtime tree", "immutable gate copy", "complete lite-home rollback snapshot", "temporary apply files"],
     "capacityObservation": {
-      "timestamp": "2026-08-06T03:25:33+08:00",
-      "freeBytes": 19527106560,
+      "timestamp": "2026-08-06T05:18:20+08:00",
+      "freeBytes": 18587557888,
+      "preallocatedArtifactBytes": 133558059,
+      "freeBytesBeforeStaging": 18721115947,
       "floorBytes": 16106127360,
       "requiredBytes": 17821294803,
-      "headroomBytes": 1705811757,
+      "headroomBytes": 899821144,
       "existingP3Bytes": 0,
       "existingP3DeletionAuthorized": true
     },
-    "current": "PENDING_NEW_ARTIFACT_LINUX_VERIFICATION_NOT_ADMISSION_EXACT_APPLY_RECHECK_REQUIRED",
+    "current": "PRELIMINARY_PASS_ARTIFACT_ALREADY_STAGED_EXACT_FINAL_CANDIDATE_DRY_RUN_RECHECK_REQUIRED",
     "requiredArtifactStatus": "LINUX_VERIFIED",
     "requiredCandidate": "exact-40-character-SHA",
     "requiredGates": "artifact manifest, Linux native/relocation/offline smoke, topology preflight, complete rollback, immutable root and runtime acceptance"
