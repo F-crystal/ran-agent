@@ -143,6 +143,9 @@ export async function handleExternalMcpGatewayMcpRequest(request, options = {}) 
       serverInfo: SERVER_INFO,
     };
   }
+  if (method === 'ping') {
+    return {};
+  }
   if (method === 'tools/list') {
     return { tools: buildExternalMcpGatewayTools({ diagnosticMode: options.diagnosticMode === true }) };
   }

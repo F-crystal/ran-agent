@@ -2240,6 +2240,9 @@ export async function handleSocialReaderMcpRequest(request, options = {}) {
       serverInfo: SERVER_INFO,
     };
   }
+  if (method === 'ping') {
+    return {};
+  }
   if (method === 'tools/list') {
     return { tools: buildSocialReaderTools(options.env || process.env) };
   }

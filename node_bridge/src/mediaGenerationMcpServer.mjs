@@ -159,6 +159,10 @@ export async function handleMediaGenerationMcpRequest(request, options = {}) {
     };
   }
 
+  if (method === 'ping') {
+    return {};
+  }
+
   if (method === 'tools/list') {
     return {
       tools: buildTools(),

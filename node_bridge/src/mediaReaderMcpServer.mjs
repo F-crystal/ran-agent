@@ -928,6 +928,9 @@ export async function handleMediaReaderMcpRequest(request, options = {}) {
       serverInfo: SERVER_INFO,
     };
   }
+  if (method === 'ping') {
+    return {};
+  }
   if (method === 'tools/list') {
     return { tools: buildMediaReaderTools() };
   }

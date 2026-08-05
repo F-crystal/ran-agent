@@ -130,6 +130,9 @@ export async function handleStickerCatalogMcpRequest(request, options = {}) {
       serverInfo: SERVER_INFO,
     };
   }
+  if (method === 'ping') {
+    return {};
+  }
   if (method === 'tools/list') {
     return { tools: buildStickerCatalogTools(options) };
   }

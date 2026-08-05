@@ -205,6 +205,10 @@ export async function handlePersonalMemoryMcpRequest(request, options = {}) {
     };
   }
 
+  if (method === 'ping') {
+    return {};
+  }
+
   if (method === 'tools/list') {
     return {
       tools: buildPersonalMemoryTools(),

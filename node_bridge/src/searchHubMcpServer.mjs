@@ -44,6 +44,9 @@ export async function handleSearchHubMcpRequest(request, options = {}) {
       serverInfo: SEARCH_HUB_SERVER_INFO,
     };
   }
+  if (method === 'ping') {
+    return {};
+  }
   if (method === 'tools/list') {
     return { tools: buildSearchHubTools() };
   }

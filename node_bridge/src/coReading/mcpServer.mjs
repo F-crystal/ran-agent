@@ -98,6 +98,9 @@ export async function handleCoReadingMcpRequest(request, options = {}) {
       serverInfo: CO_READING_SERVER_INFO,
     };
   }
+  if (method === 'ping') {
+    return {};
+  }
   if (method === 'tools/list') {
     return { tools: buildCoReadingTools() };
   }
