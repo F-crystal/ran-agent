@@ -10,29 +10,51 @@ contracts live in the linked governance docs below.
 
 ```text
 production_repository_sha: bb66f1e6a8a400d599c7f86139107742bbedddc8
-runtime_evidence_class: USER_SUPPLIED_RUNTIME
-local_o1_online_revalidation: not performed
-production_worktree: clean in owner-supplied 2026-07-31 preflight
-production_services: four core units active in owner-supplied 2026-07-31 preflight
+runtime_evidence_class: POINT_IN_TIME_AUDIT (2026-08-05T13:30:09+08:00..13:35:11+08:00)
+production_observation_stage: PROD_VERIFIED for the exact SHA and named runtime/storage/permission dimensions in the base audit window
+production_worktree: clean
+production_services: four core units active; direct Ombre Brain 18001 active; recall-only 18002 inactive
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
-rejected_deployment_candidates: 834eabef5a2e8883d3237f7b35c96f70d1fac7a9 (desktop-only Hermes path); f6f6048029de6e4c73b5b8b11f1441069770786c (release tests assumed Git metadata and non-root sudo behavior); 8ff3ce43d6b90bf6f972a8293b83a912e5f9cb77 (O1 contract test ignored the gate-provided Python path); 62fca911a09ea7246393cdedece048ee91b4abb5 (provider tests treated the Hermes source project as its runtime venv); 414210f238215d0f8ef83175851b5ed311ad5d06 (identity verifier treated login.defs allocation defaults as existing-account authority); 7649a9471b15b09e9aac25bed269a0e5d8b254dc (cross-user Ombre socket ownership was probed without the existing privilege seam); 8c259ddcd2a34e80400ac39e444876807960f689 (ran-agent wrapper re-read deployment-user env and exited before PID/listener); e0b20b172955af175004ac8a7a3cdc0018a2b698 (bootstrap could not resolve the service-managed Node path and later hit an unsafe cross-UID temporary lock); first four and e0b20b stopped before production mutation; 414210f and 8c259dd rolled back completely; the supplied 7649a94 trace alone does not establish its rollback completion
-production_storage: owner reported 38GB/59GB used, 19GB available, 68% utilization after removing seven verified state-less legacy transaction directories; governed recovery prunes only verified rollback-used payloads or verified state-less non-current transaction directories and then requires allocated-block, inode, candidate-stage, and full-snapshot headroom before mutation
-ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; undeployed
-v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; archived and pushed; undeployed
+production_hermes: v0.13.0; Lite/Full deepseek-v4-flash via official DeepSeek endpoint
+production_runtime_identity: observed ubuntu:ubuntu; core units declare User=ubuntu
+legacy_ran_agent_account_followup: POINT_IN_TIME_AUDIT (2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00); present UID 999/GID 988, nologin; no ran-agent-owned runtime process was observed in the base audit window
+production_storage: 39GB/59GB used, 19GB available, 68% utilization; inode use 23%
+permission_exposure: historical env backups observed at 0644/0664; personal_agent.db observed at 0644 under data directory 0755; contents not inspected; containment pending separate authorization
+production_memory_surface: existing direct Ombre Brain 18001 active/healthy; recall-only O1 18002 inactive; O2 absent
+digest_2026_08_05_followup: POINT_IN_TIME_AUDIT (2026-08-05T13:42:01.034+08:00..13:46:55.750+08:00); EXACTLY_ONCE_OBSERVED externally; Node about 66s; outbox sent attempt 1; one Feishu message; Python 30s timeout left no marker/timeline; do not retry occurrence
+digest_deadline_inputs_followup: POINT_IN_TIME_AUDIT (2026-08-05T14:24:21+08:00); Python service environment exposed HERMES_REPLY_TIMEOUT_SECONDS=1200 and FEISHU_SEND_TIMEOUT_SECONDS=30
+digest_correction_artifact: four-file patch atop b5b4ff43f8c3d5706192cabefcece49408b73558; unified diff sha256 ada5e89f1912ec0d208adbe91e43596f1528a1512a58f0d63ae5654de4df932f; src/personal_agent/outbound_channel.py, tests/test_outbound_channel.py, node_bridge/src/outboundServer.mjs, node_bridge/tests/outboundServer.test.mjs
+digest_correction_stage: LOCAL_VERIFIED (2026-08-05T14:25:28+08:00..14:25:29+08:00) by 7 Python and 67 Node focused/regression tests; caller deadline derived as Hermes deadline + Feishu deadline + 30s margin (1260s under observed 1200s/30s production values) plus live outbox transition clock; not deployed
+ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; ARCHIVED; not deployed; real cross-process recall contract blocker
+v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; ARCHIVED; not deployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
 node_receipt: deferred
-ombre_o2: a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7; independently reviewed implementation baseline; preserved while the Linux identity split is reverted; source fail-off; official release default enabled; non-authoritative, projection-only, pre-Gate-5; not deployed
-linux_runtime_identity: one existing RAN_AGENT_RUNTIME_USER/GROUP identity; default ubuntu; no account creation
-production_account_state: SERVER_UNKNOWN
+ombre_o2: a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7; ARCHIVED; projection-only; pre-Gate-5; not deployed
+unified_identity_o2_rollback: b5b4ff43f8c3d5706192cabefcece49408b73558; ARCHIVED; not deployed
 ombre_o2_total_delete: typed unsupported
 gate_5: not started, not authorized
 package_b_2_b_3: not started
 ```
 
-This production statement is `USER_SUPPLIED_RUNTIME`, not revalidated by this
-local integration line. The formal production release does not contain the
-archived O1 baseline, V4+O1 baseline, or O2 implementation.
-The owner-supplied preflight showed no tracked or untracked worktree changes.
+This production statement is a bounded `POINT_IN_TIME_AUDIT`, not a promise
+about state after the evidence window and not authorization to mutate service
+identity, permissions, storage, or the legacy account. The active release
+does not contain the archived recall-only O1 baseline, V4+O1 baseline, O2
+implementation, or unified-identity candidate.
+
+For the separately timestamped digest follow-up above, external delivery was
+observed exactly once, but Python completion truth diverged after its caller
+deadline expired. The `LOCAL_VERIFIED` caller-deadline ordering contract and live outbox-clock
+correction are not production facts until a separately isolated candidate is
+deployed and accepted.
+
+## Superseded Candidate Evidence
+
+The candidate chronology below is retained as historical failure evidence. It
+does not describe the current implementation, runtime identity, or deployment
+procedure; the release contract and the point-in-time block above take
+precedence.
+
 The first four failed candidate gates ran before snapshots, service
 interruption, checkout activation, or runtime mutation. Candidate `414210f`
 passed that gate, then its transaction rejected a host identity-policy
@@ -47,11 +69,11 @@ deployment-user `0600` env files under `set -e`; its owner-supplied trace does
 show `rollback-complete`. Production therefore remains on the recorded SHA.
 Server acceptance remains the authority after the next apply.
 
-The repository mainline keeps every O1 invariant from
+At that candidate evidence point, the repository mainline kept every O1 invariant from
 `1be3ee58919fb01f1c442d75ba2463e237fba0b2`, keeps Lite/Full on
 `deepseek-v4-flash` with explicit provider-boundary
 `thinking: {"type":"disabled"}`, and production-wires O2 for the next formal
-release. It is not a claim about the still-unrevalidated production host.
+release. It was not a claim about the production host at that time.
 
 ## Ombre O2 Reviewed Production Candidate Boundary
 
@@ -357,7 +379,10 @@ External MCP candidates
 
 ## Deployment And Diagnostics
 
-Standard deploy/drift repair is `bash scripts/apply-hermes-runtime-split.sh`.
+Configuration-drift repair inside an already selected release transaction is
+`bash scripts/apply-hermes-runtime-split.sh`; code deployment uses the
+candidate-specific immutable-SHA transaction in
+`docs/governance/hermes_release_deployment.md`.
 Run diagnostics through the repo scripts named in
 `docs/governance/server_runtime_commands.md`, including lite/full,
 external MCP, proactive events, multi-frontend, continuity, and Ombre Brain.

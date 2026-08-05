@@ -5,7 +5,7 @@ description: "Server runtime deployment and drift repair for ran-agent/Hermes. U
 
 # Server Runtime Skill
 
-Status: CURRENT (2026-06-23)
+Status: CURRENT (2026-08-05)
 
 ## Use When
 
@@ -21,8 +21,16 @@ These are Hermes runtime configuration conditions, not optional shell habits.
 When giving production Hermes deploy or repair commands, label them as
 configuration prerequisites.
 
-Always include the Python virtualenv activation in server deploy or diagnostic
-commands:
+Always include the Python virtualenv activation in server deploy, repair, or
+diagnostic commands:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+```
+
+For an authorized configuration-drift repair inside an already selected
+release transaction, use:
 
 ```bash
 cd /opt/ran_agent
@@ -30,15 +38,11 @@ source /opt/ran_agent/.venv/bin/activate
 bash scripts/apply-hermes-runtime-split.sh
 ```
 
-For standard deployment, prefer this sequence:
-
-```bash
-cd /opt/ran_agent
-source /opt/ran_agent/.venv/bin/activate
-git pull --ff-only
-bash scripts/apply-hermes-runtime-split.sh
-bash scripts/diagnose-lite-full.sh
-```
+Do not run `git pull`, `git switch`, or `git checkout` in the production
+checkout before deployment. The release transaction resolves and gates one
+immutable, reviewed candidate SHA. Do not use a floating `origin/main` apply as
+the default deployment instruction; follow the candidate-specific release
+contract in `docs/governance/hermes_release_deployment.md`.
 
 Do not ask the user to remember activation separately. Put it in the command
 block or make the script self-sufficient.

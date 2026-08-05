@@ -227,6 +227,7 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
 
   let channelMessage = null;
   const calls = [];
+  let clockTick = 0;
   const result = await handleScheduledAiDigestRequest({
     logger: { info() {}, warn() {}, error() {}, log() {} },
     env,
@@ -239,6 +240,7 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
       calls.push({ bin, args });
       return { stdout: '{"ok":true}' };
     },
+    nowImpl: () => new Date(Date.parse('2026-08-05T00:00:00.000Z') + (clockTick++ * 1000)),
   });
 
   assert.equal(result.status, 200);
@@ -261,6 +263,13 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   assert.equal(calls[0].bin, 'lark-cli');
   assert.equal(calls[0].args.includes('--user-id'), true);
   assert.equal(calls[0].args.includes('ou-home'), true);
+  const outboxState = JSON.parse(fs.readFileSync(
+    path.join(resolveStateDir(env), 'core', 'durable-outbox.json'),
+    'utf8'
+  ));
+  const outboxItem = outboxState.items.find((item) => item.outboxId === result.payload.outbox_id);
+  assert.ok(Date.parse(outboxItem.sendStartedAt) > Date.parse(outboxItem.createdAt));
+  assert.ok(Date.parse(outboxItem.deliveryCommittedAt) > Date.parse(outboxItem.sendStartedAt));
 });
 
 test('manual AI digest uses its operation scope to send one digest body exactly once', async (t) => {

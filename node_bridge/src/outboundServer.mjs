@@ -341,7 +341,7 @@ export async function handleScheduledAiDigestRequest({
   if (!replyText) {
     return { status: 503, payload: { ok: false, reason: 'digest_reply_empty' } };
   }
-  const outbox = createDurableOutbox({ env, now: () => runtimeNow });
+  const outbox = createDurableOutbox({ env, now: nowImpl });
   const outboxItem = await outbox.deliver({
     operationKey: `${mode}:${idempotencyKey}`,
     jobResultKey: `job-result:${idempotencyKey}`,

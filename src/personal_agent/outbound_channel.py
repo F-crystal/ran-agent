@@ -10,6 +10,25 @@ import urllib.request
 from personal_agent.config import AppConfig
 
 
+# The caller must outlive Node's Hermes and Feishu deadlines so their committed
+# delivery result can return before Python records its local completion truth.
+AI_DAILY_DIGEST_TIMEOUT_MARGIN_SECONDS = 30
+
+
+def _ai_daily_digest_request_timeout_seconds() -> int:
+    def positive_env_seconds(name: str, default: int) -> int:
+        try:
+            return max(1, int(os.environ.get(name, default)))
+        except (TypeError, ValueError):
+            return default
+
+    return (
+        positive_env_seconds("HERMES_REPLY_TIMEOUT_SECONDS", 180)
+        + positive_env_seconds("FEISHU_SEND_TIMEOUT_SECONDS", 30)
+        + AI_DAILY_DIGEST_TIMEOUT_MARGIN_SECONDS
+    )
+
+
 class NodeBridgeOutboundClient:
     """Tiny HTTP client for sending one proactive text through the local outbound bridge."""
 
@@ -58,7 +77,10 @@ class NodeBridgeOutboundClient:
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(
+            request,
+            timeout=_ai_daily_digest_request_timeout_seconds(),
+        ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         if payload.get("ok") is not True:
             raise RuntimeError("node bridge scheduled digest response missing ok=true")

@@ -1,14 +1,14 @@
 # Ombre Memory Skill
 
-Status: CURRENT (2026-07-24)
+Status: CURRENT (2026-08-05)
 
-`USER_SUPPLIED_RUNTIME`: known production SHA
-`bb66f1e6a8a400d599c7f86139107742bbedddc8` was not revalidated by this local
-O1 line. Production has manual hotfixes; O1 is uncommitted, unarchived, and
-undeployed. V4 Pro is frozen; Node Receipt is deferred; O2 is not
-started/authorized; Package B.2/B.3 have not started.
-
-Status: ACTIVE (2026-07-23)
+`POINT_IN_TIME_AUDIT` (2026-08-05): production SHA
+`bb66f1e6a8a400d599c7f86139107742bbedddc8` still uses the existing direct
+Ombre Brain path on `127.0.0.1:18001`. The recall-only O1 baseline and the O2
+baseline are archived but not deployed; `18002` was inactive and O2 was absent
+from the active revision/configuration. O1 must not advance to deployment while
+its real Python -> HTTP -> Node recall chain is not `LOCAL_VERIFIED`. V4 Pro
+is frozen; Node Receipt is deferred; Package B.2/B.3 have not started.
 
 ## Overview
 

@@ -6,33 +6,33 @@ This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
 manual systemd or env edits.
 
-`USER_SUPPLIED_RUNTIME`: production repository SHA is
-`bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local line has not
-revalidated it online. The owner-supplied 2026-07-31 preflight reported a clean
-worktree, Node v22.22.2 with `node:sqlite`, and all four core services active.
-Candidates `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` and
-`f6f6048029de6e4c73b5b8b11f1441069770786c` stopped at the immutable
-pre-mutation gate and did not change production. O1 baseline
-`1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed; the
-V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` and independently
-reviewed O2 implementation `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7`
-are archived and pushed but undeployed. The current reviewed line keeps O2
-but reuses the existing `RAN_AGENT_RUNTIME_USER/GROUP` service identity
-(default `ubuntu`) for Node, Ombre, and Hermes. Production account state is
-`SERVER_UNKNOWN`. The source remains fail-off, while the formal release defaults to Flash with O2 enabled. Commands below describe
-that target state, not behavior already asserted in production.
-The later candidate `8c259ddcd2a34e80400ac39e444876807960f689`
-passed the immutable gate but failed Ombre startup and rolled back completely;
-production therefore remains on the recorded SHA. An earlier failed trace
-reported `54GB/59GB` used, `3.3GB` available, and `95%` utilization; the owner
-later reported `38GB/59GB` used, `19GB` available, and `68%` utilization after
-removing seven verified state-less legacy transaction directories. Use only
-the verified pruner below; do not manually remove snapshot directories.
+`POINT_IN_TIME_AUDIT`
+(`2026-08-05T13:30:09+08:00..13:35:11+08:00`) observed production at
+`bb66f1e6a8a400d599c7f86139107742bbedddc8` with a clean worktree, Node
+v22.22.2, and four active core services. All observed runtime processes used
+`ubuntu:ubuntu`. Lite/Full used Hermes v0.13.0 with `deepseek-v4-flash`.
+The existing direct Ombre Brain service on `18001` was active; recall-only O1
+on `18002` was inactive and O2 was absent. Storage was 39/59 GB used, 19 GB
+available, 68%. These are bounded observations, not mutation authority.
+
+O1 `1be3ee5`, V4+O1 `c52f8ba`, O2 `a978444`, and unified-identity line
+`b5b4ff4` are archived but not deployed to production. Commands that describe
+`18002`, O2, or unified-identity apply behavior are target-release contracts,
+not claims about the active host. Historical failed traces included 95% disk
+utilization; that value is not current. Use only the verified pruner below and
+never remove snapshot directories manually.
+
+A separate account audit
+(`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy
+`ran-agent` account at UID 999/GID 988 with a nologin shell. No ran-agent-owned
+runtime process was observed in the base audit window. Do not mutate or delete
+the account without separate authorization.
 
 ## Source Of Truth
 
-- Formal main release: `bash scripts/deploy-hermes-main.sh --apply`
-- Reviewed release candidate: `bash scripts/deploy-hermes-candidate.sh --branch <remote-branch> --apply` or `bash scripts/deploy-hermes-candidate.sh --commit <40-char-sha> --apply`
+- Validate an exact reviewed release: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-run`
+- Apply that same exact release after separate authorization: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply`
+- `deploy-hermes-main.sh --dry-run` may discover and test the then-current main head, but it is not apply authority; record and review its resolved SHA, then use the exact `--commit` path above.
 - Deploy or repair lite/full runtime drift within an existing release
   transaction: `bash scripts/apply-hermes-runtime-split.sh`
 - Diagnose lite/full convergence:
@@ -116,12 +116,13 @@ transaction fetches a source ref only to resolve one SHA, gates an immutable
 stage, snapshots the active runtime, then changes the checkout only inside the
 apply transaction.
 
-The gate runs the same Git-less read-only candidate as root and as
-`ran-agent`. Before and after checkout activation, tracked paths are projected
-to their Git modes and the `ubuntu` checkout owner; root-owned restrictive
-residue is repaired through no-follow file descriptors, then the Node entry and
-runtime dependencies are imported as `ran-agent`. Do not manually `chown -R`
-or loosen repository env-file modes.
+The gate runs the same Git-less read-only candidate as root and as the
+validated non-root `RAN_AGENT_RUNTIME_USER/GROUP` identity (default
+`ubuntu:ubuntu`). Before and after checkout activation, tracked paths are
+projected to their Git modes and checkout owner; root-owned restrictive residue
+is repaired through no-follow file descriptors, then the Node entry and runtime
+dependencies are imported as that validated runtime identity. Do not manually
+`chown -R` or loosen repository env-file modes.
 
 After the quiesced Node and migration payloads extend the snapshot manifest,
 deploy reseals and re-verifies the in-progress snapshot before checkout. An
@@ -235,13 +236,19 @@ bash scripts/apply-hermes-runtime-split.sh
 
 ## Runtime Services
 
+The table is a release topology, not a statement that every optional unit is
+active. In the 2026-08-05 production audit, `8642`, `8643`, and the existing
+direct Ombre service on `18001` were active; `18002` and `18061` were inactive.
+For the undeployed O1 target, `18001` becomes the internal upstream and `18002`
+becomes the only recall surface exposed to Hermes.
+
 | Service | Port | Profile | Home | Purpose |
 |---------|------|---------|------|---------|
 | `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | Daily lite-context entry |
 | `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | Full debug/heavy-tool entry |
 | `ran-agent-xhs-public-sidecar.service` | `18061` | n/a | `/opt/ran_agent/.ran_agent_state/xhs-public-sidecar` | XHS-Downloader public API sidecar for `social_reader` |
-| `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | O1 target: loopback-only internal upstream |
-| `ran-agent-ombre-recall.service` | `18002` | n/a | `/opt/ran_agent` | O1 target: local recall-only MCP exposed to Lite/Full |
+| `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Current direct service; O1 target makes it internal-only |
+| `ran-agent-ombre-recall.service` | `18002` | n/a | `/opt/ran_agent` | Undeployed O1 target: recall-only MCP for Lite/Full |
 
 `8642` is a lite-context entry, not a security sandbox. Node bridge routes
 normal chat, XHS, media, and memory requests to lite by default, and routes

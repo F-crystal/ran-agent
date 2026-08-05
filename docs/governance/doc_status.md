@@ -2,45 +2,68 @@
 
 Status: CURRENT (2026-08-05)
 
-`USER_SUPPLIED_RUNTIME`: the known production repository SHA is
-`bb66f1e6a8a400d599c7f86139107742bbedddc8`; this local O1 line has not
-revalidated it online. The owner-supplied 2026-07-31 preflight reported a clean
-worktree and all four core units active. Rejected candidate lineage, including
-immutable-gate failures and the later transactional `414210f`, `7649a94`, and
-`8c259dd` apply failures, is maintained in
-`docs/governance/current_runtime_status.md`. The supplied `8c259dd` trace shows
-a complete rollback after a zero-PID Ombre startup failure; it is not production
-acceptance evidence. The owner reported `38GB/59GB` used, `19GB` available,
-and `68%` utilization after removing seven verified state-less legacy
-transaction directories. The reviewed recovery path prunes
-only verified completed payloads, then requires fresh allocated-block, inode,
-candidate-stage, and full-snapshot headroom before any copy or service stop;
-partial copies cannot enter the rollback manifest.
-Candidate `e0b20b172955af175004ac8a7a3cdc0018a2b698` also remains rejected: its
-bootstrap stopped before production mutation on service-Node resolution and an
-unsafe cross-UID temporary lock. The current controller remediation is local
-pre-deployment evidence, not a production-state claim. Its final Git-less,
-read-only desktop `--all` gate passed the real patched Ombre and Hermes v0.13
-boundaries, `hermes-release-smoke: all-ok`, 380 Python tests with one explicit
-Linux-root verifier skip, and `workflow_guard`; server root checks remain part
-of pre-mutation deployment acceptance.
-Ombre O1 baseline
-`1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
-V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
-pushed but undeployed. Node Receipt is deferred and its failed source is not
-reintroduced. Ombre O2 implementation
-`a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` passed independent v0.7
-implementation review and is archived and pushed to `main`. It remains
-the independently reviewed implementation baseline. The current line preserves
-O2 while reverting the unapproved Linux identity split: all managed services
-reuse the existing runtime identity (default `ubuntu`). Production account
-state is `SERVER_UNKNOWN`; production is still undeployed. Gate 5 is neither executed nor authorized, and
-`total_delete` remains typed unsupported.
-Package B.2/B.3 have not started.
+`POINT_IN_TIME_AUDIT`
+(`2026-08-05T13:30:09+08:00..13:35:11+08:00`) revalidated production SHA
+`bb66f1e6a8a400d599c7f86139107742bbedddc8`, a clean worktree, four active core
+units, Hermes v0.13.0 with `deepseek-v4-flash`, the existing direct Ombre path
+on `18001`, and 68% storage utilization (39/59 GB used, 19 GB available).
+Recall-only O1 on `18002` was inactive and O2 was absent from the active
+revision/configuration. All observed runtime processes used `ubuntu:ubuntu`.
+Several historical env backups and the personal memory database also had
+over-broad read modes. Contents were not inspected; containment is pending
+separate authorization.
+
+A separate `POINT_IN_TIME_AUDIT`
+(`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) confirmed that the
+legacy `ran-agent` account remained present with UID 999/GID 988 and a nologin
+shell. Combined with the base window's process inventory, no ran-agent-owned
+runtime process was observed. This does not authorize identity mutation or
+account deletion.
+
+For the single 2026-08-05 08:00 digest occurrence, a separate
+`POINT_IN_TIME_AUDIT`
+(`2026-08-05T13:42:01.034+08:00..13:46:55.750+08:00`) established
+`EXACTLY_ONCE_OBSERVED`: Node completed in about 66 seconds, the durable outbox
+recorded `sent` on attempt 1, and exactly one matching Feishu message was
+observed. The Python caller timed out at 30 seconds and persisted no sent marker
+or timeline row. This is occurrence-scoped evidence, not a global exactly-once
+guarantee, and that occurrence must not be retried.
+
+The four-file digest correction atop `b5b4ff4` is bound by unified-diff SHA-256
+`ada5e89f1912ec0d208adbe91e43596f1528a1512a58f0d63ae5654de4df932f`.
+Its caller deadline is derived as Hermes deadline + Feishu deadline + 30-second
+margin. A read-only Python-service environment check at
+`2026-08-05T14:24:21+08:00` observed 1200/30 production values, yielding a
+1260-second caller deadline; its
+outbox transitions use a live clock. The artifact is `LOCAL_VERIFIED` by 7
+Python and 67 Node tests in
+`2026-08-05T14:25:28+08:00..14:25:29+08:00`; it is not deployed or
+production-verified.
+
+O1 `1be3ee5`, V4+O1 `c52f8ba`, O2 `a978444`, and the unified-identity/O2
+rollback line `b5b4ff4` are `ARCHIVED` and not deployed to production. O1 has a
+known blocker: its real Python -> HTTP -> Node recall contract has not passed
+end-to-end validation. Gate 5 is not authorized, `total_delete` remains
+unsupported, Node Receipt is deferred, and Package B.2/B.3 have not started.
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
 `docs/governance/`.
+
+## Lifecycle Stages
+
+Stages describe completed lifecycle events for one exact artifact and scope;
+they are not permanent quality scores. Every claim binds its artifact,
+evidence, and time. A separately recorded known blocker prevents advancement.
+
+| Stage | Meaning |
+|---|---|
+| `DESIGNED` | An approved contract or design exists; no implementation claim. |
+| `IMPLEMENTED` | Code exists for the named scope; no validation or deployment claim. |
+| `LOCAL_VERIFIED` | Required isolated/local acceptance passed for that exact artifact. |
+| `ARCHIVED` | The exact artifact was committed and pushed with archive evidence; this is not deployment approval. |
+| `DEPLOYED` | The production mutation completed; no post-deploy acceptance claim. |
+| `PROD_VERIFIED` | Bounded production acceptance or observation passed for the named dimensions and time window. |
 
 ## Public Source Of Truth
 

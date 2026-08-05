@@ -4,9 +4,9 @@
 
 Status: CURRENT (2026-08-05)
 
-`USER_SUPPLIED_RUNTIME`：已知生产仓库 SHA 为 `bb66f1e6a8a400d599c7f86139107742bbedddc8`，生产仍是 DeepSeek V4 Flash；2026-07-31 的用户预检显示工作树干净、四个核心服务均为 active，本地未在线复核。候选 `834eabef5a2e8883d3237f7b35c96f70d1fac7a9` 与 `f6f6048029de6e4c73b5b8b11f1441069770786c` 均在不可变预变更门禁停止，未改变生产。V4+O1 基线 `c52f8ba9b26338204e8ae189d1f1df5f3800e630` 与通过独立实施复审的 O2 基线 `a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` 已归档并推送但均未部署。正式发布仍默认保持 Flash 并启用 O2；生产未部署，`total_delete` 仍为 typed unsupported，Gate 5 未开始。Node Receipt deferred 且失败差量未恢复；Package B.2/B.3 未开始。
+`POINT_IN_TIME_AUDIT`（2026-08-05）：生产仍在 `bb66f1e6a8a400d599c7f86139107742bbedddc8` 且工作树干净；四个核心服务和现有直连 Ombre `18001` active，O1 recall-only `18002` inactive，O2 不在活动 revision/configuration 中。观测到的运行进程均为 `ubuntu:ubuntu`；旧 `ran-agent` 账号仍存在但空闲，仅保留回滚兼容。Lite/Full 使用 Hermes v0.13.0 + DeepSeek V4 Flash，磁盘使用率为 68%。完整时间窗与边界见 `docs/governance/current_runtime_status.md`。
 
-当前仓库已撤销新增 `ran-agent` Linux 服务身份：Node、Ombre 与 Hermes 的目标稳态统一复用 `RAN_AGENT_RUNTIME_USER/GROUP`（默认 `ubuntu`）。本地事务测试覆盖旧身份 token 备份、目标身份切换及按快照来源身份回滚；O2 行为保留，生产账号现状为 `SERVER_UNKNOWN`，尚未部署验证。
+unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` 已归档并推送，但尚未部署到生产。它保留 O2 并撤销新增 Linux 服务身份；O1/O2 候选仍是 `ARCHIVED`、未部署，`total_delete` unsupported，Gate 5 未授权，Package B.2/B.3 未开始。
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -177,10 +177,12 @@ cd node_bridge
 ./start_node.sh
 ```
 
-正式生产代码发布使用 immutable-SHA transaction：
+正式生产代码发布使用同一个已审核的 40 位 immutable SHA：
 
 ```bash
-bash scripts/deploy-hermes-main.sh --apply
+bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-run
+# 对同一 SHA 另行授权 apply 后：
+bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
 ```
 
 release 内的配置应用与既有 runtime 漂移修复使用：

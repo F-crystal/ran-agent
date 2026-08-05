@@ -1,6 +1,6 @@
 # Delivery Evidence
 
-Status: CURRENT (2026-07-19)
+Status: CURRENT (2026-08-05)
 
 ## Purpose
 
@@ -133,7 +133,14 @@ Every blocker needs a stable ID, violated invariant, minimal reproduction, and c
 
 ## Evidence Classes
 
-Record conclusions as `STATIC`, `TESTED`, `USER_SUPPLIED_RUNTIME`, or `SERVER_UNKNOWN`, followed by `observation → inference → decision`.
+Record conclusions as `STATIC`, `TESTED`, `USER_SUPPLIED_RUNTIME`,
+`POINT_IN_TIME_AUDIT`, or `SERVER_UNKNOWN`, followed by
+`observation → inference → decision`.
+
+`POINT_IN_TIME_AUDIT` means a direct, read-only observation of an external
+runtime during a bounded, timestamped window. It supports only the named
+dimensions in that window; it neither authorizes mutation nor asserts that the
+state persisted after the observation.
 
 ## Human-Only Decisions
 

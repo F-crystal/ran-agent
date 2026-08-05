@@ -27,7 +27,15 @@ class NodeBridgeOutboundClientTest(TestCase):
 
     def test_daily_digest_sends_the_private_control_secret(self) -> None:
         with (
-            patch.dict(os.environ, {"RAN_AGENT_INTERNAL_CONTROL_SECRET": "private-control-secret"}, clear=True),
+            patch.dict(
+                os.environ,
+                {
+                    "RAN_AGENT_INTERNAL_CONTROL_SECRET": "private-control-secret",
+                    "HERMES_REPLY_TIMEOUT_SECONDS": "1200",
+                    "FEISHU_SEND_TIMEOUT_SECONDS": "30",
+                },
+                clear=True,
+            ),
             patch("personal_agent.outbound_channel.urllib.request.urlopen", return_value=_Response()) as urlopen,
         ):
             result = self.client.send_ai_daily_digest("verified facts", mode="manual", operation_id="op_" + "a" * 32)
@@ -35,6 +43,7 @@ class NodeBridgeOutboundClientTest(TestCase):
         self.assertEqual(result["delivery_status"], "sent")
         request = urlopen.call_args.args[0]
         self.assertEqual(request.get_header("Authorization"), "Bearer private-control-secret")
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 1260)
 
     def test_daily_digest_fails_closed_without_the_private_control_secret(self) -> None:
         with patch.dict(os.environ, {}, clear=True), patch("personal_agent.outbound_channel.urllib.request.urlopen") as urlopen:

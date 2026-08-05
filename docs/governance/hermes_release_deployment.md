@@ -2,21 +2,23 @@
 
 Status: CURRENT (2026-08-05)
 
-`USER_SUPPLIED_RUNTIME`: the 2026-08-03 apply attempt for candidate
-`e85301fef053dd02d920af61fa5db01f2b381d3b` stopped before service mutation
-because the old checkout did not contain the transitive-only
-`@mozilla/readability` package. The active server SHA has not been re-observed
-after that failure. The current release line declares the complete direct Node
-runtime dependency closure, installs it from the candidate lock before the
-snapshot boundary, and switches it with the candidate checkout. Ombre O1 baseline
-`1be3ee58919fb01f1c442d75ba2463e237fba0b2` is archived but undeployed. The
-V4+O1 baseline `c52f8ba9b26338204e8ae189d1f1df5f3800e630` is archived and
-pushed but undeployed. Node Receipt is deferred. O2 implementation
-`a978444fc94f21c7d84df1e65e6fa8a8eb7dfdd7` passed independent v0.7
-implementation review and is archived and pushed to `main`, but remains
-undeployed. The current reviewed line preserves O2 while reverting the
-unapproved Linux identity split: source remains fail-off, while the formal release defaults to Flash with O2
-enabled (Gate 5 not started or authorized; `total_delete` typed unsupported).
+`POINT_IN_TIME_AUDIT`
+(`2026-08-05T13:30:09+08:00..13:35:11+08:00`) revalidated active production at
+`bb66f1e6a8a400d599c7f86139107742bbedddc8` with a clean worktree, four active
+core services, observed `ubuntu:ubuntu` runtime processes, Hermes v0.13.0 with
+`deepseek-v4-flash`, and 68% storage utilization. The existing direct Ombre
+service on `18001` was active; recall-only O1 on `18002` was inactive and O2
+was absent. A separate account audit
+(`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy
+`ran-agent` account at UID 999/GID 988 with a nologin shell; no ran-agent-owned
+runtime process was observed in the base window. This evidence neither deploys
+a candidate nor authorizes account or permission changes.
+
+O1 `1be3ee5`, V4+O1 `c52f8ba`, O2 `a978444`, and unified-identity line
+`b5b4ff4` are archived but not deployed to production. The current release
+contract preserves O2 while using the validated existing
+`RAN_AGENT_RUNTIME_USER/GROUP` identity (default `ubuntu:ubuntu`). Gate 5 is
+not authorized, `total_delete` is unsupported, Node Receipt is deferred, and
 Package B.2/B.3 have not started.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
@@ -38,6 +40,11 @@ Never run `git pull`, `git switch`, `git checkout`, `git reset`, or `git
 clean` as a pre-deploy action in `/opt/ran_agent`.
 
 ## Release Lineage
+
+This section is historical failure evidence. Retired dedicated-account and
+candidate-specific identities below are not the current runtime or release
+contract; the bounded production statement and unified-identity contract above
+take precedence.
 
 The owner-supplied known production repository revision is
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`. Candidate
@@ -206,16 +213,17 @@ the checkout revision being restored.
 | Enter the checkout | `cd /opt/ran_agent` | Stop if this is not the active production checkout. |
 | Activate the managed Python environment | `source /opt/ran_agent/.venv/bin/activate` | The command succeeds. |
 | Confirm the old checkout is clean | `git status --short` | No output. Any output stops bootstrap. |
-| Fetch only the reviewed candidate object | `git fetch --no-tags origin codex/hermes-dual-spec-implementation` | Fetch succeeds; production HEAD and files remain unchanged. |
-| Resolve its immutable SHA | `git rev-parse --verify refs/remotes/origin/codex/hermes-dual-spec-implementation^{commit}` | Record the full SHA as `CANDIDATE`; stop on failure. |
-| Extract the bootstrap source outside the checkout | `git show CANDIDATE:scripts/bootstrap-hermes-release.sh > /tmp/ran-agent-bootstrap.sh` | Replace `CANDIDATE` with the recorded SHA. Only `/tmp` changes. |
-| Verify bootstrap source digest | `printf '%s  %s\n' 'b6800f3e23e7c448c463c4b9c52e4e16dbb5a662d28bc28551251d08fce0bb3b' /tmp/ran-agent-bootstrap.sh | sha256sum -c -` | Expect `OK`. Stop on any mismatch; do not execute the file. |
-| Make the temporary file owner-only | `chmod 700 /tmp/ran-agent-bootstrap.sh` | Succeeds. |
-| Validate the staged framework without service interruption | `bash /tmp/ran-agent-bootstrap.sh --dry-run CANDIDATE` | Prints `bootstrap-ok candidate=…`; stop on failure. |
-| Apply through the common transaction (**service interruption**) | `bash /tmp/ran-agent-bootstrap.sh --apply CANDIDATE` | Prints the ordinary transaction result and then `bootstrap-ok`. Retain its snapshot path; any failure auto-rolls back once snapshotting begins. |
+| Fetch the reviewed source ref | `git fetch --no-tags origin '<reviewed-source-ref>'` | Replace the placeholder with the reviewed ref. Fetch succeeds; production HEAD and files remain unchanged. |
+| Bind the fetched object to the reviewed immutable SHA | `CANDIDATE="$(git rev-parse --verify FETCH_HEAD^{commit})"; test "$CANDIDATE" = '<reviewed-full-candidate-sha>'` | Replace the placeholder with the separately reviewed full SHA. Any mismatch stops bootstrap. |
+| Create a private extraction directory | `BOOTSTRAP_DIR="$(mktemp -d /tmp/ran-agent-bootstrap.XXXXXX)"; chmod 700 "$BOOTSTRAP_DIR"` | Record `BOOTSTRAP_DIR`; only `/tmp` changes. |
+| Extract the bootstrap and its candidate-owned manifest | `git show "${CANDIDATE}:scripts/bootstrap-hermes-release.sh" > "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh"; git show "${CANDIDATE}:docs/governance/hermes_release_bootstrap.v1.sha256" > "$BOOTSTRAP_DIR/manifest"` | Both files come from the exact reviewed candidate. |
+| Verify the bootstrap against that manifest | `EXPECTED="$(awk '$2 == "scripts/bootstrap-hermes-release.sh" { print $1 }' "$BOOTSTRAP_DIR/manifest")"; test "$(awk '$2 == "scripts/bootstrap-hermes-release.sh" { count += 1 } END { print count + 0 }' "$BOOTSTRAP_DIR/manifest")" -eq 1; printf '%s  %s\n' "$EXPECTED" "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh" > "$BOOTSTRAP_DIR/bootstrap-only.sha256"; sha256sum -c "$BOOTSTRAP_DIR/bootstrap-only.sha256"` | Expect `OK`. Stop on a missing, duplicate, malformed, or mismatched entry; do not execute the file. |
+| Make the temporary bootstrap owner-only | `chmod 700 "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh"` | Succeeds. |
+| Validate the staged framework without service interruption | `bash "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh" --dry-run "$CANDIDATE"` | Prints `bootstrap-ok candidate=…`; stop on failure. |
+| Apply through the common transaction (**service interruption**) | `bash "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh" --apply "$CANDIDATE"` | Prints the ordinary transaction result and then `bootstrap-ok`. Retain its snapshot path; any failure auto-rolls back once snapshotting begins. |
 
 The bootstrap validates the exact SHA, rejects every dirty worktree, obtains
-only the six files named by
+only the seven files named by
 `docs/governance/hermes_release_bootstrap.v1.sha256` from that commit, and
 checks every source against that candidate-owned manifest.
 It invokes the same `deploy-hermes-release.sh` transaction as normal releases;
@@ -265,7 +273,8 @@ also requires a concrete Python 3.12 executable and all real-process gate
 assets before snapshot, service interruption, or checkout activation. The
 immutable pre-mutation gate runs in `code-only` mode and forbids live Ombre
 inputs; after prepare, a required real-process gate runs the pinned source,
-venv, Git, patch, and server probes as `ran-agent`, never as root. Root remains
+venv, Git, patch, and server probes as the validated non-root runtime identity,
+never as root. Root remains
 only the transaction/ownership orchestrator and does not execute bytes writable
 by the service account.
 
@@ -412,20 +421,25 @@ configured accepted rollback points.
 | Check artifact location before deploy | `sudo test ! -e /opt/ran_agent/.ran_agent_state/snapshots && echo separate` | `separate`; if a custom artifact root is used, confirm it is outside the state directory. |
 | Verify a printed snapshot later | `sudo test -s SNAPSHOT_DIR/prior-head -a -f SNAPSHOT_DIR/manifest -a -f SNAPSHOT_DIR/services && echo snapshot-ok` | Replace `SNAPSHOT_DIR` with the exact printed path; expect `snapshot-ok`. Stop if not. |
 
-## 3. Formal Main Release
+## 3. Formal Main-Derived Release
 
-Only use this after the intended code is merged to `origin/main`.
+Only use this after the intended code is merged to `origin/main`. Resolve it
+once, record the exact SHA, and use that same SHA for validation and apply.
+Never authorize an apply by branch name or by a prior dry-run of a different
+resolution.
 
 | Purpose | Command | Expected result / stop condition |
 |---|---|---|
-| Validate main candidate without moving production | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-main.sh --dry-run` | Prints the resolved SHA and succeeds. A failure leaves `/opt/ran_agent` unchanged; stop. |
-| Apply main (**service interruption**) | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-main.sh --apply` | Prints `apply-ok candidate=SHA snapshot=SNAPSHOT_DIR`. Any failure triggers automatic rollback; retain the printed snapshot and stop. |
+| Resolve the intended main object | `git fetch --no-tags origin main && git rev-parse --verify refs/remotes/origin/main^{commit}` | Record the full output as `REVIEWED_SHA`. This changes only remote-tracking objects; stop on failure. |
+| Validate the exact candidate without moving production | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --commit REVIEWED_SHA --dry-run` | Replace `REVIEWED_SHA` with the recorded 40-character value. A failure leaves `/opt/ran_agent` unchanged; stop. |
+| Apply that exact candidate (**service interruption; separate authorization**) | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --commit REVIEWED_SHA --apply` | Use the identical reviewed SHA. Prints `apply-ok candidate=SHA snapshot=SNAPSHOT_DIR`; any failure triggers automatic rollback. |
 | Confirm active SHA | `git rev-parse HEAD` | Equals the `candidate` SHA from apply output. Stop and use rollback if different. |
 | Confirm blocking production acceptance | `source /opt/ran_agent/.venv/bin/activate && bash scripts/verify-hermes-release.sh --release` | Prints `blocking-ok`. Failure is a release failure; run explicit rollback. |
 
-The main wrapper runs `git fetch --no-tags origin main`, resolves
-`refs/remotes/origin/main` once, and passes that SHA to the common transaction.
-It never pre-switches the active checkout.
+The main wrapper remains a convenience for discovery/dry-run. It must not be
+used as apply authority because a later invocation can resolve a newer main
+head. The exact `--commit` path above passes the reviewed SHA to the common
+transaction and never pre-switches the active checkout.
 
 ## 4. Release Candidate
 
@@ -434,9 +448,8 @@ production source.
 
 | Purpose | Command | Expected result / stop condition |
 |---|---|---|
-| Discover a remote candidate branch | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --branch codex/example-candidate --dry-run` | Prints one candidate SHA; the active checkout remains unchanged. Stop on failure. |
-| Apply that SHA (**service interruption**) | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --branch codex/example-candidate --apply` | Prints candidate and snapshot. Failure auto-rolls back; stop. |
-| Apply a specifically reviewed SHA | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --commit 0123456789abcdef0123456789abcdef01234567 --apply` | Use only the real reviewed SHA; same transaction and stop rules. |
+| Discover a remote candidate branch | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --branch codex/example-candidate --dry-run` | Prints one candidate SHA; record it as `REVIEWED_SHA`. The active checkout remains unchanged. Stop on failure. |
+| Apply that exact SHA (**service interruption; separate authorization**) | `source /opt/ran_agent/.venv/bin/activate && bash scripts/deploy-hermes-candidate.sh --commit REVIEWED_SHA --apply` | Replace `REVIEWED_SHA` with the recorded 40-character value. Failure auto-rolls back; stop. |
 | Run optional specialty diagnostics | `source /opt/ran_agent/.venv/bin/activate && bash scripts/verify-hermes-release.sh --specialized` | Prints only `specialized-ok` or non-blocking `specialized-warning`; warnings do not change release status but must be recorded. |
 
 The blocking acceptance is `accept-hermes-release.sh` plus strict
@@ -480,8 +493,8 @@ O2 posture without weakening O1 recall-only behavior.
 
 Ombre listener ownership checks must run `ss -ltnp` through the same privilege
 seam used for `systemctl show MainPID`; an unprivileged process view is not
-authoritative across the `ubuntu` deployment account and `ran-agent` service
-account. Startup remains bounded and reports separate active, PID-valid,
+authoritative across the deployment account and validated runtime service
+identity. Startup remains bounded and reports separate active, PID-valid,
 MainPID-listener, and HTTP-health results before dependent services start.
 
 ## 5. Difference Record And Acceptance Evidence
