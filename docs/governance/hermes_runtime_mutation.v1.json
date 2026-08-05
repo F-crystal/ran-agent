@@ -182,7 +182,7 @@
       "existingP3Bytes": 0,
       "existingP3DeletionAuthorized": true
     },
-    "current": "PRELIMINARY_PASS_ARTIFACT_ALREADY_STAGED_EXACT_FINAL_CANDIDATE_DRY_RUN_RECHECK_REQUIRED",
+    "current": "PRELIMINARY_PASS_NOT_ADMISSION_ARTIFACT_ALREADY_STAGED_EXACT_FINAL_CANDIDATE_DRY_RUN_RECHECK_REQUIRED",
     "requiredArtifactStatus": "LINUX_VERIFIED",
     "requiredCandidate": "exact-40-character-SHA",
     "requiredGates": "artifact manifest, Linux native/relocation/offline smoke, topology preflight, complete rollback, immutable root and runtime acceptance"
