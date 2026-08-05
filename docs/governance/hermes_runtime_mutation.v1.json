@@ -179,7 +179,7 @@
       "existingP3Bytes": 0,
       "existingP3DeletionAuthorized": true
     },
-    "current": "PENDING_NEW_ARTIFACT_LINUX_VERIFICATION_AND_EXACT_APPLY_RECHECK",
+    "current": "PENDING_NEW_ARTIFACT_LINUX_VERIFICATION_NOT_ADMISSION_EXACT_APPLY_RECHECK_REQUIRED",
     "requiredArtifactStatus": "LINUX_VERIFIED",
     "requiredCandidate": "exact-40-character-SHA",
     "requiredGates": "artifact manifest, Linux native/relocation/offline smoke, topology preflight, complete rollback, immutable root and runtime acceptance"
