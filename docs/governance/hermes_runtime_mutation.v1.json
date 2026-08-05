@@ -172,8 +172,9 @@
     "peakInventoryRequired": ["artifact archive", "expanded runtime tree", "immutable gate copy", "complete lite-home rollback snapshot", "temporary apply files"],
     "capacityObservation": {
       "timestamp": "2026-08-06T05:18:20+08:00",
-      "freeBytes": 18587557888,
+      "freeBytesNow": 18587557888,
       "preallocatedArtifactBytes": 133558059,
+      "freeBytes": 18721115947,
       "freeBytesBeforeStaging": 18721115947,
       "floorBytes": 16106127360,
       "requiredBytes": 17821294803,
