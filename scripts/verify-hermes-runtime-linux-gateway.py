@@ -12,6 +12,7 @@ import stat
 import subprocess
 import time
 import urllib.request
+import hashlib
 from pathlib import Path
 
 
@@ -40,6 +41,49 @@ def require_loopback_only() -> dict[str, object]:
     return {"interfaces": ["lo"], "ipv4Routes": 0, "ipv6Routes": 0}
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def mount_companion_overlay(runtime: Path, manifest: dict[str, object], repo_root: Path) -> dict[str, str]:
+    overlay = manifest.get("companionOverlay")
+    files = overlay.get("files") if isinstance(overlay, dict) else None
+    if not isinstance(files, list) or len(files) != 8:
+        raise RuntimeError("companion overlay manifest invalid")
+    subprocess.run(["/usr/bin/mount", "--make-rprivate", "/"], check=True)
+    baseline = {}
+    for item in files:
+        if not isinstance(item, dict):
+            raise RuntimeError("companion overlay entry invalid")
+        source = runtime / str(item["artifactPath"])
+        destination = Path(str(item["destination"]))
+        if destination != repo_root / str(item["source"]):
+            raise RuntimeError(f"companion overlay destination escapes repo: {destination}")
+        if source.is_symlink() or not source.is_file() or destination.is_symlink() or not destination.is_file():
+            raise RuntimeError(f"companion overlay path invalid: {destination}")
+        baseline[str(destination)] = sha256_file(destination)
+        if sha256_file(source) != item["sourceSha256"]:
+            raise RuntimeError(f"companion overlay source digest mismatch: {source}")
+        subprocess.run(["/usr/bin/mount", "--bind", str(source), str(destination)], check=True)
+        subprocess.run(["/usr/bin/mount", "-o", "remount,bind,ro", str(destination)], check=True)
+        if sha256_file(destination) != item["sourceSha256"]:
+            raise RuntimeError(f"companion overlay bind mismatch: {destination}")
+    return baseline
+
+
+def unmount_companion_overlay(manifest: dict[str, object], baseline: dict[str, str]) -> None:
+    files = manifest["companionOverlay"]["files"]
+    for item in reversed(files):
+        subprocess.run(["/usr/bin/umount", str(item["destination"])], check=True)
+    for destination, expected in baseline.items():
+        if sha256_file(Path(destination)) != expected:
+            raise RuntimeError(f"companion overlay changed host file: {destination}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--archive", type=Path, required=True)
@@ -55,6 +99,8 @@ def main() -> int:
         raise SystemExit("requires Linux x86_64 root harness")
     if os.readlink("/proc/self/ns/net") == os.readlink("/proc/1/ns/net"):
         raise SystemExit("requires an isolated network namespace")
+    if os.readlink("/proc/self/ns/mnt") == os.readlink("/proc/1/ns/mnt"):
+        raise SystemExit("requires an isolated mount namespace")
     network = require_loopback_only()
     subprocess.run(["/usr/sbin/ip", "link", "set", "lo", "up"], check=True)
     network = require_loopback_only()
@@ -89,6 +135,7 @@ def main() -> int:
     if any(path.lstat().st_mode & 0o222 for path in [runtime, *builder.walk_tree(runtime)] if not path.is_symlink()):
         raise RuntimeError("runtime remains writable")
     before = builder.tree_digest(runtime)
+    overlay_baseline = mount_companion_overlay(runtime, manifest, Path(args.repo_root))
 
     home = args.scratch / "home"
     profile_dir = home / "profiles/ran-assistant-lite"
@@ -149,35 +196,38 @@ def main() -> int:
         "--replace", "--external-supervisor", "--accept-hooks",
     ]
     log_path = args.scratch / "gateway.log"
-    with log_path.open("wb") as log:
-        process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
-        try:
-            payload = None
-            for _ in range(120):
-                if process.poll() is not None:
-                    break
-                try:
-                    request = urllib.request.Request(
-                        f"http://127.0.0.1:{port}/v1/models",
-                        headers={"Authorization": f"Bearer {key}"},
-                    )
-                    with urllib.request.urlopen(request, timeout=1) as response:
-                        payload = json.loads(response.read())
-                    break
-                except Exception:
-                    time.sleep(0.25)
-            if payload is None:
-                raise RuntimeError(f"gateway did not become ready; exit={process.poll()}\n{log_path.read_text(errors='replace')}")
-            if "ran-assistant-lite" not in json.dumps(payload):
-                raise RuntimeError(f"unexpected /v1/models response: {payload}")
-        finally:
-            if process.poll() is None:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=20)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait(timeout=5)
+    try:
+        with log_path.open("wb") as log:
+            process = subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, start_new_session=True)
+            try:
+                payload = None
+                for _ in range(120):
+                    if process.poll() is not None:
+                        break
+                    try:
+                        request = urllib.request.Request(
+                            f"http://127.0.0.1:{port}/v1/models",
+                            headers={"Authorization": f"Bearer {key}"},
+                        )
+                        with urllib.request.urlopen(request, timeout=1) as response:
+                            payload = json.loads(response.read())
+                        break
+                    except Exception:
+                        time.sleep(0.25)
+                if payload is None:
+                    raise RuntimeError(f"gateway did not become ready; exit={process.poll()}\n{log_path.read_text(errors='replace')}")
+                if "ran-assistant-lite" not in json.dumps(payload):
+                    raise RuntimeError(f"unexpected /v1/models response: {payload}")
+            finally:
+                if process.poll() is None:
+                    os.killpg(process.pid, signal.SIGTERM)
+                    try:
+                        process.wait(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait(timeout=5)
+    finally:
+        unmount_companion_overlay(manifest, overlay_baseline)
 
     lazy_probe = r'''
 from tools import lazy_deps, tirith_security
@@ -228,6 +278,7 @@ if tirith_security.ensure_installed(log_failures=False) is not None:
         "model": "ran-assistant-lite",
         "network": {"mode": "loopback-only", **network},
         "cronJobs": 0,
+        "companionOverlayFiles": len(manifest["companionOverlay"]["files"]),
     }, sort_keys=True))
     return 0
 
