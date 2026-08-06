@@ -42,6 +42,17 @@ Python and 67 Node tests in
 `2026-08-05T14:25:28+08:00..14:25:29+08:00`; it is not deployed or
 production-verified.
 
+The duplicate JSON observed after recent AI digests is a separate output-boundary
+defect: Hermes sometimes returned visible prose followed by the same private reply
+envelope, while the bridge recognized envelopes only when the whole content was
+JSON. The shared Hermes response parser now recognizes only a valid v1 trailing
+envelope whose `message` exactly matches the preceding prose, then exposes that
+message once. Invalid, mismatched, or JSON-example suffixes remain visible. The
+same validation found that the unified profile's renamed runtime-topology heading
+would break Node identity projection after a future source deploy; its parser
+anchor now follows the current heading. The complete Hermes gateway test file
+passes; both corrections are `LOCAL_VERIFIED`, not deployed.
+
 O1 `1be3ee5`, V4+O1 `c52f8ba`, O2 `a978444`, and the unified-identity/O2
 rollback line `b5b4ff4` are `ARCHIVED` and not deployed to production. O1 has a
 known blocker: its real Python -> HTTP -> Node recall contract has not passed

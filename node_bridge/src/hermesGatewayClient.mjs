@@ -27,6 +27,7 @@ import {
   runHermesLiteSoftReset,
 } from './hermesSessionMaintenance.mjs';
 import { resolveStateDir } from './runtimeState.mjs';
+import { normalizeReplyEnvelope } from './replyEnvelope.mjs';
 import { isHermesTaskScopedRoute, normalizeHermesTaskKind } from './hermesTaskScope.mjs';
 import {
   buildHermesCanonicalProjection,
@@ -1960,14 +1961,21 @@ function extractReplyEnvelopeFromChoice(body = {}) {
   const choice = Array.isArray(body.choices) ? body.choices[0] : null;
   const content = choice?.message?.content;
   if (typeof content !== 'string') return null;
-  try {
-    const parsed = JSON.parse(content);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    if (!Object.hasOwn(parsed, 'schemaVersion') || !Object.hasOwn(parsed, 'message')) return null;
-    return parsed;
-  } catch {
-    return null;
+  const candidates = [{ text: content, prefix: null }];
+  for (let index = content.lastIndexOf('\n{'); index >= 0; index = content.lastIndexOf('\n{', index - 1)) {
+    candidates.push({ text: content.slice(index + 1).trim(), prefix: content.slice(0, index).trim() });
   }
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate.text);
+      const normalized = normalizeReplyEnvelope({ reply_envelope: parsed });
+      if (candidate.prefix !== null && candidate.prefix !== normalized.message) continue;
+      return parsed;
+    } catch {
+      // Try an earlier line boundary; model output may prefix the private envelope with prose.
+    }
+  }
+  return null;
 }
 
 function extractHermesReplyText(body = {}) {

@@ -482,6 +482,62 @@ test('parses the private reply envelope from real OpenAI-compatible message cont
   assert.deepEqual(response.claims, envelope.claims);
 });
 
+test('parses a trailing private reply envelope without exposing duplicate JSON', async () => {
+  const message = '给陛下呈上今日 AI 日报｜2026-08-06\n\n🔥 头条\n\n今日摘要';
+  const envelope = {
+    schemaVersion: 1,
+    message,
+    actionRequests: [],
+    activityRequest: null,
+    claims: [],
+    commitments: [],
+  };
+  const response = await sendChatToHermesGateway(
+    { text: '生成日报', sender_id: 'digest-sender', conversation_id: 'digest-conversation', channel: 'feishu' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async () => makeJsonResponse({
+        choices: [{ message: { content: `${message}\n\n${JSON.stringify(envelope)}` } }],
+      }),
+      logger: { log() {}, warn() {} },
+    },
+  );
+
+  assert.equal(response.reply_text, message);
+  assert.deepEqual(response.reply_envelope, envelope);
+});
+
+test('keeps invalid or non-duplicate trailing JSON visible', async () => {
+  for (const suffix of [
+    { schemaVersion: 1, message: null },
+    { schemaVersion: 999, message: '正文' },
+    { schemaVersion: 1, message: '不同内容' },
+    { schemaVersion: 1, message: '正文', unexpected: true },
+  ]) {
+    const content = `正文\n${JSON.stringify(suffix)}`;
+    const response = await sendChatToHermesGateway(
+      { text: '返回 JSON 示例', sender_id: 'json-sender', conversation_id: 'json-conversation', channel: 'wechat' },
+      {
+        config: getHermesGatewayConfig({
+          HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+          HERMES_API_KEY: 'token',
+          HERMES_REPLY_MODE: 'api',
+          RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+        }),
+        fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content } }] }),
+        logger: { log() {}, warn() {} },
+      },
+    );
+    assert.equal(response.reply_text, content);
+    assert.equal(response.reply_envelope, undefined);
+  }
+});
+
 test('sendChatToHermesGateway aborts Hermes API fetch on reply timeout', async () => {
   let sawAbort = false;
   await assert.rejects(

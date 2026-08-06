@@ -46,14 +46,14 @@ export function buildHermesCanonicalProjection(projectRoot) {
     if (!line) throw new Error(`core projection source missing: ${prefix}`);
     return line;
   };
-  const liteStart = coreLines.findIndex((line) => line === 'lite/full 口径：');
-  if (liteStart < 0) throw new Error('core projection source missing: lite/full 口径：');
-  const liteEndOffset = coreLines.slice(liteStart + 1).findIndex((line) => !line.trim());
-  const liteEnd = liteEndOffset < 0 ? coreLines.length : liteStart + 1 + liteEndOffset;
+  const runtimeStart = coreLines.findIndex((line) => line === '运行时拓扑边界：');
+  if (runtimeStart < 0) throw new Error('core projection source missing: 运行时拓扑边界：');
+  const runtimeEndOffset = coreLines.slice(runtimeStart + 1).findIndex((line) => !line.trim());
+  const runtimeEnd = runtimeEndOffset < 0 ? coreLines.length : runtimeStart + 1 + runtimeEndOffset;
   const coreProjection = [
     requireLine('Hermes 是 ran-agent 的前台对话 shell。'),
     requireLine('- 个人记忆：'),
-    coreLines.slice(liteStart, liteEnd).join('\n'),
+    coreLines.slice(runtimeStart, runtimeEnd).join('\n'),
     requireLine('安全边界：'),
   ].join('\n\n');
   return {
