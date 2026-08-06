@@ -6,11 +6,13 @@ import logging
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from conftest import make_test_config
 from personal_agent.db import Database
 from personal_agent.memory_specialist import MemorySpecialist
 from personal_agent.memory_llm import MemoryExtractionResult
+from personal_agent.memory_retriever import HybridMemoryRetriever
 
 
 def build_test_logger() -> logging.Logger:
@@ -102,6 +104,42 @@ class MemorySpecialistTest(unittest.TestCase):
         self.assertIn("local_profile_memory", recall.used_sources)
         self.assertIn("【你对用户的了解】", recall.rendered_context)
         self.assertIn("【用户当前状态（近期）】", recall.rendered_context)
+
+    def test_explicit_recall_bypasses_chat_gate_and_returns_only_matching_memory(self) -> None:
+        self.database.store_memory(
+            '{"type":"working","topic":"Hermes v0.20","summary":"升级 Hermes v0.20 是为了统一前台运行时"}',
+            "working",
+            importance=4,
+        )
+        self.database.store_memory(
+            '{"type":"profile","trait":"文化观察","summary":"最近关注文化观察"}',
+            "profile",
+            importance=4,
+        )
+        vector_backend = MagicMock()
+        vector_backend.search.return_value = ()
+        specialist = MemorySpecialist(
+            database=self.database,
+            logger=self.logger,
+            config=self.config,
+            memory_retriever=HybridMemoryRetriever(
+                self.database,
+                self.logger,
+                vector_backend=vector_backend,
+            ),
+        )
+        specialist._ombre_backend.recall = lambda **_kwargs: ()
+
+        recall = specialist.recall_for_turn(
+            user_text="为什么升级 Hermes v0.20 前台运行时",
+            route="text_chat",
+            response_mode="chat",
+            explicit=True,
+        )
+
+        self.assertTrue(recall.should_inject)
+        self.assertIn("Hermes v0.20", recall.rendered_context)
+        self.assertNotIn("文化观察", recall.rendered_context)
 
     def test_update_from_user_turn_falls_back_to_rule_based_memory(self) -> None:
         specialist = MemorySpecialist(

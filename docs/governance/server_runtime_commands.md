@@ -42,6 +42,17 @@ candidate ref: refs/ran-agent/runtime-candidates/0b793e8fea85c409800ee7e0d615501
 snapshot: /opt/ran_agent-release/runtime-snapshots/runtime-20260806T010417Z-0b793e8fea85
 ```
 
+Two bounded source-only transactions later advanced the clean checkout from
+`bb66f1e6` through `57638ce` to `0cbeed7` while leaving the accepted Hermes
+MainPID and Runtime authority unchanged. The current binding files are
+`binding.v1.json` and `binding.v2.json` under the accepted Runtime
+transaction's `/opt/ran_agent-release/runtime-source-bindings/` directory.
+Source rollback must use the
+candidate-extracted source controller for the matching binding; combined
+Runtime rollback first restores the source chain, then invokes the pinned
+Runtime controller. Do not relax checkout-SHA validation or use the legacy
+split release scripts.
+
 Do not retry `44b84fb11fe8` or use the split deploy scripts against the unified
 topology.
 

@@ -9,26 +9,28 @@ contracts live in the linked governance docs below.
 ## Release Lineage
 
 ```text
-production_repository_sha: bb66f1e6a8a400d599c7f86139107742bbedddc8
-runtime_evidence_class: DEPLOYED_RUNTIME_ACCEPTANCE (2026-08-06T09:04:17+08:00..09:13:42+08:00) plus the retained historical audits below
-production_observation_stage: DEPLOYED for unified Hermes v0.20; immediate topology acceptance passed, observation window not complete
+production_repository_sha: 0cbeed729255cfdc13af7aec1438880b2ae79ec5
+runtime_evidence_class: DEPLOYED_RUNTIME_ACCEPTANCE (2026-08-06T09:04:17+08:00..09:13:42+08:00) plus accepted source-only bindings at 13:23 and 19:35 CST and the retained historical audits below
+production_observation_stage: DEPLOYED for unified Hermes v0.20 and source SHA 0cbeed7; immediate acceptance passed, bounded product observation not complete
 production_worktree: clean
 production_services: Node, Python and unified Hermes active; retired Full inactive/dead, disabled and condition-blocked; direct Ombre Brain 18001 active; recall-only 18002 inactive
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
 production_hermes: unified v0.20.0 on 8642; deepseek-v4-flash; one home/profile; no 8643 listener
 production_runtime_identity: observed ubuntu:ubuntu; core units declare User=ubuntu
 legacy_ran_agent_account_followup: POINT_IN_TIME_AUDIT (2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00); present UID 999/GID 988, nologin; no ran-agent-owned runtime process was observed in the base audit window
-production_storage: 42068938752/63290032128 bytes used, 18520346624 bytes available, 70% utilization at 2026-08-06T09:13:42+08:00
+production_storage: 42154065920/63290032128 bytes used, 18435219456 bytes available, 70% utilization at 2026-08-06T21:47:13+08:00
+production_source_bindings: binding.v1 accepted bb66f1e6 -> 57638ce at 13:23 CST; binding.v2 accepted 57638ce -> 0cbeed7 at 19:35 CST; retained rolled-back v2 evidence proves source rollback, while combined rollback to v0.13 remains a separately governed retirement path
 runtime_apply_recovery_followup: POINT_IN_TIME_AUDIT (2026-08-06T08:46:03+08:00); production remains clean bb66f1e6 with all four services active, candidate install/topology marker absent, and 18368720896 bytes available (70% utilization)
 permission_containment_followup: COMPLETE (2026-08-05T17:07:16+08:00..17:09:04+08:00); seven authorized files ubuntu:ubuntu 0600; /opt/ran_agent/data 0700; five backups matched secret-like key patterns without exposing values; core services and Python health passed; deletion/rotation not authorized
 production_memory_surface: existing direct Ombre Brain 18001 active/healthy; recall-only O1 18002 inactive; O2 absent
 digest_2026_08_05_followup: POINT_IN_TIME_AUDIT (2026-08-05T13:42:01.034+08:00..13:46:55.750+08:00); EXACTLY_ONCE_OBSERVED externally; Node about 66s; outbox sent attempt 1; one Feishu message; Python 30s timeout left no marker/timeline; do not retry occurrence
 digest_deadline_inputs_followup: POINT_IN_TIME_AUDIT (2026-08-05T14:24:21+08:00); Python service environment exposed HERMES_REPLY_TIMEOUT_SECONDS=1200 and FEISHU_SEND_TIMEOUT_SECONDS=30
 digest_correction_artifact: four-file patch atop b5b4ff43f8c3d5706192cabefcece49408b73558; unified diff sha256 ada5e89f1912ec0d208adbe91e43596f1528a1512a58f0d63ae5654de4df932f; src/personal_agent/outbound_channel.py, tests/test_outbound_channel.py, node_bridge/src/outboundServer.mjs, node_bridge/tests/outboundServer.test.mjs
-digest_correction_stage: LOCAL_VERIFIED (2026-08-05T14:25:28+08:00..14:25:29+08:00) by 7 Python and 67 Node focused/regression tests; caller deadline derived as Hermes deadline + Feishu deadline + 30s margin (1260s under observed 1200s/30s production values) plus live outbox transition clock; not deployed
-digest_duplicate_envelope_followup: LOCAL_VERIFIED (2026-08-06); recent digest output exposed a private reply envelope after identical visible prose because the Hermes boundary parsed only whole-string JSON; the shared response parser now accepts only a valid v1 trailing envelope whose message exactly matches that prose and releases the message once; focused Node tests passed; not deployed
-unified_identity_projection_compatibility: LOCAL_VERIFIED (2026-08-06); the unified profile renamed the old lite/full prose heading, so the pre-deploy Node identity projection anchor now follows the current stable runtime-topology heading; the complete Hermes gateway test file passes; not deployed
-ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; ARCHIVED; not deployed; real cross-process recall contract blocker
+digest_correction_stage: DEPLOYED in source binding.v1 and retained by 0cbeed7; caller deadline is Hermes deadline + Feishu deadline + 30-second margin (1260s under the observed 1200s/30s values) and outbox transitions use a live clock; the next clean real 08:00 cycle is still required for PROD_VERIFIED
+digest_duplicate_envelope_followup: DEPLOYED in source binding.v1/v2; the shared response parser releases a valid trailing private envelope once, including the observed labelled form; invalid or mismatched JSON remains visible; not yet PROD_VERIFIED by a clean real digest cycle
+unified_identity_projection_compatibility: DEPLOYED in source binding.v1 and retained by 0cbeed7; the projection anchor follows the unified runtime-topology heading; not yet PROD_VERIFIED by a named live identity assertion
+cross_channel_and_explicit_memory_followup: DEPLOYED as 0cbeed7; Hermes session keys are conversation-scoped, new non-referential requests do not inherit cross-channel global turns, and explicit personal-memory calls bypass the automatic chat-injection trigger; the current main convergence candidate preserves these semantics without importing the old source tree wholesale
+ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; superseded by strict recall contract archive deed261; neither is deployed and production 18002 remains inactive
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; ARCHIVED; not deployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
 node_receipt: deferred
@@ -52,9 +54,10 @@ implementation, or unified-identity candidate.
 
 For the separately timestamped digest follow-up above, external delivery was
 observed exactly once, but Python completion truth diverged after its caller
-deadline expired. The `LOCAL_VERIFIED` caller-deadline ordering contract and live outbox-clock
-correction are not production facts until a separately isolated candidate is
-deployed and accepted.
+deadline expired. The caller-deadline ordering contract and live outbox-clock
+correction were subsequently deployed by source binding v1; they remain short
+of `PROD_VERIFIED` until a clean real 08:00 cycle reconciles external delivery,
+the durable outbox, and the Python sent marker.
 
 ## Superseded Candidate Evidence
 

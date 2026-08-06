@@ -115,7 +115,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     global_user_id: globalUserId,
     stable_conversation_key: taskScoped ? '' : getStableConversationKey(message),
     hermes_session_id: taskScoped ? '' : getHermesSessionId(message),
-    hermes_session_key: taskScoped ? '' : getHermesSessionKey(globalUserId),
+    hermes_session_key: taskScoped ? '' : getHermesSessionKey(getStableConversationKey(message)),
     prior_messages: taskScoped ? [] : requestPriorMessages,
     recent_local_history: localRecentForHermes,
     recent_global_history: globalRecent,

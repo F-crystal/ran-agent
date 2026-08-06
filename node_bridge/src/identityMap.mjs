@@ -87,8 +87,8 @@ export function getHermesSessionId(normalizedMessage = {}) {
   return `ran-agent-wechat-${shortHash(conversationId)}`;
 }
 
-export function getHermesSessionKey(globalUserId = DEFAULT_GLOBAL_USER_ID) {
-  const id = String(globalUserId || DEFAULT_GLOBAL_USER_ID).trim() || DEFAULT_GLOBAL_USER_ID;
+export function getHermesSessionKey(stableConversationKey = DEFAULT_GLOBAL_USER_ID) {
+  const id = String(stableConversationKey || DEFAULT_GLOBAL_USER_ID).trim() || DEFAULT_GLOBAL_USER_ID;
   return `ran-agent-memory-${shortHash(id)}`;
 }
 

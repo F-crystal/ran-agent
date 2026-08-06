@@ -512,6 +512,34 @@ test('parses a trailing private reply envelope without exposing duplicate JSON',
   assert.deepEqual(response.reply_envelope, envelope);
 });
 
+test('parses a labelled trailing private reply envelope without exposing protocol prose', async () => {
+  const envelope = {
+    schemaVersion: 1,
+    message: '没有证据。升级原因和当前前台运行时都没有存下来——不瞎猜。',
+    actionRequests: [],
+    activityRequest: null,
+    claims: [],
+    commitments: [],
+  };
+  const content = `没有记忆证据。升级原因和前台运行时都没有存下来——不猜。\n\n我的回复信封：\n\n${JSON.stringify(envelope)}`;
+  const response = await sendChatToHermesGateway(
+    { text: '验收记忆', sender_id: 'envelope-sender', conversation_id: 'envelope-conversation', channel: 'wechat' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content } }] }),
+      logger: { log() {}, warn() {} },
+    },
+  );
+
+  assert.equal(response.reply_text, envelope.message);
+  assert.deepEqual(response.reply_envelope, envelope);
+});
+
 test('keeps invalid or non-duplicate trailing JSON visible', async () => {
   for (const suffix of [
     { schemaVersion: 1, message: null },
@@ -1467,7 +1495,7 @@ test('Hermes user prompt keeps stable routing before digest time media context a
 test('Hermes prompt labels stale continuity without treating it as current topic', async () => {
   const { capturedBody } = await captureHermesRequest({
     payload: {
-      text: '今天天气不错',
+      text: '之前换新电脑迁移资料怎么样了',
       active_topic: '',
       stale_context: '我换了新电脑，正在迁移资料',
     },
@@ -2601,6 +2629,7 @@ test('context injection rich mode preserves legacy-sized local history budget', 
   const { capturedBody, logs } = await captureHermesRequest({
     env: { HERMES_CONTEXT_INJECTION_MODE: 'rich' },
     payload: {
+      text: '刚才的上下文继续',
       recent_local_history: historyTurns('rich-local', 5),
       recent_global_history: historyTurns('rich-global', 3),
       active_topic: 'rich-active-topic',
@@ -2621,6 +2650,7 @@ test('context injection slim mode uses smaller local global and active topic bud
   const { capturedBody, logs } = await captureHermesRequest({
     env: { HERMES_CONTEXT_INJECTION_MODE: 'slim' },
     payload: {
+      text: '刚才的上下文继续',
       recent_local_history: historyTurns('slim-local', 6),
       recent_global_history: historyTurns('slim-global', 4),
       active_topic: `slim-active ${'长话题'.repeat(300)}`,
@@ -2693,6 +2723,7 @@ test('context injection auto cross channel keeps continuity and brief global rec
     payload: {
       channel: 'feishu',
       platform: 'feishu',
+      text: '刚才那个跨渠道话题继续说',
       recent_local_history: [],
       recent_global_history: historyTurns('cross-global', 3),
       continuity_note: 'current_topic: cross-channel handoff',
@@ -2709,6 +2740,33 @@ test('context injection auto cross channel keeps continuity and brief global rec
   assert.equal(telemetry.budgets.globalRecentTurns, 2);
 });
 
+test('context injection does not replay cross-channel answers into a new explicit request', async () => {
+  for (const mode of ['auto', 'rich', 'slim', 'resume']) {
+    const { capturedBody, logs } = await captureHermesRequest({
+      env: {
+        HERMES_CONTEXT_INJECTION_MODE: mode,
+        HERMES_GLOBAL_RECENT_TURNS: '9',
+        HERMES_GLOBAL_RECENT_CHAR_BUDGET: '9000',
+      },
+      payload: {
+        channel: 'wechat',
+        platform: 'wechat',
+        text: '请说明当前使用哪个前台运行时，再回答其他问题',
+        recent_local_history: [],
+        recent_global_history: historyTurns(`${mode}-feishu-answer`, 2),
+        continuity_note: `current_topic: ${mode}-prior Feishu acceptance test`,
+        active_topic: `${mode}-prior Feishu acceptance test`,
+      },
+    });
+
+    assert.doesNotMatch(JSON.stringify(capturedBody.messages), new RegExp(`${mode}-(?:feishu-answer|prior Feishu)`));
+    const telemetry = parseContextComponentsLog(logs);
+    assert.equal(telemetry.budgets.globalRecentTurns, 0);
+    assert.equal(telemetry.components.active_topic.omitted, true);
+    assert.equal(telemetry.components.continuity_note.omitted, true);
+  }
+});
+
 test('context injection env budgets override mode defaults', async () => {
   const { capturedBody, logs } = await captureHermesRequest({
     env: {
@@ -2717,6 +2775,7 @@ test('context injection env budgets override mode defaults', async () => {
       HERMES_GLOBAL_RECENT_CHAR_BUDGET: '5000',
     },
     payload: {
+      text: '刚才的上下文继续',
       recent_local_history: [],
       recent_global_history: historyTurns('override-global', 3),
     },

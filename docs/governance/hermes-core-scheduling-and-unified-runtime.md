@@ -243,7 +243,8 @@ and archive SHA256
 `44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30`.
 It retains the deterministic offline v0.20 runtime and adds exactly eight
 digest-bound MCP server files as a service-private read-only overlay; the host
-checkout and production Node namespace keep the active `bb66f1e6` files.
+checkout and production Node namespace now use the accepted `0cbeed7` source
+binding without changing the Runtime artifact or Hermes MainPID.
 Native Linux, relocation, read-only, compiled-import, system-terminfo, offline
 unified-profile, zero-lazy-install, zero-Tirith, exact mount-namespace, and
 218-second MCP keepalive gates passed. Exact evidence, including the disclosed

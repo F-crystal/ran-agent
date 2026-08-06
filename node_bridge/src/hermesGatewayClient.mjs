@@ -29,6 +29,7 @@ import {
 import { resolveStateDir } from './runtimeState.mjs';
 import { normalizeReplyEnvelope } from './replyEnvelope.mjs';
 import { isHermesTaskScopedRoute, normalizeHermesTaskKind } from './hermesTaskScope.mjs';
+import { isReferentialUserText } from './globalTimeline.mjs';
 import {
   buildHermesCanonicalProjection,
   computeHermesIdentityVersion,
@@ -192,6 +193,7 @@ export function resolveHermesContextBudget({
   const requestedMode = String(mode || 'auto').trim().toLowerCase() || 'auto';
   const invalidMode = !VALID_CONTEXT_INJECTION_MODES.has(requestedMode);
   const finalMode = invalidMode ? 'auto' : requestedMode;
+  const hasReferentialUserText = continuityState.hasReferentialUserText === true;
   let defaults;
   let decisionReason;
 
@@ -208,7 +210,10 @@ export function resolveHermesContextBudget({
     const hasLocalRecent = continuityState.hasLocalRecent === true;
     const hasGlobalRecent = continuityState.hasGlobalRecent === true;
     const hasContinuityNote = continuityState.hasContinuityNote === true;
-    if (hasMedia) {
+    if ((hasGlobalRecent || hasContinuityNote) && !hasReferentialUserText) {
+      defaults = hasLocalRecent ? HERMES_CONTEXT_BUDGET_DEFAULTS.slim : HERMES_CONTEXT_BUDGET_DEFAULTS.resume;
+      decisionReason = hasLocalRecent ? 'auto_same_conversation_slim' : 'auto_cross_channel_detached';
+    } else if (hasMedia) {
       defaults = HERMES_CONTEXT_BUDGET_DEFAULTS.slim;
       decisionReason = 'auto_media_slim';
     } else if (hasGlobalRecent && hasContinuityNote) {
@@ -235,9 +240,18 @@ export function resolveHermesContextBudget({
     }
   }
 
+  const budgets = normalizeContextBudget(applyBudgetOverrides(defaults, config.contextBudgetOverrides));
+  if (!hasReferentialUserText) {
+    Object.assign(budgets, {
+      globalRecentTurns: 0,
+      globalRecentChars: 0,
+      activeTopicChars: 0,
+    });
+  }
+
   return {
     mode: finalMode,
-    budgets: normalizeContextBudget(applyBudgetOverrides(defaults, config.contextBudgetOverrides)),
+    budgets,
     decisionReason,
     invalidMode,
   };
@@ -464,6 +478,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     && (recentConversationStore.get(sessionContext.stableKey) || []).length > 0;
   const hasGlobalRecent = Array.isArray(effectivePayload.recent_global_history) && effectivePayload.recent_global_history.length > 0;
   const hasStaleContext = Boolean(String(effectivePayload.stale_context || '').trim());
+  const hasReferentialUserText = isReferentialUserText(effectivePayload.text);
   const contextBudget = resolveHermesContextBudget({
     mode: pendingResumeDigest ? 'resume' : selectedConfig.contextInjectionMode,
     config: selectedConfig,
@@ -471,6 +486,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       hasLocalRecent: hasExternalLocalRecent || (!Array.isArray(effectivePayload.recent_local_history) && hasStoredLocalRecent),
       hasGlobalRecent,
       hasContinuityNote: Boolean(String(effectivePayload.continuity_note || '').trim()) || hasStaleContext,
+      hasReferentialUserText,
     },
     channel: effectivePayload.platform || effectivePayload.channel,
     conversationId: firstNonEmptyString(effectivePayload.conversation_id, effectivePayload.conversationId, effectivePayload.sender_id, effectivePayload.senderId),
@@ -483,6 +499,13 @@ export async function sendChatToHermesGateway(payload, options = {}) {
   if (contextBudget.invalidMode) {
     logger.warn?.('invalid HERMES_CONTEXT_INJECTION_MODE; falling back to auto');
   }
+  const contextPayload = hasReferentialUserText ? effectivePayload : {
+    ...effectivePayload,
+    recent_global_history: [],
+    active_topic: '',
+    stale_context: '',
+    continuity_note: '',
+  };
   const budgetedConfig = applyContextBudgetToConfig(selectedConfig, contextBudget.budgets, contextBudget.mode);
   const externalRecentMessages = limitHistoryMessages(
     normalizeHistoryMessages(effectivePayload.recent_local_history, budgetedConfig),
@@ -497,13 +520,13 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     : externalRecentMessages.length > 0
       ? externalRecentMessages
       : buildRecentHistoryMessages(sessionContext, budgetedConfig);
-  const globalRecentMessages = limitHistoryMessages(normalizeHistoryMessages(effectivePayload.recent_global_history, {
+  const globalRecentMessages = limitHistoryMessages(normalizeHistoryMessages(contextPayload.recent_global_history, {
     ...budgetedConfig,
     recentTextMaxUserChars: 900,
     recentTextMaxAssistantChars: 900,
   }), contextBudget.budgets.globalRecentTurns, contextBudget.budgets.globalRecentChars);
 
-  const preparedMessage = await buildHermesUserMessage(effectivePayload, {
+  const preparedMessage = await buildHermesUserMessage(contextPayload, {
     env,
     config: budgetedConfig,
     logger,
@@ -523,8 +546,8 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     recentMessages,
     globalRecentMessages,
     preparedMessage,
-    continuityNoteChars: buildBudgetedContinuityNote(effectivePayload, recentMessages, contextBudget.budgets).length,
-    payload: effectivePayload,
+    continuityNoteChars: buildBudgetedContinuityNote(contextPayload, recentMessages, contextBudget.budgets).length,
+    payload: contextPayload,
   });
 
   try {
@@ -537,7 +560,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
       requestId,
       contextBudget,
       cacheFriendlyHistory,
-      payload: effectivePayload,
+      payload: contextPayload,
       env,
       softResetResume: Boolean(pendingResumeDigest),
       taskScoped,
@@ -1200,7 +1223,7 @@ function buildConversationContinuityNote(payload = {}, recentMessages = []) {
   const text = String(payload.text || '').trim();
   if (!text) return '';
   const naturalnessFeedback = /不连贯|模板|套话|机制外显|不自然|像流程|太机械/.test(text);
-  const referentialText = /她|他|这个故事|这篇|刚才那个|上面那张图|那张图|那个链接|这件事|图片呢|没看到图|fallback/.test(text);
+  const referentialText = isReferentialUserText(text);
   if (!naturalnessFeedback && !referentialText) return '';
   const recentTopic = inferRecentTopicFromMessages(recentMessages);
   if (referentialText && recentTopic) {
@@ -1214,6 +1237,7 @@ function buildConversationContinuityNote(payload = {}, recentMessages = []) {
       'do_not_repeat: 不要问“是谁的故事”；不要解释内部连续性实现',
     ].join('\n');
   }
+  if (!naturalnessFeedback) return '';
   return [
     '【conversation continuity note（非用户原话，不要复述）】',
     'current_topic: reply naturalness feedback',
@@ -1887,7 +1911,7 @@ function logHermesSessionContinuity({
     recent_chars: recentChars,
     continuity_note_chars: Number(continuityNoteChars || 0),
     active_topic_chars: String(payload?.active_topic || '').length,
-    has_referential_user_text: /她|他|这个故事|这篇|刚才那个|上面那张图|那张图|那个链接|这件事|图片呢|没看到图|fallback/.test(String(payload?.text || '')),
+    has_referential_user_text: isReferentialUserText(payload?.text),
     current_prompt_chars: String(preparedMessage || '').length,
   }));
 }
@@ -1969,7 +1993,9 @@ function extractReplyEnvelopeFromChoice(body = {}) {
     try {
       const parsed = JSON.parse(candidate.text);
       const normalized = normalizeReplyEnvelope({ reply_envelope: parsed });
-      if (candidate.prefix !== null && candidate.prefix !== normalized.message) continue;
+      if (candidate.prefix !== null
+        && candidate.prefix !== normalized.message
+        && !/(?:^|\n)\s*(?:我的\s*)?(?:回复信封|reply envelope)\s*[:：]?\s*$/iu.test(candidate.prefix)) continue;
       return parsed;
     } catch {
       // Try an earlier line boundary; model output may prefix the private envelope with prose.

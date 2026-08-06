@@ -14,6 +14,11 @@ const DEFAULT_TIMELINE_PATH = '/opt/ran_agent/.ran_agent_state/global-timeline.j
 const DEFAULT_ARCHIVE_DIR = '/opt/ran_agent/.ran_agent_state/timeline_archive';
 const DEFAULT_MAX_TEXT_CHARS = 2000;
 const DEFAULT_CONTINUITY_FRESHNESS_HOURS = 24;
+const REFERENTIAL_USER_PATTERN = /她|(?<!其)他|它|这个故事|这篇|这张图|刚才那个|刚才|上面那张图|上面那篇|那张图|那个链接|这件事|图片呢|没看到图|fallback|上次|之前|以前|前面|前几天|周五|昨天|那个/;
+
+export function isReferentialUserText(value) {
+  return REFERENTIAL_USER_PATTERN.test(String(value || ''));
+}
 
 export function getGlobalTimelineConfig(env = process.env) {
   const stateDir = String(env.RAN_AGENT_STATE_DIR || '').trim();
@@ -314,7 +319,7 @@ export function buildContinuityNote({
   staleContext = '',
 } = {}) {
   const text = String(message.text || '').trim();
-  const isReferential = /她|他|它|这篇|这个故事|刚才那个|那张图|上面那篇|那个链接|这件事|图片呢|没看到图|上次|之前|以前|前面|前几天|周五|昨天|那个/.test(text);
+  const isReferential = isReferentialUserText(text);
   const topic = inferTopic([...localRecent, ...globalRecent], activeTopic);
   const stale = clipText(String(staleContext || '').trim(), 240);
   if (!topic && isReferential && stale) {

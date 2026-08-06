@@ -33,15 +33,10 @@ test('identity map builds hashed account binding keys without raw ids', () => {
   assert.equal(key.includes('wx-secret-openid'), false);
 });
 
-test('same global user gets same Hermes session key across platforms', (t) => {
-  const isolated = createIsolatedTestEnv(t, {}, 'ran-agent-identity-');
-  const env = {
-    ...isolated,
-    RAN_AGENT_IDENTITY_MAP_PATH: path.join(isolated.RAN_AGENT_STATE_DIR, 'identity-map.json'),
-  };
-  const left = getHermesSessionKey('user:ran');
-  const right = getHermesSessionKey(getGlobalUserId({ platform: 'feishu', sender_id: 'ou-secret' }, { env }));
-  assert.equal(left, right);
+test('Hermes session keys stay inside stable conversation boundaries', () => {
+  const left = getHermesSessionKey('wechat:dm:wx-conv');
+  const right = getHermesSessionKey('feishu:dm:fs-conv');
+  assert.notEqual(left, right);
   assert.match(left, /^ran-agent-memory-[a-f0-9]{16}$/);
 });
 

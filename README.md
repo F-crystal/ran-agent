@@ -4,7 +4,7 @@
 
 Status: CURRENT (2026-08-06)
 
-`DEPLOYED_RUNTIME_ACCEPTANCE`（2026-08-06）：生产代码仍是 clean `bb66f1e6`，Hermes 已由 exact candidate `0b793e8` 切到统一 v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full 服务 inactive/disabled。完整时间窗与边界见 `docs/governance/current_runtime_status.md`。
+`DEPLOYED_RUNTIME_ACCEPTANCE`（2026-08-06）：生产代码为 clean `0cbeed7`，Hermes 由 exact candidate `0b793e8` 运行统一 v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full 服务 inactive/disabled。两次 source-only 事务已接受到当前 SHA，完整时间窗与边界见 `docs/governance/current_runtime_status.md`。
 
 unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` 已归档并推送，但尚未部署到生产。它保留 O2 并撤销新增 Linux 服务身份；O1/O2 候选仍是 `ARCHIVED`、未部署，`total_delete` unsupported，Gate 5 未授权，Package B.2/B.3 未开始。
 

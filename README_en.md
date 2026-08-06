@@ -4,7 +4,7 @@
 
 Status: CURRENT (2026-08-06)
 
-`DEPLOYED_RUNTIME_ACCEPTANCE` (2026-08-06): production code remains clean `bb66f1e6`; exact candidate `0b793e8` deployed one unified Hermes v0.20 gateway with DeepSeek V4 Flash on `8642`, and the retired Full service is inactive/disabled. See `docs/governance/current_runtime_status.md` for the bounded evidence.
+`DEPLOYED_RUNTIME_ACCEPTANCE` (2026-08-06): production code is clean `0cbeed7`; exact candidate `0b793e8` runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash on `8642`, and the retired Full service is inactive/disabled. Two source-only transactions were accepted through the current SHA. See `docs/governance/current_runtime_status.md` for the bounded evidence.
 
 The unified-identity/O2 rollback baseline `b5b4ff43f8c3d5706192cabefcece49408b73558` is archived and pushed but not deployed to production. It preserves O2 while reverting the added Linux service identity. O1/O2 candidates remain `ARCHIVED` and not deployed; `total_delete` is unsupported, Gate 5 is not authorized, and Package B.2/B.3 have not started.
 

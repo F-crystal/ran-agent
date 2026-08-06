@@ -635,6 +635,7 @@ class PersonalAgentService:
             user_text=user_text,
             route=route,
             response_mode=response_mode,
+            explicit=True,
         )
         return {
             "should_inject": recall.should_inject,

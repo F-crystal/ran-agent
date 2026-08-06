@@ -176,16 +176,26 @@ class MemorySpecialist:
         user_text: str,
         route: str,
         response_mode: str,
+        explicit: bool = False,
     ) -> MemoryRecallResult:
         """Return the structured memory needed for the current turn."""
 
-        if route != "text_chat" or not self.should_inject_memory(user_text):
+        if route != "text_chat" or (not explicit and not self.should_inject_memory(user_text)):
             return MemoryRecallResult(should_inject=False)
 
-        profile_rows = self._database.get_profile_memories(limit=self._config.profile_memory_limit)
-        working_rows = self._database.get_working_memories(limit=self._config.working_memory_limit)
-        short_term_memories = tuple(str(row["content"]) for row in working_rows)
-        long_term_memories = tuple(str(row["content"]) for row in profile_rows)
+        if explicit:
+            local_hits = self._memory_retriever.retrieve(
+                user_text=user_text,
+                limit=self._config.profile_memory_limit + self._config.working_memory_limit,
+                memory_types=("working", "profile"),
+            )
+            short_term_memories = tuple(hit.content for hit in local_hits if hit.memory_type == "working")
+            long_term_memories = tuple(hit.content for hit in local_hits if hit.memory_type == "profile")
+        else:
+            profile_rows = self._database.get_profile_memories(limit=self._config.profile_memory_limit)
+            working_rows = self._database.get_working_memories(limit=self._config.working_memory_limit)
+            short_term_memories = tuple(str(row["content"]) for row in working_rows)
+            long_term_memories = tuple(str(row["content"]) for row in profile_rows)
         
         # Get ombre brain memories
         ombre_memories = self._ombre_backend.recall(
@@ -194,7 +204,7 @@ class MemorySpecialist:
         )
         
         # Find topic-associated memories for proactive surfacing
-        topic_associations = self.find_associated_memories(
+        topic_associations = () if explicit else self.find_associated_memories(
             user_text=user_text,
             recent_memories=short_term_memories,
             long_term_memories=long_term_memories + ombre_memories,

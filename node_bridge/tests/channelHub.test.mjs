@@ -7,7 +7,7 @@ import { handleIncomingMessage } from '../src/channelHub.mjs';
 import { appendTurn, readTimelineRecords } from '../src/globalTimeline.mjs';
 import { createDurableOutbox } from '../src/durableOutbox.mjs';
 import { createPendingAction, listPendingActions } from '../src/pendingActionState.mjs';
-import { getAccountBindingKey } from '../src/identityMap.mjs';
+import { getAccountBindingKey, getHermesSessionKey } from '../src/identityMap.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 import { createTrustedBridgeInformationalReportTask, listHermesTaskScopedRoutes } from '../src/hermesTaskScope.mjs';
 
@@ -74,6 +74,7 @@ test('channel hub routes normalized WeChat message through replyBackend and time
   assert.notEqual(backendMessage.trusted_actor_context.actorKey, 'actor:forged');
   assert.match(backendMessage.hermes_session_id, /^ran-agent-wechat-/);
   assert.match(backendMessage.hermes_session_key, /^ran-agent-memory-/);
+  assert.equal(backendMessage.hermes_session_key, getHermesSessionKey(backendMessage.stable_conversation_key));
   assert.equal(sent.text, '她的故事确实动人');
 
   const records = readTimelineRecords({ timelinePath: env.RAN_AGENT_GLOBAL_TIMELINE_PATH });

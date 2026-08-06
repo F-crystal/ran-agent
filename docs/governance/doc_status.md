@@ -2,6 +2,17 @@
 
 Status: CURRENT (2026-08-06)
 
+A current read-only audit at `2026-08-06T21:47:13+08:00` supersedes the older
+production-head statements below: production is clean
+`0cbeed729255cfdc13af7aec1438880b2ae79ec5`; unified Hermes v0.20 remains the
+only gateway on `8642`, `8643` is absent, retired Full is inactive/disabled,
+Node/Python are active with zero restarts since the 19:35 source apply, direct
+Ombre `18001` is active, recall-only `18002` is inactive, and storage is 70%
+used with 18,435,219,456 bytes available. Source binding v1 accepted
+`bb66f1e6 -> 57638ce`; binding v2 accepted `57638ce -> 0cbeed7`. These are
+`DEPLOYED` facts, not `PROD_VERIFIED` claims for the pending digest, identity,
+memory-hit, and capability observations.
+
 `POINT_IN_TIME_AUDIT`
 (`2026-08-05T13:30:09+08:00..13:35:11+08:00`) revalidated production SHA
 `bb66f1e6a8a400d599c7f86139107742bbedddc8`, a clean worktree, four active core
@@ -39,8 +50,8 @@ margin. A read-only Python-service environment check at
 1260-second caller deadline; its
 outbox transitions use a live clock. The artifact is `LOCAL_VERIFIED` by 7
 Python and 67 Node tests in
-`2026-08-05T14:25:28+08:00..14:25:29+08:00`; it is not deployed or
-production-verified.
+`2026-08-05T14:25:28+08:00..14:25:29+08:00`; its behavior was subsequently
+deployed by source binding v1 and remains pending a clean real 08:00 cycle.
 
 The duplicate JSON observed after recent AI digests is a separate output-boundary
 defect: Hermes sometimes returned visible prose followed by the same private reply
@@ -51,12 +62,14 @@ message once. Invalid, mismatched, or JSON-example suffixes remain visible. The
 same validation found that the unified profile's renamed runtime-topology heading
 would break Node identity projection after a future source deploy; its parser
 anchor now follows the current heading. The complete Hermes gateway test file
-passes; both corrections are `LOCAL_VERIFIED`, not deployed.
+passed; both corrections were subsequently deployed by the accepted source
+bindings and remain short of `PROD_VERIFIED`.
 
 O1 `1be3ee5`, V4+O1 `c52f8ba`, O2 `a978444`, and the unified-identity/O2
-rollback line `b5b4ff4` are `ARCHIVED` and not deployed to production. O1 has a
-known blocker: its real Python -> HTTP -> Node recall contract has not passed
-end-to-end validation. Gate 5 is not authorized, `total_delete` remains
+rollback line `b5b4ff4` are `ARCHIVED` and not deployed to production. The
+strict Python -> HTTP -> Node recall contract was locally verified and archived
+at `deed261`, but production still uses direct `18001` and keeps `18002`
+inactive. Gate 5 is not authorized, `total_delete` remains
 unsupported, Node Receipt is deferred, and Package B.2/B.3 have not started.
 
 The Hermes v0.20 Runtime is `DEPLOYED` from exact candidate
@@ -71,6 +84,14 @@ malformed partial uv tool; old split production had disabled and filtered it,
 so no large ML dependency install was attempted during cutover. The prior
 `44b84fb11fe8` failed apply and completed rollback remain disclosed in the
 runtime status/evidence.
+
+Two bounded source-only transactions subsequently advanced the clean production
+checkout to `0cbeed7` without replacing the accepted Hermes MainPID. They
+deployed the digest deadline/outbox corrections, trailing-envelope
+normalization, conversation-scoped session continuity, and explicit memory
+tool recall behavior. The main-source convergence change is `LOCAL_VERIFIED`
+only until it is archived and separately applied; it does not turn the parked
+`18002` O1 adapter or O2 into production behavior.
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
