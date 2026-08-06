@@ -90,6 +90,7 @@ test('recall_personal_memory forwards to backend memory recall endpoint', async 
           should_inject: true,
           rendered_context: '【你对用户的了解】\n- 用户最近被一个问题卡住过',
           used_sources: ['ombre_long_memory', 'local_profile_memory'],
+          source_status: { local_memory: 'hit', ombre: 'empty' },
         });
       },
     }
@@ -103,6 +104,7 @@ test('recall_personal_memory forwards to backend memory recall endpoint', async 
     response_mode: 'casual_chat',
   });
   assert.equal(result.structuredContent.ok, true);
+  assert.deepEqual(result.structuredContent.source_status, { local_memory: 'hit', ombre: 'empty' });
   assert.equal(result.structuredContent.rendered_context, '【你对用户的了解】\n- 用户最近被一个问题卡住过');
   assert.match(result.content[0].text, /ombre_long_memory/);
 });

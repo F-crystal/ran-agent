@@ -13,6 +13,7 @@ from personal_agent.db import Database
 from personal_agent.memory_specialist import MemorySpecialist
 from personal_agent.memory_llm import MemoryExtractionResult
 from personal_agent.memory_retriever import HybridMemoryRetriever
+from personal_agent.memory_types import OmbreRecallResult
 
 
 def build_test_logger() -> logging.Logger:
@@ -56,6 +57,19 @@ class StaticProfileMemoryExtractor:
                 "confidence": 0.81,
                 "ttl_days": 90,
             },
+            source="llm",
+            should_fallback=False,
+        )
+
+
+class StaticSkipMemoryExtractor:
+    """Return a valid LLM skip without asking the rule fallback to run."""
+
+    def extract(self, user_text: str, recent_history: list[str]) -> MemoryExtractionResult:
+        del user_text, recent_history
+        return MemoryExtractionResult(
+            decision="skip",
+            memory=None,
             source="llm",
             should_fallback=False,
         )
@@ -128,7 +142,7 @@ class MemorySpecialistTest(unittest.TestCase):
                 vector_backend=vector_backend,
             ),
         )
-        specialist._ombre_backend.recall = lambda **_kwargs: ()
+        specialist._ombre_backend.recall = lambda **_kwargs: OmbreRecallResult(outcome="empty")
 
         recall = specialist.recall_for_turn(
             user_text="为什么升级 Hermes v0.20 前台运行时",
@@ -140,6 +154,31 @@ class MemorySpecialistTest(unittest.TestCase):
         self.assertTrue(recall.should_inject)
         self.assertIn("Hermes v0.20", recall.rendered_context)
         self.assertNotIn("文化观察", recall.rendered_context)
+        self.assertEqual(dict(recall.source_statuses), {"local_memory": "hit", "ombre": "empty"})
+
+    def test_explicit_recall_reports_semantic_backend_failure_as_degraded(self) -> None:
+        vector_backend = MagicMock()
+        vector_backend.search.side_effect = RuntimeError("model missing")
+        specialist = MemorySpecialist(
+            database=self.database,
+            logger=self.logger,
+            config=self.config,
+            memory_retriever=HybridMemoryRetriever(
+                self.database,
+                self.logger,
+                vector_backend=vector_backend,
+            ),
+        )
+        specialist._ombre_backend.recall = lambda **_kwargs: OmbreRecallResult(outcome="empty")
+
+        recall = specialist.recall_for_turn(
+            user_text="一个没有关键词命中的问题",
+            route="text_chat",
+            response_mode="chat",
+            explicit=True,
+        )
+
+        self.assertEqual(dict(recall.source_statuses)["local_memory"], "degraded")
 
     def test_update_from_user_turn_falls_back_to_rule_based_memory(self) -> None:
         specialist = MemorySpecialist(
@@ -170,6 +209,35 @@ class MemorySpecialistTest(unittest.TestCase):
         self.assertIsNotNone(result.long_term_candidate)
         profile_memories = self.database.get_profile_memories(limit=5)
         self.assertEqual(len(profile_memories), 1)
+
+    def test_update_from_user_turn_does_not_drop_project_decisions(self) -> None:
+        specialist = MemorySpecialist(
+            database=self.database,
+            logger=self.logger,
+            config=self.config,
+            memory_extractor=NoopFallbackMemoryExtractor(),
+        )
+
+        result = specialist.update_from_user_turn(
+            "我决定把 Hermes 升级到 v0.20 作为统一前台运行时"
+        )
+
+        self.assertTrue(result.working_written)
+
+    def test_project_decision_survives_valid_llm_skip(self) -> None:
+        specialist = MemorySpecialist(
+            database=self.database,
+            logger=self.logger,
+            config=self.config,
+            memory_extractor=StaticSkipMemoryExtractor(),
+        )
+
+        result = specialist.update_from_user_turn(
+            "我决定把 Hermes 升级到 v0.20 作为统一前台运行时"
+        )
+
+        self.assertTrue(result.working_written)
+        self.assertIn("Hermes升级到v0.20", self.database.get_working_memories(limit=1)[0]["content"])
 
     def test_maybe_store_core_stays_noop_in_phase_one(self) -> None:
         specialist = MemorySpecialist(

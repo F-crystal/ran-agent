@@ -333,17 +333,17 @@ bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
 ## Runtime Services
 
 The table describes the deployed Runtime topology. The existing direct Ombre
-service on `18001` remains active; `18002` and `18061` remain inactive. For the
-undeployed O1 target, `18001` becomes the internal upstream and `18002` becomes
-the only recall surface exposed to Hermes.
+service on `18001` remains active; `18002` and `18061` remain inactive. The next
+personal-memory candidate keeps `18001` internal behind Python and removes the
+direct Hermes tool; it does not activate `18002`.
 
 | Service | Port | Profile | Home | Purpose |
 |---------|------|---------|------|---------|
 | `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` compatibility ID | `/home/ubuntu/.hermes-ran-agent/lite` | Unified legacy Lite/Full capability surface |
 | `ran-agent-hermes-full.service` | none | retired | retained rollback state only | Inactive, disabled and condition-blocked |
 | `ran-agent-xhs-public-sidecar.service` | `18061` | n/a | `/opt/ran_agent/.ran_agent_state/xhs-public-sidecar` | XHS-Downloader public API sidecar for `social_reader` |
-| `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Current direct service; O1 target makes it internal-only |
-| `ran-agent-ombre-recall.service` | `18002` | n/a | `/opt/ran_agent` | Undeployed O1 target: recall-only MCP for Lite/Full |
+| `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Current direct service; next candidate reads it only through Python personal_memory |
+| `ran-agent-ombre-recall.service` | `18002` | n/a | `/opt/ran_agent` | Inactive v0.13 rollback-era adapter; not a target service |
 
 All legacy Lite/Full bridge URLs and selectors resolve to `8642`. The unified
 profile includes terminal, file, session-search, Playwright, media and
@@ -435,7 +435,13 @@ EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=true
 EXTERNAL_MCP_ACTIVITY_TICK_MS=60000
 ```
 
-O1 deliberately has no Ombre network authenticator.
+The deployed env may retain `OMBRE_RECALL_MCP_URL`,
+`PERSONAL_AGENT_OMBRE_BACKEND`, and `PERSONAL_AGENT_OMBRE_MCP_URL` while the
+v0.13 rollback window is open. The next personal-memory code does not read
+them; remove them with the retired `18002` unit and split profiles when that
+window closes.
+
+Ombre deliberately has no network authenticator.
 `OMBRE_MCP_REQUIRE_AUTH=false` is valid only with the enforced `127.0.0.1`
 bind and loopback-only MCP/health URLs. An external bind—or claiming
 authentication with `true`—is a release error.

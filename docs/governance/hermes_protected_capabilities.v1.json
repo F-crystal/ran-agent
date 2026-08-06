@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "status": "CURRENT_SOURCE_BASELINE",
+  "status": "LEGACY_SPLIT_SOURCE_BASELINE",
   "reservedMcpNames": [
     "search_hub",
     "social_reader",

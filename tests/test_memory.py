@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import sys
 import tempfile
+import types
 import unittest
+from dataclasses import replace
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from conftest import make_test_config
 from personal_agent.db import Database
@@ -26,8 +30,8 @@ from personal_agent.memory_retriever import HybridMemoryRetriever
 from personal_agent.service import PersonalAgentService
 from personal_agent.memory_specialist import MemorySpecialist
 from personal_agent.vector_memory_index import (
-    FileBackedMemoryVectorIndex,
-    NumpyVectorIndex,
+    FastEmbedClient,
+    VectorMemoryIndex,
 )
 
 
@@ -68,6 +72,44 @@ class MemoryFlowTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def test_enabled_memory_llm_uses_the_existing_model_client(self) -> None:
+        service = PersonalAgentService(
+            database=self.database,
+            model_client=PlaceholderModelClient(),
+            logger=self.logger,
+            config=replace(self.config, memory_llm_enabled=True),
+        )
+        self.addCleanup(service.shutdown)
+
+        self.assertIsInstance(service._memory_extractor, LLMMemoryExtractor)
+
+    def test_fastembed_client_uses_local_query_and_document_paths(self) -> None:
+        calls = []
+
+        class FakeTextEmbedding:
+            def __init__(self, **kwargs):
+                calls.append(("init", kwargs))
+
+            def query_embed(self, texts):
+                calls.append(("query", list(texts)))
+                return ([1.0, 0.0] for _ in texts)
+
+            def embed(self, texts):
+                calls.append(("document", list(texts)))
+                return ([0.0, 1.0] for _ in texts)
+
+        fake_module = types.ModuleType("fastembed")
+        fake_module.TextEmbedding = FakeTextEmbedding
+        client = FastEmbedClient(cache_dir=self.config.data_dir / "fastembed_cache")
+
+        with patch.dict(sys.modules, {"fastembed": fake_module}):
+            self.assertEqual(client.embed_texts(["查询"], text_type="query"), ((1.0, 0.0),))
+            self.assertEqual(client.embed_texts(["文档"], text_type="document"), ((0.0, 1.0),))
+
+        self.assertEqual(calls[0][0], "init")
+        self.assertTrue(calls[0][1]["local_files_only"])
+        self.assertEqual([call[0] for call in calls], ["init", "query", "document"])
+
     def test_llm_memory_extractor_returns_structured_working_memory(self) -> None:
         class JsonModelClient:
             def generate_reply(self, request: ModelRequest) -> ModelResponse:
@@ -84,7 +126,7 @@ class MemoryFlowTest(unittest.TestCase):
         extractor = LLMMemoryExtractor(
             model_client=JsonModelClient(),
             logger=self.logger,
-            config=self.config,
+            config=replace(self.config, memory_llm_enabled=True),
         )
 
         result = extractor.extract(
@@ -108,7 +150,7 @@ class MemoryFlowTest(unittest.TestCase):
         extractor = LLMMemoryExtractor(
             model_client=InvalidJsonModelClient(),
             logger=self.logger,
-            config=self.config,
+            config=replace(self.config, memory_llm_enabled=True),
         )
 
         result = extractor.extract(
@@ -133,6 +175,14 @@ class MemoryFlowTest(unittest.TestCase):
                 "summary": "用户今天在处理论文，情绪有些烦躁",
             },
         )
+
+    def test_extract_working_memory_keeps_explicit_project_decision(self) -> None:
+        memory = extract_working_memory(
+            "我决定把 Hermes 升级到 v0.20 作为统一前台运行时"
+        )
+
+        self.assertEqual(memory["topic"], "项目决策")
+        self.assertIn("Hermes", memory["summary"])
 
     def test_extract_profile_memory_requires_repeat_before_writing(self) -> None:
         first_result = extract_profile_memory(
@@ -485,13 +535,12 @@ class MemoryFlowTest(unittest.TestCase):
                 self.document_calls = 0
                 self.query_calls = 0
 
-            def embed_documents(self, texts: list[str]) -> list[list[float]]:
-                self.document_calls += 1
+            def embed_texts(self, texts, *, text_type):
+                if text_type == "document":
+                    self.document_calls += 1
+                else:
+                    self.query_calls += 1
                 return [self._embed(text) for text in texts]
-
-            def embed_query(self, text: str) -> list[float]:
-                self.query_calls += 1
-                return self._embed(text)
 
             @staticmethod
             def _embed(text: str) -> list[float]:
@@ -528,12 +577,13 @@ class MemoryFlowTest(unittest.TestCase):
         )
 
         embedder = FakeEmbeddingClient()
-        index = FileBackedMemoryVectorIndex(
+        index = VectorMemoryIndex(
             database=self.database,
-            config=self.config,
             logger=self.logger,
+            index_path=self.config.vector_memory_index_path,
+            metadata_path=self.config.vector_memory_metadata_path,
             embedding_client=embedder,
-            ann_backend=NumpyVectorIndex(),
+            enabled=True,
         )
 
         first_hits = index.search("晚上出去走走会放松一点", limit=1)
@@ -546,16 +596,14 @@ class MemoryFlowTest(unittest.TestCase):
         self.assertEqual(embedder.document_calls, 1)
         self.assertEqual(embedder.query_calls, 2)
         self.assertTrue((self.config.data_dir / "memory_vector_index.json").exists())
-        self.assertTrue((self.config.data_dir / "memory_vector_index.npy").exists())
+        self.assertTrue(self.config.vector_memory_index_path.exists())
 
     def test_hybrid_memory_retriever_can_return_vector_hit_without_keyword_overlap(self) -> None:
         class FakeEmbeddingClient:
-            def embed_documents(self, texts: list[str]) -> list[list[float]]:
+            def embed_texts(self, texts, *, text_type):
+                if text_type == "query":
+                    return [[1.0, 0.0]]
                 return [[1.0, 0.0], [0.0, 1.0]]
-
-            def embed_query(self, text: str) -> list[float]:
-                self.last_query = text
-                return [1.0, 0.0]
 
         self.database.store_memory(
             serialize_memory_content(
@@ -582,12 +630,13 @@ class MemoryFlowTest(unittest.TestCase):
             importance=3,
         )
 
-        vector_backend = FileBackedMemoryVectorIndex(
+        vector_backend = VectorMemoryIndex(
             database=self.database,
-            config=self.config,
             logger=self.logger,
+            index_path=self.config.vector_memory_index_path,
+            metadata_path=self.config.vector_memory_metadata_path,
             embedding_client=FakeEmbeddingClient(),
-            ann_backend=NumpyVectorIndex(),
+            enabled=True,
         )
         retriever = HybridMemoryRetriever(
             database=self.database,

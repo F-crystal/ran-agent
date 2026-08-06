@@ -137,7 +137,8 @@ For Ombre Brain, the canonical upstream is
 Default posture:
 
 - Deploy through the common runtime script, not manual server edits.
-- Keep lite using `personal_memory` as the small public memory surface.
+- Keep `personal_memory` as the only public personal-memory surface. Ombre is
+  an internal read source behind Python, not a second Hermes tool.
 - Treat upstream Ombre Brain as source-runner first:
   `OMBRE_BRAIN_RUNNER=source`, source checkout under
   `.ran_agent_state/ombre-brain/upstream`, venv under
@@ -145,15 +146,12 @@ Default posture:
 - Docker is optional. Do not install Docker silently from the Hermes runtime
   split script; only use `OMBRE_BRAIN_RUNNER=docker` when the operator has made
   Docker available intentionally.
-- Python `personal_memory` uses the local recall-only HTTP adapter
-  (`PERSONAL_AGENT_OMBRE_BACKEND=recall_only`). The known production legacy
-  value `official_with_legacy_fallback` is a migration alias for recall-only
-  and logs a warning; it does not reactivate the legacy writable shim. No
-  other deploy override is valid: unknown values intentionally fail startup
-  closed and must be caught by pre-deploy validation rather than preserved as
-  a runtime option.
-- Expose direct Ombre MCP tools in full only unless there is a specific reason
-  to expand lite, and only when the upstream runner is actually available.
+- Python reads `OMBRE_BRAIN_MCP_URL` directly through bounded
+  `breath_search`; do not deploy the retired `18002` adapter or a raw Hermes
+  Ombre tool in the unified profile.
+- Provision FastEmbed dependencies and the pinned local model as candidate
+  assets before restart. Runtime recall must stay `local_files_only` and must
+  not download or call a paid embedding API.
 - Store runtime data under ignored state or private `vault/ombre`; never commit
   memory buckets.
 - Reuse existing Ombre env values by default. Operator changes should survive

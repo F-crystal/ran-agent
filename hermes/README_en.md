@@ -141,9 +141,8 @@ ran-agent uses repo-owned MCP services:
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares |
 | `mimo_power` | Retired: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles |
-| `personal_memory` | Personal memory recall through the Python backend |
+| `personal_memory` | Unified Python memory entry combining local memory and read-only Ombre |
 | `obsidian_memory` | Optional Obsidian vault semantic search; registered but not currently runtime-ready |
-| `ombre_memory` | Local recall-only O1 candidate endpoint; the upstream registry is not exposed to Hermes |
 | `media_generation` | Image and speech generation in the unified profile |
 | `playwright` | Browser automation in the unified profile |
 | `tavily` | Optional lower-level web search provider for Search Hub compatibility |
@@ -172,12 +171,11 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `OBSIDIAN_INDEX_DEVICE` | Default `cpu` on Linux servers |
 | `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | Set to `1` only during explicit maintenance |
 | `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Internal Ombre Brain service switches; they do not authorize direct Hermes access |
-| `OMBRE_BRAIN_RUNNER` | O1 is pinned to `source`; `docker`, `external`, and unknown runners fail closed |
+| `OMBRE_BRAIN_RUNNER` | Ombre Brain runner; production uses pinned `source` |
 | `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream, default `https://github.com/P0luz/Ombre-Brain` |
 | `OMBRE_BRAIN_HOME`, `OMBRE_BRAIN_SOURCE_DIR`, `OMBRE_BRAIN_VENV`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime, source checkout, venv, and private buckets paths |
-| `OMBRE_BIND_HOST`, `OMBRE_MCP_REQUIRE_AUTH`, `OMBRE_BRAIN_MCP_URL` | Loopback-only contract for the internal upstream; O1 has no network authenticator, so only `127.0.0.1` and `false` are accepted |
-| `OMBRE_RECALL_MCP_URL` | Local recall-only endpoint used by Hermes and Python |
-| `PERSONAL_AGENT_OMBRE_BACKEND` | Python `personal_memory` Ombre backend, fixed to `recall_only` in the O1 candidate |
+| `OMBRE_BIND_HOST`, `OMBRE_MCP_REQUIRE_AUTH`, `OMBRE_BRAIN_MCP_URL` | Loopback-only Ombre read endpoint used internally by Python `personal_memory` |
+| `PERSONAL_AGENT_VECTOR_MEMORY_ENABLED` | Local FastEmbed + HNSW semantic ranking; runtime recall stays offline |
 
 Secrets must live in machine-local `.env` files, for example:
 

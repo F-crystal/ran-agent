@@ -102,6 +102,7 @@ def inspect_local_memory(memory_specialist: MemorySpecialist, *, user_text: str)
         "core_memories": list(recall.core_memories),
         "rendered_context": recall.rendered_context,
         "used_sources": list(recall.used_sources),
+        "source_status": dict(recall.source_statuses),
     }
 
 

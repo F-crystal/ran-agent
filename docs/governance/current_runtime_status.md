@@ -30,6 +30,7 @@ digest_correction_stage: DEPLOYED in source binding.v1 and retained by 0cbeed7; 
 digest_duplicate_envelope_followup: DEPLOYED in source binding.v1/v2; the shared response parser releases a valid trailing private envelope once, including the observed labelled form; invalid or mismatched JSON remains visible; not yet PROD_VERIFIED by a clean real digest cycle
 unified_identity_projection_compatibility: DEPLOYED in source binding.v1 and retained by 0cbeed7; the projection anchor follows the unified runtime-topology heading; not yet PROD_VERIFIED by a named live identity assertion
 cross_channel_and_explicit_memory_followup: DEPLOYED as 0cbeed7; Hermes session keys are conversation-scoped, new non-referential requests do not inherit cross-channel global turns, and explicit personal-memory calls bypass the automatic chat-injection trigger; the current main convergence candidate preserves these semantics without importing the old source tree wholesale
+personal_memory_facade_candidate: LOCAL_VERIFIED_NOT_DEPLOYED; 137 focused Python tests plus 8 subtests and 6 Node tests pass on Linux; next unified v0.20 source exposes only personal_memory, reads local SQLite through free offline FastEmbed/HNSW plus keywords, reads bounded Ombre breath_search through internal 18001, reports source degradation explicitly, and makes extra LLM extraction opt-in/off by default; production profile and services are unchanged until a new exact candidate supplies dependencies/model assets and restarts Python plus Hermes
 ombre_o1_archived_baseline: 1be3ee58919fb01f1c442d75ba2463e237fba0b2; superseded by strict recall contract archive deed261; neither is deployed and production 18002 remains inactive
 v4_o1_baseline: c52f8ba9b26338204e8ae189d1f1df5f3800e630; ARCHIVED; not deployed
 v4_pro: explicit Lite/Full opt-in only; undeployed
@@ -445,7 +446,7 @@ state, vault, data, or XHS note debug output.
 | `sticker_catalog` | Local sticker picker/attach/save catalog |
 | `personal_memory` | Personal memory recall and backend health check |
 | `obsidian_memory` | Optional surface is configured/registered but currently parked on an inherited malformed partial uv tool; not runtime-ready |
-| legacy direct Ombre surfaces | Prior production-repository shape; the local O1 recall-only replacement is not deployed |
+| direct Ombre surface | Present only in the deployed historical v0.20 profile; removed from the next source candidate in favor of `personal_memory` |
 | `media_generation` | Image and speech generation |
 | `playwright` | Dynamic/visual web pages, full/debug use |
 | `external_mcp_gateway` | Stable broker for governed external MCPs |
@@ -535,8 +536,8 @@ ChannelHub, frontends, the provider gateway/history, Global Timeline,
 service implementation has not started, no Core B path has been deployed, and
 no partial Core production write path is authorized.
 
-The deployed release does not yet unify automatic memory recall, Ombre direct
-and wrapper surfaces, Vault recall, ordinary session continuity, and
+The deployed release does not yet carry the source candidate that removes the
+direct Ombre tool behind `personal_memory`. Vault recall, ordinary session continuity, and
 provider-visible history under one control plane. It also does not establish a
 single final-delivered assistant turn as the proven shared source for every
 timeline, backend, provider-history, and session layer. These are follow-up

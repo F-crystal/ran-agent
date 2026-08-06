@@ -121,6 +121,7 @@ class PersonalAgentServiceTest(unittest.TestCase):
         )
 
     def _service(self, **kwargs: object) -> PersonalAgentService:
+        kwargs.setdefault("memory_extractor", NoopFallbackMemoryExtractor())
         return self._track_service(PersonalAgentService(**kwargs))
 
     def _track_service(self, service: PersonalAgentService) -> PersonalAgentService:

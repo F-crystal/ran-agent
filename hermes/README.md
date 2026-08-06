@@ -139,9 +139,8 @@ ran-agent 使用仓库内 MCP 服务：
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享 |
 | `mimo_power` | 已退役：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles |
-| `personal_memory` | Python backend 个人记忆召回 |
+| `personal_memory` | Python backend 的统一个人记忆入口，内部组合本地 memory 与只读 Ombre |
 | `obsidian_memory` | Optional Obsidian vault 语义检索；已注册但当前未 runtime-ready |
-| `ombre_memory` | O1 候选的本地 recall-only 入口；不向 Hermes 暴露上游 registry |
 | `media_generation` | 图片和语音生成，统一 profile 可用 |
 | `playwright` | 浏览器自动化，统一 profile 可用 |
 | `tavily` | 可选底层网页搜索 provider，仅供 Search Hub 兼容使用 |
@@ -170,12 +169,11 @@ ran-agent 使用仓库内 MCP 服务：
 | `OBSIDIAN_INDEX_DEVICE` | Linux 服务器默认 `cpu` |
 | `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | 只在显式维护时设为 `1` |
 | `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | 内部 Ombre Brain 服务开关；不授权 Hermes 直连 |
-| `OMBRE_BRAIN_RUNNER` | O1 固定为 pinned `source`；`docker`、`external` 和未知 runner 均 fail-closed |
+| `OMBRE_BRAIN_RUNNER` | Ombre Brain runner；生产使用 pinned `source` |
 | `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream，默认 `https://github.com/P0luz/Ombre-Brain` |
 | `OMBRE_BRAIN_HOME`, `OMBRE_BRAIN_SOURCE_DIR`, `OMBRE_BRAIN_VENV`, `OMBRE_BUCKETS_DIR` | Ombre Brain runtime、source checkout、venv 和私有 buckets 路径 |
-| `OMBRE_BIND_HOST`, `OMBRE_MCP_REQUIRE_AUTH`, `OMBRE_BRAIN_MCP_URL` | 内部上游的 loopback-only 网络契约；O1 未实现网络认证，故仅允许 `127.0.0.1` 与 `false` |
-| `OMBRE_RECALL_MCP_URL` | Hermes/Python 使用的本地 recall-only 端点 |
-| `PERSONAL_AGENT_OMBRE_BACKEND` | Python `personal_memory` 底层 Ombre 后端，O1 候选固定为 `recall_only` |
+| `OMBRE_BIND_HOST`, `OMBRE_MCP_REQUIRE_AUTH`, `OMBRE_BRAIN_MCP_URL` | Python `personal_memory` 使用的 loopback-only Ombre 只读端点 |
+| `PERSONAL_AGENT_VECTOR_MEMORY_ENABLED` | 本地 FastEmbed + HNSW 语义排序开关；运行时不联网 |
 
 Secrets 必须放在机器本地 `.env`，例如：
 

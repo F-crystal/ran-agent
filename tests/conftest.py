@@ -31,7 +31,10 @@ def make_test_config(tmp_path: Path, **overrides: object) -> AppConfig:
 
     root = Path(tmp_path).resolve()
     path_values = {name: root / relative for name, relative in _PATH_DEFAULTS.items()}
-    config = replace(AppConfig(**path_values), **overrides)
+    config = replace(
+        AppConfig(**path_values, ombre_mcp_url="", vector_memory_enabled=False),
+        **overrides,
+    )
 
     for field_name in _PATH_DEFAULTS:
         candidate = getattr(config, field_name)

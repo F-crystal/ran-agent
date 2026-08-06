@@ -86,10 +86,8 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(config.brain_loop_interval_minutes, 120)
         self.assertEqual(config.proactive_check_interval_minutes, 90)
         self.assertEqual(config.reminder_check_interval_minutes, 5)
+        self.assertFalse(config.memory_llm_enabled)
         self.assertTrue(config.vector_memory_enabled)
-        self.assertEqual(config.vector_memory_embedding_provider, "dashscope")
-        self.assertEqual(config.vector_memory_embedding_model, "text-embedding-v4")
-        self.assertEqual(config.vector_memory_embedding_dimension, 256)
         self.assertEqual(config.vector_memory_index_path, config.data_dir / "memory_vector_index.bin")
         self.assertEqual(config.vector_memory_metadata_path, config.data_dir / "memory_vector_index.json")
         self.assertEqual(config.profile_memory_limit, 3)
@@ -104,8 +102,7 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(config.proactive_memory_context_max_chars, 300)
         self.assertTrue(config.hermes_bounded_context_enabled)
         self.assertEqual(config.hermes_bounded_context_interval_minutes, 720)
-        self.assertEqual(config.ombre_backend, "recall_only")
-        self.assertEqual(config.ombre_mcp_url, "http://127.0.0.1:18002/mcp")
+        self.assertEqual(config.ombre_mcp_url, "http://127.0.0.1:18001/mcp")
 
     def test_reviewer_flags_can_be_overridden_from_environment(self) -> None:
         with patch.dict(
@@ -135,9 +132,6 @@ class ConfigLoadingTest(unittest.TestCase):
                 "HERMES_PROACTIVE_REMINDERS_ENABLED": "true",
                 "PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED": "false",
                 "PERSONAL_AGENT_VECTOR_MEMORY_ENABLED": "false",
-                "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_PROVIDER": "openai_compatible",
-                "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_MODEL": "text-embedding-3-small",
-                "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_DIMENSION": "128",
                 "PERSONAL_AGENT_MEMORY_CONTEXT_MAX_CHARS": "420",
                 "PERSONAL_AGENT_DAILY_CONTEXT_MAX_CHARS": "300",
                 "PERSONAL_AGENT_REFLECTION_CONTEXT_MAX_CHARS": "280",
@@ -177,9 +171,6 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertTrue(config.reminder_delivery_enabled)
         self.assertTrue(config.proactive_reminders_enabled)
         self.assertFalse(config.vector_memory_enabled)
-        self.assertEqual(config.vector_memory_embedding_provider, "openai_compatible")
-        self.assertEqual(config.vector_memory_embedding_model, "text-embedding-3-small")
-        self.assertEqual(config.vector_memory_embedding_dimension, 128)
         self.assertEqual(config.memory_context_max_chars, 420)
         self.assertEqual(config.daily_context_max_chars, 300)
         self.assertEqual(config.reflection_context_max_chars, 280)

@@ -32,6 +32,7 @@ from personal_agent.reply_reviewer import ReplyReviewResult, build_retry_instruc
 from personal_agent.knowledge_agent import KnowledgeAgent, load_knowledge_state
 from personal_agent.knowledge_retriever import KnowledgeRetriever
 from personal_agent.life_loop import LifeLoop, LifeOpportunity
+from personal_agent.memory_llm import LLMMemoryExtractor
 from personal_agent.memory_specialist import DisabledMemoryExtractor, MemorySpecialist
 from personal_agent.memory import extract_repeated_learning_candidates
 from personal_agent.night_cycle import NightCycle
@@ -149,7 +150,15 @@ class PersonalAgentService:
         self._tool_model_client = tool_model_client or model_client
         self._logger = logger
         self._system_prompt_override = system_prompt
-        self._memory_extractor = memory_extractor or DisabledMemoryExtractor()
+        self._memory_extractor = memory_extractor or (
+            LLMMemoryExtractor(
+                model_client=self._tool_model_client,
+                logger=logger,
+                config=self._config,
+            )
+            if self._config.memory_llm_enabled
+            else DisabledMemoryExtractor()
+        )
         self._memory_specialist = MemorySpecialist(
             database=database,
             logger=logger,
@@ -642,8 +651,12 @@ class PersonalAgentService:
             "short_term_memories": list(recall.short_term_memories),
             "long_term_memories": list(recall.long_term_memories),
             "core_memories": list(recall.core_memories),
-            "rendered_context": recall.rendered_context,
+            "rendered_context": trim_context(
+                recall.rendered_context,
+                self._config.memory_context_max_chars,
+            ),
             "used_sources": list(recall.used_sources),
+            "source_status": dict(recall.source_statuses),
             "injection_level": recall.injection_level,
         }
 

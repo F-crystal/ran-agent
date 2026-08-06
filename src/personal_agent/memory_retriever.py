@@ -61,11 +61,7 @@ class HybridMemoryRetriever:
         self._database = database
         self._logger = logger
         self._candidate_limit = getattr(config, "vector_memory_candidate_limit", candidate_limit)
-        self._vector_backend = vector_backend or _build_default_vector_backend(
-            database=database,
-            config=config,
-            logger=logger,
-        )
+        self._vector_backend = vector_backend
 
     def retrieve(
         self,
@@ -75,9 +71,20 @@ class HybridMemoryRetriever:
     ) -> tuple[MemoryRetrievalHit, ...]:
         """Return the best local memories for one user query."""
 
+        hits, _ = self.retrieve_with_status(user_text, limit, memory_types)
+        return hits
+
+    def retrieve_with_status(
+        self,
+        user_text: str,
+        limit: int = 3,
+        memory_types: Sequence[str] | None = None,
+    ) -> tuple[tuple[MemoryRetrievalHit, ...], str]:
+        """Return ranked memories and the semantic backend outcome."""
+
         normalized_query = _normalize_text(user_text)
         if not normalized_query:
-            return ()
+            return (), "empty"
 
         local_rows = self._database.get_memories_for_retrieval(
             limit=self._candidate_limit,
@@ -88,7 +95,12 @@ class HybridMemoryRetriever:
             for row in local_rows
         ]
 
-        scored_hits.extend(self._vector_hits(user_text=user_text, limit=limit, memory_types=memory_types))
+        vector_hits, vector_outcome = self._vector_hits(
+            user_text=user_text,
+            limit=limit,
+            memory_types=memory_types,
+        )
+        scored_hits.extend(vector_hits)
 
         deduped: dict[tuple[str, str], MemoryRetrievalHit] = {}
         for hit in scored_hits:
@@ -108,7 +120,7 @@ class HybridMemoryRetriever:
                 -item.id,
             ),
         )
-        return tuple(ranked_hits[:limit])
+        return tuple(ranked_hits[:limit]), vector_outcome
 
     def _vector_hits(
         self,
@@ -116,22 +128,22 @@ class HybridMemoryRetriever:
         user_text: str,
         limit: int,
         memory_types: Sequence[str] | None,
-    ) -> list[MemoryRetrievalHit]:
+    ) -> tuple[list[MemoryRetrievalHit], str]:
         if self._vector_backend is None:
-            return []
+            return [], "disabled"
 
         try:
             candidates = self._vector_backend.search(user_text, limit, memory_types=memory_types)
         except Exception as exc:  # pragma: no cover - defensive integration guard
             self._logger.warning("vector memory retrieval failed: %s", exc)
-            return []
+            return [], "degraded"
 
         hits: list[MemoryRetrievalHit] = []
         for candidate in candidates:
             hit = self._coerce_hit(candidate)
             if hit is not None:
                 hits.append(hit)
-        return hits
+        return hits, "hit" if hits else "empty"
 
     def _score_row(self, row, normalized_query: str) -> MemoryRetrievalHit:
         raw_content = str(row["content"])
@@ -296,20 +308,3 @@ def _coerce_terms(raw_terms: object) -> tuple[str, ...]:
     if not isinstance(raw_terms, Sequence):
         return ()
     return tuple(str(term) for term in raw_terms if str(term).strip())
-
-
-def _build_default_vector_backend(
-    *,
-    database: Database,
-    config: AppConfig | None,
-    logger: logging.Logger,
-) -> VectorMemoryBackend | None:
-    if config is None:
-        return None
-    try:
-        from personal_agent.vector_memory_index import build_vector_memory_backend
-
-        return build_vector_memory_backend(database=database, config=config, logger=logger)
-    except Exception as exc:  # pragma: no cover - integration safety
-        logger.warning("default vector memory backend disabled: %s", exc)
-        return None

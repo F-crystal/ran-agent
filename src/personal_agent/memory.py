@@ -121,6 +121,15 @@ def extract_working_memory(user_text: str) -> MemoryPayload | None:
     if not cleaned:
         return None
 
+    if any(marker in cleaned for marker in ("我决定", "最终决定", "确定采用", "确定使用", "确认使用", "就这么定")):
+        return {
+            "type": "working",
+            "time_scope": "current",
+            "topic": "项目决策",
+            "state": "",
+            "summary": _truncate_text(f"用户确认的项目决策：{cleaned}", max_length=80),
+        }
+
     has_current_marker = any(marker in cleaned for marker in WORKING_TIME_MARKERS)
     activity = _extract_activity_fragment(cleaned)
     emotion = _extract_emotion_fragment(cleaned)

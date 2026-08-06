@@ -34,11 +34,15 @@ function buildErrorResult(message) {
 function buildRecallResult(payload = {}) {
   const renderedContext = String(payload.rendered_context || '').trim();
   const usedSources = Array.isArray(payload.used_sources) ? payload.used_sources.map(String) : [];
+  const sourceStatus = payload.source_status && typeof payload.source_status === 'object' && !Array.isArray(payload.source_status)
+    ? Object.fromEntries(Object.entries(payload.source_status).map(([key, value]) => [String(key), String(value)]))
+    : {};
   const result = {
     ok: true,
     should_inject: payload.should_inject === true,
     rendered_context: renderedContext,
     used_sources: usedSources,
+    source_status: sourceStatus,
     injection_level: String(payload.injection_level || ''),
     short_term_memories: Array.isArray(payload.short_term_memories) ? payload.short_term_memories : [],
     long_term_memories: Array.isArray(payload.long_term_memories) ? payload.long_term_memories : [],
@@ -120,7 +124,7 @@ export function buildPersonalMemoryTools() {
 }
 
 async function recallPersonalMemory(args = {}, options = {}) {
-  const query = String(args.query || args.user_text || '').trim();
+  const query = String(args.query || '').trim();
   if (!query) {
     return buildErrorResult('recall_personal_memory requires query');
   }

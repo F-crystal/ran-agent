@@ -178,15 +178,10 @@ class AppConfig:
     working_memory_retention_limit: int = 20
     profile_memory_history_limit: int = 30
     profile_memory_repeat_threshold: int = 2
-    memory_llm_enabled: bool = True
+    memory_llm_enabled: bool = False
     memory_llm_history_limit: int = 6
     vector_memory_enabled: bool = True
     vector_memory_candidate_limit: int = 200
-    vector_memory_embedding_provider: str = "dashscope"
-    vector_memory_embedding_model: str = "text-embedding-v4"
-    vector_memory_embedding_dimension: int = 256
-    vector_memory_embedding_api_key_env_var: str = "DASHSCOPE_API_KEY"
-    vector_memory_embedding_base_url: str = "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding"
     vector_memory_index_path: Path = Path("data/memory_vector_index.bin")
     vector_memory_metadata_path: Path = Path("data/memory_vector_index.json")
     memory_policy_prompt: str = DEFAULT_MEMORY_POLICY_PROMPT
@@ -228,9 +223,8 @@ class AppConfig:
     persona_proposals_dir: Path = Path("debug/persona_proposals")
     identity_path: Path = Path("IDENTITY.md")
     soul_path: Path = Path("SOUL.md")
-    ombre_backend: str = "recall_only"
     ombre_mcp_timeout_seconds: int = 10
-    ombre_mcp_url: str = "http://127.0.0.1:18002/mcp"
+    ombre_mcp_url: str = "http://127.0.0.1:18001/mcp"
     wechat_account_id: str = "personal_agent"
     wechat_login_mode: str = "terminal"
     http_host: str = "127.0.0.1"
@@ -373,7 +367,7 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         profile_memory_repeat_threshold=int(
             os.getenv("PERSONAL_AGENT_PROFILE_MEMORY_REPEAT_THRESHOLD", "2").strip()
         ),
-        memory_llm_enabled=not _env_disabled("PERSONAL_AGENT_MEMORY_LLM_ENABLED", "true"),
+        memory_llm_enabled=_env_enabled("PERSONAL_AGENT_MEMORY_LLM_ENABLED", "false"),
         memory_llm_history_limit=int(
             os.getenv("PERSONAL_AGENT_MEMORY_LLM_HISTORY_LIMIT", "6").strip()
         ),
@@ -381,25 +375,6 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         vector_memory_candidate_limit=int(
             os.getenv("PERSONAL_AGENT_VECTOR_MEMORY_CANDIDATE_LIMIT", "200").strip()
         ),
-        vector_memory_embedding_provider=os.getenv(
-            "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_PROVIDER",
-            "dashscope",
-        ).strip().lower(),
-        vector_memory_embedding_model=os.getenv(
-            "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_MODEL",
-            "text-embedding-v4",
-        ).strip(),
-        vector_memory_embedding_dimension=int(
-            os.getenv("PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_DIMENSION", "256").strip()
-        ),
-        vector_memory_embedding_api_key_env_var=os.getenv(
-            "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_API_KEY_ENV",
-            "DASHSCOPE_API_KEY",
-        ).strip(),
-        vector_memory_embedding_base_url=os.getenv(
-            "PERSONAL_AGENT_VECTOR_MEMORY_EMBEDDING_BASE_URL",
-            "https://dashscope.aliyuncs.com/api/v1/services/embeddings/text-embedding/text-embedding",
-        ).strip(),
         vector_memory_index_path=Path(
             os.getenv(
                 "PERSONAL_AGENT_VECTOR_MEMORY_INDEX_PATH",
@@ -472,16 +447,12 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         persona_proposals_dir=debug_dir / "persona_proposals",
         identity_path=resolved_base_dir / "IDENTITY.md",
         soul_path=resolved_base_dir / "SOUL.md",
-        ombre_backend=os.getenv(
-            "PERSONAL_AGENT_OMBRE_BACKEND",
-            "recall_only",
-        ).strip().lower(),
         ombre_mcp_timeout_seconds=int(
             os.getenv("PERSONAL_AGENT_OMBRE_MCP_TIMEOUT_SECONDS", "10").strip()
         ),
         ombre_mcp_url=os.getenv(
-            "PERSONAL_AGENT_OMBRE_MCP_URL",
-            os.getenv("OMBRE_RECALL_MCP_URL", "http://127.0.0.1:18002/mcp"),
+            "OMBRE_BRAIN_MCP_URL",
+            "http://127.0.0.1:18001/mcp",
         ).strip(),
         wechat_account_id=os.getenv("PERSONAL_AGENT_WECHAT_ACCOUNT_ID", "personal_agent").strip(),
         wechat_login_mode=os.getenv("PERSONAL_AGENT_WECHAT_LOGIN_MODE", "terminal").strip().lower(),

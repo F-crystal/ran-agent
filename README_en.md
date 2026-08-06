@@ -83,18 +83,13 @@ known limitations.
 
 **Media follow-up context.** Inbound media becomes conversation-scoped artifacts. When the user says “that image from earlier” or “analyze the image from before,” the inbound message buffer binds the text to recent media explicitly or as a soft candidate. Context Policy v1 injects at most 3 compact artifacts per turn by default.
 
-**Memory and knowledge.** `personal_memory`, Ombre, Vault, and
-`GlobalTimeline` already exist. `personal_memory` recalls personal memory
-through the Python backend; `surface_relevant_context` is only the current
-lightweight memory surface and must not be described as automatically searching
-Vault. An automatic unified recall control plane is not complete yet. The
-production-repository shape still describes `obsidian_memory` and direct Ombre
-MCPs as optional surfaces; the undeployed O1 candidate replaces only the Ombre
-surface with a local recall-only endpoint. The current undeployed candidate
-also adds a pre-Gate-5 O2 compatibility writer for confirmed delivered final
-turns; it remains non-authoritative and projection-only. Long-term writes,
-reflection, night-cycle work, and knowledge maintenance stay in the Python
-backend and on-demand skills instead of always living in the main prompt.
+**Memory and knowledge.** The next source candidate makes `personal_memory` the unified personal-memory
+entry: the Python backend combines local working/profile memory, free local
+FastEmbed semantic ranking, and Ombre relationship context. Ombre is a
+read-only derived source, not an authority for technical or Core facts, and is
+not exposed as a second Hermes tool; production keeps the historical tool
+surface until that candidate is applied. `surface_relevant_context` still does not
+mean automatic whole-Vault search.
 
 **Sendable media generation.** The unified gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.
 
@@ -113,7 +108,6 @@ backend and on-demand skills instead of always living in the main prompt.
 | `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | unified |
 | `personal_memory` | Personal memory recall and backend health check | unified |
 | `obsidian_memory` | Obsidian vault semantic search | optional / registered / not runtime-ready |
-| `ombre_memory` | Recall-only adapter in the local O1 candidate (not a production claim) | lite/full candidate |
 | `external_mcp_gateway` | Governed dynamic External MCP broker | governed / source profiles disabled-by-default |
 | `media_generation` | Image and speech generation | unified |
 | `playwright` | Browser automation and dynamic-page debugging | unified |

@@ -15,6 +15,14 @@ class MemoryStoreDecision:
     source: str = "local"
 
 
+@dataclass(frozen=True)
+class OmbreRecallResult:
+    """One bounded Ombre recall with an observable outcome."""
+
+    items: tuple[str, ...] = ()
+    outcome: str = "empty"
+
+
 class OmbreMemoryBackend(Protocol):
     """Backend contract for long, core, and emotional memory access."""
 
@@ -23,7 +31,7 @@ class OmbreMemoryBackend(Protocol):
         *,
         user_text: str,
         response_mode: str,
-    ) -> tuple[str, ...]:
+    ) -> OmbreRecallResult:
         """Return relevant long-memory snippets for one turn."""
 
     def store_long_term(self, candidate: dict[str, object]) -> MemoryStoreDecision:

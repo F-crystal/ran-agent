@@ -12,7 +12,12 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 from personal_agent.config import AppConfig
-from personal_agent.memory_types import MemoryStoreDecision, OmbreMemoryBackend
+from personal_agent.context_budget import trim_context
+from personal_agent.memory_types import (
+    MemoryStoreDecision,
+    OmbreMemoryBackend,
+    OmbreRecallResult,
+)
 
 
 @dataclass(frozen=True)
@@ -45,32 +50,26 @@ def _strict_json_object(raw: str) -> dict[str, object] | None:
     return parsed if isinstance(parsed, dict) else None
 
 
-def _recall_excerpts(items: object, *, limit: int) -> list[str] | None:
-    """Validate the local Node adapter's canonical recall item schema."""
+def _upstream_recall_items(value: object) -> tuple[str, ...] | None:
+    """Normalize official breath_search text without leaking its empty hint."""
 
-    if not isinstance(items, list):
+    if not isinstance(value, str) or not value.strip():
         return None
-    if len(items) > limit:
-        return None
-    excerpts: list[str] = []
-    for item in items:
-        if not isinstance(item, dict) or set(item) != {"path", "excerpt"}:
-            return None
-        path = item.get("path")
-        excerpt = item.get("excerpt")
-        if (
-            not isinstance(path, str)
-            or not path.strip()
-            or not isinstance(excerpt, str)
-            or not excerpt.strip()
-        ):
-            return None
-        excerpts.append(excerpt.strip())
-    return excerpts
+    lines = value.strip().splitlines()
+    if lines and lines[0].startswith("[检索降级："):
+        lines = lines[1:]
+    normalized = "\n".join(lines).strip()
+    first_line = normalized.splitlines()[0] if normalized else ""
+    if not normalized or (
+        first_line.startswith("没有匹配到")
+        and ("相关记忆" in first_line or "相关的记忆" in first_line)
+    ):
+        return ()
+    return (normalized,)
 
 
 class OfficialOmbreHTTPClient:
-    """Small JSON-RPC client for the local recall-only Ombre adapter."""
+    """Small JSON-RPC client for official Ombre Brain on loopback."""
 
     def __init__(self, config: AppConfig, logger: logging.Logger) -> None:
         self._mcp_url = config.ombre_mcp_url.strip()
@@ -138,102 +137,56 @@ class OfficialOmbreHTTPClient:
         if not isinstance(result, dict) or result.get("isError") is not False:
             return OmbreCallResult(ok=False, payload={}, error="tool_result_invalid")
         structured = result.get("structuredContent")
-        if not isinstance(structured, dict) or not isinstance(structured.get("items"), list):
-            return OmbreCallResult(ok=False, payload={}, error="payload_items_invalid")
-        return OmbreCallResult(ok=True, payload={"items": structured["items"]})
+        if not isinstance(structured, dict) or not isinstance(structured.get("result"), str):
+            return OmbreCallResult(ok=False, payload={}, error="payload_result_invalid")
+        return OmbreCallResult(ok=True, payload={"result": structured["result"]})
 
 
 class OmbreMCPMemoryBackend(OmbreMemoryBackend):
-    """Recall-only backend that talks to the local filtered Ombre adapter."""
+    """Recall-only backend that calls official Ombre Brain directly."""
 
     def __init__(self, config: AppConfig, logger: logging.Logger) -> None:
-        backend_mode = config.ombre_backend.strip().lower()
-        if backend_mode == "official_with_legacy_fallback":
-            logger.warning("legacy Ombre backend value is mapped to recall_only; no legacy fallback is active")
-        elif backend_mode != "recall_only":
-            raise ValueError("unsupported Ombre backend; only recall_only is authorized")
         self._official_client = OfficialOmbreHTTPClient(config, logger)
         self._logger = logger
+        self._max_chars = config.memory_context_max_chars
 
-    def recall(self, *, user_text: str, response_mode: str) -> tuple[str, ...]:
+    def recall(self, *, user_text: str, response_mode: str) -> OmbreRecallResult:
         del response_mode
-        return self._recall_with_client(
-            self._official_client,
-            query=user_text,
-            limit=5,
-            actions=("ombre_recall_search",),
-            source="local_recall_projection",
+        action = "breath_search"
+        started_monotonic = time.monotonic()
+        result = self._official_client.call(
+            action,
+            {"query": user_text, "max_results": 5},
         )
-
-    def _recall_with_client(
-        self,
-        client,
-        *,
-        query: str,
-        limit: int,
-        actions: tuple[str, ...],
-        source: str,
-    ) -> tuple[str, ...]:
-        snippets: list[str] = []
-        for action in actions:
-            started_monotonic = time.monotonic()
-            result = client.call(
-                action,
-                {
-                    "query": query,
-                    "limit": limit,
-                },
-            )
-            duration_seconds = time.monotonic() - started_monotonic
-            if not result.ok:
-                self._logger.info(
-                    "ombre recall action=%s ok=%s outcome=%s source=%s items=%d duration_seconds=%.3f error=%s",
-                    action,
-                    result.ok,
-                    "failed",
-                    source,
-                    0,
-                    duration_seconds,
-                    result.error or "call_not_ok",
-                )
-                continue
-            excerpts = _recall_excerpts(result.payload.get("items"), limit=limit)
-            if excerpts is None:
-                self._logger.info(
-                    "ombre recall action=%s ok=%s outcome=%s source=%s items=%d duration_seconds=%.3f error=%s",
-                    action,
-                    False,
-                    "failed",
-                    source,
-                    0,
-                    duration_seconds,
-                    "payload_items_invalid",
-                )
-                continue
-            snippets.extend(excerpts)
-            self._logger.info(
-                "ombre recall action=%s ok=%s outcome=%s source=%s items=%d duration_seconds=%.3f error=%s",
-                action,
-                result.ok,
-                "hit" if excerpts else "empty",
-                source,
-                len(excerpts),
-                duration_seconds,
-                "",
-            )
-        deduped: list[str] = []
-        seen: set[str] = set()
-        for item in snippets:
-            if item in seen:
-                continue
-            seen.add(item)
-            deduped.append(item)
-        return tuple(deduped[:5])
+        duration_seconds = time.monotonic() - started_monotonic
+        if not result.ok:
+            outcome = "transport_error" if result.error == "transport_unavailable" else "protocol_error"
+            items: tuple[str, ...] = ()
+        else:
+            parsed = _upstream_recall_items(result.payload.get("result"))
+            if parsed is None:
+                result = OmbreCallResult(ok=False, payload={}, error="payload_result_invalid")
+                outcome = "protocol_error"
+                items = ()
+            else:
+                items = tuple(trim_context(item, self._max_chars) for item in parsed)
+                outcome = "hit" if items else "empty"
+        self._logger.info(
+            "ombre recall action=%s ok=%s outcome=%s source=%s items=%d duration_seconds=%.3f error=%s",
+            action,
+            result.ok,
+            outcome,
+            "official_ombre",
+            len(items),
+            duration_seconds,
+            result.error,
+        )
+        return OmbreRecallResult(items=items, outcome=outcome)
 
     def store_long_term(self, candidate: dict[str, object]) -> MemoryStoreDecision:
-        """O1 has no Ombre mutation authority."""
+        """The personal-memory facade has no Ombre mutation authority."""
         return MemoryStoreDecision(action="skip", candidate=candidate, source="ombre_mcp")
 
     def store_core(self, candidate: dict[str, object]) -> MemoryStoreDecision:
-        """O1 has no Ombre mutation authority."""
+        """The personal-memory facade has no Ombre mutation authority."""
         return MemoryStoreDecision(action="skip", candidate=candidate, source="ombre_mcp")

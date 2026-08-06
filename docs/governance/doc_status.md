@@ -93,6 +93,14 @@ tool recall behavior. The main-source convergence change is `LOCAL_VERIFIED`
 only until it is archived and separately applied; it does not turn the parked
 `18002` O1 adapter or O2 into production behavior.
 
+The personal-memory P2 source is `LOCAL_VERIFIED_NOT_DEPLOYED`: 137 focused
+Python tests plus 8 subtests and 6 Node tests pass on Linux. The next unified
+profile has one public `personal_memory` facade, Python reads bounded Ombre
+`breath_search` internally on `18001`, and local semantic retrieval uses the
+free offline FastEmbed `BAAI/bge-small-zh-v1.5` model. The deployed historical
+profile still exposes direct Ombre until a new exact candidate supplies the
+pinned dependency/model assets and applies the revised profile.
+
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
 `docs/governance/`.
@@ -121,7 +129,7 @@ evidence, and time. A separately recorded known blocker prevents advancement.
 | `AGENTS.md` | Repo-root operating rules |
 | `CLAUDE.md` | Claude shim that points to canonical `AGENTS.md` |
 | `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
-| `hermes/profile/config.companion.yaml` | DEPLOYED single companion profile preserving the legacy source Lite/Full capability union; optional obsidian_memory is registered but not runtime-ready |
+| `hermes/profile/config.companion.yaml` | LOCAL_VERIFIED_NOT_DEPLOYED next unified profile; preserves the capability union except the duplicate direct Ombre tool, whose read capability remains behind personal_memory |
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
 | `docs/governance/hermes-core-foundation.md` | Local-only Core Package A boundary and frozen Schema v1 |
@@ -142,7 +150,7 @@ evidence, and time. A separately recorded known blocker prevents advancement.
 | `docs/governance/sticker-catalog.md` | Cross-channel sticker catalog and safe `RAN_MEDIA` contract |
 | `docs/governance/hermes-action-contract-gate.md` | Hermes action contract validation, repair, and pending-action rules |
 | `docs/governance/hermes_action_compatibility.v1.json` | Versioned closed registry of protected compatibility evidence signals |
-| `docs/governance/hermes_protected_capabilities.v1.json` | Versioned protected-capability digest manifest |
+| `docs/governance/hermes_protected_capabilities.v1.json` | Legacy split-profile capability digest retained with the v0.13 rollback line |
 | `docs/governance/hermes_runtime_artifact.v1.json` | Immutable LOCAL_BUILT provenance and digest manifest for the pinned Hermes v0.20 artifact; later Linux verification is recorded separately and neither document alone is deployment approval |
 | `docs/governance/hermes_runtime_linux_verification.v1.json` | LOCAL_VERIFIED native Linux artifact/profile, exact eight-file overlay, 218-second MCP keepalive, zero-business-state-delta, and Git-less ubuntu/root controller evidence; includes the disclosed superseded 8642 restart probe |
 | `docs/governance/hermes_runtime_mutation.v1.json` | DEPLOYED by exact candidate 0b793e8fea85c409800ee7e0d615501816c99387; accepted snapshot retained for rollback; observation remains before PROD_VERIFIED |

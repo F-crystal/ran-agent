@@ -5,6 +5,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from threading import Lock
 from time import perf_counter
 
 from personal_agent.config import AppConfig
@@ -36,6 +37,7 @@ class MemoryRecallResult:
     core_memories: tuple[str, ...] = ()
     rendered_context: str = ""
     used_sources: tuple[str, ...] = ()
+    source_statuses: tuple[tuple[str, str], ...] = ()
     injection_level: str = "none"
     topic_associations: tuple[str, ...] = ()  # 话题关联的记忆
 
@@ -100,6 +102,7 @@ class MemorySpecialist:
             vector_backend=resolved_vector_backend,
         )
         self._ombre_backend = ombre_backend or OmbreMCPMemoryBackend(config=config, logger=logger)
+        self._update_lock = Lock()
 
     def execute_background_maintenance(self) -> dict[str, object]:
         """Execute background memory maintenance when opportunity is judged as silent.
@@ -184,7 +187,7 @@ class MemorySpecialist:
             return MemoryRecallResult(should_inject=False)
 
         if explicit:
-            local_hits = self._memory_retriever.retrieve(
+            local_hits, vector_outcome = self._memory_retriever.retrieve_with_status(
                 user_text=user_text,
                 limit=self._config.profile_memory_limit + self._config.working_memory_limit,
                 memory_types=("working", "profile"),
@@ -192,16 +195,18 @@ class MemorySpecialist:
             short_term_memories = tuple(hit.content for hit in local_hits if hit.memory_type == "working")
             long_term_memories = tuple(hit.content for hit in local_hits if hit.memory_type == "profile")
         else:
+            vector_outcome = "disabled"
             profile_rows = self._database.get_profile_memories(limit=self._config.profile_memory_limit)
             working_rows = self._database.get_working_memories(limit=self._config.working_memory_limit)
             short_term_memories = tuple(str(row["content"]) for row in working_rows)
             long_term_memories = tuple(str(row["content"]) for row in profile_rows)
         
         # Get ombre brain memories
-        ombre_memories = self._ombre_backend.recall(
+        ombre_recall = self._ombre_backend.recall(
             user_text=user_text,
             response_mode=response_mode,
         )
+        ombre_memories = ombre_recall.items
         
         # Find topic-associated memories for proactive surfacing
         topic_associations = () if explicit else self.find_associated_memories(
@@ -242,6 +247,15 @@ class MemorySpecialist:
             core_memories=(),
             rendered_context=rendered_context,
             used_sources=tuple(used_sources),
+            source_statuses=(
+                (
+                    "local_memory",
+                    "degraded"
+                    if vector_outcome == "degraded"
+                    else "hit" if short_term_memories or long_term_memories else "empty",
+                ),
+                ("ombre", ombre_recall.outcome),
+            ),
             injection_level="light" if rendered_context.strip() else "none",
             topic_associations=topic_associations,
         )
@@ -312,6 +326,12 @@ class MemorySpecialist:
     def update_from_user_turn(self, user_text: str) -> MemoryUpdateResult:
         """Update local short memory after one user turn."""
 
+        with self._update_lock:
+            return self._update_from_user_turn(user_text)
+
+    def _update_from_user_turn(self, user_text: str) -> MemoryUpdateResult:
+        """Serialize extraction and duplicate checks for one process."""
+
         cleaned = user_text.strip()
         if not cleaned:
             return MemoryUpdateResult()
@@ -319,12 +339,19 @@ class MemorySpecialist:
         if not normalized:
             return MemoryUpdateResult()
 
-        # Fast-path skip for low-information and task/technical turns:
-        # these turns are unlikely to produce useful durable memory and can
-        # otherwise add one extra LLM request latency before main reply.
-        if self._is_low_information_message(normalized) or self._is_task_or_technical_message(normalized):
+        if self._is_low_information_message(normalized):
             self._logger.info("memory extraction skipped reason=low_value_turn")
             return MemoryUpdateResult()
+
+        working_memory = extract_working_memory(user_text)
+        if working_memory and working_memory.get("topic") == "项目决策":
+            working_written = not self._memory_exists("working", working_memory)
+            if working_written:
+                self._store_memory_payload(working_memory)
+            return MemoryUpdateResult(
+                working_written=working_written,
+                fallback_used=True,
+            )
 
         recent_history = self._database.get_recent_user_messages(
             limit=self._config.profile_memory_history_limit

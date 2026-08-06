@@ -81,15 +81,11 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 
 **媒体上下文追问。** 入站媒体会生成会话级 artifact。用户说“刚才那张图”“分析一下刚才那张图”时，入站消息缓冲会把文本与最近媒体显式或软绑定。默认 Context Policy v1 每轮最多注入 3 个紧凑 artifact。
 
-**记忆和知识。** `personal_memory`、Ombre、Vault 和 `GlobalTimeline` 都已存在；
-`personal_memory` 通过 Python backend 提供个人记忆召回，
-`surface_relevant_context` 只是当前的轻量 memory surface，不能宣称会自动检索
-Vault。自动统一的 recall control plane 尚未完成。当前生产仓库形态仍把
-`obsidian_memory` 与 direct Ombre MCP 记为 optional surfaces；未部署的 O1
-候选只把 Ombre 替换成本地 recall-only 入口。当前未部署候选另有 pre-Gate-5
-O2 兼容写入层，只处理已确认投递的最终轮次，且始终是非权威、projection-only
-状态。长期写入、反思、夜间循环和知识维护仍留在 Python backend 与按需 skill
-中，不常驻主 prompt。
+**记忆和知识。** 下一个 source candidate 以 `personal_memory` 作为统一的个人记忆入口：Python backend
+组合本地 working/profile memory、免费的本地 FastEmbed 语义排序和 Ombre
+长期关系语境。Ombre 是只读派生来源，不是技术事实或 Core 真源，也不再作为
+独立 Hermes 工具暴露；生产在该 candidate apply 前仍保持历史工具面。`surface_relevant_context` 仍不代表自动检索整个 Vault；
+长期写入、反思、夜间循环和知识维护留在 Python backend 与按需 skill 中。
 
 **可发送媒体生成。** 统一 gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
 
@@ -110,7 +106,6 @@ O2 兼容写入层，只处理已确认投递的最终轮次，且始终是非�
 | `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | unified |
 | `personal_memory` | 个人记忆召回与 backend 健康检查 | unified |
 | `obsidian_memory` | Obsidian vault 语义检索 | optional / registered / not runtime-ready |
-| `ombre_memory` | O1 本地候选的 recall-only 适配入口（非当前生产声明） | lite/full candidate |
 | `external_mcp_gateway` | 受治理的动态 External MCP broker | governed / source profiles disabled-by-default |
 | `media_generation` | 图片和语音生成 | unified |
 | `playwright` | 浏览器自动化和动态页面调试 | unified |

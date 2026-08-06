@@ -13,7 +13,7 @@ MUTATION = Path(__file__).parents[1] / "docs/governance/hermes_runtime_mutation.
 FORBIDDEN_TOOLS = {"cronjob", "delegate_task", "execute_code"}
 
 
-def test_companion_profile_preserves_the_lite_full_capability_union() -> None:
+def test_companion_profile_preserves_union_behind_one_memory_facade() -> None:
     config = yaml.safe_load(PROFILE.read_text(encoding="utf-8"))
     lite = yaml.safe_load(LITE_PROFILE.read_text(encoding="utf-8"))
     full = yaml.safe_load(FULL_PROFILE.read_text(encoding="utf-8"))
@@ -23,8 +23,9 @@ def test_companion_profile_preserves_the_lite_full_capability_union() -> None:
     legacy_mcp = set(lite["mcp_servers"]) | set(full["mcp_servers"])
 
     assert cli == api
-    assert set(api) == legacy_toolsets
-    assert set(config["mcp_servers"]) == legacy_mcp
+    assert set(api) == legacy_toolsets - {"mcp-ombre_memory"}
+    assert set(config["mcp_servers"]) == legacy_mcp - {"ombre_memory"}
+    assert "mcp-personal_memory" in api
     assert FORBIDDEN_TOOLS.issubset(config["disabled_tools"])
     assert "Environment=OBSIDIAN_MEMORY_MCP_ENABLED=true" in UNIT.read_text(encoding="utf-8")
     sticker = config["mcp_servers"]["sticker_catalog"]["env"]
@@ -38,17 +39,19 @@ def test_companion_profile_preserves_the_lite_full_capability_union() -> None:
     assert config["security"]["allow_lazy_installs"] is False
     assert config["security"]["tirith_enabled"] is False
     assert config["agent"]["reasoning_effort"] == "none"
-    assert config["mcp_servers"]["ombre_memory"]["url"] == "${OMBRE_BRAIN_MCP_URL}"
+    assert "ombre_memory" not in config["mcp_servers"]
 
 
-def test_runtime_mutation_binds_profile_and_live_node_switch() -> None:
+def test_deployed_runtime_mutation_remains_bound_to_its_historical_profile() -> None:
     mutation = json.loads(MUTATION.read_text(encoding="utf-8"))
     config = yaml.safe_load(PROFILE.read_text(encoding="utf-8"))
     digest = hashlib.sha256(PROFILE.read_bytes()).hexdigest()
 
-    assert mutation["companionProfile"]["sourceSha256"] == digest
-    assert mutation["companionProfile"]["destinationSha256"] == digest
-    assert set(mutation["companionProfile"]["requiredToolsets"]) == set(config["platform_toolsets"]["api_server"])
+    assert mutation["deploymentStatus"] == "DEPLOYED"
+    assert mutation["companionProfile"]["sourceSha256"] != digest
+    assert mutation["companionProfile"]["destinationSha256"] == mutation["companionProfile"]["sourceSha256"]
+    assert "mcp-ombre_memory" in mutation["companionProfile"]["requiredToolsets"]
+    assert "mcp-ombre_memory" not in config["platform_toolsets"]["api_server"]
     assert set(mutation["companionProfile"]["forbiddenTools"]) == FORBIDDEN_TOOLS
     assert mutation["unifiedUnit"]["sourceSha256"] == hashlib.sha256(UNIT.read_bytes()).hexdigest()
     values = mutation["envMutations"][0]["values"]

@@ -74,7 +74,6 @@ platform_toolsets:
     - mcp-media_generation
     - mcp-personal_memory
     - mcp-obsidian_memory
-    - mcp-ombre_memory
     - mcp-playwright
     - mcp-external_mcp_gateway
   api_server: *companion_toolsets
@@ -161,11 +160,6 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_obsidian_memory_mcp.sh
     timeout: 180
     connect_timeout: 90
-
-  ombre_memory:
-    url: "${OMBRE_BRAIN_MCP_URL}"
-    timeout: 120
-    connect_timeout: 30
 
   playwright:
     command: bash
