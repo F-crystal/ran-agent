@@ -1,13 +1,14 @@
 # Hermes Core Scheduling and Unified Runtime
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-06)
 
-Lifecycle: `DESIGNED` — not implemented, archived, deployed, or
-production-verified.
+Lifecycle: Runtime Phase `DEPLOYED`; Core Phase `DESIGNED`; neither is
+`PROD_VERIFIED`.
 
 This decision record amends the implementation direction of the archived v0.4 cutover
 contract. It does not modify frozen Schema v1, authorize a production Core
-write path, or describe the current production runtime.
+write path. Runtime deployment facts are recorded separately from the still
+unimplemented Core cutover.
 
 ## Decision
 
@@ -233,8 +234,9 @@ Transition has two releases and only one Core write-path cutover.
 
 ### Runtime Phase
 
-Implementation checkpoint (2026-08-06): the superseding immutable artifact is
-`LINUX_VERIFIED`. The archive is 133,558,059 bytes,
+Deployment checkpoint (2026-08-06): exact candidate
+`0b793e8fea85c409800ee7e0d615501816c99387` applied the `LINUX_VERIFIED`
+immutable artifact. The archive is 133,558,059 bytes,
 with tree SHA256
 `3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698`
 and archive SHA256
@@ -249,9 +251,11 @@ superseded probe that restarted only the v0.13 Lite gateway before recovering,
 is in `hermes_runtime_linux_verification.v1.json`. Candidate `44b84fb11fe8`
 passed dry-run and received authorization for the exact eight
 `BindReadOnlyPaths`, but apply failed closed during the wrapper's same-PID exec
-transition and rolled production back. The successor preserves the exact
-Lite/Full capability union and adds only a bounded MainPID-settle correction;
-its exact-SHA tests, evidence, review, and dry-run must pass before apply.
+transition and rolled production back. The deployed successor added the
+bounded MainPID-settle correction, passed exact-SHA gates and dry-run, then
+returned `APPLIED`. Immediate acceptance found one v0.20 gateway on `8642`, no
+`8643`, zero cron jobs/executions, and retired Full condition-blocked. Runtime
+observation remains before `PROD_VERIFIED`.
 
 1. Build a candidate-SHA-bound offline v0.20 runtime artifact. Its manifest
    records upstream version/source digest, dependency lock digest, every wheel
@@ -447,9 +451,9 @@ design a fallback from that evidence. No second timer is prebuilt in the MVP.
 This design does not authorize production Core writes, state migration,
 Full-home deletion, or legacy scheduler retirement. Runtime service mutation
 and exact v0.13-only cleanup are authorized only through the reviewed Runtime
-transaction and its immediate acceptance/inventory sequence. Production stays
-on Hermes v0.13 until the exact Runtime candidate passes admission, atomic
-apply, and immediate acceptance. Legacy wake owners remain authoritative
+transaction and its immediate acceptance/inventory sequence. Production has
+passed Runtime admission, atomic apply, and immediate acceptance on unified
+Hermes v0.20. Legacy wake owners remain authoritative
 through Runtime observation and stop only at the separate Core atomic cutover;
 Core is authoritative immediately after that cutover and its blocking
 acceptance, while observation controls later Core cleanup.

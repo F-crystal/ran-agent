@@ -31,6 +31,20 @@ exact-SHA dry-run. Authorization for the unchanged exact eight-file read-only
 bind boundary is recorded; any target or path expansion requires new
 authorization.
 
+Successor `0b793e8fea85c409800ee7e0d615501816c99387` was applied on
+2026-08-06 and passed immediate topology acceptance. Production now has one
+Hermes v0.20 gateway on `8642`; `8643` is absent and the retired Full unit is
+inactive, disabled and condition-blocked. Its rollback authority is:
+
+```text
+controller: /opt/ran_agent-release/runtime-artifacts/deploy-hermes-runtime-release-0b793e8fea85c409800ee7e0d615501816c99387.py
+candidate ref: refs/ran-agent/runtime-candidates/0b793e8fea85c409800ee7e0d615501816c99387
+snapshot: /opt/ran_agent-release/runtime-snapshots/runtime-20260806T010417Z-0b793e8fea85
+```
+
+Do not retry `44b84fb11fe8` or use the split deploy scripts against the unified
+topology.
+
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy
 `ran-agent` account at UID 999/GID 988 with a nologin shell. No ran-agent-owned
@@ -43,7 +57,7 @@ the account without separate authorization.
   root-owned controller and artifact. Replace every placeholder with the exact
   reviewed values; do not use `HEAD`, a branch, or a worktree copy:
 
-  The current Runtime candidate binds exactly the eight files enumerated in
+  The deployed Runtime binds exactly the eight files enumerated in
   `hermes_runtime_artifact.v1.json` read-only inside only the Hermes systemd
   mount namespace. General deployment authorization does not by itself approve
   that permission-boundary mutation: record separate authorization before
@@ -200,8 +214,8 @@ interrupted explicit rollback remains eligible for the same rollback command;
 a completed rollback with only stale pointer metadata is finalized by that
 command rather than by manual Git or file deletion.
 
-While production remains on v0.13, the release-internal
-`apply-hermes-runtime-split.sh` owns:
+For rollback interpretation only, the retired v0.13 split transaction used
+`apply-hermes-runtime-split.sh` to own:
 
 - Hermes profile install for lite and full.
 - Compact systemd units for `ran-agent-hermes.service` and
@@ -307,31 +321,33 @@ bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
 
 ## Runtime Services
 
-The table is a release topology, not a statement that every optional unit is
-active. In the 2026-08-05 production audit, `8642`, `8643`, and the existing
-direct Ombre service on `18001` were active; `18002` and `18061` were inactive.
-For the undeployed O1 target, `18001` becomes the internal upstream and `18002`
-becomes the only recall surface exposed to Hermes.
+The table describes the deployed Runtime topology. The existing direct Ombre
+service on `18001` remains active; `18002` and `18061` remain inactive. For the
+undeployed O1 target, `18001` becomes the internal upstream and `18002` becomes
+the only recall surface exposed to Hermes.
 
 | Service | Port | Profile | Home | Purpose |
 |---------|------|---------|------|---------|
-| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | Daily lite-context entry |
-| `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | Full debug/heavy-tool entry |
+| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` compatibility ID | `/home/ubuntu/.hermes-ran-agent/lite` | Unified legacy Lite/Full capability surface |
+| `ran-agent-hermes-full.service` | none | retired | retained rollback state only | Inactive, disabled and condition-blocked |
 | `ran-agent-xhs-public-sidecar.service` | `18061` | n/a | `/opt/ran_agent/.ran_agent_state/xhs-public-sidecar` | XHS-Downloader public API sidecar for `social_reader` |
 | `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Current direct service; O1 target makes it internal-only |
 | `ran-agent-ombre-recall.service` | `18002` | n/a | `/opt/ran_agent` | Undeployed O1 target: recall-only MCP for Lite/Full |
 
-`8642` is a lite-context entry, not a security sandbox. Node bridge routes
-normal chat, XHS, media, and memory requests to lite by default, and routes
-debug, command, file, Playwright, media generation, and `lark-cli` intents to
-full.
+All legacy Lite/Full bridge URLs and selectors resolve to `8642`. The unified
+profile includes terminal, file, session-search, Playwright, media and
+co-reading instead of routing heavy intents to a second gateway.
 
 ## Required Env Locations
 
-The deploy script should keep the following public routing keys consistent:
+The unified Runtime controller manages public routing in:
 
 - `/opt/ran_agent/.env.local`
 - `/opt/ran_agent/node_bridge/.env.local`
+
+These homes remain legacy rollback state, not unified-controller routing
+authorities:
+
 - `/home/ubuntu/.hermes-ran-agent/.env`
 - `/home/ubuntu/.hermes-ran-agent/lite/.env`
 - `/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env`
@@ -341,7 +357,7 @@ Important non-secret keys:
 
 ```text
 HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
 RAN_AGENT_CAPABILITY_MODE=auto
 HERMES_CONTEXT_INJECTION_MODE=auto
 HERMES_CONTEXT_CACHE_STRATEGY=balanced
@@ -373,7 +389,7 @@ UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache
 UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
 UV_LINK_MODE=copy
 UV_PYTHON_DOWNLOADS=never
-OBSIDIAN_MEMORY_MCP_ENABLED=false
+OBSIDIAN_MEMORY_MCP_ENABLED=true
 OMBRE_BRAIN_ENABLED=true
 OMBRE_BRAIN_MCP_ENABLED=true
 OMBRE_BRAIN_RUNNER=source

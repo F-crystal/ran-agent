@@ -2,9 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-06)
 
-`POINT_IN_TIME_AUDIT` (2026-08-05): production remained at `bb66f1e6a8a400d599c7f86139107742bbedddc8` with a clean worktree. The four core services and the existing direct Ombre path on `18001` were active; recall-only O1 on `18002` was inactive and O2 was absent from the active revision/configuration. All observed runtime processes used `ubuntu:ubuntu`; the legacy `ran-agent` account remained present but idle for rollback compatibility. Lite/Full used Hermes v0.13.0 with DeepSeek V4 Flash, and storage utilization was 68%. See `docs/governance/current_runtime_status.md` for the bounded evidence window.
+`DEPLOYED_RUNTIME_ACCEPTANCE` (2026-08-06): production code remains clean `bb66f1e6`; exact candidate `0b793e8` deployed one unified Hermes v0.20 gateway with DeepSeek V4 Flash on `8642`, and the retired Full service is inactive/disabled. See `docs/governance/current_runtime_status.md` for the bounded evidence.
 
 The unified-identity/O2 rollback baseline `b5b4ff43f8c3d5706192cabefcece49408b73558` is archived and pushed but not deployed to production. It preserves O2 while reverting the added Linux service identity. O1/O2 candidates remain `ARCHIVED` and not deployed; `total_delete` is unsupported, Gate 5 is not authorized, and Package B.2/B.3 have not started.
 
@@ -14,7 +14,7 @@ The unified-identity/O2 rollback baseline `b5b4ff43f8c3d5706192cabefcece49408b73
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The current candidate matches the production model policy: Lite and Full default to DeepSeek V4 Flash and add `thinking: {"type":"disabled"}` to the final provider HTTP body; V4 Pro is explicit opt-in only. MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, `personal_memory`, and `obsidian_memory` provide fresh facts, media, social content, sticker lookup, personal memory, and vault retrieval. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
+Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The unified production profile uses DeepSeek V4 Flash and adds `thinking: {"type":"disabled"}` to the final provider HTTP body; V4 Pro is explicit opt-in only. MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, and `personal_memory` provide fresh facts, media, social content, sticker lookup, and personal memory. Optional `obsidian_memory` is registered but not currently runtime-ready. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
 
 OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Production and the current candidate both use Hermes + DeepSeek V4 Flash non-thinking; Pro requires an explicit opt-in.
 
@@ -26,7 +26,7 @@ OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Produc
 WeChat / Feishu / Desktop Proxy
   -> ChannelHub
   -> replyBackend
-  -> Hermes gateway lite/full
+  -> unified Hermes gateway
   -> DeepSeek V4 Flash
   -> reply
 
@@ -40,19 +40,18 @@ Python backend
 
 MCP services
   -> search_hub / media_reader / social_reader / sticker_catalog / co_reading / media_generation
-  -> personal_memory / obsidian_memory / time / playwright
+  -> personal_memory / optional obsidian_memory (currently parked) / time / playwright
 ```
 
-### Lite / Full Gateway
+### Unified Hermes Gateway
 
-Production uses two Hermes gateway instances. Node bridge selects the gateway per request:
+Production uses one Hermes v0.20 gateway. Legacy Lite/Full selectors resolve to the same instance:
 
 | Gateway | Port | Profile | Purpose |
 |---------|------|---------|---------|
-| lite | `8642` | `ran-assistant-lite` | The real daily mainline: chat, Xiaohongshu, memory, image understanding |
-| full | `8643` | `ran-assistant` | Primarily debugging and heavy tools: commands, logs, Playwright, media generation |
+| unified | `8642` | `ran-assistant-lite` compatibility ID | Chat, memory, terminal, Playwright, media, and existing MCPs |
 
-`8642` is a low-context entry, not a security sandbox. If full is unavailable, Node bridge falls back to lite and logs the reason.
+The retired Full service is disabled. Terminal/file/session-search/Playwright capabilities moved into the unified profile rather than disappearing with `8643`.
 Desktop Proxy is disabled by default. When enabled, bind it only to localhost or
 a controlled private network and configure `DESKTOP_PROXY_API_KEY`.
 
@@ -76,7 +75,7 @@ known limitations.
 
 **Daily AI digest.** Optionally enable `AI_DAILY_DIGEST_ENABLED=true`; the Python scheduler fetches AIHOT facts at 08:00, sends a synthetic Feishu DM turn through `ChannelHub -> Hermes`, lets Hermes write the report-style digest from `src/personal_agent/prompts/ai_daily_digest_report.md`, and delivers it through the existing Feishu reply path. This does not re-enable old proactive check-ins, reminders, or life-loop outbound messages.
 
-**Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. It is registered in both lite and full; lite uses lightweight providers such as Tavily, AIHOT, OpenCLI public-only, OpenAlex/arxiv/pubmed, while full may use Playwright fallback. OpenCLI browser-backed mode is disabled by default for the 2C4G/60G server and remains an optional Phase 11.2 enhancement. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.
+**Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. The unified profile retains the old Full Playwright fallback; OpenCLI browser-backed mode remains disabled. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.
 
 **Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. Xiaohongshu is public-only: it tries `wanyi-watermark`, the XHS-Downloader public sidecar, and minimal HTML/OG fallback, then sends public media URLs to `media_reader` for OCR/VLM. It does not use `XHS_COOKIE`, QR login, or account-backed MCP; public parse failures return unreadable/metadata-only results instead of touching a personal account.
 
@@ -97,7 +96,7 @@ turns; it remains non-authoritative and projection-only. Long-term writes,
 reflection, night-cycle work, and knowledge maintenance stay in the Python
 backend and on-demand skills instead of always living in the main prompt.
 
-**Sendable media generation.** The full gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.
+**Sendable media generation.** The unified gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.
 
 ---
 
@@ -105,19 +104,19 @@ backend and on-demand skills instead of always living in the main prompt.
 
 | Service | Purpose | Default Entry |
 |---------|---------|---------------|
-| `search_hub` | Unified fresh web search entry: news, web facts, academic lookup, AI hot topics, platform-search routing | lite/full |
-| `co_reading` | Private shared reading room: EPUB/TXT/Markdown/pasted text/HTML/URL/PDF text-layer import, chunk reading, bilingual display, progress, shared annotations, Hermes margin replies, Vault deposit | full/Web |
-| `time` | Timezone-aware time queries, default `Asia/Shanghai` | lite/full |
-| `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis | lite/full |
-| `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | lite/full |
+| `search_hub` | Unified fresh web search entry: news, web facts, academic lookup, AI hot topics, platform-search routing | unified |
+| `co_reading` | Private shared reading room: EPUB/TXT/Markdown/pasted text/HTML/URL/PDF text-layer import, chunk reading, bilingual display, progress, shared annotations, Hermes margin replies, Vault deposit | unified/Web |
+| `time` | Timezone-aware time queries, default `Asia/Shanghai` | unified |
+| `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis | unified |
+| `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | unified |
 | `mimo_power` | RETIRED: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles | historical |
-| `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | lite/full |
-| `personal_memory` | Personal memory recall and backend health check | lite/full |
-| `obsidian_memory` | Obsidian vault semantic search | optional / disabled-by-default |
+| `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | unified |
+| `personal_memory` | Personal memory recall and backend health check | unified |
+| `obsidian_memory` | Obsidian vault semantic search | optional / registered / not runtime-ready |
 | `ombre_memory` | Recall-only adapter in the local O1 candidate (not a production claim) | lite/full candidate |
 | `external_mcp_gateway` | Governed dynamic External MCP broker | governed / source profiles disabled-by-default |
-| `media_generation` | Image and speech generation | full |
-| `playwright` | Browser automation and dynamic-page debugging | full |
+| `media_generation` | Image and speech generation | unified |
+| `playwright` | Browser automation and dynamic-page debugging | unified |
 | `tavily` | Optional lower-level provider, used only for Search Hub compatibility | internal/compat |
 
 DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must go through MCP tools first. Hermes receives structured text results.
@@ -159,13 +158,13 @@ At minimum, configure the model, Hermes gateway, and Python backend variables:
 RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
 NODE_BRIDGE_REPLY_BACKEND=hermes
 HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
 RAN_AGENT_CAPABILITY_MODE=auto
 PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
 DEEPSEEK_API_KEY=...
 ```
 
-For local development, a single full gateway is enough. Production should run lite and full:
+Local development and production need only one unified gateway:
 
 ```bash
 # Terminal 1: Python backend
@@ -191,10 +190,10 @@ bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-ru
 bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
 ```
 
-Configuration application within a release and existing runtime drift repair use:
+Runtime deployment and rollback use the exact-SHA unified controller documented
+in `docs/governance/server_runtime_commands.md`. Routine diagnostics use:
 
 ```bash
-bash scripts/apply-hermes-runtime-split.sh
 bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-hermes-tools.sh
@@ -211,7 +210,7 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Module | Key Variables | Notes |
 |--------|---------------|-------|
 | Hermes / DeepSeek | `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, `API_SERVER_KEY` | Hermes gateway and model provider |
-| Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Node bridge lite/full auto-selection |
+| Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Compatibility selectors resolve to unified `8642` |
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | Unified identity and cross-platform timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | Timeline retention and compaction |
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | Optional multi-frontend entries; keep Desktop Proxy local or on a controlled private network when enabled |

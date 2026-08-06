@@ -2,9 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-06)
 
-`POINT_IN_TIME_AUDIT`（2026-08-05）：生产仍在 `bb66f1e6a8a400d599c7f86139107742bbedddc8` 且工作树干净；四个核心服务和现有直连 Ombre `18001` active，O1 recall-only `18002` inactive，O2 不在活动 revision/configuration 中。观测到的运行进程均为 `ubuntu:ubuntu`；旧 `ran-agent` 账号仍存在但空闲，仅保留回滚兼容。Lite/Full 使用 Hermes v0.13.0 + DeepSeek V4 Flash，磁盘使用率为 68%。完整时间窗与边界见 `docs/governance/current_runtime_status.md`。
+`DEPLOYED_RUNTIME_ACCEPTANCE`（2026-08-06）：生产代码仍是 clean `bb66f1e6`，Hermes 已由 exact candidate `0b793e8` 切到统一 v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full 服务 inactive/disabled。完整时间窗与边界见 `docs/governance/current_runtime_status.md`。
 
 unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` 已归档并推送，但尚未部署到生产。它保留 O2 并撤销新增 Linux 服务身份；O1/O2 候选仍是 `ARCHIVED`、未部署，`total_delete` unsupported，Gate 5 未授权，Package B.2/B.3 未开始。
 
@@ -14,7 +14,7 @@ unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` �
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。当前候选与生产模型口径一致：Lite/Full 默认使用 DeepSeek V4 Flash，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；V4 Pro 只保留为显式 opt-in。`search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory`、`obsidian_memory` 等 MCP 工具负责联网事实、媒体、社交内容、表情包目录、个人记忆和知识库。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
+Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。生产统一 profile 使用 DeepSeek V4 Flash，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；V4 Pro 只保留为显式 opt-in。`search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory` 等 MCP 工具负责联网事实、媒体、社交内容、表情包目录和个人记忆；optional `obsidian_memory` 已注册但当前尚未 runtime-ready。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
 
 OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产前台和当前候选都使用 Hermes + DeepSeek V4 Flash non-thinking，Pro 仅显式启用。
 
@@ -26,7 +26,7 @@ OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产�
 WeChat / Feishu / Desktop Proxy
   -> ChannelHub
   -> replyBackend
-  -> Hermes gateway lite/full
+  -> unified Hermes gateway
   -> DeepSeek V4 Flash
   -> reply
 
@@ -40,19 +40,18 @@ Python backend
 
 MCP services
   -> search_hub / media_reader / social_reader / sticker_catalog / co_reading / media_generation
-  -> personal_memory / obsidian_memory / time / playwright
+  -> personal_memory / optional obsidian_memory (currently parked) / time / playwright
 ```
 
-### Lite / Full Gateway
+### 统一 Hermes Gateway
 
-生产部署使用两个 Hermes gateway，由 Node bridge 按请求自动选择：
+生产部署使用一个 Hermes v0.20 gateway；旧 Lite/Full 选择器兼容指向同一实例：
 
 | Gateway | 端口 | Profile | 用途 |
 |---------|------|---------|------|
-| lite | `8642` | `ran-assistant-lite` | 日常真实主链：聊天、小红书、记忆、图片理解 |
-| full | `8643` | `ran-assistant` | 主要用于调试和重工具：命令、日志、Playwright、媒体生成 |
+| unified | `8642` | `ran-assistant-lite` 兼容 ID | 聊天、记忆、命令、Playwright、媒体与全部既有 MCP |
 
-`8642` 是低上下文入口，不是安全沙箱。full 不可用时，Node bridge 会回退到 lite 并记录原因。
+旧 Full 服务已停用；terminal/file/session search/Playwright 等能力并入统一 profile，而不是随 `8643` 一起删除。
 Desktop Proxy 默认关闭；启用时仅应绑定 localhost 或受控私网，并配置
 `DESKTOP_PROXY_API_KEY`。
 
@@ -74,7 +73,7 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 
 **每日 AI 日报。** 可选启用 `AI_DAILY_DIGEST_ENABLED=true`，Python scheduler 每天 08:00 拉取 AIHOT 事实，作为合成的飞书私聊 turn 进入 `ChannelHub -> Hermes`，由 Hermes 按 `src/personal_agent/prompts/ai_daily_digest_report.md` 生成报道式日报，再通过现有飞书回复路径发回给你。它不打开旧 proactive check-in、reminder 或 life-loop 外发。
 
-**联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。它同时注册到 lite/full；lite 使用 Tavily、AIHOT、OpenCLI public-only、OpenAlex/arxiv/pubmed 等轻量 provider，full 使用 Playwright fallback。OpenCLI browser-backed 默认关闭（2C4G/60G 服务器约束），后续 Phase 11.2 可选增强。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
+**联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。统一 profile 保留旧 Full 的 Playwright fallback；OpenCLI browser-backed 默认关闭。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
 
 **社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书固定走公开解析链路：`wanyi-watermark`、XHS-Downloader public sidecar、通用网页/OG 兜底，再把公开媒体 URL 交给 `media_reader` 做 OCR/VLM；不配置 `XHS_COOKIE`、扫码登录或账号态 MCP。公开解析失败时返回不可读/metadata-only，不会动用个人账号。
 
@@ -92,9 +91,9 @@ O2 兼容写入层，只处理已确认投递的最终轮次，且始终是非�
 状态。长期写入、反思、夜间循环和知识维护仍留在 Python backend 与按需 skill
 中，不常驻主 prompt。
 
-**可发送媒体生成。** full gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
+**可发送媒体生成。** 统一 gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。
 
-**表情包目录。** `sticker_catalog` 在 lite/full 均注册，用于按标签选择并通过 `RAN_MEDIA` 的 `stickerId` 发送本地表情包；保存入库只在 owner 明确要求时发生，资产留在 `.ran_agent_state/stickers/`。
+**表情包目录。** `sticker_catalog` 在统一 profile 注册，用于按标签选择并通过 `RAN_MEDIA` 的 `stickerId` 发送本地表情包；保存入库只在 owner 明确要求时发生，资产留在 `.ran_agent_state/stickers/`。
 
 ---
 
@@ -102,19 +101,19 @@ O2 兼容写入层，只处理已确认投递的最终轮次，且始终是非�
 
 | 服务 | 作用 | 默认入口 |
 |------|------|----------|
-| `search_hub` | 统一联网搜索入口：新闻、网页事实、学术检索、AI 热点、平台搜索路由 | lite/full |
-| `co_reading` | 私有共享读书室：EPUB/TXT/Markdown/粘贴正文/HTML/URL/PDF 文本层导入、chunk 阅读、双语显示、进度、共享批注、Hermes 边栏回复、Vault 沉淀 | full/Web |
-| `time` | 时区感知时间查询，默认 `Asia/Shanghai` | lite/full |
-| `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | lite/full |
-| `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | lite/full |
+| `search_hub` | 统一联网搜索入口：新闻、网页事实、学术检索、AI 热点、平台搜索路由 | unified |
+| `co_reading` | 私有共享读书室：EPUB/TXT/Markdown/粘贴正文/HTML/URL/PDF 文本层导入、chunk 阅读、双语显示、进度、共享批注、Hermes 边栏回复、Vault 沉淀 | unified/Web |
+| `time` | 时区感知时间查询，默认 `Asia/Shanghai` | unified |
+| `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | unified |
+| `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | unified |
 | `mimo_power` | RETIRED：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles | historical |
-| `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | lite/full |
-| `personal_memory` | 个人记忆召回与 backend 健康检查 | lite/full |
-| `obsidian_memory` | Obsidian vault 语义检索 | optional / disabled-by-default |
+| `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | unified |
+| `personal_memory` | 个人记忆召回与 backend 健康检查 | unified |
+| `obsidian_memory` | Obsidian vault 语义检索 | optional / registered / not runtime-ready |
 | `ombre_memory` | O1 本地候选的 recall-only 适配入口（非当前生产声明） | lite/full candidate |
 | `external_mcp_gateway` | 受治理的动态 External MCP broker | governed / source profiles disabled-by-default |
-| `media_generation` | 图片和语音生成 | full |
-| `playwright` | 浏览器自动化和动态页面调试 | full |
+| `media_generation` | 图片和语音生成 | unified |
+| `playwright` | 浏览器自动化和动态页面调试 | unified |
 | `tavily` | 可选底层 provider，仅供 Search Hub 兼容使用 | 内部/兼容 |
 
 DeepSeek V4 在本项目中按文本模型使用。原始图片、音频、视频和社交平台内容必须先交给 MCP 工具，Hermes 只接收结构化文本结果。
@@ -154,13 +153,13 @@ cp .env.example .env.local
 RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
 NODE_BRIDGE_REPLY_BACKEND=hermes
 HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
 RAN_AGENT_CAPABILITY_MODE=auto
 PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
 DEEPSEEK_API_KEY=...
 ```
 
-开发机可只启动一个 full gateway；生产口径建议同时启动 lite/full：
+开发机与生产都只需启动一个统一 gateway：
 
 ```bash
 # 终端 1：Python backend
@@ -185,22 +184,18 @@ bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-ru
 bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
 ```
 
-release 内的配置应用与既有 runtime 漂移修复使用：
+Runtime 部署与回滚使用 `docs/governance/server_runtime_commands.md` 中的
+exact-SHA unified controller。日常诊断使用：
 
 ```bash
-bash scripts/apply-hermes-runtime-split.sh
 bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-search-hub.sh
 bash scripts/diagnose-hermes-tools.sh
 ```
 
-Phase 11.1 后，`ran-agent-hermes.service` 主 unit 直接表示 lite gateway
-（8642 / `ran-assistant-lite`），`ran-agent-hermes-full.service` 主 unit
-直接表示 full gateway（8643 / `ran-assistant`）；不再依赖
-`90-lite-runtime.conf` 覆盖旧 full 配置。不要手工修改
-`/home/ubuntu/.hermes-ran-agent` 或 systemd/env 作为常规部署路径。Hermes
-runtime 配置变更必须从 repo 源配置进入，再通过
-`scripts/apply-hermes-runtime-split.sh` 应用；详细口径见
+`ran-agent-hermes.service` 是唯一生产 gateway；
+`ran-agent-hermes-full.service` 仅保留为 inactive/disabled 的回滚状态。
+不要手工修改 Hermes home 或 systemd/env；详细口径见
 `docs/governance/server_runtime_commands.md`。
 
 ---
@@ -212,7 +207,7 @@ runtime 配置变更必须从 repo 源配置进入，再通过
 | 模块 | 关键变量 | 说明 |
 |------|----------|------|
 | Hermes / DeepSeek | `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, `API_SERVER_KEY` | Hermes gateway 和模型 provider |
-| Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Node bridge 自动选择 lite/full |
+| Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | 兼容选择器都解析到统一 `8642` |
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | 统一身份、跨平台 timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | timeline 保留和压缩 |
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | 多前端可选入口；开启 Desktop Proxy 时必须保持本机或内网受控 |

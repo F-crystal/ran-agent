@@ -10,15 +10,15 @@ contracts live in the linked governance docs below.
 
 ```text
 production_repository_sha: bb66f1e6a8a400d599c7f86139107742bbedddc8
-runtime_evidence_class: POINT_IN_TIME_AUDIT (2026-08-05T13:30:09+08:00..13:35:11+08:00)
-production_observation_stage: PROD_VERIFIED for the exact SHA and named runtime/storage/permission dimensions in the base audit window
+runtime_evidence_class: DEPLOYED_RUNTIME_ACCEPTANCE (2026-08-06T09:04:17+08:00..09:13:42+08:00) plus the retained historical audits below
+production_observation_stage: DEPLOYED for unified Hermes v0.20; immediate topology acceptance passed, observation window not complete
 production_worktree: clean
-production_services: four core units active; direct Ombre Brain 18001 active; recall-only 18002 inactive
+production_services: Node, Python and unified Hermes active; retired Full inactive/dead, disabled and condition-blocked; direct Ombre Brain 18001 active; recall-only 18002 inactive
 production_node: /opt/nodejs/node-v22.22.2-linux-x64/bin/node; node:sqlite probe passed
-production_hermes: v0.13.0; Lite/Full deepseek-v4-flash via official DeepSeek endpoint
+production_hermes: unified v0.20.0 on 8642; deepseek-v4-flash; one home/profile; no 8643 listener
 production_runtime_identity: observed ubuntu:ubuntu; core units declare User=ubuntu
 legacy_ran_agent_account_followup: POINT_IN_TIME_AUDIT (2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00); present UID 999/GID 988, nologin; no ran-agent-owned runtime process was observed in the base audit window
-production_storage: 39GB/59GB used, 19GB available, 68% utilization; inode use 23%
+production_storage: 42068938752/63290032128 bytes used, 18520346624 bytes available, 70% utilization at 2026-08-06T09:13:42+08:00
 runtime_apply_recovery_followup: POINT_IN_TIME_AUDIT (2026-08-06T08:46:03+08:00); production remains clean bb66f1e6 with all four services active, candidate install/topology marker absent, and 18368720896 bytes available (70% utilization)
 permission_containment_followup: COMPLETE (2026-08-05T17:07:16+08:00..17:09:04+08:00); seven authorized files ubuntu:ubuntu 0600; /opt/ran_agent/data 0700; five backups matched secret-like key patterns without exposing values; core services and Python health passed; deletion/rotation not authorized
 production_memory_surface: existing direct Ombre Brain 18001 active/healthy; recall-only O1 18002 inactive; O2 absent
@@ -35,7 +35,9 @@ unified_identity_o2_rollback: b5b4ff43f8c3d5706192cabefcece49408b73558; ARCHIVED
 ombre_o2_total_delete: typed unsupported
 gate_5: not started, not authorized
 package_b_2_b_3: not started
-hermes_v020_unified_runtime_candidate: RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY for exact artifact 44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30 / tree 3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698; the unchanged exact eight-file BindReadOnlyPaths boundary is authorized; the successor profile preserves the exact legacy Lite/Full capability union and the controller waits only for the shell wrapper's bounded same-PID exec transition; Git-less ubuntu/root 41/41, Node MCP ping 16/16, and isolated offline gateway passed; exact candidate SHA archive and fresh dry-run remain before apply; not deployed
+hermes_v020_unified_runtime_candidate: DEPLOYED for exact candidate 0b793e8fea85c409800ee7e0d615501816c99387, artifact 44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30 and tree 3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698; exact dry-run left 813932120 bytes headroom; apply returned APPLIED with accepted snapshot /opt/ran_agent-release/runtime-snapshots/runtime-20260806T010417Z-0b793e8fea85; MainPID is the private v0.20 Python, 8642 is the only Hermes listener, Full is inactive/disabled/condition-blocked, cron has 0 jobs and 0 executions, and Node/Python remain active; not yet PROD_VERIFIED
+unified_capability_acceptance: configured toolsets and MCP servers equal the legacy source Lite/Full union; terminal/file/session-search and Playwright are present, and all previously active command MCPs launched. Optional obsidian_memory remains registered but parked because the pre-existing iflow uv tool is a malformed 88KB partial install; old split production disabled and filtered this optional MCP. Do not install its Torch/Transformers dependency tree without a separate space-bounded plan
+runtime_cleanup_followup: COMPLETE (2026-08-06T09:11+08:00); reset the retired Full unit's stale failed ledger to inactive/dead without starting it, removed three terminal rolled-back Runtime snapshots totaling about 638 MiB, retained only the accepted 0b793e8 snapshot and live v0.13 executables required by its rollback contract; personal data, shared runtimes and unified capabilities were not deleted
 runtime_apply_mainpid_incident: ROLLED_BACK (2026-08-06T08:05:58+08:00..08:07:01+08:00); exact candidate 44b84fb11fe8854f510a78d0bea462e9b77b1bb0 passed dry-run, then initial apply inspected MainPID during /usr/bin/env -> dash -> private-python same-PID exec and failed closed before gateway acceptance; the controller restored clean bb66f1e6, all four services and 8642/8643/8787, removed the candidate install, and left no unified-topology marker or active bind topology; do not retry that candidate
 runtime_overlay_probe_incident: POINT_IN_TIME_AUDIT (2026-08-06T05:11:22+08:00..05:11:27+08:00); a superseded transient inherited production API_SERVER_PORT/HERMES_HOME after systemd EnvironmentFile precedence and its --replace caused one v0.13 Lite gateway restart; systemd recovery succeeded in five seconds, all four core services remain active, production checkout stayed clean at bb66f1e6, and the accepted 18766 probe showed no business-state delta; this incident is not Runtime deployment
 ```
@@ -366,27 +368,26 @@ External MCP candidates
   proactive events, and external-MCP system-queue turns; their audit state stays
   in their existing receipts/ledgers/outboxes, never the ordinary timeline.
 
-## Lite/Full Runtime
+## Unified Hermes Runtime
 
 | Entry | Port | Profile | Home | Default Use |
 |-------|------|---------|------|-------------|
-| lite | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | Normal chat, XHS, media, memory |
-| full | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | Debug, commands, logs, Playwright, media generation, `lark-cli` |
+| unified | `8642` | `ran-assistant-lite` compatibility ID | `/home/ubuntu/.hermes-ran-agent/lite` | Legacy Lite/Full capability union |
 
-- `8642` is a lite-context entry, not a security sandbox.
-- Node bridge auto-selects via `RAN_AGENT_CAPABILITY_MODE=auto`.
-- Full unavailable -> lite fallback with logged reason.
-- Compact systemd is current: `ran-agent-hermes.service` owns lite and
-  `ran-agent-hermes-full.service` owns full.
-- Stale lite/full drop-ins should be absent after
-  `scripts/apply-hermes-runtime-split.sh`.
+- All legacy Lite/Full bridge URLs and profile selectors resolve to the one
+  `8642` instance. There is no `8643` fallback.
+- `ran-agent-hermes-full.service` is disabled and condition-blocked; its tiny
+  unit/drop-in remain during the active rollback window, not as a second
+  runtime.
+- The companion profile keeps terminal, file, session search, Playwright,
+  media, co-reading and existing MCP registrations. Hermes-native `cronjob`,
+  `delegate_task` and `execute_code` remain disabled.
 
 ## Deployment And Diagnostics
 
-Configuration-drift repair inside an already selected release transaction is
-`bash scripts/apply-hermes-runtime-split.sh`; code deployment uses the
-candidate-specific immutable-SHA transaction in
-`docs/governance/hermes_release_deployment.md`.
+Unified Runtime deployment/rollback uses its candidate-extracted controller;
+compatible code deployment uses the candidate-specific immutable-SHA
+transaction in `docs/governance/hermes_release_deployment.md`.
 Run diagnostics through the repo scripts named in
 `docs/governance/server_runtime_commands.md`, including lite/full,
 external MCP, proactive events, multi-frontend, continuity, and Ombre Brain.
@@ -438,7 +439,7 @@ state, vault, data, or XHS note debug output.
 | `social_reader` | Social content reading (Bilibili, XHS, WeChat articles, music) |
 | `sticker_catalog` | Local sticker picker/attach/save catalog |
 | `personal_memory` | Personal memory recall and backend health check |
-| `obsidian_memory` | Optional Obsidian vault search, disabled by default |
+| `obsidian_memory` | Optional surface is configured/registered but currently parked on an inherited malformed partial uv tool; not runtime-ready |
 | legacy direct Ombre surfaces | Prior production-repository shape; the local O1 recall-only replacement is not deployed |
 | `media_generation` | Image and speech generation |
 | `playwright` | Dynamic/visual web pages, full/debug use |

@@ -2,9 +2,9 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-06)
 
-`POINT_IN_TIME_AUDIT`（2026-08-05）：生产 `bb66f1e6a8a400d599c7f86139107742bbedddc8` 的四个核心服务与现有直连 Ombre `18001` active；O1 recall-only `18002` inactive，O2 不在活动 revision/configuration 中。所有观测到的进程均为 `ubuntu:ubuntu`；旧 `ran-agent` 账号仍存在但空闲。Lite/Full 使用 Hermes v0.13.0 + DeepSeek V4 Flash。完整边界见 `docs/governance/current_runtime_status.md`。
+`DEPLOYED_RUNTIME_ACCEPTANCE`（2026-08-06）：exact candidate `0b793e8` 已部署统一 Hermes v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full 服务 inactive/disabled。完整边界见 `docs/governance/current_runtime_status.md`。
 
 unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` 已归档但尚未部署到生产；它保留 O2 并统一复用既有 runtime identity。O1/O2 候选仍未部署，Gate 5 未授权。
 
@@ -15,10 +15,10 @@ unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` �
 ## 当前定位
 
 - Hermes 是 ran-agent 的前台对话 shell。
-- 当前候选中 Lite/Full 默认模型统一为 `deepseek-v4-flash`，provider policy
+- 当前统一生产 profile 使用 `deepseek-v4-flash`，provider policy
   在最终 HTTP body 显式加入 `thinking.type=disabled`；Pro 仅显式 opt-in。
 - DeepSeek V4 在本项目中按文本模型使用，原始图片、音频、视频和社交平台内容必须先由 MCP 工具处理。
-- Node bridge 生产运行会在 lite/full 两个 gateway 之间自动路由；微信、飞书/Lark 和桌面 Proxy 都先进入 ChannelHub，再由统一主链路调用 Hermes。
+- Node bridge 的旧 lite/full 选择器都指向同一个 `8642` gateway；微信、飞书/Lark 和桌面 Proxy 都先进入 ChannelHub，再由统一主链路调用 Hermes。
 - OpenClaw、Kimi、GLM 前台路线已经退休，不再作为运行时、部署目标或调试权威。
 
 ---
@@ -85,42 +85,34 @@ hermes -p ran-assistant mcp list
 
 ---
 
-## Lite / Full Gateway
+## 统一 Hermes Gateway
 
-生产部署有两个 Hermes gateway：
+生产部署只有一个 Hermes v0.20 gateway：
 
 | 服务 | 端口 | Profile | Hermes home | 用途 |
 |------|------|---------|-------------|------|
-| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | 日常低上下文入口 |
-| `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | 调试、命令、Playwright、媒体生成 |
+| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` 兼容 ID | `/home/ubuntu/.hermes-ran-agent/lite` | 旧 Lite/Full 能力并集 |
 
 Node bridge 通过以下变量自动路由：
 
 ```bash
 HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
 RAN_AGENT_CAPABILITY_MODE=auto
 HERMES_LITE_PROFILE=ran-assistant-lite
-HERMES_FULL_PROFILE=ran-assistant
+HERMES_FULL_PROFILE=ran-assistant-lite
 ```
 
-路由规则：
+terminal、file、session search、Playwright、媒体生成和既有 MCP 均由统一
+profile 提供；`ran-agent-hermes-full.service` inactive/disabled，不是 fallback。
 
-- 默认聊天、小红书、记忆、图片理解走 lite。
-- 调试、命令、日志、systemctl、journalctl、git、npm、Playwright、媒体生成走 full。
-- 用户显式说“开 full / 全能力 / 调试模式”走 full。
-- full 不可用时回退 lite，并记录 `fallback_reason=full_gateway_unavailable`。
-
-`8642` 是低上下文入口，不是安全沙箱；不要把“lite 不会执行终端”当成强安全保证。
-
-生产部署、profile 刷新、systemd/env 漂移修复统一执行：
+生产部署、profile 刷新与回滚按运行手册执行；诊断可运行：
 
 ```bash
-bash scripts/apply-hermes-runtime-split.sh
 bash scripts/diagnose-lite-full.sh
 ```
 
-不要手工修改 systemd/env 作为常规路径。排查时以 `systemctl cat ran-agent-hermes.service` 和 `systemctl cat ran-agent-hermes-full.service` 的合并视图为准。
+不要手工修改 systemd/env 作为常规路径。详细命令见 `docs/governance/server_runtime_commands.md`。
 
 ---
 
@@ -148,10 +140,10 @@ ran-agent 使用仓库内 MCP 服务：
 | `social_reader` | B 站、小红书、微信公众号、音乐分享 |
 | `mimo_power` | 已退役：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles |
 | `personal_memory` | Python backend 个人记忆召回 |
-| `obsidian_memory` | Obsidian vault 语义检索 |
+| `obsidian_memory` | Optional Obsidian vault 语义检索；已注册但当前未 runtime-ready |
 | `ombre_memory` | O1 候选的本地 recall-only 入口；不向 Hermes 暴露上游 registry |
-| `media_generation` | 图片和语音生成，full 默认可用 |
-| `playwright` | 浏览器自动化，full 默认可用 |
+| `media_generation` | 图片和语音生成，统一 profile 可用 |
+| `playwright` | 浏览器自动化，统一 profile 可用 |
 | `tavily` | 可选底层网页搜索 provider，仅供 Search Hub 兼容使用 |
 
 最新网页事实、新闻、学术检索和普通 URL 读取优先走 `search_hub`。社交平台链接必须走 `social_reader`；不要用普通网页抽取工具替代小红书、B 站等平台解析器。
@@ -199,7 +191,7 @@ Secrets 必须放在机器本地 `.env`，例如：
 
 ## Obsidian Memory MCP
 
-`obsidian_memory` 使用 `obsidian-index` 语义检索。仓库启动器会包装上游包，使 Linux 服务器可以在 CPU 上运行 embedding 模型，并把索引维护变成显式操作。
+`obsidian_memory` 设计为使用 `obsidian-index` 语义检索。当前生产继承的 uv tool 是畸形半安装，因此 surface 虽已注册但未 runtime-ready；补齐 Torch/Transformers 依赖前必须先做空间受限的独立安装计划。
 
 服务器推荐值：
 

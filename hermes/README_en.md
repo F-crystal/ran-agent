@@ -2,9 +2,9 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-06)
 
-`POINT_IN_TIME_AUDIT` (2026-08-05): production `bb66f1e6a8a400d599c7f86139107742bbedddc8` had all four core services and the existing direct Ombre path on `18001` active. Recall-only O1 on `18002` was inactive and O2 was absent from the active revision/configuration. All observed processes used `ubuntu:ubuntu`; the legacy `ran-agent` account remained present but idle. Lite/Full used Hermes v0.13.0 with DeepSeek V4 Flash. See `docs/governance/current_runtime_status.md` for the bounded evidence.
+`DEPLOYED_RUNTIME_ACCEPTANCE` (2026-08-06): exact candidate `0b793e8` deployed one unified Hermes v0.20 gateway with DeepSeek V4 Flash on `8642`; the retired Full service is inactive/disabled. See `docs/governance/current_runtime_status.md` for the bounded evidence.
 
 The unified-identity/O2 rollback baseline `b5b4ff43f8c3d5706192cabefcece49408b73558` is archived but not deployed to production. It preserves O2 and reuses the existing runtime identity. O1/O2 candidates remain undeployed and Gate 5 is not authorized.
 
@@ -15,11 +15,10 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 ## Current Role
 
 - Hermes is the frontend conversation shell for ran-agent.
-- In the current candidate, Lite and Full both default to
-  `deepseek-v4-flash`; the provider policy adds `thinking.type=disabled` to
+- The unified production profile uses `deepseek-v4-flash`; the provider policy adds `thinking.type=disabled` to
   the final HTTP body. Pro is explicit opt-in only.
 - DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must be processed by MCP tools first.
-- In production, Node bridge automatically routes requests between lite and full gateways; WeChat, Feishu/Lark, and the desktop proxy all enter ChannelHub before the unified mainline calls Hermes.
+- In production, legacy Lite/Full selectors point to the same `8642` gateway; WeChat, Feishu/Lark, and the desktop proxy all enter ChannelHub before the unified mainline calls Hermes.
 - OpenClaw, Kimi, and GLM are retired as frontend paths and must not be used as runtime, deployment, or debugging authorities.
 
 ---
@@ -86,42 +85,36 @@ Do not run `hermes profile use ran-assistant` during verification. Production sh
 
 ---
 
-## Lite / Full Gateway
+## Unified Hermes Gateway
 
-Production runs two Hermes gateways:
+Production runs one Hermes v0.20 gateway:
 
 | Service | Port | Profile | Hermes home | Purpose |
 |---------|------|---------|-------------|---------|
-| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` | `/home/ubuntu/.hermes-ran-agent/lite` | Daily low-context entry |
-| `ran-agent-hermes-full.service` | `8643` | `ran-assistant` | `/home/ubuntu/.hermes-ran-agent` | Debugging, commands, Playwright, media generation |
+| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` compatibility ID | `/home/ubuntu/.hermes-ran-agent/lite` | Legacy Lite/Full capability union |
 
 Node bridge routes automatically with these variables:
 
 ```bash
 HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1
+HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
 RAN_AGENT_CAPABILITY_MODE=auto
 HERMES_LITE_PROFILE=ran-assistant-lite
-HERMES_FULL_PROFILE=ran-assistant
+HERMES_FULL_PROFILE=ran-assistant-lite
 ```
 
-Routing rules:
+Terminal, file, session search, Playwright, media generation, and existing MCPs
+are available through the unified profile. `ran-agent-hermes-full.service` is
+inactive/disabled, not a fallback.
 
-- Default chat, Xiaohongshu, memory, and image understanding use lite.
-- Debugging, commands, logs, systemctl, journalctl, git, npm, Playwright, and media generation use full.
-- User overrides such as “open full / all capabilities / debug mode” use full.
-- If full is unavailable, requests fall back to lite with `fallback_reason=full_gateway_unavailable`.
-
-`8642` is a low-context entry, not a security sandbox. Do not treat “lite cannot execute terminal” as a hard security guarantee.
-
-Production deployment, profile refresh, and systemd/env drift repair use:
+Follow the runtime runbook for production deployment, profile refresh, and
+rollback. Routine diagnostics may use:
 
 ```bash
-bash scripts/apply-hermes-runtime-split.sh
 bash scripts/diagnose-lite-full.sh
 ```
 
-Do not hand-edit systemd/env as the normal path. When debugging, trust the merged `systemctl cat ran-agent-hermes.service` and `systemctl cat ran-agent-hermes-full.service` views.
+Do not hand-edit systemd/env as the normal path. See `docs/governance/server_runtime_commands.md`.
 
 ---
 
@@ -149,10 +142,10 @@ ran-agent uses repo-owned MCP services:
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares |
 | `mimo_power` | Retired: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles |
 | `personal_memory` | Personal memory recall through the Python backend |
-| `obsidian_memory` | Obsidian vault semantic search |
+| `obsidian_memory` | Optional Obsidian vault semantic search; registered but not currently runtime-ready |
 | `ombre_memory` | Local recall-only O1 candidate endpoint; the upstream registry is not exposed to Hermes |
-| `media_generation` | Image and speech generation, available on full by default |
-| `playwright` | Browser automation, available on full by default |
+| `media_generation` | Image and speech generation in the unified profile |
+| `playwright` | Browser automation in the unified profile |
 | `tavily` | Optional lower-level web search provider for Search Hub compatibility |
 
 Fresh web facts, news, academic lookup, and normal URL reads should use `search_hub` first. Social-platform links must use `social_reader`; do not use generic web extraction as a replacement for Xiaohongshu, Bilibili, or similar platform resolvers.
@@ -200,7 +193,7 @@ Do not write `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, platform cookies, proxy URLs,
 
 ## Obsidian Memory MCP
 
-`obsidian_memory` uses `obsidian-index` semantic search. The repo launcher wraps the upstream package so Linux servers can run the embedding model on CPU and so index maintenance is explicit.
+`obsidian_memory` is designed around `obsidian-index` semantic search. Production inherited a malformed partial uv tool, so the surface is registered but not runtime-ready. Create a separate space-bounded plan before installing its Torch/Transformers dependency tree.
 
 Recommended server values:
 

@@ -1,6 +1,18 @@
 # Cleanup Scope
 
-Status: CURRENT (2026-07-06)
+Status: CURRENT (2026-08-06)
+
+## Deleted (2026-08-06, Unified Hermes Runtime Cleanup)
+
+- Three terminal `rolled-back` Runtime snapshots from failed/superseded v0.20
+  attempts (about 638 MiB total). The accepted `0b793e8` controller, candidate
+  ref and snapshot remain the sole Runtime rollback authority set.
+- Exact server `/tmp` candidate stages, duplicate artifact copy and transfer
+  bundle used by the accepted Runtime transaction.
+
+The retired Full unit is inactive, disabled and condition-blocked. Live v0.13
+executables remain until the accepted rollback window closes; personal data,
+shared runtimes and the unified Lite/Full capability surface were not deleted.
 
 ## Deleted (2026-04-13)
 

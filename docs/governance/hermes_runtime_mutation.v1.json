@@ -1,6 +1,9 @@
 {
   "schemaVersion": 1,
   "status": "RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY",
+  "deploymentStatus": "DEPLOYED",
+  "deployedCandidate": "0b793e8fea85c409800ee7e0d615501816c99387",
+  "acceptedSnapshot": "/opt/ran_agent-release/runtime-snapshots/runtime-20260806T010417Z-0b793e8fea85",
   "phase": "runtime-only",
   "requiredProductionHead": "bb66f1e6a8a400d599c7f86139107742bbedddc8",
   "artifactManifest": {
