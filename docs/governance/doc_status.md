@@ -48,15 +48,16 @@ known blocker: its real Python -> HTTP -> Node recall contract has not passed
 end-to-end validation. Gate 5 is not authorized, `total_delete` remains
 unsupported, Node Receipt is deferred, and Package B.2/B.3 have not started.
 
-The unified Hermes v0.20 Runtime candidate is `LOCAL_VERIFIED` and not
-deployed. Its exact 133,558,059-byte artifact carries eight digest-bound MCP
-ping-compatible files as a Hermes-only read-only overlay. Native Linux and a
-218-second transient keepalive run proved stable gateway/MCP PIDs, isolated
-Hermes and Node mount views, zero cron jobs, and zero business-state delta.
-Exact final-candidate dry-run and separate authorization for the eight systemd
-`BindReadOnlyPaths` remain pending. The evidence also records a superseded
-probe that caused one five-second v0.13 Lite gateway restart; it is not hidden
-or classified as Runtime deployment.
+The immutable Hermes v0.20 artifact remains `LOCAL_VERIFIED` and is not
+deployed. Candidate `44b84fb11fe8854f510a78d0bea462e9b77b1bb0` passed its
+dry-run and received authorization for the exact eight systemd
+`BindReadOnlyPaths`, but apply observed the shell wrapper's same-PID exec
+transition before it reached the private Python executable and failed closed.
+The controller completed rollback: production returned to clean `bb66f1e6`,
+all four services recovered, and the candidate install/topology marker are
+absent. The locally verified successor preserves the exact Lite/Full
+capability union and includes the bounded MainPID-settle correction; exact-SHA
+archive and a fresh dry-run remain before apply.
 
 This file is the public documentation index and conflict rule. Historical
 deployment notes belong under ignored `local_archive/`, not under
@@ -86,7 +87,7 @@ evidence, and time. A separately recorded known blocker prevents advancement.
 | `AGENTS.md` | Repo-root operating rules |
 | `CLAUDE.md` | Claude shim that points to canonical `AGENTS.md` |
 | `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
-| `hermes/profile/config.companion.yaml` | DESIGNED least-privilege single companion profile for the Hermes v0.20 Runtime candidate; not installed in production |
+| `hermes/profile/config.companion.yaml` | DESIGNED single companion profile preserving the exact legacy Lite/Full capability union for the Hermes v0.20 Runtime candidate; not installed in production |
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
 | `docs/governance/hermes-core-foundation.md` | Local-only Core Package A boundary and frozen Schema v1 |
@@ -110,7 +111,7 @@ evidence, and time. A separately recorded known blocker prevents advancement.
 | `docs/governance/hermes_protected_capabilities.v1.json` | Versioned protected-capability digest manifest |
 | `docs/governance/hermes_runtime_artifact.v1.json` | Immutable LOCAL_BUILT provenance and digest manifest for the pinned Hermes v0.20 artifact; later Linux verification is recorded separately and neither document alone is deployment approval |
 | `docs/governance/hermes_runtime_linux_verification.v1.json` | LOCAL_VERIFIED native Linux artifact/profile, exact eight-file overlay, 218-second MCP keepalive, zero-business-state-delta, and Git-less ubuntu/root controller evidence; includes the disclosed superseded 8642 restart probe |
-| `docs/governance/hermes_runtime_mutation.v1.json` | RELEASE_CANDIDATE machine-readable Runtime Phase topology/mutation/rollback contract with Linux-verified artifact/overlay/controller evidence; production apply still requires exact-SHA dry-run admission and separate BindReadOnlyPaths authorization |
+| `docs/governance/hermes_runtime_mutation.v1.json` | RELEASE_CANDIDATE machine-readable Runtime Phase topology/mutation/rollback contract; the authorized eight-file BindReadOnlyPaths boundary is unchanged, while exact-SHA archive and dry-run remain before apply |
 | `docs/governance/hermes-context-optimization.md` | Hermes context optimization, cache-friendly history, and soft reset |
 | `docs/governance/external-mcp-gateway.md` | External MCP gateway, admission, evidence, and proactive system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |

@@ -6,35 +6,35 @@ import yaml
 
 
 PROFILE = Path(__file__).parents[1] / "hermes/profile/config.companion.yaml"
+LITE_PROFILE = Path(__file__).parents[1] / "hermes/profile/config.lite.yaml"
+FULL_PROFILE = Path(__file__).parents[1] / "hermes/profile/config.yaml"
 UNIT = Path(__file__).parents[1] / "hermes/systemd/ran-agent-hermes-unified.service"
 MUTATION = Path(__file__).parents[1] / "docs/governance/hermes_runtime_mutation.v1.json"
-REQUIRED_MCP = {
-    "time",
-    "social_reader",
-    "media_reader",
-    "media_generation",
-    "co_reading",
-    "sticker_catalog",
-    "search_hub",
-    "personal_memory",
-    "ombre_memory",
-    "external_mcp_gateway",
-}
-FORBIDDEN_TOOLSETS = {"terminal", "file", "session_search", "cronjob", "delegation", "browser", "code_execution"}
+FORBIDDEN_TOOLS = {"cronjob", "delegate_task", "execute_code"}
 
 
-def test_companion_profile_is_one_restricted_api_surface() -> None:
+def test_companion_profile_preserves_the_lite_full_capability_union() -> None:
     config = yaml.safe_load(PROFILE.read_text(encoding="utf-8"))
+    lite = yaml.safe_load(LITE_PROFILE.read_text(encoding="utf-8"))
+    full = yaml.safe_load(FULL_PROFILE.read_text(encoding="utf-8"))
     cli = config["platform_toolsets"]["cli"]
     api = config["platform_toolsets"]["api_server"]
+    legacy_toolsets = set(lite["platform_toolsets"]["gateway"]) | set(full["platform_toolsets"]["gateway"])
+    legacy_mcp = set(lite["mcp_servers"]) | set(full["mcp_servers"])
 
     assert cli == api
-    assert not FORBIDDEN_TOOLSETS.intersection(api)
-    assert {"mcp-media_generation", "mcp-co_reading"}.issubset(api)
-    assert REQUIRED_MCP.issubset(config["mcp_servers"])
-    assert "mcp-obsidian_memory" not in api
-    assert "obsidian_memory" not in config["mcp_servers"]
-    assert "Environment=OBSIDIAN_MEMORY_MCP_ENABLED=false" in UNIT.read_text(encoding="utf-8")
+    assert set(api) == legacy_toolsets
+    assert set(config["mcp_servers"]) == legacy_mcp
+    assert FORBIDDEN_TOOLS.issubset(config["disabled_tools"])
+    assert "Environment=OBSIDIAN_MEMORY_MCP_ENABLED=true" in UNIT.read_text(encoding="utf-8")
+    sticker = config["mcp_servers"]["sticker_catalog"]["env"]
+    search = config["mcp_servers"]["search_hub"]["env"]
+    external = config["mcp_servers"]["external_mcp_gateway"]["env"]
+    assert sticker["STICKER_CATALOG_PROFILE_MODE"] == "full" and sticker["STICKER_CATALOG_ALLOW_RUNTIME_SAVE"] == "true"
+    assert search["SEARCH_HUB_PROFILE_MODE"] == "full"
+    assert search["SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK"] == "true" and search["SEARCH_HUB_PUBLIC_ONLY_DEFAULT"] == "false"
+    assert external["EXTERNAL_MCP_GATEWAY_PROFILE"] == "full"
+    assert external["EXTERNAL_MCP_GATEWAY_ENABLED"] == "false" and external["EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED"] == "false"
     assert config["security"]["allow_lazy_installs"] is False
     assert config["security"]["tirith_enabled"] is False
     assert config["agent"]["reasoning_effort"] == "none"
@@ -43,10 +43,13 @@ def test_companion_profile_is_one_restricted_api_surface() -> None:
 
 def test_runtime_mutation_binds_profile_and_live_node_switch() -> None:
     mutation = json.loads(MUTATION.read_text(encoding="utf-8"))
+    config = yaml.safe_load(PROFILE.read_text(encoding="utf-8"))
     digest = hashlib.sha256(PROFILE.read_bytes()).hexdigest()
 
     assert mutation["companionProfile"]["sourceSha256"] == digest
     assert mutation["companionProfile"]["destinationSha256"] == digest
+    assert set(mutation["companionProfile"]["requiredToolsets"]) == set(config["platform_toolsets"]["api_server"])
+    assert set(mutation["companionProfile"]["forbiddenTools"]) == FORBIDDEN_TOOLS
     assert mutation["unifiedUnit"]["sourceSha256"] == hashlib.sha256(UNIT.read_bytes()).hexdigest()
     values = mutation["envMutations"][0]["values"]
     assert len({values[key] for key in ("HERMES_PROFILE", "HERMES_LITE_PROFILE", "HERMES_FULL_PROFILE")}) == 1
@@ -56,6 +59,7 @@ def test_runtime_mutation_binds_profile_and_live_node_switch() -> None:
     assert hermes_unit["afterEnvironment"] == {
         "HERMES_DISABLE_LAZY_INSTALLS": "1",
         "TIRITH_ENABLED": "false",
+        "OBSIDIAN_MEMORY_MCP_ENABLED": "true",
     }
     admission = mutation["admission"]
     assert admission["peakNewAllocatedBytes"] == sum(admission["peakInventoryBytes"].values())

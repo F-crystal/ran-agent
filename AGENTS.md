@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-08-04)
+Status: CURRENT (2026-08-06)
 
 ## Scope
 
@@ -11,10 +11,13 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 - Keep work local-first and project-scoped unless the user explicitly asks for global agent configuration.
 - Keep runtime simple: backend services, state layer, WeChat bridge, MCP/knowledge interfaces. Do not expand a custom front conversation runtime.
 - OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime, deployment, or debugging authorities. Treat `openclaw-*` names and `.openclaw_state` only as legacy compatibility artifacts.
-- For time-sensitive facts, perform live lookup before answering. Weather uses `skills/weather/SKILL.md`; other online lookup uses `skills/web-search-live/SKILL.md`.
+- For time-sensitive or materially uncertain externally verifiable facts, perform live lookup before answering. Weather uses `skills/weather/SKILL.md`; other online lookup uses `skills/web-search-live/SKILL.md`.
 - For unfamiliar integration/debugging work, check official docs and mature prior art before designing or coding.
 - Use absolute paths or workspace-relative paths, not `~`-prefixed paths.
 - Feature authorization does not authorize changing production service identities, Unix users/groups, ownership, permission boundaries, or storage layout; these require separate explicit user approval.
+- This is a personal, single-owner project. Match process to concrete risk and use Ponytail discipline: reuse the existing code or platform, fix the shared root cause, and avoid speculative abstractions, fallback stacks, redundant backups, or duplicate checks.
+- Protect irrecoverable personal data and external effects, but do not inflate reversible work into a security project. Budget server space, elapsed time, and tokens explicitly; retain only recovery artifacts required by the active transaction or documented retention/rollback policy, and remove exact temporary validation artifacts when they are no longer needed and deletion is authorized.
+- Stop validating once fresh evidence covers the claimed invariant. Repeat a check only after relevant state changes or when an independent review identifies a specific gap.
 
 ## Skills And Delegation
 
@@ -24,6 +27,8 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 - Server deployment, lite/full runtime, systemd/env, or MCP exposure work must use `skills/server-runtime/SKILL.md`.
 - Documentation governance work must use `skills/doc-governance/SKILL.md`.
 - Use sub-agents only for heavy background tasks, exploration, or maintenance. Do not sub-agentize frontline chat, memory main flow, life loop, or todo/reminder main flow.
+- When Codex delegation needs an explicit model override, do not exceed `gpt-5.6-terra` with `reasoning_effort=xhigh`.
+- Before any archive operation, run an adversarial review proportional to the change. After it is clear, reconcile affected public state with `doc-governance`, then use `archive-and-push`.
 
 ## Agent Capability Governance
 

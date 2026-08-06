@@ -12,6 +12,16 @@ model:
 agent:
   reasoning_effort: none
 
+web:
+  search_backend: tavily
+  extract_backend: tavily
+
+terminal:
+  backend: local
+  cwd: /opt/ran_agent
+  timeout: 180
+  lifetime_seconds: 300
+
 compression:
   enabled: true
   threshold: 0.35
@@ -31,13 +41,6 @@ disabled_tools:
   - text_to_speech
   - video_analyze
   - vision_analyze
-  - terminal
-  - process
-  - read_file
-  - write_file
-  - patch
-  - search_files
-  - session_search
   - cronjob
   - delegate_task
   - execute_code
@@ -56,8 +59,11 @@ disabled_tools:
 platform_toolsets:
   cli: &companion_toolsets
     - web
+    - terminal
+    - file
     - skills
     - memory
+    - session_search
     - safe
     - mcp-time
     - mcp-social_reader
@@ -67,7 +73,9 @@ platform_toolsets:
     - mcp-sticker_catalog
     - mcp-media_generation
     - mcp-personal_memory
+    - mcp-obsidian_memory
     - mcp-ombre_memory
+    - mcp-playwright
     - mcp-external_mcp_gateway
   api_server: *companion_toolsets
 
@@ -120,7 +128,7 @@ mcp_servers:
       - -lc
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_sticker_catalog_mcp.sh
     env:
-      STICKER_CATALOG_PROFILE_MODE: lite
+      STICKER_CATALOG_PROFILE_MODE: full
       STICKER_CATALOG_ALLOW_RUNTIME_SAVE: "true"
     timeout: 120
     connect_timeout: 60
@@ -131,10 +139,10 @@ mcp_servers:
       - -lc
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_search_hub_mcp.sh
     env:
-      SEARCH_HUB_PROFILE_MODE: lite
+      SEARCH_HUB_PROFILE_MODE: full
       SEARCH_HUB_ENABLE_OPENCLI_BROWSER: "false"
-      SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK: "false"
-      SEARCH_HUB_PUBLIC_ONLY_DEFAULT: "true"
+      SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK: "true"
+      SEARCH_HUB_PUBLIC_ONLY_DEFAULT: "false"
     timeout: 120
     connect_timeout: 60
 
@@ -146,10 +154,26 @@ mcp_servers:
     timeout: 120
     connect_timeout: 60
 
+  obsidian_memory:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_obsidian_memory_mcp.sh
+    timeout: 180
+    connect_timeout: 90
+
   ombre_memory:
     url: "${OMBRE_BRAIN_MCP_URL}"
     timeout: 120
     connect_timeout: 30
+
+  playwright:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_playwright_mcp.sh
+    timeout: 180
+    connect_timeout: 90
 
   external_mcp_gateway:
     command: bash
@@ -157,7 +181,7 @@ mcp_servers:
       - -lc
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_external_mcp_gateway.sh
     env:
-      EXTERNAL_MCP_GATEWAY_PROFILE: "lite"
+      EXTERNAL_MCP_GATEWAY_PROFILE: "full"
       EXTERNAL_MCP_GATEWAY_ENABLED: "false"
       EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "false"
     timeout: 120

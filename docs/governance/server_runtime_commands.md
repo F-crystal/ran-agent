@@ -22,6 +22,15 @@ not claims about the active host. Historical failed traces included 95% disk
 utilization; that value is not current. Use only the verified pruner below and
 never remove snapshot directories manually.
 
+The exact `44b84fb11fe8854f510a78d0bea462e9b77b1bb0` Runtime apply on
+2026-08-06 failed closed while its shell wrapper was completing the same-PID
+exec into the private Python runtime, then rolled back successfully. Do not
+retry that candidate. A successor must carry the bounded MainPID-settle fix,
+preserve the exact legacy Lite/Full capability union, and pass a fresh
+exact-SHA dry-run. Authorization for the unchanged exact eight-file read-only
+bind boundary is recorded; any target or path expansion requires new
+authorization.
+
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy
 `ran-agent` account at UID 999/GID 988 with a nologin shell. No ran-agent-owned
@@ -73,6 +82,14 @@ the account without separate authorization.
   candidate-named controller, candidate ref, and accepted snapshot are one
   rollback authority set; do not overwrite or delete any member while that
   Runtime or its rollback window remains active.
+- After unified v0.20 passes immediate acceptance, the user has authorized
+  disabling the split topology and removing exact temporary validation assets
+  to reclaim space. Inventory references first. The active rollback contract
+  verifies the live v0.13 executables by digest, so retain them until that
+  rollback window closes; then remove those exact v0.13-only assets. Preserve
+  the unified capability union, personal data, and shared runtimes. Do not
+  treat the old Full service name as permission to delete Full product state
+  or MCP capability.
 - Validate an exact reviewed release: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-run`
 - Apply that same exact release after separate authorization: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply`
 - `deploy-hermes-main.sh --dry-run` may discover and test the then-current main head, but it is not apply authority; record and review its resolved SHA, then use the exact `--commit` path above.

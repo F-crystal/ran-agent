@@ -2,8 +2,8 @@
   "schemaVersion": 1,
   "stage": "LOCAL_VERIFIED",
   "result": "LINUX_VERIFIED",
-  "scope": "runtime-artifact-unified-profile-companion-overlay-and-staged-runtime-controller",
-  "verifiedAt": "2026-08-06T05:18:20+08:00",
+  "scope": "runtime-artifact-unified-lite-full-capability-profile-companion-overlay-and-staged-runtime-controller",
+  "verifiedAt": "2026-08-06T08:52:35+08:00",
   "artifact": {
     "manifest": "docs/governance/hermes_runtime_artifact.v1.json",
     "manifestSha256": "6d427a63b5405cab01c08454bc2923d7f7e468e4b7e86f0670a9b68012cb2e79",
@@ -13,7 +13,7 @@
   },
   "profile": {
     "path": "hermes/profile/config.companion.yaml",
-    "sha256": "abe6430f1274cbf086109ddad799549a39c48744f83c17ad823f7f64c8b5326e",
+    "sha256": "f015cdfd63469befe6d6c57172b78705418707e8a3756c670782db2241717a17",
     "name": "ran-assistant-lite",
     "nameMeaning": "bounded compatibility identifier, not a second runtime topology",
     "reasoningEffort": "none",
@@ -30,15 +30,15 @@
     },
     "gateway": {
       "path": "scripts/verify-hermes-runtime-linux-gateway.py",
-      "sha256": "2cf5da91705c7fae77c918690bb6b9446efa2f01bb8315dbd9840087c2beef8b"
+      "sha256": "45976af1fbb29951a935fbb1cf34f4b61a6cf6c40b9917d8c4dd523bd3d52918"
     },
     "runtimeReleaseController": {
       "path": "scripts/deploy-hermes-runtime-release.py",
-      "sha256": "704507fe3cc85450a42e2ca0ef87abfed004fde95893d34ea5aaba2a41da8abb"
+      "sha256": "f8b628c67f9a7ffb5058a65ecc27529598075f9462507ae7e127229aee14f016"
     },
     "runtimeReleaseTests": {
       "path": "tests/test_hermes_runtime_release.py",
-      "sha256": "710c369a4008f5f6cd6a72b0a1e0b4d0d6dd1e359ceb42cce646788dbd6a132f"
+      "sha256": "029d3fbaf997cfe9336a0acbcef85e0e0b5d393709ae5f134383440d4406ea68"
     },
     "mcpPingCompatibilityTests": {
       "path": "node_bridge/tests/mcpPingCompatibility.test.mjs",
@@ -106,11 +106,11 @@
       },
       "nonRoot": {
         "identity": "ubuntu",
-        "result": "38 passed"
+        "result": "41 passed"
       },
       "root": {
         "identity": "root via sudo env -i",
-        "result": "38 passed"
+        "result": "41 passed"
       }
     },
     "mcpPingCompatibility": {
@@ -202,6 +202,7 @@
     },
     "relocatedReadOnlyRuntime": "PASS",
     "offlineUnifiedGateway": "PASS",
+    "exactLegacyLiteFullCapabilityUnionConfigured": "PASS",
     "emptyCronStore": "PASS",
     "lazyInstallBlocked": "PASS",
     "tirithDisabledWithoutDownloadOrState": "PASS",
@@ -228,12 +229,15 @@
     ],
     "productionBusinessDataMutated": false,
     "productionServiceMutationObserved": true,
-    "productionServiceMutationDetail": "A superseded first transient probe allowed production EnvironmentFile values to override synthetic API_SERVER_PORT/HERMES_HOME and passed --replace. It stopped the v0.13 Lite gateway at 05:11:22; systemd restarted it successfully at 05:11:27. The corrected probe moved every isolation value into the final ExecStart /usr/bin/env position, used port 18766 and omitted --replace."
+    "productionServiceMutationDetail": "A superseded first transient probe allowed production EnvironmentFile values to override synthetic API_SERVER_PORT/HERMES_HOME and passed --replace. It stopped the v0.13 Lite gateway at 05:11:22; systemd restarted it successfully at 05:11:27. The corrected probe moved every isolation value into the final ExecStart /usr/bin/env position, used port 18766 and omitted --replace.",
+    "runtimeApplyRollbackObserved": true,
+    "runtimeApplyRollbackDetail": "Candidate 44b84fb11fe8854f510a78d0bea462e9b77b1bb0 failed closed while its shell wrapper was completing the same-PID exec into private Python. The controller restored clean bb66f1e6, all four services and legacy listeners, removed the candidate install, and left no unified topology marker."
   },
   "storage": {
     "temporaryValidationBytesBeforeCleanup": 1250712745,
     "temporaryValidationPathRemoved": true,
     "freeBytesAfterCleanupAt2026-08-06T05:18:20+08:00": 18587557888,
+    "freeBytesAfterRollbackAndTemporaryCleanupAt2026-08-06T08:46:03+08:00": 18368720896,
     "stagedRootOnlyArtifact": {
       "path": "/opt/ran_agent-release/runtime-artifacts/hermes-runtime-3049a082c0d1.tar.gz",
       "bytes": 133558059,
@@ -247,11 +251,10 @@
     "The first production-like transient inherited API_SERVER_PORT=8642 and HERMES_HOME from production EnvironmentFile values after systemd-run environment assignments. Its --replace caused one v0.13 Lite gateway restart. Production recovered in five seconds; no business-state delta was observed. The accepted invocation places synthetic isolation values in the final ExecStart /usr/bin/env position, uses 18766, and omits --replace."
   ],
   "remainingBeforeProduction": [
-    "bind the full worktree to one exact 40-character candidate SHA and candidate-extracted controller digest",
-    "rerun the immutable Git-less controller tests and numeric capacity dry-run against that exact candidate",
-    "obtain the separately required authorization for eight service-private systemd BindReadOnlyPaths; host and Node namespaces remain unchanged",
-    "receive independent adversarial CLEAR for scope, portability and security"
+    "bind the governed worktree to one exact 40-character candidate SHA and candidate-extracted controller digest",
+    "rerun the numeric capacity dry-run against that exact candidate",
+    "receive final independent adversarial CLEAR for the exact candidate"
   ],
   "generalRuntimeDeploymentAuthorized": true,
-  "companionOverlayPermissionBoundaryAuthorized": false
+  "companionOverlayPermissionBoundaryAuthorized": true
 }

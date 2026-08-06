@@ -69,7 +69,9 @@ diagnostic only. It never returns private schedule content.
 
 Same-UID operator CLI and authenticated job API remain an operator trust
 boundary, not a second runtime writer. The companion profile must not expose
-the cronjob, terminal, file, delegation, or Playwright toolsets.
+the Hermes-native `cronjob`, `delegate_task`, or `execute_code` tools. The
+legacy Lite/Full terminal, file, session-search, Playwright, and MCP product
+capabilities remain available through the unified allowlist.
 
 The deploy-owned managed-job manifest is exact: `no_agent=true`,
 `deliver=local`, one owner-only absolute script path, fixed working directory,
@@ -221,18 +223,18 @@ gateway processes, cron tickers, cache/history policy, and release gates
 without providing a security boundary. The target has one Hermes home, one
 gateway, one provider policy, and one companion profile.
 
-The profile starts from the current Lite surface and adds the current product
-surfaces `media_generation` and `co_reading`. Terminal, file, debugging, coding,
-delegation, cronjob, and Playwright remain outside the companion runtime and
-are handled through Codex or a future explicitly governed Core broker.
+The profile preserves the exact union of the current Lite and Full product
+surfaces: terminal, file, session search, Playwright, media, co-reading, and all
+existing MCP servers. The merge removes duplicate topology, not capabilities.
+Hermes-native `cronjob`, `delegate_task`, and `execute_code` remain outside the
+companion runtime because neither legacy profile approved them.
 
 Transition has two releases and only one Core write-path cutover.
 
 ### Runtime Phase
 
 Implementation checkpoint (2026-08-06): the superseding immutable artifact is
-`LINUX_VERIFIED` and the mutation contract is
-`RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY`. The archive is 133,558,059 bytes,
+`LINUX_VERIFIED`. The archive is 133,558,059 bytes,
 with tree SHA256
 `3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698`
 and archive SHA256
@@ -244,10 +246,12 @@ Native Linux, relocation, read-only, compiled-import, system-terminfo, offline
 unified-profile, zero-lazy-install, zero-Tirith, exact mount-namespace, and
 218-second MCP keepalive gates passed. Exact evidence, including the disclosed
 superseded probe that restarted only the v0.13 Lite gateway before recovering,
-is in `hermes_runtime_linux_verification.v1.json`. Exact final-candidate
-capacity/dry-run, independent adversarial CLEAR, and separate authorization for
-the eight `BindReadOnlyPaths` remain pending; this checkpoint does not
-authorize production apply.
+is in `hermes_runtime_linux_verification.v1.json`. Candidate `44b84fb11fe8`
+passed dry-run and received authorization for the exact eight
+`BindReadOnlyPaths`, but apply failed closed during the wrapper's same-PID exec
+transition and rolled production back. The successor preserves the exact
+Lite/Full capability union and adds only a bounded MainPID-settle correction;
+its exact-SHA tests, evidence, review, and dry-run must pass before apply.
 
 1. Build a candidate-SHA-bound offline v0.20 runtime artifact. Its manifest
    records upstream version/source digest, dependency lock digest, every wheel
@@ -394,8 +398,10 @@ second black-box Node request.
 Runtime observation then requires at least 7 days, 30 normal Exchanges, one
 media generation, one co-reading operation, and one gateway restart, with zero
 Full fallback. Before Core pre-mutation admission it also performs black-box
-tool enumeration/negative calls and real recall, proactive-decision, digest,
-media and co-reading paths, with zero Tirith download and zero unexpected tool.
+tool enumeration/negative calls, confirms the preserved legacy Full terminal,
+file, session-search, Playwright, Obsidian and remaining MCP surfaces, and runs
+real recall, proactive-decision, digest, media and co-reading paths, with zero
+Tirith download and zero unexpected tool.
 
 Core pre-mutation admission proves the schema/migration candidate, cutover and
 system-schedule manifests, per-job disposition inventory, capacity, isolated
@@ -424,22 +430,26 @@ missed/duplicate synthetic tick probe, zero duplicate delivery, and no
 ambiguous auto-retry. Observation decides cleanup eligibility, not Core
 authority.
 
-Runtime/Core observation must pass before Full-specific state, legacy
-scheduler code, or split compatibility routing is considered for separately
-authorized deletion. P3 test artifacts are different: after their evidence is
-archived, separate deletion authorization may reclaim them to increase
-admission headroom before staging; this does not depend on Runtime observation.
+After Runtime immediate acceptance, stop/disable the split service topology
+and remove exact temporary validation artifacts under the recorded user
+authorization. The active rollback contract still verifies the live v0.13
+executables by digest, so retain those executables until its rollback window
+closes; then remove them with the other exact v0.13-only assets. Preserve
+personal data, the unified Lite/Full capability union, and shared runtimes.
+Full-specific product state, legacy scheduler code, and Core write-path cleanup
+still wait for their own acceptance boundary.
 
 If the Hermes managed-job projection later misses a measured availability SLO,
 design a fallback from that evidence. No second timer is prebuilt in the MVP.
 
 ## Production and deletion boundary
 
-This design does not authorize production Core writes, service stop/restart,
-state migration, Full-home deletion, P3 staging deletion, or legacy scheduler
-retirement. Those remain explicit release/cutover operations. Production stays
+This design does not authorize production Core writes, state migration,
+Full-home deletion, or legacy scheduler retirement. Runtime service mutation
+and exact v0.13-only cleanup are authorized only through the reviewed Runtime
+transaction and its immediate acceptance/inventory sequence. Production stays
 on Hermes v0.13 until the exact Runtime candidate passes admission, atomic
 apply, and immediate acceptance. Legacy wake owners remain authoritative
 through Runtime observation and stop only at the separate Core atomic cutover;
 Core is authoritative immediately after that cutover and its blocking
-acceptance, while observation controls later cleanup.
+acceptance, while observation controls later Core cleanup.

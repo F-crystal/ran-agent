@@ -35,8 +35,8 @@ DeepSeek V4 在本项目中不直接处理原始图片、视频、音频或社�
 
 - 当前生产在正式 Runtime 切换前仍可能保留 `8642`/`8643` 两个兼容入口；不得把设计目标冒充为生产事实。
 - 统一 Runtime 候选只有一个 gateway、一个 home 和一个 companion profile。`ran-assistant-lite` 仅保留为过渡期兼容 ID，Lite/Full URL 和 profile 选择器必须收敛到同一实例。
-- companion profile 只暴露 allowlist 中的工具；terminal、file、cronjob、delegation、Playwright 和 code execution 的黑盒不可用性是部署验收项。
-- companion 的 `search_hub` 使用 public-only/无 Playwright fallback 的最小 provider 策略；重型调试和维护交给 Codex 或另行治理的 Core broker。
+- companion profile 的产品能力面必须精确保留旧 Lite 与 Full 的并集，包括 terminal、file、session search、Playwright 和全部既有 MCP；合并拓扑不得降级 Full 能力。
+- 旧 Lite/Full 都未批准的 Hermes 原生 `cronjob`、`delegate_task` 和 `execute_code` 继续禁用。`search_hub` 保留旧 Full 的 Playwright fallback；普通搜索仍优先走 Search Hub，直接 Playwright 只用于明确的浏览器调试。
 
 安全边界：不要泄露 API key、Cookie、token、平台 resolver 细节、本地 debug 路径、工具 trace 或内部 marker。不要在普通聊天中复述这些规则。
 

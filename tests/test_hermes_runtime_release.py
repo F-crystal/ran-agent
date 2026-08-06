@@ -247,6 +247,7 @@ def _install_transaction_fixture(monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     monkeypatch.setattr(MODULE.os, "chown", lambda *args, **kwargs: None)
     monkeypatch.setattr(MODULE, "port_open", lambda port: port == 8642)
     monkeypatch.setattr(MODULE, "validate_gateway_process", lambda _context: {})
+    monkeypatch.setattr(MODULE, "wait_for_gateway_process", lambda _context: {})
     monkeypatch.setattr(MODULE, "wait_for_gateway", lambda *args, **kwargs: None)
     monkeypatch.setattr(MODULE, "validate_installed_runtime", lambda _context: {})
     monkeypatch.setattr(MODULE, "validate_node_routes", lambda: None)
@@ -404,6 +405,44 @@ def test_preflight_does_not_overwrite_the_candidate_unit_payload() -> None:
 
 def test_gateway_readiness_covers_hermes_mcp_discovery_ceiling() -> None:
     assert MODULE.GATEWAY_READINESS_ATTEMPTS * 0.5 >= 150
+
+
+def test_gateway_process_waits_for_same_pid_exec_transition(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    expected = tmp_path / "runtime/python/bin/python3.12"
+    expected.parent.mkdir(parents=True)
+    expected.write_bytes(b"python")
+    executables = iter((Path("/usr/bin/dash"), expected))
+    monkeypatch.setattr(MODULE, "service_main_pid", lambda _unit: 123)
+    monkeypatch.setattr(MODULE, "process_executable", lambda _pid: next(executables))
+    monkeypatch.setattr(
+        MODULE,
+        "validate_gateway_process",
+        lambda _context, *, expected_pid=None: {"pid": str(expected_pid)},
+    )
+    monkeypatch.setattr(MODULE.time, "sleep", lambda _seconds: None)
+
+    assert MODULE.wait_for_gateway_process({"installRoot": tmp_path / "runtime"}) == {"pid": "123"}
+
+
+def test_gateway_process_settle_timeout_reports_last_executable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    clock = iter((0.0, 11.0))
+    monkeypatch.setattr(MODULE, "service_main_pid", lambda _unit: 123)
+    monkeypatch.setattr(MODULE, "process_executable", lambda _pid: Path("/usr/bin/dash"))
+    monkeypatch.setattr(MODULE.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(MODULE.time, "sleep", lambda _seconds: None)
+
+    with pytest.raises(MODULE.ReleaseError, match=r"pid=123 exe=/usr/bin/dash"):
+        MODULE.wait_for_gateway_process({"installRoot": tmp_path / "runtime"})
+
+
+def test_gateway_process_settle_rejects_main_pid_change(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    pids = iter((123, 456))
+    monkeypatch.setattr(MODULE, "service_main_pid", lambda _unit: next(pids))
+
+    with pytest.raises(MODULE.ReleaseError, match="MainPID changed"):
+        MODULE.wait_for_gateway_process({"installRoot": tmp_path / "runtime"})
 
 
 def test_privileged_replace_rejects_symlink_target(tmp_path: Path) -> None:

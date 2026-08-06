@@ -62,6 +62,8 @@ CONTROLLER_PATH = "scripts/deploy-hermes-runtime-release.py"
 RELEASE_CANDIDATE_STATUS = "RELEASE_CANDIDATE_READY_FOR_RUNTIME_APPLY"
 CANDIDATE_REF_ROOT = "refs/ran-agent/runtime-candidates"
 GATEWAY_READINESS_ATTEMPTS = 300
+GATEWAY_PROCESS_SETTLE_SECONDS = 10
+GATEWAY_PROCESS_POLL_SECONDS = 0.05
 COMPANION_OVERLAY_PATHS = (
     "node_bridge/src/coReading/mcpServer.mjs",
     "node_bridge/src/externalMcp/gatewayMcpServer.mjs",
@@ -806,8 +808,12 @@ def service_main_pid(unit: str) -> int:
     return int(raw)
 
 
-def process_environment(unit: str) -> dict[str, str]:
-    data = Path(f"/proc/{service_main_pid(unit)}/environ").read_bytes()
+def process_executable(pid: int) -> Path:
+    return Path(f"/proc/{pid}/exe").resolve(strict=True)
+
+
+def process_environment_for_pid(pid: int) -> dict[str, str]:
+    data = Path(f"/proc/{pid}/environ").read_bytes()
     values: dict[str, str] = {}
     for entry in data.split(b"\0"):
         if b"=" in entry:
@@ -816,15 +822,21 @@ def process_environment(unit: str) -> dict[str, str]:
     return values
 
 
-def validate_gateway_process(context: dict[str, Any]) -> dict[str, str]:
+def process_environment(unit: str) -> dict[str, str]:
+    return process_environment_for_pid(service_main_pid(unit))
+
+
+def validate_gateway_process(context: dict[str, Any], *, expected_pid: int | None = None) -> dict[str, str]:
     pid = service_main_pid("ran-agent-hermes.service")
-    executable = Path(f"/proc/{pid}/exe").resolve()
+    if expected_pid is not None and pid != expected_pid:
+        raise ReleaseError("Hermes MainPID changed during candidate validation")
+    executable = process_executable(pid)
     expected_executable = (context["installRoot"] / "python/bin/python3.12").resolve()
     if executable != expected_executable:
         raise ReleaseError("Hermes MainPID is not the exact candidate runtime")
     if sha256_file(executable) != context["manifest"]["python"]["executableSha256"]:
         raise ReleaseError("Hermes MainPID interpreter digest mismatch")
-    environment = process_environment("ran-agent-hermes.service")
+    environment = process_environment_for_pid(pid)
     expected = {
         "HERMES_HOME": str(LITE_HOME),
         "HERMES_PROFILE": "ran-assistant-lite",
@@ -836,7 +848,31 @@ def validate_gateway_process(context: dict[str, Any]) -> dict[str, str]:
     }
     if any(environment.get(key) != value for key, value in expected.items()):
         raise ReleaseError("Hermes MainPID environment differs from the canonical runtime contract")
+    if service_main_pid("ran-agent-hermes.service") != pid or process_executable(pid) != expected_executable:
+        raise ReleaseError("Hermes MainPID changed during candidate validation")
     return environment
+
+
+def wait_for_gateway_process(context: dict[str, Any]) -> dict[str, str]:
+    pid = service_main_pid("ran-agent-hermes.service")
+    expected = (context["installRoot"] / "python/bin/python3.12").resolve()
+    deadline = time.monotonic() + GATEWAY_PROCESS_SETTLE_SECONDS
+    last_executable = "unavailable"
+    while True:
+        if service_main_pid("ran-agent-hermes.service") != pid:
+            raise ReleaseError("Hermes MainPID changed before candidate runtime settled")
+        try:
+            executable = process_executable(pid)
+            last_executable = str(executable)
+        except OSError:
+            executable = None
+        if executable == expected:
+            return validate_gateway_process(context, expected_pid=pid)
+        if time.monotonic() >= deadline:
+            raise ReleaseError(
+                f"Hermes MainPID did not settle on the exact candidate runtime: pid={pid} exe={last_executable}"
+            )
+        time.sleep(GATEWAY_PROCESS_POLL_SECONDS)
 
 
 def validate_listener_topology(expected_pid: int) -> None:
@@ -1280,7 +1316,7 @@ def apply(candidate: str, artifact_path: Path, context: dict[str, Any]) -> Path:
         run(["systemctl", "daemon-reload"])
         run(["systemctl", "enable", "ran-agent-hermes.service"])
         run(["systemctl", "start", "ran-agent-hermes.service"])
-        hermes_environment = validate_gateway_process(context)
+        hermes_environment = wait_for_gateway_process(context)
         wait_for_gateway(8642, hermes_environment, "ran-assistant-lite")
         patch_runtime_env()
         run(["systemctl", "disable", "ran-agent-hermes-full.service"])

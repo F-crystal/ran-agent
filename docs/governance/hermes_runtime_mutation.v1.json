@@ -15,27 +15,27 @@
     "path": "docs/governance/hermes_runtime_linux_verification.v1.json",
     "stage": "LOCAL_VERIFIED",
     "result": "LINUX_VERIFIED",
-    "verifiedAt": "2026-08-06T05:18:20+08:00",
+    "verifiedAt": "2026-08-06T08:52:35+08:00",
     "tarGzSha256": "44572a7be51e66b43aa5f15b9d8442bff52052d4dd0167b75dd85206660cff30",
     "treeSha256": "3049a082c0d1794bdf0f5d681132eaeb84fd7006b5ddb1514694717874214698"
   },
   "companionProfile": {
     "compatibilityName": "ran-assistant-lite",
     "source": "hermes/profile/config.companion.yaml",
-    "sourceSha256": "abe6430f1274cbf086109ddad799549a39c48744f83c17ad823f7f64c8b5326e",
+    "sourceSha256": "f015cdfd63469befe6d6c57172b78705418707e8a3756c670782db2241717a17",
     "destinations": [
       "/home/ubuntu/.hermes-ran-agent/lite/config.yaml",
       "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml"
     ],
-    "destinationSha256": "abe6430f1274cbf086109ddad799549a39c48744f83c17ad823f7f64c8b5326e",
-    "requiredToolsets": ["mcp-co_reading", "mcp-media_generation"],
-    "forbiddenToolsets": ["browser", "code_execution", "cronjob", "delegation", "file", "session_search", "terminal"],
+    "destinationSha256": "f015cdfd63469befe6d6c57172b78705418707e8a3756c670782db2241717a17",
+    "requiredToolsets": ["web", "terminal", "file", "skills", "memory", "session_search", "safe", "mcp-time", "mcp-social_reader", "mcp-media_reader", "mcp-search_hub", "mcp-co_reading", "mcp-sticker_catalog", "mcp-media_generation", "mcp-personal_memory", "mcp-obsidian_memory", "mcp-ombre_memory", "mcp-playwright", "mcp-external_mcp_gateway"],
+    "forbiddenTools": ["cronjob", "delegate_task", "execute_code"],
     "lazyInstalls": false,
     "tirithEnabled": false
   },
   "unifiedUnit": {
     "source": "hermes/systemd/ran-agent-hermes-unified.service",
-    "sourceSha256": "d160c4d2beb2fc1759f08a093b5b42cdbef9b946a195cc1683a649cc84c87d90",
+    "sourceSha256": "42703a7eaa1975b6336a6eae700c744f9bedc12892f5ab0492d753ef396a479c",
     "destination": "/etc/systemd/system/ran-agent-hermes.service",
     "companionOverlay": {
       "mode": "systemd-bind-read-only",
@@ -89,7 +89,8 @@
       "afterPort": 8642,
       "afterEnvironment": {
         "HERMES_DISABLE_LAZY_INSTALLS": "1",
-        "TIRITH_ENABLED": "false"
+        "TIRITH_ENABLED": "false",
+        "OBSIDIAN_MEMORY_MCP_ENABLED": "true"
       }
     },
     {
