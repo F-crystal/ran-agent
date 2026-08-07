@@ -12,14 +12,18 @@ Production is clean at `2c8e97cacd1d2eaed30738abe621f3393cffb885`
 with accepted binding.v4. Hermes v0.20 is `PROD_VERIFIED` for the bounded
 evidence recorded in `current_runtime_status.md`. Runtime rollback is closed,
 the retired v0.13 payloads are deleted, `18002` and O2 are inactive, and the
-direct loopback Ombre service on `18001` remains active.
+direct loopback Ombre service on `18001` remains active. An accepted companion
+overlay from `dc5fcf13f86483073c54ac046e1b238a90c91921` supplies the active
+profile, MCP namespace and Python memory seam without changing the source
+checkout; the remaining parent-env/child-default 5000/15000 ms configuration
+conflict is recorded in the runtime status.
 
-Main contains archived convergence commit
-`c0c913604190ee725e6ea90dc8d34f46545e644b` but remains undeployed. That
-commit aligns main with production-backed index, transport, unified-port and
-O2-default contracts; it does not refresh the live v0.20 personal-memory
-overlay. The only non-main remote branch retained is the exact production
-source line `codex/p2-memory-production-candidate`.
+Main is archived and pushed at
+`dc5fcf13f86483073c54ac046e1b238a90c91921` but remains source-undeployed. It
+and production are divergent histories, so the accepted overlay must be
+absorbed by an overlay-aware immutable source transaction rather than treated
+as a fast-forward. The only non-main remote branch retained is the exact
+production source line `codex/p2-memory-production-candidate`.
 
 ## Lifecycle Stages
 
@@ -68,7 +72,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/hermes_runtime_artifact.v1.json` | Immutable LOCAL_BUILT v0.20 provenance |
 | `docs/governance/hermes_runtime_linux_verification.v1.json` | LOCAL_VERIFIED Linux artifact/profile evidence |
 | `docs/governance/hermes_runtime_mutation.v1.json` | Deployed v0.20 mutation evidence; bounded production verification is recorded in current runtime status; retained snapshot is evidence-only |
-| `docs/governance/hermes_companion_overlay.v1.json` | Exact production baseline and companion source/profile/Python-memory overlay contract; source candidate only until applied |
+| `docs/governance/hermes_companion_overlay.v1.json` | Exact production baseline and companion source/profile/Python-memory overlay contract; current acceptance truth remains in the runtime status and private transaction record |
 | `docs/governance/hermes-context-optimization.md` | Context optimization, cache and soft-reset contract |
 | `docs/governance/external-mcp-gateway.md` | External MCP admission and system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |

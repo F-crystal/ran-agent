@@ -546,7 +546,7 @@ Expected state:
 ```text
 /opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
 /opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json
-ran-agent-xhs-public-sidecar.service active on 127.0.0.1:18061
+ran-agent-xhs-public-sidecar.service active on 127.0.0.1:18061 when the marker is ready and the optional sidecar is enabled
 ran-agent-xhs-browse.service absent or inactive
 no XHS_COOKIE / XHS_BROWSE_* / XHS_NOTE_TOKEN_CACHE_* in managed env files
 ```

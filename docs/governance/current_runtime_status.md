@@ -10,12 +10,13 @@ historical phase records stay in their focused governance documents.
 
 ```text
 repository_sha: 2c8e97cacd1d2eaed30738abe621f3393cffb885; clean; accepted binding.v4
+companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921; accepted; source checkout not converged
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
 runtime_stage: PROD_VERIFIED for the bounded channel, identity, memory, capability, topology and 2026-08-07 digest evidence
 services: Node, Python, unified Hermes and direct Ombre Brain active; no unexpected restart in the acceptance window
 identity: production processes run as ubuntu:ubuntu
-storage: 70% used; 18460344320 bytes available after retired v0.13 payload deletion
+storage: 70% used; 18391031808 bytes available after retired v0.13 payload deletion
 ```
 
 WeChat, Feishu/Lark and the optional Desktop proxy share
@@ -25,10 +26,11 @@ inherit another channel's last turn. Python `/chat` is retired and returns 410.
 
 The unified companion keeps the former Lite/Full capability union on one
 runtime. Search, terminal/file/session tools, Playwright, media, co-reading and
-the supported MCP registrations remain available. Production still carries a
-parked `obsidian_memory` registration pending the next exact source apply; main
-retired that broken standalone surface and routes bounded Vault recall through
-`personal_memory` instead. No replacement dependency was installed.
+the supported MCP registrations remain available. The accepted companion
+overlay removes `obsidian_memory` from the active Hermes mount namespace and
+routes bounded Vault recall through `personal_memory`; the host-visible profile
+files remain on the old source checkout and still contain that retired
+registration. No replacement dependency was installed.
 Hermes-native `cronjob`, `delegate_task` and `execute_code` remain disabled.
 Scheduled outbound is limited to explicit reminders, the opt-in AI digest and
 governed external-MCP notifications.
@@ -46,10 +48,15 @@ facts or deployment truth. Core and governed runtime documents remain the
 authorities; future Ombre ingestion must be a rebuildable projection from
 confirmed Core events or other explicit sources.
 
-The deployed v0.20 `personalMemoryMcpServer` overlay accepts `query`, but is
-older than main's source façade: strict query-only validation and
-`source_status` still require one bounded Runtime-overlay refresh. This is a
-known follow-up, not a claim that the newer source is deployed.
+The accepted overlay deploys main's strict query-only `personalMemoryMcpServer`,
+explicit `source_status`, Vault retrieval, and Python extractor assembly. Its
+controller declares a 15000 ms Python-backend deadline. The active Hermes
+parent still receives 5000 ms from later Home/Profile `EnvironmentFile`
+entries, while the MCP child receives no explicit value and therefore uses the
+overlay server's 15000 ms default. The current request path has the larger
+budget, but removing the overlay without reconciling source and env authority
+would restore the old 5000 ms behavior. The source-convergence transaction must
+make and verify one 15000 ms truth instead of adding another overlay.
 
 ## Delivery Evidence
 
@@ -82,30 +89,24 @@ the root-owned `v013-payloads.deleted.json` record, reclaiming 224079872
 allocated bytes. Shared runtimes, MCP capabilities, model/index assets, the
 v0.20 Runtime and personal data were preserved.
 
-The first strict personal-memory overlay apply exceeded its readiness timeout
-because the parked `obsidian_memory` MCP still blocked Hermes cold start. Its
-drop-in and namespace were restored to the prior digests, all three services
-returned active, and the transaction was reconciled as `rolled_back`; the
-strict overlay remains source-only.
-
-The 2026-08-07 follow-up candidate removed that startup dependency and reached
-the real memory acceptance probe, but the client-driven controller received a
-termination signal while that probe was still running. Recovery restored both
-drop-ins; the old profile then exceeded the shared 45-second
-rollback readiness budget, so Node and the soft-reset timer required explicit
-restart after the old gateway became ready. Production is again on the prior
-digests with Python, Hermes, Node, Ombre and the timer active. A one-time root
-reconciliation reused the exact old candidate contract to verify those digests,
-both absent drop-ins, service identity, ports and host baseline without
-restarting services; the transaction is now `rolled_back`. No candidate
-overlay is deployed.
+Two earlier companion-overlay attempts are closed as `rolled_back`: the first
+exposed the parked Obsidian startup dependency, and the second exposed
+client-lifetime and rollback-readiness defects. Candidate
+`dc5fcf13f86483073c54ac046e1b238a90c91921` then ran under a transient systemd
+unit and was accepted at `2026-08-07T12:46:10Z`. Its transaction records the
+exact profile, MCP namespace, Python source, drop-in and overlay digests. The
+active rollback target is therefore the real `2c8e97c + accepted overlay`
+topology, not the bare host-visible old profile.
 
 ## Main Source State
 
-Main now contains convergence commit
-`c0c913604190ee725e6ea90dc8d34f46545e644b`, which is archived but not
-deployed. It preserves main's newer Core and personal-memory design while
-aligning four production-backed contracts:
+Main is `dc5fcf13f86483073c54ac046e1b238a90c91921`, archived and pushed but not
+source-deployed. It preserves the newer Core and personal-memory design,
+retires the standalone Obsidian surface, and includes the accepted overlay
+controller fixes. Production `2c8e97c` is not its ancestor: the trees are
+diverged by 244 files (`+59623/-15594` at the 2026-08-07 audit), so convergence
+requires a full classified source review rather than a routine fast-forward.
+The source still aligns four production-backed contracts:
 
 - canonical `memory_bge_vector_index.*` paths;
 - Ombre endpoint absence classified as transport failure;
@@ -117,10 +118,11 @@ transaction must still validate and apply one exact main SHA.
 
 ## Active Follow-Ups
 
-1. Apply the exact companion profile, MCP and Python memory overlay that retire
-   the broken standalone Obsidian MCP while preserving Vault recall behind
-   `personal_memory`.
-2. After that overlay, close the existing-asset Feishu workflow as one bounded
+1. Classify the main-versus-production diff and audit every consumed non-secret
+   runtime env key. Then use one overlay-aware source transaction whose apply
+   tests the unmounted candidate and whose rollback restores the current
+   accepted overlay topology.
+2. After source convergence, close the existing-asset Feishu workflow as one bounded
    typed request/receipt path: organize an existing Minutes transcript and
    existing attachment into a cloud document, move it to the requested folder,
    and return the verified document and move result. The 2026-08-07 probe
