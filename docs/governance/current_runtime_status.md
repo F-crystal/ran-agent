@@ -76,28 +76,30 @@ v0.20 Runtime and personal data were preserved.
 
 ## Main Source State
 
-`origin/main=0469d30e24d098a1ad4892c5a949c48ba42546f9` is not deployed. The
-current convergence candidate preserves main's newer Core and personal-memory
-design while aligning four production-backed contracts:
+Main now contains convergence commit
+`c0c913604190ee725e6ea90dc8d34f46545e644b`, which is archived but not
+deployed. It preserves main's newer Core and personal-memory design while
+aligning four production-backed contracts:
 
 - canonical `memory_bge_vector_index.*` paths;
 - Ombre endpoint absence classified as transport failure;
 - unified Hermes and co-reading defaults on `8642`;
 - O2 release/apply/acceptance defaults off unless explicitly enabled.
 
-Archiving this candidate changes source authority only. A later production
-source transaction must still validate and apply one exact main SHA.
+The archive changed source authority only. A later production source
+transaction must still validate and apply one exact main SHA.
 
 ## Active Follow-Ups
 
-1. Archive and push the main-source convergence candidate, then remove remote
-   branches that carry no unique history; retain the production branch until a
-   future main source cutover.
-2. Refresh the deployed personal-memory overlay with main's strict query-only
+1. Refresh the deployed personal-memory overlay with main's strict query-only
    and `source_status` contract.
-3. Improve Ombre ingestion and retrieval only after the current façade is
+2. Improve Ombre ingestion and retrieval only after the current façade is
    stable; use the existing free local embedding stack and do not add a paid
    provider by default.
+
+The remote branch set is intentionally `main` plus
+`codex/p2-memory-production-candidate`; retain the latter because it carries the
+exact production source lineage until a future main source cutover succeeds.
 
 Package A and B.1 Core primitives exist in source but are not composed into the
 production Node write path. Packages B.2/B.3 and Gate 5 have not started. O2 is

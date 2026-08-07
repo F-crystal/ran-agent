@@ -14,10 +14,12 @@ evidence recorded in `current_runtime_status.md`. Runtime rollback is closed,
 the retired v0.13 payloads are deleted, `18002` and O2 are inactive, and the
 direct loopback Ombre service on `18001` remains active.
 
-`origin/main=0469d30e24d098a1ad4892c5a949c48ba42546f9` is source-only and
-undeployed. The current convergence candidate aligns main with production-backed
-index, transport, unified-port and O2-default contracts; it does not deploy main
-or refresh the live v0.20 personal-memory overlay.
+Main contains archived convergence commit
+`c0c913604190ee725e6ea90dc8d34f46545e644b` but remains undeployed. That
+commit aligns main with production-backed index, transport, unified-port and
+O2-default contracts; it does not refresh the live v0.20 personal-memory
+overlay. The only non-main remote branch retained is the exact production
+source line `codex/p2-memory-production-candidate`.
 
 ## Lifecycle Stages
 
