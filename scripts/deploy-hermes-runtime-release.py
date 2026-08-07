@@ -75,6 +75,7 @@ COMPANION_OVERLAY_PREFIX = "companion-overlay"
 COMPANION_OVERLAY_TARGET_ROOT = Path("/opt/ran_agent")
 
 SOURCE_SHAPE_BASE = "0fef0427683a8f3f77deec9e6cff937f7ab0a02e"
+SOURCE_CONTROLLER_BASE = "7c1f12fcf131621b8d8fd1389fc40ccde1b71b84"
 SOURCE_PRODUCTION_BASE = "2c8e97cacd1d2eaed30738abe621f3393cffb885"
 SOURCE_OVERLAY_CANDIDATE = "dc5fcf13f86483073c54ac046e1b238a90c91921"
 SOURCE_OVERLAY_TRANSACTION = ARTIFACT_ROOT / "companion-overlay-transactions/20260807T124548Z-dc5fcf13f864"
@@ -1410,8 +1411,8 @@ def validate_source_candidate(candidate: str) -> None:
     check_candidate(REPO, candidate, SOURCE_REF_ROOT)
     if run(["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), "merge-base", "--is-ancestor", SOURCE_SHAPE_BASE, candidate], check=False).returncode:
         raise ReleaseError("source candidate is not descended from the accepted S1a shape")
-    if git(REPO, "rev-list", "--count", f"{SOURCE_SHAPE_BASE}..{candidate}").stdout.strip() != "1":
-        raise ReleaseError("source candidate must be one bounded controller commit above S1a")
+    if git(REPO, "rev-parse", f"{candidate}^").stdout.strip() != SOURCE_CONTROLLER_BASE:
+        raise ReleaseError("source candidate is not the bounded controller fix")
     if source_candidate_paths(candidate) != SOURCE_CONTROLLER_CHANGE_PATHS:
         raise ReleaseError("source candidate contains changes outside the bounded controller scope")
     if Path(__file__).read_bytes() != candidate_blob(REPO, candidate, CONTROLLER_PATH):
@@ -1431,7 +1432,7 @@ def validate_source_candidate(candidate: str) -> None:
         raise ReleaseError("candidate unit is not the single companion topology")
     if "HERMES_FULL_API_BASE_URL" in gateway or "HERMES_LITE_API_BASE_URL" in gateway or "http://127.0.0.1:8643" in gateway:
         raise ReleaseError("candidate gateway retains the split frontend route")
-    if "const BACKEND_DEADLINE_MS = 15_000" not in memory or "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS" in memory:
+    if "const BACKEND_TIMEOUT_MS = 15000;" not in memory or "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS" in memory:
         raise ReleaseError("candidate personal-memory deadline is not a single 15-second truth")
     changed = git(REPO, "diff", "--name-only", SOURCE_PRODUCTION_BASE, candidate).stdout.splitlines()
     if any(path.startswith(("data/", "migrations/")) for path in changed):

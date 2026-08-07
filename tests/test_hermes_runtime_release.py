@@ -75,6 +75,9 @@ def test_unified_unit_uses_exact_runtime_and_one_port() -> None:
     assert "TIRITH_ENABLED=false" in unit
     assert "BindReadOnlyPaths=" not in unit
     assert "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=" not in unit
+    memory = (Path(__file__).parents[1] / "node_bridge/src/personalMemoryMcpServer.mjs").read_text()
+    assert "const BACKEND_TIMEOUT_MS = 15000;" in memory
+    assert "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS" not in memory
 
 
 def test_overlay_contract_binds_candidate_manifest_mutation_and_unit(monkeypatch: pytest.MonkeyPatch) -> None:
