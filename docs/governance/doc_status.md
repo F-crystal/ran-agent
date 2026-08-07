@@ -15,15 +15,18 @@ the retired v0.13 payloads are deleted, `18002` and O2 are inactive, and the
 direct loopback Ombre service on `18001` remains active. An accepted companion
 overlay from `dc5fcf13f86483073c54ac046e1b238a90c91921` supplies the active
 profile, MCP namespace and Python memory seam without changing the source
-checkout; the remaining parent-env/child-default 5000/15000 ms configuration
-conflict is recorded in the runtime status.
+checkout. The active child already uses a 15000 ms deadline; the locally
+verified S1a source candidate makes that value constant at the child process
+boundary but is not deployed.
 
 Main is archived and pushed at
-`dc5fcf13f86483073c54ac046e1b238a90c91921` but remains source-undeployed. It
-and production are divergent histories, so the accepted overlay must be
-absorbed by an overlay-aware immutable source transaction rather than treated
-as a fast-forward. The only non-main remote branch retained is the exact
-production source line `codex/p2-memory-production-candidate`.
+`efd1aeb2a952ebd37a3c765ef1ee5771ed3e6bd9` but remains source-undeployed. The
+S1a candidate is locally verified and prepares a single companion source shape;
+it does not authorize production apply. Main and production are divergent
+histories, so the accepted overlay must later be absorbed by an explicitly
+authorized overlay-aware immutable source transaction rather than treated as a
+fast-forward. The exact production source line remains on
+`codex/p2-memory-production-candidate`.
 
 ## Lifecycle Stages
 

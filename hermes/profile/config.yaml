@@ -1,22 +1,63 @@
-# Installable Hermes profile config for ran-assistant (full gateway).
-# This file is safe to commit. Put secrets in the machine-local .env file.
+# Single ran-agent companion profile for Hermes v0.20.
+# Runtime topology is unified; "lite" below names downstream least-privilege
+# policy modes only, not a second gateway or Hermes home.
 
 model:
   provider: deepseek
   default: deepseek-v4-flash
+  model: deepseek-v4-flash
+  base_url: https://api.deepseek.com/v1
+  api_mode: chat_completions
 
-# Lite and Full use the installed DeepSeek provider policy, which adds
-# thinking.type=disabled at the final provider boundary.
+agent:
+  reasoning_effort: none
 
+web:
+  search_backend: tavily
+  extract_backend: tavily
+
+terminal:
+  backend: local
+  cwd: /opt/ran_agent
+  timeout: 180
+  lifetime_seconds: 300
+
+compression:
+  enabled: true
+  threshold: 0.35
+  target_ratio: 0.12
+  protect_last_n: 8
+  hygiene_hard_message_limit: 160
+
+security:
+  allow_lazy_installs: false
+  tirith_enabled: false
+
+# Defense in depth: the allowlists below are authoritative; these individual
+# tools remain denied even if an upstream default toolset changes.
 disabled_tools:
   - browser_vision
   - image_generate
   - text_to_speech
   - video_analyze
   - vision_analyze
+  - cronjob
+  - delegate_task
+  - execute_code
+  - browser_navigate
+  - browser_snapshot
+  - browser_click
+  - browser_type
+  - browser_scroll
+  - browser_back
+  - browser_press
+  - browser_get_images
+  - browser_console
+  - browser_cdp
+  - browser_dialog
 
 platform_toolsets:
-  cli:
+  cli: &companion_toolsets
     - web
     - terminal
     - file
@@ -32,28 +73,9 @@ platform_toolsets:
     - mcp-sticker_catalog
     - mcp-media_generation
     - mcp-personal_memory
-    - mcp-ombre_memory
     - mcp-playwright
     - mcp-external_mcp_gateway
-  gateway:
-    - web
-    - terminal
-    - file
-    - skills
-    - memory
-    - session_search
-    - safe
-    - mcp-time
-    - mcp-social_reader
-    - mcp-media_reader
-    - mcp-search_hub
-    - mcp-co_reading
-    - mcp-sticker_catalog
-    - mcp-media_generation
-    - mcp-personal_memory
-    - mcp-ombre_memory
-    - mcp-playwright
-    - mcp-external_mcp_gateway
+  api_server: *companion_toolsets
 
 mcp_servers:
   time:
@@ -66,12 +88,36 @@ mcp_servers:
     timeout: 120
     connect_timeout: 60
 
+  social_reader:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_social_reader_mcp.sh
+    timeout: 1200
+    connect_timeout: 90
+
+  media_reader:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_reader_mcp.sh
+    timeout: 1200
+    connect_timeout: 90
+
   media_generation:
     command: bash
     args:
       - -lc
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_generation_mcp.sh
     timeout: 1200
+    connect_timeout: 60
+
+  co_reading:
+    command: bash
+    args:
+      - -lc
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_co_reading_mcp.sh
+    timeout: 180
     connect_timeout: 60
 
   sticker_catalog:
@@ -84,35 +130,6 @@ mcp_servers:
       STICKER_CATALOG_ALLOW_RUNTIME_SAVE: "true"
     timeout: 120
     connect_timeout: 60
-
-  media_reader:
-    command: bash
-    args:
-      - -lc
-      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_media_reader_mcp.sh
-    timeout: 1200
-    connect_timeout: 90
-
-  social_reader:
-    command: bash
-    args:
-      - -lc
-      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_social_reader_mcp.sh
-    timeout: 1200
-    connect_timeout: 90
-
-  personal_memory:
-    command: bash
-    args:
-      - -lc
-      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh
-    timeout: 120
-    connect_timeout: 60
-
-  ombre_memory:
-    url: "${OMBRE_RECALL_MCP_URL}"
-    timeout: 120
-    connect_timeout: 30
 
   search_hub:
     command: bash
@@ -127,12 +144,12 @@ mcp_servers:
     timeout: 120
     connect_timeout: 60
 
-  co_reading:
+  personal_memory:
     command: bash
     args:
       - -lc
-      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_co_reading_mcp.sh
-    timeout: 180
+      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh
+    timeout: 120
     connect_timeout: 60
 
   playwright:
@@ -155,6 +172,7 @@ mcp_servers:
     timeout: 120
     connect_timeout: 60
 
-# Tavily remains optional because the remote URL needs a machine-local API key.
-# Add it after install with:
-#   hermes -p ran-assistant mcp add tavily --url "https://mcp.tavily.com/mcp/?tavilyApiKey=$TAVILY_API_KEY"
+  tavily:
+    url: "https://mcp.tavily.com/mcp/?tavilyApiKey=${TAVILY_API_KEY}"
+    timeout: 60
+    connect_timeout: 30

@@ -71,12 +71,10 @@ const HERMES_CONTEXT_BUDGET_DEFAULTS = {
 
 export function getHermesGatewayConfig(env = process.env) {
   const baseUrl = String(env.HERMES_API_BASE_URL || 'http://127.0.0.1:8642/v1').trim().replace(/\/$/, '');
-  const liteBaseUrl = String(env.HERMES_LITE_API_BASE_URL || baseUrl).trim().replace(/\/$/, '');
-  const fullBaseUrl = String(env.HERMES_FULL_API_BASE_URL || baseUrl).trim().replace(/\/$/, '');
   const token = String(env.HERMES_API_KEY || env.API_SERVER_KEY || '').trim();
   const model = String(env.HERMES_DEFAULT_MODEL || env.HERMES_INFERENCE_MODEL || 'deepseek-v4-flash').trim();
   const provider = String(env.HERMES_PROVIDER || env.HERMES_INFERENCE_PROVIDER || 'deepseek').trim();
-  const profile = String(env.HERMES_PROFILE || 'ran-assistant').trim();
+  const profile = String(env.HERMES_PROFILE || 'ran-agent-companion').trim();
   const mode = normalizeMode(env.HERMES_REPLY_MODE || env.HERMES_GATEWAY_CLIENT_MODE || 'api');
   const command = String(env.HERMES_COMMAND || 'hermes').trim() || 'hermes';
   const timeoutSeconds = Math.max(1, Number.parseInt(String(env.HERMES_REPLY_TIMEOUT_SECONDS || '180'), 10) || 180);
@@ -86,9 +84,6 @@ export function getHermesGatewayConfig(env = process.env) {
     maxMediaArtifacts,
     enableContextSizeLog,
   } = getContextPolicyConfig(env);
-  const capabilityMode = String(env.RAN_AGENT_CAPABILITY_MODE || 'auto').trim().toLowerCase();
-  const liteProfile = String(env.HERMES_LITE_PROFILE || 'ran-assistant-lite').trim();
-  const fullProfile = String(env.HERMES_FULL_PROFILE || env.HERMES_PROFILE || 'ran-assistant').trim();
   const sessionContinuityEnabled = String(env.HERMES_SESSION_CONTINUITY_ENABLED || 'true').trim().toLowerCase() !== 'false';
   const sessionIdPrefix = String(env.HERMES_SESSION_ID_PREFIX || 'ran-agent-wechat').trim() || 'ran-agent-wechat';
   const sessionKeyPrefix = String(env.HERMES_SESSION_KEY_PREFIX || 'ran-agent-memory').trim() || 'ran-agent-memory';
@@ -106,7 +101,7 @@ export function getHermesGatewayConfig(env = process.env) {
   const cacheFriendlyHistoryEnabled = parseEnvBoolean(env.HERMES_CACHE_FRIENDLY_HISTORY, false);
   const cacheFriendlyHistoryMaxTurns = normalizePositiveInteger(env.HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS, 6);
   const cacheFriendlyHistoryCharBudget = normalizePositiveInteger(env.HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET, 12000);
-  const cacheFriendlyHistoryProfile = String(env.HERMES_CACHE_FRIENDLY_HISTORY_PROFILE || 'lite').trim().toLowerCase() || 'lite';
+  const cacheFriendlyHistoryProfile = String(env.HERMES_CACHE_FRIENDLY_HISTORY_PROFILE || 'companion').trim().toLowerCase() || 'companion';
   const cacheTelemetryEnabled = parseEnvBoolean(env.HERMES_CACHE_TELEMETRY_ENABLED, true);
   const publishedMemoryContextMaxChars = clampInteger(
     env.HERMES_PUBLISHED_MEMORY_CONTEXT_MAX_CHARS,
@@ -136,14 +131,10 @@ export function getHermesGatewayConfig(env = process.env) {
 
   return {
     baseUrl,
-    liteBaseUrl,
-    fullBaseUrl,
     token,
     model,
     provider,
     profile,
-    liteProfile,
-    fullProfile,
     sessionContinuityEnabled,
     sessionIdPrefix,
     sessionKeyPrefix,
@@ -179,7 +170,6 @@ export function getHermesGatewayConfig(env = process.env) {
     providerVisibleHistoryDir: path.join(stateDir, 'hermes', 'provider_visible_history'),
     maxMediaArtifacts,
     enableContextSizeLog,
-    capabilityMode,
     fallbackText: env.NODE_BRIDGE_FALLBACK_TEXT || '暂时无法连接到 Hermes，请稍后再试。',
   };
 }
@@ -389,8 +379,7 @@ export function loadHermesIdentityContext(config = {}, logger = console) {
 
 const GENERATION_INTENT_PATTERN = /(?:生成|画|制作)(?:一?[张幅个]?\s*)?(?:[\u4e00-\u9fff]{0,12})?(?:图片|图像|海报|头像|壁纸|配图|插画|图)|(?:生成|合成|朗读)(?:一?[段条]?\s*)?(?:[\u4e00-\u9fff]{0,12})?(?:语音|音频)|(?:画图|生图|tts)/i;
 const DEBUG_INTENT_PATTERN = /调试|debug|执行命令|运行命令|看文件|查看文件|查看日志|看日志|服务端|systemd|systemctl|journalctl|lark-cli|playwright|重启服务|部署|git\s+(push|pull|commit|log|diff|status)|npm\s+(install|run|test|exec)|pip\s+install|curl\s+/;
-export function resolveCapabilityMode(payload, config) {
-  const mode = config.capabilityMode || 'auto';
+export function resolveHermesRequestNeeds(payload) {
   const text = String(payload.text || '');
   const hasSocialLink = SOCIAL_PLATFORM_NAMES.some(({ pattern }) => pattern.test(text));
   const hasMedia = normalizeMediaItems(payload.media).length > 0
@@ -398,15 +387,8 @@ export function resolveCapabilityMode(payload, config) {
   const hasGenerationIntent = GENERATION_INTENT_PATTERN.test(text);
   const hasDebugIntent = DEBUG_INTENT_PATTERN.test(text);
 
-  // Deployment-owned profile mode is authoritative.
-  if (mode === 'lite') return { mode: 'lite', reason: 'explicit_lite', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
-  if (mode === 'full') return { mode: 'full', reason: 'explicit_full', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
-
-  // Auto mode uses structured request needs, not natural-language profile words.
-  if (hasDebugIntent) return { mode: 'full', reason: 'debug_intent', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
-  if (hasGenerationIntent) return { mode: 'full', reason: 'generation_intent', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
-  // Default: lite (covers normal chat, social links, image analysis, memory queries)
-  return { mode: 'lite', reason: 'default', hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
+  const reason = hasDebugIntent ? 'debug_intent' : hasGenerationIntent ? 'generation_intent' : 'default';
+  return { reason, hasSocialLink, hasMedia, hasGenerationIntent, hasDebugIntent };
 }
 
 export async function sendChatToHermesGateway(payload, options = {}) {
@@ -422,53 +404,27 @@ export async function sendChatToHermesGateway(payload, options = {}) {
   const taskScoped = isHermesTaskScopedRoute(payload.route_hint);
   const taskEffectivePayload = taskScoped ? isolateTaskPayload(payload) : payload;
 
-  // Determine capability mode and select base URL + profile
-  const capResult = resolveCapabilityMode(taskEffectivePayload, config);
-  let selectedBaseUrl = capResult.mode === 'lite' ? config.liteBaseUrl : config.fullBaseUrl;
-  let selectedProfile = capResult.mode === 'lite' ? config.liteProfile : config.fullProfile;
-  let fallbackReason = '';
+  const requestNeeds = resolveHermesRequestNeeds(taskEffectivePayload);
 
-  // If full mode and API mode, try full gateway first; fallback to lite if unavailable
-  if (capResult.mode === 'full' && selectedBaseUrl !== config.liteBaseUrl && config.mode === 'api') {
-    try {
-      const testResp = await (options.fetchImpl || fetch)(`${selectedBaseUrl}/models`, {
-        method: 'GET',
-        headers: config.token ? { Authorization: `Bearer ${config.token}` } : {},
-        signal: AbortSignal.timeout(3000),
-      });
-      if (!testResp.ok) {
-        fallbackReason = 'full_gateway_unavailable';
-        selectedBaseUrl = config.liteBaseUrl;
-        selectedProfile = config.liteProfile;
-      }
-    } catch {
-      fallbackReason = 'full_gateway_unavailable';
-      selectedBaseUrl = config.liteBaseUrl;
-      selectedProfile = config.liteProfile;
-    }
-  }
-
-  // Always log capability mode (not just when contextSizeLog is enabled)
+  // One capability-union profile serves every request; log intent only.
   logger.log?.('[hermes-capability-mode]', JSON.stringify({
-    mode: capResult.mode,
-    reason: capResult.reason,
-    has_social_link: capResult.hasSocialLink,
-    has_media: capResult.hasMedia,
-    has_generation_intent: capResult.hasGenerationIntent,
-    has_debug_intent: capResult.hasDebugIntent,
-    selected_base_url: selectedBaseUrl,
-    selected_profile: selectedProfile,
+    mode: 'companion',
+    reason: requestNeeds.reason,
+    has_social_link: requestNeeds.hasSocialLink,
+    has_media: requestNeeds.hasMedia,
+    has_generation_intent: requestNeeds.hasGenerationIntent,
+    has_debug_intent: requestNeeds.hasDebugIntent,
+    selected_base_url: config.baseUrl,
+    selected_profile: config.profile,
     request_id: requestId,
-    fallback_reason: fallbackReason || undefined,
   }));
   logSocialLinkRouting(taskEffectivePayload, logger, requestId);
 
-  const selectedConfig = { ...config, baseUrl: selectedBaseUrl, profile: selectedProfile };
+  const selectedConfig = config;
   const sessionContext = taskScoped
     ? buildTaskHermesSessionContext(taskEffectivePayload, selectedConfig)
     : buildHermesSessionContext(taskEffectivePayload, selectedConfig);
-  const isLiteProfile = selectedConfig.profile === selectedConfig.liteProfile;
-  const pendingResumeDigest = !taskScoped && isLiteProfile ? getPendingLiteResumeDigest(selectedConfig) : null;
+  const pendingResumeDigest = !taskScoped ? getPendingLiteResumeDigest(selectedConfig) : null;
   const effectivePayload = pendingResumeDigest
     ? { ...taskEffectivePayload, daily_digest_context: pendingResumeDigest.text }
     : taskEffectivePayload;
@@ -491,7 +447,7 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     channel: effectivePayload.platform || effectivePayload.channel,
     conversationId: firstNonEmptyString(effectivePayload.conversation_id, effectivePayload.conversationId, effectivePayload.sender_id, effectivePayload.senderId),
     sessionId: sessionContext.sessionId,
-    hasMedia: capResult.hasMedia,
+    hasMedia: requestNeeds.hasMedia,
   });
   if (pendingResumeDigest) {
     contextBudget.decisionReason = 'soft_reset_pending_digest';
@@ -675,7 +631,6 @@ function maybeApplyLiteSoftResetAfterAccumulation(usageTelemetry = {}, options =
   if (usageTelemetry?.possible_server_session_accumulation !== true) return null;
   if (options.taskScoped === true) return null;
   if (options.softResetResume === true) return null;
-  if (config.profile !== config.liteProfile) return null;
   if (config.softResetEnabled !== true) return null;
   if (getPendingLiteResumeDigest(config)) return null;
   try {
@@ -954,7 +909,7 @@ function logProviderUsageTelemetry(body = {}, options = {}) {
     provider_visible_history_used: options.taskScoped !== true && cacheFriendlyHistory.enabled === true,
     continuity_digest_used: options.softResetResume === true,
     ordinary_timeline_projection: options.taskScoped !== true,
-    soft_reset_eligible: options.taskScoped !== true && options.config?.profile === options.config?.liteProfile,
+    soft_reset_eligible: options.taskScoped !== true,
     soft_reset_skipped_reason: options.taskScoped === true && possibleServerSessionAccumulation ? 'task_scoped' : '',
     daily_digest_chars: nullableNumber(options.dailyDigestChars) ?? 0,
   };
@@ -1018,7 +973,7 @@ function buildHermesSystemInstruction() {
     'Return final json reply envelope: {"schemaVersion":1,"message":"好的，我会处理。","actionRequests":[],"activityRequest":null,"claims":[],"commitments":[]}. Keep keys exact; users see message only.',
     'Do not expose provider internals, tokens, cookies, signed URLs, or raw tool logs; if tool evidence is insufficient, say you are uncertain rather than guessing.',
     'Resolve pronouns like 她/他/这篇/这个故事/刚才那个/那张图 from recent messages before asking follow-up questions.',
-    'Use full gateway intent for debugging, commands, files, Playwright, media_generation, and lark-cli work.',
+    'Use the companion toolset for debugging, commands, files, Playwright, media_generation, and lark-cli work.',
   ].join(' ');
 }
 
@@ -1461,7 +1416,7 @@ function normalizeNonNegativeTelemetryCount(value) {
 }
 
 function applyLiteSessionNonce(sessionContext = {}, config = {}) {
-  if (config.profile !== config.liteProfile || config.softResetEnabled !== true) {
+  if (config.softResetEnabled !== true) {
     return sessionContext;
   }
   const nonce = getLiteSessionNonce(config);
@@ -1479,11 +1434,10 @@ function isCacheFriendlyHistoryActive(config = {}) {
   if (strategy === 'token_first') return false;
   if (config.cacheFriendlyHistoryEnabled !== true && strategy !== 'cache_first') return false;
   const profile = String(config.profile || '').trim();
-  const profileMode = String(config.cacheFriendlyHistoryProfile || 'lite').trim().toLowerCase();
+  const profileMode = String(config.cacheFriendlyHistoryProfile || 'companion').trim().toLowerCase();
   const allowed = new Set(profileMode.split(',').map((item) => item.trim()).filter(Boolean));
   if (allowed.has('*') || allowed.has('all')) return true;
-  const normalizedProfile = profile === config.liteProfile ? 'lite' : profile === config.fullProfile ? 'full' : profile.toLowerCase();
-  return allowed.has(normalizedProfile) || allowed.has(profile.toLowerCase());
+  return allowed.has('companion') || allowed.has(profile.toLowerCase());
 }
 
 function emptyCacheFriendlyHistoryStats(config = {}) {

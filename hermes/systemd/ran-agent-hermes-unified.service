@@ -8,34 +8,23 @@ Type=simple
 User=ubuntu
 Group=ubuntu
 WorkingDirectory=/opt/ran_agent
-BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/node_bridge/src/coReading/mcpServer.mjs:/opt/ran_agent/node_bridge/src/coReading/mcpServer.mjs
-BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/node_bridge/src/externalMcp/gatewayMcpServer.mjs:/opt/ran_agent/node_bridge/src/externalMcp/gatewayMcpServer.mjs
-BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/node_bridge/src/mediaGenerationMcpServer.mjs:/opt/ran_agent/node_bridge/src/mediaGenerationMcpServer.mjs
-BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/node_bridge/src/mediaReaderMcpServer.mjs:/opt/ran_agent/node_bridge/src/mediaReaderMcpServer.mjs
-BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/node_bridge/src/personalMemoryMcpServer.mjs:/opt/ran_agent/node_bridge/src/personalMemoryMcpServer.mjs
-BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/node_bridge/src/searchHubMcpServer.mjs:/opt/ran_agent/node_bridge/src/searchHubMcpServer.mjs
-BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/node_bridge/src/socialReaderMcpServer.mjs:/opt/ran_agent/node_bridge/src/socialReaderMcpServer.mjs
-BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/node_bridge/src/stickerCatalogMcpServer.mjs:/opt/ran_agent/node_bridge/src/stickerCatalogMcpServer.mjs
 EnvironmentFile=-/opt/ran_agent/.env.local
 EnvironmentFile=-/opt/ran_agent/node_bridge/.env.local
 EnvironmentFile=-/home/ubuntu/.hermes/.env
-EnvironmentFile=-/home/ubuntu/.hermes-ran-agent/lite/.env
-EnvironmentFile=-/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/.env
 UnsetEnvironment=BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH
 Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
 Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite
-Environment=HERMES_PROFILE=ran-assistant-lite
+Environment=HERMES_PROFILE=ran-agent-companion
 Environment=API_SERVER_ENABLED=true
 Environment=API_SERVER_HOST=127.0.0.1
 Environment=API_SERVER_PORT=8642
-Environment=API_SERVER_MODEL_NAME=ran-assistant-lite
+Environment=API_SERVER_MODEL_NAME=ran-agent-companion
 Environment=HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
 Environment=HERMES_REPLY_MODE=api
 Environment=HERMES_REPLY_TIMEOUT_SECONDS=1200
 Environment=HERMES_RESTART_DRAIN_TIMEOUT=60
 Environment=PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
 Environment=PYTHON_BACKEND_INGEST_TIMEOUT_MS=5000
-Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=15000
 Environment=PERSONAL_AGENT_PROACTIVE_ENABLED=false
 Environment=PERSONAL_AGENT_REMINDER_DELIVERY_ENABLED=false
 Environment=HERMES_PROACTIVE_EVENTS_ENABLED=true
@@ -65,7 +54,7 @@ Environment=PERSONAL_AGENT_OCR_PROVIDER=dashscope-qwen-vl-ocr
 Environment=PERSONAL_AGENT_OCR_MODEL=qwen-vl-ocr-2025-11-20
 Environment=PERSONAL_AGENT_OCR_TIMEOUT_MS=120000
 Environment=XHS_GENERIC_FALLBACK_MIN_VERSION=1.2.0
-ExecStart=/usr/bin/env HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite HERMES_PROFILE=ran-assistant-lite API_SERVER_ENABLED=true API_SERVER_HOST=127.0.0.1 API_SERVER_PORT=8642 API_SERVER_MODEL_NAME=ran-assistant-lite HERMES_DISABLE_LAZY_INSTALLS=1 TIRITH_ENABLED=false /opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes -p ran-assistant-lite gateway run --replace --external-supervisor --accept-hooks
+ExecStart=/usr/bin/env HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite HERMES_PROFILE=ran-agent-companion API_SERVER_ENABLED=true API_SERVER_HOST=127.0.0.1 API_SERVER_PORT=8642 API_SERVER_MODEL_NAME=ran-agent-companion HERMES_DISABLE_LAZY_INSTALLS=1 TIRITH_ENABLED=false /opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes -p ran-agent-companion gateway run --replace --external-supervisor --accept-hooks
 Restart=always
 RestartSec=5
 TimeoutStopSec=240

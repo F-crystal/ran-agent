@@ -43,11 +43,11 @@ MCP services
 
 ### 统一 Hermes Gateway
 
-生产部署使用一个 Hermes v0.20 gateway；旧 Lite/Full 选择器兼容指向同一实例：
+生产部署使用一个 Hermes v0.20 gateway；当前 source candidate 只保留一个前台 URL 和一个 companion profile：
 
 | Gateway | 端口 | Profile | 用途 |
 |---------|------|---------|------|
-| unified | `8642` | `ran-assistant-lite` 兼容 ID | 聊天、记忆、命令、Playwright、媒体与全部既有 MCP |
+| unified | `8642` | `ran-agent-companion` | 聊天、记忆、命令、Playwright、媒体与全部既有 MCP |
 
 旧 Full 服务已停用；terminal/file/session search/Playwright 等能力并入统一 profile，而不是随 `8643` 一起删除。
 Desktop Proxy 默认关闭；启用时仅应绑定 localhost 或受控私网，并配置
@@ -144,9 +144,8 @@ cp .env.example .env.local
 ```bash
 RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
 NODE_BRIDGE_REPLY_BACKEND=hermes
-HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
-RAN_AGENT_CAPABILITY_MODE=auto
+HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_PROFILE=ran-agent-companion
 PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
 DEEPSEEK_API_KEY=...
 ```
@@ -160,8 +159,8 @@ DEEPSEEK_API_KEY=...
 # 终端 2：Hermes gateway
 export RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
 export HERMES_HOME=/absolute/path/to/hermes-home
-hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
-hermes -p ran-assistant gateway run --replace --accept-hooks
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-agent-companion --force -y
+hermes -p ran-agent-companion gateway run --replace --accept-hooks
 
 # 终端 3：Node bridge
 cd node_bridge
@@ -199,12 +198,12 @@ bash scripts/diagnose-hermes-tools.sh
 | 模块 | 关键变量 | 说明 |
 |------|----------|------|
 | Hermes / DeepSeek | `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, `API_SERVER_KEY` | Hermes gateway 和模型 provider |
-| Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | 兼容选择器都解析到统一 `8642` |
+| Gateway routing | `HERMES_API_BASE_URL`, `HERMES_PROFILE` | 单一 companion profile 走统一 `8642` |
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | 统一身份、跨平台 timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | timeline 保留和压缩 |
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | 多前端可选入口；开启 Desktop Proxy 时必须保持本机或内网受控 |
 | AI 日报 | `AI_DAILY_DIGEST_ENABLED`, `AI_DAILY_DIGEST_HOUR`, `AI_DAILY_DIGEST_MINUTE` | 可选飞书私聊日报，默认关闭 |
-| Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest 和记忆召回 |
+| Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS` | ingest 和记忆召回；MCP deadline 由服务端固定为 15 秒 |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR 和媒体生成 |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | provider-neutral vault 维护 runner；默认 Qwen-compatible，小步处理 inbox，默认超过 10 条或最老 120 分钟触发维护 |
 | 社交平台 | `SESSDATA` | B 站认证可选；小红书为 public-only，不使用 `XHS_COOKIE` |
@@ -221,7 +220,7 @@ bash scripts/diagnose-hermes-tools.sh
 ```text
 ran_agent/
 ├── hermes/                         # Hermes profile distribution
-│   └── profile/                    # ran-assistant / ran-assistant-lite 配置
+│   └── profile/                    # 单一 ran-agent-companion 配置
 ├── node_bridge/                    # 多前端 bridge、Hermes client、MCP facade
 │   └── src/
 │       ├── mediaReader/            # OCR、ASR、VLM、平台解析器、视频分析
@@ -271,9 +270,9 @@ bash scripts/diagnose-hermes-tools.sh
 Hermes profile smoke：
 
 ```bash
-hermes -p ran-assistant mcp list
-hermes -p ran-assistant mcp test media_reader
-HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+hermes -p ran-agent-companion mcp list
+hermes -p ran-agent-companion mcp test media_reader
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-agent-companion --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
 ---

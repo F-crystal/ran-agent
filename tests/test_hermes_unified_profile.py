@@ -4,25 +4,30 @@ from pathlib import Path
 import yaml
 
 
-PROFILE = Path(__file__).parents[1] / "hermes/profile/config.companion.yaml"
-LITE_PROFILE = Path(__file__).parents[1] / "hermes/profile/config.lite.yaml"
-FULL_PROFILE = Path(__file__).parents[1] / "hermes/profile/config.yaml"
+PROFILE = Path(__file__).parents[1] / "hermes/profile/config.yaml"
 MUTATION = Path(__file__).parents[1] / "docs/governance/hermes_runtime_mutation.v1.json"
 FORBIDDEN_TOOLS = {"cronjob", "delegate_task", "execute_code"}
 
 
-def test_companion_profile_preserves_union_behind_one_memory_facade() -> None:
+def test_companion_profile_is_the_capability_union_behind_one_memory_facade() -> None:
     config = yaml.safe_load(PROFILE.read_text(encoding="utf-8"))
-    lite = yaml.safe_load(LITE_PROFILE.read_text(encoding="utf-8"))
-    full = yaml.safe_load(FULL_PROFILE.read_text(encoding="utf-8"))
     cli = config["platform_toolsets"]["cli"]
     api = config["platform_toolsets"]["api_server"]
-    legacy_toolsets = set(lite["platform_toolsets"]["gateway"]) | set(full["platform_toolsets"]["gateway"])
-    legacy_mcp = set(lite["mcp_servers"]) | set(full["mcp_servers"])
+    expected_tools = {
+        "web", "terminal", "file", "skills", "memory", "session_search", "safe",
+        "mcp-time", "mcp-social_reader", "mcp-media_reader", "mcp-search_hub",
+        "mcp-co_reading", "mcp-sticker_catalog", "mcp-media_generation",
+        "mcp-personal_memory", "mcp-playwright", "mcp-external_mcp_gateway",
+    }
+    expected_mcp = {
+        "time", "social_reader", "media_reader", "media_generation", "co_reading",
+        "sticker_catalog", "search_hub", "personal_memory", "playwright",
+        "external_mcp_gateway", "tavily",
+    }
 
     assert cli == api
-    assert set(api) == legacy_toolsets - {"mcp-ombre_memory"}
-    assert set(config["mcp_servers"]) == legacy_mcp - {"ombre_memory"}
+    assert set(api) == expected_tools
+    assert set(config["mcp_servers"]) == expected_mcp
     assert "mcp-personal_memory" in api
     assert FORBIDDEN_TOOLS.issubset(config["disabled_tools"])
     sticker = config["mcp_servers"]["sticker_catalog"]["env"]
@@ -41,12 +46,10 @@ def test_companion_profile_preserves_union_behind_one_memory_facade() -> None:
 
 def test_deployed_runtime_mutation_remains_bound_to_its_historical_profile() -> None:
     mutation = json.loads(MUTATION.read_text(encoding="utf-8"))
-    config = yaml.safe_load(PROFILE.read_text(encoding="utf-8"))
     assert mutation["deploymentStatus"] == "DEPLOYED"
     assert mutation["companionProfile"]["sourceSha256"] == "f015cdfd63469befe6d6c57172b78705418707e8a3756c670782db2241717a17"
     assert mutation["companionProfile"]["destinationSha256"] == mutation["companionProfile"]["sourceSha256"]
     assert "mcp-ombre_memory" in mutation["companionProfile"]["requiredToolsets"]
-    assert "mcp-ombre_memory" not in config["platform_toolsets"]["api_server"]
     assert set(mutation["companionProfile"]["forbiddenTools"]) == FORBIDDEN_TOOLS
     assert mutation["unifiedUnit"]["sourceSha256"] == "42703a7eaa1975b6336a6eae700c744f9bedc12892f5ab0492d753ef396a479c"
     values = mutation["envMutations"][0]["values"]

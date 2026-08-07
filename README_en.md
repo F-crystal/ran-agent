@@ -43,11 +43,11 @@ MCP services
 
 ### Unified Hermes Gateway
 
-Production uses one Hermes v0.20 gateway. Legacy Lite/Full selectors resolve to the same instance:
+Production uses one Hermes v0.20 gateway. The current source candidate keeps one frontend URL and one companion profile:
 
 | Gateway | Port | Profile | Purpose |
 |---------|------|---------|---------|
-| unified | `8642` | `ran-assistant-lite` compatibility ID | Chat, memory, terminal, Playwright, media, and existing MCPs |
+| unified | `8642` | `ran-agent-companion` | Chat, memory, terminal, Playwright, media, and existing MCPs |
 
 The retired Full service is disabled. Terminal/file/session-search/Playwright capabilities moved into the unified profile rather than disappearing with `8643`.
 Desktop Proxy is disabled by default. When enabled, bind it only to localhost or
@@ -148,9 +148,8 @@ At minimum, configure the model, Hermes gateway, and Python backend variables:
 ```bash
 RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
 NODE_BRIDGE_REPLY_BACKEND=hermes
-HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
-RAN_AGENT_CAPABILITY_MODE=auto
+HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_PROFILE=ran-agent-companion
 PYTHON_BACKEND_BASE_URL=http://127.0.0.1:8787
 DEEPSEEK_API_KEY=...
 ```
@@ -164,8 +163,8 @@ Local development and production need only one unified gateway:
 # Terminal 2: Hermes gateway
 export RAN_AGENT_REPO_ROOT=/absolute/path/to/ran-agent
 export HERMES_HOME=/absolute/path/to/hermes-home
-hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
-hermes -p ran-assistant gateway run --replace --accept-hooks
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-agent-companion --force -y
+hermes -p ran-agent-companion gateway run --replace --accept-hooks
 
 # Terminal 3: Node bridge
 cd node_bridge
@@ -201,12 +200,12 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Module | Key Variables | Notes |
 |--------|---------------|-------|
 | Hermes / DeepSeek | `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, `API_SERVER_KEY` | Hermes gateway and model provider |
-| Gateway routing | `HERMES_LITE_API_BASE_URL`, `HERMES_FULL_API_BASE_URL`, `RAN_AGENT_CAPABILITY_MODE` | Compatibility selectors resolve to unified `8642` |
+| Gateway routing | `HERMES_API_BASE_URL`, `HERMES_PROFILE` | One companion profile on unified `8642` |
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | Unified identity and cross-platform timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | Timeline retention and compaction |
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | Optional multi-frontend entries; keep Desktop Proxy local or on a controlled private network when enabled |
 | AI daily digest | `AI_DAILY_DIGEST_ENABLED`, `AI_DAILY_DIGEST_HOUR`, `AI_DAILY_DIGEST_MINUTE` | Optional Feishu DM digest, disabled by default |
-| Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS`, `PERSONAL_MEMORY_BACKEND_TIMEOUT_MS` | ingest and memory recall |
+| Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS` | ingest and memory recall; the MCP deadline is fixed at 15 seconds |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR and media generation |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | Provider-neutral vault maintenance runner; Qwen-compatible by default, processes inbox in small steps, and triggers maintenance above 10 pending items or oldest item age of 120 minutes by default |
 | Social platforms | `SESSDATA` | Optional Bilibili auth; Xiaohongshu is public-only and does not use `XHS_COOKIE` |
@@ -223,7 +222,7 @@ The full template is `.env.example`. The authoritative current runtime state is 
 ```text
 ran_agent/
 ├── hermes/                         # Hermes profile distribution
-│   └── profile/                    # ran-assistant / ran-assistant-lite config
+│   └── profile/                    # Single ran-agent-companion config
 ├── node_bridge/                    # Multi-frontend bridges, Hermes client, MCP facades
 │   └── src/
 │       ├── mediaReader/            # OCR, ASR, VLM, platform resolvers, video analysis
@@ -273,9 +272,9 @@ bash scripts/diagnose-hermes-tools.sh
 Hermes profile smoke:
 
 ```bash
-hermes -p ran-assistant mcp list
-hermes -p ran-assistant mcp test media_reader
-HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+hermes -p ran-agent-companion mcp list
+hermes -p ran-agent-companion mcp test media_reader
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-agent-companion --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
 ---

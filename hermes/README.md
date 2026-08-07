@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-07)
 
 `DEPLOYED_RUNTIME_ACCEPTANCE`（2026-08-06）：exact candidate `0b793e8` 已部署统一 Hermes v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full 服务 inactive/disabled。完整边界见 `docs/governance/current_runtime_status.md`。
 
@@ -18,7 +18,7 @@ unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` �
 - 当前统一生产 profile 使用 `deepseek-v4-flash`，provider policy
   在最终 HTTP body 显式加入 `thinking.type=disabled`；Pro 仅显式 opt-in。
 - DeepSeek V4 在本项目中按文本模型使用，原始图片、音频、视频和社交平台内容必须先由 MCP 工具处理。
-- Node bridge 的旧 lite/full 选择器都指向同一个 `8642` gateway；微信、飞书/Lark 和桌面 Proxy 都先进入 ChannelHub，再由统一主链路调用 Hermes。
+- 当前 source candidate 只使用一个 `8642` gateway 和一个 companion profile；微信、飞书/Lark 和桌面 Proxy 都先进入 ChannelHub，再由统一主链路调用 Hermes。
 - OpenClaw、Kimi、GLM 前台路线已经退休，不再作为运行时、部署目标或调试权威。
 
 ---
@@ -27,9 +27,7 @@ unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` �
 
 | 文件或目录 | 作用 |
 |------------|------|
-| `profile/config.yaml` | `ran-assistant` full profile，包含完整 MCP 工具面 |
-| `profile/config.lite.yaml` | `ran-assistant-lite` lite profile，低上下文日常入口 |
-| `profile/config.pro.template.yaml` | Pro 模型显式模板 |
+| `profile/config.yaml` | `ran-agent-companion` 唯一安装 profile，保留旧 Lite/Full 支持能力的并集 |
 | `profile/distribution.yaml` | profile 元数据和所需环境变量说明 |
 | `profile/AGENTS.md` | Hermes 运行时约束 |
 | `profile/IDENTITY.md`, `profile/SOUL.md` | 人格和长期表达基线 |
@@ -52,8 +50,7 @@ export HERMES_HOME=/absolute/path/to/hermes-home
 | 场景 | Repo root | Hermes home |
 |------|-----------|-------------|
 | 本地验证 | `/Users/fengran/ran_agent` | `/private/tmp/ran-agent-hermes-home` 或其他临时目录 |
-| 服务器生产 | `/opt/ran_agent` | `/home/ubuntu/.hermes-ran-agent` |
-| 服务器 lite | `/opt/ran_agent` | `/home/ubuntu/.hermes-ran-agent/lite` |
+| 服务器生产 | `/opt/ran_agent` | `/home/ubuntu/.hermes-ran-agent/lite`（沿用物理目录，不代表 Lite 产品模式） |
 
 机器本地 Hermes home 才能保存 `.env`、sessions、logs、memories、cron 等运行态文件。不要把这些内容复制回仓库。
 
@@ -67,21 +64,21 @@ export HERMES_HOME=/absolute/path/to/hermes-home
 export RAN_AGENT_REPO_ROOT=/Users/fengran/ran_agent
 export HERMES_HOME=/private/tmp/ran-agent-hermes-home
 
-hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
-hermes -p ran-assistant mcp list
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-agent-companion --force -y
+hermes -p ran-agent-companion mcp list
 ```
 
 服务器生产使用服务器路径：
 
 ```bash
 export RAN_AGENT_REPO_ROOT=/opt/ran_agent
-export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite
 
-hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
-hermes -p ran-assistant mcp list
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-agent-companion --force -y
+hermes -p ran-agent-companion mcp list
 ```
 
-不要在验证过程中运行 `hermes profile use ran-assistant`。生产机器应由 systemd 或显式环境变量指定 profile 与 Hermes home。
+不要在验证过程中运行 `hermes profile use ran-agent-companion`。生产机器应由 systemd 或显式环境变量指定 profile 与 Hermes home。
 
 ---
 
@@ -91,16 +88,13 @@ hermes -p ran-assistant mcp list
 
 | 服务 | 端口 | Profile | Hermes home | 用途 |
 |------|------|---------|-------------|------|
-| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` 兼容 ID | `/home/ubuntu/.hermes-ran-agent/lite` | 旧 Lite/Full 能力并集 |
+| `ran-agent-hermes.service` | `8642` | `ran-agent-companion` | `/home/ubuntu/.hermes-ran-agent/lite` | 旧 Lite/Full 支持能力并集 |
 
-Node bridge 通过以下变量自动路由：
+Node bridge 只消费以下前台变量：
 
 ```bash
-HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
-RAN_AGENT_CAPABILITY_MODE=auto
-HERMES_LITE_PROFILE=ran-assistant-lite
-HERMES_FULL_PROFILE=ran-assistant-lite
+HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_PROFILE=ran-agent-companion
 ```
 
 terminal、file、session search、Playwright、媒体生成和既有 MCP 均由统一
@@ -118,7 +112,7 @@ bash scripts/diagnose-lite-full.sh
 
 ## MCP 工具边界
 
-`profile/config.yaml` 和 `profile/config.lite.yaml` 都禁用 Hermes 内置媒体工具：
+`profile/config.yaml` 禁用 Hermes 内置媒体工具：
 
 ```yaml
 disabled_tools:
@@ -174,7 +168,7 @@ Secrets 必须放在机器本地 `.env`，例如：
 
 ```text
 /home/ubuntu/.hermes-ran-agent/.env
-/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
+/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-agent-companion/.env
 /home/ubuntu/.hermes-ran-agent/lite/.env
 ```
 
@@ -187,16 +181,16 @@ Secrets 必须放在机器本地 `.env`，例如：
 ```bash
 hermes --help
 hermes profile --help
-hermes profile show ran-assistant
-hermes -p ran-assistant mcp list
-hermes -p ran-assistant mcp test media_reader
-HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+hermes profile show ran-agent-companion
+hermes -p ran-agent-companion mcp list
+hermes -p ran-agent-companion mcp test media_reader
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-agent-companion --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
 前台启动 gateway：
 
 ```bash
-hermes -p ran-assistant gateway run --replace --accept-hooks
+hermes -p ran-agent-companion gateway run --replace --accept-hooks
 ```
 
 诊断：

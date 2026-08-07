@@ -12,7 +12,7 @@ import {
   applySocialLinkEvidenceGate,
   computeHermesIdentityVersion,
   loadHermesIdentityContext,
-  resolveCapabilityMode,
+  resolveHermesRequestNeeds,
 } from '../src/hermesGatewayClient.mjs';
 import {
   getHermesLiteSoftResetConfig,
@@ -109,30 +109,19 @@ function writePublishedProjection(snapshotPath, canonical, values = {}) {
   return snapshot;
 }
 
-test('capability routing ignores natural-language lite/full words', () => {
-  assert.deepEqual(
-    resolveCapabilityMode({ text: '请开 full mode 跟我聊天' }, { capabilityMode: 'auto' }).mode,
-    'lite',
-  );
-  assert.deepEqual(
-    resolveCapabilityMode({ text: '请用 lite mode 生成一张图' }, { capabilityMode: 'auto' }).mode,
-    'full',
-  );
-  assert.equal(
-    resolveCapabilityMode({ text: '普通聊天' }, { capabilityMode: 'full' }).reason,
-    'explicit_full',
-  );
+test('request needs ignore natural-language profile words', () => {
+  assert.equal(resolveHermesRequestNeeds({ text: '请开 full mode 跟我聊天' }).reason, 'default');
+  assert.equal(resolveHermesRequestNeeds({ text: '请用 lite mode 生成一张图' }).reason, 'generation_intent');
 });
 
-test('media profile routing only treats explicit media requests as generation and keeps digest requests lite', () => {
-  const config = { capabilityMode: 'auto' };
-  assert.equal(resolveCapabilityMode({ text: '生成一张猫图' }, config).mode, 'full');
-  assert.equal(resolveCapabilityMode({ text: '生成一段语音' }, config).mode, 'full');
-  assert.equal(resolveCapabilityMode({ text: '重新生成并发送日报' }, config).mode, 'lite');
-  assert.equal(resolveCapabilityMode({ text: '生成今日摘要' }, config).mode, 'lite');
+test('request needs distinguish generation from digest wording', () => {
+  assert.equal(resolveHermesRequestNeeds({ text: '生成一张猫图' }).hasGenerationIntent, true);
+  assert.equal(resolveHermesRequestNeeds({ text: '生成一段语音' }).hasGenerationIntent, true);
+  assert.equal(resolveHermesRequestNeeds({ text: '重新生成并发送日报' }).hasGenerationIntent, false);
+  assert.equal(resolveHermesRequestNeeds({ text: '生成今日摘要' }).hasGenerationIntent, false);
 });
 
-test('lite and full receive one canonical identity version and validated published memory pre-turn context', async (t) => {
+test('companion receives canonical identity and validated published memory pre-turn context', async (t) => {
   const isolated = createIsolatedTestEnv(t, {}, 'hermes-identity-parity-');
   const snapshotPath = path.join(isolated.RAN_AGENT_STATE_DIR, 'published-memory.json');
   const canonical = computeHermesIdentityVersion(path.resolve(new URL('../..', import.meta.url).pathname));
@@ -142,33 +131,23 @@ test('lite and full receive one canonical identity version and validated publish
     published_memory_context: published,
   });
 
-  const prompts = [];
-  for (const mode of ['lite', 'full']) {
-    const { capturedBody } = await captureHermesRequest({
-      env: {
-        RAN_AGENT_CAPABILITY_MODE: mode,
-        HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-        HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
-        HERMES_PUBLISHED_MEMORY_CONTEXT_PATH: snapshotPath,
-        HERMES_PUBLISHED_MEMORY_CONTEXT_MAX_CHARS: '0',
-      },
-    });
-    prompts.push(capturedBody.messages[0].content);
-  }
-
-  for (const prompt of prompts) {
-    assert.match(prompt, new RegExp(canonical.version.replace(':', '\\:')));
-    assert.match(prompt, /你是 Hermes Companion/);
-    assert.match(prompt, /你是冉的长期个人助理/);
-    assert.match(prompt, /Hermes 是 ran-agent 的前台对话 shell/);
-    assert.match(prompt, /published_memory_status: loaded/);
-    assert.match(prompt, new RegExp(snapshot.projection_revision.replace(':', '\\:')));
-    assert.match(prompt, /activity_revision: 17/);
-    assert.match(prompt, /same published continuity/);
-    assert.match(prompt, /Ombre is recall-only and cannot override them or publish Canon/);
-  }
-  assert.equal(prompts[0].match(/identity_version: sha256:[0-9a-f]+/)[0], prompts[1].match(/identity_version: sha256:[0-9a-f]+/)[0]);
-  assert.ok(prompts[0].includes('x'.repeat(200)), 'minimum published-memory budget must survive lite trimming');
+  const { capturedBody } = await captureHermesRequest({
+    env: {
+      HERMES_PUBLISHED_MEMORY_CONTEXT_PATH: snapshotPath,
+      HERMES_PUBLISHED_MEMORY_CONTEXT_MAX_CHARS: '0',
+    },
+  });
+  const prompt = capturedBody.messages[0].content;
+  assert.match(prompt, new RegExp(canonical.version.replace(':', '\\:')));
+  assert.match(prompt, /你是 Hermes Companion/);
+  assert.match(prompt, /你是冉的长期个人助理/);
+  assert.match(prompt, /Hermes 是 ran-agent 的前台对话 shell/);
+  assert.match(prompt, /published_memory_status: loaded/);
+  assert.match(prompt, new RegExp(snapshot.projection_revision.replace(':', '\\:')));
+  assert.match(prompt, /activity_revision: 17/);
+  assert.match(prompt, /same published continuity/);
+  assert.match(prompt, /Ombre is recall-only and cannot override them or publish Canon/);
+  assert.ok(prompt.includes('x'.repeat(200)), 'minimum published-memory budget must survive trimming');
 });
 
 test('invalid or unavailable published context fails safe without claiming it loaded', (t) => {
@@ -206,7 +185,6 @@ test('canonical identity survives zero history budgets, missing Ombre projection
       recent_local_history: historyTurns('trim-me', 10, 'x'.repeat(200)),
     },
     env: {
-      RAN_AGENT_CAPABILITY_MODE: 'lite',
       RAN_AGENT_REPO_ROOT: path.resolve(new URL('../..', import.meta.url).pathname),
       HERMES_PUBLISHED_MEMORY_CONTEXT_PATH: missingSnapshot,
       HERMES_RECENT_TEXT_TURNS: '0',
@@ -407,15 +385,11 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
         HERMES_PROFILE: 'ran-assistant',
         HERMES_DEFAULT_MODEL: 'deepseek-v4-flash',
         RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-        RAN_AGENT_CAPABILITY_MODE: 'full',
       }),
       fetchImpl: async (url, init) => {
-        // Health check to /models has no body; chat completions has body
-        if (init?.body) {
-          capturedUrl = url;
-          capturedHeaders = init.headers;
-          capturedBody = JSON.parse(init.body);
-        }
+        capturedUrl = url;
+        capturedHeaders = init.headers;
+        capturedBody = JSON.parse(init.body);
         return makeJsonResponse({
           model: 'ran-assistant',
           action_requests: [{ requestRef: 'save-1', actionType: 'memory.remember', scope: {} }],
@@ -1305,19 +1279,17 @@ test('cache-friendly history does not break current media compact injection', as
   assert.match(capturedBody.messages.at(-1).content, /媒体工具指令/);
 });
 
-test('cache-friendly history is not enabled for full profile by default', async (t) => {
+test('cache-friendly history is available to the companion when enabled', async (t) => {
   let secondBody = null;
   const conversationId = 'wx-cache-friendly-full-default';
   const isolatedEnv = tempGatewayEnv(t);
   const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const config = getHermesGatewayConfig({
-    HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-    HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
     ...isolatedEnv,
-    RAN_AGENT_CAPABILITY_MODE: 'full',
     HERMES_CACHE_FRIENDLY_HISTORY: 'true',
   });
 
@@ -1337,8 +1309,8 @@ test('cache-friendly history is not enabled for full profile by default', async 
     }
   );
 
-  assert.equal(secondBody.messages[1].content, '第一轮 full 原文');
-  assert.deepEqual(readProviderVisibleHistoryFiles(stateDir), []);
+  assert.match(secondBody.messages[1].content, /第一轮 full 原文/);
+  assert.equal(readProviderVisibleHistoryFiles(stateDir).length, 1);
 });
 
 test('context cache strategy defaults to balanced with cache telemetry only', async () => {
@@ -2087,19 +2059,17 @@ test('social routing does not break media context injection', async () => {
   assert.ok(userMsg.content.includes('媒体工具指令'), 'should include media generation instruction');
 });
 
-test('auto routing sends debug and lark-cli intents to full gateway', async () => {
+test('debug and lark-cli intents use the one companion gateway', async () => {
   for (const text of ['调试模式', 'systemctl status ran-agent-node', 'journalctl -u ran-agent-node', 'git pull', 'npm test', 'lark-cli user me']) {
     let capturedUrl = '';
     await sendChatToHermesGateway(
       { text, sender_id: `conv-full-${text}`, channel: 'wechat' },
       {
         config: getHermesGatewayConfig({
-          HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-          HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+          HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
           HERMES_API_KEY: 'token',
           HERMES_REPLY_MODE: 'api',
           RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-          RAN_AGENT_CAPABILITY_MODE: 'auto',
         }),
         fetchImpl: async (url, init) => {
           if (init?.body) capturedUrl = url;
@@ -2108,11 +2078,11 @@ test('auto routing sends debug and lark-cli intents to full gateway', async () =
         logger: { warn() {}, log() {} },
       }
     );
-    assert.equal(capturedUrl, 'http://127.0.0.1:8643/v1/chat/completions', `${text} should route to full`);
+    assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions', `${text} should use companion`);
   }
 });
 
-test('auto routing keeps normal chat, XHS, and media on lite gateway', async () => {
+test('normal chat, XHS, and media use the one companion gateway', async () => {
   const cases = [
     { text: '你有点不连贯', sender_id: 'conv-lite-chat' },
     { text: '看看 http://xhslink.com/o/abc123', sender_id: 'conv-lite-xhs' },
@@ -2124,12 +2094,10 @@ test('auto routing keeps normal chat, XHS, and media on lite gateway', async () 
       { channel: 'wechat', ...payload },
       {
         config: getHermesGatewayConfig({
-          HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-          HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+          HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
           HERMES_API_KEY: 'token',
           HERMES_REPLY_MODE: 'api',
           RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-          RAN_AGENT_CAPABILITY_MODE: 'auto',
         }),
         fetchImpl: async (url, init) => {
           if (init?.body) capturedUrl = url;
@@ -2138,11 +2106,11 @@ test('auto routing keeps normal chat, XHS, and media on lite gateway', async () 
         logger: { warn() {}, log() {} },
       }
     );
-    assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions', `${payload.text} should route to lite`);
+    assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions', `${payload.text} should use companion`);
   }
 });
 
-test('auto routing keeps explicit sticker-save intents on lite gateway', async () => {
+test('explicit sticker-save intents use the one companion gateway', async () => {
   const cases = [
     { text: '保存这个为表情包', sender_id: 'conv-sticker-save', media: [{ filePath: '/tmp/sticker.png', mimeType: 'image/png', type: 'image' }] },
     { text: '这个加入表情包', sender_id: 'conv-sticker-add', media: [{ filePath: '/tmp/sticker.gif', mimeType: 'image/gif', type: 'image' }] },
@@ -2155,12 +2123,10 @@ test('auto routing keeps explicit sticker-save intents on lite gateway', async (
       { channel: 'wechat', ...payload },
       {
         config: getHermesGatewayConfig({
-          HERMES_LITE_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-          HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
+          HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
           HERMES_API_KEY: 'token',
           HERMES_REPLY_MODE: 'api',
           RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-          RAN_AGENT_CAPABILITY_MODE: 'auto',
         }),
         fetchImpl: async (url, init) => {
           if (init?.body) capturedUrl = url;
@@ -2169,7 +2135,7 @@ test('auto routing keeps explicit sticker-save intents on lite gateway', async (
         logger: { warn() {}, log() {} },
       }
     );
-    assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions', `${payload.text} should stay on lite`);
+    assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions', `${payload.text} should use companion`);
   }
 });
 
@@ -2459,7 +2425,7 @@ test('context component telemetry logs sizes and hashes without user text', asyn
   assert.ok(line, 'should log context component telemetry');
   const payload = JSON.parse(line.slice(line.indexOf('{')));
 
-  assert.equal(payload.profile, 'ran-assistant-lite');
+  assert.equal(payload.profile, 'ran-agent-companion');
   assert.equal(payload.channel, 'wechat');
   assert.match(payload.conversation_id_hash, /^[a-f0-9]{16}$/);
   assert.match(payload.session_id_hash, /^[a-f0-9]{16}$/);
@@ -2929,15 +2895,13 @@ test('soft reset pending digest is not consumed when provider request fails', as
   assert.equal(state.digests[0].consumed, false);
 });
 
-test('soft reset pending digest does not affect full profile requests', async (t) => {
+test('soft reset pending digest is consumed by the companion request', async (t) => {
   const isolatedEnv = tempGatewayEnv(t);
   const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   const env = {
     HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-    HERMES_FULL_API_BASE_URL: 'http://127.0.0.1:8643/v1',
     HERMES_API_KEY: 'token',
     HERMES_REPLY_MODE: 'api',
-    RAN_AGENT_CAPABILITY_MODE: 'full',
     RAN_AGENT_CONTEXT_SIZE_LOG: '1',
     ...isolatedEnv,
     HERMES_LITE_SOFT_RESET_ENABLED: 'true',
@@ -2956,7 +2920,6 @@ test('soft reset pending digest does not affect full profile requests', async (t
     {
       config: getHermesGatewayConfig(env),
       fetchImpl: async (url, options) => {
-        if (!options?.body) return makeJsonResponse({ data: [] });
         capturedBody = JSON.parse(options.body);
         return makeJsonResponse({ choices: [{ message: { content: 'ok' } }] });
       },
@@ -2964,9 +2927,9 @@ test('soft reset pending digest does not affect full profile requests', async (t
     }
   );
 
-  assert.equal(capturedBody.model, 'ran-assistant');
-  assert.doesNotMatch(capturedBody.messages.at(-1).content, /daily_digest|lite only digest/);
+  assert.equal(capturedBody.model, 'ran-agent-companion');
+  assert.match(capturedBody.messages.at(-1).content, /lite only digest/);
   const state = readHermesLiteMaintenanceState(getHermesLiteSoftResetConfig(env));
-  assert.equal(state.pendingDigestId, applied.digest.digestId);
-  assert.equal(state.digests[0].consumed, false);
+  assert.equal(state.pendingDigestId, '');
+  assert.equal(state.digests[0].consumed, true);
 });

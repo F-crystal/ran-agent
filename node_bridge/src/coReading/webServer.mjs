@@ -34,7 +34,7 @@ export function getCoReadingWebConfig(env = process.env) {
     accessToken: String(env.CO_READING_WEB_ACCESS_TOKEN || '').trim(),
     ownerToken: String(env.CO_READING_OWNER_TOKEN || '').trim(),
     rootDir: String(env.CO_READING_ROOT_DIR || path.join(PROJECT_ROOT, '.ran_agent_state/co_reading')).trim(),
-    hermesBaseUrl: String(env.CO_READING_HERMES_API_BASE_URL || env.HERMES_FULL_API_BASE_URL || DEFAULT_HERMES_BASE_URL).trim().replace(/\/$/, ''),
+    hermesBaseUrl: String(env.CO_READING_HERMES_API_BASE_URL || env.HERMES_API_BASE_URL || DEFAULT_HERMES_BASE_URL).trim().replace(/\/$/, ''),
     hermesApiKey: String(env.CO_READING_HERMES_API_KEY || env.HERMES_API_KEY || env.API_SERVER_KEY || '').trim(),
     translationEnabled: String(env.CO_READING_TRANSLATION_ENABLED || 'true').trim().toLowerCase() !== 'false',
     translationProvider: String(env.CO_READING_TRANSLATION_PROVIDER || DEFAULT_TRANSLATION_PROVIDER).trim().toLowerCase() || DEFAULT_TRANSLATION_PROVIDER,

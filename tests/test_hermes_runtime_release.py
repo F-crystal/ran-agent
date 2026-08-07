@@ -39,16 +39,13 @@ def test_unified_unit_uses_exact_runtime_and_one_port() -> None:
     unit = (Path(__file__).parents[1] / "hermes/systemd/ran-agent-hermes-unified.service").read_text()
     assert "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes" in unit
     assert "ExecStart=/usr/bin/env HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite" in unit
+    assert "HERMES_PROFILE=ran-agent-companion" in unit
     assert "API_SERVER_PORT=8642" in unit
     assert "8643" not in unit
     assert "HERMES_DISABLE_LAZY_INSTALLS=1" in unit
     assert "TIRITH_ENABLED=false" in unit
-    binds = {line for line in unit.splitlines() if line.startswith("BindReadOnlyPaths=")}
-    assert binds == {
-        "BindReadOnlyPaths=/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/companion-overlay/"
-        f"{path}:/opt/ran_agent/{path}"
-        for path in MODULE.COMPANION_OVERLAY_PATHS
-    }
+    assert "BindReadOnlyPaths=" not in unit
+    assert "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=" not in unit
 
 
 def test_overlay_contract_binds_candidate_manifest_mutation_and_unit(monkeypatch: pytest.MonkeyPatch) -> None:

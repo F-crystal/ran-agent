@@ -33,7 +33,7 @@ files remain on the old source checkout and still contain that retired
 registration. No replacement dependency was installed.
 Hermes-native `cronjob`, `delegate_task` and `execute_code` remain disabled.
 Scheduled outbound is limited to explicit reminders, the opt-in AI digest and
-governed external-MCP notifications.
+governed `external_mcp_gateway` notifications.
 
 ## Memory
 
@@ -49,14 +49,11 @@ authorities; future Ombre ingestion must be a rebuildable projection from
 confirmed Core events or other explicit sources.
 
 The accepted overlay deploys main's strict query-only `personalMemoryMcpServer`,
-explicit `source_status`, Vault retrieval, and Python extractor assembly. Its
-controller declares a 15000 ms Python-backend deadline. The active Hermes
-parent still receives 5000 ms from later Home/Profile `EnvironmentFile`
-entries, while the MCP child receives no explicit value and therefore uses the
-overlay server's 15000 ms default. The current request path has the larger
-budget, but removing the overlay without reconciling source and env authority
-would restore the old 5000 ms behavior. The source-convergence transaction must
-make and verify one 15000 ms truth instead of adding another overlay.
+explicit `source_status`, Vault retrieval, and Python extractor assembly. The
+active MCP child uses its 15000 ms default even though later Home/Profile env
+files still give the Hermes parent an irrelevant 5000 ms value. The current
+source candidate removes the configurable child deadline and fixes the actual
+process boundary at 15000 ms; this is locally verified but not source-deployed.
 
 ## Delivery Evidence
 
@@ -100,12 +97,13 @@ topology, not the bare host-visible old profile.
 
 ## Main Source State
 
-Main is `dc5fcf13f86483073c54ac046e1b238a90c91921`, archived and pushed but not
-source-deployed. It preserves the newer Core and personal-memory design,
-retires the standalone Obsidian surface, and includes the accepted overlay
-controller fixes. Production `2c8e97c` is not its ancestor: the trees are
-diverged by 244 files (`+59623/-15594` at the 2026-08-07 audit), so convergence
-requires a full classified source review rather than a routine fast-forward.
+Main's last archived authority is `efd1aeb2a952ebd37a3c765ef1ee5771ed3e6bd9`;
+production remains source-undeployed at `2c8e97c + accepted overlay`. The S1a
+candidate prepares one `ran-agent-companion` source profile, one `8642` client
+route, the supported Lite/Full capability union, and a fixed 15000 ms memory
+boundary. It is locally verified only. The 244-file production-versus-main diff
+has been classified and the consumed non-secret runtime env keys have been
+audited; the histories remain divergent, so this is not a routine fast-forward.
 The source still aligns four production-backed contracts:
 
 - canonical `memory_bge_vector_index.*` paths;
@@ -113,15 +111,18 @@ The source still aligns four production-backed contracts:
 - unified Hermes and co-reading defaults on `8642`;
 - O2 release/apply/acceptance defaults off unless explicitly enabled.
 
-The archive changed source authority only. A later production source
-transaction must still validate and apply one exact main SHA.
+Legacy split-profile release inputs remain in source but are excluded from the
+companion distribution until an explicitly authorized production source
+transaction replaces the old release path. The controller continues to fail
+closed on the unified marker; no S1a change is a production apply authority.
 
 ## Active Follow-Ups
 
-1. Classify the main-versus-production diff and audit every consumed non-secret
-   runtime env key. Then use one overlay-aware source transaction whose apply
-   tests the unmounted candidate and whose rollback restores the current
-   accepted overlay topology.
+1. After explicit production-mutation authorization, integrate one bounded,
+   overlay-aware source transaction into the existing controller. It must dry
+   run and apply one exact SHA, test the unmounted candidate, and restore the
+   accepted overlay topology on rollback. Do not repeat the completed diff or
+   env audits.
 2. After source convergence, close the existing-asset Feishu workflow as one bounded
    typed request/receipt path: organize an existing Minutes transcript and
    existing attachment into a cloud document, move it to the requested folder,

@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-07)
 
 `DEPLOYED_RUNTIME_ACCEPTANCE` (2026-08-06): exact candidate `0b793e8` deployed one unified Hermes v0.20 gateway with DeepSeek V4 Flash on `8642`; the retired Full service is inactive/disabled. See `docs/governance/current_runtime_status.md` for the bounded evidence.
 
@@ -18,7 +18,7 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 - The unified production profile uses `deepseek-v4-flash`; the provider policy adds `thinking.type=disabled` to
   the final HTTP body. Pro is explicit opt-in only.
 - DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must be processed by MCP tools first.
-- In production, legacy Lite/Full selectors point to the same `8642` gateway; WeChat, Feishu/Lark, and the desktop proxy all enter ChannelHub before the unified mainline calls Hermes.
+- The current source candidate uses one `8642` gateway and one companion profile; WeChat, Feishu/Lark, and the desktop proxy all enter ChannelHub before the unified mainline calls Hermes.
 - OpenClaw, Kimi, and GLM are retired as frontend paths and must not be used as runtime, deployment, or debugging authorities.
 
 ---
@@ -27,9 +27,7 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 
 | File or Directory | Purpose |
 |-------------------|---------|
-| `profile/config.yaml` | `ran-assistant` full profile with the complete MCP tool surface |
-| `profile/config.lite.yaml` | `ran-assistant-lite` lite profile for low-context daily use |
-| `profile/config.pro.template.yaml` | Explicit Pro model template |
+| `profile/config.yaml` | The single installable `ran-agent-companion` profile, preserving the supported Lite/Full capability union |
 | `profile/distribution.yaml` | Profile metadata and required environment variables |
 | `profile/AGENTS.md` | Hermes runtime constraints |
 | `profile/IDENTITY.md`, `profile/SOUL.md` | Persona and long-term expression baseline |
@@ -52,8 +50,7 @@ Recommended conventions:
 | Scenario | Repo root | Hermes home |
 |----------|-----------|-------------|
 | Local verification | `/Users/fengran/ran_agent` | `/private/tmp/ran-agent-hermes-home` or another temporary directory |
-| Server production | `/opt/ran_agent` | `/home/ubuntu/.hermes-ran-agent` |
-| Server lite | `/opt/ran_agent` | `/home/ubuntu/.hermes-ran-agent/lite` |
+| Server production | `/opt/ran_agent` | `/home/ubuntu/.hermes-ran-agent/lite` (physical path retained; not a Lite product mode) |
 
 Only the machine-local Hermes home should contain `.env`, sessions, logs, memories, cron, and similar runtime files. Do not copy those files back into the repository.
 
@@ -67,21 +64,21 @@ For local verification, do not switch the global sticky profile. Install into a 
 export RAN_AGENT_REPO_ROOT=/Users/fengran/ran_agent
 export HERMES_HOME=/private/tmp/ran-agent-hermes-home
 
-hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
-hermes -p ran-assistant mcp list
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-agent-companion --force -y
+hermes -p ran-agent-companion mcp list
 ```
 
 On the production server, use server paths:
 
 ```bash
 export RAN_AGENT_REPO_ROOT=/opt/ran_agent
-export HERMES_HOME=/home/ubuntu/.hermes-ran-agent
+export HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite
 
-hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-assistant --force -y
-hermes -p ran-assistant mcp list
+hermes profile install "$RAN_AGENT_REPO_ROOT/hermes/profile" --name ran-agent-companion --force -y
+hermes -p ran-agent-companion mcp list
 ```
 
-Do not run `hermes profile use ran-assistant` during verification. Production should set the profile and Hermes home through systemd or explicit environment variables.
+Do not run `hermes profile use ran-agent-companion` during verification. Production should set the profile and Hermes home through systemd or explicit environment variables.
 
 ---
 
@@ -91,16 +88,13 @@ Production runs one Hermes v0.20 gateway:
 
 | Service | Port | Profile | Hermes home | Purpose |
 |---------|------|---------|-------------|---------|
-| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` compatibility ID | `/home/ubuntu/.hermes-ran-agent/lite` | Legacy Lite/Full capability union |
+| `ran-agent-hermes.service` | `8642` | `ran-agent-companion` | `/home/ubuntu/.hermes-ran-agent/lite` | Supported Lite/Full capability union |
 
-Node bridge routes automatically with these variables:
+Node bridge consumes only these frontend variables:
 
 ```bash
-HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
-RAN_AGENT_CAPABILITY_MODE=auto
-HERMES_LITE_PROFILE=ran-assistant-lite
-HERMES_FULL_PROFILE=ran-assistant-lite
+HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
+HERMES_PROFILE=ran-agent-companion
 ```
 
 Terminal, file, session search, Playwright, media generation, and existing MCPs
@@ -120,7 +114,7 @@ Do not hand-edit systemd/env as the normal path. See `docs/governance/server_run
 
 ## MCP Tool Boundary
 
-Both `profile/config.yaml` and `profile/config.lite.yaml` disable Hermes built-in media tools:
+`profile/config.yaml` disables Hermes built-in media tools:
 
 ```yaml
 disabled_tools:
@@ -176,7 +170,7 @@ Secrets must live in machine-local `.env` files, for example:
 
 ```text
 /home/ubuntu/.hermes-ran-agent/.env
-/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env
+/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-agent-companion/.env
 /home/ubuntu/.hermes-ran-agent/lite/.env
 ```
 
@@ -189,16 +183,16 @@ Do not write `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, platform cookies, proxy URLs,
 ```bash
 hermes --help
 hermes profile --help
-hermes profile show ran-assistant
-hermes -p ran-assistant mcp list
-hermes -p ran-assistant mcp test media_reader
-HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-assistant --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
+hermes profile show ran-agent-companion
+hermes -p ran-agent-companion mcp list
+hermes -p ran-agent-companion mcp test media_reader
+HERMES_DEEPSEEK_THINKING_MODE=disabled hermes -p ran-agent-companion --provider deepseek --model deepseek-v4-flash -z "只输出 OK"
 ```
 
 Run a gateway in the foreground:
 
 ```bash
-hermes -p ran-assistant gateway run --replace --accept-hooks
+hermes -p ran-agent-companion gateway run --replace --accept-hooks
 ```
 
 Diagnostics:

@@ -33,7 +33,7 @@ DeepSeek V4 在本项目中不直接处理原始图片、视频、音频或社�
 
 运行时拓扑边界：
 
-- 当前生产只有一个 `8642` gateway、一个 home 和一个 companion profile；`8643` Full gateway 已退休。`ran-assistant-lite` 仅是兼容 ID，Lite/Full URL 和 profile 选择器都指向同一实例。
+- 当前生产只有一个 `8642` gateway 和一个物理 home；`8643` Full gateway 已退休。source target 只有 `ran-agent-companion` profile 和一个前台 URL，生产 overlay 的旧 profile ID 只作为未收敛事实记录，不作为兼容目标。
 - companion profile 的产品能力面必须精确保留旧 Lite 与 Full 仍受支持能力的并集，包括 terminal、file、session search、Playwright 和当前 MCP；合并拓扑不得降级有效能力。
 - 旧 Lite/Full 都未批准的 Hermes 原生 `cronjob`、`delegate_task` 和 `execute_code` 继续禁用。`search_hub` 保留旧 Full 的 Playwright fallback；普通搜索仍优先走 Search Hub，直接 Playwright 只用于明确的浏览器调试。
 

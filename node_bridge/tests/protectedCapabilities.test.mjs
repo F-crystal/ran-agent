@@ -78,18 +78,15 @@ function collectKeys(value, output = []) {
   return output;
 }
 
-test('current source profiles retain personal memory and retire standalone Obsidian', async () => {
-  for (const [profile, filename] of [['full', 'config.yaml'], ['lite', 'config.lite.yaml']]) {
-    const text = await readFile(path.join(ROOT, 'hermes/profile', filename), 'utf8');
-    for (const toolset of ['cli', 'gateway']) {
-      const values = yamlList(text, 'platform_toolsets', toolset);
-      assert.equal(values.includes('mcp-personal_memory'), true, `${profile}.${toolset}`);
-      assert.equal(values.includes('mcp-obsidian_memory'), false, `${profile}.${toolset}`);
-    }
-    const servers = yamlTopMapKeys(text, 'mcp_servers');
-    assert.equal(servers.includes('personal_memory'), true, profile);
-    assert.equal(servers.includes('obsidian_memory'), false, profile);
-  }
+test('current companion profile retains personal memory and retires standalone Obsidian', async () => {
+  const text = await readFile(path.join(ROOT, 'hermes/profile/config.yaml'), 'utf8');
+  const values = yamlList(text.replace('cli: &companion_toolsets', 'cli:'), 'platform_toolsets', 'cli');
+  assert.equal(values.includes('mcp-personal_memory'), true);
+  assert.equal(values.includes('mcp-obsidian_memory'), false);
+  assert.match(text, /^  api_server: \*companion_toolsets$/m);
+  const servers = yamlTopMapKeys(text, 'mcp_servers');
+  assert.equal(servers.includes('personal_memory'), true);
+  assert.equal(servers.includes('obsidian_memory'), false);
 });
 
 test('protected locally-owned MCP tool names and public schemas stay exact', async () => {

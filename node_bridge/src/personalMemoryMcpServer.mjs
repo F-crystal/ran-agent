@@ -5,14 +5,10 @@ const SERVER_INFO = {
   name: 'ran-agent-personal-memory',
   version: '0.1.0',
 };
+const BACKEND_TIMEOUT_MS = 15000;
 
 function backendBaseUrl(env = process.env) {
   return String(env.PYTHON_BACKEND_BASE_URL || 'http://127.0.0.1:8787').trim().replace(/\/$/, '');
-}
-
-function backendTimeoutMs(env = process.env) {
-  const parsed = Number.parseInt(String(env.PERSONAL_MEMORY_BACKEND_TIMEOUT_MS || ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
 }
 
 function buildErrorResult(message) {
@@ -132,7 +128,7 @@ async function recallPersonalMemory(args = {}, options = {}) {
   const responseMode = String(args.response_mode || 'chat').trim() || 'chat';
   const fetchImpl = options.fetchImpl || fetch;
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), backendTimeoutMs(options.env));
+  const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
   let response;
   try {
     response = await fetchImpl(`${backendBaseUrl(options.env)}/tools/memory/recall`, {
@@ -165,7 +161,7 @@ async function checkPersonalMemoryBackend(options = {}) {
   const fetchImpl = options.fetchImpl || fetch;
   const baseUrl = backendBaseUrl(options.env);
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), backendTimeoutMs(options.env));
+  const timeout = setTimeout(() => controller.abort(), BACKEND_TIMEOUT_MS);
   let response;
   try {
     response = await fetchImpl(`${baseUrl}/health`, {
