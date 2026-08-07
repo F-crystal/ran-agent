@@ -182,8 +182,8 @@ class AppConfig:
     memory_llm_history_limit: int = 6
     vector_memory_enabled: bool = True
     vector_memory_candidate_limit: int = 200
-    vector_memory_index_path: Path = Path("data/memory_vector_index.bin")
-    vector_memory_metadata_path: Path = Path("data/memory_vector_index.json")
+    vector_memory_index_path: Path = Path("data/memory_bge_vector_index.bin")
+    vector_memory_metadata_path: Path = Path("data/memory_bge_vector_index.json")
     memory_policy_prompt: str = DEFAULT_MEMORY_POLICY_PROMPT
     agent_system_prompt: str = DEFAULT_SYSTEM_PROMPT
     tool_use_system_prompt: str = DEFAULT_TOOL_USE_PROMPT
@@ -378,13 +378,13 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
         vector_memory_index_path=Path(
             os.getenv(
                 "PERSONAL_AGENT_VECTOR_MEMORY_INDEX_PATH",
-                str(data_dir / "memory_vector_index.bin"),
+                str(data_dir / "memory_bge_vector_index.bin"),
             ).strip()
         ),
         vector_memory_metadata_path=Path(
             os.getenv(
                 "PERSONAL_AGENT_VECTOR_MEMORY_METADATA_PATH",
-                str(data_dir / "memory_vector_index.json"),
+                str(data_dir / "memory_bge_vector_index.json"),
             ).strip()
         ),
         memory_policy_prompt=os.getenv(

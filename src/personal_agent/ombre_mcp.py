@@ -160,7 +160,11 @@ class OmbreMCPMemoryBackend(OmbreMemoryBackend):
         )
         duration_seconds = time.monotonic() - started_monotonic
         if not result.ok:
-            outcome = "transport_error" if result.error == "transport_unavailable" else "protocol_error"
+            outcome = (
+                "transport_error"
+                if result.error in {"endpoint_unavailable", "transport_unavailable"}
+                else "protocol_error"
+            )
             items: tuple[str, ...] = ()
         else:
             parsed = _upstream_recall_items(result.payload.get("result"))

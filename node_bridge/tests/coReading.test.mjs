@@ -36,6 +36,10 @@ async function withStore(fn) {
   }
 }
 
+test('co-reading defaults to the unified Hermes gateway', () => {
+  assert.equal(getCoReadingWebConfig({}).hermesBaseUrl, 'http://127.0.0.1:8642/v1');
+});
+
 function callTool(name, args, options = {}) {
   return handleCoReadingMcpRequest(
     {

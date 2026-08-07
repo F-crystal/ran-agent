@@ -433,7 +433,7 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
     }
   );
 
-  assert.equal(capturedUrl, 'http://127.0.0.1:8643/v1/chat/completions');
+  assert.equal(capturedUrl, 'http://127.0.0.1:8642/v1/chat/completions');
   assert.equal(capturedHeaders.Authorization, 'Bearer token');
   assert.equal(capturedBody.model, 'ran-assistant');
   assert.equal(capturedBody.stream, false);

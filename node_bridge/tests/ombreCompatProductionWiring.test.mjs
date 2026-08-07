@@ -76,12 +76,12 @@ function writeManagedCompatEnv({ existing = '', existingRoot = existing, existin
   return { node: readFileSync(nodeEnv, 'utf8'), bridge: readFileSync(bridgeEnv, 'utf8'), state };
 }
 
-test('official apply writes a runnable O2 contract while preserving safe operator values', () => {
+test('official apply keeps O2 disabled unless explicitly enabled', () => {
   const initial = writeManagedCompatEnv({
     existing: 'UNRELATED_SECRET=keep\nHERMES_PROVIDER=deepseek\nOMBRE_COMPAT_CURATOR_BASE_URL=https://unsafe.invalid/v1\n',
   });
   for (const env of [initial.node, initial.bridge]) {
-    assert.match(env, /^OMBRE_COMPAT_ENABLED=true$/m);
+    assert.match(env, /^OMBRE_COMPAT_ENABLED=false$/m);
     assert.match(env, new RegExp(`^OMBRE_COMPAT_STATE_DIR=${initial.state}/ombre-compat$`, 'm'));
     assert.match(env, new RegExp(`^OMBRE_COMPAT_STEWARD_IDENTITY_FILE=${initial.state}/ombre-brain/steward-identity\\.v1\\.json$`, 'm'));
     assert.match(env, /^OMBRE_COMPAT_STEWARD_ENDPOINT=http:\/\/127\.0\.0\.1:18001\/internal\/ran-agent\/steward\/v1$/m);
@@ -128,6 +128,9 @@ test('release defaults to Flash, manages O2 transactionally, and accepts it read
   assert.match(apply, /MODEL_NAME="\$\{RAN_AGENT_DEPLOY_HERMES_MODEL:-deepseek-v4-flash\}"/);
   assert.match(deploy, /DEPLOY_MODEL="\$\{RAN_AGENT_DEPLOY_HERMES_MODEL:-deepseek-v4-flash\}"/);
   assert.match(accept, /EXPECTED_MODEL="\$\{RAN_AGENT_EXPECTED_HERMES_MODEL:-deepseek-v4-flash\}"/);
+  assert.match(apply, /OMBRE_COMPAT_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED:-false\}"/);
+  assert.match(deploy, /DEPLOY_OMBRE_COMPAT_ENABLED="\$\{RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED:-false\}"/);
+  assert.match(accept, /EXPECTED_OMBRE_COMPAT_ENABLED="\$\{RAN_AGENT_EXPECTED_OMBRE_COMPAT_ENABLED:-false\}"/);
   assert.match(deploy, /Environment=OMBRE_COMPAT_ENABLED=false/);
   assert.match(deploy, /RAN_AGENT_DEPLOY_OMBRE_COMPAT_ENABLED="\$DEPLOY_OMBRE_COMPAT_ENABLED"/);
   assert.match(deploy, /rm -f -- "\$OMBRE_INGRESS_DROPIN"/);

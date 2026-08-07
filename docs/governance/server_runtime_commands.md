@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-07)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -32,9 +32,10 @@ bind boundary is recorded; any target or path expansion requires new
 authorization.
 
 Successor `0b793e8fea85c409800ee7e0d615501816c99387` was applied on
-2026-08-06 and passed immediate topology acceptance. Production now has one
+2026-08-06 and is `PROD_VERIFIED` for the bounded evidence in
+`current_runtime_status.md`. Production now has one
 Hermes v0.20 gateway on `8642`; `8643` is absent and the retired Full unit is
-inactive, disabled and condition-blocked. Its rollback authority is:
+inactive, disabled and condition-blocked. Its retained evidence set is:
 
 ```text
 controller: /opt/ran_agent-release/runtime-artifacts/deploy-hermes-runtime-release-0b793e8fea85c409800ee7e0d615501816c99387.py
@@ -42,16 +43,15 @@ candidate ref: refs/ran-agent/runtime-candidates/0b793e8fea85c409800ee7e0d615501
 snapshot: /opt/ran_agent-release/runtime-snapshots/runtime-20260806T010417Z-0b793e8fea85
 ```
 
-Two bounded source-only transactions later advanced the clean checkout from
-`bb66f1e6` through `57638ce` to `0cbeed7` while leaving the accepted Hermes
-MainPID and Runtime authority unchanged. The current binding files are
-`binding.v1.json` and `binding.v2.json` under the accepted Runtime
-transaction's `/opt/ran_agent-release/runtime-source-bindings/` directory.
-Source rollback must use the
-candidate-extracted source controller for the matching binding; combined
-Runtime rollback first restores the source chain, then invokes the pinned
-Runtime controller. Do not relax checkout-SHA validation or use the legacy
-split release scripts.
+Four bounded source-only transactions advanced the clean checkout to
+`2c8e97cacd1d2eaed30738abe621f3393cffb885` without replacing a service PID.
+Binding.v4 is accepted after a real source apply/rollback/reapply and records
+`runtimeRollbackAuthorized=false`; only its candidate-extracted source rollback
+remains authorized. The retired v0.13 payloads have been deleted under the
+root-owned `v013-payloads.deleted.json` record. The Runtime controller,
+candidate ref, artifact, topology, snapshot state and sealed builder remain
+evidence-only. Do not invoke Runtime rollback, relax checkout-SHA validation,
+or use the legacy split release scripts.
 
 Do not retry `44b84fb11fe8` or use the split deploy scripts against the unified
 topology.
@@ -88,30 +88,20 @@ the account without separate authorization.
   sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode apply
   ```
 
-  Apply prints the exact snapshot path. If acceptance fails, the controller
-  rolls back before returning. A later explicit rollback must use that printed
-  snapshot and the same candidate-extracted controller:
-
-  ```bash
-  cd /opt/ran_agent
-  source /opt/ran_agent/.venv/bin/activate
-  RUNTIME_CANDIDATE=<deployed-40-char-sha>
-  RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/deploy-hermes-runtime-release-<deployed-40-char-sha>.py
-  RUNTIME_SNAPSHOT=/opt/ran_agent-release/runtime-snapshots/<exact-transaction-directory>
-  sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --mode rollback --snapshot "$RUNTIME_SNAPSHOT"
-  ```
+  Apply prints the exact snapshot path. For the deployed 0b793e8 Runtime,
+  binding.v4 has since closed Runtime rollback. Its controller and snapshot are
+  evidence-only; do not invoke `--mode rollback`.
 
   After the unified topology marker is published, the legacy
   `deploy-hermes-candidate.sh` and standalone Lite/Full repair intentionally
   refuse to operate. They are not rollback paths for the unified Runtime. The
-  candidate-named controller, candidate ref, and accepted snapshot are one
-  rollback authority set; do not overwrite or delete any member while that
-  Runtime or its rollback window remains active.
+  candidate-named controller, candidate ref, artifact, topology, snapshot state
+  and sealed builder remain the retained evidence set.
 - After unified v0.20 passes immediate acceptance, the user has authorized
   disabling the split topology and removing exact temporary validation assets
   to reclaim space. Inventory references first. The active rollback contract
-  verifies the live v0.13 executables by digest, so retain them until that
-  rollback window closes; then remove those exact v0.13-only assets. Preserve
+  formerly verified the v0.13 payloads by digest. That retention window is now
+  closed and the exact payloads are absent. Preserve
   the unified capability union, personal data, and shared runtimes. Do not
   treat the old Full service name as permission to delete Full product state
   or MCP capability.
@@ -413,9 +403,6 @@ OMBRE_BRAIN_STATUS_FILE=/opt/ran_agent/.ran_agent_state/ombre-brain/status.json
 OMBRE_BIND_HOST=127.0.0.1
 OMBRE_MCP_REQUIRE_AUTH=false
 OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
-OMBRE_RECALL_MCP_URL=http://127.0.0.1:18002/mcp
-PERSONAL_AGENT_OMBRE_BACKEND=recall_only
-PERSONAL_AGENT_OMBRE_MCP_URL=http://127.0.0.1:18002/mcp
 AI_DAILY_DIGEST_ENABLED=true
 AI_DAILY_DIGEST_HOUR=8
 AI_DAILY_DIGEST_MINUTE=0
@@ -435,11 +422,10 @@ EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=true
 EXTERNAL_MCP_ACTIVITY_TICK_MS=60000
 ```
 
-The deployed env may retain `OMBRE_RECALL_MCP_URL`,
-`PERSONAL_AGENT_OMBRE_BACKEND`, and `PERSONAL_AGENT_OMBRE_MCP_URL` while the
-v0.13 rollback window is open. The next personal-memory code does not read
-them; remove them with the retired `18002` unit and split profiles when that
-window closes.
+The recall-only `18002` service and its `OMBRE_RECALL_MCP_URL`,
+`PERSONAL_AGENT_OMBRE_BACKEND=recall_only`, and
+`PERSONAL_AGENT_OMBRE_MCP_URL` keys are retired. Do not restore them as current
+runtime configuration; personal memory uses the loopback `18001` boundary.
 
 Ombre deliberately has no network authenticator.
 `OMBRE_MCP_REQUIRE_AUTH=false` is valid only with the enforced `127.0.0.1`

@@ -19,7 +19,7 @@ import { handleSocialReaderMcpRequest } from '../socialReaderMcpServer.mjs';
 
 const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const PUBLIC_ROOT = path.join(PROJECT_ROOT, 'node_bridge/public/co-reading');
-const DEFAULT_HERMES_BASE_URL = 'http://127.0.0.1:8643/v1';
+const DEFAULT_HERMES_BASE_URL = 'http://127.0.0.1:8642/v1';
 const DEFAULT_TRANSLATION_PROVIDER = 'hermes';
 const DEFAULT_TRANSLATION_TARGET_LANG = 'zh-CN';
 const DEFAULT_ASK_CONTEXT_CHARS = 1000;

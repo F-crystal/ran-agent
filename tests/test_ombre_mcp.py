@@ -55,6 +55,7 @@ class OmbreMCPTest(unittest.TestCase):
         backend = OmbreMCPMemoryBackend(config=self.config, logger=self.logger)
         cases = (
             (OmbreCallResult(ok=True, payload={"result": "没有匹配到相关记忆。"}), "empty"),
+            (OmbreCallResult(ok=False, payload={}, error="endpoint_unavailable"), "transport_error"),
             (OmbreCallResult(ok=False, payload={}, error="transport_unavailable"), "transport_error"),
             (OmbreCallResult(ok=False, payload={}, error="rpc_error:-32002"), "protocol_error"),
             (OmbreCallResult(ok=True, payload={"result": 3}), "protocol_error"),

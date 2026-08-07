@@ -5,7 +5,7 @@ description: "Server runtime deployment and drift repair for ran-agent/Hermes. U
 
 # Server Runtime Skill
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-07)
 
 ## Use When
 
@@ -62,7 +62,8 @@ sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME
 sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode apply
 ```
 
-The apply output is the rollback authority. For an explicit rollback, pass its
+The apply output is Runtime rollback authority only while the current source
+binding records `runtimeRollbackAuthorized=true`. During that window, pass its
 exact snapshot to the same candidate-extracted controller:
 
 ```bash
@@ -74,7 +75,10 @@ Once the unified topology marker exists, never use
 `deploy-hermes-candidate.sh` or standalone `apply-hermes-runtime-split.sh` as a
 Runtime rollback path; both intentionally fail closed at that boundary. Retain
 the candidate-named controller, `refs/ran-agent/runtime-candidates/<SHA>`, and
-the accepted snapshot together for the complete rollback window.
+the accepted snapshot together for the complete rollback window. Once a later
+accepted source binding records `runtimeRollbackAuthorized=false`, these are
+evidence-only: do not invoke Runtime rollback. Use only that source candidate's
+reviewed `source-rollback` mode for source changes.
 
 Do not ask the user to remember activation separately. Put it in the command
 block or make the script self-sufficient.
