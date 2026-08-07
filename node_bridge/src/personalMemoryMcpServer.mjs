@@ -12,7 +12,7 @@ function backendBaseUrl(env = process.env) {
 
 function backendTimeoutMs(env = process.env) {
   const parsed = Number.parseInt(String(env.PERSONAL_MEMORY_BACKEND_TIMEOUT_MS || ''), 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 5000;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 15000;
 }
 
 function buildErrorResult(message) {

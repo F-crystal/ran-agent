@@ -95,7 +95,12 @@ def overlay_digest(files: dict[str, bytes]) -> str:
 
 
 def render_dropin(root: Path) -> bytes:
-    lines = ["[Service]", "BindReadOnlyPaths=", "UnsetEnvironment=OBSIDIAN_MEMORY_MCP_ENABLED"]
+    lines = [
+        "[Service]",
+        "BindReadOnlyPaths=",
+        "UnsetEnvironment=OBSIDIAN_MEMORY_MCP_ENABLED",
+        "Environment=PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=15000",
+    ]
     for relative in OVERLAY_PATHS:
         lines.append(f"BindReadOnlyPaths={root / relative}:/opt/ran_agent/{relative}")
     for destination in PROFILE_DESTINATIONS:
@@ -435,7 +440,7 @@ def call_memory_mcp(node_bin: Path, server: Path) -> None:
         "LANG": "C.UTF-8",
         "PATH": "/usr/bin:/bin",
         "PYTHON_BACKEND_BASE_URL": "http://127.0.0.1:8787",
-        "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS": "5000",
+        "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS": "15000",
     }
     result = subprocess.run([str(node_bin), str(server)], input=payload, capture_output=True, text=True, timeout=20, env=env)
     if result.returncode != 0:
@@ -524,15 +529,13 @@ def wait_for_python(timeout: float = 30.0) -> int:
     raise OverlayError("Python backend did not become ready")
 
 
-def start_services(timer_active: bool) -> None:
+def start_services(*, gateway_timeout: float = 45.0) -> None:
     run(["systemctl", "daemon-reload"])
     run(["systemctl", "start", PYTHON_UNIT])
     wait_for_python()
     run(["systemctl", "start", HERMES_UNIT])
-    wait_for_gateway()
+    wait_for_gateway(gateway_timeout)
     run(["systemctl", "start", NODE_UNIT])
-    if timer_active:
-        run(["systemctl", "start", "ran-agent-hermes-lite-soft-reset.timer"])
 
 
 def rollback(transaction: Path, state: dict, manifest: dict) -> None:
@@ -543,7 +546,13 @@ def rollback(transaction: Path, state: dict, manifest: dict) -> None:
         transaction / "previous-python-dropin.conf",
         bool(state["previous_python_dropin_present"]),
     )
-    start_services(bool(state["timer_active"]))
+    state["rollback_dropins_restored_at"] = datetime.now(timezone.utc).isoformat()
+    write_json(transaction / "state.json", state)
+    try:
+        start_services(gateway_timeout=120.0)
+    except BaseException:
+        run(["systemctl", "start", NODE_UNIT], check=False)
+        raise
     pid = wait_for_gateway()
     if namespace_digests(pid) != state["previous_namespace_digests"]:
         raise OverlayError("overlay rollback namespace mismatch")
@@ -556,6 +565,8 @@ def rollback(transaction: Path, state: dict, manifest: dict) -> None:
     namespace_mounts_readonly(pid)
     if host_baseline(Path(state["repo"])) != state["host_baseline"]:
         raise OverlayError("host checkout changed across overlay rollback")
+    if state["timer_active"]:
+        run(["systemctl", "start", "ran-agent-hermes-lite-soft-reset.timer"])
     state["status"] = "rolled_back"
     state["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
     write_json(transaction / "state.json", state)
@@ -606,7 +617,7 @@ def explicit_rollback(args: argparse.Namespace) -> None:
     if transaction.parent != transaction_root or not transaction.is_dir():
         raise OverlayError("rollback transaction is outside the managed root")
     state = json.loads((transaction / "state.json").read_text(encoding="utf-8"))
-    if state.get("status") not in {"prepared", "activating", "accepted"}:
+    if state.get("status") not in {"prepared", "activating", "accepted", "rollback_pending", "recovery_required"}:
         raise OverlayError("transaction is not rollback-eligible")
     repo = args.repo.resolve()
     manifest = require_candidate(repo, str(state.get("candidate", "")))
@@ -629,6 +640,29 @@ def explicit_rollback(args: argparse.Namespace) -> None:
         current_profile_digests,
         current_python_digest,
     )
+    if (
+        current_dropin_sha256 is None
+        and current_python_dropin_sha256 is None
+        and current_digests == state["previous_namespace_digests"]
+        and current_profile_digests == state["previous_profile_digests"]
+        and current_python_digest == state["previous_python_digest"]
+        and port_open(8787)
+        and service_active(NODE_UNIT)
+    ):
+        require_gateway_identity(current_pid, manifest)
+        namespace_mounts_readonly(current_pid)
+        if host_baseline(repo) != state["host_baseline"]:
+            raise OverlayError("host checkout changed across observed overlay rollback")
+        if state["timer_active"]:
+            run(["systemctl", "start", "ran-agent-hermes-lite-soft-reset.timer"])
+            if not service_active("ran-agent-hermes-lite-soft-reset.timer"):
+                raise OverlayError("soft-reset timer did not recover")
+        state["status"] = "rolled_back"
+        state["rolled_back_at"] = datetime.now(timezone.utc).isoformat()
+        state["rollback_observation"] = "previous runtime already active"
+        write_json(transaction / "state.json", state)
+        print(json.dumps({"status": "rolled_back", "transaction": str(transaction)}, sort_keys=True))
+        return
     rollback(transaction, state, manifest)
     print(json.dumps({"status": "rolled_back", "transaction": str(transaction)}, sort_keys=True))
 
@@ -697,7 +731,7 @@ def preflight(args: argparse.Namespace) -> dict:
     if TRANSACTION_ROOT.exists():
         for state_path in TRANSACTION_ROOT.glob("*/state.json"):
             status = json.loads(state_path.read_text(encoding="utf-8")).get("status")
-            if status in {"prepared", "activating"}:
+            if status in {"prepared", "activating", "rollback_pending", "recovery_required"}:
                 raise OverlayError(f"unfinished overlay transaction requires rollback: {state_path.parent}")
     return {
         "repo": repo,
@@ -776,13 +810,24 @@ def apply(args: argparse.Namespace) -> None:
         stop_services(bool(state["timer_active"]))
         atomic_write(DROPIN, dropin, 0o644)
         atomic_write(PYTHON_DROPIN, python_dropin, 0o644)
-        start_services(bool(state["timer_active"]))
+        start_services()
         accepted = verify_overlay(repo, root, files, baseline, node_bin, manifest)
+        if state["timer_active"]:
+            run(["systemctl", "start", "ran-agent-hermes-lite-soft-reset.timer"])
         state.update(status="accepted", accepted_at=datetime.now(timezone.utc).isoformat(), acceptance=accepted)
         write_json(transaction / "state.json", state)
-    except BaseException:
+    except BaseException as apply_error:
         signal.signal(signal.SIGTERM, signal.SIG_IGN)
-        rollback(transaction, state, manifest)
+        state["status"] = "rollback_pending"
+        state["apply_error"] = str(apply_error)
+        write_json(transaction / "state.json", state)
+        try:
+            rollback(transaction, state, manifest)
+        except BaseException as rollback_error:
+            state["status"] = "recovery_required"
+            state["rollback_error"] = str(rollback_error)
+            write_json(transaction / "state.json", state)
+            raise OverlayError(f"apply failed: {apply_error}; rollback failed: {rollback_error}") from rollback_error
         raise
     finally:
         signal.signal(signal.SIGTERM, previous_sigterm)

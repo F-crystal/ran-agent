@@ -118,10 +118,15 @@ the account without separate authorization.
   sudo chown root:root "$OVERLAY_CONTROLLER"
   sudo chmod 0500 "$OVERLAY_CONTROLLER"
   sudo "$OVERLAY_CONTROLLER" --mode preflight --candidate "$OVERLAY_CANDIDATE"
-  sudo "$OVERLAY_CONTROLLER" --mode apply --candidate "$OVERLAY_CANDIDATE"
+  OVERLAY_APPLY_UNIT=ran-agent-companion-overlay-${OVERLAY_CANDIDATE:0:12}
+  sudo systemd-run --unit="$OVERLAY_APPLY_UNIT" --property=Type=exec --wait --collect \
+    "$OVERLAY_CONTROLLER" --mode apply --candidate "$OVERLAY_CANDIDATE"
+  sudo journalctl -u "$OVERLAY_APPLY_UNIT" --no-pager -n 80
   ```
 
-  Apply prints the accepted transaction directory. A later explicit overlay
+  The transient systemd service keeps the transaction alive if the SSH client
+  disconnects; acceptance still comes only from the controller state and
+  journal. Apply prints the accepted transaction directory. A later explicit overlay
   rollback may use only that candidate-extracted controller and exact directory:
   `sudo "$OVERLAY_CONTROLLER" --mode rollback --transaction <exact-transaction-directory>`.
   This is independent of, and does not reopen, v0.20 Runtime rollback.

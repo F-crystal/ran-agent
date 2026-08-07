@@ -74,7 +74,7 @@
       {"path": "node_bridge/src/externalMcp/gatewayMcpServer.mjs", "sha256": "8f29309aaa84b4be001771bf372a1dc632ad0d02286ec43bb595faca72143688"},
       {"path": "node_bridge/src/mediaGenerationMcpServer.mjs", "sha256": "6c224bc569ef40df3e18c019cbb35d0a1b05c093ad7ba6ebd40014667bd7f79d"},
       {"path": "node_bridge/src/mediaReaderMcpServer.mjs", "sha256": "3beb916e4731c8c2d6639b1a7b76f006f38890ce1bdff0ec8b357fc5ff9b8896"},
-      {"path": "node_bridge/src/personalMemoryMcpServer.mjs", "sha256": "b02c29591cc1043f8b19c5cd66c5826224ba2e4ded618c84e7b3fe2fd4fc6ce7"},
+      {"path": "node_bridge/src/personalMemoryMcpServer.mjs", "sha256": "afd70f4e70c8342dc5780d8d20c216ed77e228c72f306b69b769040269b8a4d0"},
       {"path": "node_bridge/src/searchHubMcpServer.mjs", "sha256": "7500111b190fc33b1a9fd60904db645faef2c7cb3e6ecfa6a12bce7b521be2a3"},
       {"path": "node_bridge/src/socialReaderMcpServer.mjs", "sha256": "c659e5edfe31159bebfbc5e290a82b8c59e014dd7fda9e201ec0af6e0c60cddb"},
       {"path": "node_bridge/src/stickerCatalogMcpServer.mjs", "sha256": "818251c9b2fa88bb03ec17fdfdb6ed4f274fd59c1caffb98bcaa161eadcd0b27"}

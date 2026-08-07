@@ -88,6 +88,18 @@ drop-in and namespace were restored to the prior digests, all three services
 returned active, and the transaction was reconciled as `rolled_back`; the
 strict overlay remains source-only.
 
+The 2026-08-07 follow-up candidate removed that startup dependency and reached
+the real memory acceptance probe, but the client-driven controller received a
+termination signal while that probe was still running. Recovery restored both
+drop-ins; the old profile then exceeded the shared 45-second
+rollback readiness budget, so Node and the soft-reset timer required explicit
+restart after the old gateway became ready. Production is again on the prior
+digests with Python, Hermes, Node, Ombre and the timer active. A one-time root
+reconciliation reused the exact old candidate contract to verify those digests,
+both absent drop-ins, service identity, ports and host baseline without
+restarting services; the transaction is now `rolled_back`. No candidate
+overlay is deployed.
+
 ## Main Source State
 
 Main now contains convergence commit
