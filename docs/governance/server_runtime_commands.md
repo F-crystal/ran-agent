@@ -97,6 +97,31 @@ the account without separate authorization.
   refuse to operate. They are not rollback paths for the unified Runtime. The
   candidate-named controller, candidate ref, artifact, topology, snapshot state
   and sealed builder remain the retained evidence set.
+- Companion MCP overlay refreshes use the exact candidate-bound manifest and
+  narrow controller. They do not replace the Hermes executable, Home, source
+  checkout, env, database, or closed Runtime rollback authority:
+
+  ```bash
+  cd /opt/ran_agent
+  source /opt/ran_agent/.venv/bin/activate
+  set -euo pipefail
+  OVERLAY_CANDIDATE=<reviewed-40-char-sha>
+  OVERLAY_CANDIDATE_REF=refs/ran-agent/overlay-candidates/$OVERLAY_CANDIDATE
+  OVERLAY_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/deploy-hermes-companion-overlay-$OVERLAY_CANDIDATE.py
+  git fetch origin main
+  test ! "$(git rev-parse --verify "$OVERLAY_CANDIDATE_REF" 2>/dev/null)" || test "$(git rev-parse --verify "$OVERLAY_CANDIDATE_REF^{commit}")" = "$OVERLAY_CANDIDATE"
+  git update-ref "$OVERLAY_CANDIDATE_REF" "$OVERLAY_CANDIDATE"
+  git show "$OVERLAY_CANDIDATE:scripts/deploy-hermes-companion-overlay.py" | sudo tee "$OVERLAY_CONTROLLER" >/dev/null
+  sudo chown root:root "$OVERLAY_CONTROLLER"
+  sudo chmod 0500 "$OVERLAY_CONTROLLER"
+  sudo "$OVERLAY_CONTROLLER" --mode preflight --candidate "$OVERLAY_CANDIDATE"
+  sudo "$OVERLAY_CONTROLLER" --mode apply --candidate "$OVERLAY_CANDIDATE"
+  ```
+
+  Apply prints the accepted transaction directory. A later explicit overlay
+  rollback may use only that candidate-extracted controller and exact directory:
+  `sudo "$OVERLAY_CONTROLLER" --mode rollback --transaction <exact-transaction-directory>`.
+  This is independent of, and does not reopen, v0.20 Runtime rollback.
 - After unified v0.20 passes immediate acceptance, the user has authorized
   disabling the split topology and removing exact temporary validation assets
   to reclaim space. Inventory references first. The active rollback contract

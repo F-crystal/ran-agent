@@ -68,6 +68,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/hermes_runtime_artifact.v1.json` | Immutable LOCAL_BUILT v0.20 provenance |
 | `docs/governance/hermes_runtime_linux_verification.v1.json` | LOCAL_VERIFIED Linux artifact/profile evidence |
 | `docs/governance/hermes_runtime_mutation.v1.json` | Deployed v0.20 mutation evidence; bounded production verification is recorded in current runtime status; retained snapshot is evidence-only |
+| `docs/governance/hermes_companion_overlay.v1.json` | Exact production baseline and eight-file companion-overlay refresh contract; source candidate only until applied |
 | `docs/governance/hermes-context-optimization.md` | Context optimization, cache and soft-reset contract |
 | `docs/governance/external-mcp-gateway.md` | External MCP admission and system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |

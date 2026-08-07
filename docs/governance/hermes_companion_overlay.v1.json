@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "status": "RELEASE_CANDIDATE_READY_FOR_COMPANION_OVERLAY_APPLY",
+  "requiredProductionHead": "2c8e97cacd1d2eaed30738abe621f3393cffb885",
+  "runtime": {
+    "unit": {
+      "path": "/etc/systemd/system/ran-agent-hermes.service",
+      "sha256": "42703a7eaa1975b6336a6eae700c744f9bedc12892f5ab0492d753ef396a479c"
+    },
+    "executable": {
+      "path": "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes",
+      "sha256": "d61e2094ec09adf889d1cd9938e789a1e2a2ca38c10c9523823a34276bc9f685"
+    },
+    "node": {
+      "path": "/opt/nodejs/node-v22.22.2-linux-x64/bin/node",
+      "sha256": "81925c0995b5c1427b5d538e6a90ca2fdc4daffb786b09af749beaf7369d4e90"
+    },
+    "topology": {
+      "path": "/opt/ran_agent-release/runtime-topology.v1.json",
+      "sha256": "b0c70833a14ab7641b900c29aad7272dcbd7f7bbcbb2639cd37cbd0865fb5d57"
+    },
+    "home": "/home/ubuntu/.hermes-ran-agent/lite",
+    "profile": "ran-assistant-lite"
+  },
+  "previousOverlay": {
+    "dropIn": "absent",
+    "files": [
+      {"path": "node_bridge/src/coReading/mcpServer.mjs", "sha256": "455700118e12eb312499ecb7d3e6484b67cc429b5afe813f26761eaf97b2570b"},
+      {"path": "node_bridge/src/externalMcp/gatewayMcpServer.mjs", "sha256": "8f29309aaa84b4be001771bf372a1dc632ad0d02286ec43bb595faca72143688"},
+      {"path": "node_bridge/src/mediaGenerationMcpServer.mjs", "sha256": "6c224bc569ef40df3e18c019cbb35d0a1b05c093ad7ba6ebd40014667bd7f79d"},
+      {"path": "node_bridge/src/mediaReaderMcpServer.mjs", "sha256": "3beb916e4731c8c2d6639b1a7b76f006f38890ce1bdff0ec8b357fc5ff9b8896"},
+      {"path": "node_bridge/src/personalMemoryMcpServer.mjs", "sha256": "621976948619cfa95b11446a7e80738a061ae511c233415d39338bbaea358bd9"},
+      {"path": "node_bridge/src/searchHubMcpServer.mjs", "sha256": "7500111b190fc33b1a9fd60904db645faef2c7cb3e6ecfa6a12bce7b521be2a3"},
+      {"path": "node_bridge/src/socialReaderMcpServer.mjs", "sha256": "c659e5edfe31159bebfbc5e290a82b8c59e014dd7fda9e201ec0af6e0c60cddb"},
+      {"path": "node_bridge/src/stickerCatalogMcpServer.mjs", "sha256": "818251c9b2fa88bb03ec17fdfdb6ed4f274fd59c1caffb98bcaa161eadcd0b27"}
+    ]
+  },
+  "candidateOverlay": {
+    "files": [
+      {"path": "node_bridge/src/coReading/mcpServer.mjs", "sha256": "455700118e12eb312499ecb7d3e6484b67cc429b5afe813f26761eaf97b2570b"},
+      {"path": "node_bridge/src/externalMcp/gatewayMcpServer.mjs", "sha256": "8f29309aaa84b4be001771bf372a1dc632ad0d02286ec43bb595faca72143688"},
+      {"path": "node_bridge/src/mediaGenerationMcpServer.mjs", "sha256": "6c224bc569ef40df3e18c019cbb35d0a1b05c093ad7ba6ebd40014667bd7f79d"},
+      {"path": "node_bridge/src/mediaReaderMcpServer.mjs", "sha256": "3beb916e4731c8c2d6639b1a7b76f006f38890ce1bdff0ec8b357fc5ff9b8896"},
+      {"path": "node_bridge/src/personalMemoryMcpServer.mjs", "sha256": "1e119410bc828f4ebd843e419ad712a68e4c08e9c188ba5f002fe4108d8e49e8"},
+      {"path": "node_bridge/src/searchHubMcpServer.mjs", "sha256": "7500111b190fc33b1a9fd60904db645faef2c7cb3e6ecfa6a12bce7b521be2a3"},
+      {"path": "node_bridge/src/socialReaderMcpServer.mjs", "sha256": "c659e5edfe31159bebfbc5e290a82b8c59e014dd7fda9e201ec0af6e0c60cddb"},
+      {"path": "node_bridge/src/stickerCatalogMcpServer.mjs", "sha256": "818251c9b2fa88bb03ec17fdfdb6ed4f274fd59c1caffb98bcaa161eadcd0b27"}
+    ]
+  }
+}

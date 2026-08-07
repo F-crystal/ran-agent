@@ -1,0 +1,138 @@
+from __future__ import annotations
+
+import importlib.util
+import json
+from types import SimpleNamespace
+from unittest.mock import patch
+from pathlib import Path
+
+
+SCRIPT = Path(__file__).parents[1] / "scripts/deploy-hermes-companion-overlay.py"
+SPEC = importlib.util.spec_from_file_location("deploy_hermes_companion_overlay", SCRIPT)
+assert SPEC and SPEC.loader
+MODULE = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(MODULE)
+
+
+def test_overlay_digest_and_dropin_are_stable(tmp_path: Path) -> None:
+    files = {path: path.encode() for path in MODULE.OVERLAY_PATHS}
+    assert MODULE.overlay_digest(files) == MODULE.overlay_digest(dict(reversed(files.items())))
+
+    root = tmp_path / "overlay"
+    dropin = MODULE.render_dropin(root).decode()
+    lines = dropin.splitlines()
+    assert lines[:2] == ["[Service]", "BindReadOnlyPaths="]
+    assert len(lines) == len(MODULE.OVERLAY_PATHS) + 2
+    for relative in MODULE.OVERLAY_PATHS:
+        assert f"BindReadOnlyPaths={root / relative}:/opt/ran_agent/{relative}" in lines
+
+
+def test_overlay_revision_is_content_addressed_and_read_only(tmp_path: Path) -> None:
+    files = {path: f"payload:{path}".encode() for path in MODULE.OVERLAY_PATHS}
+    root = tmp_path / "overlay"
+    tmp_path.chmod(0o755)
+    original_runtime_root = MODULE.RUNTIME_ROOT
+    MODULE.RUNTIME_ROOT = tmp_path
+    try:
+        MODULE.build_overlay(root, files)
+        MODULE.build_overlay(root, files)
+    finally:
+        MODULE.RUNTIME_ROOT = original_runtime_root
+
+    for relative, value in files.items():
+        target = root / relative
+        assert target.read_bytes() == value
+        assert target.stat().st_mode & 0o222 == 0
+
+
+def test_manifest_changes_only_personal_memory_and_stale_rollback_fails() -> None:
+    manifest = json.loads((SCRIPT.parents[1] / "docs/governance/hermes_companion_overlay.v1.json").read_text())
+    previous = MODULE.manifest_files(manifest, "previousOverlay")
+    candidate = MODULE.manifest_files(manifest, "candidateOverlay")
+    assert [path for path in MODULE.OVERLAY_PATHS if previous[path] != candidate[path]] == [
+        "node_bridge/src/personalMemoryMcpServer.mjs"
+    ]
+
+    state = {
+        "status": "accepted",
+        "applied_dropin_sha256": "dropin-v1",
+        "candidate_namespace_digests": candidate,
+    }
+    MODULE.require_current_transaction(state, "dropin-v1", candidate)
+    MODULE.require_current_transaction(state, "dropin-v1", None)
+    try:
+        MODULE.require_current_transaction(state, "dropin-v2", candidate)
+    except MODULE.OverlayError:
+        pass
+    else:
+        raise AssertionError("stale rollback must fail")
+
+    activating = {
+        "status": "activating",
+        "previous_namespace_digests": previous,
+        "candidate_namespace_digests": candidate,
+    }
+    MODULE.require_current_transaction(activating, None, None)
+
+
+def test_accepted_state_write_failure_triggers_rollback(tmp_path: Path) -> None:
+    files = {path: path.encode() for path in MODULE.OVERLAY_PATHS}
+    context = {
+        "repo": tmp_path,
+        "manifest": {},
+        "node_bin": Path("/bin/true"),
+        "files": files,
+        "digest": MODULE.overlay_digest(files),
+        "root": tmp_path / "overlay",
+        "baseline": {},
+        "previous_digests": {path: "old" for path in MODULE.OVERLAY_PATHS},
+        "required_head": "2" * 40,
+    }
+    statuses = []
+    rolled_back = []
+
+    def write_state(_path, value):
+        statuses.append(value["status"])
+        if value["status"] == "accepted":
+            raise OSError("simulated durable-state failure")
+
+    with (
+        patch.object(MODULE, "TRANSACTION_ROOT", tmp_path / "transactions"),
+        patch.object(MODULE, "DROPIN", tmp_path / "30-companion-overlay.conf"),
+        patch.object(MODULE, "preflight", return_value=context),
+        patch.object(MODULE, "service_active", return_value=True),
+        patch.object(MODULE, "build_overlay"),
+        patch.object(MODULE, "stop_services"),
+        patch.object(MODULE, "start_services"),
+        patch.object(MODULE, "atomic_write"),
+        patch.object(MODULE, "verify_overlay", return_value={"hermes_pid": 1, "digests": {}}),
+        patch.object(MODULE, "write_json", side_effect=write_state),
+        patch.object(MODULE, "rollback", side_effect=lambda *_args: rolled_back.append(True)),
+    ):
+        try:
+            MODULE.apply(SimpleNamespace(candidate="1" * 40))
+        except OSError as error:
+            assert "durable-state" in str(error)
+        else:
+            raise AssertionError("accepted state write failure must propagate")
+
+    assert statuses == ["prepared", "activating", "accepted"]
+    assert rolled_back == [True]
+
+
+def test_capacity_keeps_the_existing_15_gib_floor() -> None:
+    enough = SimpleNamespace(
+        f_bavail=MODULE.MIN_FREE_BYTES + 2 * 1024 * 1024,
+        f_frsize=1,
+        f_favail=1000,
+    )
+    low = SimpleNamespace(f_bavail=MODULE.MIN_FREE_BYTES, f_frsize=1, f_favail=1000)
+    with patch.object(MODULE.os, "statvfs", return_value=enough):
+        MODULE.require_capacity({"one": b"x"})
+    with patch.object(MODULE.os, "statvfs", return_value=low):
+        try:
+            MODULE.require_capacity({"one": b"x"})
+        except MODULE.OverlayError:
+            pass
+        else:
+            raise AssertionError("capacity below the floor must fail")
