@@ -207,9 +207,14 @@ def pid_socket_inodes(pid: int) -> set[str]:
 
 def require_gateway_identity(pid: int, manifest: dict) -> None:
     runtime = manifest["runtime"]
-    executable = require_exact_file(runtime["executable"])
+    require_exact_file(runtime["executable"])
+    process = runtime["process"]
+    executable = require_exact_file(process["executable"])
     if Path(f"/proc/{pid}/exe").resolve() != executable:
-        raise OverlayError("Hermes MainPID is not the approved v0.20 executable")
+        raise OverlayError("Hermes MainPID interpreter is not the approved v0.20 executable")
+    argv = [field.decode() for field in Path(f"/proc/{pid}/cmdline").read_bytes().split(b"\0") if field]
+    if argv != process["argv"]:
+        raise OverlayError("Hermes MainPID argv differs from the approved v0.20 command")
     listeners = socket_inodes_for_port(8642)
     if len(listeners) != 1 or not listeners.issubset(pid_socket_inodes(pid)) or socket_inodes_for_port(8643):
         raise OverlayError("Hermes listener ownership/topology differs")

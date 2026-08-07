@@ -47,6 +47,7 @@ def test_overlay_revision_is_content_addressed_and_read_only(tmp_path: Path) -> 
 
 def test_manifest_changes_only_personal_memory_and_stale_rollback_fails() -> None:
     manifest = json.loads((SCRIPT.parents[1] / "docs/governance/hermes_companion_overlay.v1.json").read_text())
+    assert manifest["runtime"]["process"]["argv"][2:4] == ["-m", "hermes_cli.main"]
     previous = MODULE.manifest_files(manifest, "previousOverlay")
     candidate = MODULE.manifest_files(manifest, "candidateOverlay")
     assert [path for path in MODULE.OVERLAY_PATHS if previous[path] != candidate[path]] == [

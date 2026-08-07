@@ -11,6 +11,25 @@
       "path": "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes",
       "sha256": "d61e2094ec09adf889d1cd9938e789a1e2a2ca38c10c9523823a34276bc9f685"
     },
+    "process": {
+      "executable": {
+        "path": "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/python/bin/python3.12",
+        "sha256": "acd18a584fb167c52f79c0861c093fc1476691554db8e19747c5dc3761006252"
+      },
+      "argv": [
+        "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/python/bin/python3",
+        "-P",
+        "-m",
+        "hermes_cli.main",
+        "-p",
+        "ran-assistant-lite",
+        "gateway",
+        "run",
+        "--replace",
+        "--external-supervisor",
+        "--accept-hooks"
+      ]
+    },
     "node": {
       "path": "/opt/nodejs/node-v22.22.2-linux-x64/bin/node",
       "sha256": "81925c0995b5c1427b5d538e6a90ca2fdc4daffb786b09af749beaf7369d4e90"
