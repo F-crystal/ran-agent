@@ -41,7 +41,7 @@ export function getCoReadingWebConfig(env = process.env) {
     translationTargetLang: String(env.CO_READING_TRANSLATION_TARGET_LANG || DEFAULT_TRANSLATION_TARGET_LANG).trim() || DEFAULT_TRANSLATION_TARGET_LANG,
     askContextChars: Math.max(120, Math.min(Number.parseInt(String(env.CO_READING_ASK_CONTEXT_CHARS || DEFAULT_ASK_CONTEXT_CHARS), 10) || DEFAULT_ASK_CONTEXT_CHARS, 4000)),
     askThreadLimit: Math.max(0, Math.min(Number.parseInt(String(env.CO_READING_ASK_THREAD_LIMIT || DEFAULT_ASK_THREAD_LIMIT), 10) || DEFAULT_ASK_THREAD_LIMIT, 12)),
-    vaultDir: String(env.CO_READING_VAULT_DIR || env.OBSIDIAN_MEMORY_VAULT_DIR || path.join(PROJECT_ROOT, 'vault')).trim(),
+    vaultDir: String(env.CO_READING_VAULT_DIR || path.join(PROJECT_ROOT, 'vault')).trim(),
   };
 }
 

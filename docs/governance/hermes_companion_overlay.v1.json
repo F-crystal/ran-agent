@@ -54,16 +54,43 @@
       {"path": "node_bridge/src/stickerCatalogMcpServer.mjs", "sha256": "818251c9b2fa88bb03ec17fdfdb6ed4f274fd59c1caffb98bcaa161eadcd0b27"}
     ]
   },
+  "previousProfile": {
+    "source": "hermes/profile/config.companion.yaml",
+    "destinations": [
+      "/home/ubuntu/.hermes-ran-agent/lite/config.yaml",
+      "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml"
+    ],
+    "sha256": "f015cdfd63469befe6d6c57172b78705418707e8a3756c670782db2241717a17"
+  },
+  "previousPython": {
+    "dropIn": "absent",
+    "source": "src/personal_agent/service.py",
+    "destination": "/opt/ran_agent/src/personal_agent/service.py",
+    "sha256": "6be1bc0e372649a4abfca3e8e518861762485666e862296fb44e1fbb91dd8339"
+  },
   "candidateOverlay": {
     "files": [
       {"path": "node_bridge/src/coReading/mcpServer.mjs", "sha256": "455700118e12eb312499ecb7d3e6484b67cc429b5afe813f26761eaf97b2570b"},
       {"path": "node_bridge/src/externalMcp/gatewayMcpServer.mjs", "sha256": "8f29309aaa84b4be001771bf372a1dc632ad0d02286ec43bb595faca72143688"},
       {"path": "node_bridge/src/mediaGenerationMcpServer.mjs", "sha256": "6c224bc569ef40df3e18c019cbb35d0a1b05c093ad7ba6ebd40014667bd7f79d"},
       {"path": "node_bridge/src/mediaReaderMcpServer.mjs", "sha256": "3beb916e4731c8c2d6639b1a7b76f006f38890ce1bdff0ec8b357fc5ff9b8896"},
-      {"path": "node_bridge/src/personalMemoryMcpServer.mjs", "sha256": "1e119410bc828f4ebd843e419ad712a68e4c08e9c188ba5f002fe4108d8e49e8"},
+      {"path": "node_bridge/src/personalMemoryMcpServer.mjs", "sha256": "b02c29591cc1043f8b19c5cd66c5826224ba2e4ded618c84e7b3fe2fd4fc6ce7"},
       {"path": "node_bridge/src/searchHubMcpServer.mjs", "sha256": "7500111b190fc33b1a9fd60904db645faef2c7cb3e6ecfa6a12bce7b521be2a3"},
       {"path": "node_bridge/src/socialReaderMcpServer.mjs", "sha256": "c659e5edfe31159bebfbc5e290a82b8c59e014dd7fda9e201ec0af6e0c60cddb"},
       {"path": "node_bridge/src/stickerCatalogMcpServer.mjs", "sha256": "818251c9b2fa88bb03ec17fdfdb6ed4f274fd59c1caffb98bcaa161eadcd0b27"}
     ]
+  },
+  "candidateProfile": {
+    "source": "hermes/profile/config.companion.yaml",
+    "destinations": [
+      "/home/ubuntu/.hermes-ran-agent/lite/config.yaml",
+      "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/config.yaml"
+    ],
+    "sha256": "1d127a97aa9acd6207596dfef87f82e0ca3fb82a8b7014cde209c51879d792ac"
+  },
+  "candidatePython": {
+    "source": "src/personal_agent/service.py",
+    "destination": "/opt/ran_agent/src/personal_agent/service.py",
+    "sha256": "c9f15820148036516a6c9cfda0ba16102a288dd90f01ebb1bd67ff58345b77fd"
   }
 }

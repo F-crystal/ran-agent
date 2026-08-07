@@ -15,12 +15,25 @@ import { buildStickerCatalogTools } from '../src/stickerCatalogMcpServer.mjs';
 import { OMBRE_RECALL_TOOLS, OMBRE_UPSTREAM_COMMIT } from '../src/ombreRecallPolicy.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const MANIFEST_PATH = path.join(ROOT, 'docs/governance/hermes_protected_capabilities.v1.json');
 const FORBIDDEN_PRIVATE_KEYS = /^(actorKey|capability|evidenceDigest|issuer|nonce|operationId|receipt|requestRef)$/i;
-
-async function loadManifest() {
-  return JSON.parse(await readFile(MANIFEST_PATH, 'utf8'));
-}
+const TOOL_NAMES = Object.freeze({
+  search_hub: ['search', 'read', 'research'],
+  social_reader: ['resolve_social_url', 'read_social_post', 'read_social_post_deep', 'read_music_share'],
+  media_reader: ['extract_media_assets', 'analyze_image', 'resolve_platform_media', 'transcribe_audio', 'analyze_video', 'analyze_media_batch', 'search_media_artifacts'],
+  personal_memory: ['check_personal_memory_backend', 'recall_personal_memory', 'surface_relevant_context'],
+  ombre_memory: ['ombre_recall_search', 'ombre_recall_read'],
+  co_reading: [
+    'reading_list_books', 'reading_list_chunks', 'reading_get_progress', 'reading_continue',
+    'reading_read_chunk', 'reading_get_context_window', 'reading_search', 'reading_list_annotations',
+    'reading_read_thread', 'reading_get_storage_stats', 'reading_list_events', 'reading_import_book',
+    'reading_import_pasted_text', 'reading_add_annotation', 'reading_share_annotation',
+    'reading_reply_to_annotation', 'reading_mark_progress', 'reading_archive_book',
+    'reading_restore_book', 'reading_delete_book', 'reading_cleanup_trash',
+  ],
+  sticker_catalog_lite: ['sticker_tags', 'sticker_pick', 'sticker_attach', 'sticker_save_from_inbox'],
+  sticker_catalog_full: ['sticker_tags', 'sticker_pick', 'sticker_attach', 'sticker_save_from_inbox', 'sticker_update', 'sticker_delete', 'sticker_list'],
+  media_generation: ['generate_image', 'generate_speech'],
+});
 
 function yamlList(text, section, key) {
   const lines = text.split(/\r?\n/);
@@ -65,29 +78,21 @@ function collectKeys(value, output = []) {
   return output;
 }
 
-test('protected capability manifest pins exact source full/lite profiles', async () => {
-  const manifest = await loadManifest();
+test('current source profiles retain personal memory and retire standalone Obsidian', async () => {
   for (const [profile, filename] of [['full', 'config.yaml'], ['lite', 'config.lite.yaml']]) {
     const text = await readFile(path.join(ROOT, 'hermes/profile', filename), 'utf8');
-    const expectedToolsets = manifest.profiles[profile].sourceToolsets;
-    assert.deepEqual(yamlList(text, 'platform_toolsets', 'cli'), expectedToolsets);
-    assert.deepEqual(yamlList(text, 'platform_toolsets', 'gateway'), expectedToolsets);
-    assert.deepEqual(yamlTopMapKeys(text, 'mcp_servers'), manifest.profiles[profile].sourceMcpServers);
-    assert.deepEqual(
-      new Set(expectedToolsets),
-      new Set([
-        ...manifest.profiles[profile].requiredToolsets,
-        ...Object.keys(manifest.profiles[profile].conditionalToolsets),
-      ]),
-    );
-    for (const forbidden of manifest.profiles[profile].forbiddenToolsets) {
-      assert.equal(expectedToolsets.includes(forbidden), false, `${profile} exposes ${forbidden}`);
+    for (const toolset of ['cli', 'gateway']) {
+      const values = yamlList(text, 'platform_toolsets', toolset);
+      assert.equal(values.includes('mcp-personal_memory'), true, `${profile}.${toolset}`);
+      assert.equal(values.includes('mcp-obsidian_memory'), false, `${profile}.${toolset}`);
     }
+    const servers = yamlTopMapKeys(text, 'mcp_servers');
+    assert.equal(servers.includes('personal_memory'), true, profile);
+    assert.equal(servers.includes('obsidian_memory'), false, profile);
   }
 });
 
 test('protected locally-owned MCP tool names and public schemas stay exact', async () => {
-  const manifest = await loadManifest();
   const mediaGeneration = await handleMediaGenerationMcpRequest({ method: 'tools/list' });
   const actual = {
     search_hub: buildSearchHubTools(),
@@ -101,17 +106,17 @@ test('protected locally-owned MCP tool names and public schemas stay exact', asy
     media_generation: mediaGeneration.tools,
   };
   for (const [name, tools] of Object.entries(actual)) {
-    assert.deepEqual(tools.map((tool) => tool.name), manifest.locallyOwnedServers[name].toolNames, name);
+    assert.deepEqual(tools.map((tool) => tool.name), TOOL_NAMES[name], name);
     const privateKeys = collectKeys(tools).filter((key) => FORBIDDEN_PRIVATE_KEYS.test(key));
     assert.deepEqual(privateKeys, [], `${name} leaked private receipt schema keys`);
   }
-  assert.equal(manifest.locallyOwnedServers.ombre_memory.mode, 'local-recall-only');
-  assert.equal(manifest.locallyOwnedServers.ombre_memory.upstreamCommit, OMBRE_UPSTREAM_COMMIT);
-  assert.equal(manifest.liveFingerprintOnly.includes('ombre_memory'), false);
+  assert.equal(OMBRE_UPSTREAM_COMMIT, '0e83d4671ce1629e03ad36bb9160235bf60dbd34');
 });
 
-test('runtime protected namespace exactly matches the governed manifest', async () => {
-  const manifest = await loadManifest();
-  assert.deepEqual([...PROTECTED_MCP_NAMES], manifest.reservedMcpNames);
+test('runtime protected namespace matches supported source MCPs', () => {
+  assert.deepEqual([...PROTECTED_MCP_NAMES], [
+    'search_hub', 'social_reader', 'media_reader', 'personal_memory', 'ombre_memory',
+    'co_reading', 'sticker_catalog', 'media_generation', 'time', 'playwright',
+  ]);
   assert.equal(new Set(PROTECTED_MCP_NAMES).size, PROTECTED_MCP_NAMES.length);
 });

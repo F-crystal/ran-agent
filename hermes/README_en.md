@@ -141,8 +141,7 @@ ran-agent uses repo-owned MCP services:
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares |
 | `mimo_power` | Retired: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles |
-| `personal_memory` | Unified Python memory entry combining local memory and read-only Ombre |
-| `obsidian_memory` | Optional Obsidian vault semantic search; registered but not currently runtime-ready |
+| `personal_memory` | Unified Python memory entry combining local memory, read-only Ombre, and bounded Vault recall |
 | `media_generation` | Image and speech generation in the unified profile |
 | `playwright` | Browser automation in the unified profile |
 | `tavily` | Optional lower-level web search provider for Search Hub compatibility |
@@ -166,10 +165,6 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `CO_READING_WEB_ENABLED`, `CO_READING_WEB_ACCESS_TOKEN` | Optional Tailscale Web reader switch and browser access token |
 | `CO_READING_ASK_CONTEXT_CHARS`, `CO_READING_ASK_THREAD_LIMIT` | Context window and recent-thread limits for Hermes co-reading replies |
 | `CO_READING_VAULT_DIR` | Target directory for explicit shared annotation deposits to Vault |
-| `OBSIDIAN_MEMORY_VAULT_DIR` | Obsidian vault path |
-| `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB path |
-| `OBSIDIAN_INDEX_DEVICE` | Default `cpu` on Linux servers |
-| `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | Set to `1` only during explicit maintenance |
 | `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | Internal Ombre Brain service switches; they do not authorize direct Hermes access |
 | `OMBRE_BRAIN_RUNNER` | Ombre Brain runner; production uses pinned `source` |
 | `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream, default `https://github.com/P0luz/Ombre-Brain` |
@@ -186,28 +181,6 @@ Secrets must live in machine-local `.env` files, for example:
 ```
 
 Do not write `DEEPSEEK_API_KEY`, `HERMES_API_KEY`, platform cookies, proxy URLs, or login state into this repository.
-
----
-
-## Obsidian Memory MCP
-
-`obsidian_memory` is designed around `obsidian-index` semantic search. Production inherited a malformed partial uv tool, so the surface is registered but not runtime-ready. Create a separate space-bounded plan before installing its Torch/Transformers dependency tree.
-
-Recommended server values:
-
-```bash
-export HF_ENDPOINT=https://hf-mirror.com
-export HF_HOME=/home/ubuntu/.hermes-ran-agent/hf-home
-export TRANSFORMERS_CACHE=/home/ubuntu/.hermes-ran-agent/hf-home
-export SENTENCE_TRANSFORMERS_HOME=/home/ubuntu/.hermes-ran-agent/sentence-transformers
-export OBSIDIAN_MEMORY_VAULT_DIR=/opt/ran_agent/vault
-export OBSIDIAN_MEMORY_INDEX_PATH=/opt/ran_agent/data/obsidian-memory-index.duckdb
-export OBSIDIAN_INDEX_DEVICE=cpu
-export OBSIDIAN_MEMORY_REINDEX=0
-export OBSIDIAN_MEMORY_WATCH=0
-```
-
-`OBSIDIAN_MEMORY_INDEX_PATH` is a single-writer DuckDB file. Do not run multiple `obsidian_memory` MCP instances against the same database.
 
 ---
 

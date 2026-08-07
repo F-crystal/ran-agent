@@ -49,7 +49,6 @@ platform_toolsets:
     - mcp-search_hub
     - mcp-sticker_catalog
     - mcp-personal_memory
-    - mcp-obsidian_memory
     - mcp-ombre_memory
     - mcp-external_mcp_gateway
   gateway:
@@ -63,7 +62,6 @@ platform_toolsets:
     - mcp-search_hub
     - mcp-sticker_catalog
     - mcp-personal_memory
-    - mcp-obsidian_memory
     - mcp-ombre_memory
     - mcp-external_mcp_gateway
 
@@ -125,14 +123,6 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh
     timeout: 120
     connect_timeout: 60
-
-  obsidian_memory:
-    command: bash
-    args:
-      - -lc
-      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_obsidian_memory_mcp.sh
-    timeout: 180
-    connect_timeout: 90
 
   ombre_memory:
     url: "${OMBRE_RECALL_MCP_URL}"

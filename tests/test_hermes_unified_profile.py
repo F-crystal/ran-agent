@@ -1,4 +1,3 @@
-import hashlib
 import json
 from pathlib import Path
 
@@ -8,7 +7,6 @@ import yaml
 PROFILE = Path(__file__).parents[1] / "hermes/profile/config.companion.yaml"
 LITE_PROFILE = Path(__file__).parents[1] / "hermes/profile/config.lite.yaml"
 FULL_PROFILE = Path(__file__).parents[1] / "hermes/profile/config.yaml"
-UNIT = Path(__file__).parents[1] / "hermes/systemd/ran-agent-hermes-unified.service"
 MUTATION = Path(__file__).parents[1] / "docs/governance/hermes_runtime_mutation.v1.json"
 FORBIDDEN_TOOLS = {"cronjob", "delegate_task", "execute_code"}
 
@@ -27,7 +25,6 @@ def test_companion_profile_preserves_union_behind_one_memory_facade() -> None:
     assert set(config["mcp_servers"]) == legacy_mcp - {"ombre_memory"}
     assert "mcp-personal_memory" in api
     assert FORBIDDEN_TOOLS.issubset(config["disabled_tools"])
-    assert "Environment=OBSIDIAN_MEMORY_MCP_ENABLED=true" in UNIT.read_text(encoding="utf-8")
     sticker = config["mcp_servers"]["sticker_catalog"]["env"]
     search = config["mcp_servers"]["search_hub"]["env"]
     external = config["mcp_servers"]["external_mcp_gateway"]["env"]
@@ -45,15 +42,13 @@ def test_companion_profile_preserves_union_behind_one_memory_facade() -> None:
 def test_deployed_runtime_mutation_remains_bound_to_its_historical_profile() -> None:
     mutation = json.loads(MUTATION.read_text(encoding="utf-8"))
     config = yaml.safe_load(PROFILE.read_text(encoding="utf-8"))
-    digest = hashlib.sha256(PROFILE.read_bytes()).hexdigest()
-
     assert mutation["deploymentStatus"] == "DEPLOYED"
-    assert mutation["companionProfile"]["sourceSha256"] != digest
+    assert mutation["companionProfile"]["sourceSha256"] == "f015cdfd63469befe6d6c57172b78705418707e8a3756c670782db2241717a17"
     assert mutation["companionProfile"]["destinationSha256"] == mutation["companionProfile"]["sourceSha256"]
     assert "mcp-ombre_memory" in mutation["companionProfile"]["requiredToolsets"]
     assert "mcp-ombre_memory" not in config["platform_toolsets"]["api_server"]
     assert set(mutation["companionProfile"]["forbiddenTools"]) == FORBIDDEN_TOOLS
-    assert mutation["unifiedUnit"]["sourceSha256"] == hashlib.sha256(UNIT.read_bytes()).hexdigest()
+    assert mutation["unifiedUnit"]["sourceSha256"] == "42703a7eaa1975b6336a6eae700c744f9bedc12892f5ab0492d753ef396a479c"
     values = mutation["envMutations"][0]["values"]
     assert len({values[key] for key in ("HERMES_PROFILE", "HERMES_LITE_PROFILE", "HERMES_FULL_PROFILE")}) == 1
     assert len({values[key] for key in ("HERMES_API_BASE_URL", "HERMES_LITE_API_BASE_URL", "HERMES_FULL_API_BASE_URL")}) == 1

@@ -2,11 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-07)
 
-`DEPLOYED_RUNTIME_ACCEPTANCE`（2026-08-06）：生产代码为 clean `0cbeed7`，Hermes 由 exact candidate `0b793e8` 运行统一 v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full 服务 inactive/disabled。两次 source-only 事务已接受到当前 SHA，完整时间窗与边界见 `docs/governance/current_runtime_status.md`。
-
-unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` 已归档并推送，但尚未部署到生产。它保留 O2 并撤销新增 Linux 服务身份；O1/O2 候选仍是 `ARCHIVED`、未部署，`total_delete` unsupported，Gate 5 未授权，Package B.2/B.3 未开始。
+生产运行统一 Hermes v0.20 + DeepSeek V4 Flash；精确代码 SHA、证据与回滚边界见 `docs/governance/current_runtime_status.md`。
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -14,7 +12,7 @@ unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` �
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。生产统一 profile 使用 DeepSeek V4 Flash，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；V4 Pro 只保留为显式 opt-in。`search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory` 等 MCP 工具负责联网事实、媒体、社交内容、表情包目录和个人记忆；optional `obsidian_memory` 已注册但当前尚未 runtime-ready。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
+Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。生产统一 profile 使用 DeepSeek V4 Flash，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；V4 Pro 只保留为显式 opt-in。`search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory` 等 MCP 工具负责联网事实、媒体、社交内容、表情包目录、Vault 和个人记忆。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
 
 OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产前台和当前候选都使用 Hermes + DeepSeek V4 Flash non-thinking，Pro 仅显式启用。
 
@@ -40,7 +38,7 @@ Python backend
 
 MCP services
   -> search_hub / media_reader / social_reader / sticker_catalog / co_reading / media_generation
-  -> personal_memory / optional obsidian_memory (currently parked) / time / playwright
+  -> personal_memory / time / playwright
 ```
 
 ### 统一 Hermes Gateway
@@ -104,8 +102,7 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 | `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | unified |
 | `mimo_power` | RETIRED：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles | historical |
 | `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | unified |
-| `personal_memory` | 个人记忆召回与 backend 健康检查 | unified |
-| `obsidian_memory` | Obsidian vault 语义检索 | optional / registered / not runtime-ready |
+| `personal_memory` | 个人记忆、Ombre 与受控 Vault 召回；backend 健康检查 | unified |
 | `external_mcp_gateway` | 受治理的动态 External MCP broker | governed / source profiles disabled-by-default |
 | `media_generation` | 图片和语音生成 | unified |
 | `playwright` | 浏览器自动化和动态页面调试 | unified |
@@ -211,7 +208,6 @@ bash scripts/diagnose-hermes-tools.sh
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR 和媒体生成 |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | provider-neutral vault 维护 runner；默认 Qwen-compatible，小步处理 inbox，默认超过 10 条或最老 120 分钟触发维护 |
 | 社交平台 | `SESSDATA` | B 站认证可选；小红书为 public-only，不使用 `XHS_COOKIE` |
-| Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault 检索与索引 |
 | 媒体上下文 | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | 默认 compact，可回退 legacy |
 | UV cache | `UV_CACHE_DIR`, `UV_TOOL_DIR`, `UV_LINK_MODE`, `UV_PYTHON_DOWNLOADS` | 固定 uv/uvx 缓存路径，防止磁盘膨胀 |
 | XHS public parser | `XHS_GENERIC_FALLBACK_READY_PATH`, `XHS_PUBLIC_SIDECAR_URL`, `XHS_PUBLIC_SIDECAR_TIMEOUT_MS` | 小红书公开解析与 XHS-Downloader sidecar；不使用登录态 |

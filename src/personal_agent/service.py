@@ -646,18 +646,32 @@ class PersonalAgentService:
             response_mode=response_mode,
             explicit=True,
         )
+        knowledge_hits = self._knowledge_retriever.retrieve(user_text)
+        rendered_context = recall.rendered_context
+        if knowledge_hits:
+            knowledge_context = "【知识库线索】\n" + "\n".join(
+                f"- {hit.title}（{hit.path}）：{hit.snippet}" for hit in knowledge_hits
+            )
+            rendered_context = f"{rendered_context}\n\n{knowledge_context}" if rendered_context else knowledge_context
+        used_sources = list(recall.used_sources)
+        if knowledge_hits:
+            used_sources.append("vault_knowledge")
+        source_status = dict(recall.source_statuses)
+        source_status["vault_knowledge"] = "hit" if knowledge_hits else "empty"
+        injection_level = recall.injection_level if recall.should_inject else ("light" if knowledge_hits else "none")
         return {
-            "should_inject": recall.should_inject,
+            "should_inject": bool(rendered_context.strip()),
             "short_term_memories": list(recall.short_term_memories),
             "long_term_memories": list(recall.long_term_memories),
             "core_memories": list(recall.core_memories),
             "rendered_context": trim_context(
-                recall.rendered_context,
+                rendered_context,
                 self._config.memory_context_max_chars,
             ),
-            "used_sources": list(recall.used_sources),
-            "source_status": dict(recall.source_statuses),
-            "injection_level": recall.injection_level,
+            "used_sources": used_sources,
+            "source_status": source_status,
+            "knowledge_hits": [hit.__dict__ for hit in knowledge_hits],
+            "injection_level": injection_level,
         }
 
     def update_memory(self, user_text: str) -> dict[str, object]:

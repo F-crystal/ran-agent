@@ -282,8 +282,6 @@ run_node_test() {
       EXTERNAL_MCP_GATEWAY_NODE_BIN="$NODE_BIN" \
       RAN_AGENT_GLOBAL_TIMELINE_PATH="$case_root/tmp/state/global-timeline.jsonl" \
       RAN_AGENT_TIMELINE_ARCHIVE_DIR="$case_root/tmp/state/timeline-archive" \
-      OBSIDIAN_MEMORY_VAULT_DIR="$case_root/vault" \
-      OBSIDIAN_MEMORY_INDEX_PATH="$case_root/tmp/state/obsidian-memory-index.duckdb" \
       CO_READING_ROOT_DIR="$case_root/co-reading" \
       STICKER_CATALOG_ROOT_DIR="$case_root/tmp/state/stickers" \
       WEIXIN_SDK_INBOUND_MEDIA_DIRS="$case_root/media" \
@@ -331,8 +329,6 @@ run_node_smoke() {
       EXTERNAL_MCP_GATEWAY_NODE_BIN="$NODE_BIN" \
       RAN_AGENT_GLOBAL_TIMELINE_PATH="$case_root/tmp/state/global-timeline.jsonl" \
       RAN_AGENT_TIMELINE_ARCHIVE_DIR="$case_root/tmp/state/timeline-archive" \
-      OBSIDIAN_MEMORY_VAULT_DIR="$case_root/vault" \
-      OBSIDIAN_MEMORY_INDEX_PATH="$case_root/tmp/state/obsidian-memory-index.duckdb" \
       CO_READING_ROOT_DIR="$case_root/co-reading" \
       STICKER_CATALOG_ROOT_DIR="$case_root/tmp/state/stickers" \
       WEIXIN_SDK_INBOUND_MEDIA_DIRS="$case_root/media" \

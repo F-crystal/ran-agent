@@ -98,8 +98,11 @@ the account without separate authorization.
   candidate-named controller, candidate ref, artifact, topology, snapshot state
   and sealed builder remain the retained evidence set.
 - Companion MCP overlay refreshes use the exact candidate-bound manifest and
-  narrow controller. They do not replace the Hermes executable, Home, source
-  checkout, env, database, or closed Runtime rollback authority:
+  narrow controller. The current contract mounts the exact candidate companion
+  profile read-only at the two existing Home profile paths so MCP registration
+  changes, MCP source changes and the one Python memory-facade source file
+  activate and roll back together. It does not replace the Hermes executable,
+  source checkout, database, or closed Runtime rollback authority:
 
   ```bash
   cd /opt/ran_agent
@@ -415,7 +418,6 @@ UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache
 UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
 UV_LINK_MODE=copy
 UV_PYTHON_DOWNLOADS=never
-OBSIDIAN_MEMORY_MCP_ENABLED=true
 OMBRE_BRAIN_ENABLED=true
 OMBRE_BRAIN_MCP_ENABLED=true
 OMBRE_BRAIN_RUNNER=source

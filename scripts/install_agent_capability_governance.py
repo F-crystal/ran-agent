@@ -135,7 +135,6 @@ Source: `/Users/fengran/.codex/config.toml` enabled plugin entries.
 - `sticker_catalog`
 - `media_reader`
 - `social_reader`
-- `obsidian_memory`
 - `personal_memory`
 - `ombre_memory`
 - `search_hub`

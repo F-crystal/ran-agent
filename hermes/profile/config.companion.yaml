@@ -73,7 +73,6 @@ platform_toolsets:
     - mcp-sticker_catalog
     - mcp-media_generation
     - mcp-personal_memory
-    - mcp-obsidian_memory
     - mcp-playwright
     - mcp-external_mcp_gateway
   api_server: *companion_toolsets
@@ -152,14 +151,6 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_personal_memory_mcp.sh
     timeout: 120
     connect_timeout: 60
-
-  obsidian_memory:
-    command: bash
-    args:
-      - -lc
-      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_obsidian_memory_mcp.sh
-    timeout: 180
-    connect_timeout: 90
 
   playwright:
     command: bash

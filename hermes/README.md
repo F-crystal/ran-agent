@@ -139,8 +139,7 @@ ran-agent 使用仓库内 MCP 服务：
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享 |
 | `mimo_power` | 已退役：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles |
-| `personal_memory` | Python backend 的统一个人记忆入口，内部组合本地 memory 与只读 Ombre |
-| `obsidian_memory` | Optional Obsidian vault 语义检索；已注册但当前未 runtime-ready |
+| `personal_memory` | Python backend 的统一个人记忆入口，内部组合本地 memory、只读 Ombre 与受控 Vault 召回 |
 | `media_generation` | 图片和语音生成，统一 profile 可用 |
 | `playwright` | 浏览器自动化，统一 profile 可用 |
 | `tavily` | 可选底层网页搜索 provider，仅供 Search Hub 兼容使用 |
@@ -164,10 +163,6 @@ ran-agent 使用仓库内 MCP 服务：
 | `CO_READING_WEB_ENABLED`, `CO_READING_WEB_ACCESS_TOKEN` | 可选 Tailscale Web reader 开关和浏览器访问 token |
 | `CO_READING_ASK_CONTEXT_CHARS`, `CO_READING_ASK_THREAD_LIMIT` | Hermes 共读边注的上下文窗口和 thread 数量上限 |
 | `CO_READING_VAULT_DIR` | shared annotation 显式沉淀到 Vault 的目标目录 |
-| `OBSIDIAN_MEMORY_VAULT_DIR` | Obsidian vault 路径 |
-| `OBSIDIAN_MEMORY_INDEX_PATH` | Obsidian semantic index DuckDB 路径 |
-| `OBSIDIAN_INDEX_DEVICE` | Linux 服务器默认 `cpu` |
-| `OBSIDIAN_MEMORY_REINDEX`, `OBSIDIAN_MEMORY_WATCH` | 只在显式维护时设为 `1` |
 | `OMBRE_BRAIN_ENABLED`, `OMBRE_BRAIN_MCP_ENABLED` | 内部 Ombre Brain 服务开关；不授权 Hermes 直连 |
 | `OMBRE_BRAIN_RUNNER` | Ombre Brain runner；生产使用 pinned `source` |
 | `OMBRE_BRAIN_REPO_URL` | Ombre Brain canonical upstream，默认 `https://github.com/P0luz/Ombre-Brain` |
@@ -184,28 +179,6 @@ Secrets 必须放在机器本地 `.env`，例如：
 ```
 
 不要把 `DEEPSEEK_API_KEY`、`HERMES_API_KEY`、平台 Cookie、代理 URL 或登录态写入本仓库。
-
----
-
-## Obsidian Memory MCP
-
-`obsidian_memory` 设计为使用 `obsidian-index` 语义检索。当前生产继承的 uv tool 是畸形半安装，因此 surface 虽已注册但未 runtime-ready；补齐 Torch/Transformers 依赖前必须先做空间受限的独立安装计划。
-
-服务器推荐值：
-
-```bash
-export HF_ENDPOINT=https://hf-mirror.com
-export HF_HOME=/home/ubuntu/.hermes-ran-agent/hf-home
-export TRANSFORMERS_CACHE=/home/ubuntu/.hermes-ran-agent/hf-home
-export SENTENCE_TRANSFORMERS_HOME=/home/ubuntu/.hermes-ran-agent/sentence-transformers
-export OBSIDIAN_MEMORY_VAULT_DIR=/opt/ran_agent/vault
-export OBSIDIAN_MEMORY_INDEX_PATH=/opt/ran_agent/data/obsidian-memory-index.duckdb
-export OBSIDIAN_INDEX_DEVICE=cpu
-export OBSIDIAN_MEMORY_REINDEX=0
-export OBSIDIAN_MEMORY_WATCH=0
-```
-
-`OBSIDIAN_MEMORY_INDEX_PATH` 是单写 DuckDB 文件。不要让多个 `obsidian_memory` MCP 实例同时写同一个数据库。
 
 ---
 

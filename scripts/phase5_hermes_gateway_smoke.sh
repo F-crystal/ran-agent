@@ -71,9 +71,6 @@ stop_previous_phase5_processes() {
     stop_pid_file_process "$pid_file"
   done < <(find "$PHASE5_LOG_DIR" -path '*/hermes-gateway.pid' -type f -print0 2>/dev/null || true)
 
-  pkill -u "$(id -u)" -f 'scripts/start_obsidian_memory_mcp\.sh' >/dev/null 2>&1 || true
-  pkill -u "$(id -u)" -f 'scripts/obsidian_index_mcp_launcher\.py' >/dev/null 2>&1 || true
-  pkill -u "$(id -u)" -f 'obsidian-index mcp' >/dev/null 2>&1 || true
 }
 
 export RAN_AGENT_REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$ROOT_DIR}"
@@ -86,16 +83,6 @@ export TIME_MCP_PYTHON="${TIME_MCP_PYTHON:-$ROOT_DIR/.venv/bin/python}"
 export MCP_SERVER_TIME_PYTHON="${MCP_SERVER_TIME_PYTHON:-$ROOT_DIR/.venv/bin/python}"
 export PLAYWRIGHT_MCP_HEADLESS="${PLAYWRIGHT_MCP_HEADLESS:-true}"
 export PLAYWRIGHT_MCP_ISOLATED="${PLAYWRIGHT_MCP_ISOLATED:-true}"
-export HF_ENDPOINT="${HF_ENDPOINT:-https://hf-mirror.com}"
-export HF_HOME="${HF_HOME:-$HERMES_HOME/hf-home}"
-export TRANSFORMERS_CACHE="${TRANSFORMERS_CACHE:-$HF_HOME}"
-export SENTENCE_TRANSFORMERS_HOME="${SENTENCE_TRANSFORMERS_HOME:-$HERMES_HOME/sentence-transformers}"
-export OBSIDIAN_MEMORY_VAULT_DIR="${OBSIDIAN_MEMORY_VAULT_DIR:-$ROOT_DIR/vault}"
-export OBSIDIAN_MEMORY_INDEX_PATH="${OBSIDIAN_MEMORY_INDEX_PATH:-$ROOT_DIR/data/obsidian-memory-index.duckdb}"
-export OBSIDIAN_INDEX_DEVICE="${OBSIDIAN_INDEX_DEVICE:-cpu}"
-export OBSIDIAN_MEMORY_REINDEX="${OBSIDIAN_MEMORY_REINDEX:-0}"
-export OBSIDIAN_MEMORY_WATCH="${OBSIDIAN_MEMORY_WATCH:-0}"
-
 export API_SERVER_ENABLED="${API_SERVER_ENABLED:-true}"
 export API_SERVER_HOST="${API_SERVER_HOST:-$HERMES_HOST}"
 export API_SERVER_PORT="${API_SERVER_PORT:-$HERMES_PORT}"
@@ -118,13 +105,9 @@ export PHASE5_SMOKE_TIMEOUT_MS="${PHASE5_SMOKE_TIMEOUT_MS:-90000}"
 export PHASE5_INCLUDE_MEMORY="${PHASE5_INCLUDE_MEMORY:-0}"
 export PHASE5_INCLUDE_MCP_TOOLS="${PHASE5_INCLUDE_MCP_TOOLS:-0}"
 export PHASE5_INCLUDE_SOCIAL_READER="${PHASE5_INCLUDE_SOCIAL_READER:-0}"
-export PHASE5_INCLUDE_OBSIDIAN="${PHASE5_INCLUDE_OBSIDIAN:-0}"
 export PHASE5_SMOKE_OUTPUT_DIR="$PHASE5_OUTPUT_DIR"
 
 mkdir -p "$PHASE5_OUTPUT_DIR" "$UV_CACHE_DIR" "$UV_TOOL_DIR" "$npm_config_cache"
-if [ "$PHASE5_INCLUDE_OBSIDIAN" = "1" ]; then
-  mkdir -p "$(dirname "$OBSIDIAN_MEMORY_INDEX_PATH")"
-fi
 
 cd "$ROOT_DIR"
 
@@ -168,11 +151,9 @@ fi
   echo "phase5.env.profile=$PROFILE_NAME"
   echo "phase5.env.hermes_home=$HERMES_HOME"
   echo "phase5.env.api_base=$HERMES_API_BASE_URL"
-  echo "phase5.env.obsidian_index=$OBSIDIAN_MEMORY_INDEX_PATH"
   echo "phase5.env.include_memory=$PHASE5_INCLUDE_MEMORY"
   echo "phase5.env.include_mcp_tools=$PHASE5_INCLUDE_MCP_TOOLS"
   echo "phase5.env.include_social_reader=$PHASE5_INCLUDE_SOCIAL_READER"
-  echo "phase5.env.include_obsidian=$PHASE5_INCLUDE_OBSIDIAN"
   echo "phase5.env.gateway_started=$gateway_started"
   echo "phase5.env.gateway_log=$GATEWAY_LOG"
   echo "phase5.env.smoke_log=$SMOKE_LOG"

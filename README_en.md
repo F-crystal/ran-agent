@@ -2,11 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-07)
 
-`DEPLOYED_RUNTIME_ACCEPTANCE` (2026-08-06): production code is clean `0cbeed7`; exact candidate `0b793e8` runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash on `8642`, and the retired Full service is inactive/disabled. Two source-only transactions were accepted through the current SHA. See `docs/governance/current_runtime_status.md` for the bounded evidence.
-
-The unified-identity/O2 rollback baseline `b5b4ff43f8c3d5706192cabefcece49408b73558` is archived and pushed but not deployed to production. It preserves O2 while reverting the added Linux service identity. O1/O2 candidates remain `ARCHIVED` and not deployed; `total_delete` is unsupported, Gate 5 is not authorized, and Package B.2/B.3 have not started.
+Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash. See `docs/governance/current_runtime_status.md` for the exact source SHA, evidence, and rollback boundary.
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -14,7 +12,7 @@ The unified-identity/O2 rollback baseline `b5b4ff43f8c3d5706192cabefcece49408b73
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The unified production profile uses DeepSeek V4 Flash and adds `thinking: {"type":"disabled"}` to the final provider HTTP body; V4 Pro is explicit opt-in only. MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, and `personal_memory` provide fresh facts, media, social content, sticker lookup, and personal memory. Optional `obsidian_memory` is registered but not currently runtime-ready. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
+Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The unified production profile uses DeepSeek V4 Flash and adds `thinking: {"type":"disabled"}` to the final provider HTTP body; V4 Pro is explicit opt-in only. MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, and `personal_memory` provide fresh facts, media, social content, sticker lookup, Vault recall, and personal memory. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
 
 OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Production and the current candidate both use Hermes + DeepSeek V4 Flash non-thinking; Pro requires an explicit opt-in.
 
@@ -40,7 +38,7 @@ Python backend
 
 MCP services
   -> search_hub / media_reader / social_reader / sticker_catalog / co_reading / media_generation
-  -> personal_memory / optional obsidian_memory (currently parked) / time / playwright
+  -> personal_memory / time / playwright
 ```
 
 ### Unified Hermes Gateway
@@ -106,8 +104,7 @@ mean automatic whole-Vault search.
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | unified |
 | `mimo_power` | RETIRED: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles | historical |
 | `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | unified |
-| `personal_memory` | Personal memory recall and backend health check | unified |
-| `obsidian_memory` | Obsidian vault semantic search | optional / registered / not runtime-ready |
+| `personal_memory` | Personal memory, Ombre, and bounded Vault recall; backend health check | unified |
 | `external_mcp_gateway` | Governed dynamic External MCP broker | governed / source profiles disabled-by-default |
 | `media_generation` | Image and speech generation | unified |
 | `playwright` | Browser automation and dynamic-page debugging | unified |
@@ -213,7 +210,6 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR and media generation |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | Provider-neutral vault maintenance runner; Qwen-compatible by default, processes inbox in small steps, and triggers maintenance above 10 pending items or oldest item age of 120 minutes by default |
 | Social platforms | `SESSDATA` | Optional Bilibili auth; Xiaohongshu is public-only and does not use `XHS_COOKIE` |
-| Obsidian memory | `OBSIDIAN_MEMORY_VAULT_DIR`, `OBSIDIAN_MEMORY_INDEX_PATH`, `OBSIDIAN_INDEX_DEVICE` | Vault retrieval and indexing |
 | Media context | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | compact by default, legacy fallback available |
 | UV cache | `UV_CACHE_DIR`, `UV_TOOL_DIR`, `UV_LINK_MODE`, `UV_PYTHON_DOWNLOADS` | Fixed uv/uvx cache paths to prevent disk growth |
 | XHS public parser | `XHS_GENERIC_FALLBACK_READY_PATH`, `XHS_PUBLIC_SIDECAR_URL`, `XHS_PUBLIC_SIDECAR_TIMEOUT_MS` | Xiaohongshu public parsing and XHS-Downloader sidecar; no login state |

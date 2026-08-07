@@ -130,6 +130,8 @@ test('surface_relevant_context reuses bounded backend memory recall endpoint', a
           should_inject: true,
           rendered_context: '【你对用户的了解】\n- 用户之前聊过拼豆作品',
           used_sources: ['local_profile_memory', 'vault_knowledge'],
+          source_status: { local_memory: 'empty', ombre: 'empty', vault_knowledge: 'hit' },
+          knowledge_hits: [{ path: 'wiki/pindou.md', title: '拼豆', snippet: '用户做过拼豆作品', score: 1 }],
         });
       },
     }
@@ -144,6 +146,7 @@ test('surface_relevant_context reuses bounded backend memory recall endpoint', a
   });
   assert.equal(result.structuredContent.should_inject, true);
   assert.match(result.structuredContent.rendered_context, /拼豆作品/);
+  assert.equal(result.structuredContent.knowledge_hits[0].path, 'wiki/pindou.md');
 });
 
 test('recall_personal_memory returns structured error on backend failure', async () => {

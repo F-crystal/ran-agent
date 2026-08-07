@@ -25,11 +25,13 @@ inherit another channel's last turn. Python `/chat` is retired and returns 410.
 
 The unified companion keeps the former Lite/Full capability union on one
 runtime. Search, terminal/file/session tools, Playwright, media, co-reading and
-the existing MCP registrations remain available. `obsidian_memory` is parked
-because its inherited uv tool is malformed; no large replacement dependency
-was installed. Hermes-native `cronjob`, `delegate_task` and `execute_code`
-remain disabled. Scheduled outbound is limited to explicit reminders, the
-opt-in AI digest and governed external-MCP notifications.
+the supported MCP registrations remain available. Production still carries a
+parked `obsidian_memory` registration pending the next exact source apply; main
+retired that broken standalone surface and routes bounded Vault recall through
+`personal_memory` instead. No replacement dependency was installed.
+Hermes-native `cronjob`, `delegate_task` and `execute_code` remain disabled.
+Scheduled outbound is limited to explicit reminders, the opt-in AI digest and
+governed external-MCP notifications.
 
 ## Memory
 
@@ -103,9 +105,17 @@ transaction must still validate and apply one exact main SHA.
 
 ## Active Follow-Ups
 
-1. Refresh the deployed personal-memory overlay with main's strict query-only
-   and `source_status` contract.
-2. Improve Ombre ingestion and retrieval only after the current façade is
+1. Apply the exact companion profile, MCP and Python memory overlay that retire
+   the broken standalone Obsidian MCP while preserving Vault recall behind
+   `personal_memory`.
+2. After that overlay, close the existing-asset Feishu workflow as one bounded
+   typed request/receipt path: organize an existing Minutes transcript and
+   existing attachment into a cloud document, move it to the requested folder,
+   and return the verified document and move result. The 2026-08-07 probe
+   produced no action request or trusted evidence, so the completion gate
+   correctly refused to claim success. Do not add ASR or presentation
+   generation to this path.
+3. Improve Ombre ingestion and retrieval only after the current façade is
    stable; use the existing free local embedding stack and do not add a paid
    provider by default.
 

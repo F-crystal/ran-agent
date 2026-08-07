@@ -27,10 +27,6 @@
       "command": "bash",
       "args": ["-lc", "cd \"$RAN_AGENT_REPO_ROOT\" && exec bash scripts/start_social_reader_mcp.sh"]
     },
-    "obsidian_memory": {
-      "command": "bash",
-      "args": ["-lc", "cd \"$RAN_AGENT_REPO_ROOT\" && exec bash scripts/start_obsidian_memory_mcp.sh"]
-    },
     "personal_memory": {
       "command": "bash",
       "args": ["-lc", "cd \"$RAN_AGENT_REPO_ROOT\" && exec bash scripts/start_personal_memory_mcp.sh"]

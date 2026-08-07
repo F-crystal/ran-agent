@@ -1,12 +1,12 @@
 # Hermes Context Optimization
 
-Status: CURRENT (2026-07-13)
+Status: CURRENT (2026-08-07)
 
 ## Why Not Hard Reset
 
 Hermes context optimization must reduce repeated prompt input without deleting useful continuity. A hard reset would drop live task clues, break cross-platform handoff, and encourage reloading long-term memory into every prompt. The supported path is telemetry first, budgeted injection second, and lite-only soft reset last.
 
-Long-term memory remains external and on demand through `personal_memory`, `obsidian_memory`, or other specialist tools. The soft reset digest is not a memory store.
+Long-term memory remains external and on demand through `personal_memory` or other specialist tools. The soft reset digest is not a memory store.
 
 The digest is a bounded continuity aid derived from retained timeline material;
 it is not provenance that every source turn was the final delivered reply. It
@@ -17,7 +17,7 @@ ordinary session control. Those boundaries remain follow-up audit work.
 
 - Hermes session history: provider-side short-term continuity for the selected profile.
 - Node continuity: `recent_local_history`, `global_recent_history`, `active_topic`, `continuity_note`, media compact, and current user message.
-- Vault and long-term memory: `vault/`, `personal_memory`, and `obsidian_memory` are storage/recall sources. They must not be injected wholesale into lite prompts.
+- Vault and long-term memory: `vault/` remains authoritative content; `personal_memory` performs bounded recall across Vault, local memory, and Ombre. These sources must not be injected wholesale into prompts.
 - Long-term memory: explicit tool recall only, not injected wholesale.
 
 The optimization goal is to avoid stacking all layers on every lite request.

@@ -3,7 +3,6 @@ export const PROTECTED_MCP_NAMES = Object.freeze([
   'social_reader',
   'media_reader',
   'personal_memory',
-  'obsidian_memory',
   'ombre_memory',
   'co_reading',
   'sticker_catalog',

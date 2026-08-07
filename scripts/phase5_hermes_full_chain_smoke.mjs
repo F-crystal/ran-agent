@@ -8,7 +8,6 @@ const timeoutMs = Number.parseInt(process.env.PHASE5_SMOKE_TIMEOUT_MS || '300000
 const includeMemory = String(process.env.PHASE5_INCLUDE_MEMORY || '').trim() === '1';
 const includeMcpTools = String(process.env.PHASE5_INCLUDE_MCP_TOOLS || '').trim() === '1';
 const includeSocialReader = String(process.env.PHASE5_INCLUDE_SOCIAL_READER || '').trim() === '1';
-const includeObsidian = String(process.env.PHASE5_INCLUDE_OBSIDIAN || '').trim() === '1';
 
 const allCases = [
   {
@@ -20,13 +19,6 @@ const allCases = [
     text: [
       'Phase 5 follow-up smoke：请使用 personal_memory / recall_personal_memory 查询是否有和 Hermes 迁移相关的本地个人记忆。',
       '无结果也可以说明无结果。最后单独输出 PHASE5_PERSONAL_MEMORY_DONE。',
-    ].join('\n'),
-  },
-  {
-    name: 'obsidian_memory',
-    text: [
-      'Phase 5 follow-up smoke：请使用 obsidian_memory / search-notes 搜索 Hermes migration 或 Phase 5 相关笔记。',
-      '无结果也可以说明无结果。最后单独输出 PHASE5_OBSIDIAN_MEMORY_DONE。',
     ].join('\n'),
   },
   {
@@ -60,9 +52,6 @@ const cases = allCases.filter((testCase) => {
   }
   if (testCase.name === 'personal_memory') {
     return includeMemory;
-  }
-  if (testCase.name === 'obsidian_memory') {
-    return includeObsidian;
   }
   if (testCase.name === 'social_reader') {
     return includeSocialReader;
@@ -179,14 +168,6 @@ function skippedCases() {
       ok: true,
       skipped: true,
       reason: 'skipped by default: Python backend / memory bridge belongs to Phase 6; set PHASE5_INCLUDE_MEMORY=1 to opt in.',
-    });
-  }
-  if (!includeObsidian) {
-    skipped.push({
-      name: 'obsidian_memory',
-      ok: true,
-      skipped: true,
-      reason: 'skipped by default: Obsidian memory depends on backend/index state and belongs to Phase 6; set PHASE5_INCLUDE_OBSIDIAN=1 to opt in.',
     });
   }
   if (!includeSocialReader) {

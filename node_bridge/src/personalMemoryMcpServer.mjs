@@ -47,6 +47,7 @@ function buildRecallResult(payload = {}) {
     short_term_memories: Array.isArray(payload.short_term_memories) ? payload.short_term_memories : [],
     long_term_memories: Array.isArray(payload.long_term_memories) ? payload.long_term_memories : [],
     core_memories: Array.isArray(payload.core_memories) ? payload.core_memories : [],
+    knowledge_hits: Array.isArray(payload.knowledge_hits) ? payload.knowledge_hits : [],
   };
   return {
     content: [
@@ -75,7 +76,7 @@ export function buildPersonalMemoryTools() {
       name: 'recall_personal_memory',
       title: 'Recall Personal Memory',
       description: [
-        'Read-only recall from the local personal memory backend, including Ombre emotional memory and SQLite working/profile memory.',
+        'Read-only recall from the local personal memory backend, including Ombre, SQLite working/profile memory, and bounded Vault knowledge.',
         'Use when prior preferences, commitments, relationship context, unresolved emotional state, or long-term memory may affect the reply.',
         'Do not use when the current conversation context is already enough. If recall is weak or empty, say you are not sure rather than inventing memory.',
       ].join(' '),

@@ -53,6 +53,33 @@ class BackendHttpControllerTest(unittest.TestCase):
     def tearDown(self) -> None:
         self.temp_dir.cleanup()
 
+    def test_memory_recall_surfaces_bounded_vault_knowledge(self) -> None:
+        wiki = self.config.vault_dir / "wiki"
+        wiki.mkdir(parents=True, exist_ok=True)
+        (wiki / "hermes.md").write_text(
+            "# Hermes 决策\n升级 v0.20 是为了统一前台运行时。\n",
+            encoding="utf-8",
+        )
+        service = PersonalAgentService(
+            database=self.database,
+            model_client=PlaceholderModelClient(),
+            logger=self.logger,
+            config=self.config,
+        )
+        controller = BackendHttpController(service, self.logger, self.config)
+
+        status_code, payload = controller.handle_tools(
+            "/tools/memory/recall",
+            {"user_text": "为什么升级 Hermes v0.20"},
+        )
+
+        self.assertEqual(status_code, 200)
+        self.assertTrue(payload["should_inject"])
+        self.assertEqual(payload["source_status"]["vault_knowledge"], "hit")
+        self.assertIn("vault_knowledge", payload["used_sources"])
+        self.assertEqual(payload["knowledge_hits"][0]["path"], "wiki/hermes.md")
+        self.assertIn("统一前台运行时", payload["rendered_context"])
+
     def test_handle_ingest_records_external_exchange_without_model_generation(self) -> None:
         status_code, response_payload = self.controller.handle_ingest(
             {
