@@ -75,7 +75,7 @@ COMPANION_OVERLAY_PREFIX = "companion-overlay"
 COMPANION_OVERLAY_TARGET_ROOT = Path("/opt/ran_agent")
 
 SOURCE_SHAPE_BASE = "0fef0427683a8f3f77deec9e6cff937f7ab0a02e"
-SOURCE_CONTROLLER_BASE = "7c1f12fcf131621b8d8fd1389fc40ccde1b71b84"
+SOURCE_CONTROLLER_BASE = "977bd5850b6c7e7175000c9ce028cb3eb23866a0"
 SOURCE_PRODUCTION_BASE = "2c8e97cacd1d2eaed30738abe621f3393cffb885"
 SOURCE_OVERLAY_CANDIDATE = "dc5fcf13f86483073c54ac046e1b238a90c91921"
 SOURCE_OVERLAY_TRANSACTION = ARTIFACT_ROOT / "companion-overlay-transactions/20260807T124548Z-dc5fcf13f864"
@@ -1558,7 +1558,10 @@ def create_source_snapshot(candidate: str, overlay_state: dict[str, Any]) -> tup
         "schemaVersion": 1,
         "candidate": candidate,
         "priorHead": SOURCE_PRODUCTION_BASE,
-        "priorRef": git(REPO, "symbolic-ref", "-q", "HEAD", text=True).stdout.strip(),
+        "priorRef": run(
+            ["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), "symbolic-ref", "-q", "HEAD"],
+            check=False,
+        ).stdout.strip(),
         "phase": "snapshot-created",
         "createdAt": datetime.now(timezone.utc).isoformat(),
         "overlayTransaction": str(SOURCE_OVERLAY_TRANSACTION),
