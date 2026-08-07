@@ -55,6 +55,34 @@ def test_source_env_patch_removes_split_and_retired_memory_keys() -> None:
     )
 
 
+def test_gateway_readiness_refreshes_credentials_after_main_pid_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    environments = iter([{"API_SERVER_KEY": "stale"}, {"API_SERVER_KEY": "fresh"}])
+    attempts: list[str | None] = []
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return b'{"data":[{"id":"ran-agent-companion"}]}'
+
+    def open_request(request, *, timeout):
+        attempts.append(request.get_header("Authorization"))
+        if attempts[-1] != "Bearer fresh":
+            raise OSError("stale process credentials")
+        return Response()
+
+    monkeypatch.setattr(MODULE, "process_environment", lambda _unit: next(environments))
+    monkeypatch.setattr(MODULE.urllib.request, "urlopen", open_request)
+    monkeypatch.setattr(MODULE.time, "sleep", lambda _seconds: None)
+
+    MODULE.wait_for_gateway(8642, {}, "ran-agent-companion", refresh_unit="ran-agent-hermes.service")
+    assert attempts == ["Bearer stale", "Bearer fresh"]
+
+
 def test_bootstrap_routes_unified_source_through_existing_candidate_controller() -> None:
     bootstrap = (Path(__file__).parents[1] / "scripts/bootstrap-hermes-release.sh").read_text()
     assert "scripts/deploy-hermes-runtime-release.py" in bootstrap

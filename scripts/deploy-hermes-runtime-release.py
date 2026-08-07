@@ -75,7 +75,7 @@ COMPANION_OVERLAY_PREFIX = "companion-overlay"
 COMPANION_OVERLAY_TARGET_ROOT = Path("/opt/ran_agent")
 
 SOURCE_SHAPE_BASE = "0fef0427683a8f3f77deec9e6cff937f7ab0a02e"
-SOURCE_CONTROLLER_BASE = "977bd5850b6c7e7175000c9ce028cb3eb23866a0"
+SOURCE_CONTROLLER_BASE = "3a3fa44e087ac24efa1828f32df22a69ddbea936"
 SOURCE_PRODUCTION_BASE = "2c8e97cacd1d2eaed30738abe621f3393cffb885"
 SOURCE_OVERLAY_CANDIDATE = "dc5fcf13f86483073c54ac046e1b238a90c91921"
 SOURCE_OVERLAY_TRANSACTION = ARTIFACT_ROOT / "companion-overlay-transactions/20260807T124548Z-dc5fcf13f864"
@@ -818,11 +818,19 @@ def update_phase(snapshot: Path, state: dict[str, Any], phase: str) -> None:
     write_json(snapshot / "state.json", state)
 
 
-def wait_for_gateway(port: int, env_values: dict[str, str], expected_model: str) -> None:
-    key = env_values.get("API_SERVER_KEY") or env_values.get("HERMES_API_KEY")
+def wait_for_gateway(
+    port: int,
+    env_values: dict[str, str],
+    expected_model: str,
+    *,
+    refresh_unit: str | None = None,
+) -> None:
     last_error: Exception | None = None
     for _ in range(GATEWAY_READINESS_ATTEMPTS):
         try:
+            if refresh_unit:
+                env_values = process_environment(refresh_unit)
+            key = env_values.get("API_SERVER_KEY") or env_values.get("HERMES_API_KEY")
             headers = {"Authorization": f"Bearer {key}"} if key else {}
             request = urllib.request.Request(f"http://127.0.0.1:{port}/v1/models", headers=headers)
             with urllib.request.urlopen(request, timeout=1) as response:
@@ -1612,7 +1620,7 @@ def restore_source_services(state: dict[str, Any], *, expected_profile: str) -> 
             if unit == "ran-agent-python.service":
                 wait_port(8787)
             elif unit == "ran-agent-hermes.service":
-                wait_for_gateway(8642, process_environment(unit), expected_profile)
+                wait_for_gateway(8642, {}, expected_profile, refresh_unit=unit)
             elif unit == "ran-agent-node.service":
                 wait_port(8791)
         else:
