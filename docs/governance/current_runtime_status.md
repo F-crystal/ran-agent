@@ -51,6 +51,9 @@ known follow-up, not a claim that the newer source is deployed.
 
 ## Delivery Evidence
 
+Directed isolation probes returned only `飞书独立` on Feishu and `微信独立`
+on WeChat; neither channel inherited the sibling channel's answer.
+
 The 2026-08-07 08:00 AI digest produced exactly one observed Feishu message
 without trailing envelope JSON. Node recorded a sent attempt once, and Python
 stored the matching sent marker and timeline event without the earlier caller
@@ -69,10 +72,19 @@ candidate ref, topology and snapshot state are evidence-only. Do not invoke
 Runtime rollback. The candidate-extracted binding.v4 source controller is the
 current rollback path for production source changes.
 
-The v0.13 rollback window is closed. Six exact retired payloads were removed
-under the root-owned `v013-payloads.deleted.json` record, reclaiming 224079872
+The owner authorized closing the v0.13 rollback window before the 2026-08-07
+cleanup. Closure relied on bounded v0.20 production acceptance plus the real
+binding.v4 source apply/rollback/reapply; no separate v0.13 Runtime rollback was
+used as a close-out drill. Six exact retired payloads were then removed under
+the root-owned `v013-payloads.deleted.json` record, reclaiming 224079872
 allocated bytes. Shared runtimes, MCP capabilities, model/index assets, the
 v0.20 Runtime and personal data were preserved.
+
+The first strict personal-memory overlay apply exceeded its readiness timeout
+because the parked `obsidian_memory` MCP still blocked Hermes cold start. Its
+drop-in and namespace were restored to the prior digests, all three services
+returned active, and the transaction was reconciled as `rolled_back`; the
+strict overlay remains source-only.
 
 ## Main Source State
 
