@@ -1,6 +1,6 @@
 # Main Source Authority Convergence
 
-Status: DESIGNED / NOT AUTHORIZED FOR PRODUCTION APPLY (2026-08-07)
+Status: AUTHORIZED FOR BOUNDED S1 SOURCE TRANSACTION (2026-08-08)
 
 ## Objective
 
@@ -179,10 +179,10 @@ The exact candidate is accepted only when all of the following hold:
 - source apply and explicit source rollback/reapply use the same exact SHA and
   leave a current recovery authority.
 
-Any failed invariant rolls back. A successful rollback is not acceptance.
-The explicit rollback/reapply drill is a production mutation covered only by
-the same later owner authorization as source apply; this design does not
-authorize it by itself.
+Any failed invariant rolls back. A successful rollback is not acceptance. The
+owner authorized the exact dry-run, source apply, source rollback and reapply
+drill on 2026-08-08. That authorization does not extend to later features,
+Core activation, identity changes or storage-layout changes.
 
 ## Cleanup Unlock
 

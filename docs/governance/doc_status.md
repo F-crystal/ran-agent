@@ -8,8 +8,11 @@ journals belong in ignored `local_archive/` or the focused phase record.
 
 ## Current State
 
-Production is clean at `2c8e97cacd1d2eaed30738abe621f3393cffb885`
-with accepted binding.v4. Hermes v0.20 is `PROD_VERIFIED` for the bounded
+Before the authorized S1 source pointer exists, production is clean at
+`2c8e97cacd1d2eaed30738abe621f3393cffb885` plus the accepted overlay. After
+`source-snapshots/current-source.json` is accepted, its exact candidate is the
+clean production checkout and source rollback authority. Hermes v0.20 is
+`PROD_VERIFIED` for the bounded
 evidence recorded in `current_runtime_status.md`. Runtime rollback is closed,
 the retired v0.13 payloads are deleted, `18002` and O2 are inactive, and the
 direct loopback Ombre service on `18001` remains active. An accepted companion
@@ -19,14 +22,11 @@ checkout. The active child already uses a 15000 ms deadline; the locally
 verified S1a source candidate makes that value constant at the child process
 boundary but is not deployed.
 
-Main is archived and pushed at
-`efd1aeb2a952ebd37a3c765ef1ee5771ed3e6bd9` but remains source-undeployed. The
-S1a candidate is locally verified and prepares a single companion source shape;
-it does not authorize production apply. Main and production are divergent
-histories, so the accepted overlay must later be absorbed by an explicitly
-authorized overlay-aware immutable source transaction rather than treated as a
-fast-forward. The exact production source line remains on
-`codex/p2-memory-production-candidate`.
+S1a is archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`.
+Its bounded successor adds only the authorized candidate-extracted source
+transaction and governance/tests. The exact production source line remains on
+`codex/p2-memory-production-candidate` until the accepted S1 source pointer is
+published.
 
 ## Lifecycle Stages
 

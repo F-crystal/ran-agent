@@ -640,6 +640,7 @@ for path, digest in entries.items():
 ' "$bootstrap_root" \
     scripts/bootstrap-hermes-release.sh \
     scripts/deploy-hermes-release.sh \
+    scripts/deploy-hermes-runtime-release.py \
     scripts/resolve-hermes-service-node.sh \
     scripts/prune-hermes-release-artifacts.sh \
     scripts/check-hermes-snapshot-capacity.py \

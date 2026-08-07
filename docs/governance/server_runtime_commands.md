@@ -56,6 +56,31 @@ or use the legacy split release scripts.
 Do not retry `44b84fb11fe8` or use the split deploy scripts against the unified
 topology.
 
+For the authorized S1 main-source convergence, bind one reviewed main SHA and
+use its candidate-extracted existing controller. The rollback drill must use
+the same SHA and the exact snapshot printed by apply:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+git fetch --no-tags origin main
+SOURCE_CANDIDATE=<reviewed-40-char-main-sha>
+test "$(git rev-parse refs/remotes/origin/main)" = "$SOURCE_CANDIDATE"
+BOOTSTRAP="$(mktemp /tmp/ran-agent-source-bootstrap.XXXXXX)"
+git show "$SOURCE_CANDIDATE:scripts/bootstrap-hermes-release.sh" > "$BOOTSTRAP"
+chmod 700 "$BOOTSTRAP"
+RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP" --dry-run "$SOURCE_CANDIDATE"
+RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP" --apply "$SOURCE_CANDIDATE"
+RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP" --rollback "$SOURCE_CANDIDATE" <exact-source-snapshot>
+RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP" --apply "$SOURCE_CANDIDATE"
+rm -f "$BOOTSTRAP"
+```
+
+This source transaction preserves the accepted v0.20 runtime, personal data
+and direct Ombre service. It snapshots only the checkout dependencies, two env
+files, Hermes unit/profile and overlay drop-ins; it does not copy databases or
+durable delivery state.
+
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy
 `ran-agent` account at UID 999/GID 988 with a nologin shell. No ran-agent-owned

@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: CURRENT (2026-08-07)
+Status: S1 SOURCE-CUTOVER CANDIDATE (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,8 +9,8 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_sha: 2c8e97cacd1d2eaed30738abe621f3393cffb885; clean; accepted binding.v4
-companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921; accepted; source checkout not converged
+repository_sha: 2c8e97cacd1d2eaed30738abe621f3393cffb885 before S1; accepted current-source pointer after S1
+companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 before S1; rollback-only after accepted current-source pointer
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
 runtime_stage: PROD_VERIFIED for the bounded channel, identity, memory, capability, topology and 2026-08-07 digest evidence
@@ -72,11 +72,13 @@ unified runtime. `8643` remained absent.
 
 ## Source And Recovery Authority
 
-Binding.v4 completed source apply, source rollback and reapply. It records
+Binding.v4 completed the earlier source apply, rollback and reapply and records
 `runtimeRollbackAuthorized=false`; the retained Runtime controller, artifact,
-candidate ref, topology and snapshot state are evidence-only. Do not invoke
-Runtime rollback. The candidate-extracted binding.v4 source controller is the
-current rollback path for production source changes.
+candidate ref, topology and snapshot state are evidence-only. Before S1, its
+source controller remains the recovery authority for the accepted overlay
+baseline. After `source-snapshots/current-source.json` is accepted, the exact
+candidate controller and snapshot recorded there become the source rollback
+authority. Runtime rollback remains forbidden in both states.
 
 The owner authorized closing the v0.13 rollback window before the 2026-08-07
 cleanup. Closure relied on bounded v0.20 production acceptance plus the real
@@ -97,13 +99,16 @@ topology, not the bare host-visible old profile.
 
 ## Main Source State
 
-Main's last archived authority is `efd1aeb2a952ebd37a3c765ef1ee5771ed3e6bd9`;
-production remains source-undeployed at `2c8e97c + accepted overlay`. The S1a
-candidate prepares one `ran-agent-companion` source profile, one `8642` client
-route, the supported Lite/Full capability union, and a fixed 15000 ms memory
-boundary. It is locally verified only. The 244-file production-versus-main diff
-has been classified and the consumed non-secret runtime env keys have been
-audited; the histories remain divergent, so this is not a routine fast-forward.
+S1a was archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`.
+The authorized bounded successor adds only candidate-extracted source
+dry-run/apply/rollback modes and their governance/test contract. Before its
+accepted private `source-snapshots/current-source.json` pointer exists,
+production remains `2c8e97c + accepted overlay`; after it exists, the exact
+candidate recorded there is the clean production checkout and source rollback
+authority. The source shape keeps one `ran-agent-companion` profile, one `8642`
+route, the supported Lite/Full capability union and a fixed 15000 ms memory
+boundary. The 244-file diff and consumed non-secret runtime env keys were
+already audited and are not re-reviewed during apply.
 The source still aligns four production-backed contracts:
 
 - canonical `memory_bge_vector_index.*` paths;
@@ -111,26 +116,21 @@ The source still aligns four production-backed contracts:
 - unified Hermes and co-reading defaults on `8642`;
 - O2 release/apply/acceptance defaults off unless explicitly enabled.
 
-Legacy split-profile release inputs remain in source but are excluded from the
-companion distribution until an explicitly authorized production source
-transaction replaces the old release path. The controller continues to fail
-closed on the unified marker; no S1a change is a production apply authority.
+Legacy split-profile release inputs remain excluded from the companion
+distribution. The source mode reuses the existing candidate controller and is
+the only authorized seam through the unified marker; the legacy release mode
+continues to fail closed.
 
 ## Active Follow-Ups
 
-1. After explicit production-mutation authorization, integrate one bounded,
-   overlay-aware source transaction into the existing controller. It must dry
-   run and apply one exact SHA, test the unmounted candidate, and restore the
-   accepted overlay topology on rollback. Do not repeat the completed diff or
-   env audits.
-2. After source convergence, close the existing-asset Feishu workflow as one bounded
+1. After source convergence, close the existing-asset Feishu workflow as one bounded
    typed request/receipt path: organize an existing Minutes transcript and
    existing attachment into a cloud document, move it to the requested folder,
    and return the verified document and move result. The 2026-08-07 probe
    produced no action request or trusted evidence, so the completion gate
    correctly refused to claim success. Do not add ASR or presentation
    generation to this path.
-3. Improve Ombre ingestion and retrieval only after the current façade is
+2. Improve Ombre ingestion and retrieval only after the current façade is
    stable; use the existing free local embedding stack and do not add a paid
    provider by default.
 

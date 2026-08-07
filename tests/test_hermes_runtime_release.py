@@ -35,6 +35,35 @@ def test_env_patch_changes_only_managed_keys_and_collapses_duplicates() -> None:
     )
 
 
+def test_source_env_patch_removes_split_and_retired_memory_keys() -> None:
+    original = (
+        b"SECRET=keep\n"
+        b"HERMES_FULL_API_BASE_URL=http://127.0.0.1:8643/v1\n"
+        b"HERMES_LITE_PROFILE=ran-assistant-lite\n"
+        b"RAN_AGENT_CAPABILITY_MODE=auto\n"
+        b"OMBRE_RECALL_MCP_URL=http://127.0.0.1:18002/mcp\n"
+        b"OMBRE_COMPAT_ENABLED=false\n"
+        b"OBSIDIAN_MEMORY_MCP_ENABLED=false\n"
+        b"PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000\n"
+    )
+    patched = MODULE.patch_source_env_bytes(original)
+    assert patched == (
+        b"SECRET=keep\n"
+        b"HERMES_API_BASE_URL=http://127.0.0.1:8642/v1\n"
+        b"HERMES_PROFILE=ran-agent-companion\n"
+        b"CO_READING_HERMES_API_BASE_URL=http://127.0.0.1:8642/v1\n"
+    )
+
+
+def test_bootstrap_routes_unified_source_through_existing_candidate_controller() -> None:
+    bootstrap = (Path(__file__).parents[1] / "scripts/bootstrap-hermes-release.sh").read_text()
+    assert "scripts/deploy-hermes-runtime-release.py" in bootstrap
+    assert "RAN_AGENT_RELEASE_UNIFIED_SOURCE" in bootstrap
+    assert "source-dry-run" in bootstrap
+    assert "source-apply" in bootstrap
+    assert "source-rollback" in bootstrap
+
+
 def test_unified_unit_uses_exact_runtime_and_one_port() -> None:
     unit = (Path(__file__).parents[1] / "hermes/systemd/ran-agent-hermes-unified.service").read_text()
     assert "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes" in unit

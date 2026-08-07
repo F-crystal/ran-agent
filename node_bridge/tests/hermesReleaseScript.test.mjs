@@ -17,6 +17,7 @@ const linuxRoot = process.platform === 'linux' && process.geteuid?.() === 0;
 const bootstrapFrameworkFiles = [
   'bootstrap-hermes-release.sh',
   'deploy-hermes-release.sh',
+  'deploy-hermes-runtime-release.py',
   'resolve-hermes-service-node.sh',
   'prune-hermes-release-artifacts.sh',
   'check-hermes-snapshot-capacity.py',
@@ -4273,6 +4274,7 @@ test('bootstrap manifest pins the exact candidate framework sources', () => {
   for (const path of [
     'scripts/bootstrap-hermes-release.sh',
     'scripts/deploy-hermes-release.sh',
+    'scripts/deploy-hermes-runtime-release.py',
     'scripts/resolve-hermes-service-node.sh',
     'scripts/prune-hermes-release-artifacts.sh',
     'scripts/check-hermes-snapshot-capacity.py',

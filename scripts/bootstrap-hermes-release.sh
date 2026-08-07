@@ -50,6 +50,7 @@ git show "$CANDIDATE:$MANIFEST_PATH" > "$TMP_ROOT/manifest" || fail bootstrap_ma
 required=(
   scripts/bootstrap-hermes-release.sh
   scripts/deploy-hermes-release.sh
+  scripts/deploy-hermes-runtime-release.py
   scripts/resolve-hermes-service-node.sh
   scripts/prune-hermes-release-artifacts.sh
   scripts/check-hermes-snapshot-capacity.py
@@ -75,6 +76,28 @@ NODE_BIN_INPUT="${RAN_AGENT_NODE_BIN:-}"
 # resolver itself never guesses when a wrapper-based old unit is inactive.
 if [[ -z "$NODE_BIN_INPUT" && -x /opt/nodejs/node-v22.22.2-linux-x64/bin/node ]]; then
   NODE_BIN_INPUT=/opt/nodejs/node-v22.22.2-linux-x64/bin/node
+fi
+
+if [[ "${RAN_AGENT_RELEASE_UNIFIED_SOURCE:-0}" == 1 ]]; then
+  [[ "$(git rev-parse --verify refs/remotes/origin/main^{commit})" == "$CANDIDATE" ]] ||
+    fail source_candidate_not_archived_main
+  source_ref="refs/ran-agent/source-candidates/$CANDIDATE"
+  existing_source_ref="$(git rev-parse --verify "$source_ref^{commit}" 2>/dev/null || true)"
+  [[ -z "$existing_source_ref" || "$existing_source_ref" == "$CANDIDATE" ]] ||
+    fail source_candidate_ref_moved
+  [[ -n "$existing_source_ref" ]] || git update-ref "$source_ref" "$CANDIDATE" 0000000000000000000000000000000000000000
+  [[ "$(git rev-parse --verify refs/ran-agent/source-candidates/$CANDIDATE^{commit})" == "$CANDIDATE" ]] ||
+    fail source_candidate_ref_invalid
+  case "$MODE" in
+    --dry-run) source_mode=source-dry-run ;;
+    --apply) source_mode=source-apply ;;
+    --rollback) source_mode=source-rollback ;;
+  esac
+  source_args=(--candidate "$CANDIDATE" --mode "$source_mode")
+  [[ "$MODE" != --rollback ]] || source_args+=(--snapshot "$ROLLBACK_SNAPSHOT")
+  sudo "$TMP_ROOT/scripts/deploy-hermes-runtime-release.py" "${source_args[@]}"
+  printf 'bootstrap-hermes-release: bootstrap-ok candidate=%s\n' "$CANDIDATE"
+  exit 0
 fi
 
 deploy_args=("$MODE")

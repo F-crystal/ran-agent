@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Candidate-bound, runtime-only Hermes transaction.
-
-This controller deliberately does not deploy the ran_agent checkout. It only
-applies docs/governance/hermes_runtime_mutation.v1.json from an exact commit.
-"""
+"""Candidate-bound Hermes runtime and unified-source transactions."""
 
 from __future__ import annotations
 
@@ -12,6 +8,7 @@ import contextlib
 import fcntl
 import hashlib
 import importlib.util
+import io
 import json
 import os
 import pwd
@@ -76,6 +73,43 @@ COMPANION_OVERLAY_PATHS = (
 )
 COMPANION_OVERLAY_PREFIX = "companion-overlay"
 COMPANION_OVERLAY_TARGET_ROOT = Path("/opt/ran_agent")
+
+SOURCE_SHAPE_BASE = "0fef0427683a8f3f77deec9e6cff937f7ab0a02e"
+SOURCE_PRODUCTION_BASE = "2c8e97cacd1d2eaed30738abe621f3393cffb885"
+SOURCE_OVERLAY_CANDIDATE = "dc5fcf13f86483073c54ac046e1b238a90c91921"
+SOURCE_OVERLAY_TRANSACTION = ARTIFACT_ROOT / "companion-overlay-transactions/20260807T124548Z-dc5fcf13f864"
+SOURCE_BINDING = ARTIFACT_ROOT / "runtime-source-bindings/runtime-20260806T010417Z-0b793e8fea85/binding.v4.json"
+SOURCE_SNAPSHOT_ROOT = ARTIFACT_ROOT / "source-snapshots"
+SOURCE_POINTER = SOURCE_SNAPSHOT_ROOT / "current-source.json"
+SOURCE_ARTIFACT_ROOT = ARTIFACT_ROOT / "source-artifacts"
+SOURCE_STAGE_ROOT = ARTIFACT_ROOT / "source-stages"
+SOURCE_REF_ROOT = "refs/ran-agent/source-candidates"
+SOURCE_HERMES_BIN = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes")
+SOURCE_NODE_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/node")
+SOURCE_NPM_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/npm")
+SOURCE_PROFILE = "ran-agent-companion"
+SOURCE_PROFILE_DIR = LITE_HOME / f"profiles/{SOURCE_PROFILE}"
+SOURCE_LEGACY_PROFILE_DIR = LITE_HOME / "profiles/ran-assistant-lite"
+SOURCE_HERMES_OVERLAY_DROPIN = LITE_UNIT.with_suffix(".service.d") / "30-companion-overlay.conf"
+SOURCE_PYTHON_OVERLAY_DROPIN = Path("/etc/systemd/system/ran-agent-python.service.d/30-personal-memory-overlay.conf")
+SOURCE_SERVICES = (
+    "ran-agent-python.service",
+    "ran-agent-hermes.service",
+    "ran-agent-node.service",
+    "ran-agent-hermes-lite-soft-reset.timer",
+)
+SOURCE_CONTROLLER_CHANGE_PATHS = frozenset({
+    "docs/governance/current_runtime_status.md",
+    "docs/governance/doc_status.md",
+    "docs/governance/hermes_release_bootstrap.v1.sha256",
+    "docs/governance/server_runtime_commands.md",
+    "docs/superpowers/plans/2026-08-07-main-source-authority-convergence.md",
+    "scripts/bootstrap-hermes-release.sh",
+    "scripts/deploy-hermes-release.sh",
+    "scripts/deploy-hermes-runtime-release.py",
+    "tests/test_hermes_runtime_release.py",
+    "node_bridge/tests/hermesReleaseScript.test.mjs",
+})
 
 
 class ReleaseError(RuntimeError):
@@ -219,13 +253,13 @@ def set_enabled(unit: str, state: str) -> None:
         raise ReleaseError(f"unsupported service enabled state: {unit}={state}")
 
 
-def check_candidate(repo: Path, candidate: str) -> None:
+def check_candidate(repo: Path, candidate: str, candidate_ref_root: str = CANDIDATE_REF_ROOT) -> None:
     if len(candidate) != 40 or any(character not in "0123456789abcdef" for character in candidate):
         raise ReleaseError("candidate must be an exact lowercase 40-character SHA")
     resolved = git(repo, "rev-parse", "--verify", f"{candidate}^{{commit}}").stdout.strip()
     if resolved != candidate:
         raise ReleaseError("candidate object mismatch")
-    candidate_ref = f"{CANDIDATE_REF_ROOT}/{candidate}"
+    candidate_ref = f"{candidate_ref_root}/{candidate}"
     try:
         referenced = git(repo, "rev-parse", "--verify", f"{candidate_ref}^{{commit}}").stdout.strip()
     except subprocess.CalledProcessError as exc:
@@ -1360,11 +1394,426 @@ def apply(candidate: str, artifact_path: Path, context: dict[str, Any]) -> Path:
         raise
 
 
+def git_as_checkout_owner(*args: str) -> None:
+    owner = pwd.getpwuid(REPO.stat().st_uid).pw_name
+    if owner != "ubuntu":
+        raise ReleaseError("production checkout owner changed")
+    run(["/usr/sbin/runuser", "-u", owner, "--", "git", "-C", str(REPO), *args])
+
+
+def source_candidate_paths(candidate: str) -> set[str]:
+    lines = git(REPO, "diff", "--name-only", SOURCE_SHAPE_BASE, candidate).stdout.splitlines()
+    return {line for line in lines if line}
+
+
+def validate_source_candidate(candidate: str) -> None:
+    check_candidate(REPO, candidate, SOURCE_REF_ROOT)
+    if run(["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), "merge-base", "--is-ancestor", SOURCE_SHAPE_BASE, candidate], check=False).returncode:
+        raise ReleaseError("source candidate is not descended from the accepted S1a shape")
+    if git(REPO, "rev-list", "--count", f"{SOURCE_SHAPE_BASE}..{candidate}").stdout.strip() != "1":
+        raise ReleaseError("source candidate must be one bounded controller commit above S1a")
+    if source_candidate_paths(candidate) != SOURCE_CONTROLLER_CHANGE_PATHS:
+        raise ReleaseError("source candidate contains changes outside the bounded controller scope")
+    if Path(__file__).read_bytes() != candidate_blob(REPO, candidate, CONTROLLER_PATH):
+        raise ReleaseError("running source controller is not candidate-extracted")
+    if git(REPO, "rev-parse", "--verify", "refs/remotes/origin/main").stdout.strip() != candidate:
+        raise ReleaseError("source candidate is not the exact archived main")
+
+    profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml").decode()
+    unit = candidate_blob(REPO, candidate, UNIT_SOURCE_PATH).decode()
+    gateway = candidate_blob(REPO, candidate, "node_bridge/src/hermesGatewayClient.mjs").decode()
+    memory = candidate_blob(REPO, candidate, "node_bridge/src/personalMemoryMcpServer.mjs").decode()
+    if "obsidian_memory" in profile or "ombre_memory" in profile or "18002" in profile:
+        raise ReleaseError("candidate profile exposes a retired memory surface")
+    if "mcp-personal_memory" not in profile or "mcp-playwright" not in profile or "mcp-media_generation" not in profile:
+        raise ReleaseError("candidate profile lost the supported capability union")
+    if "BindReadOnlyPaths=" in unit or "8643" in unit or f"HERMES_PROFILE={SOURCE_PROFILE}" not in unit:
+        raise ReleaseError("candidate unit is not the single companion topology")
+    if "HERMES_FULL_API_BASE_URL" in gateway or "HERMES_LITE_API_BASE_URL" in gateway or "http://127.0.0.1:8643" in gateway:
+        raise ReleaseError("candidate gateway retains the split frontend route")
+    if "const BACKEND_DEADLINE_MS = 15_000" not in memory or "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS" in memory:
+        raise ReleaseError("candidate personal-memory deadline is not a single 15-second truth")
+    changed = git(REPO, "diff", "--name-only", SOURCE_PRODUCTION_BASE, candidate).stdout.splitlines()
+    if any(path.startswith(("data/", "migrations/")) for path in changed):
+        raise ReleaseError("source convergence includes a state or data migration")
+
+
+def require_source_baseline() -> dict[str, Any]:
+    if git(REPO, "rev-parse", "HEAD").stdout.strip() != SOURCE_PRODUCTION_BASE:
+        raise ReleaseError("production checkout is not at the approved source baseline")
+    if git(REPO, "status", "--porcelain").stdout:
+        raise ReleaseError("production checkout is dirty")
+    marker = json.loads(TOPOLOGY_MARKER.read_text(encoding="utf-8"))
+    if marker.get("candidate") != "0b793e8fea85c409800ee7e0d615501816c99387" or marker.get("topology") != "unified-hermes-v0.20":
+        raise ReleaseError("unified runtime marker changed")
+    binding = json.loads(SOURCE_BINDING.read_text(encoding="utf-8"))
+    if binding.get("phase") != "accepted" or binding.get("runtimeRollbackAuthorized") is not False:
+        raise ReleaseError("binding.v4 is not the closed runtime authority")
+    overlay_state = json.loads((SOURCE_OVERLAY_TRANSACTION / "state.json").read_text(encoding="utf-8"))
+    if overlay_state.get("status") != "accepted" or overlay_state.get("candidate") != SOURCE_OVERLAY_CANDIDATE:
+        raise ReleaseError("accepted companion overlay authority changed")
+    for path, field in (
+        (SOURCE_HERMES_OVERLAY_DROPIN, "applied_dropin_sha256"),
+        (SOURCE_PYTHON_OVERLAY_DROPIN, "applied_python_dropin_sha256"),
+    ):
+        if not path.is_file() or path.is_symlink() or sha256_file(path) != overlay_state.get(field):
+            raise ReleaseError(f"accepted overlay drop-in changed: {path}")
+    if shutil.disk_usage(REPO).free < 2 * 1024 * 1024 * 1024:
+        raise ReleaseError("less than 2 GiB free for source convergence")
+    return overlay_state
+
+
+def refuse_unfinished_source_transaction() -> None:
+    if not SOURCE_SNAPSHOT_ROOT.exists():
+        return
+    for state_path in SOURCE_SNAPSHOT_ROOT.glob("*/state.json"):
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if state.get("phase") not in {"accepted", "rolled-back"}:
+            raise ReleaseError(f"unfinished source transaction requires rollback: {state_path.parent}")
+
+
+def source_snapshot_paths() -> tuple[Path, ...]:
+    return (
+        LITE_UNIT,
+        SOURCE_HERMES_OVERLAY_DROPIN,
+        SOURCE_PYTHON_OVERLAY_DROPIN,
+        LITE_HOME / "config.yaml",
+        SOURCE_PROFILE_DIR,
+        SOURCE_LEGACY_PROFILE_DIR,
+        *ENV_FILES,
+    )
+
+
+def stage_source_candidate(candidate: str) -> Path:
+    SOURCE_STAGE_ROOT.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(SOURCE_STAGE_ROOT, 0o700)
+    stage = Path(tempfile.mkdtemp(prefix=f"source-{candidate[:12]}-", dir=SOURCE_STAGE_ROOT))
+    archive = git(REPO, "archive", "--format=tar", candidate, text=False).stdout
+    with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as source:
+        for member in source.getmembers():
+            parts = PurePosixPath(member.name).parts
+            if member.name.startswith("/") or ".." in parts or not (member.isfile() or member.isdir()):
+                raise ReleaseError(f"unsupported source archive member: {member.name}")
+        source.extractall(stage)
+    if not SOURCE_NPM_BIN.is_file():
+        raise ReleaseError("managed Node npm is absent")
+    environment = os.environ.copy()
+    environment.update({
+        "HOME": "/nonexistent",
+        "PATH": f"{SOURCE_NODE_BIN.parent}:/usr/bin:/bin",
+        "npm_config_cache": str(stage / ".npm-cache"),
+        "npm_config_audit": "false",
+        "npm_config_fund": "false",
+        "npm_config_update_notifier": "false",
+        "npm_config_engine_strict": "true",
+    })
+    try:
+        subprocess.run(
+            [str(SOURCE_NPM_BIN), "ci", "--omit=dev", "--ignore-scripts", "--prefix", str(stage)],
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env=environment,
+            text=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        shutil.rmtree(stage, ignore_errors=True)
+        raise ReleaseError("candidate Node dependency install failed") from exc
+    return stage
+
+
+def patch_source_env_bytes(original: bytes) -> bytes:
+    removed = {
+        "HERMES_LITE_API_BASE_URL", "HERMES_FULL_API_BASE_URL", "HERMES_LITE_PROFILE",
+        "HERMES_FULL_PROFILE", "RAN_AGENT_CAPABILITY_MODE", "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS",
+        "PERSONAL_AGENT_OMBRE_BACKEND", "PERSONAL_AGENT_OMBRE_MCP_URL",
+        "PERSONAL_AGENT_OMBRE_READ_ENABLED", "PERSONAL_AGENT_OMBRE_WRITE_ENABLED",
+        "PERSONAL_AGENT_OMBRE_TIMEOUT_MS", "PERSONAL_AGENT_OMBRE_MAX_RESULTS",
+        "PERSONAL_AGENT_OMBRE_MAX_CHARS", "OBSIDIAN_MEMORY_MCP_ENABLED",
+    }
+    values = {
+        "HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "HERMES_PROFILE": SOURCE_PROFILE,
+        "CO_READING_HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1",
+    }
+    kept: list[str] = []
+    for line in original.decode("utf-8").splitlines():
+        key = line.split("=", 1)[0] if "=" in line else ""
+        if key in values or key in removed or key.startswith(("OMBRE_RECALL_", "OMBRE_COMPAT_")):
+            continue
+        kept.append(line)
+    kept.extend(f"{key}={value}" for key, value in values.items())
+    return ("\n".join(kept) + "\n").encode()
+
+
+def create_source_snapshot(candidate: str, overlay_state: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
+    SOURCE_SNAPSHOT_ROOT.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(SOURCE_SNAPSHOT_ROOT, 0o700)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    snapshot = SOURCE_SNAPSHOT_ROOT / f"source-{timestamp}-{candidate[:12]}"
+    snapshot.mkdir(mode=0o700)
+    (snapshot / "files").mkdir(mode=0o700)
+    state = {
+        "schemaVersion": 1,
+        "candidate": candidate,
+        "priorHead": SOURCE_PRODUCTION_BASE,
+        "priorRef": git(REPO, "symbolic-ref", "-q", "HEAD", text=True).stdout.strip(),
+        "phase": "snapshot-created",
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "overlayTransaction": str(SOURCE_OVERLAY_TRANSACTION),
+        "overlayStateSha256": sha256_file(SOURCE_OVERLAY_TRANSACTION / "state.json"),
+        "services": {unit: service_state(unit) for unit in SOURCE_SERVICES},
+        "paths": [backup_path(snapshot, path, index) for index, path in enumerate(source_snapshot_paths())],
+    }
+    write_json(snapshot / "state.json", state)
+    fsync_directory(snapshot)
+    return snapshot, state
+
+
+def persist_source_authority(candidate: str) -> Path:
+    SOURCE_ARTIFACT_ROOT.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(SOURCE_ARTIFACT_ROOT, 0o700)
+    destination = SOURCE_ARTIFACT_ROOT / f"deploy-hermes-source-{candidate}.py"
+    payload = candidate_blob(REPO, candidate, CONTROLLER_PATH)
+    if destination.exists():
+        if destination.read_bytes() != payload:
+            raise ReleaseError("persisted source controller differs")
+    else:
+        atomic_write(destination, payload, mode=0o700, uid=0, gid=0)
+    git_as_checkout_owner("update-ref", f"{SOURCE_REF_ROOT}/{candidate}", candidate)
+    return destination
+
+
+def stop_source_services() -> None:
+    for unit in reversed(SOURCE_SERVICES):
+        if service_state(unit)["active"] == "active":
+            run(["systemctl", "stop", unit])
+
+
+def wait_port(port: int, timeout: float = 60.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if port_open(port):
+            return
+        time.sleep(0.5)
+    raise ReleaseError(f"port did not become ready: {port}")
+
+
+def restore_source_services(state: dict[str, Any], *, expected_profile: str) -> None:
+    run(["systemctl", "daemon-reload"])
+    for unit in SOURCE_SERVICES[:3]:
+        prior = state["services"][unit]
+        if prior["active"] == "active":
+            run(["systemctl", "start", unit])
+            if unit == "ran-agent-python.service":
+                wait_port(8787)
+            elif unit == "ran-agent-hermes.service":
+                wait_for_gateway(8642, process_environment(unit), expected_profile)
+            elif unit == "ran-agent-node.service":
+                wait_port(8791)
+        else:
+            run(["systemctl", "stop", unit], check=False)
+    timer = SOURCE_SERVICES[3]
+    if state["services"][timer]["active"] == "active":
+        run(["systemctl", "start", timer])
+    else:
+        run(["systemctl", "stop", timer], check=False)
+
+
+def activate_source_candidate(candidate: str, stage: Path, snapshot: Path) -> None:
+    git_as_checkout_owner("checkout", "--detach", candidate)
+    live_modules = REPO / "node_modules"
+    rollback_modules = snapshot / "node_modules.rollback"
+    if live_modules.is_symlink() or (live_modules.exists() and not live_modules.is_dir()):
+        raise ReleaseError("live node_modules has an invalid type")
+    if live_modules.exists():
+        shutil.move(live_modules, rollback_modules)
+    shutil.move(stage / "node_modules", live_modules)
+    account = pwd.getpwnam("ubuntu")
+    for root, directories, files in os.walk(live_modules):
+        os.chown(root, account.pw_uid, account.pw_gid)
+        for name in directories + files:
+            os.chown(Path(root, name), account.pw_uid, account.pw_gid)
+    for env_file in ENV_FILES:
+        value = env_file.stat()
+        atomic_write_existing(
+            env_file,
+            patch_source_env_bytes(env_file.read_bytes()),
+            mode=stat.S_IMODE(value.st_mode),
+            uid=value.st_uid,
+            gid=value.st_gid,
+        )
+    run([
+        "/usr/sbin/runuser", "-u", "ubuntu", "--", "/usr/bin/env",
+        f"HERMES_HOME={LITE_HOME}", f"RAN_AGENT_REPO_ROOT={REPO}",
+        str(SOURCE_HERMES_BIN), "profile", "install", str(REPO / "hermes/profile"),
+        "--name", SOURCE_PROFILE, "--force", "-y",
+    ])
+    profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml")
+    root_config = LITE_HOME / "config.yaml"
+    value = root_config.stat()
+    atomic_write_existing(root_config, profile, mode=0o644, uid=value.st_uid, gid=value.st_gid)
+    if SOURCE_LEGACY_PROFILE_DIR.exists():
+        shutil.rmtree(SOURCE_LEGACY_PROFILE_DIR)
+    atomic_write(LITE_UNIT, candidate_blob(REPO, candidate, UNIT_SOURCE_PATH), mode=0o644, uid=0, gid=0)
+    SOURCE_HERMES_OVERLAY_DROPIN.unlink(missing_ok=True)
+    SOURCE_PYTHON_OVERLAY_DROPIN.unlink(missing_ok=True)
+
+
+def source_real_provider_probe() -> None:
+    environment = process_environment("ran-agent-hermes.service")
+    key = environment.get("HERMES_API_KEY") or environment.get("API_SERVER_KEY")
+    if not key:
+        raise ReleaseError("Hermes gateway key is absent")
+    payload = json.dumps({
+        "model": SOURCE_PROFILE,
+        "messages": [{"role": "user", "content": "Source acceptance probe. Reply only OK; do not use tools."}],
+        "stream": False,
+    }).encode()
+    request = urllib.request.Request(
+        "http://127.0.0.1:8642/v1/chat/completions",
+        data=payload,
+        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=180) as response:
+        result = json.loads(response.read())
+    if not result.get("choices") and not result.get("output"):
+        raise ReleaseError("Hermes provider probe returned no completion")
+
+
+def source_memory_probe() -> None:
+    payload = json.dumps({"user_text": "source convergence acceptance", "route": "text_chat", "response_mode": "chat"}).encode()
+    request = urllib.request.Request(
+        "http://127.0.0.1:8787/tools/memory/recall",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        result = json.loads(response.read())
+    statuses = result.get("source_status")
+    if not isinstance(statuses, dict) or not statuses or any(value not in {"hit", "empty", "transport", "degraded"} for value in statuses.values()):
+        raise ReleaseError("personal-memory source status is not observable")
+
+
+def validate_source_acceptance(candidate: str) -> None:
+    if git(REPO, "rev-parse", "HEAD").stdout.strip() != candidate or git(REPO, "status", "--porcelain").stdout:
+        raise ReleaseError("source checkout did not converge cleanly")
+    if LITE_UNIT.read_bytes() != candidate_blob(REPO, candidate, UNIT_SOURCE_PATH):
+        raise ReleaseError("live Hermes unit differs from candidate")
+    if SOURCE_HERMES_OVERLAY_DROPIN.exists() or SOURCE_PYTHON_OVERLAY_DROPIN.exists():
+        raise ReleaseError("companion overlay drop-in remains active")
+    profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml")
+    if (LITE_HOME / "config.yaml").read_bytes() != profile or (SOURCE_PROFILE_DIR / "config.yaml").read_bytes() != profile:
+        raise ReleaseError("live companion profile differs from candidate")
+    if SOURCE_LEGACY_PROFILE_DIR.exists():
+        raise ReleaseError("legacy Lite profile remains deployable")
+    for unit in SOURCE_SERVICES[:3]:
+        if service_state(unit)["active"] != "active":
+            raise ReleaseError(f"source service is inactive: {unit}")
+    pid = service_main_pid("ran-agent-hermes.service")
+    environment = process_environment_for_pid(pid)
+    expected_executable = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/python/bin/python3.12").resolve()
+    if environment.get("HERMES_PROFILE") != SOURCE_PROFILE or process_executable(pid) != expected_executable:
+        raise ReleaseError("Hermes process does not use the companion source contract")
+    validate_listener_topology(pid)
+    if not port_open(18001) or port_open(18002) or port_open(8643):
+        raise ReleaseError("source listener topology is invalid")
+    wait_port(8787)
+    wait_port(8791)
+    wait_for_gateway(8642, environment, SOURCE_PROFILE)
+    source_memory_probe()
+    source_real_provider_probe()
+
+
+def restore_source_snapshot(snapshot: Path, state: dict[str, Any]) -> None:
+    stop_source_services()
+    for record in reversed(state["paths"]):
+        restore_path(snapshot, record)
+    live_modules = REPO / "node_modules"
+    rollback_modules = snapshot / "node_modules.rollback"
+    if rollback_modules.exists():
+        if live_modules.exists():
+            shutil.rmtree(live_modules)
+        shutil.move(rollback_modules, live_modules)
+    git_as_checkout_owner("checkout", "--detach", state["priorHead"])
+    if state.get("priorRef", "").startswith("refs/heads/"):
+        git_as_checkout_owner("checkout", state["priorRef"].removeprefix("refs/heads/"))
+    restore_source_services(state, expected_profile="ran-assistant-lite")
+    if sha256_file(SOURCE_OVERLAY_TRANSACTION / "state.json") != state["overlayStateSha256"]:
+        raise ReleaseError("accepted overlay record changed across source rollback")
+    if not SOURCE_HERMES_OVERLAY_DROPIN.is_file() or not SOURCE_PYTHON_OVERLAY_DROPIN.is_file():
+        raise ReleaseError("source rollback did not restore the accepted overlay")
+    if git(REPO, "rev-parse", "HEAD").stdout.strip() != SOURCE_PRODUCTION_BASE or git(REPO, "status", "--porcelain").stdout:
+        raise ReleaseError("source rollback did not restore the production checkout")
+
+
+def source_rollback(snapshot: Path, candidate: str) -> None:
+    state_path = snapshot / "state.json"
+    if snapshot.parent != SOURCE_SNAPSHOT_ROOT or not state_path.is_file() or state_path.is_symlink():
+        raise ReleaseError("source rollback snapshot is invalid")
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    if state.get("candidate") != candidate or state.get("phase") != "accepted":
+        raise ReleaseError("source rollback snapshot is not the accepted candidate")
+    if not SOURCE_POINTER.is_file() or json.loads(SOURCE_POINTER.read_text(encoding="utf-8")).get("snapshot") != str(snapshot):
+        raise ReleaseError("source rollback snapshot is not current")
+    restore_source_snapshot(snapshot, state)
+    update_phase(snapshot, state, "rolled-back")
+    SOURCE_POINTER.unlink()
+    fsync_directory(SOURCE_SNAPSHOT_ROOT)
+
+
+def source_apply(candidate: str) -> Path:
+    overlay_state = require_source_baseline()
+    refuse_unfinished_source_transaction()
+    controller = persist_source_authority(candidate)
+    stage = stage_source_candidate(candidate)
+    snapshot, state = create_source_snapshot(candidate, overlay_state)
+    try:
+        stop_source_services()
+        activate_source_candidate(candidate, stage, snapshot)
+        restore_source_services(state, expected_profile=SOURCE_PROFILE)
+        validate_source_acceptance(candidate)
+        state["controller"] = str(controller)
+        update_phase(snapshot, state, "accepted")
+        write_json(SOURCE_POINTER, {"schemaVersion": 1, "candidate": candidate, "snapshot": str(snapshot), "controller": str(controller)})
+        return snapshot
+    except BaseException:
+        with contextlib.suppress(Exception):
+            restore_source_snapshot(snapshot, state)
+            update_phase(snapshot, state, "rolled-back")
+        raise
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+
+def source_main(args: argparse.Namespace) -> int:
+    validate_source_candidate(args.candidate)
+    if args.mode == "source-rollback":
+        if args.snapshot is None:
+            raise ReleaseError("source rollback requires --snapshot")
+        source_rollback(args.snapshot.resolve(), args.candidate)
+        print(json.dumps({"status": "SOURCE_ROLLED_BACK", "candidate": args.candidate, "snapshot": str(args.snapshot.resolve())}, sort_keys=True))
+        return 0
+    require_source_baseline()
+    refuse_unfinished_source_transaction()
+    if args.mode == "source-dry-run":
+        print(json.dumps({"status": "SOURCE_DRY_RUN_OK", "candidate": args.candidate, "freeBytes": shutil.disk_usage(REPO).free}, sort_keys=True))
+        return 0
+    signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
+    snapshot = source_apply(args.candidate)
+    print(json.dumps({"status": "SOURCE_APPLIED", "candidate": args.candidate, "snapshot": str(snapshot)}, sort_keys=True))
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate", required=True)
     parser.add_argument("--artifact", type=Path)
-    parser.add_argument("--mode", choices=("dry-run", "apply", "rollback"), required=True)
+    parser.add_argument(
+        "--mode",
+        choices=("dry-run", "apply", "rollback", "source-dry-run", "source-apply", "source-rollback"),
+        required=True,
+    )
     parser.add_argument("--snapshot", type=Path)
     args = parser.parse_args()
     if os.geteuid() != 0:
@@ -1373,6 +1822,8 @@ def main() -> int:
         raise ReleaseError("authorized release artifact root is absent")
     require_private_root(ARTIFACT_ROOT)
     with release_lock():
+        if args.mode.startswith("source-"):
+            return source_main(args)
         validate_candidate_controller(REPO, args.candidate)
         if args.mode == "rollback":
             if args.snapshot is None:
