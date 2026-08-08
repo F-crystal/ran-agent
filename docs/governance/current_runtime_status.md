@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5 LOCAL_VERIFIED; S6 ARCHIVED (2026-08-08)
+Status: S4 PROD_VERIFIED; S5-S8 LOCAL_VERIFIED; S9 IN_PROGRESS (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -47,8 +47,9 @@ changing the direct `18001` read path.
 
 Ombre is a derived relationship/context source, not the authority for Core
 facts or deployment truth. Core and governed runtime documents remain the
-authorities; future Ombre ingestion must be a rebuildable projection from
-confirmed Core events or other explicit sources.
+authorities. S8 adds one local-only rebuildable projector for confirmed,
+payload-hash-bound Core/personal-learning events; production still has no
+Ombre mutation path.
 
 The converged source deploys main's strict query-only
 `personalMemoryMcpServer`, explicit `source_status`, Vault retrieval, Python
@@ -133,6 +134,18 @@ exception is durably ambiguous and does not resend after reopen. The combined
 ChannelHub/Core suite passes 145 tests. No production database, route, flag,
 service or source pointer changed.
 
+S8 is locally verified under the owner's 2026-08-08 authorization for one
+governed projector. It reuses Core's projection outbox, cursor and fence
+receipts; only two confirmed event classes select Ombre `hold` or `grow`, and
+the content must match the keyed journal-payload hash. Stable event/scope tags
+reconcile a lost Ombre response before retry, support scope-level soft erasure,
+and permit replay into a new scope from unchanged Core facts. Concurrent and
+restart-like replays mutate Ombre once, projector failure leaves the Core source
+fact intact, and the existing public recall MCP still rejects `hold`, `grow`
+and every other upstream mutation. Six focused tests plus the combined
+Core/Ombre suite pass locally (180 pass, one existing root-only skip). The
+projector is not composed into production and no real vault data was changed.
+
 ## Source And Recovery Authority
 
 Binding.v4 completed the earlier runtime apply, rollback and reapply and records
@@ -178,7 +191,8 @@ The source still aligns four production-backed contracts:
 - canonical `memory_bge_vector_index.*` paths;
 - Ombre endpoint absence classified as transport failure;
 - unified Hermes and co-reading defaults on `8642`;
-- no direct Ombre mutation; inactive O2 seams are absent.
+- no production-composed or model-facing Ombre mutation; inactive O2 seams are
+  absent.
 
 Legacy split-profile release inputs remain excluded from the companion
 distribution. The source mode reuses the existing candidate controller and is
@@ -190,9 +204,8 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S7 are complete. S8 is not started and
-the ready frontier is waiting for the separately required owner authorization
-to enable the single governed Ombre projector. The S5-era root-worktree drafts
+`docs/governance/active_sequence.md`. S0-S8 are complete and S9 Package C
+scheduling is the sole active stage. The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the
 three retained runtime semantics were re-implemented on current main, and the
@@ -203,13 +216,13 @@ The remote branch set is intentionally `main` only. Historical candidate
 branches are neither production nor rollback authority; recoverable local S4
 convergence artifacts remain ignored under `local_archive/`.
 
-Package A and B.1 Core primitives exist in source, and S5 locally verifies one
-B.2 final-transaction/outbox/effect/result-receipt loop with 121 passing Core
-tests and reopen/replay without a second effect. It is not composed into the
-production Node write path; B.3 has not started. Ombre Gate 5 is retired with
-O2 and the historical name is retained only as retired evidence; the single
-future Core production gate is uniformly named the Core Cutover Gate (S12). O2
-is a retired migration-era path; only rollback evidence may remain.
+Package A and B.1 Core primitives exist in source; S5 verifies the local B.2
+final/outbox/effect/receipt loop, S7 completes local B.3 Node wiring, and S8
+completes the local governed Ombre projection seam. None is composed into the
+production Node write path. Ombre Gate 5 is retired with O2 and the historical
+name is retained only as retired evidence; the single future Core production
+gate is uniformly named the Core Cutover Gate (S12). O2 is a retired
+migration-era path; only rollback evidence may remain.
 
 ## Protected State
 

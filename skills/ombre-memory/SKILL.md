@@ -17,9 +17,9 @@ Status: CURRENT (2026-08-08)
 - Ombre is a derived read source for emotional and long-term relationship
   context. It is not the authority for technical reality, delivery truth,
   identity, permissions, or Core facts.
-- Governance docs remain authoritative for ran-agent runtime facts. Future
-  confirmed Core events may project into Ombre, but no direct model-to-Ombre
-  write or O2 compatibility path is authorized in the current line.
+- Governance docs remain authoritative for ran-agent runtime facts. The owner
+  authorized one internal rebuildable projector on 2026-08-08; direct
+  model-to-Ombre write and every O2 compatibility path remain forbidden.
 - Explicit personal learning uses the existing typed action path: Hermes
   proposes an action identifier and bounded content, Node validates that the
   identifier, content class and format agree, and the authenticated Python
@@ -38,7 +38,16 @@ The response must be correlated JSON-RPC with
 `structuredContent.result: string`. The facade bounds returned text and reports
 `hit`, `empty`, `transport_error`, or `protocol_error`; it never turns a failed
 call into an empty-memory claim. `hold`, `grow`, and other upstream mutations
-are not exposed.
+are not exposed through `personal_memory` or the public recall MCP.
+
+The S8 source-only projector lives behind Core rather than a model tool. It
+accepts only current `personal_learning_confirmed` or
+`core_relationship_summary_confirmed` journal events whose content recomputes
+to the keyed journal-payload hash. It reuses Core's projection cursor/outbox,
+calls only official loopback `hold`, `grow`, `breath_advanced`, and `trace`, and
+uses stable event/scope markers for lost-response reconciliation and
+erase/rebuild. Do not add a second outbox, direct Hermes mutation tool, or O2
+writer.
 
 Local semantic retrieval is offline at request time. The exact FastEmbed model
 must be provisioned into `data/fastembed_cache` before activation; a missing
@@ -58,7 +67,8 @@ S3 remains production verified: active personal learning is visible through
 `personal_memory`, the independent read-only Ombre outcome remains visible,
 and the four relevant services stayed active. S4 production verification
 confirmed those services still active, `18001` open, `18002`/`8643` closed,
-and no Node O2 environment residue. It does not mutate Ombre or enable O2.
+and no Node O2 environment residue. Production does not compose the S8
+projector, mutate Ombre, or enable O2.
 
 ## Configuration
 

@@ -17,8 +17,8 @@ S0 facts/runtime selection
   -> S5 Core B.2 local closed loop
   -> S6 root-worktree convergence, draft triage and governance sync
   -> S7 Node to Core local wiring
-  -> S8 Ombre rebuildable projection (separate owner authorization)
-  -> S9 Package C scheduling
+  -> S8 Ombre rebuildable projection (owner authorized 2026-08-08)
+  -> S9 Package C scheduling (current)
   -> S10 migration rehearsal
   -> S11 synthetic fault acceptance
   -> S12 production cutover (owner authorization)
@@ -35,8 +35,8 @@ S0 facts/runtime selection
 | S5 | COMPLETE | S4 | — | `runPackageBLocalDelivery` composes the existing typed final transaction, presentation outbox claim/dispatch boundary, one injected effect and durable terminal receipt. A reopen/replay regression proves the effect runs once, and the Core suite passes 121 tests. The service is not wired into production. |
 | S6 | COMPLETE | S5 | Verify facts; triage all 33 root-worktree status entries; retain the 30 runtime draft paths in the checksummed desktop recovery patch and hand the three governance-hook paths to their dedicated task; re-implement the three still-missing runtime semantics on current main; sync governance documents; land the S6–S13 topology. | Root worktree is clean on current main; documents are consistent; the topology is in effect. |
 | S7 | COMPLETE | S6 | Real local Node to Core link: identity, ingress, Turn, provider attempt, final, B.2 outbox, receipt. | One synthetic Feishu text passes end to end through Core; concurrent callers share one effect, and reopen/replay returns the durable `sent` receipt without another send. Non-owner input writes no Core fact; an unknown result or adapter exception becomes durable `ambiguous` without resend. The combined ChannelHub and Core suite passes 145 tests; production is not connected. |
-| S8 | NOT STARTED | S7 + separate owner authorization | The single governed projector maps confirmed Core/personal-learning events into Ombre. | Repeated events do not grow twice; projector failure does not affect Core; the projection is erasable and rebuildable; the model cannot write Ombre directly. |
-| S9 | NOT STARTED | S8 | Schema v2, ScheduleSpec, WakeOccurrence, WorkRun, `wake_due`, and the single managed tick. | One-shot, interval and daily schedules work; duplicate or missed ticks never duplicate an occurrence; no network inside the transaction. |
+| S8 | COMPLETE | S7 + owner authorization granted 2026-08-08 | The single internal projector uses the existing Core projection outbox/cursor to map payload-hash-bound `personal_learning_confirmed` events through Ombre `hold`, and confirmed long relationship summaries through `grow`. Stable event/scope markers reconcile a lost response before retry; scope-tagged buckets can be soft-deleted and replayed from unchanged Core facts. The public recall MCP still rejects every upstream mutation tool. | Concurrent/repeated events perform one Ombre mutation; a post-commit lost response recovers by marker without a second `hold` or `grow`; a failed projector leaves the Core source intact and retryable; one scope erases and a new scope rebuilds. Six focused checks and the 181-test Core/Ombre suite pass locally (180 pass, one existing root-only skip). Production remains unchanged. |
+| S9 | IN_PROGRESS | S8 | Schema v2, ScheduleSpec, WakeOccurrence, WorkRun, `wake_due`, and the single managed tick. | One-shot, interval and daily schedules work; duplicate or missed ticks never duplicate an occurrence; no network inside the transaction. |
 | S10 | NOT STARTED | S9 | Inventory legacy scheduler, reminders, daily digest, pollers and dispatchers; build manifest/watermark; rehearse on a production copy. | Every legacy component has a recorded disposition; legacy jobs default to paused; no historical reminder is re-sent. |
 | S11 | NOT STARTED | S10 | Synthetic acceptance: duplicate/missed ticks, DST, crash, legacy fence, ambiguous outcomes, restart no-resend. | A deployable SHA exists; every external effect uses a synthetic target. |
 | S12 | NOT STARTED | S11 + production authorization | Stop ingress, let legacy effect/outbox drain, execute the single Core Cutover Gate, enable one tick, disable legacy visible wake. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |

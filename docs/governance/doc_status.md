@@ -40,8 +40,11 @@ reopen without a duplicate effect and remains disconnected from production.
 S6 then converged the root worktree, triaged its 33 status entries, reimplemented
 the three retained runtime semantics on current `main`, and synchronized the
 S6-S13 topology. S7 Node-to-Core local wiring is locally verified through its
-typed adapter receipt and does not change production. S8 remains `NOT STARTED`
-until the owner separately authorizes the governed Ombre projector.
+typed adapter receipt and does not change production. S8 is locally verified:
+the owner-authorized internal projector binds content to confirmed Core payload
+hashes, recovers lost Ombre responses without duplicate growth, and supports
+scope erasure/rebuild while the public recall surface remains read-only. It is
+not composed into production. S9 Package C scheduling is now `IN_PROGRESS`.
 
 ## Lifecycle Stages
 

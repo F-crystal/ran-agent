@@ -898,6 +898,7 @@ test('prepare-ombre-brain.sh fails closed when timed-out source cannot prove the
       OMBRE_BRAIN_HOME: homeDir,
       OMBRE_BRAIN_SOURCE_DIR: sourceDir,
       OMBRE_BRAIN_VENV: join(homeDir, '.venv'),
+      RAN_AGENT_OMBRE_PYTHON_BIN: join(binDir, 'python312'),
       RAN_AGENT_OMBRE_PATCH_PYTHON_BIN: join(binDir, 'python312'),
     },
     encoding: 'utf8',
@@ -925,7 +926,6 @@ test('prepare-ombre-brain.sh installs the official hashed lock once and caches i
   execFileSync('git', ['config', 'user.name', 'Ombre test'], { cwd: sourceDir });
   execFileSync('git', ['add', 'src/server.py', 'requirements.lock.txt'], { cwd: sourceDir });
   execFileSync('git', ['commit', '-m', 'fixed fixture'], { cwd: sourceDir, stdio: 'pipe' });
-  const fixedCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: sourceDir, encoding: 'utf8' }).trim();
   writeFileSync(join(venvDir, 'bin', 'python'), [
     '#!/usr/bin/env bash',
     'if [[ "$*" == *"sys.version_info"* ]]; then printf "3.12\\n"; exit 0; fi',
@@ -943,11 +943,11 @@ test('prepare-ombre-brain.sh installs the official hashed lock once and caches i
     '  printf "%s\\n" 0e83d4671ce1629e03ad36bb9160235bf60dbd34',
     '  exit 0',
     'fi',
+    'if [[ "$*" == *"checkout --detach --force 0e83d4671ce1629e03ad36bb9160235bf60dbd34"* ]]; then exit 0; fi',
     'exec /usr/bin/git "$@"',
     '',
   ].join('\n'));
   chmodSync(gitShim, 0o755);
-
   const env = {
     ...process.env,
     PATH: `${dir}:${process.env.PATH}`,
@@ -957,6 +957,7 @@ test('prepare-ombre-brain.sh installs the official hashed lock once and caches i
     OMBRE_BRAIN_HOME: homeDir,
     OMBRE_BRAIN_SOURCE_DIR: sourceDir,
     OMBRE_BRAIN_VENV: venvDir,
+    RAN_AGENT_OMBRE_PYTHON_BIN: patchPython,
     RAN_AGENT_OMBRE_PATCH_PYTHON_BIN: patchPython,
   };
   execFileSync('bash', ['scripts/prepare-ombre-brain.sh'], {

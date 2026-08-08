@@ -175,6 +175,7 @@ export class CoreDatabase {
       foreignKeyViolations: () => all('PRAGMA foreign_key_check').map((row) => Object.freeze({ ...row })),
       journalEventCount: () => Number(read('SELECT count(*) AS count FROM journal_event').count),
       journalEvent: (eventId) => read('SELECT * FROM journal_event WHERE journal_event_id=?', eventId),
+      journalPayload: (payloadId) => read('SELECT * FROM journal_payload WHERE journal_payload_id=?', payloadId),
       ingressEventCount: () => Number(read('SELECT count(*) AS count FROM ingress_event').count),
       ingressEvent: (eventId) => read('SELECT * FROM ingress_event WHERE ingress_event_id=?', eventId),
       projectorCursor: (projectorId, targetScope) => read(
