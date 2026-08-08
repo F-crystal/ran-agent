@@ -111,6 +111,18 @@ SOURCE_CONTROLLER_CHANGE_PATHS = frozenset({
     "tests/test_hermes_runtime_release.py",
     "node_bridge/tests/hermesReleaseScript.test.mjs",
 })
+SOURCE_ADVANCE_FORBIDDEN_PATHS = frozenset({
+    ".env",
+    ".env.local",
+    "node_bridge/.env.local",
+})
+SOURCE_ADVANCE_FORBIDDEN_PREFIXES = (
+    ".ran_agent_state/",
+    "data/",
+    "local_archive/",
+    "migrations/",
+    "vault/",
+)
 
 
 class ReleaseError(RuntimeError):
@@ -1415,19 +1427,42 @@ def source_candidate_paths(candidate: str) -> set[str]:
     return {line for line in lines if line}
 
 
-def validate_source_candidate(candidate: str) -> None:
-    check_candidate(REPO, candidate, SOURCE_REF_ROOT)
-    if run(["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), "merge-base", "--is-ancestor", SOURCE_SHAPE_BASE, candidate], check=False).returncode:
-        raise ReleaseError("source candidate is not descended from the accepted S1a shape")
-    if git(REPO, "rev-parse", f"{candidate}^").stdout.strip() != SOURCE_CONTROLLER_BASE:
-        raise ReleaseError("source candidate is not the bounded controller fix")
-    if source_candidate_paths(candidate) != SOURCE_CONTROLLER_CHANGE_PATHS:
-        raise ReleaseError("source candidate contains changes outside the bounded controller scope")
-    if Path(__file__).read_bytes() != candidate_blob(REPO, candidate, CONTROLLER_PATH):
-        raise ReleaseError("running source controller is not candidate-extracted")
-    if git(REPO, "rev-parse", "--verify", "refs/remotes/origin/main").stdout.strip() != candidate:
-        raise ReleaseError("source candidate is not the exact archived main")
+def current_source_pointer() -> dict[str, Any] | None:
+    if not SOURCE_POINTER.exists() and not SOURCE_POINTER.is_symlink():
+        return None
+    if not SOURCE_POINTER.is_file() or SOURCE_POINTER.is_symlink():
+        raise ReleaseError("current source pointer is invalid")
+    try:
+        pointer = json.loads(SOURCE_POINTER.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReleaseError("current source pointer is invalid") from exc
+    candidate = str(pointer.get("candidate", ""))
+    snapshot = Path(str(pointer.get("snapshot", "")))
+    controller = Path(str(pointer.get("controller", "")))
+    if (
+        pointer.get("schemaVersion") != 1
+        or not re.fullmatch(r"[0-9a-f]{40}", candidate)
+        or snapshot.parent != SOURCE_SNAPSHOT_ROOT
+        or snapshot.is_symlink()
+        or not snapshot.is_dir()
+        or controller.parent != SOURCE_ARTIFACT_ROOT
+        or controller.is_symlink()
+        or not controller.is_file()
+    ):
+        raise ReleaseError("current source pointer is invalid")
+    state_path = snapshot / "state.json"
+    if not state_path.is_file() or state_path.is_symlink():
+        raise ReleaseError("current source snapshot is invalid")
+    try:
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ReleaseError("current source snapshot is invalid") from exc
+    if state.get("candidate") != candidate or state.get("phase") != "accepted":
+        raise ReleaseError("current source snapshot is not accepted")
+    return pointer
 
+
+def validate_unified_source_shape(candidate: str) -> None:
     profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml").decode()
     unit = candidate_blob(REPO, candidate, UNIT_SOURCE_PATH).decode()
     gateway = candidate_blob(REPO, candidate, "node_bridge/src/hermesGatewayClient.mjs").decode()
@@ -1442,13 +1477,59 @@ def validate_source_candidate(candidate: str) -> None:
         raise ReleaseError("candidate gateway retains the split frontend route")
     if "const BACKEND_TIMEOUT_MS = 15000;" not in memory or "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS" in memory:
         raise ReleaseError("candidate personal-memory deadline is not a single 15-second truth")
+
+
+def validate_source_advance_paths(paths: list[str]) -> None:
+    if any(
+        path in SOURCE_ADVANCE_FORBIDDEN_PATHS
+        or any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in SOURCE_ADVANCE_FORBIDDEN_PREFIXES)
+        for path in paths
+    ):
+        raise ReleaseError("source advance contains state, data, archive, vault, migration, or env changes")
+
+
+def validate_source_candidate(candidate: str, *, allow_current: bool = False) -> None:
+    check_candidate(REPO, candidate, SOURCE_REF_ROOT)
+    pointer = current_source_pointer()
+    if pointer is not None:
+        prior = pointer["candidate"]
+        if candidate == prior:
+            if not allow_current:
+                raise ReleaseError("source candidate is already the accepted source")
+        elif run([
+            "git", "-c", f"safe.directory={REPO}", "-C", str(REPO),
+            "merge-base", "--is-ancestor", prior, candidate,
+        ], check=False).returncode:
+            raise ReleaseError("source candidate is not a forward descendant of the accepted source")
+        changed = git(REPO, "diff", "--name-only", prior, candidate).stdout.splitlines()
+        validate_source_advance_paths(changed)
+        if Path(__file__).read_bytes() != candidate_blob(REPO, candidate, CONTROLLER_PATH):
+            raise ReleaseError("running source controller is not candidate-extracted")
+        if git(REPO, "rev-parse", "--verify", "refs/remotes/origin/main").stdout.strip() != candidate:
+            raise ReleaseError("source candidate is not the exact archived main")
+        validate_unified_source_shape(candidate)
+        return
+    if run(["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), "merge-base", "--is-ancestor", SOURCE_SHAPE_BASE, candidate], check=False).returncode:
+        raise ReleaseError("source candidate is not descended from the accepted S1a shape")
+    if git(REPO, "rev-parse", f"{candidate}^").stdout.strip() != SOURCE_CONTROLLER_BASE:
+        raise ReleaseError("source candidate is not the bounded controller fix")
+    if source_candidate_paths(candidate) != SOURCE_CONTROLLER_CHANGE_PATHS:
+        raise ReleaseError("source candidate contains changes outside the bounded controller scope")
+    if Path(__file__).read_bytes() != candidate_blob(REPO, candidate, CONTROLLER_PATH):
+        raise ReleaseError("running source controller is not candidate-extracted")
+    if git(REPO, "rev-parse", "--verify", "refs/remotes/origin/main").stdout.strip() != candidate:
+        raise ReleaseError("source candidate is not the exact archived main")
+
+    validate_unified_source_shape(candidate)
     changed = git(REPO, "diff", "--name-only", SOURCE_PRODUCTION_BASE, candidate).stdout.splitlines()
     if any(path.startswith(("data/", "migrations/")) for path in changed):
         raise ReleaseError("source convergence includes a state or data migration")
 
 
 def require_source_baseline() -> dict[str, Any]:
-    if git(REPO, "rev-parse", "HEAD").stdout.strip() != SOURCE_PRODUCTION_BASE:
+    pointer = current_source_pointer()
+    prior_head = pointer["candidate"] if pointer is not None else SOURCE_PRODUCTION_BASE
+    if git(REPO, "rev-parse", "HEAD").stdout.strip() != prior_head:
         raise ReleaseError("production checkout is not at the approved source baseline")
     if git(REPO, "status", "--porcelain").stdout:
         raise ReleaseError("production checkout is dirty")
@@ -1465,11 +1546,20 @@ def require_source_baseline() -> dict[str, Any]:
         (SOURCE_HERMES_OVERLAY_DROPIN, "applied_dropin_sha256"),
         (SOURCE_PYTHON_OVERLAY_DROPIN, "applied_python_dropin_sha256"),
     ):
-        if not path.is_file() or path.is_symlink() or sha256_file(path) != overlay_state.get(field):
-            raise ReleaseError(f"accepted overlay drop-in changed: {path}")
+        if pointer is None:
+            if not path.is_file() or path.is_symlink() or sha256_file(path) != overlay_state.get(field):
+                raise ReleaseError(f"accepted overlay drop-in changed: {path}")
+        elif path.exists() or path.is_symlink():
+            raise ReleaseError(f"retired overlay drop-in returned: {path}")
     if shutil.disk_usage(REPO).free < 2 * 1024 * 1024 * 1024:
         raise ReleaseError("less than 2 GiB free for source convergence")
-    return overlay_state
+    return {
+        "kind": "converged" if pointer is not None else "initial",
+        "priorHead": prior_head,
+        "priorProfile": SOURCE_PROFILE if pointer is not None else "ran-assistant-lite",
+        "priorPointer": pointer,
+        "overlayState": overlay_state,
+    }
 
 
 def refuse_unfinished_source_transaction() -> None:
@@ -1555,7 +1645,7 @@ def patch_source_env_bytes(original: bytes) -> bytes:
     return ("\n".join(kept) + "\n").encode()
 
 
-def create_source_snapshot(candidate: str, overlay_state: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
+def create_source_snapshot(candidate: str, baseline: dict[str, Any]) -> tuple[Path, dict[str, Any]]:
     SOURCE_SNAPSHOT_ROOT.mkdir(parents=True, mode=0o700, exist_ok=True)
     os.chmod(SOURCE_SNAPSHOT_ROOT, 0o700)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -1565,7 +1655,10 @@ def create_source_snapshot(candidate: str, overlay_state: dict[str, Any]) -> tup
     state = {
         "schemaVersion": 1,
         "candidate": candidate,
-        "priorHead": SOURCE_PRODUCTION_BASE,
+        "baselineKind": baseline["kind"],
+        "priorHead": baseline["priorHead"],
+        "priorProfile": baseline["priorProfile"],
+        "priorPointer": baseline["priorPointer"],
         "priorRef": run(
             ["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), "symbolic-ref", "-q", "HEAD"],
             check=False,
@@ -1738,6 +1831,7 @@ def validate_source_acceptance(candidate: str) -> None:
 
 
 def restore_source_snapshot(snapshot: Path, state: dict[str, Any]) -> None:
+    baseline_kind = state.get("baselineKind", "initial")
     stop_source_services()
     for record in reversed(state["paths"]):
         restore_path(snapshot, record)
@@ -1748,14 +1842,17 @@ def restore_source_snapshot(snapshot: Path, state: dict[str, Any]) -> None:
             shutil.rmtree(live_modules)
         shutil.move(rollback_modules, live_modules)
     git_as_checkout_owner("checkout", "--detach", state["priorHead"])
-    if state.get("priorRef", "").startswith("refs/heads/"):
+    if baseline_kind == "initial" and state.get("priorRef", "").startswith("refs/heads/"):
         git_as_checkout_owner("checkout", state["priorRef"].removeprefix("refs/heads/"))
-    restore_source_services(state, expected_profile="ran-assistant-lite")
+    restore_source_services(state, expected_profile=state.get("priorProfile", "ran-assistant-lite"))
     if sha256_file(SOURCE_OVERLAY_TRANSACTION / "state.json") != state["overlayStateSha256"]:
         raise ReleaseError("accepted overlay record changed across source rollback")
-    if not SOURCE_HERMES_OVERLAY_DROPIN.is_file() or not SOURCE_PYTHON_OVERLAY_DROPIN.is_file():
-        raise ReleaseError("source rollback did not restore the accepted overlay")
-    if git(REPO, "rev-parse", "HEAD").stdout.strip() != SOURCE_PRODUCTION_BASE or git(REPO, "status", "--porcelain").stdout:
+    if baseline_kind == "initial":
+        if not SOURCE_HERMES_OVERLAY_DROPIN.is_file() or not SOURCE_PYTHON_OVERLAY_DROPIN.is_file():
+            raise ReleaseError("source rollback did not restore the accepted overlay")
+    elif SOURCE_HERMES_OVERLAY_DROPIN.exists() or SOURCE_PYTHON_OVERLAY_DROPIN.exists():
+        raise ReleaseError("source rollback restored a retired overlay")
+    if git(REPO, "rev-parse", "HEAD").stdout.strip() != state["priorHead"] or git(REPO, "status", "--porcelain").stdout:
         raise ReleaseError("source rollback did not restore the production checkout")
 
 
@@ -1770,16 +1867,19 @@ def source_rollback(snapshot: Path, candidate: str) -> None:
         raise ReleaseError("source rollback snapshot is not current")
     restore_source_snapshot(snapshot, state)
     update_phase(snapshot, state, "rolled-back")
-    SOURCE_POINTER.unlink()
+    if state.get("priorPointer") is None:
+        SOURCE_POINTER.unlink()
+    else:
+        write_json(SOURCE_POINTER, state["priorPointer"])
     fsync_directory(SOURCE_SNAPSHOT_ROOT)
 
 
 def source_apply(candidate: str) -> Path:
-    overlay_state = require_source_baseline()
+    baseline = require_source_baseline()
     refuse_unfinished_source_transaction()
     controller = persist_source_authority(candidate)
     stage = stage_source_candidate(candidate)
-    snapshot, state = create_source_snapshot(candidate, overlay_state)
+    snapshot, state = create_source_snapshot(candidate, baseline)
     try:
         stop_source_services()
         activate_source_candidate(candidate, stage, snapshot)
@@ -1799,7 +1899,7 @@ def source_apply(candidate: str) -> Path:
 
 
 def source_main(args: argparse.Namespace) -> int:
-    validate_source_candidate(args.candidate)
+    validate_source_candidate(args.candidate, allow_current=args.mode == "source-rollback")
     if args.mode == "source-rollback":
         if args.snapshot is None:
             raise ReleaseError("source rollback requires --snapshot")

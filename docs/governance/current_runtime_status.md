@@ -110,12 +110,15 @@ The source still aligns four production-backed contracts:
 
 Legacy split-profile release inputs remain excluded from the companion
 distribution. The source mode reuses the existing candidate controller and is
-the only authorized seam through the unified marker; the legacy release mode
-continues to fail closed.
+the only authorized seam through the unified marker; after S1 it advances only
+from the accepted source pointer to an exact archived `main` descendant and
+restores that pointer on rollback. The legacy release mode continues to fail
+closed.
 
 ## Active Follow-Ups
 
-1. Apply and accept the locally verified `feishu.minutes_to_doc` candidate. It
+1. Archive, apply and accept the locally verified `feishu.minutes_to_doc`
+   candidate through the post-S1 source-pointer advance. It
    reads an existing Minutes transcript through the authenticated user, creates
    one structured cloud document directly in the uniquely matched destination
    folder, and signs success only after document readback. The 2026-08-07

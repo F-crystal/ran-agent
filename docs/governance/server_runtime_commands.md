@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-07)
+Status: CURRENT (2026-08-08)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -56,9 +56,10 @@ or use the legacy split release scripts.
 Do not retry `44b84fb11fe8` or use the split deploy scripts against the unified
 topology.
 
-For the authorized S1 main-source convergence, bind one reviewed main SHA and
-use its candidate-extracted existing controller. The rollback drill must use
-the same SHA and the exact snapshot printed by apply:
+For S1 and later main-source advances, bind one reviewed main SHA and use its
+candidate-extracted existing controller. After S1, a candidate must be an exact
+archived `main` fast-forward descendant of the accepted source pointer. The
+rollback command must use the same SHA and the exact snapshot printed by apply:
 
 ```bash
 cd /opt/ran_agent
@@ -77,9 +78,9 @@ rm -f "$BOOTSTRAP"
 ```
 
 This source transaction preserves the accepted v0.20 runtime, personal data
-and direct Ombre service. It snapshots only the checkout dependencies, two env
-files, Hermes unit/profile and overlay drop-ins; it does not copy databases or
-durable delivery state.
+and direct Ombre service. It snapshots the prior source pointer, checkout
+dependencies, two env files and Hermes unit/profile; it does not copy databases
+or durable delivery state. A rollback restores the exact prior source pointer.
 
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy

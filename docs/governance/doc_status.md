@@ -20,9 +20,11 @@ The S2 source candidate adds one locally verified typed action for an existing
 Feishu Minutes transcript: `feishu.minutes_to_doc`. It uses the authenticated
 user to resolve one transcript and one destination folder, creates one cloud
 document, and requires readback before a success receipt. It does not add ASR,
-PPT handling, polling or a general workflow framework. Production acceptance
-still requires applying the exact archived candidate and observing one real
-receipt.
+PPT handling, polling or a general workflow framework. Its source controller
+also extends the existing S1 transaction to exact archived `main` descendants
+while retaining the prior source pointer as rollback authority. Production
+acceptance still requires applying the exact archived candidate and observing
+one real receipt.
 
 ## Lifecycle Stages
 

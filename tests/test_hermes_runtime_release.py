@@ -55,6 +55,71 @@ def test_source_env_patch_removes_split_and_retired_memory_keys() -> None:
     )
 
 
+def test_converged_source_pointer_is_bound_to_accepted_snapshot_and_controller(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    snapshot_root = tmp_path / "source-snapshots"
+    artifact_root = tmp_path / "source-artifacts"
+    snapshot = snapshot_root / "source-old"
+    controller = artifact_root / "controller.py"
+    snapshot.mkdir(parents=True)
+    artifact_root.mkdir()
+    candidate = "a" * 40
+    (snapshot / "state.json").write_text(json.dumps({"candidate": candidate, "phase": "accepted"}))
+    controller.write_text("controller")
+    pointer_path = snapshot_root / "current-source.json"
+    pointer = {
+        "schemaVersion": 1,
+        "candidate": candidate,
+        "snapshot": str(snapshot),
+        "controller": str(controller),
+    }
+    pointer_path.write_text(json.dumps(pointer))
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshot_root)
+    monkeypatch.setattr(MODULE, "SOURCE_ARTIFACT_ROOT", artifact_root)
+    monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer_path)
+
+    assert MODULE.current_source_pointer() == pointer
+
+
+def test_source_advance_rejects_private_or_migrating_paths() -> None:
+    MODULE.validate_source_advance_paths([".env.example", "node_bridge/src/replyBackend.mjs", "README.md"])
+    for path in (".env.local", "data/private.db", "migrations/999.sql", "vault/raw/item"):
+        with pytest.raises(MODULE.ReleaseError, match="source advance contains"):
+            MODULE.validate_source_advance_paths([path])
+
+
+def test_converged_source_rollback_restores_prior_pointer(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    candidate = "b" * 40
+    prior = {
+        "schemaVersion": 1,
+        "candidate": "a" * 40,
+        "snapshot": str(tmp_path / "prior"),
+        "controller": str(tmp_path / "prior-controller.py"),
+    }
+    snapshot = tmp_path / "source-new"
+    snapshot.mkdir()
+    state = {
+        "candidate": candidate,
+        "phase": "accepted",
+        "priorPointer": prior,
+    }
+    (snapshot / "state.json").write_text(json.dumps(state))
+    pointer_path = tmp_path / "current-source.json"
+    pointer_path.write_text(json.dumps({"candidate": candidate, "snapshot": str(snapshot)}))
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", tmp_path)
+    monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer_path)
+    monkeypatch.setattr(MODULE, "restore_source_snapshot", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "update_phase", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "fsync_directory", lambda *_args: None)
+
+    MODULE.source_rollback(snapshot, candidate)
+
+    assert json.loads(pointer_path.read_text()) == prior
+
+
 def test_gateway_readiness_refreshes_credentials_after_main_pid_change(monkeypatch: pytest.MonkeyPatch) -> None:
     environments = iter([{"API_SERVER_KEY": "stale"}, {"API_SERVER_KEY": "fresh"}])
     attempts: list[str | None] = []
