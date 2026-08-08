@@ -160,6 +160,68 @@ test('marks a mixed component result ambiguous and never projects it as sent', a
   assert.equal(outbox.get(item.outboxId).backendProjection, 'pending');
 });
 
+test('terminalizes an adapter exception as ambiguous and never sends it again', async (t) => {
+  const outbox = durableOutbox.createDurableOutbox({ env: createIsolatedTestEnv(t) });
+  const input = request('operation:adapter-timeout');
+  let sends = 0;
+
+  await assert.rejects(outbox.deliver(input, {
+    send: async () => {
+      sends += 1;
+      throw new Error('adapter timeout');
+    },
+  }), /adapter timeout/);
+
+  const [item] = outbox.list();
+  assert.equal(item.delivery, 'ambiguous');
+  assert.equal(item.deliveryTerminalReceipts.length, 1);
+  assert.equal(item.deliveryTerminalReceipts[0].delivery, 'ambiguous');
+  assert.equal(item.timelineProjection, 'pending');
+  assert.equal(item.backendProjection, 'pending');
+  await outbox.projectPending({
+    timeline: async () => assert.fail('ambiguous adapter exception must not project timeline'),
+    backend: async () => assert.fail('ambiguous adapter exception must not project backend'),
+  });
+  await assert.rejects(outbox.deliver(input, {
+    send: async () => { sends += 1; },
+  }), (error) => error?.code === 'OUTBOX_DELIVERY_UNCERTAIN');
+  assert.equal(sends, 1);
+});
+
+test('terminalizes an untyped adapter result as ambiguous and never sends it again', async (t) => {
+  const outbox = durableOutbox.createDurableOutbox({ env: createIsolatedTestEnv(t) });
+  const input = request('operation:adapter-protocol-invalid');
+  let sends = 0;
+
+  await assert.rejects(outbox.deliver(input, {
+    send: async () => {
+      sends += 1;
+      return { ok: true };
+    },
+  }), (error) => error?.code === 'OUTBOX_ADAPTER_RESULT_INVALID');
+
+  const [item] = outbox.list();
+  assert.equal(item.delivery, 'ambiguous');
+  assert.equal(item.deliveryTerminalReceipts.length, 1);
+  await assert.rejects(outbox.deliver(input, {
+    send: async () => { sends += 1; },
+  }), (error) => error?.code === 'OUTBOX_DELIVERY_UNCERTAIN');
+  assert.equal(sends, 1);
+});
+
+test('terminalizes an invalid adapter receipt as ambiguous', async (t) => {
+  const outbox = durableOutbox.createDurableOutbox({ env: createIsolatedTestEnv(t) });
+  const input = request('operation:adapter-receipt-invalid');
+
+  await assert.rejects(outbox.deliver(input, {
+    send: async () => sentResult({ adapterReceiptRef: '/private/adapter-receipt' }),
+  }), (error) => error?.code === 'OUTBOX_ADAPTER_RESULT_INVALID');
+
+  const [item] = outbox.list();
+  assert.equal(item.delivery, 'ambiguous');
+  assert.equal(item.deliveryTerminalReceipts.length, 1);
+});
+
 test('binds one durable job result to at most one outbox across restart', (t) => {
   const env = createIsolatedTestEnv(t);
   const first = durableOutbox.createDurableOutbox({ env });

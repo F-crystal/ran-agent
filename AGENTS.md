@@ -15,6 +15,7 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 - For unfamiliar integration/debugging work, check official docs and mature prior art before designing or coding.
 - Use absolute paths or workspace-relative paths, not `~`-prefixed paths.
 - Feature authorization does not authorize changing production service identities, Unix users/groups, ownership, permission boundaries, or storage layout; these require separate explicit user approval.
+- The owner signs only irreversible operations: deletion, permission/identity/ownership changes, and production apply. All other verification and recovery-friendly work is executed by the agent; only exceptions and blockers are escalated.
 - This is a personal, single-owner project. Match process to concrete risk and use Ponytail discipline: reuse the existing code or platform, fix the shared root cause, and avoid speculative abstractions, fallback stacks, redundant backups, or duplicate checks.
 - Protect irrecoverable personal data and external effects, but do not inflate reversible work into a security project. Budget server space, elapsed time, and tokens explicitly; retain only recovery artifacts required by the active transaction or documented retention/rollback policy, and remove exact temporary validation artifacts when they are no longer needed and deletion is authorized.
 - Stop validating once fresh evidence covers the claimed invariant. Repeat a check only after relevant state changes or when an independent review identifies a specific gap.

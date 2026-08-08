@@ -129,9 +129,29 @@ export function createDurableOutbox(options = {}) {
     if (typeof options.send !== 'function') throw outboxError('OUTBOX_ADAPTER_REQUIRED', 'delivery adapter is required');
     item = startSend(item.outboxId, { expectedRevision: item.revision });
     await inject(options, 'after_send_start', item);
-    const result = await options.send(adapterView(item));
+    let result;
+    try {
+      result = await options.send(adapterView(item));
+    } catch (error) {
+      item = completeSend(item.outboxId, {
+        expectedRevision: item.revision,
+        result: unknownAdapterResult(item),
+      });
+      if (typeof options.onTerminal === 'function') await options.onTerminal(currentTerminal(item));
+      throw error;
+    }
     await inject(options, 'after_adapter_return', item);
-    item = completeSend(item.outboxId, { expectedRevision: item.revision, result });
+    try {
+      item = completeSend(item.outboxId, { expectedRevision: item.revision, result });
+    } catch (error) {
+      if (error?.code !== 'OUTBOX_ADAPTER_RESULT_INVALID') throw error;
+      item = completeSend(item.outboxId, {
+        expectedRevision: item.revision,
+        result: unknownAdapterResult(item),
+      });
+      if (typeof options.onTerminal === 'function') await options.onTerminal(currentTerminal(item));
+      throw error;
+    }
     if (typeof options.onTerminal === 'function') await options.onTerminal(currentTerminal(item));
     if (item.delivery === 'sent') {
       await inject(options, 'after_sent_commit', item);
@@ -323,7 +343,7 @@ function normalizeAdapterResult(item, result) {
     textStatus,
     attachments,
     knownFailure: result.knownFailure === true,
-    adapterReceiptRef: boundedReference(result.adapterReceiptRef),
+    adapterReceiptRef: boundedAdapterReference(result.adapterReceiptRef),
   };
   const delivery = classifyDelivery(adapterResult);
   if ((delivery === 'failed') !== adapterResult.knownFailure) {
@@ -549,6 +569,15 @@ function boundedReference(value) {
     throw outboxError('OUTBOX_CONTENT_INVALID', 'private attachment reference is invalid');
   }
   return text;
+}
+
+function boundedAdapterReference(value) {
+  try {
+    return boundedReference(value);
+  } catch (error) {
+    if (error?.code !== 'OUTBOX_CONTENT_INVALID') throw error;
+    throw outboxError('OUTBOX_ADAPTER_RESULT_INVALID', 'adapter receipt reference is invalid');
+  }
 }
 
 function hash(value) {

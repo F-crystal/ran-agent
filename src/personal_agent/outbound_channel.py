@@ -12,10 +12,10 @@ from personal_agent.config import AppConfig
 
 # The caller must outlive Node's Hermes and Feishu deadlines so their committed
 # delivery result can return before Python records its local completion truth.
-AI_DAILY_DIGEST_TIMEOUT_MARGIN_SECONDS = 30
+OUTBOUND_TIMEOUT_MARGIN_SECONDS = 30
 
 
-def _ai_daily_digest_request_timeout_seconds() -> int:
+def _outbound_request_timeout_seconds() -> int:
     def positive_env_seconds(name: str, default: int) -> int:
         try:
             return max(1, int(os.environ.get(name, default)))
@@ -25,7 +25,7 @@ def _ai_daily_digest_request_timeout_seconds() -> int:
     return (
         positive_env_seconds("HERMES_REPLY_TIMEOUT_SECONDS", 180)
         + positive_env_seconds("FEISHU_SEND_TIMEOUT_SECONDS", 30)
-        + AI_DAILY_DIGEST_TIMEOUT_MARGIN_SECONDS
+        + OUTBOUND_TIMEOUT_MARGIN_SECONDS
     )
 
 
@@ -59,7 +59,7 @@ class NodeBridgeOutboundClient:
             headers={"Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(request, timeout=30) as response:
+        with urllib.request.urlopen(request, timeout=_outbound_request_timeout_seconds()) as response:
             payload = json.loads(response.read().decode("utf-8"))
         if payload.get("ok") is not True:
             raise RuntimeError("node bridge proactive event response missing ok=true")
@@ -79,7 +79,7 @@ class NodeBridgeOutboundClient:
         )
         with urllib.request.urlopen(
             request,
-            timeout=_ai_daily_digest_request_timeout_seconds(),
+            timeout=_outbound_request_timeout_seconds(),
         ) as response:
             payload = json.loads(response.read().decode("utf-8"))
         if payload.get("ok") is not True:

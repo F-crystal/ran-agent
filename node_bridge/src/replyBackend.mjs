@@ -30,7 +30,7 @@ import {
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { normalizeReplyEnvelope } from './replyEnvelope.mjs';
 import { getSemanticVerifierConfig, verifySemanticClaims } from './semanticClaimVerifier.mjs';
-import { isTrustedInformationalReportTask } from './hermesTaskScope.mjs';
+import { isHermesTaskScopedRoute, isTrustedInformationalReportTask } from './hermesTaskScope.mjs';
 import { createOperationLedger } from './operationLedger.mjs';
 import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
 import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
@@ -90,6 +90,7 @@ export function createReplyBackend(options = {}) {
       const gatewayConfig = backendOptions.hermesConfig || getHermesGatewayConfig(env);
       const chatImpl = options.hermesImpl || options.chatImpl || sendChatToHermesGateway;
       const requestId = sanitizeRequestId(backendOptions.requestId || message.request_id || createRequestId());
+      const taskScoped = isHermesTaskScopedRoute(message.route_hint);
       const environmentPrivacyCommand = detectEnvironmentPrivacyCommand(message.text);
       if (environmentPrivacyCommand) {
         return {
@@ -424,7 +425,7 @@ export function createReplyBackend(options = {}) {
       });
 
       let backendProjection = null;
-      if (!excludeFromHistory && !suppression.suppress) {
+      if (!taskScoped && !excludeFromHistory && !suppression.suppress) {
         const projectIngest = async ({ outboxId = '', replyText = '' } = {}) => ingestVisibleExchange({
           message,
           replyText: String(replyText || visibleReplyText),

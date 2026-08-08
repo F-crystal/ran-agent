@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5 LOCAL_VERIFIED (2026-08-08)
+Status: S4 PROD_VERIFIED; S5 LOCAL_VERIFIED; S6 ARCHIVED (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -102,6 +102,18 @@ typed terminal receipt. The focused reopen/replay check invokes the effect once
 and returns the durable sent state on replay; all 121 Core tests pass. No
 production service, database, route, flag or source pointer changed.
 
+S6 converged the root worktree to a clean current `main` and preserved the 33
+S5-era draft files as a verified local snapshot with checksums outside Git.
+Their three still-missing semantics were re-implemented on current main:
+Python outbound caller deadlines for proactive events now outlive the Node
+Hermes plus Feishu deadlines by the same margin as the digest path; task-scoped
+synthetic Hermes turns never project into the ordinary backend ingest; and an
+adapter exception or invalid adapter result now terminalizes as `ambiguous`
+with a durable receipt, so it is never automatically resent. Every other draft
+content class (O2/Steward/token, superseded deployment documents, the second
+proactive-delivery framework and the JSON outbox expansion) is retired. No
+production service, database, route, flag or source pointer changed.
+
 ## Source And Recovery Authority
 
 Binding.v4 completed the earlier runtime apply, rollback and reapply and records
@@ -158,10 +170,12 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S5 are complete and the ready frontier
-is empty. The preserved root-worktree draft was classified separately from S5:
-its legacy `durableOutbox` proactive-delivery changes were not treated as Core
-B.2 or merged wholesale.
+`docs/governance/active_sequence.md`. S0-S6 are complete and S7 is the ready
+frontier. The S5-era root-worktree drafts were triaged in S6: a verified local
+snapshot keeps them recoverable outside Git, their three still-missing
+semantics were re-implemented on current main, and the remaining O2/Steward,
+legacy-deployment, second proactive-delivery and JSON-outbox content is
+retired.
 
 The remote branch set is intentionally `main` only. Historical candidate
 branches are neither production nor rollback authority; recoverable local S4
@@ -170,8 +184,10 @@ convergence artifacts remain ignored under `local_archive/`.
 Package A and B.1 Core primitives exist in source, and S5 locally verifies one
 B.2 final-transaction/outbox/effect/result-receipt loop with 121 passing Core
 tests and reopen/replay without a second effect. It is not composed into the
-production Node write path; B.3 and Gate 5 have not started. O2 is a retired
-migration-era path; only rollback evidence may remain.
+production Node write path; B.3 has not started. Ombre Gate 5 is retired with
+O2 and the historical name is retained only as retired evidence; the single
+future Core production gate is uniformly named the Core Cutover Gate (S12). O2
+is a retired migration-era path; only rollback evidence may remain.
 
 ## Protected State
 

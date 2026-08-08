@@ -1,9 +1,10 @@
 # Hermes Core Scheduling and Unified Runtime
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-08)
 
-Lifecycle: Runtime Phase `DEPLOYED`; Core Phase `DESIGNED`; neither is
-`PROD_VERIFIED`.
+Lifecycle: Runtime Phase `PROD_VERIFIED` for the bounded channel, identity,
+memory, capability, topology and 2026-08-07 digest evidence in
+`docs/governance/current_runtime_status.md`; Core Phase `DESIGNED`.
 
 This decision record amends the implementation direction of the archived v0.4 cutover
 contract. It does not modify frozen Schema v1, authorize a production Core
@@ -255,8 +256,10 @@ passed dry-run and received authorization for the exact eight
 transition and rolled production back. The deployed successor added the
 bounded MainPID-settle correction, passed exact-SHA gates and dry-run, then
 returned `APPLIED`. Immediate acceptance found one v0.20 gateway on `8642`, no
-`8643`, zero cron jobs/executions, and retired Full condition-blocked. Runtime
-observation remains before `PROD_VERIFIED`.
+`8643`, zero cron jobs/executions, and retired Full condition-blocked. Bounded
+production observation has since reached `PROD_VERIFIED` for the channel,
+identity, memory, capability, topology and 2026-08-07 digest evidence recorded
+in `docs/governance/current_runtime_status.md`.
 
 1. Build a candidate-SHA-bound offline v0.20 runtime artifact. Its manifest
    records upstream version/source digest, dependency lock digest, every wheel

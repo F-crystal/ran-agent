@@ -83,12 +83,11 @@ known limitations.
 
 **Media follow-up context.** Inbound media becomes conversation-scoped artifacts. When the user says “that image from earlier” or “analyze the image from before,” the inbound message buffer binds the text to recent media explicitly or as a soft candidate. Context Policy v1 injects at most 3 compact artifacts per turn by default.
 
-**Memory and knowledge.** The next source candidate makes `personal_memory` the unified personal-memory
+**Memory and knowledge.** `personal_memory` is the production unified personal-memory
 entry: the Python backend combines local working/profile memory, free local
 FastEmbed semantic ranking, and Ombre relationship context. Ombre is a
 read-only derived source, not an authority for technical or Core facts, and is
-not exposed as a second Hermes tool; production keeps the historical tool
-surface until that candidate is applied. `surface_relevant_context` still does not
+not exposed as a second Hermes tool. `surface_relevant_context` still does not
 mean automatic whole-Vault search.
 
 **Sendable media generation.** The unified gateway can call `media_generation` to generate images or speech for WeChat and preserve `WECHAT_MEDIA` markers for Node bridge delivery.

@@ -14,7 +14,7 @@ import { createOperationLedger } from '../src/operationLedger.mjs';
 import { createTrustedExecutorAdapters } from '../src/trustedExecutorAdapters.mjs';
 import { listStickers, saveStickersFromInbox } from '../src/stickerCatalog.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
-import { createTrustedBridgeInformationalReportTask } from '../src/hermesTaskScope.mjs';
+import { createTrustedBridgeInformationalReportTask, listHermesTaskScopedRoutes } from '../src/hermesTaskScope.mjs';
 import { createFeishuMinutesDocumentExecutorAdapter } from '../src/feishuMinutesDocumentClient.mjs';
 
 function tempStateEnv(t, extra = {}) {
@@ -1975,4 +1975,48 @@ test('createReplyBackend does not treat arbitrary markdown images as generated W
 
   assert.equal(response.replyText, '这是外部图片。\n\n![cat](https://image.pollinations.ai/prompt/cat)');
   assert.equal(response.media, null);
+});
+
+test('task-scoped Hermes turns never project into the ordinary backend', async () => {
+  for (const routeHint of listHermesTaskScopedRoutes()) {
+    let ingestCount = 0;
+    const backend = createReplyBackend({
+      hermesImpl: async () => ({
+        reply_text: '合成任务结果',
+        follow_up_messages: [],
+        media: null,
+      }),
+      ingestImpl: async () => { ingestCount += 1; return { ok: true }; },
+      logger: { log() {}, warn() {} },
+    });
+
+    const response = await backend.getReply({
+      text: 'synthetic task',
+      sender_id: 'synthetic-sender',
+      conversation_id: 'synthetic-conversation',
+      channel: 'feishu',
+      route_hint: routeHint,
+    });
+
+    assert.equal(typeof response.replyText, 'string', routeHint);
+    assert.equal(ingestCount, 0, routeHint);
+  }
+
+  let ordinaryIngestCount = 0;
+  const ordinaryBackend = createReplyBackend({
+    hermesImpl: async () => ({
+      reply_text: '普通回复',
+      follow_up_messages: [],
+      media: null,
+    }),
+    ingestImpl: async () => { ordinaryIngestCount += 1; return { ok: true }; },
+    logger: { log() {}, warn() {} },
+  });
+  await ordinaryBackend.getReply({
+    text: '普通消息',
+    sender_id: 'ordinary-sender',
+    conversation_id: 'ordinary-conversation',
+    channel: 'feishu',
+  });
+  assert.equal(ordinaryIngestCount, 1);
 });

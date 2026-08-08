@@ -81,10 +81,10 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 
 **媒体上下文追问。** 入站媒体会生成会话级 artifact。用户说“刚才那张图”“分析一下刚才那张图”时，入站消息缓冲会把文本与最近媒体显式或软绑定。默认 Context Policy v1 每轮最多注入 3 个紧凑 artifact。
 
-**记忆和知识。** 下一个 source candidate 以 `personal_memory` 作为统一的个人记忆入口：Python backend
+**记忆和知识。** `personal_memory` 是生产中的统一个人记忆入口：Python backend
 组合本地 working/profile memory、免费的本地 FastEmbed 语义排序和 Ombre
 长期关系语境。Ombre 是只读派生来源，不是技术事实或 Core 真源，也不再作为
-独立 Hermes 工具暴露；生产在该 candidate apply 前仍保持历史工具面。`surface_relevant_context` 仍不代表自动检索整个 Vault；
+独立 Hermes 工具暴露。`surface_relevant_context` 仍不代表自动检索整个 Vault；
 长期写入、反思、夜间循环和知识维护留在 Python backend 与按需 skill 中。
 
 **可发送媒体生成。** 统一 gateway 可调用 `media_generation` 生成微信可发送的图片或语音，并保留 `WECHAT_MEDIA` 标记供 Node bridge 消费。

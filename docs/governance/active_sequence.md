@@ -14,16 +14,32 @@ S0 facts/runtime selection
   -> S3 personal memory and Ombre value chain
   -> S4 worktree and branch convergence
   -> S5 Core B.2 local closed loop
+  -> S6 root-worktree convergence, draft triage and governance sync
+  -> S7 Node to Core local wiring
+  -> S8 Ombre rebuildable projection (separate owner authorization)
+  -> S9 Package C scheduling
+  -> S10 migration rehearsal
+  -> S11 synthetic fault acceptance
+  -> S12 production cutover (owner authorization)
+  -> S13 observation and cleanup
 ```
 
-| Stage | Status | Exit condition |
-|---|---|---|
-| S0 | COMPLETE | Runtime facts and v0.20 selection recorded. |
-| S1 | COMPLETE | `main`, production source authority and the exact-SHA release seam converged; apply, rollback and reapply passed. |
-| S2 | COMPLETE | One existing Feishu Minutes transcript produced the bounded typed document action and passed production verification without adding ASR or PPT handling. |
-| S3 | COMPLETE | Production source `cc663876881e4d1f5cfb67f20d74230730a2f68c` completed one observable capture-and-recall path through `personal_memory`: an existing active personal-learning fact returned `personal_learning=hit`, while independent read-only Ombre returned the observable `empty` outcome. The model proposes semantic content plus an identifier; Node remains the deterministic valve and accepts it only when identifier, content class and payload format agree. Project/runtime facts continue to use governed documents, not Ombre; O2 and direct Ombre mutation remain off. |
-| S4 | COMPLETE | Source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d` deleted inactive O2 source, Steward/token/model endpoint tooling and its dedicated gate while preserving direct Ombre recall on `18001`; the full release suite, source-controller tests, archive/push, production dry-run/apply and post-deploy checks passed. Obsolete worktrees and branches were deliberately closed after recoverable local snapshots; the root S5 draft was preserved. |
-| S5 | COMPLETE | `runPackageBLocalDelivery` composes the existing typed final transaction, presentation outbox claim/dispatch boundary, one injected effect and durable terminal receipt. A reopen/replay regression proves the effect runs once, and the Core suite passes 121 tests. The service is not wired into production. |
+| Stage | Status | Depends | Scope | Exit condition |
+|---|---|---|---|---|
+| S0 | COMPLETE | — | — | Runtime facts and v0.20 selection recorded. |
+| S1 | COMPLETE | S0 | — | `main`, production source authority and the exact-SHA release seam converged; apply, rollback and reapply passed. |
+| S2 | COMPLETE | S1 | — | One existing Feishu Minutes transcript produced the bounded typed document action and passed production verification without adding ASR or PPT handling. |
+| S3 | COMPLETE | S2 | — | Production source `cc663876881e4d1f5cfb67f20d74230730a2f68c` completed one observable capture-and-recall path through `personal_memory`: an existing active personal-learning fact returned `personal_learning=hit`, while independent read-only Ombre returned the observable `empty` outcome. The model proposes semantic content plus an identifier; Node remains the deterministic valve and accepts it only when identifier, content class and payload format agree. Project/runtime facts continue to use governed documents, not Ombre; O2 and direct Ombre mutation remain off. |
+| S4 | COMPLETE | S3 | — | Source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d` deleted inactive O2 source, Steward/token/model endpoint tooling and its dedicated gate while preserving direct Ombre recall on `18001`; the full release suite, source-controller tests, archive/push, production dry-run/apply and post-deploy checks passed. Obsolete worktrees and branches were deliberately closed after recoverable local snapshots; the root S5 draft was preserved. |
+| S5 | COMPLETE | S4 | — | `runPackageBLocalDelivery` composes the existing typed final transaction, presentation outbox claim/dispatch boundary, one injected effect and durable terminal receipt. A reopen/replay regression proves the effect runs once, and the Core suite passes 121 tests. The service is not wired into production. |
+| S6 | COMPLETE | S5 | Verify facts; snapshot and triage the 33 root-worktree drafts; re-implement their three still-missing semantics on current main; sync governance documents; land the S6–S13 topology. | Root worktree is clean on current main; documents are consistent; the topology is in effect. |
+| S7 | IN_PROGRESS | S6 | Real local Node to Core link: identity, ingress, Turn, provider attempt, final, B.2 outbox, receipt. | One synthetic Feishu text passes end to end through Core; concurrent, restarted and replayed delivery sends exactly once; production is not connected. |
+| S8 | NOT STARTED | S7 + separate owner authorization | The single governed projector maps confirmed Core/personal-learning events into Ombre. | Repeated events do not grow twice; projector failure does not affect Core; the projection is erasable and rebuildable; the model cannot write Ombre directly. |
+| S9 | NOT STARTED | S8 | Schema v2, ScheduleSpec, WakeOccurrence, WorkRun, `wake_due`, and the single managed tick. | One-shot, interval and daily schedules work; duplicate or missed ticks never duplicate an occurrence; no network inside the transaction. |
+| S10 | NOT STARTED | S9 | Inventory legacy scheduler, reminders, daily digest, pollers and dispatchers; build manifest/watermark; rehearse on a production copy. | Every legacy component has a recorded disposition; legacy jobs default to paused; no historical reminder is re-sent. |
+| S11 | NOT STARTED | S10 | Synthetic acceptance: duplicate/missed ticks, DST, crash, legacy fence, ambiguous outcomes, restart no-resend. | A deployable SHA exists; every external effect uses a synthetic target. |
+| S12 | NOT STARTED | S11 + production authorization | Stop ingress, let legacy effect/outbox drain, execute the single Core Cutover Gate, enable one tick, disable legacy visible wake. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
+| S13 | NOT STARTED | S12 + observation window | After observation, remove the legacy scheduler, JSON outbox and compatibility writer. | No duplicate delivery; the legacy writer and legacy clock are truly gone. |
 
 ## Update Rule
 

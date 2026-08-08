@@ -17,7 +17,9 @@ a candidate nor authorizes account or permission changes.
 The O1/O2 and unified-identity commits are historical, undeployed release
 lines. O2, its Steward/token/model endpoint wiring, and Gate 5 are retired
 source; direct Ombre recall on `18001` remains the supported path. Package
-B.2/B.3 have not started.
+B.2 is locally implemented and LOCAL_VERIFIED: 121/121 Core tests pass,
+including reopen/replay without a second effect; it is not wired into any
+production path. Package B.3 has not started.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable

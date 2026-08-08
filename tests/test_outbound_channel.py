@@ -45,6 +45,19 @@ class NodeBridgeOutboundClientTest(TestCase):
         self.assertEqual(request.get_header("Authorization"), "Bearer private-control-secret")
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 1260)
 
+    def test_proactive_event_waits_for_hermes_and_feishu_completion(self) -> None:
+        with (
+            patch.dict(
+                os.environ,
+                {"HERMES_REPLY_TIMEOUT_SECONDS": "180", "FEISHU_SEND_TIMEOUT_SECONDS": "30"},
+                clear=True,
+            ),
+            patch("personal_agent.outbound_channel.urllib.request.urlopen", return_value=_Response()) as urlopen,
+        ):
+            self.client.send_proactive_event({"event_id": "reminder-timeout-contract"})
+
+        self.assertEqual(urlopen.call_args.kwargs["timeout"], 240)
+
     def test_daily_digest_fails_closed_without_the_private_control_secret(self) -> None:
         with patch.dict(os.environ, {}, clear=True), patch("personal_agent.outbound_channel.urllib.request.urlopen") as urlopen:
             with self.assertRaisesRegex(RuntimeError, "internal control secret"):
