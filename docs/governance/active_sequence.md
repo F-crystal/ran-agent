@@ -21,8 +21,8 @@ S0 facts/runtime selection
 | S1 | COMPLETE | `main`, production source authority and the exact-SHA release seam converged; apply, rollback and reapply passed. |
 | S2 | COMPLETE | One existing Feishu Minutes transcript produced the bounded typed document action and passed production verification without adding ASR or PPT handling. |
 | S3 | COMPLETE | Production source `cc663876881e4d1f5cfb67f20d74230730a2f68c` completed one observable capture-and-recall path through `personal_memory`: an existing active personal-learning fact returned `personal_learning=hit`, while independent read-only Ombre returned the observable `empty` outcome. The model proposes semantic content plus an identifier; Node remains the deterministic valve and accepts it only when identifier, content class and payload format agree. Project/runtime facts continue to use governed documents, not Ombre; O2 and direct Ombre mutation remain off. |
-| S4 | IN_PROGRESS | The local candidate has deleted inactive O2 source, Steward/token/model endpoint tooling and its dedicated gate after proving the active Node path independent; focused release, source-controller and Git-less tests pass. Archive, production source dry-run/apply, post-deploy acceptance, and deliberate worktree/branch convergence remain. The preserved root-worktree draft is not lost. |
-| S5 | PENDING | Core B.2 has one local typed transaction/outbox/effect/receipt loop with a focused regression check; no production cutover is implied. |
+| S4 | COMPLETE | Source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d` deleted inactive O2 source, Steward/token/model endpoint tooling and its dedicated gate while preserving direct Ombre recall on `18001`; the full release suite, source-controller tests, archive/push, production dry-run/apply and post-deploy checks passed. Obsolete worktrees and branches were deliberately closed after recoverable local snapshots; the root S5 draft was preserved. |
+| S5 | IN_PROGRESS | Core B.2 has one local typed transaction/outbox/effect/receipt loop with a focused regression check; no production cutover is implied. |
 
 ## Update Rule
 

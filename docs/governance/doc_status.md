@@ -9,12 +9,12 @@ work order and completion state live in `docs/governance/active_sequence.md`.
 
 ## Current State
 
-The clean production checkout and accepted source pointer are at S3 runtime
-source `cc663876881e4d1f5cfb67f20d74230730a2f68c`; GitHub `main` contains the
+The clean production checkout and accepted source pointer are at S4 runtime
+source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; GitHub `main` contains the
 same runtime source. Hermes v0.20 is
 `PROD_VERIFIED` for the bounded evidence in `current_runtime_status.md`.
 Runtime rollback is closed, retired v0.13 payloads are deleted, `18002` and O2
-are inactive, and the direct loopback Ombre service on `18001` remains active.
+are absent, and the direct loopback Ombre service on `18001` remains active.
 The earlier companion overlay is rollback-only evidence.
 
 S2 adds one production-verified typed action for an existing
@@ -31,9 +31,11 @@ S3 is production verified for its bounded value chain. Hermes proposes the
 identifier and content, Node validates their class and format, and Python owns
 persistence and recall. An existing active fact produced
 `personal_learning=hit` through `personal_memory`, while the independent
-read-only Ombre outcome remained observable. S4 is now the only active stage.
-Its local candidate deletes O2 and passes the focused release/source gates;
-archive, production acceptance, and worktree convergence remain.
+read-only Ombre outcome remained observable. S4 is complete: production no
+longer contains the inactive O2 implementation or its dedicated
+Steward/token/model/gate seams, direct Ombre on `18001` remains active, and old
+worktrees/branches were closed after recoverable snapshots. S5 is now the only
+active stage and is local-only until separately authorized for production.
 
 ## Lifecycle Stages
 

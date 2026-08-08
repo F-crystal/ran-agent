@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S3 PROD_VERIFIED; S4 LOCAL_VERIFIED (2026-08-08)
+Status: S4 PROD_VERIFIED; S5 IN_PROGRESS (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,14 +9,14 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_sha: cc663876881e4d1f5cfb67f20d74230730a2f68c
+repository_sha: 98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d
 companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
 runtime_stage: PROD_VERIFIED for the bounded channel, identity, memory, capability, topology and 2026-08-07 digest evidence
 services: Node, Python, unified Hermes and direct Ombre Brain active; no unexpected restart in the acceptance window
 identity: production processes run as ubuntu:ubuntu
-storage: 70% used; 18391031808 bytes available after retired v0.13 payload deletion
+storage: 70% used; 18201784320 bytes available after S4 source activation
 ```
 
 WeChat, Feishu/Lark and the optional Desktop proxy share
@@ -41,9 +41,9 @@ Production memory uses local SQLite with free offline FastEmbed/HNSW plus
 keyword retrieval. `personal_memory` also performs a bounded direct Ombre
 `breath_search` through the loopback-only service on `18001`; source failures
 are surfaced separately from an empty result. The recall-only adapter on
-`18002` is inactive, and the production S3 O2 writer is inactive. The S4
-source candidate deletes that writer, its Steward/token/model endpoint code,
-and its dedicated release gate without changing the direct `18001` read path.
+`18002` and the O2 writer are absent. S4 removed that writer, its
+Steward/token/model endpoint code, and its dedicated release gate without
+changing the direct `18001` read path.
 
 Ombre is a derived relationship/context source, not the authority for Core
 facts or deployment truth. Core and governed runtime documents remain the
@@ -87,13 +87,23 @@ personal-learning record without printing its key or content and observed
 returned the valid observable outcome `empty`. Node, Python, unified Hermes and
 direct Ombre remained active.
 
+S4 archived and deployed source
+`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The full release suite passed
+80 tests with three Linux-root-only skips, the source controller passed 33
+tests, and production independently reported Node, Python, unified Hermes and
+direct Ombre active. Node had no O2 environment residue; `18001` was open and
+`18002`/`8643` were closed. Obsolete worktrees and branches were closed only
+after a verified Git bundle plus binary patches and untracked-file archives
+made their remaining drafts recoverable.
+
 ## Source And Recovery Authority
 
 Binding.v4 completed the earlier runtime apply, rollback and reapply and records
 `runtimeRollbackAuthorized=false`; the retained Runtime controller, artifact,
 candidate ref, topology and snapshot state are evidence-only. S1 then completed
 the source dry-run, apply, source rollback and reapply at `c6c0baf`. Post-S1
-source advances then accepted S2 at `2dc6d1a`; the exact snapshot recorded by
+source advances then accepted S2 at `2dc6d1a`, S3 at `cc66387`, and S4 at
+`98fd8b3`; the exact snapshot recorded by
 `source-snapshots/current-source.json` is now the source rollback authority and
 retains the prior pointer chain. Runtime rollback remains forbidden.
 
@@ -119,8 +129,8 @@ not the bare host-visible old profile; S1 source convergence superseded it.
 S1a was archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`;
 its bounded successor completed at
 `c6c0baf6dfbcf2cc38a68986292f55649ec93932`. The post-S1 source controller then
-advanced the clean production checkout and accepted source pointer through S2
-to the S3 runtime source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A later
+advanced the clean production checkout and accepted source pointer through S4
+to runtime source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. A later
 status-only documentation commit on `main` does not require runtime activation.
 The source shape keeps one `ran-agent-companion` profile, one `8642` route, the
 supported Lite/Full capability union and a fixed 15000 ms memory boundary.
@@ -129,7 +139,7 @@ The source still aligns four production-backed contracts:
 - canonical `memory_bge_vector_index.*` paths;
 - Ombre endpoint absence classified as transport failure;
 - unified Hermes and co-reading defaults on `8642`;
-- no direct Ombre mutation; the S4 candidate removes the inactive O2 seams.
+- no direct Ombre mutation; inactive O2 seams are absent.
 
 Legacy split-profile release inputs remain excluded from the companion
 distribution. The source mode reuses the existing candidate controller and is
@@ -141,20 +151,19 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S4 is currently in progress. Its local
-candidate has deleted the inactive O2 implementation and passed focused Node,
-release, source-controller, shell, and Git-less gate regressions. Archive,
-production source dry-run/apply, post-deploy acceptance, and deliberate
-worktree/branch convergence remain. Preserve the root-worktree draft until its
-useful changes are classified.
+`docs/governance/active_sequence.md`. S4 is complete and S5 is in progress.
+S5 begins from the preserved root-worktree draft and must classify its useful
+Core B.2 changes against current `main` before integration; it does not imply a
+production cutover.
 
-The remote branch set is intentionally `main` plus
-`codex/p2-memory-production-candidate`; the latter is historical candidate
-lineage, not current production or rollback authority.
+The remote branch set is intentionally `main` only. Historical candidate
+branches are neither production nor rollback authority; recoverable local S4
+convergence artifacts remain ignored under `local_archive/`.
 
 Package A and B.1 Core primitives exist in source but are not composed into the
-production Node write path. Packages B.2/B.3 and Gate 5 have not started. O2 is
-a retired migration-era path; only rollback evidence may remain after S4.
+production Node write path. Local B.2 integration is in progress; B.3 and Gate
+5 have not started. O2 is a retired migration-era path; only rollback evidence
+may remain.
 
 ## Protected State
 
