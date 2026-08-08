@@ -1480,6 +1480,8 @@ def validate_unified_source_shape(candidate: str) -> None:
 
 
 def validate_source_advance_paths(paths: list[str]) -> None:
+    if any(path == "hermes/profile" or path.startswith("hermes/profile/") for path in paths):
+        raise ReleaseError("source advance contains a profile change requiring a dedicated migration")
     if any(
         path in SOURCE_ADVANCE_FORBIDDEN_PATHS
         or any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in SOURCE_ADVANCE_FORBIDDEN_PREFIXES)
@@ -1725,7 +1727,7 @@ def restore_source_services(state: dict[str, Any], *, expected_profile: str) -> 
         run(["systemctl", "stop", timer], check=False)
 
 
-def activate_source_candidate(candidate: str, stage: Path, snapshot: Path) -> None:
+def activate_source_candidate(candidate: str, stage: Path, snapshot: Path, *, install_profile: bool) -> None:
     git_as_checkout_owner("checkout", "--detach", candidate)
     live_modules = REPO / "node_modules"
     rollback_modules = snapshot / "node_modules.rollback"
@@ -1748,12 +1750,13 @@ def activate_source_candidate(candidate: str, stage: Path, snapshot: Path) -> No
             uid=value.st_uid,
             gid=value.st_gid,
         )
-    run([
-        "/usr/sbin/runuser", "-u", "ubuntu", "--", "/usr/bin/env",
-        f"HERMES_HOME={LITE_HOME}", f"RAN_AGENT_REPO_ROOT={REPO}",
-        str(SOURCE_HERMES_BIN), "profile", "install", str(REPO / "hermes/profile"),
-        "--name", SOURCE_PROFILE, "--force", "-y",
-    ])
+    if install_profile:
+        run([
+            "/usr/sbin/runuser", "-u", "ubuntu", "--", "/usr/bin/env",
+            f"HERMES_HOME={LITE_HOME}", f"RAN_AGENT_REPO_ROOT={REPO}",
+            str(SOURCE_HERMES_BIN), "profile", "install", str(REPO / "hermes/profile"),
+            "--name", SOURCE_PROFILE, "--force", "-y",
+        ])
     profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml")
     root_config = LITE_HOME / "config.yaml"
     value = root_config.stat()
@@ -1882,7 +1885,12 @@ def source_apply(candidate: str) -> Path:
     snapshot, state = create_source_snapshot(candidate, baseline)
     try:
         stop_source_services()
-        activate_source_candidate(candidate, stage, snapshot)
+        activate_source_candidate(
+            candidate,
+            stage,
+            snapshot,
+            install_profile=baseline["kind"] == "initial",
+        )
         restore_source_services(state, expected_profile=SOURCE_PROFILE)
         validate_source_acceptance(candidate)
         state["controller"] = str(controller)

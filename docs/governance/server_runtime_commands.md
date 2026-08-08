@@ -81,6 +81,8 @@ This source transaction preserves the accepted v0.20 runtime, personal data
 and direct Ombre service. It snapshots the prior source pointer, checkout
 dependencies, two env files and Hermes unit/profile; it does not copy databases
 or durable delivery state. A rollback restores the exact prior source pointer.
+Post-S1 advances reuse the installed profile and reject profile-distribution
+changes; those require a separately reviewed profile migration.
 
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy

@@ -84,6 +84,8 @@ def test_converged_source_pointer_is_bound_to_accepted_snapshot_and_controller(
 
 def test_source_advance_rejects_private_or_migrating_paths() -> None:
     MODULE.validate_source_advance_paths([".env.example", "node_bridge/src/replyBackend.mjs", "README.md"])
+    with pytest.raises(MODULE.ReleaseError, match="profile change requiring a dedicated migration"):
+        MODULE.validate_source_advance_paths(["hermes/profile/config.yaml"])
     for path in (".env.local", "data/private.db", "migrations/999.sql", "vault/raw/item"):
         with pytest.raises(MODULE.ReleaseError, match="source advance contains"):
             MODULE.validate_source_advance_paths([path])
