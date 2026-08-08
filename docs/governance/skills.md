@@ -1,6 +1,6 @@
 # Skills Map
 
-Status: CURRENT (2026-07-19)
+Status: CURRENT (2026-08-08)
 
 ## Active Skills (On-Demand)
 
@@ -18,6 +18,7 @@ Status: CURRENT (2026-07-19)
 - `aihot`
 - `doc-governance`
 - `server-runtime`
+- `topology-work-planning`
 
 ## Loading Rule
 
@@ -28,6 +29,9 @@ Status: CURRENT (2026-07-19)
   commit, and push stay consistent and runtime/private files remain excluded.
 - Server deployment, runtime drift, lite/full, systemd/env, MCP exposure, and
   one-command rollout requests must use `server-runtime`.
+- Staged or parallel project work must use `topology-work-planning` so ready
+  nodes, write ownership, integration order, and public state stay aligned with
+  the canonical dependency topology.
 
 ## Delivery Evidence
 
@@ -56,3 +60,4 @@ Status: CURRENT (2026-07-19)
 - `skills/aihot/SKILL.md`
 - `skills/doc-governance/SKILL.md`
 - `skills/server-runtime/SKILL.md`
+- `skills/topology-work-planning/SKILL.md`

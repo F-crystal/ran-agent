@@ -869,22 +869,25 @@ function groundActionRequest(request, message = {}) {
     if (!hasExplicitMemoryIntent(userText, actionType)) {
       throw actionExecutionError('ACTION_NOT_GROUNDED');
     }
+    const expectedKeys = actionType === 'memory.remember'
+      ? 'kind|statement|subject_key'
+      : 'statement|subject_key';
+    if (Object.keys(scope).sort().join('|') !== expectedKeys) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
     const statement = String(scope.statement || '').trim();
     const normalizedStatement = normalizeGroundingText(statement);
     const normalizedUserText = normalizeGroundingText(userText);
     if (normalizedStatement.length < 2 || !normalizedUserText.includes(normalizedStatement)) {
       throw actionExecutionError('ACTION_NOT_GROUNDED');
     }
-    const kind = actionType === 'memory.correct'
-      ? 'correction'
-      : ['preference', 'relationship', 'routine', 'operating_lesson'].includes(String(scope.kind || ''))
-        ? String(scope.kind)
-        : 'preference';
+    const kind = actionType === 'memory.correct' ? 'correction' : String(scope.kind || '');
+    const subjectKey = normalizeMemorySubjectKey(scope.subject_key, kind);
     return {
       ...request,
       scope: {
         kind,
-        subject_key: String(scope.subject_key || scope.subjectKey || '').trim(),
+        subject_key: subjectKey,
         statement,
         evidence_digest: createHash('sha256').update(userText, 'utf8').digest('hex'),
         confidence: 1,
@@ -895,9 +898,10 @@ function groundActionRequest(request, message = {}) {
     if (!/(?:忘记|别再记|不要记|删除).*(?:记忆|偏好|这个|它)?|forget/i.test(userText)) {
       throw actionExecutionError('ACTION_NOT_GROUNDED');
     }
+    if (Object.keys(scope).sort().join('|') !== 'subject_key') throw actionExecutionError('ACTION_NOT_GROUNDED');
     return {
       ...request,
-      scope: { subject_key: String(scope.subject_key || scope.subjectKey || '').trim() },
+      scope: { subject_key: normalizeMemorySubjectKey(scope.subject_key, 'correction') },
     };
   }
   if (actionType === 'memory.query') {
@@ -913,6 +917,23 @@ function groundActionRequest(request, message = {}) {
     };
   }
   throw actionExecutionError('ACTION_NOT_GROUNDED');
+}
+
+function normalizeMemorySubjectKey(value, kind) {
+  const subjectKey = String(value || '').trim().toLowerCase();
+  if (!/^[a-z0-9][a-z0-9_.-]*:[a-z0-9][a-z0-9_.:-]*$/.test(subjectKey) || subjectKey.length > 120) {
+    throw actionExecutionError('ACTION_NOT_GROUNDED');
+  }
+  const prefix = subjectKey.split(':', 1)[0];
+  const preferencePrefixes = ['communication', 'environment', 'food', 'hobby', 'preference', 'reply', 'style'];
+  if ((kind === 'routine' && prefix !== 'routine')
+    || (kind === 'relationship' && !['person', 'relationship'].includes(prefix))
+    || (kind === 'operating_lesson' && !['operating', 'reply_rule'].includes(prefix))
+    || (kind === 'preference' && !preferencePrefixes.includes(prefix))
+    || !['preference', 'relationship', 'routine', 'operating_lesson', 'correction'].includes(kind)) {
+    throw actionExecutionError('ACTION_NOT_GROUNDED');
+  }
+  return subjectKey;
 }
 
 function hasExplicitMemoryIntent(userText, actionType) {

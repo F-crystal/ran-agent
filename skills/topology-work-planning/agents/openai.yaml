@@ -1,0 +1,4 @@
+interface:
+  display_name: "Topology Work Planning"
+  short_description: "Order and merge work by dependency topology"
+  default_prompt: "Use $topology-work-planning to order this staged or parallel work from the canonical dependency topology."

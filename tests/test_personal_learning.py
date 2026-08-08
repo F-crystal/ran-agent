@@ -321,6 +321,32 @@ def test_service_injects_only_relevant_active_learning(learning) -> None:
     service.shutdown()
 
 
+def test_personal_memory_facade_recalls_an_explicit_learning(learning) -> None:
+    _, database = learning
+    service = PersonalAgentService(
+        database=database,
+        model_client=PlaceholderModelClient(),
+        logger=logging.getLogger("test.personal_learning.facade"),
+        config=database.config,
+    )
+    service.observe_personal_learning(
+        kind="preference",
+        subject_key="reply:structure",
+        statement="复杂问题先说结论再解释依据",
+        source="explicit_user",
+        evidence_digests=["b" * 64],
+        confidence=1,
+    )
+
+    recalled = service.recall_memory("复杂问题请按我的回复结构回答")
+
+    assert recalled["source_status"]["personal_learning"] == "hit"
+    assert "personal_learning" in recalled["used_sources"]
+    assert "复杂问题先说结论再解释依据" in recalled["rendered_context"]
+    assert recalled["injection_level"] == "light"
+    service.shutdown()
+
+
 def test_external_user_turn_repeated_preference_promotes_through_learning_lifecycle(learning) -> None:
     """The live Node->Python projection, not the retired chat route, feeds learning."""
 

@@ -128,9 +128,11 @@ closed.
 
 ## Active Follow-Ups
 
-1. Improve Ombre ingestion and retrieval only after the current façade is
-   stable; use the existing free local embedding stack and do not add a paid
-   provider by default.
+The canonical execution order and stage exit conditions live in
+`docs/governance/active_sequence.md`. S3 is currently in progress: close one
+observable personal-memory capture-and-recall path through `personal_memory`,
+while keeping the independent read-only Ombre result observable. Reuse the
+existing free local embedding stack; do not add a paid provider by default.
 
 The remote branch set is intentionally `main` plus
 `codex/p2-memory-production-candidate`; the latter is historical candidate

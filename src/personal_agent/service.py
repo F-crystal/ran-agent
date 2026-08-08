@@ -647,18 +647,26 @@ class PersonalAgentService:
             explicit=True,
         )
         knowledge_hits = self._knowledge_retriever.retrieve(user_text)
-        rendered_context = recall.rendered_context
+        personal_learning_context = self._recall_personal_learning_context(user_text)
+        rendered_context = "\n\n".join(
+            part for part in (personal_learning_context, recall.rendered_context) if part.strip()
+        )
         if knowledge_hits:
             knowledge_context = "【知识库线索】\n" + "\n".join(
                 f"- {hit.title}（{hit.path}）：{hit.snippet}" for hit in knowledge_hits
             )
             rendered_context = f"{rendered_context}\n\n{knowledge_context}" if rendered_context else knowledge_context
         used_sources = list(recall.used_sources)
+        if personal_learning_context:
+            used_sources.append("personal_learning")
         if knowledge_hits:
             used_sources.append("vault_knowledge")
         source_status = dict(recall.source_statuses)
+        source_status["personal_learning"] = "hit" if personal_learning_context else "empty"
         source_status["vault_knowledge"] = "hit" if knowledge_hits else "empty"
-        injection_level = recall.injection_level if recall.should_inject else ("light" if knowledge_hits else "none")
+        injection_level = recall.injection_level if recall.should_inject else (
+            "light" if personal_learning_context or knowledge_hits else "none"
+        )
         return {
             "should_inject": bool(rendered_context.strip()),
             "short_term_memories": list(recall.short_term_memories),

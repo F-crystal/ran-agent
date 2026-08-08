@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-08)
 
 ## Scope
 
@@ -18,6 +18,7 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 - This is a personal, single-owner project. Match process to concrete risk and use Ponytail discipline: reuse the existing code or platform, fix the shared root cause, and avoid speculative abstractions, fallback stacks, redundant backups, or duplicate checks.
 - Protect irrecoverable personal data and external effects, but do not inflate reversible work into a security project. Budget server space, elapsed time, and tokens explicitly; retain only recovery artifacts required by the active transaction or documented retention/rollback policy, and remove exact temporary validation artifacts when they are no longer needed and deletion is authorized.
 - Stop validating once fresh evidence covers the claimed invariant. Repeat a check only after relevant state changes or when an independent review identifies a specific gap.
+- Plan staged or parallel work with `skills/topology-work-planning/SKILL.md`: follow the canonical dependency topology, parallelize only ready independent nodes with disjoint write ownership, and reconcile the sequence plus affected status and plan documents after integration.
 
 ## Skills And Delegation
 
@@ -91,6 +92,7 @@ This is the canonical repo-root rule file for agents in this checkout and must s
 
 - Documentation index and conflict rule: `docs/governance/doc_status.md`.
 - Current runtime status: `docs/governance/current_runtime_status.md`.
+- Active work order and completion state: `docs/governance/active_sequence.md`.
 - Server runbook: `docs/governance/server_runtime_commands.md`.
 - Agent capability governance: `docs/governance/agent-capability-governance.md`.
 - Delivery evidence and adversarial acceptance: `docs/governance/delivery-evidence.md`.

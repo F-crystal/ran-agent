@@ -5,12 +5,12 @@ description: Inspect or change ran-agent personal-memory recall, Ombre Brain int
 
 # Ombre Memory
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-08)
 
 ## Product Role
 
 - `personal_memory` is the only Hermes-facing personal-memory facade in the
-  next unified v0.20 source profile.
+  unified v0.20 source profile.
 - Local SQLite working/profile memory supplies recent context and explicit
   user decisions. FastEmbed with `BAAI/bge-small-zh-v1.5` supplies free local
   semantic ranking over that store; keyword ranking remains available.
@@ -18,8 +18,12 @@ Status: CURRENT (2026-08-06)
   context. It is not the authority for technical reality, delivery truth,
   identity, permissions, or Core facts.
 - Governance docs remain authoritative for ran-agent runtime facts. Future
-  confirmed Core events may project into Ombre, but no projector or Ombre write
-  path is authorized in the current line.
+  confirmed Core events may project into Ombre, but no direct model-to-Ombre
+  write or O2 compatibility path is authorized in the current line.
+- Explicit personal learning uses the existing typed action path: Hermes
+  proposes an action identifier and bounded content, Node validates that the
+  identifier, content class and format agree, and the authenticated Python
+  adapter owns persistence. Ombre remains an independent read-only source.
 
 ## Current Source Contract
 
@@ -43,17 +47,18 @@ The model has no API or token charge.
 
 ## Deployment Truth
 
-The P2 source is locally verified but not deployed until a new exact candidate installs its pinned
-Python dependency/model assets, installs the revised companion profile,
-restarts only Python and unified Hermes, and passes the real chain above.
-Production currently still runs source `0cbeed7`, exposes direct Ombre through
-the deployed historical profile, keeps `18001` active, and keeps `18002`
-inactive.
+Production runs the S2 source
+`2dc6d1a4d29ef7c9f37fb9e0076d51fd79417360`, with unified Hermes and
+`personal_memory`; direct loopback Ombre recall on `18001` is active, while
+`18002` and O2 are inactive. The v0.13 rollback window is closed.
 
-The `18002` O1 adapter, split Lite/Full profiles, and split release controller
-are retained only by the still-open v0.13 rollback window. They are not a
-fallback or target architecture and must be removed together when that window
-closes.
+S3 is locally verified but not deployed. Its bounded change teaches Hermes to
+emit the existing `memory.remember`, `memory.correct`, and `memory.forget`
+actions for explicit owner requests, tightens the Node valve for those scopes,
+and makes active personal learning visible through `personal_memory` recall.
+It does not mutate Ombre or enable O2. The inactive O2 compatibility
+implementation is scheduled for deletion in S4 after runtime references are
+proven absent.
 
 ## Configuration
 

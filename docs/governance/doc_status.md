@@ -4,7 +4,8 @@ Status: CURRENT (2026-08-08)
 
 This file is the public documentation index and conflict rule. Current runtime
 facts live in `docs/governance/current_runtime_status.md`; historical deployment
-journals belong in ignored `local_archive/` or the focused phase record.
+journals belong in ignored `local_archive/` or the focused phase record. Active
+work order and completion state live in `docs/governance/active_sequence.md`.
 
 ## Current State
 
@@ -25,6 +26,12 @@ also extends the existing S1 transaction to exact archived `main` descendants
 while retaining the prior source pointer as rollback authority. Production
 accepted a normalized action canary without replaying the executor against the
 already-created document.
+
+S3 is the only active stage. Its local candidate reuses the existing typed
+personal-learning action and `personal_memory` facade: Hermes proposes the
+identifier and content, Node validates their class and format, and Python owns
+persistence and recall. Ombre stays read-only and O2 stays inactive; this is
+not yet a production claim.
 
 ## Lifecycle Stages
 
@@ -50,6 +57,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
 | `hermes/profile/config.companion.yaml` | Deployed unified companion source profile |
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
+| `docs/governance/active_sequence.md` | Canonical S-stage order, current stage and exit conditions |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
 | `docs/governance/hermes-core-foundation.md` | Package A boundary and frozen Schema v1 |
 | `docs/governance/hermes-core-scheduling-and-unified-runtime.md` | Schema v2 scheduling and unified-runtime target |

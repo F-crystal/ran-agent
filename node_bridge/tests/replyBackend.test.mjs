@@ -829,7 +829,7 @@ test('createReplyBackend issues and verifies a real receipt before preserving a 
       action_requests: [{
         requestRef: 'remember-1',
         actionType: 'memory.remember',
-        scope: { subject_key: 'reply:tone', statement: '先说结论' },
+        scope: { kind: 'preference', subject_key: 'reply:tone', statement: '先说结论' },
       }],
       claims: [{ type: 'memory_saved', requestRef: 'remember-1' }],
     }),
@@ -965,7 +965,7 @@ test('createReplyBackend grounds personal learning in the trusted user turn befo
       action_requests: [{
         requestRef: 'remember-forged',
         actionType: 'memory.remember',
-        scope: { subject_key: 'medical:diagnosis', statement: '用户患有严重疾病' },
+        scope: { kind: 'preference', subject_key: 'medical:diagnosis', statement: '用户患有严重疾病' },
       }],
     }),
     ingestImpl: async () => ({ ok: true }),
@@ -1012,7 +1012,7 @@ test('createReplyBackend requires an explicit current-turn memory intent before 
       reply_text: '已保存。',
       action_requests: [{
         requestRef: 'remember-one-off', actionType: 'memory.remember',
-        scope: { subject_key: 'reply:style', statement: '我喜欢先说结论' },
+        scope: { kind: 'preference', subject_key: 'reply:style', statement: '我喜欢先说结论' },
       }],
     }),
     ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
@@ -1020,6 +1020,44 @@ test('createReplyBackend requires an explicit current-turn memory intent before 
 
   const response = await backend.getReply({
     text: '我喜欢先说结论。', sender_id: 'owner', conversation_id: 'owner-conversation', channel: 'wechat',
+    trusted_actor_context: { actorKey: 'actor:wechat:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:conversation' },
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(response.replyText, '保存结果尚未返回，未写入长期记忆。');
+});
+
+test('createReplyBackend rejects a memory identifier whose prefix contradicts the model content kind', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
+  const ledger = createOperationLedger({ env });
+  let calls = 0;
+  const executors = createTrustedExecutorAdapters({
+    ledger,
+    adapters: [{
+      issuer: 'bridge:python-personal-learning', actionTypes: ['memory.remember'],
+      evidenceType: 'personal_learning_result', boundary: 'authenticated_private',
+      async execute({ operation }) {
+        calls += 1;
+        return { authenticated: true, operationId: operation.operationId, ok: true, effectId: 'learning:mismatch' };
+      },
+      validateResult: () => true,
+      normalizeResult: (result) => ({ status: 'succeeded', effectId: result.effectId }),
+    }],
+  });
+  const backend = createReplyBackend({
+    env, operationLedger: ledger, trustedActionExecutors: executors,
+    hermesImpl: async () => ({
+      reply_text: '已保存。',
+      action_requests: [{
+        requestRef: 'remember-mismatch', actionType: 'memory.remember',
+        scope: { kind: 'routine', subject_key: 'reply:style', statement: '我每天晚上读书' },
+      }],
+    }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '记住我每天晚上读书', sender_id: 'owner', conversation_id: 'owner-conversation', channel: 'wechat',
     trusted_actor_context: { actorKey: 'actor:wechat:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:conversation' },
   });
 
