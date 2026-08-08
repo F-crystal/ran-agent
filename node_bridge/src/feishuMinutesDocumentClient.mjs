@@ -108,10 +108,10 @@ function normalizeOperation(operation) {
   const documentTitle = title(scope.documentTitle);
   const contentXml = String(scope.contentXml || '').trim();
   if (contentXml.length < 40
-    || contentXml.length > 2_400
+    || contentXml.length > 2_000
     || Buffer.byteLength(contentXml, 'utf8') > 7_000
     || contentXml.includes('\0')
-    || /<(?:img|source|whiteboard|sheet|task|chat_card)\b/i.test(contentXml)) {
+    || /<\/?(?:root|content)\b|<(?:img|source|whiteboard|sheet|task|chat_card)\b/i.test(contentXml)) {
     throw clientError('FEISHU_MINUTES_DOCUMENT_CONTENT_INVALID');
   }
   const escapedTitle = documentTitle.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');

@@ -15,6 +15,7 @@ import { createTrustedExecutorAdapters } from '../src/trustedExecutorAdapters.mj
 import { listStickers, saveStickersFromInbox } from '../src/stickerCatalog.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 import { createTrustedBridgeInformationalReportTask } from '../src/hermesTaskScope.mjs';
+import { createFeishuMinutesDocumentExecutorAdapter } from '../src/feishuMinutesDocumentClient.mjs';
 
 function tempStateEnv(t, extra = {}) {
   return createIsolatedTestEnv(t, {
@@ -916,6 +917,24 @@ test('existing Feishu Minutes transcript becomes one read-back cloud document', 
     ['docs', '+create'],
     ['docs', '+fetch'],
   ]);
+});
+
+test('Feishu Minutes document action rejects non-DocxXML wrappers before lark-cli', async () => {
+  let calls = 0;
+  const adapter = createFeishuMinutesDocumentExecutorAdapter({
+    execFileImpl: async () => { calls += 1; },
+  });
+  await assert.rejects(adapter.execute({ operation: {
+    operationId: 'op_minutes_invalid',
+    actionType: 'feishu.minutes_to_doc',
+    scope: {
+      minuteTitle: '个人成长',
+      folderTitle: '中海油',
+      documentTitle: '个人成长｜录音整理',
+      contentXml: '<root><title>个人成长｜录音整理</title><content><p>整理摘要</p></content></root>',
+    },
+  } }), { code: 'FEISHU_MINUTES_DOCUMENT_CONTENT_INVALID' });
+  assert.equal(calls, 0);
 });
 
 test('createReplyBackend grounds personal learning in the trusted user turn before execution', async (t) => {

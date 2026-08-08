@@ -414,6 +414,8 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.equal(capturedBody.stream, false);
   assert.match(capturedBody.messages[0].content, /Hermes/);
   assert.doesNotMatch(capturedBody.messages[0].content, /"actionRequests":\[\]/);
+  assert.match(capturedBody.messages[0].content, /requestRef such as "feishu-minutes-doc-1"/);
+  assert.match(capturedBody.messages[0].content, /without <root> or <content> wrappers/);
   assert.ok(
     capturedBody.messages[0].content.indexOf('exact keys schemaVersion')
       < capturedBody.messages[0].content.indexOf('For an owner request to organize an existing Feishu Minutes'),
