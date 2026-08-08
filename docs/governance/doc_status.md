@@ -31,8 +31,9 @@ S3 is production verified for its bounded value chain. Hermes proposes the
 identifier and content, Node validates their class and format, and Python owns
 persistence and recall. An existing active fact produced
 `personal_learning=hit` through `personal_memory`, while the independent
-read-only Ombre outcome remained observable. S4 is now the only active stage;
-O2 remains inactive pending source deletion and worktree convergence.
+read-only Ombre outcome remained observable. S4 is now the only active stage.
+Its local candidate deletes O2 and passes the focused release/source gates;
+archive, production acceptance, and worktree convergence remain.
 
 ## Lifecycle Stages
 

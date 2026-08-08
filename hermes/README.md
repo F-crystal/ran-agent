@@ -2,11 +2,11 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-07)
+Status: CURRENT (2026-08-08)
 
 `DEPLOYED_RUNTIME_ACCEPTANCE`（2026-08-06）：exact candidate `0b793e8` 已部署统一 Hermes v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full 服务 inactive/disabled。完整边界见 `docs/governance/current_runtime_status.md`。
 
-unified-identity/O2 rollback 基线 `b5b4ff43f8c3d5706192cabefcece49408b73558` 已归档但尚未部署到生产；它保留 O2 并统一复用既有 runtime identity。O1/O2 候选仍未部署，Gate 5 未授权。
+O1/O2 与 unified-identity 提交仅保留为历史证据。S4 候选删除 O2、Steward/token/模型端点及专属发布门；现役 `personal_memory → Python → Ombre 18001` 只读链路不变，生产状态以治理文档为准。
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 

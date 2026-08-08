@@ -287,11 +287,10 @@ For rollback interpretation only, the retired v0.13 split transaction used
 - Synchronized Lite/Full `deepseek-v4-flash` selection and the shared DeepSeek
   provider plugin that forces `thinking.type=disabled`. Pro remains available
   only through an explicit deployment override.
-- Managed pre-Gate-5 O2 compatibility wiring: official release default
-  `OMBRE_COMPAT_ENABLED=true`, canonical state/Steward identity paths, and
-  separate tool-less Curator/Reviewer calls using Flash and the existing
-  `DEEPSEEK_API_KEY`. Ordinary drift repair preserves an existing effective
-  operator `false` across the two Node environment files.
+- The old pre-Gate-5 O2 compatibility wiring is retired. Current source apply
+  removes its Node environment/drop-in seams while preserving direct read-only
+  Ombre on `18001`; the previous source snapshot remains the only rollback
+  authority for any retained legacy state.
 - Service restart for `ran-agent-python.service`, `ran-agent-node.service`,
   `ran-agent-hermes.service`, and `ran-agent-hermes-full.service` so new env
   gates are loaded by running processes.

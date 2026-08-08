@@ -26,16 +26,14 @@ OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-c
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
 OMBRE_BRAIN_ENV_EXAMPLE_FILE="${OMBRE_BRAIN_ENV_EXAMPLE_FILE:-$OMBRE_BRAIN_HOME/.env.example}"
 OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
-OMBRE_STEWARD_IDENTITY_FILE="${RAN_AGENT_STEWARD_IDENTITY_FILE:-$OMBRE_BRAIN_HOME/steward-identity.v1.json}"
-OMBRE_STEWARD_ROTATE="${RAN_AGENT_ROTATE_STEWARD_TOKEN:-0}"
-if [[ -n "${RAN_AGENT_OMBRE_PATCH_PYTHON_BIN:-}" ]]; then
-  OMBRE_PATCH_PYTHON_BIN="$RAN_AGENT_OMBRE_PATCH_PYTHON_BIN"
+if [[ -n "${RAN_AGENT_OMBRE_PYTHON_BIN:-}" ]]; then
+  OMBRE_PYTHON_BIN="$RAN_AGENT_OMBRE_PYTHON_BIN"
 elif [[ -x /usr/bin/python3.12 ]]; then
-  OMBRE_PATCH_PYTHON_BIN=/usr/bin/python3.12
+  OMBRE_PYTHON_BIN=/usr/bin/python3.12
 else
-  OMBRE_PATCH_PYTHON_BIN="$(command -v python3.12 || true)"
+  OMBRE_PYTHON_BIN="$(command -v python3.12 || true)"
 fi
-[[ -n "$OMBRE_PATCH_PYTHON_BIN" ]] || {
+[[ -n "$OMBRE_PYTHON_BIN" ]] || {
   echo "ERROR: Ombre Brain source preparation requires a Python 3.12 executable" >&2
   exit 1
 }
@@ -56,12 +54,6 @@ require_derived_path OMBRE_BRAIN_COMPOSE_FILE "$OMBRE_BRAIN_COMPOSE_FILE" "$OMBR
 require_derived_path OMBRE_BRAIN_CONFIG_FILE "$OMBRE_BRAIN_CONFIG_FILE" "$OMBRE_BRAIN_HOME/config.yaml"
 require_derived_path OMBRE_BRAIN_ENV_EXAMPLE_FILE "$OMBRE_BRAIN_ENV_EXAMPLE_FILE" "$OMBRE_BRAIN_HOME/.env.example"
 require_derived_path OMBRE_BRAIN_STATUS_FILE "$OMBRE_BRAIN_STATUS_FILE" "$OMBRE_BRAIN_HOME/status.json"
-require_derived_path RAN_AGENT_STEWARD_IDENTITY_FILE "$OMBRE_STEWARD_IDENTITY_FILE" "$OMBRE_BRAIN_HOME/steward-identity.v1.json"
-
-if [ "$OMBRE_STEWARD_ROTATE" = "1" ] && [ "${RAN_AGENT_STEWARD_ROTATION_QUIESCED:-0}" != "1" ]; then
-  echo "ERROR: Steward token rotation requires a quiesced release transaction" >&2
-  exit 1
-fi
 
 FORCE_CONFIG=0
 FORCE_COMPOSE=0
@@ -266,7 +258,7 @@ prepare_source_runner() {
       ;;
   esac
 
-  [ "$(python_minor_version "$OMBRE_PATCH_PYTHON_BIN")" = 3.12 ] || {
+  [ "$(python_minor_version "$OMBRE_PYTHON_BIN")" = 3.12 ] || {
     echo "ERROR: Ombre Brain source preparation requires Python 3.12" >&2
     exit 1
   }
@@ -331,25 +323,14 @@ prepare_source_runner() {
     echo "ERROR: Ombre Brain source is not the fixed reviewed commit" >&2
     exit 1
   fi
-  if ! "$OMBRE_PATCH_PYTHON_BIN" "$ROOT_DIR/scripts/apply_ombre_steward_patch.py" \
-    --checkout "$OMBRE_BRAIN_SOURCE_DIR" \
-    --identity-output "$OMBRE_STEWARD_IDENTITY_FILE" \
-    --verify >/dev/null 2>&1; then
-    if [ -n "$(git -C "$OMBRE_BRAIN_SOURCE_DIR" status --porcelain)" ]; then
-      echo "ERROR: patched Ombre effective tree identity mismatch" >&2
-      exit 1
-    fi
-    "$OMBRE_PATCH_PYTHON_BIN" "$ROOT_DIR/scripts/apply_ombre_steward_patch.py" \
-      --checkout "$OMBRE_BRAIN_SOURCE_DIR" \
-      --identity-output "$OMBRE_STEWARD_IDENTITY_FILE" >/dev/null
+  git -C "$OMBRE_BRAIN_SOURCE_DIR" checkout --detach --force "$OMBRE_BRAIN_SOURCE_COMMIT"
+  if ! git -C "$OMBRE_BRAIN_SOURCE_DIR" cat-file -e "$OMBRE_BRAIN_SOURCE_COMMIT:src/web/steward_api.py" 2>/dev/null; then
+    rm -f -- "$OMBRE_BRAIN_SOURCE_DIR/src/web/steward_api.py"
   fi
-  local -a token_args=(
-    --state-dir "$RAN_AGENT_STATE_DIR"
-    --runtime-user "${RAN_AGENT_RUNTIME_USER:-ubuntu}"
-    --runtime-group "${RAN_AGENT_RUNTIME_GROUP:-${RAN_AGENT_RUNTIME_USER:-ubuntu}}"
-  )
-  if [ "$OMBRE_STEWARD_ROTATE" = "1" ]; then token_args+=(--rotate); fi
-  "$OMBRE_PATCH_PYTHON_BIN" "$ROOT_DIR/scripts/install-ombre-steward-token.py" "${token_args[@]}"
+  if [ -n "$(git -C "$OMBRE_BRAIN_SOURCE_DIR" status --porcelain --untracked-files=no)" ]; then
+    echo "ERROR: Ombre Brain source differs from the pinned upstream commit" >&2
+    exit 1
+  fi
 
   if [ ! -e "$OMBRE_BRAIN_SOURCE_DIR/config.yaml" ]; then
     ln -s "$OMBRE_BRAIN_CONFIG_FILE" "$OMBRE_BRAIN_SOURCE_DIR/config.yaml" 2>/dev/null || cp "$OMBRE_BRAIN_CONFIG_FILE" "$OMBRE_BRAIN_SOURCE_DIR/config.yaml"
@@ -363,7 +344,7 @@ prepare_source_runner() {
   fi
   if [ ! -x "$OMBRE_BRAIN_VENV/bin/python" ]; then
     log "creating source venv $OMBRE_BRAIN_VENV"
-    "$OMBRE_PATCH_PYTHON_BIN" -m venv "$OMBRE_BRAIN_VENV"
+    "$OMBRE_PYTHON_BIN" -m venv "$OMBRE_BRAIN_VENV"
   fi
   [ "$(python_minor_version "$OMBRE_BRAIN_VENV/bin/python")" = 3.12 ] || {
     echo "ERROR: Ombre Brain source venv creation did not produce Python 3.12" >&2

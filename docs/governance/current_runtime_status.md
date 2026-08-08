@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S3 PERSONAL MEMORY PROD_VERIFIED (2026-08-08)
+Status: S3 PROD_VERIFIED; S4 LOCAL_VERIFIED (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -41,7 +41,9 @@ Production memory uses local SQLite with free offline FastEmbed/HNSW plus
 keyword retrieval. `personal_memory` also performs a bounded direct Ombre
 `breath_search` through the loopback-only service on `18001`; source failures
 are surfaced separately from an empty result. The recall-only adapter on
-`18002` is inactive, and the O2 compatibility writer is inactive.
+`18002` is inactive, and the production S3 O2 writer is inactive. The S4
+source candidate deletes that writer, its Steward/token/model endpoint code,
+and its dedicated release gate without changing the direct `18001` read path.
 
 Ombre is a derived relationship/context source, not the authority for Core
 facts or deployment truth. Core and governed runtime documents remain the
@@ -127,7 +129,7 @@ The source still aligns four production-backed contracts:
 - canonical `memory_bge_vector_index.*` paths;
 - Ombre endpoint absence classified as transport failure;
 - unified Hermes and co-reading defaults on `8642`;
-- O2 release/apply/acceptance defaults off unless explicitly enabled.
+- no direct Ombre mutation; the S4 candidate removes the inactive O2 seams.
 
 Legacy split-profile release inputs remain excluded from the companion
 distribution. The source mode reuses the existing candidate controller and is
@@ -139,10 +141,12 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S4 is currently in progress: converge
-valid retained work, branches and worktrees, then delete the inactive O2
-compatibility implementation after proving that no active runtime depends on
-it. Preserve the root-worktree draft until its useful changes are classified.
+`docs/governance/active_sequence.md`. S4 is currently in progress. Its local
+candidate has deleted the inactive O2 implementation and passed focused Node,
+release, source-controller, shell, and Git-less gate regressions. Archive,
+production source dry-run/apply, post-deploy acceptance, and deliberate
+worktree/branch convergence remain. Preserve the root-worktree draft until its
+useful changes are classified.
 
 The remote branch set is intentionally `main` plus
 `codex/p2-memory-production-candidate`; the latter is historical candidate
@@ -150,7 +154,7 @@ lineage, not current production or rollback authority.
 
 Package A and B.1 Core primitives exist in source but are not composed into the
 production Node write path. Packages B.2/B.3 and Gate 5 have not started. O2 is
-an archived migration-era path, remains off, and is not the target architecture.
+a retired migration-era path; only rollback evidence may remain after S4.
 
 ## Protected State
 

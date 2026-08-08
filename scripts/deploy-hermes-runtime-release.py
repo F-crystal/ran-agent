@@ -93,6 +93,7 @@ SOURCE_PROFILE_DIR = LITE_HOME / f"profiles/{SOURCE_PROFILE}"
 SOURCE_LEGACY_PROFILE_DIR = LITE_HOME / "profiles/ran-assistant-lite"
 SOURCE_HERMES_OVERLAY_DROPIN = LITE_UNIT.with_suffix(".service.d") / "30-companion-overlay.conf"
 SOURCE_PYTHON_OVERLAY_DROPIN = Path("/etc/systemd/system/ran-agent-python.service.d/30-personal-memory-overlay.conf")
+SOURCE_NODE_STEWARD_DROPIN = Path("/etc/systemd/system/ran-agent-node.service.d/99-ombre-steward-identity.conf")
 SOURCE_SERVICES = (
     "ran-agent-python.service",
     "ran-agent-hermes.service",
@@ -1578,6 +1579,7 @@ def source_snapshot_paths() -> tuple[Path, ...]:
         LITE_UNIT,
         SOURCE_HERMES_OVERLAY_DROPIN,
         SOURCE_PYTHON_OVERLAY_DROPIN,
+        SOURCE_NODE_STEWARD_DROPIN,
         LITE_HOME / "config.yaml",
         SOURCE_PROFILE_DIR,
         SOURCE_LEGACY_PROFILE_DIR,
@@ -1640,7 +1642,7 @@ def patch_source_env_bytes(original: bytes) -> bytes:
     kept: list[str] = []
     for line in original.decode("utf-8").splitlines():
         key = line.split("=", 1)[0] if "=" in line else ""
-        if key in values or key in removed or key.startswith(("OMBRE_RECALL_", "OMBRE_COMPAT_")):
+        if key in values or key in removed or key.startswith(("OMBRE_RECALL_", "OMBRE_COMPAT_", "RAN_AGENT_STEWARD_")):
             continue
         kept.append(line)
     kept.extend(f"{key}={value}" for key, value in values.items())
@@ -1766,6 +1768,7 @@ def activate_source_candidate(candidate: str, stage: Path, snapshot: Path, *, in
     atomic_write(LITE_UNIT, candidate_blob(REPO, candidate, UNIT_SOURCE_PATH), mode=0o644, uid=0, gid=0)
     SOURCE_HERMES_OVERLAY_DROPIN.unlink(missing_ok=True)
     SOURCE_PYTHON_OVERLAY_DROPIN.unlink(missing_ok=True)
+    SOURCE_NODE_STEWARD_DROPIN.unlink(missing_ok=True)
 
 
 def source_real_provider_probe() -> None:
@@ -1810,6 +1813,8 @@ def validate_source_acceptance(candidate: str) -> None:
         raise ReleaseError("live Hermes unit differs from candidate")
     if SOURCE_HERMES_OVERLAY_DROPIN.exists() or SOURCE_PYTHON_OVERLAY_DROPIN.exists():
         raise ReleaseError("companion overlay drop-in remains active")
+    if SOURCE_NODE_STEWARD_DROPIN.exists() or (REPO / "node_bridge/src/ombreCompat").exists():
+        raise ReleaseError("retired O2 source or systemd drop-in remains active")
     profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml")
     if (LITE_HOME / "config.yaml").read_bytes() != profile or (SOURCE_PROFILE_DIR / "config.yaml").read_bytes() != profile:
         raise ReleaseError("live companion profile differs from candidate")
@@ -1823,6 +1828,9 @@ def validate_source_acceptance(candidate: str) -> None:
     expected_executable = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/python/bin/python3.12").resolve()
     if environment.get("HERMES_PROFILE") != SOURCE_PROFILE or process_executable(pid) != expected_executable:
         raise ReleaseError("Hermes process does not use the companion source contract")
+    node_environment = process_environment("ran-agent-node.service")
+    if any(key.startswith(("OMBRE_COMPAT_", "RAN_AGENT_STEWARD_")) for key in node_environment):
+        raise ReleaseError("retired O2 process environment remains active")
     validate_listener_topology(pid)
     if not port_open(18001) or port_open(18002) or port_open(8643):
         raise ReleaseError("source listener topology is invalid")

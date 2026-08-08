@@ -21,8 +21,6 @@ import {
   isTrustedInformationalReportTask,
   preserveTrustedBridgeTaskProvenance,
 } from './hermesTaskScope.mjs';
-import { maybeEmitCompatFinalTurn } from './ombreCompat/emitterSeam.mjs';
-import { sourceTimelineEventKey } from './ombreCompat/runtime.mjs';
 
 export async function handleIncomingMessage(normalizedMessage = {}, options = {}) {
   const env = options.env || process.env;
@@ -84,11 +82,6 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     source_message_id: message.id,
     created_at: message.created_at,
     tags: inferTags(message),
-    event_key: sourceTimelineEventKey({
-      platform: message.platform,
-      conversation_id: message.conversation_id,
-      exchange_id: message.id,
-    }),
   }, logger);
 
   logger.log?.('[channel-hub] incoming_message', JSON.stringify({
@@ -138,27 +131,6 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     : response;
   const assistantTurn = buildAssistantTurn({ message, response: deliveredResponse, globalUserId, timelinePath: timelineConfig.timelinePath });
   if (shouldUseDurableTextDelivery({ response: deliveredResponse, options })) {
-    const reservation = options.outbox.reserve({
-      operationKey: durableOperationKey,
-      platform: message.platform,
-      conversation_id: message.conversation_id,
-      exchange_id: message.id,
-      route: {
-        adapterKey: message.platform,
-        destinationRef: `conversation:${shortHash(message.conversation_id)}`,
-      },
-      text: deliveredResponse.replyText.trim(),
-      attachments: [],
-      idempotent: false,
-      maxAttempts: 1,
-    });
-    await maybeEmitCompatFinalTurn({
-      env,
-      message,
-      normalizedMessage: message,
-      response: deliveredResponse,
-      outboxItem: reservation,
-    });
     await options.outbox.deliver({
       operationKey: durableOperationKey,
       platform: message.platform,
@@ -180,13 +152,8 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
         message,
       }),
       timeline: async () => {
-        if (!taskScoped && deliveredResponse.excludeFromHistory !== true) {
-          appendTurn({ ...assistantTurn, event_key: `ombre-assistant:${reservation.outboxId}` });
-        }
+        if (!taskScoped && deliveredResponse.excludeFromHistory !== true) appendTurn(assistantTurn);
       },
-      onTerminal: env.ombreCompatRuntime?.active
-        ? (receipt) => env.ombreCompatRuntime.observeTerminal(receipt)
-        : undefined,
       backend: !taskScoped && typeof deliveredResponse.backendProjection === 'function'
         ? async ({ outboxId, text }) => deliveredResponse.backendProjection({ outboxId, replyText: text })
         : undefined,

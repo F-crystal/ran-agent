@@ -34,7 +34,7 @@ esac
 privileged_test_skip_reason() {
   [[ "$SKIP_PRIVILEGED_TESTS" == 1 ]] || return 1
   case "$(basename "$1")" in
-    hermesModelCutover.test.mjs|searchHubApplyScript.test.mjs|ombreCompatProductionWiring.test.mjs)
+    hermesModelCutover.test.mjs|searchHubApplyScript.test.mjs)
       printf 'exercises root-only apply tooling that chowns to the ubuntu runtime user; covered by the root gate' ;;
     *)
       return 1 ;;
@@ -199,57 +199,6 @@ if find "$SOURCE_ROOT" -name sitecustomize.py -print -quit | grep -q .; then
   fail source_sitecustomize_present
 fi
 chmod -R a-w "$SOURCE_ROOT"
-
-run_ombre_real_process_gate() {
-  local upstream="${RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR:-}" venv="${RAN_AGENT_OMBRE_UPSTREAM_VENV:-}"
-  case "${RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE:-required}" in
-    code-only)
-      [[ -z "$upstream" && -z "$venv" ]] || fail ombre_code_gate_live_inputs_forbidden
-      return 0
-      ;;
-    required) ;;
-    *) fail ombre_real_process_phase_invalid ;;
-  esac
-  [[ -n "$upstream" && -n "$venv" ]] || fail ombre_real_process_inputs_required
-  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 ]]; then
-    run_clean /usr/bin/env \
-      RAN_AGENT_TEST_MODE=1 \
-      RAN_AGENT_TEST_OMBRE_EXPECTED_SOURCE_UID="$(id -u)" \
-      RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
-      RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$upstream" \
-      RAN_AGENT_OMBRE_UPSTREAM_VENV="$venv" \
-      RAN_AGENT_NODE_BIN="$NODE_BIN" \
-      bash "$SOURCE_ROOT/scripts/verify-ombre-steward-real-process.sh" >/dev/null ||
-      fail ombre_real_process_gate
-    return 0
-  fi
-  [[ "${EUID}" -eq 0 && -x /usr/sbin/runuser ]] || fail ombre_real_process_root_runner_required
-  id -u "$RUNTIME_USER" >/dev/null 2>&1 || fail runtime_account_required
-  chmod 711 "$SANDBOX_ROOT"
-  chmod -R a+rX "$SOURCE_ROOT"
-  install -d -o "$RUNTIME_USER" -g "$RUNTIME_GROUP" -m 700 "$SANDBOX_ROOT/ombre-steward-home"
-  /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- /usr/bin/env -i \
-    HOME="$SANDBOX_ROOT/ombre-steward-home" \
-    PATH="$(dirname "$NODE_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-    TMPDIR=/tmp \
-    GIT_CONFIG_GLOBAL=/dev/null \
-    GIT_CONFIG_NOSYSTEM=1 \
-    RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
-    RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$upstream" \
-    RAN_AGENT_OMBRE_UPSTREAM_VENV="$venv" \
-    RAN_AGENT_NODE_BIN="$NODE_BIN" \
-    RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" \
-    /bin/bash "$SOURCE_ROOT/scripts/verify-ombre-steward-real-process.sh" >/dev/null ||
-    fail ombre_real_process_gate
-}
-
-if [[ "$MODE" == --all ]]; then
-  run_ombre_real_process_gate
-  if [[ "${RAN_AGENT_TEST_MODE:-0}" == 1 && "${RAN_AGENT_TEST_OMBRE_GATE_PHASE_ONLY:-0}" == 1 ]]; then
-    printf 'hermes-release-gate: ombre-phase-ok\n'
-    exit 0
-  fi
-fi
 
 run_node_test() {
   local test_file="$1"

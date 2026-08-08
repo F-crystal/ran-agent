@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-08)
 
 ## Split Of Responsibility
 
@@ -16,11 +16,13 @@ Status: CURRENT (2026-08-06)
 
 - Production chat mainline: `WeChat -> Node bridge -> Hermes gateway -> DeepSeek V4 Flash -> reply`
 - Node, Ombre, and Hermes share the existing `RAN_AGENT_RUNTIME_USER/GROUP`
-  identity (default `ubuntu`); O2 does not authorize creating a second Linux account.
+  identity (default `ubuntu`); source changes do not authorize creating a
+  second Linux account.
 - Unified Hermes v0.20 Runtime candidate: one companion gateway preserves
   `DeepSeek V4 Flash` and adds explicit `thinking.type=disabled` only at the
   provider boundary; V4 Pro remains explicit opt-in. The Runtime phase does
-  not change O1/O2 identity, recall, wake, rollback, or retention ownership.
+  not change service identity, direct Ombre recall, rollback, or retention
+  ownership.
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
 - Scheduled digest mainline: `scheduler -> AIHOT facts -> synthetic Feishu turn -> Hermes -> Feishu reply`
 - External MCP candidate mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional ProactiveEvent synthetic Hermes turn`; source profiles fall back disabled, while standard server deploy enables the gateway, proactive event, and system queue env gates.

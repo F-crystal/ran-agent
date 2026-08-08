@@ -105,19 +105,6 @@ export function appendTurn(turn = {}) {
   return record;
 }
 
-export function resolveTimelineEventByKey({ timelinePath, eventKey }) {
-  const key = sanitizeTimelineEventKey(eventKey);
-  if (!key) throw timelineError('COMPAT_PAYLOAD_UNRESOLVABLE', 'timeline event key is invalid');
-  const matches = readTimelineRecords({ timelinePath, limit: Number.MAX_SAFE_INTEGER })
-    .filter((record) => record.event_key === key);
-  if (matches.length === 0) throw timelineError('COMPAT_PAYLOAD_UNRESOLVABLE', 'timeline event key was not found');
-  if (matches.length > 1) throw timelineError('RAN_AGENT_TIMELINE_EVENT_KEY_CONFLICT', 'timeline event key is not unique');
-  return Object.freeze({
-    record: Object.freeze(structuredClone(matches[0])),
-    timeline_record_digest: timelineRecordDigest(matches[0]),
-  });
-}
-
 export function timelineRecordDigest(record) {
   return `sha256:${createHash('sha256').update(canonicalStringify(record), 'utf8').digest('hex')}`;
 }

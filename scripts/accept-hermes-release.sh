@@ -35,9 +35,6 @@ OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$RAN_AGENT_STATE_DIR/ombre-brain}"
 [[ "$OMBRE_BRAIN_HOME" == "$RAN_AGENT_STATE_DIR/ombre-brain" ]] ||
   fail ombre_home_state_dir_mismatch
 RELEASE_SNAPSHOT_DIR="${RAN_AGENT_RELEASE_SNAPSHOT_DIR:-}"
-SECRET_ROLLBACK_ROOT="${RAN_AGENT_RELEASE_SECRET_ROLLBACK_ROOT:-/run/ran-agent-release-secrets}"
-SECRET_ROLLBACK_DIR="${RAN_AGENT_RELEASE_SECRET_ROLLBACK_DIR:-}"
-OLD_STEWARD_TOKEN_FILE="${RAN_AGENT_STEWARD_OLD_TOKEN_FILE:-}"
 HERMES_LITE_BRIDGE_SMOKE_URL="${RAN_AGENT_RELEASE_LITE_BRIDGE_SMOKE_URL:-http://127.0.0.1:8642/v1/models}"
 HERMES_FULL_BRIDGE_SMOKE_URL="${RAN_AGENT_RELEASE_FULL_BRIDGE_SMOKE_URL:-http://127.0.0.1:8643/v1/models}"
 GATEWAY_READY_TIMEOUT_SECONDS="${RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS:-120}"
@@ -48,20 +45,6 @@ case "$EXPECTED_MODEL" in
   deepseek-v4-pro|deepseek-v4-flash) ;;
   *) fail expected_model_invalid ;;
 esac
-EXPECTED_OMBRE_COMPAT_ENABLED="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_ENABLED:-false}"
-case "$EXPECTED_OMBRE_COMPAT_ENABLED" in true|false) ;; *) fail expected_ombre_compat_enabled_invalid ;; esac
-EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL:-https://api.deepseek.com/v1}"
-EXPECTED_OMBRE_COMPAT_CURATOR_MODEL="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_CURATOR_MODEL:-$EXPECTED_MODEL}"
-EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL:-https://api.deepseek.com/v1}"
-EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL="${RAN_AGENT_EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL:-$EXPECTED_MODEL}"
-for expected_pair in \
-  "$EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL|$EXPECTED_OMBRE_COMPAT_CURATOR_MODEL" \
-  "$EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL|$EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL"; do
-  case "$expected_pair" in
-    'https://api.deepseek.com/v1|deepseek-v4-flash'|'https://api.deepseek.com/v1|deepseek-v4-pro') ;;
-    *) fail expected_ombre_compat_model_endpoint_invalid ;;
-  esac
-done
 
 cleanup_gateway_header() {
   [[ -z "$GATEWAY_HEADER_FILE" ]] || rm -f -- "$GATEWAY_HEADER_FILE"
@@ -119,9 +102,7 @@ release_post_start_health() {
   for unit in ran-agent-python.service ran-agent-node.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-hermes.service ran-agent-hermes-full.service; do
     "${SUDO[@]}" systemctl is-active --quiet "$unit" || fail "service_inactive:$unit"
   done
-  release_steward_identity_contract ran-agent-node.service
-  release_steward_identity_contract ran-agent-ombre-brain.service
-  release_ombre_compat_contract
+  release_o2_retirement_contract
   release_managed_endpoint_health \
     ran-agent-ombre-brain.service 18001 \
     "${OMBRE_BRAIN_HEALTH_URL:-http://127.0.0.1:18001/health}" \
@@ -133,125 +114,23 @@ release_post_start_health() {
   release_ombre_unit_contract
 }
 
-release_ombre_compat_contract() {
-  local pid_before pid_after process_env state_dir identity_file steward_endpoint
+release_o2_retirement_contract() {
+  local pid_before pid_after process_env
   pid_before="$("${SUDO[@]}" systemctl show ran-agent-node.service --property=MainPID --value 2>/dev/null)" ||
-    fail ombre_compat_node_pid_unavailable
-  [[ "$pid_before" =~ ^[1-9][0-9]*$ ]] || fail ombre_compat_node_pid_invalid
+    fail node_pid_unavailable
+  [[ "$pid_before" =~ ^[1-9][0-9]*$ ]] || fail node_pid_invalid
   process_env="$("${SUDO[@]}" cat "/proc/$pid_before/environ" 2>/dev/null | tr '\0' '\n')" ||
-    fail ombre_compat_node_environment_unavailable
+    fail node_environment_unavailable
   pid_after="$("${SUDO[@]}" systemctl show ran-agent-node.service --property=MainPID --value 2>/dev/null)" ||
-    fail ombre_compat_node_pid_recheck_unavailable
-  [[ "$pid_after" == "$pid_before" ]] || fail ombre_compat_node_pid_drift
-
-  state_dir="$RAN_AGENT_STATE_DIR/ombre-compat"
-  identity_file="$OMBRE_BRAIN_HOME/steward-identity.v1.json"
-  steward_endpoint='http://127.0.0.1:18001/internal/ran-agent/steward/v1'
-  grep -qxF "OMBRE_COMPAT_ENABLED=$EXPECTED_OMBRE_COMPAT_ENABLED" <<<"$process_env" ||
-    fail ombre_compat_process_environment_contract:OMBRE_COMPAT_ENABLED
-  [ "$EXPECTED_OMBRE_COMPAT_ENABLED" = true ] || return 0
-  for setting in \
-    "OMBRE_COMPAT_STATE_DIR=$state_dir" \
-    "OMBRE_COMPAT_STEWARD_ENDPOINT=$steward_endpoint" \
-    "OMBRE_COMPAT_STEWARD_IDENTITY_FILE=$identity_file" \
-    "OMBRE_COMPAT_CURATOR_BASE_URL=$EXPECTED_OMBRE_COMPAT_CURATOR_BASE_URL" \
-    "OMBRE_COMPAT_CURATOR_MODEL=$EXPECTED_OMBRE_COMPAT_CURATOR_MODEL" \
-    "OMBRE_COMPAT_REVIEWER_BASE_URL=$EXPECTED_OMBRE_COMPAT_REVIEWER_BASE_URL" \
-    "OMBRE_COMPAT_REVIEWER_MODEL=$EXPECTED_OMBRE_COMPAT_REVIEWER_MODEL"; do
-    grep -qxF "$setting" <<<"$process_env" || fail "ombre_compat_process_environment_contract:${setting%%=*}"
-  done
-  grep -Eq '^DEEPSEEK_API_KEY=.+$' <<<"$process_env" ||
-    fail ombre_compat_deepseek_auth_unavailable
-  [[ "$("${SUDO[@]}" stat -c '%U:%G:%a' "$state_dir")" == "$RUNTIME_USER:$RUNTIME_GROUP:700" ]] ||
-    fail ombre_compat_state_identity_contract
-  "${SUDO[@]}" test -f "$identity_file" && "${SUDO[@]}" test ! -L "$identity_file" ||
-    fail ombre_compat_steward_identity_file_contract
-}
-
-release_steward_identity_contract() {
-  local unit="$1" pid_before pid_after process_env token_path
-  "${SUDO[@]}" env \
-    RAN_AGENT_TEST_MODE="${RAN_AGENT_TEST_MODE:-0}" \
-    RAN_AGENT_TEST_PROC_ROOT="${RAN_AGENT_TEST_PROC_ROOT:-/proc}" \
-    bash "$SOURCE_ROOT/scripts/verify-runtime-service-identity.sh" \
-    --service "$unit" --expect "$RUNTIME_USER" "$RUNTIME_GROUP" >/dev/null ||
-    fail "runtime_identity_contract:$unit"
-  pid_before="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" ||
-    fail "steward_identity_pid_unavailable:$unit"
-  [[ "$pid_before" =~ ^[1-9][0-9]*$ ]] || fail "steward_identity_pid_invalid:$unit"
-  process_env="$("${SUDO[@]}" cat "/proc/$pid_before/environ" 2>/dev/null | tr '\0' '\n')" ||
-    fail "steward_process_environment_unavailable:$unit"
-  pid_after="$("${SUDO[@]}" systemctl show "$unit" --property=MainPID --value 2>/dev/null)" ||
-    fail "steward_identity_pid_recheck_unavailable:$unit"
-  [[ "$pid_after" == "$pid_before" ]] || fail "steward_identity_pid_drift:$unit"
-  token_path="$RAN_AGENT_STATE_DIR/ombre-compat/secrets/steward-api-token"
-  grep -qxF "RAN_AGENT_STEWARD_TOKEN_FILE=$token_path" <<<"$process_env" ||
-    fail "steward_token_path_contract:$unit"
-}
-
-release_steward_secret_boundary() {
-  local token_path="$RAN_AGENT_STATE_DIR/ombre-compat/secrets/steward-api-token"
-  local release_artifact_root
-  [[ "$RAN_AGENT_STATE_DIR" == /* ]] || fail steward_state_dir_invalid
-  [[ ! -e "$SOURCE_ROOT/.ran_agent_state/ombre-compat/secrets/steward-api-token" ]] ||
-    fail steward_token_in_staged_checkout
-  [[ -n "$RELEASE_SNAPSHOT_DIR" && -d "$RELEASE_SNAPSHOT_DIR" ]] ||
-    fail release_snapshot_unavailable
-  if find "$RELEASE_SNAPSHOT_DIR" -path '*/ombre-compat/secrets*' -print -quit | grep -q .; then
-    fail steward_secret_in_release_snapshot
-  fi
-  [[ -n "$SECRET_ROLLBACK_DIR" && "$SECRET_ROLLBACK_DIR" == "$SECRET_ROLLBACK_ROOT"/* ]] ||
-    fail secret_rollback_transaction_contract
-  [[ "$("${SUDO[@]}" stat -c '%U:%G:%a' "$SECRET_ROLLBACK_DIR")" == root:root:700 ]] ||
-    fail secret_rollback_identity_contract
-  "${SUDO[@]}" "$PYTHON_BIN" "$SOURCE_ROOT/scripts/install-ombre-steward-token.py" \
-    --state-dir "$RAN_AGENT_STATE_DIR" --runtime-user "$RUNTIME_USER" \
-    --runtime-group "$RUNTIME_GROUP" --verify >/dev/null ||
-    fail steward_token_file_contract
-  release_artifact_root="$(dirname "$(dirname "$RELEASE_SNAPSHOT_DIR")")"
-  "${SUDO[@]}" "$PYTHON_BIN" - "$token_path" "$OLD_STEWARD_TOKEN_FILE" "$RELEASE_SNAPSHOT_DIR" "$release_artifact_root/archives" <<'PY' ||
-import os, pathlib, sys
-tokens = [pathlib.Path(sys.argv[1]).read_bytes()]
-if sys.argv[2]:
-    tokens.append(pathlib.Path(sys.argv[2]).read_bytes())
-for scan_root in sys.argv[3:]:
-    if not pathlib.Path(scan_root).exists():
-        continue
-    for root, _, files in os.walk(scan_root):
-        for name in files:
-            path = pathlib.Path(root, name)
-            try:
-                with path.open("rb") as source:
-                    tail = b""
-                    while chunk := source.read(1024 * 1024):
-                        data = tail + chunk
-                        if any(token in data for token in tokens):
-                            raise SystemExit(1)
-                        tail = data[-max(len(token) - 1 for token in tokens):]
-            except (PermissionError, OSError):
-                raise SystemExit(1)
-PY
-    fail steward_token_bytes_in_release_artifacts
-  "${SUDO[@]}" journalctl -b \
-    -u ran-agent-node.service -u ran-agent-ombre-brain.service --no-pager |
-    "${SUDO[@]}" "$PYTHON_BIN" -c '
-import pathlib, sys
-tokens = [pathlib.Path(sys.argv[1]).read_bytes()]
-if sys.argv[2]:
-    tokens.append(pathlib.Path(sys.argv[2]).read_bytes())
-tail = b""
-while chunk := sys.stdin.buffer.read(1024 * 1024):
-    data = tail + chunk
-    if any(token in data for token in tokens):
-        raise SystemExit(1)
-    tail = data[-max(len(token) - 1 for token in tokens):]
-' "$token_path" "$OLD_STEWARD_TOKEN_FILE" ||
-    fail steward_token_bytes_in_journal
+    fail node_pid_recheck_unavailable
+  [[ "$pid_after" == "$pid_before" ]] || fail node_pid_drift
+  ! grep -Eq '^(OMBRE_COMPAT_|RAN_AGENT_STEWARD_)' <<<"$process_env" ||
+    fail retired_o2_process_environment_present
+  [[ ! -e "$SOURCE_ROOT/node_bridge/src/ombreCompat" ]] || fail retired_o2_source_present
 }
 
 release_ombre_unit_contract() {
   local unit_text pid process_env effective_exec dropins
-  local -a rejected_token_args=() run_as_steward=()
   unit_text="$("${SUDO[@]}" systemctl cat ran-agent-ombre-brain.service 2>/dev/null)" ||
     fail ombre_upstream_unit_unavailable
   for setting in \
@@ -267,9 +146,7 @@ release_ombre_unit_contract() {
     "ExecStart=/usr/bin/bash /opt/ran_agent/scripts/start_ombre_brain_service.sh --managed /opt/ran_agent $RAN_AGENT_STATE_DIR /opt/ran_agent/vault/ombre" \
     'Environment=OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp' \
     "Environment=RAN_AGENT_STATE_DIR=$RAN_AGENT_STATE_DIR" \
-    "Environment=OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME" \
-    "Environment=RAN_AGENT_STEWARD_IDENTITY_FILE=$RAN_AGENT_STATE_DIR/ombre-brain/steward-identity.v1.json" \
-    "Environment=RAN_AGENT_STEWARD_TOKEN_FILE=$RAN_AGENT_STATE_DIR/ombre-compat/secrets/steward-api-token"; do
+    "Environment=OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME"; do
     grep -qF "$setting" <<<"$unit_text" || fail ombre_upstream_unit_contract
   done
   dropins="$("${SUDO[@]}" systemctl show ran-agent-ombre-brain.service --property=DropInPaths --value 2>/dev/null)" ||
@@ -303,27 +180,6 @@ release_ombre_unit_contract() {
   for rejected in BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH; do
     ! grep -q "^$rejected=" <<<"$process_env" || fail "ombre_upstream_process_environment_injection:$rejected"
   done
-  [[ -z "$OLD_STEWARD_TOKEN_FILE" ]] ||
-    rejected_token_args=(--rejected-token-file "$OLD_STEWARD_TOKEN_FILE")
-  "${SUDO[@]}" "$PYTHON_BIN" "$SOURCE_ROOT/scripts/verify-ombre-steward-runtime.py" \
-    --state-dir "$RAN_AGENT_STATE_DIR" \
-    --identity-file "$RAN_AGENT_STATE_DIR/ombre-brain/steward-identity.v1.json" \
-    --source-dir "$OMBRE_BRAIN_HOME/upstream" \
-    --venv "$OMBRE_BRAIN_HOME/.venv" \
-    --runtime-user "$RUNTIME_USER" --runtime-group "$RUNTIME_GROUP" \
-    "${rejected_token_args[@]}" \
-    >/dev/null || fail ombre_steward_runtime_contract
-  [[ -x /usr/sbin/runuser ]] || fail ombre_steward_runuser_required
-  "${SUDO[@]}" /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- /usr/bin/env -i \
-    HOME="$OMBRE_BRAIN_HOME" \
-    PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin" \
-    TMPDIR=/tmp \
-    OMBRE_PATCHED_PROCESS_URL=http://127.0.0.1:18001/internal/ran-agent/steward/v1 \
-    RAN_AGENT_STEWARD_TOKEN_FILE="$RAN_AGENT_STATE_DIR/ombre-compat/secrets/steward-api-token" \
-    RAN_AGENT_STEWARD_IDENTITY_FILE="$RAN_AGENT_STATE_DIR/ombre-brain/steward-identity.v1.json" \
-    "$NODE_BIN" --test "$SOURCE_ROOT/node_bridge/tests/ombreCompatPatchedProcess.test.mjs" \
-    >/dev/null || fail ombre_steward_real_process_contract
-  release_steward_secret_boundary
 }
 
 release_managed_endpoint_health() {
@@ -507,29 +363,13 @@ HEAD="$(git -C "$CONTROL_ROOT" rev-parse --verify HEAD)" || fail current_head_un
 git -C "$CONTROL_ROOT" diff --quiet || fail worktree_dirty
 git -C "$CONTROL_ROOT" diff --cached --quiet || fail index_dirty
 require_acceptance_prerequisites
-# Direct acceptance executes both the immutable code gate and the real Ombre
-# process gate. Deploy completes the code gate before mutation, then runs the
-# real gate here only after the transaction has prepared the pinned runtime.
+# Direct acceptance executes the immutable code gate. Deploy completes that
+# gate before mutation and verifies the live direct Ombre endpoint below.
 if [[ "${RAN_AGENT_RELEASE_PREMUTATION_GATE:-0}" != 1 ]]; then
-  RAN_AGENT_OMBRE_REAL_PROCESS_GATE_PHASE=required \
   RAN_AGENT_GATE_SKIP_PRIVILEGED_TESTS=0 \
   RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" \
   RAN_AGENT_RUNTIME_GROUP="$RUNTIME_GROUP" \
-  RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$OMBRE_BRAIN_HOME/upstream" \
-  RAN_AGENT_OMBRE_UPSTREAM_VENV="$OMBRE_BRAIN_HOME/.venv" \
     bash "$SOURCE_ROOT/scripts/hermes-release-gate.sh" --all || fail release_gate
-else
-  [[ -x /usr/sbin/runuser ]] || fail ombre_steward_runuser_required
-  "${SUDO[@]}" /usr/sbin/runuser --user "$RUNTIME_USER" --group "$RUNTIME_GROUP" -- /usr/bin/env -i \
-    HOME="$OMBRE_BRAIN_HOME" PATH="$(dirname "$NODE_BIN"):/usr/bin:/bin" TMPDIR=/tmp \
-    GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
-    RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
-    RAN_AGENT_OMBRE_UPSTREAM_SOURCE_DIR="$OMBRE_BRAIN_HOME/upstream" \
-    RAN_AGENT_OMBRE_UPSTREAM_VENV="$OMBRE_BRAIN_HOME/.venv" \
-    RAN_AGENT_NODE_BIN="$NODE_BIN" \
-    RAN_AGENT_RUNTIME_USER="$RUNTIME_USER" \
-    /bin/bash "$SOURCE_ROOT/scripts/verify-ombre-steward-real-process.sh" >/dev/null ||
-    fail ombre_steward_candidate_real_process_gate
 fi
 release_semantic_verifier_preflight
 foreign_owner_binding_denied

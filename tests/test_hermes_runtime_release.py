@@ -43,6 +43,7 @@ def test_source_env_patch_removes_split_and_retired_memory_keys() -> None:
         b"RAN_AGENT_CAPABILITY_MODE=auto\n"
         b"OMBRE_RECALL_MCP_URL=http://127.0.0.1:18002/mcp\n"
         b"OMBRE_COMPAT_ENABLED=false\n"
+        b"RAN_AGENT_STEWARD_TOKEN_FILE=/private/token\n"
         b"OBSIDIAN_MEMORY_MCP_ENABLED=false\n"
         b"PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000\n"
     )

@@ -50,13 +50,17 @@ The model has no API or token charge.
 Production runs the S3 source
 `cc663876881e4d1f5cfb67f20d74230730a2f68c`, with unified Hermes and
 `personal_memory`; direct loopback Ombre recall on `18001` is active, while
-`18002` and O2 are inactive. The v0.13 rollback window is closed.
+`18002` and O2 are inactive. The v0.13 rollback window is closed. The S4
+source candidate deletes O2 and its Steward/token/model/gate implementation;
+it leaves the direct `18001` read path unchanged and is not production truth
+until its exact source transaction is accepted.
 
-S3 is production verified: active personal learning is visible through
+S3 remains production verified: active personal learning is visible through
 `personal_memory`, the independent read-only Ombre outcome remains visible,
 and the four relevant services stayed active. It does not mutate Ombre or
-enable O2. The inactive O2 compatibility implementation is scheduled for
-deletion in S4 after runtime references are proven absent.
+enable O2. S4 local release and source-controller regressions prove the
+retirement candidate has no active O2 seam; production dry-run/apply and
+post-deploy verification remain required.
 
 ## Configuration
 

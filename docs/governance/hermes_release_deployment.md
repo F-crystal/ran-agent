@@ -1,6 +1,6 @@
 # Hermes Immutable Release Deployment
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-08)
 
 `POINT_IN_TIME_AUDIT`
 (`2026-08-05T13:30:09+08:00..13:35:11+08:00`) revalidated active production at
@@ -14,12 +14,10 @@ was absent. A separate account audit
 runtime process was observed in the base window. This evidence neither deploys
 a candidate nor authorizes account or permission changes.
 
-O1 `1be3ee5`, V4+O1 `c52f8ba`, O2 `a978444`, and unified-identity line
-`b5b4ff4` are archived but not deployed to production. The current release
-contract preserves O2 while using the validated existing
-`RAN_AGENT_RUNTIME_USER/GROUP` identity (default `ubuntu:ubuntu`). Gate 5 is
-not authorized, `total_delete` is unsupported, Node Receipt is deferred, and
-Package B.2/B.3 have not started.
+The O1/O2 and unified-identity commits are historical, undeployed release
+lines. O2, its Steward/token/model endpoint wiring, and Gate 5 are retired
+source; direct Ombre recall on `18001` remains the supported path. Package
+B.2/B.3 have not started.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable
@@ -244,14 +242,9 @@ repaired or upgraded implicitly. The ordinary non-preserve
 drift-repair path still requires Hermes because it installs profiles and writes
 Hermes units.
 
-For the current Flash+O1+O2 candidate, that same preserve path converges the
-four installed Lite/Full model blocks, six non-secret model-policy environment
-keys, the shared DeepSeek provider plugin, and the managed O2 Node environment.
-It retains the O1 recall-only MCP shape, identity projection, startup ordering,
-rollback state machine, and retention policy. The snapshot includes both
-installed provider plugin trees and all effective environment sources;
-rollback restores the prior configs/env/plugin/O2 state together and remains
-fail-loud if any restore stage fails.
+The legacy preserve path is retained only for interpreting old rollback
+evidence. Current unified source advances do not deploy O1/O2, split gateways,
+or their model-policy environment.
 
 V4 Pro remains an explicit evaluation input to the same transaction through
 `RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-pro`. Acceptance proves the selected
@@ -324,30 +317,11 @@ with any legacy SQLite files under `/opt/ran_agent/data`. Their exact active
 paths are captured in each snapshot manifest; do not infer table names or copy
 an individual database while services are running.
 
-O2 uses the same existing service identity as Node and Hermes:
-`RAN_AGENT_RUNTIME_USER/GROUP`, defaulting to `ubuntu:ubuntu`. Apply never
-creates an account. It overwrites the legacy
-`99-ombre-steward-identity.conf` so any old `User=ran-agent`/`Group=ran-agent`
-settings are replaced while the O2 environment remains. Unit names, stable
-MainPID environment, token ownership, source paths, and the authenticated
-Steward API remain blocking acceptance contracts.
-
-The transaction keeps source and target identities distinct during cutover.
-Before any snapshot, service stop, ownership change, or token rotation, it
-rejects a missing, primary-group-mismatched, or UID/GID-zero target. It then
-anchors the source on the required active Node unit and checks its stable
-MainPID against `/proc/<pid>/status`. A loaded active Ombre unit joins the same
-verification and must resolve to the same existing non-root UID/GID; inactive
-or `not-found` Ombre is snapshotted as optional topology and does not block a
-first O2 deployment. The pre-quiesce recheck rejects Node identity drift or a
-change in whether Ombre is active, and the verified source is recorded in the
-root-private snapshot. No environment variable is accepted as source identity
-authority.
-
-The transaction also refuses to begin if its private
-`98-ombre-steward-rotation.conf` drop-in already exists or is a broken symlink.
-This prevents an interrupted or foreign residue from being overwritten and
-then silently removed during rollback.
+Current source apply preserves the accepted service identities. For O2
+retirement, it snapshots the exact legacy Node Steward drop-in when present,
+removes it during apply, and lets the ordinary source snapshot restore it only
+if the previous accepted source is explicitly rolled back. It creates no
+account, token, identity file, or replacement write endpoint.
 
 ## 2. Automatic Backup And Rollback Point
 
@@ -359,8 +333,8 @@ The apply transaction creates one owner-only snapshot under
   services, and Hermes homes/profiles;
 - Lite/Full DeepSeek provider plugin trees and all four installed model configs;
 - service active/enabled state;
-- the complete Node durable state directory after managed services stop,
-  excluding `ombre-compat/secrets`;
+- the complete active Node durable state directory after managed services
+  stop, excluding the retired `ombre-compat` subtree;
 - SQLite/WAL/SHM migration files under `/opt/ran_agent/data`.
 
 Every `present` or `migration-present` entry is committed only after its copy
@@ -372,32 +346,10 @@ atomically rewrites the in-progress transaction state with the final manifest
 digest and verifies the complete published snapshot again. Candidate checkout
 cannot begin while that quiesced rollback authority is stale or incomplete.
 
-The transaction resolves one canonical live state directory from
-`RAN_AGENT_RELEASE_STATE_DIR`, defaulting to
-`/opt/ran_agent/.ran_agent_state`. The patched checkout/home and Steward token
-then exist only at `${RAN_AGENT_STATE_DIR}/ombre-brain` and
-`${RAN_AGENT_STATE_DIR}/ombre-compat/secrets/steward-api-token`; an explicit
-`OMBRE_BRAIN_HOME` that disagrees is rejected. The token is a non-symlink
-regular file owned by the configured runtime UID/GID with mode `0600`.
-Rotation first disables O2 ingress and stops Node, then saves the old token in
-a backup validated against the pre-cutover source UID/GID. It stores that copy
-in a root-owned `0700` transaction directory under
-`/run/ran-agent-release-secrets`, atomically installs the new token, restarts
-and authenticates Ombre, clears the temporary block, restarts Node with the
-managed O2 posture, and runs read-only acceptance. That private
-copy is never placed in a retained snapshot, manifest, archive, or release
-record and is destroyed immediately after acceptance. On failure, ingress
-remains disabled while files, state, code, and the old token are restored.
-After restored units are reloaded, rollback treats the snapshot `services`
-manifest as topology authority. The restored Node unit is mandatory and
-determines the non-root token owner; restored Ombre joins that identity check
-only when the snapshot recorded it active. Rollback checks the result against
-snapshot identity metadata when present, restores token ownership to that
-source, and verifies effective UID/GID for restarted protected processes. An
-inactive or absent snapshotted Ombre remains inactive or is skipped by the
-existing restore flow. The temporary block is then cleared before the saved
-service state is restored. Any failed stage retains the `rollback-incomplete`
-fail-loud result.
+Legacy Steward token rotation and private-token rollback are retired and are
+not part of the current source transaction. Existing `ombre-compat` state is
+excluded from new durable snapshots but is not deleted while the previous
+accepted source remains rollback-authorized.
 
 The services manifest additionally records each unit's systemd load state.
 Retired optional units such as `ran-agent-xhs-browse.service` may therefore be
@@ -475,21 +427,11 @@ in curl argv. `RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS` and
 `RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS` provide bounded operator
 overrides.
 
-Blocking acceptance also checks Node and Ombre effective systemd
-`User`/`Group`, and each live MainPID's effective numeric UID/GID from
-`/proc/<MainPID>/status` against the NSS-resolved configured identity. It rejects
-UID or GID zero, rechecks MainPID and
-numeric identity to reject process exit or drift. Apply startup, final
-acceptance, and rollback recovery use the same verifier. Acceptance also
-checks their common canonical token path,
-the token owner/mode/type contract, authenticated health with the new token,
-rejection of the prior token, absence from the staged checkout and ordinary
-snapshot/archive artifacts, and the root-only in-flight rollback directory.
-For active O2 it additionally verifies canonical compatibility state/identity
-paths, exact DeepSeek endpoint/model values, a nonempty shared provider key,
-and configured runtime-identity `0700` state ownership without making a model or memory
-write canary. Any mismatch fails the release and restores the snapshot's prior
-O2 posture without weakening O1 recall-only behavior.
+Current source acceptance keeps the common runtime identity checks and direct
+Ombre health on `18001`. It additionally rejects any `OMBRE_COMPAT_*` or
+`RAN_AGENT_STEWARD_*` key in the live Node process, a remaining legacy Steward
+drop-in, or `node_bridge/src/ombreCompat` in the accepted checkout. No model or
+memory write canary is performed.
 
 Ombre listener ownership checks must run `ss -ltnp` through the same privilege
 seam used for `systemctl show MainPID`; an unprivileged process view is not

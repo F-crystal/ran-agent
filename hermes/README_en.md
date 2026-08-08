@@ -2,11 +2,11 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-07)
+Status: CURRENT (2026-08-08)
 
 `DEPLOYED_RUNTIME_ACCEPTANCE` (2026-08-06): exact candidate `0b793e8` deployed one unified Hermes v0.20 gateway with DeepSeek V4 Flash on `8642`; the retired Full service is inactive/disabled. See `docs/governance/current_runtime_status.md` for the bounded evidence.
 
-The unified-identity/O2 rollback baseline `b5b4ff43f8c3d5706192cabefcece49408b73558` is archived but not deployed to production. It preserves O2 and reuses the existing runtime identity. O1/O2 candidates remain undeployed and Gate 5 is not authorized.
+The O1/O2 and unified-identity commits are historical evidence only. The S4 candidate deletes O2, Steward/token/model endpoint tooling, and its dedicated release gate; the active read-only `personal_memory → Python → Ombre 18001` path is unchanged. Governance docs remain production authority.
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 

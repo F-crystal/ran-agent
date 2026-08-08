@@ -21,7 +21,6 @@ import { callExternalMcpTool } from './externalMcp/executor.mjs';
 import { createExternalMcpAutonomyRuntime } from './externalMcp/runtime.mjs';
 import { createReplyBackend } from './replyBackend.mjs';
 import { createDurableOutbox } from './durableOutbox.mjs';
-import { createOmbreCompatRuntime } from './ombreCompat/runtime.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
@@ -816,17 +815,7 @@ async function main() {
   };
   const durableOutbox = createDurableOutbox({ env: runtimeEnv });
   runtimeEnv.durableOutbox = durableOutbox;
-  const ombreCompatRuntime = await createOmbreCompatRuntime({
-    env: runtimeEnv,
-    outbox: durableOutbox,
-  });
-  runtimeEnv.ombreCompatRuntime = ombreCompatRuntime;
-  await durableOutbox.recover({
-    onTerminal: ombreCompatRuntime.active
-      ? (receipt) => ombreCompatRuntime.observeTerminal(receipt)
-      : undefined,
-  });
-  await ombreCompatRuntime.catchUp();
+  await durableOutbox.recover();
   const externalMcpRuntime = createExternalMcpAutonomyRuntime({
     env: runtimeEnv,
     logger: console,
@@ -872,7 +861,6 @@ async function main() {
     await new Promise((resolve) => coReadingWebServer?.close ? coReadingWebServer.close(resolve) : resolve());
     await new Promise((resolve) => desktopProxyServer?.close ? desktopProxyServer.close(resolve) : resolve());
     await new Promise((resolve) => outboundServer.close(resolve));
-    await ombreCompatRuntime.stop();
   }
 }
 

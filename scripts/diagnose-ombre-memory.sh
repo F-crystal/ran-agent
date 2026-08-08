@@ -49,16 +49,6 @@ OMBRE_RECALL_HEALTH_URL="${OMBRE_RECALL_HEALTH_URL:-http://127.0.0.1:$OMBRE_RECA
 OMBRE_BRAIN_COMPOSE_FILE="${OMBRE_BRAIN_COMPOSE_FILE:-$OMBRE_BRAIN_HOME/docker-compose.yml}"
 OMBRE_BRAIN_CONFIG_FILE="${OMBRE_BRAIN_CONFIG_FILE:-$OMBRE_BRAIN_HOME/config.yaml}"
 OMBRE_BRAIN_STATUS_FILE="${OMBRE_BRAIN_STATUS_FILE:-$OMBRE_BRAIN_HOME/status.json}"
-OMBRE_STEWARD_IDENTITY_FILE="${RAN_AGENT_STEWARD_IDENTITY_FILE:-$OMBRE_BRAIN_HOME/steward-identity.v1.json}"
-OMBRE_STEWARD_ENDPOINT="${RAN_AGENT_STEWARD_ENDPOINT:-http://127.0.0.1:$OMBRE_BRAIN_PORT/internal/ran-agent/steward/v1}"
-OMBRE_COMPAT_ENABLED="${OMBRE_COMPAT_ENABLED:-false}"
-OMBRE_COMPAT_STATE_DIR="${OMBRE_COMPAT_STATE_DIR:-$RAN_AGENT_STATE_DIR/ombre-compat}"
-OMBRE_COMPAT_STEWARD_ENDPOINT="${OMBRE_COMPAT_STEWARD_ENDPOINT:-$OMBRE_STEWARD_ENDPOINT}"
-OMBRE_COMPAT_STEWARD_IDENTITY_FILE="${OMBRE_COMPAT_STEWARD_IDENTITY_FILE:-$OMBRE_STEWARD_IDENTITY_FILE}"
-OMBRE_COMPAT_CURATOR_BASE_URL="${OMBRE_COMPAT_CURATOR_BASE_URL:-https://api.deepseek.com/v1}"
-OMBRE_COMPAT_CURATOR_MODEL="${OMBRE_COMPAT_CURATOR_MODEL:-${HERMES_DEFAULT_MODEL:-deepseek-v4-flash}}"
-OMBRE_COMPAT_REVIEWER_BASE_URL="${OMBRE_COMPAT_REVIEWER_BASE_URL:-https://api.deepseek.com/v1}"
-OMBRE_COMPAT_REVIEWER_MODEL="${OMBRE_COMPAT_REVIEWER_MODEL:-${HERMES_DEFAULT_MODEL:-deepseek-v4-flash}}"
 PYTHON_BIN="${RAN_AGENT_PYTHON_BIN:-${ROOT_DIR}/.venv/bin/python}"
 RUNTIME_USER="${RAN_AGENT_RUNTIME_USER:-ubuntu}"
 RUNTIME_GROUP="${RAN_AGENT_RUNTIME_GROUP:-$RUNTIME_USER}"
@@ -69,8 +59,7 @@ for actual_expected in \
   "$OMBRE_BRAIN_VENV|$OMBRE_BRAIN_HOME/.venv" \
   "$OMBRE_BRAIN_COMPOSE_FILE|$OMBRE_BRAIN_HOME/docker-compose.yml" \
   "$OMBRE_BRAIN_CONFIG_FILE|$OMBRE_BRAIN_HOME/config.yaml" \
-  "$OMBRE_BRAIN_STATUS_FILE|$OMBRE_BRAIN_HOME/status.json" \
-  "$OMBRE_STEWARD_IDENTITY_FILE|$OMBRE_BRAIN_HOME/steward-identity.v1.json"; do
+  "$OMBRE_BRAIN_STATUS_FILE|$OMBRE_BRAIN_HOME/status.json"; do
   [[ "${actual_expected%%|*}" == "${actual_expected#*|}" ]] || {
     echo "ERROR: Ombre runtime path must derive from RAN_AGENT_STATE_DIR" >&2
     exit 1
@@ -158,13 +147,6 @@ server_has() {
   grep -q "^  $name:" "$file"
 }
 
-compat_model_endpoint_valid() {
-  case "$1|$2" in
-    'https://api.deepseek.com/v1|deepseek-v4-flash'|'https://api.deepseek.com/v1|deepseek-v4-pro') return 0 ;;
-    *) return 1 ;;
-  esac
-}
-
 echo "=== Ombre Brain runtime ==="
 echo "repo_url: $OMBRE_BRAIN_REPO_URL"
 echo "enabled: $OMBRE_BRAIN_ENABLED"
@@ -178,27 +160,6 @@ echo "health_url: $OMBRE_BRAIN_HEALTH_URL"
 echo "internal_mcp_url: $OMBRE_BRAIN_MCP_URL"
 echo "recall_health_url: $OMBRE_RECALL_HEALTH_URL"
 echo "recall_mcp_url: $OMBRE_RECALL_MCP_URL"
-
-echo ""
-echo "=== Ombre O2 compatibility writer (pre-Gate-5) ==="
-echo "enabled: $OMBRE_COMPAT_ENABLED"
-echo "state: $OMBRE_COMPAT_STATE_DIR"
-echo "steward_endpoint: $OMBRE_COMPAT_STEWARD_ENDPOINT"
-echo "steward_identity: $OMBRE_COMPAT_STEWARD_IDENTITY_FILE"
-echo "curator: $OMBRE_COMPAT_CURATOR_BASE_URL model=$OMBRE_COMPAT_CURATOR_MODEL"
-echo "reviewer: $OMBRE_COMPAT_REVIEWER_BASE_URL model=$OMBRE_COMPAT_REVIEWER_MODEL"
-if [[ "$OMBRE_COMPAT_ENABLED" == false ]]; then
-  echo "managed O2 config: DISABLED"
-elif [[ "$OMBRE_COMPAT_STATE_DIR" == "$RAN_AGENT_STATE_DIR/ombre-compat" &&
-  "$OMBRE_COMPAT_STEWARD_ENDPOINT" == "http://127.0.0.1:$OMBRE_BRAIN_PORT/internal/ran-agent/steward/v1" &&
-  "$OMBRE_COMPAT_STEWARD_IDENTITY_FILE" == "$OMBRE_BRAIN_HOME/steward-identity.v1.json" &&
-  -n "${DEEPSEEK_API_KEY:-}" ]] &&
-  compat_model_endpoint_valid "$OMBRE_COMPAT_CURATOR_BASE_URL" "$OMBRE_COMPAT_CURATOR_MODEL" &&
-  compat_model_endpoint_valid "$OMBRE_COMPAT_REVIEWER_BASE_URL" "$OMBRE_COMPAT_REVIEWER_MODEL"; then
-  echo "managed O2 config: VALID"
-else
-  echo "managed O2 config: INVALID_OR_INCOMPLETE"
-fi
 
 echo ""
 echo "=== Status ==="
@@ -273,19 +234,6 @@ else
   sed 's/[[:cntrl:]]//g' /tmp/ombre-brain-health.err.$$ 2>/dev/null || true
 fi
 rm -f /tmp/ombre-brain-health.$$ /tmp/ombre-brain-health.err.$$
-
-echo ""
-echo "=== Patched Steward identity/auth ==="
-if id "$RUNTIME_USER" >/dev/null 2>&1 &&
-  "$PYTHON_BIN" "$ROOT_DIR/scripts/verify-ombre-steward-runtime.py" \
-    --state-dir "$RAN_AGENT_STATE_DIR" \
-    --identity-file "$OMBRE_STEWARD_IDENTITY_FILE" \
-    --endpoint "$OMBRE_STEWARD_ENDPOINT" \
-    --runtime-user "$RUNTIME_USER" --runtime-group "$RUNTIME_GROUP" >/dev/null 2>&1; then
-  echo "steward runtime contract: VALID"
-else
-  echo "steward runtime contract: INVALID_OR_UNAVAILABLE"
-fi
 
 echo ""
 echo "=== Recall adapter health ==="
