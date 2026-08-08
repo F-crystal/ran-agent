@@ -102,9 +102,16 @@ typed terminal receipt. The focused reopen/replay check invokes the effect once
 and returns the durable sent state on replay; all 121 Core tests pass. No
 production service, database, route, flag or source pointer changed.
 
-S6 converged the root worktree to a clean current `main` and preserved the 33
-S5-era draft files as a verified local snapshot with checksums outside Git.
-Their three still-missing semantics were re-implemented on current main:
+S6 converged the root worktree to a clean current `main` and triaged all 33
+S5-era status entries. The 30 runtime draft paths are retained in the
+desktop-only `local_archive/debug/ombre-p3-root-wip-20260808.patch` with SHA-256
+`aaf278e59f31fda5fdb45465eac2e5d06141174143c87bc8cef26cdd8004e53b`.
+The other three paths (`docs/governance/agent-capability-governance.md`,
+`scripts/agent_governance_guard.py`, and
+`scripts/install_agent_capability_governance.py`) were governance-hook work
+handed to the dedicated hook-fix task; they are not represented as recoverable
+S5 runtime drafts. The three still-missing runtime semantics were re-implemented
+on current main:
 Python outbound caller deadlines for proactive events now outlive the Node
 Hermes plus Feishu deadlines by the same margin as the digest path; task-scoped
 synthetic Hermes turns never project into the ordinary backend ingest; and an
@@ -113,6 +120,18 @@ with a durable receipt, so it is never automatically resent. Every other draft
 content class (O2/Steward/token, superseded deployment documents, the second
 proactive-delivery framework and the JSON outbox expansion) is retired. No
 production service, database, route, flag or source pointer changed.
+
+S7 completes the local Package B.3 link without enabling it in production.
+When a caller explicitly injects a migrated local Core and content hasher,
+ChannelHub converts one verified-owner Feishu text into the existing typed
+Conversation identity, ingress, sealed user Turn, provider epoch/attempt,
+assistant final, B.2 presentation outbox and adapter receipt. One in-process
+outbox promise owns concurrent effects; the durable terminal receipt prevents
+another send after reopen or replay. The synthetic Feishu journey passes with
+one effect; non-owner input writes no Core fact; an unknown adapter result or
+exception is durably ambiguous and does not resend after reopen. The combined
+ChannelHub/Core suite passes 145 tests. No production database, route, flag,
+service or source pointer changed.
 
 ## Source And Recovery Authority
 
@@ -149,8 +168,9 @@ its bounded successor completed at
 `c6c0baf6dfbcf2cc38a68986292f55649ec93932`. The post-S1 source controller then
 advanced the clean production checkout and accepted source pointer through S4
 to runtime source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. GitHub `main`
-also contains the local-only S5 B.2 seam; production remains on the accepted S4
-source until a separately authorized cutover.
+also contains the local-only S5 B.2 seam and S7 Package B.3 Node wiring;
+production remains on the accepted S4 source until a separately authorized
+cutover.
 The source shape keeps one `ran-agent-companion` profile, one `8642` route, the
 supported Lite/Full capability union and a fixed 15000 ms memory boundary.
 The source still aligns four production-backed contracts:
@@ -170,12 +190,14 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S6 are complete and S7 is the ready
-frontier. The S5-era root-worktree drafts were triaged in S6: a verified local
-snapshot keeps them recoverable outside Git, their three still-missing
-semantics were re-implemented on current main, and the remaining O2/Steward,
-legacy-deployment, second proactive-delivery and JSON-outbox content is
-retired.
+`docs/governance/active_sequence.md`. S0-S7 are complete. S8 is not started and
+the ready frontier is waiting for the separately required owner authorization
+to enable the single governed Ombre projector. The S5-era root-worktree drafts
+were triaged in S6: the 30 runtime paths remain in the checksummed desktop
+patch, the three governance-hook paths belong to their dedicated task, the
+three retained runtime semantics were re-implemented on current main, and the
+remaining O2/Steward, legacy-deployment, second proactive-delivery and
+JSON-outbox content is retired.
 
 The remote branch set is intentionally `main` only. Historical candidate
 branches are neither production nor rollback authority; recoverable local S4

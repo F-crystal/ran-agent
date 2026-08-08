@@ -452,6 +452,8 @@ export function createReplyBackend(options = {}) {
         followUpMessages: visibleFollowUpMessages,
         media: visibleMedia,
         source: responseSource,
+        provider: 'hermes',
+        model: String(gatewayConfig.profile || response.profile || response.model || 'unspecified'),
         suppressSend: suppression.suppress,
         suppressReason: suppression.reason,
         excludeFromHistory,

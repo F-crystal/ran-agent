@@ -17,9 +17,13 @@ a candidate nor authorizes account or permission changes.
 The O1/O2 and unified-identity commits are historical, undeployed release
 lines. O2, its Steward/token/model endpoint wiring, and Gate 5 are retired
 source; direct Ombre recall on `18001` remains the supported path. Package
-B.2 is locally implemented and LOCAL_VERIFIED: 121/121 Core tests pass,
-including reopen/replay without a second effect; it is not wired into any
-production path. Package B.3 has not started.
+B.2 is locally implemented and LOCAL_VERIFIED. Package B.3/S7 now connects an
+explicitly injected local Core to ChannelHub: one synthetic Feishu text records
+identity, ingress, Turns, provider attempt, final, outbox and adapter receipt;
+concurrency plus reopen/replay performs one effect, non-owner input writes no
+Core fact, and an unknown result or adapter exception becomes durable
+`ambiguous` without resend. The combined ChannelHub and Core suite passes
+145/145 tests. No Core database, route or flag is enabled in production.
 
 This is the production deployment contract for `/opt/ran_agent`. A branch is
 only a way to discover a release; the deploy unit is always one immutable

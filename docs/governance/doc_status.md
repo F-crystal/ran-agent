@@ -35,10 +35,13 @@ read-only Ombre outcome remained observable. S4 is complete: production no
 longer contains the inactive O2 implementation or its dedicated
 Steward/token/model/gate seams, direct Ombre on `18001` remains active, and old
 worktrees/branches were closed after recoverable snapshots. S5 is locally
-verified and completes the current S sequence: one B.2 typed
-transaction/outbox/effect/receipt loop replays after reopen without a duplicate
-effect. It remains disconnected from production, and the ready frontier is
-empty.
+verified: one B.2 typed transaction/outbox/effect/receipt loop replays after
+reopen without a duplicate effect and remains disconnected from production.
+S6 then converged the root worktree, triaged its 33 status entries, reimplemented
+the three retained runtime semantics on current `main`, and synchronized the
+S6-S13 topology. S7 Node-to-Core local wiring is locally verified through its
+typed adapter receipt and does not change production. S8 remains `NOT STARTED`
+until the owner separately authorizes the governed Ombre projector.
 
 ## Lifecycle Stages
 

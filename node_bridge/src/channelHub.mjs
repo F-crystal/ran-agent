@@ -21,6 +21,7 @@ import {
   isTrustedInformationalReportTask,
   preserveTrustedBridgeTaskProvenance,
 } from './hermesTaskScope.mjs';
+import { deliverNodeTextThroughCore } from './core/packageB/packageBNodeDeliveryService.mjs';
 
 export async function handleIncomingMessage(normalizedMessage = {}, options = {}) {
   const env = options.env || process.env;
@@ -71,6 +72,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
   if (!taskScoped) safeAppendTurn({
     timelinePath: timelineConfig.timelinePath,
     id: message.id,
+    event_key: `channel-ingress:${message.platform}:${shortHash(message.id)}`,
     global_user_id: globalUserId,
     platform: message.platform,
     channel_type: message.channel_type,
@@ -121,7 +123,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     fetchImpl: options.fetchImpl,
     execFileImpl: options.execFileImpl,
     mediaContextOptions: options.mediaContextOptions,
-    deferIngest: Boolean(options.outbox),
+    deferIngest: Boolean(options.outbox || options.core),
   });
 
   const durableOperationKey = `channel-reply:${message.platform}:${shortHash(message.id)}`;
@@ -130,7 +132,26 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     ? { ...response, replyText: priorDurableDelivery.text, media: null, followUpMessages: [] }
     : response;
   const assistantTurn = buildAssistantTurn({ message, response: deliveredResponse, globalUserId, timelinePath: timelineConfig.timelinePath });
-  if (shouldUseDurableTextDelivery({ response: deliveredResponse, options })) {
+  if (shouldUseCoreTextDelivery({ response: deliveredResponse, options, taskScoped })) {
+    const coreResult = await deliverNodeTextThroughCore({
+      core: options.core,
+      message: backendMessage,
+      response: deliveredResponse,
+      globalUserId,
+      actorContext: trustedActorContext,
+      hashContent: options.coreContentHasher,
+      send: async () => options.adapter.sendReply({
+        target: buildReplyTarget(message),
+        text: deliveredResponse.replyText,
+        media: null,
+        message,
+      }),
+    });
+    if (coreResult.delivery.state === 'sent' && deliveredResponse.excludeFromHistory !== true) {
+      safeAppendTurn(assistantTurn, logger);
+    }
+    return { ...deliveredResponse, coreDelivery: coreResult.delivery };
+  } else if (shouldUseDurableTextDelivery({ response: deliveredResponse, options })) {
     await options.outbox.deliver({
       operationKey: durableOperationKey,
       platform: message.platform,
@@ -172,6 +193,18 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
   return deliveredResponse;
 }
 
+function shouldUseCoreTextDelivery({ response, options, taskScoped }) {
+  return Boolean(
+    !taskScoped
+    && options.core
+    && typeof options.adapter?.sendReply === 'function'
+    && response.suppressSend !== true
+    && !response.media
+    && typeof response.replyText === 'string'
+    && response.replyText.trim(),
+  );
+}
+
 function shouldUseDurableTextDelivery({ response, options }) {
   return Boolean(
     options.outbox
@@ -193,6 +226,7 @@ function buildAssistantTurn({ message, response, globalUserId, timelinePath }) {
   return {
     timelinePath,
     id: `${message.id || Date.now()}-assistant`,
+    event_key: `channel-reply:${message.platform}:${shortHash(message.id)}`,
     global_user_id: globalUserId,
     platform: message.platform,
     channel_type: message.channel_type,
