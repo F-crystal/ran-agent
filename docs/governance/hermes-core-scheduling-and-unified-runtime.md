@@ -4,7 +4,7 @@ Status: CURRENT (2026-08-08)
 
 Lifecycle: Runtime Phase `PROD_VERIFIED` for the bounded channel, identity,
 memory, capability, topology and 2026-08-07 digest evidence in
-`docs/governance/current_runtime_status.md`; Core Package C `LOCAL_VERIFIED`.
+`docs/governance/current_runtime_status.md`; Core Packages C-D `LOCAL_VERIFIED`.
 
 This decision record amends the implementation direction of the archived v0.4 cutover
 contract. It does not modify frozen Schema v1 or authorize a production Core
@@ -385,9 +385,10 @@ stopping old wake neither loses the next future run nor replays an old one.
 - Package C locally implements Schema v2 ScheduleSpec/WakeOccurrence
   repositories, `wake_due`, WorkRun creation and lease/fence authority, plus an
   injected managed-clock adapter. It is not composed into production.
-- Package D performs the watermark/quiesce/manifest migration above, imports
-  legacy candidates paused with suppression/reconciliation Journal evidence, and uses
-  the per-job disposition inventory before any old component stops. Long-lived
+- Package D builds the watermark/quiesce manifest and stages legacy candidates
+  paused in a zero-business-write rehearsal. The actual cutover transaction
+  later imports accepted candidates with suppression/reconciliation Journal
+  evidence. Every old component has one disposition before it stops; long-lived
   dual visible wake is forbidden.
 - Package E adds duplicate/missed tick, long downtime, clock rollback/DST,
   crash before/after occurrence commit, stale WorkRun fence, stop/cancel,

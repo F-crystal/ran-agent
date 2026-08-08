@@ -53,7 +53,7 @@ export class CoreDatabase {
   #writesStarted = false;
   #now;
 
-  constructor({ dbPath, now = () => new Date() } = {}) {
+  constructor({ dbPath, now = () => new Date(Math.floor(Date.now() / 1_000) * 1_000) } = {}) {
     if (!String(dbPath || '').trim()) throw coreError('CORE_DB_PATH_REQUIRED', 'explicit Core database path is required');
     if (typeof now !== 'function') throw coreError('CORE_DB_CLOCK_REQUIRED', 'Core clock must be a function');
     this.dbPath = path.resolve(dbPath);

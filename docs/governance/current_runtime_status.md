@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S9 LOCAL_VERIFIED; S10 IN_PROGRESS (2026-08-08)
+Status: S4 PROD_VERIFIED; S5-S10 LOCAL_VERIFIED; S11 IN_PROGRESS (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -156,9 +156,24 @@ and missed ticks do not duplicate an occurrence. A message-capable wake creates
 only a typed Exchange: it creates no ordinary chat Turn, presentation outbox or
 adapter call. Forum/RSS/external MCP polling is therefore a future Core fact
 producer, not direct-send authority; gaming/focus-aware attention routing is an
-S10/S11 migration and synthetic-acceptance concern. The Core suite passes 140
+S11 synthetic-acceptance concern. The S9 Core suite passes 140
 tests locally. No production database, clock, route, service or source pointer
 changed.
+
+S10 is locally verified and production remains unchanged. The 19-row
+`core_schedule_migration.v1.json` assigns one disposition to every legacy
+clock/executor/outbox path. An isolated server-local production copy at
+`2026-08-08T08:28:45.000Z` migrated to Schema v2 with zero business rows and
+zero external effects: three historical reminders were suppressed, no future
+reminder or external-watch candidate existed, 13 legacy external activities
+were staged paused, the durable-job queue and proactive reservation ledger were
+empty, one pending outbound item was held for reconciliation, and 58 sent plus
+65 ambiguous legacy outbox rows were classified as receipt or no-resend
+reconciliation evidence. The temporary server/local rehearsal files
+were deleted and absence rechecked. Local source also adds a hash-bound
+`recordFact`-only external-poll seam after WorkRun authority; it has no send
+surface. The Core suite passes 143 tests locally. S11 now owns synthetic
+attention/fault acceptance.
 
 ## Source And Recovery Authority
 
@@ -218,8 +233,8 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S9 are complete and S10 migration
-rehearsal is the sole active stage. The S5-era root-worktree drafts
+`docs/governance/active_sequence.md`. S0-S10 are complete and S11 synthetic
+fault acceptance is the sole active stage. The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the
 three retained runtime semantics were re-implemented on current main, and the
@@ -232,8 +247,9 @@ convergence artifacts remain ignored under `local_archive/`.
 
 Package A and B.1 Core primitives exist in source; S5 verifies the local B.2
 final/outbox/effect/receipt loop, S7 completes local B.3 Node wiring, S8
-completes the local governed Ombre projection seam, and S9 completes local
-Package C scheduling. None is composed into the production Node write path.
+completes the local governed Ombre projection seam, S9 completes local Package
+C scheduling, and S10 completes the migration inventory/rehearsal and external
+poll fact seam. None is composed into the production Node write path.
 Ombre Gate 5 is retired with O2 and the historical
 name is retained only as retired evidence; the single future Core production
 gate is uniformly named the Core Cutover Gate (S12). O2 is a retired

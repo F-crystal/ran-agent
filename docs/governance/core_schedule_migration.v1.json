@@ -1,0 +1,163 @@
+{
+  "schemaVersion": 1,
+  "status": "CURRENT",
+  "dispositions": [
+    "MIGRATE_TO_SCHEDULE",
+    "RETAIN_NON_VISIBLE_MAINTENANCE",
+    "REPLACE_WITH_CORE_WORKER",
+    "RETIRE_EMPTY"
+  ],
+  "components": [
+    {
+      "id": "python.scheduler.durable_job_dispatch",
+      "source": "src/personal_agent/scheduler.py:durable_job_dispatch",
+      "role": "executor",
+      "disposition": "REPLACE_WITH_CORE_WORKER"
+    },
+    {
+      "id": "python.scheduler.brain_loop",
+      "source": "src/personal_agent/scheduler.py:brain_loop",
+      "role": "non_visible_placeholder",
+      "disposition": "RETIRE_EMPTY"
+    },
+    {
+      "id": "python.scheduler.life_loop",
+      "source": "src/personal_agent/scheduler.py:life_loop",
+      "role": "proactive_scan",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "python.scheduler.knowledge_agent",
+      "source": "src/personal_agent/scheduler.py:knowledge_agent",
+      "role": "non_visible_maintenance",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "python.scheduler.daily_carryover",
+      "source": "src/personal_agent/scheduler.py:daily_carryover",
+      "role": "non_visible_maintenance",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "python.scheduler.self_reflection",
+      "source": "src/personal_agent/scheduler.py:self_reflection",
+      "role": "non_visible_maintenance",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "python.scheduler.hermes_bounded_context",
+      "source": "src/personal_agent/scheduler.py:hermes_bounded_context",
+      "role": "non_visible_maintenance",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "python.scheduler.night_cycle",
+      "source": "src/personal_agent/scheduler.py:night_cycle",
+      "role": "non_visible_maintenance",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "python.scheduler.ai_daily_digest",
+      "source": "src/personal_agent/scheduler.py:ai_daily_digest",
+      "role": "visible_digest",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "python.scheduler.reminder_check",
+      "source": "src/personal_agent/scheduler.py:reminder_check",
+      "role": "visible_reminder_scan",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "node.external_mcp.autonomy_tick",
+      "source": "node_bridge/src/externalMcp/runtime.mjs:createExternalMcpAutonomyRuntime",
+      "role": "external_poll_clock",
+      "disposition": "MIGRATE_TO_SCHEDULE"
+    },
+    {
+      "id": "node.external_mcp.activity_runner",
+      "source": "node_bridge/src/index.mjs:startExternalMcpActivityRunnerLoop",
+      "role": "external_executor",
+      "disposition": "REPLACE_WITH_CORE_WORKER"
+    },
+    {
+      "id": "node.external_mcp.system_queue",
+      "source": "node_bridge/src/externalMcp/systemQueue.mjs",
+      "role": "visible_delivery_decision",
+      "disposition": "REPLACE_WITH_CORE_WORKER"
+    },
+    {
+      "id": "node.legacy_durable_outbox",
+      "source": "node_bridge/src/durableOutbox.mjs",
+      "role": "delivery_truth",
+      "disposition": "REPLACE_WITH_CORE_WORKER"
+    },
+    {
+      "id": "node.proactive_event_ledger",
+      "source": "node_bridge/src/proactiveEventLedger.mjs",
+      "role": "visible_delivery_reservation",
+      "disposition": "REPLACE_WITH_CORE_WORKER"
+    },
+    {
+      "id": "node.pending_outbound_queue",
+      "source": "node_bridge/src/runtimeState.mjs:pending-outbound",
+      "role": "legacy_delivery_queue",
+      "disposition": "REPLACE_WITH_CORE_WORKER"
+    },
+    {
+      "id": "node.proactive_dispatch_clock",
+      "source": "node_bridge/src/runtimeState.mjs:proactive-dispatch",
+      "role": "legacy_visible_wake_state",
+      "disposition": "RETIRE_EMPTY"
+    },
+    {
+      "id": "hermes.lite_soft_reset_timer",
+      "source": "scripts/install-hermes-lite-soft-reset-timer.sh",
+      "role": "non_visible_runtime_maintenance",
+      "disposition": "RETAIN_NON_VISIBLE_MAINTENANCE"
+    },
+    {
+      "id": "hermes.native_cron_store",
+      "source": "hermes/profile/config.companion.yaml",
+      "role": "empty_legacy_clock",
+      "disposition": "RETIRE_EMPTY"
+    }
+  ],
+  "importPolicies": {
+    "todoReminder": {
+      "candidateState": "paused",
+      "historicalAtOrBeforeWatermark": "suppress",
+      "alreadyReminded": "suppress",
+      "activation": "owner_reviewed_future_only"
+    },
+    "externalWatch": {
+      "candidateState": "paused",
+      "historicalResults": "suppress",
+      "pollResultAuthority": "core_fact",
+      "visibleDeliveryAuthority": "node_attention_valve"
+    },
+    "externalActivity": {
+      "candidateState": "paused",
+      "activeOrLeased": "reconcile_before_cutover",
+      "visibleDeliveryAuthority": "node_attention_valve"
+    },
+    "legacyDurableJob": {
+      "candidateState": "paused",
+      "leasedOrActive": "reconcile_before_cutover"
+    },
+    "legacyOutbox": {
+      "sent": "receipt_only",
+      "failed": "no_automatic_retry",
+      "sending": "ambiguous_no_resend",
+      "ambiguous": "ambiguous_no_resend"
+    },
+    "proactiveLedger": {
+      "sent": "receipt_only",
+      "reserved": "reconcile_before_cutover"
+    },
+    "pendingOutbound": {
+      "candidateState": "paused",
+      "historicalMessages": "reconcile_never_auto_replay"
+    }
+  }
+}

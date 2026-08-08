@@ -40,6 +40,32 @@ function scheduleInput(overrides = {}) {
   };
 }
 
+test('default Core clock normalizes process time to whole seconds', async (t) => {
+  const { dbPath } = createTempCore(t, 'hermes-core-clock-');
+  const core = openCoreDatabase({ dbPath });
+  core.migrate();
+  await core.writer.write((tx) => {
+    tx.journal.append({
+      eventId: 'clock-causation', eventType: 'schedule_requested', ownerId: 'owner',
+      originRef: 'fixture', sourceKind: 'test', sourceRef: 'fixture', createdAt: CAUSATION_AT,
+    });
+    tx.activities.create({
+      activityId: 'clock-activity', ownerId: 'owner', title: 'Clock', goalRef: 'goal:clock',
+      domain: 'personal', riskClass: 'reversible', autonomyLevel: 1, state: 'active',
+      contractRevision: 0, resumePolicy: 'bounded_auto', reportPolicy: 'milestone',
+      createdAt: CAUSATION_AT,
+    });
+  });
+  const service = createCoreSchedulingService({ core });
+  assert.equal((await service.createSchedule(scheduleInput({
+    scheduleSpecId: 'clock-schedule', scheduleSpecRevisionId: 'clock-schedule-r1',
+    activityId: 'clock-activity', operationKey: 'clock-schedule:create',
+    recurrence: { kind: 'one_shot', at: '2099-01-01T00:00:00.000Z' },
+    causationId: 'clock-causation',
+  }))).disposition, 'created');
+  await core.close();
+});
+
 test('one-shot occurrence and initial WorkRun commit once across duplicate ticks and replay', async (t) => {
   const { core, service, setNow } = await setup(t);
   const input = scheduleInput();

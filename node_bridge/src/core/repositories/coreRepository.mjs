@@ -10,6 +10,7 @@ import { createPackageBProviderRepository } from './packageBProviderRepository.m
 import { createPackageBTurnRepository } from './packageBTurnRepository.mjs';
 import { createPackageBPresentationRepositories } from './packageBPresentationRepository.mjs';
 import { createCoreScheduleRepository } from '../coreScheduling.mjs';
+import { createCoreExternalPollRepository } from './coreExternalPollRepository.mjs';
 
 function freezeNamespace(methods) {
   return Object.freeze(methods);
@@ -129,6 +130,7 @@ export function createCoreTransactionFacade({ assertActive, prepare, now = () =>
   const packageBFinal = packageBPresentationParts.finalRepository;
   const packageBPresentation = packageBPresentationParts.presentationRepository;
   const schedules = createCoreScheduleRepository({ get, all, run, now });
+  const externalPoll = createCoreExternalPollRepository({ get, run, now });
 
   const activities = freezeNamespace({
     create(input) {
@@ -617,7 +619,7 @@ export function createCoreTransactionFacade({ assertActive, prepare, now = () =>
 
   return Object.freeze({
     journal, ingress, tombstones, publications, effects, projections, revisions, soul,
-    activities, schedules,
+    activities, externalPoll, schedules,
     packageBIngress, packageBAssembly, packageBTurn, packageBProvider,
     packageBFinal, packageBPresentation,
   });

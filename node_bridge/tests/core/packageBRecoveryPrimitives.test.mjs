@@ -1308,7 +1308,7 @@ test('additive public APIs stay inside the accepted typed namespaces', async (t)
   const { core, dbPath } = await openFixture(t, 'hermes-core-b13-surface-');
   await core.writer.write((tx) => {
     assert.deepEqual(Object.keys(tx).sort(), [
-      'activities', 'effects', 'ingress', 'journal', 'packageBAssembly', 'packageBFinal', 'packageBIngress',
+      'activities', 'effects', 'externalPoll', 'ingress', 'journal', 'packageBAssembly', 'packageBFinal', 'packageBIngress',
       'packageBPresentation', 'packageBProvider', 'packageBTurn', 'projections', 'publications',
       'revisions', 'schedules', 'soul', 'tombstones',
     ]);

@@ -3,8 +3,8 @@
 Status: CURRENT (2026-08-08)
 
 This document records the public source-level status of Hermes Core Package A,
-the owner-accepted Package B transactions, and locally verified Package C
-scheduling. It is not a deployment record and does not change the production
+the owner-accepted Package B transactions, locally verified Package C
+scheduling, and the Package D migration seam. It is not a deployment record and does not change the production
 runtime described by
 `docs/governance/current_runtime_status.md`.
 
@@ -17,6 +17,11 @@ runtime described by
 - Package C adds immutable migration `core-0002-scheduling`, ScheduleSpec and
   WakeOccurrence repositories, scheduled WorkRun creation/claim, and an
   injected `wakeDue()` clock edge. Existing v1 databases upgrade in place.
+- Package D adds the governed 19-component migration manifest, a read-only
+  legacy-copy inspector/rehearsal command, and a hash-bound external-poll Core
+  fact writer. The fact writer requires a claimed `external_poll` WorkRun,
+  binds the server identifier to its Schedule revision, and exposes no delivery
+  operation.
 - Package B.1 typed business transactions are implemented in the same local
   Core source and have received owner acceptance. The accepted Conversation,
   ingress, assembly, Turn, Provider Epoch, final-commit, and presentation

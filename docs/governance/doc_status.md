@@ -46,7 +46,9 @@ hashes, recovers lost Ombre responses without duplicate growth, and supports
 scope erasure/rebuild while the public recall surface remains read-only. It is
 not composed into production. S9 Package C scheduling is locally verified:
 Schema v2, deterministic occurrences and the injected managed tick remain
-disconnected from production. S10 migration rehearsal is now `IN_PROGRESS`.
+disconnected from production. S10 is locally verified with the governed
+19-component migration manifest, a zero-effect production-copy rehearsal and a
+Core-fact-only external-poll seam. S11 synthetic acceptance is now `IN_PROGRESS`.
 
 ## Lifecycle Stages
 
@@ -74,6 +76,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/active_sequence.md` | Canonical S-stage order, current stage and exit conditions |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
+| `docs/governance/core_schedule_migration.v1.json` | S10 legacy scheduling disposition and paused-import policy manifest |
 | `docs/governance/hermes-core-foundation.md` | Package A boundary and frozen Schema v1 |
 | `docs/governance/hermes-core-scheduling-and-unified-runtime.md` | Schema v2 scheduling and unified-runtime target |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |

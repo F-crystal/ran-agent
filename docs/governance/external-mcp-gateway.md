@@ -116,9 +116,16 @@ content class and format, then applies deduplication, notification budget,
 active-hours and coarse presence policy. Gaming/focus/do-not-disturb suppresses
 or coalesces noncritical visible delivery without stopping the watch or losing
 the Core fact. Only an owner-allowlisted critical class may bypass that state.
-The S10 migration manifest must preserve existing watch scopes as paused until
+The S10 migration manifest preserves existing watch scopes as paused until
 their watermark is accepted, so historical forum or external MCP results are
-not replayed as new notifications.
+not replayed as new notifications. The local target seam now records only an
+opaque payload reference, keyed content hash and stable source fingerprint as
+a Core fact after a claimed `external_poll` WorkRun whose schedule payload is
+bound to the same server identifier; it exposes no send method.
+A production-copy rehearsal at `2026-08-08T08:28:45.000Z` found no current
+watch candidate and 13 legacy external activities; the latter are staged
+paused and must be quiesced/reconciled before cutover. This changes no
+production gateway flag or route.
 
 ## Background Activity
 
