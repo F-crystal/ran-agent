@@ -243,7 +243,10 @@ changes only visible delivery timing. Repeated equivalent source facts share a
 stable fingerprint and one presentation identity so a flapping source cannot
 produce an alert storm. Package D inventories existing external pollers under
 this split; Package E verifies gaming suppression, delayed coalescing, and the
-critical allowlist with synthetic targets.
+critical allowlist with synthetic targets. S11 implements this valve as
+`node_bridge/src/attentionValve.mjs` with a durable coalescing store; active
+hours and the notification budget remain unwired design inputs, and no
+production delivery path consumes the valve yet.
 
 ## Unified companion runtime
 
@@ -393,7 +396,9 @@ stopping old wake neither loses the next future run nor replays an old one.
 - Package E adds duplicate/missed tick, long downtime, clock rollback/DST,
   crash before/after occurrence commit, stale WorkRun fence, stop/cancel,
   timeout ambiguous, restart no-resend, gaming/focus suppression with delayed
-  coalescing, and one real synthetic delivery.
+  coalescing, and one real synthetic delivery. S11 verified these locally with
+  synthetic, non-delivering targets: the Core suite passes 149 tests and the
+  unwired `attentionValve.mjs` suite passes 9; production is unchanged.
 
 The dual gateway/profile contract, regex Full routing, Full-to-Lite fallback,
 and duplicated history/cache/cron stores are removed from the target. Existing

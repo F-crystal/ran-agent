@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S10 LOCAL_VERIFIED; S11 IN_PROGRESS (2026-08-08)
+Status: S4 PROD_VERIFIED; S5-S11 LOCAL_VERIFIED (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -175,6 +175,26 @@ were deleted and absence rechecked. Local source also adds a hash-bound
 surface. The Core suite passes 143 tests locally. S11 now owns synthetic
 attention/fault acceptance.
 
+S11 is locally verified with only synthetic, non-delivering targets and no
+production change. New fault acceptance proves a rollback clock never
+duplicates or regresses an occurrence, a six-hour downtime collapses to one
+latest occurrence with one aggregate skip event, a failure inside the tick
+transaction rolls every schedule back before commit, and a tick across the DST
+fold creates the repeated wall time exactly once at the earlier instant. One
+real synthetic delivery composes a message-capable wake, typed Exchange and
+WorkRun lease/fence claim with the existing Package B.2 final/presentation
+effect path: the synthetic Feishu target is sent exactly once across reopen
+and replay, a timed-out adapter result terminalizes `ambiguous`, and restart
+never redispatches. The new `attentionValve.mjs` implements the documented
+gaming/focus delivery-timing valve with a durable coalescing store: noncritical
+`timely` results delay and coalesce by stable fingerprint while presence is
+gaming/focused/busy/dnd or unknown, `ambient` results stay silent, only an
+owner-allowlisted critical key or an explicit owner reminder bypasses, an
+interrupted flush is recovered without loss, and a fact arriving mid-flush
+survives the stale confirmation. The valve is not wired into any production
+delivery path; that wiring is S12 scope. The Core suite passes 149 tests and
+the attention-valve suite 9 tests locally.
+
 ## Source And Recovery Authority
 
 Binding.v4 completed the earlier runtime apply, rollback and reapply and records
@@ -233,8 +253,9 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S10 are complete and S11 synthetic
-fault acceptance is the sole active stage. The S5-era root-worktree drafts
+`docs/governance/active_sequence.md`. S0-S11 are complete; S12 production
+cutover waits on explicit owner production authorization and stays NOT STARTED
+until it is granted. The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the
 three retained runtime semantics were re-implemented on current main, and the
@@ -248,8 +269,10 @@ convergence artifacts remain ignored under `local_archive/`.
 Package A and B.1 Core primitives exist in source; S5 verifies the local B.2
 final/outbox/effect/receipt loop, S7 completes local B.3 Node wiring, S8
 completes the local governed Ombre projection seam, S9 completes local Package
-C scheduling, and S10 completes the migration inventory/rehearsal and external
-poll fact seam. None is composed into the production Node write path.
+C scheduling, S10 completes the migration inventory/rehearsal and external
+poll fact seam, and S11 completes the synthetic fault/attention acceptance
+including the unwired `attentionValve.mjs`. None is composed into the
+production Node write path.
 Ombre Gate 5 is retired with O2 and the historical
 name is retained only as retired evidence; the single future Core production
 gate is uniformly named the Core Cutover Gate (S12). O2 is a retired
