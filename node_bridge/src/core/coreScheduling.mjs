@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 import { coreError } from './coreErrors.mjs';
+import { assertKeyedContentHashToken } from './coreHashToken.mjs';
 import { assertOperationSemanticDigest } from './coreOperationDigest.mjs';
 
 const OPERATION_KEY = /^[A-Za-z0-9._:-]{1,200}$/;
@@ -230,6 +231,118 @@ function deterministicId(prefix, ...parts) {
   return `${prefix}:v1:${createHash('sha256').update(parts.join('\0')).digest('hex')}`;
 }
 
+function normalizeScheduledAuthority(input) {
+  if (!input || typeof input.workRunId !== 'string' || !input.workRunId
+    || !Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1
+    || !Number.isSafeInteger(input.fenceToken) || input.fenceToken < 1
+    || typeof input.leaseOwner !== 'string' || !input.leaseOwner
+    || typeof input.leaseId !== 'string' || !input.leaseId) {
+    throw coreError('CORE_SCHEDULE_WORK_AUTHORITY_INVALID', 'scheduled Work Run authority is invalid');
+  }
+  return Object.freeze({
+    workRunId: input.workRunId,
+    expectedRevision: input.expectedRevision,
+    fenceToken: input.fenceToken,
+    leaseOwner: input.leaseOwner,
+    leaseId: input.leaseId,
+  });
+}
+
+export function assertScheduledWorkAuthority(get, input, {
+  exchangeId = null,
+  sourceTurnId = null,
+  activeAt,
+} = {}) {
+  const authority = normalizeScheduledAuthority(input);
+  const at = canonicalIso(activeAt, 'scheduled authority time');
+  const row = get(`SELECT run.*,lease.state AS lease_state,lease.fence_token AS lease_fence,
+      lease.lease_owner AS claimed_lease_owner,lease.lease_until AS claimed_lease_until,
+      activity.state AS activity_state,activity.contract_revision AS activity_contract_revision,
+      activity.conversation_id AS activity_conversation_id,
+      occurrence.schedule_spec_revision_id,revision.task_kind,revision.payload_ref AS schedule_payload_ref,
+      revision.causation_id,revision.conversation_id AS schedule_conversation_id,
+      revision.presentation_binding_id,revision.expected_binding_revision,
+      exchange.conversation_id AS exchange_conversation_id,exchange.ingress_event_id,
+      exchange.root_instruction_turn_id,exchange.revision AS exchange_revision,
+      binding.state AS binding_state,binding.revision AS binding_revision
+    FROM work_run run
+    JOIN lease ON lease.lease_id=run.lease_id AND lease.work_run_id=run.work_run_id
+    JOIN activity ON activity.activity_id=run.activity_id
+    JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
+    JOIN schedule_spec_revision revision
+      ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
+    JOIN exchange ON exchange.exchange_id=run.exchange_id
+    JOIN presentation_binding binding
+      ON binding.presentation_binding_id=revision.presentation_binding_id
+      AND binding.conversation_id=revision.conversation_id
+    WHERE run.work_run_id=?`, authority.workRunId);
+  const valid = row && row.state === 'running'
+    && Number(row.revision) === authority.expectedRevision
+    && Number(row.fence_token) === authority.fenceToken
+    && row.lease_id === authority.leaseId
+    && row.lease_owner === authority.leaseOwner
+    && row.lease_state === 'active'
+    && Number(row.lease_fence) === authority.fenceToken
+    && row.claimed_lease_owner === authority.leaseOwner
+    && row.claimed_lease_until === row.lease_until
+    && new Date(row.lease_until).getTime() >= new Date(at).getTime()
+    && row.task_kind === 'scheduled_instruction'
+    && row.activity_state === 'active'
+    && Number(row.contract_revision) === Number(row.activity_contract_revision)
+    && row.activity_conversation_id === row.schedule_conversation_id
+    && row.exchange_conversation_id === row.schedule_conversation_id
+    && row.ingress_event_id === null
+    && row.binding_state === 'active'
+    && Number(row.binding_revision) === Number(row.expected_binding_revision)
+    && (exchangeId === null || row.exchange_id === exchangeId);
+  if (!valid) {
+    throw coreError('CORE_SCHEDULE_WORK_AUTHORITY_STALE', 'scheduled Work Run authority is missing or stale');
+  }
+  if (sourceTurnId !== null) {
+    const source = get(`SELECT turn.role,turn.visibility,turn.active_revision_id,
+        revision.payload_ref,instruction.instruction_kind,receipt.source_kind,
+        receipt.correlation_id,receipt.actor_ref,receipt.revision AS receipt_revision
+      FROM semantic_turn turn
+      JOIN turn_revision revision ON revision.turn_revision_id=turn.active_revision_id
+      JOIN exchange_instruction instruction
+        ON instruction.semantic_turn_id=turn.semantic_turn_id
+        AND instruction.exchange_id=turn.exchange_id
+      JOIN journal_event receipt ON receipt.journal_event_id=revision.source_event_id
+      WHERE turn.semantic_turn_id=? AND turn.exchange_id=? AND turn.conversation_id=?`,
+    sourceTurnId, row.exchange_id, row.exchange_conversation_id);
+    if (!source || row.root_instruction_turn_id !== sourceTurnId
+      || source.role !== 'system' || source.visibility !== 'internal'
+      || source.instruction_kind !== 'root'
+      || source.payload_ref !== row.schedule_payload_ref
+      || source.source_kind !== 'core-scheduled-instruction:v1'
+      || source.correlation_id !== authority.workRunId
+      || source.actor_ref !== authority.leaseOwner
+      || Number(source.receipt_revision) !== authority.expectedRevision) {
+      throw coreError('CORE_SCHEDULE_INSTRUCTION_INVALID', 'scheduled instruction is not bound to Work Run authority');
+    }
+  }
+  return Object.freeze({ ...authority, exchangeId: row.exchange_id, conversationId: row.exchange_conversation_id,
+    payloadRef: row.schedule_payload_ref, causationId: row.causation_id });
+}
+
+function scheduledInstructionDigest(input, authority) {
+  const canonical = JSON.stringify([
+    ['operation_schema', 'core-scheduled-instruction:v1'],
+    ['operation_key', input.operationKey],
+    ['work_run_id', authority.workRunId],
+    ['work_run_revision', authority.expectedRevision],
+    ['work_run_fence', authority.fenceToken],
+    ['lease_owner', authority.leaseOwner],
+    ['lease_id', authority.leaseId],
+    ['exchange_id', authority.exchangeId],
+    ['instruction_turn_id', input.instructionTurnId],
+    ['instruction_revision_id', input.instructionRevisionId],
+    ['payload_ref', authority.payloadRef],
+    ['payload_hash_token', input.payloadHashToken],
+  ]);
+  return assertOperationSemanticDigest(`sha256:v1:${createHash('sha256').update(canonical).digest('hex')}`);
+}
+
 function normalizedRevision(input, revision) {
   const recurrence = normalizeRecurrence(input.recurrence);
   const recurrenceJson = JSON.stringify(recurrence);
@@ -339,6 +452,104 @@ export function createCoreScheduleRepository({ get, all, run, now }) {
         disposition: 'revised',
         schedule: get('SELECT * FROM schedule_spec WHERE schedule_spec_id=?', normalized.scheduleSpecId),
         revision: get('SELECT * FROM schedule_spec_revision WHERE schedule_spec_revision_id=?', normalized.scheduleSpecRevisionId),
+      });
+    },
+
+    commitInstruction(input) {
+      const operationKey = assertOperationKey(input.operationKey);
+      const instructionTurnId = assertOperationKey(input.instructionTurnId);
+      const instructionRevisionId = assertOperationKey(input.instructionRevisionId);
+      const payloadHashToken = assertKeyedContentHashToken(input.payloadHashToken);
+      const requested = normalizeScheduledAuthority(input.authority);
+      const base = get(`SELECT run.exchange_id,run.activity_id,activity.owner_id,exchange.conversation_id,
+          revision.payload_ref,revision.causation_id
+        FROM work_run run
+        JOIN activity ON activity.activity_id=run.activity_id
+        JOIN exchange ON exchange.exchange_id=run.exchange_id
+        JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
+        JOIN schedule_spec_revision revision
+          ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
+        WHERE run.work_run_id=?`, requested.workRunId);
+      if (!base) throw coreError('CORE_SCHEDULE_WORK_AUTHORITY_STALE', 'scheduled Work Run authority is missing or stale');
+      const authority = Object.freeze({ ...requested, exchangeId: base.exchange_id, payloadRef: base.payload_ref });
+      const digest = scheduledInstructionDigest({
+        operationKey, instructionTurnId, instructionRevisionId, payloadHashToken,
+      }, authority);
+      const eventId = deterministicId('scheduled-instruction', requested.workRunId, operationKey);
+      const elsewhere = get(`SELECT * FROM journal_event
+        WHERE event_type='core_scheduled_instruction_committed' AND origin_ref=?`, operationKey);
+      const prior = get(`SELECT * FROM journal_event
+        WHERE journal_event_id=? AND event_type='core_scheduled_instruction_committed'`, eventId);
+      if (elsewhere && elsewhere.journal_event_id !== eventId) {
+        throw coreError('CORE_OPERATION_KEY_CONFLICT', 'scheduled instruction operation key targets another Work Run');
+      }
+      if (prior) {
+        if (prior.source_ref !== digest || prior.correlation_id !== requested.workRunId
+          || prior.exchange_id !== base.exchange_id || prior.actor_ref !== requested.leaseOwner) {
+          throw coreError('CORE_OPERATION_KEY_CONFLICT', 'scheduled instruction operation key has different semantics');
+        }
+        const turn = get(`SELECT turn.semantic_turn_id,turn.active_revision_id
+          FROM semantic_turn turn WHERE turn.semantic_turn_id=? AND turn.exchange_id=?
+          AND turn.conversation_id=? AND turn.role='system' AND turn.visibility='internal'`,
+        instructionTurnId, base.exchange_id, base.conversation_id);
+        if (!turn || turn.active_revision_id !== instructionRevisionId) {
+          throw coreError('CORE_OPERATION_RECEIPT_INTEGRITY', 'scheduled instruction receipt result is missing');
+        }
+        return Object.freeze({ disposition: 'already_applied', eventId,
+          instructionTurnId, instructionRevisionId, authority });
+      }
+
+      const at = coreNow();
+      const active = assertScheduledWorkAuthority(get, requested, { exchangeId: base.exchange_id, activeAt: at });
+      const exchange = get('SELECT * FROM exchange WHERE exchange_id=?', base.exchange_id);
+      if (Number(exchange.revision) !== 0 || exchange.root_instruction_turn_id !== null
+        || get('SELECT 1 AS found FROM semantic_turn WHERE semantic_turn_id=?', instructionTurnId)
+        || get('SELECT 1 AS found FROM turn_revision WHERE turn_revision_id=?', instructionRevisionId)) {
+        throw coreError('CORE_SCHEDULE_INSTRUCTION_CONFLICT', 'scheduled Exchange already has another instruction');
+      }
+      run(`INSERT INTO journal_event(
+        journal_event_id,event_type,owner_id,conversation_id,exchange_id,activity_id,
+        actor_ref,origin_ref,source_kind,source_ref,revision,causation_id,correlation_id,created_at
+      ) SELECT ?,'core_scheduled_instruction_committed',?,?,?,?,?,?,'core-scheduled-instruction:v1',
+          ?,?,?,?,?
+        FROM work_run WHERE work_run_id=?`,
+      eventId, base.owner_id, base.conversation_id, base.exchange_id,
+      base.activity_id,
+      requested.leaseOwner, operationKey, digest, requested.expectedRevision,
+      base.causation_id, requested.workRunId, at, requested.workRunId);
+      run(`INSERT INTO semantic_turn(
+        semantic_turn_id,conversation_id,exchange_id,actor_ref,role,active_revision_id,
+        commit_state,visibility,created_at
+      ) VALUES (?,?,?,'system:core-schedule','system',NULL,'committed','internal',?)`,
+      instructionTurnId, base.conversation_id, base.exchange_id, at);
+      run(`INSERT INTO turn_revision(
+        turn_revision_id,semantic_turn_id,revision,change_kind,payload_ref,content_hash_token,
+        source_event_id,supersedes_revision_id,created_at
+      ) VALUES (?,?,1,'initial',?,?,?,NULL,?)`,
+      instructionRevisionId, instructionTurnId, active.payloadRef, payloadHashToken, eventId, at);
+      run('UPDATE semantic_turn SET active_revision_id=? WHERE semantic_turn_id=?',
+        instructionRevisionId, instructionTurnId);
+      run(`INSERT INTO exchange_instruction(
+        exchange_instruction_id,exchange_id,conversation_id,semantic_turn_id,
+        instruction_kind,sequence_no,source_event_id,created_at
+      ) VALUES (?,?,?,?,'root',1,?,?)`,
+      deterministicId('scheduled-exchange-instruction', base.exchange_id, instructionTurnId),
+      base.exchange_id, base.conversation_id, instructionTurnId, eventId, at);
+      const adopted = run(`UPDATE exchange SET root_instruction_turn_id=?,revision=1,updated_at=?
+        WHERE exchange_id=? AND conversation_id=? AND revision=0 AND root_instruction_turn_id IS NULL`,
+      instructionTurnId, at, base.exchange_id, base.conversation_id);
+      if (adopted.changes !== 1) {
+        throw coreError('CORE_SCHEDULE_INSTRUCTION_CONFLICT', 'scheduled Exchange instruction changed during commit');
+      }
+      return Object.freeze({ disposition: 'applied', eventId,
+        instructionTurnId, instructionRevisionId, authority: active });
+    },
+
+    assertWorkRunAuthority(input) {
+      return assertScheduledWorkAuthority(get, input.authority, {
+        exchangeId: input.exchangeId ?? null,
+        sourceTurnId: input.sourceTurnId ?? null,
+        activeAt: input.activeAt,
       });
     },
 
@@ -525,6 +736,7 @@ export function createCoreSchedulingService({ core, batchSize = 32 } = {}) {
   return Object.freeze({
     createSchedule: (input) => core.writer.write((tx) => tx.schedules.create(input)),
     reviseSchedule: (input) => core.writer.write((tx) => tx.schedules.revise(input)),
+    commitScheduledInstruction: (input) => core.writer.write((tx) => tx.schedules.commitInstruction(input)),
     claimWorkRun: (input) => core.writer.write((tx) => tx.schedules.claimWorkRun(input)),
     wakeDue: () => core.writer.write((tx) => tx.schedules.wakeDue({ batchSize })),
   });

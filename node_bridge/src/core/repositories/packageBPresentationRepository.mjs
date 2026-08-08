@@ -1,5 +1,6 @@
 import { coreError } from '../coreErrors.mjs';
 import { assertKeyedContentHashToken } from '../coreHashToken.mjs';
+import { assertScheduledWorkAuthority } from '../coreScheduling.mjs';
 import {
   finalCommitOperationDigest,
   presentationBindingOperationDigest,
@@ -213,9 +214,9 @@ export function createPackageBPresentationRepositories({ get, all, run }) {
         throw coreError('CORE_PRESENTATION_REQUIRED', 'final commit requires at least one presentation');
       }
       const exchange = get('SELECT * FROM exchange WHERE exchange_id=? AND conversation_id=?', input.exchangeId, input.conversationId);
-      const source = get(`SELECT turn.active_revision_id,revision.revision FROM semantic_turn turn
+      const source = get(`SELECT turn.active_revision_id,turn.role,revision.revision FROM semantic_turn turn
         JOIN turn_revision revision ON revision.turn_revision_id=turn.active_revision_id
-        WHERE turn.semantic_turn_id=? AND turn.exchange_id=? AND turn.conversation_id=? AND turn.role='user'`,
+        WHERE turn.semantic_turn_id=? AND turn.exchange_id=? AND turn.conversation_id=?`,
       input.sourceTurnId, input.exchangeId, input.conversationId);
       const epoch = get('SELECT * FROM provider_epoch WHERE provider_epoch_id=? AND conversation_id=?', input.providerEpochId, input.conversationId);
       const attempt = get(`SELECT * FROM journal_event WHERE journal_event_id=? AND event_type=? AND correlation_id=?
@@ -253,6 +254,19 @@ export function createPackageBPresentationRepositories({ get, all, run }) {
       if (prior) {
         assertPackageBReceipt(prior, digest, 'final semantic commit');
         return finalResult(get, all, prior, 'already_applied');
+      }
+      if (source?.role === 'system') {
+        const authority = assertScheduledWorkAuthority(get, input.workRunAuthority, {
+          exchangeId: input.exchangeId,
+          sourceTurnId: input.sourceTurnId,
+          activeAt: input.committedAt,
+        });
+        if (epoch?.active_speculative_work_run_id !== authority.workRunId) {
+          throw coreError('CORE_FINAL_SOURCE_STALE', 'scheduled final is not bound to its provider Work Run');
+        }
+      } else if (source?.role !== 'user' || input.workRunAuthority !== undefined
+        || epoch?.active_speculative_work_run_id !== null) {
+        throw coreError('CORE_FINAL_SOURCE_STALE', 'final source role and Work Run authority disagree');
       }
       if (!exchange || Number(exchange.revision) !== input.expectedExchangeRevision || exchange.root_instruction_turn_id !== input.sourceTurnId
         || !source || Number(source.revision) !== input.sourceRevision || !epoch || Number(epoch.revision) !== input.expectedProviderEpochRevision || !attempt) {

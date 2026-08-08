@@ -22,6 +22,12 @@ function adapterView(outbox) {
   });
 }
 
+function sameWorkRunAuthority(left, right) {
+  if (!left || !right) return left === right;
+  return ['workRunId', 'expectedRevision', 'fenceToken', 'leaseOwner', 'leaseId']
+    .every((field) => left[field] === right[field]);
+}
+
 export async function runPackageBLocalDelivery({
   core,
   identity,
@@ -32,6 +38,8 @@ export async function runPackageBLocalDelivery({
   leaseUntil,
   startedAt = claimedAt,
   recordedAt = startedAt,
+  workRunAuthority,
+  adapterExceptionResult,
   send,
 }) {
   if (typeof send !== 'function') {
@@ -43,6 +51,15 @@ export async function runPackageBLocalDelivery({
   if (!Array.isArray(finalInput?.presentations)
     || !finalInput.presentations.some((item) => item?.outboxId === outboxId)) {
     throw coreError('CORE_B2_OUTBOX_SCOPE_INVALID', 'Package B.2 outbox does not belong to the final transaction');
+  }
+  if (!sameWorkRunAuthority(workRunAuthority, finalInput.workRunAuthority)) {
+    throw coreError('CORE_B2_WORK_AUTHORITY_INVALID', 'Package B.2 Work Run authority differs from the final transaction');
+  }
+  if (adapterExceptionResult !== undefined
+    && (adapterExceptionResult?.resultState !== 'ambiguous'
+      || typeof adapterExceptionResult.evidenceRef !== 'string'
+      || typeof adapterExceptionResult.evidenceHashToken !== 'string')) {
+    throw coreError('CORE_B2_ADAPTER_EXCEPTION_RESULT_INVALID', 'adapter exception evidence must be durable ambiguous');
   }
   const final = await core.writer.write((tx) => tx.packageBFinal.commit(finalInput));
 
@@ -80,15 +97,25 @@ export async function runPackageBLocalDelivery({
   }
 
   const dispatchOperationKey = operationKey('dispatch', outboxId, claim.revision, claim.fenceToken);
-  const dispatch = await core.writer.write((tx) => tx.packageBPresentation.markDispatchStarted({
-    operationKey: dispatchOperationKey,
-    outboxId,
-    claimOperationKey,
-    expectedRevision: claim.revision,
-    fenceToken: claim.fenceToken,
-    leaseOwner: workerId,
-    startedAt,
-  }));
+  const dispatch = await core.writer.write((tx) => {
+    if (workRunAuthority) {
+      tx.schedules.assertWorkRunAuthority({
+        authority: workRunAuthority,
+        exchangeId: finalInput.exchangeId,
+        sourceTurnId: finalInput.sourceTurnId,
+        activeAt: startedAt,
+      });
+    }
+    return tx.packageBPresentation.markDispatchStarted({
+      operationKey: dispatchOperationKey,
+      outboxId,
+      claimOperationKey,
+      expectedRevision: claim.revision,
+      fenceToken: claim.fenceToken,
+      leaseOwner: workerId,
+      startedAt,
+    });
+  });
   if (!dispatch?.dispatchAuthorized) {
     return Object.freeze({
       final,
@@ -97,7 +124,13 @@ export async function runPackageBLocalDelivery({
     });
   }
 
-  const adapterResult = await send(adapterView(current));
+  let adapterResult;
+  try {
+    adapterResult = await send(adapterView(current));
+  } catch (error) {
+    if (!adapterExceptionResult) throw error;
+    adapterResult = adapterExceptionResult;
+  }
   const result = await core.writer.write((tx) => tx.packageBPresentation.recordResult({
     operationKey: operationKey('result', outboxId, claim.revision, claim.fenceToken),
     outboxId,

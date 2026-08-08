@@ -4,7 +4,8 @@ Status: CURRENT (2026-08-08)
 
 Lifecycle: Runtime Phase `PROD_VERIFIED` for the bounded channel, identity,
 memory, capability, topology and 2026-08-07 digest evidence in
-`docs/governance/current_runtime_status.md`; Core Packages C-D `LOCAL_VERIFIED`.
+`docs/governance/current_runtime_status.md`; Core Packages C-E/S11
+`LOCAL_VERIFIED`.
 
 This decision record amends the implementation direction of the archived v0.4 cutover
 contract. It does not modify frozen Schema v1 or authorize a production Core
@@ -396,9 +397,16 @@ stopping old wake neither loses the next future run nor replays an old one.
 - Package E adds duplicate/missed tick, long downtime, clock rollback/DST,
   crash before/after occurrence commit, stale WorkRun fence, stop/cancel,
   timeout ambiguous, restart no-resend, gaming/focus suppression with delayed
-  coalescing, and one real synthetic delivery. S11 verified these locally with
-  synthetic, non-delivering targets: the Core suite passes 149 tests and the
-  unwired `attentionValve.mjs` suite passes 9; production is unchanged.
+  coalescing, and one real synthetic delivery. S11 now binds one exact
+  WakeOccurrence→scheduled Exchange→claimed WorkRun revision/fence/lease→typed
+  system instruction→provider epoch/attempt→final→presentation outbox→injected
+  effect→terminal receipt chain. A thrown post-dispatch timeout becomes durable
+  `ambiguous`, restart does not resend, post-commit restart reuses the existing
+  WorkRun, stale WorkRun authority rejects before final/effect, and a delayed
+  fingerprint remains one candidate across gaming/focus→available. “Stale
+  fence” here is WorkRun authority; disabling legacy visible wake remains S12.
+  The focused set passes 29/29 and the full Core suite 151/151 locally.
+  Production is unchanged.
 
 The dual gateway/profile contract, regex Full routing, Full-to-Lite fallback,
 and duplicated history/cache/cron stores are removed from the target. Existing

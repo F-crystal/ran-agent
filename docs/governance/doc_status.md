@@ -48,7 +48,8 @@ not composed into production. S9 Package C scheduling is locally verified:
 Schema v2, deterministic occurrences and the injected managed tick remain
 disconnected from production. S10 is locally verified with the governed
 19-component migration manifest, a zero-effect production-copy rehearsal and a
-Core-fact-only external-poll seam. S11 synthetic acceptance is now `IN_PROGRESS`.
+Core-fact-only external-poll seam. S11 synthetic acceptance is locally verified
+after owner-audit remediation; S12 remains not started and production is unchanged.
 
 ## Lifecycle Stages
 

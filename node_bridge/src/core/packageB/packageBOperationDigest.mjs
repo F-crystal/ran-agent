@@ -317,7 +317,7 @@ export function userTurnOperationDigest(input) {
 }
 
 export function finalCommitOperationDigest(input) {
-  return digest('package-b-final-commit:v1', [
+  const specification = [
     ['operation_key', input.operationKey],
     ['conversation_id', input.conversationId],
     ['exchange_id', input.exchangeId],
@@ -334,7 +334,15 @@ export function finalCommitOperationDigest(input) {
     ['expected_exchange_revision', input.expectedExchangeRevision],
     ['expected_provider_epoch_revision', input.expectedProviderEpochRevision],
     ['presentations', presentationItems(input.presentations)],
-  ]);
+  ];
+  if (input.workRunAuthority) specification.push(
+    ['work_run_id', input.workRunAuthority.workRunId],
+    ['work_run_revision', input.workRunAuthority.expectedRevision],
+    ['work_run_fence_token', input.workRunAuthority.fenceToken],
+    ['work_run_lease_owner', input.workRunAuthority.leaseOwner],
+    ['work_run_lease_id', input.workRunAuthority.leaseId],
+  );
+  return digest('package-b-final-commit:v1', specification);
 }
 
 export function presentationClaimOperationDigest(input) {
@@ -381,7 +389,7 @@ export function presentationDispatchStartOperationDigest(input) {
 }
 
 export function providerEpochOperationDigest(input) {
-  return digest('package-b-provider-epoch:v1', [
+  const specification = [
     ['operation_key', input.operationKey],
     ['provider_epoch_id', input.providerEpochId],
     ['conversation_id', input.conversationId],
@@ -402,7 +410,15 @@ export function providerEpochOperationDigest(input) {
     ['epoch_state', input.epochState ?? 'active'],
     ['taint_state', input.taintState ?? 'clean'],
     ['request_identity', input.requestIdentity],
-  ]);
+  ];
+  if (input.workRunAuthority) specification.push(
+    ['work_run_id', input.workRunAuthority.workRunId],
+    ['work_run_revision', input.workRunAuthority.expectedRevision],
+    ['work_run_fence_token', input.workRunAuthority.fenceToken],
+    ['work_run_lease_owner', input.workRunAuthority.leaseOwner],
+    ['work_run_lease_id', input.workRunAuthority.leaseId],
+  );
+  return digest('package-b-provider-epoch:v1', specification);
 }
 
 export function providerEpochTransitionOperationDigest(input) {

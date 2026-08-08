@@ -148,6 +148,45 @@ test('a failure inside the tick transaction rolls every schedule back before com
   await reopened.close();
 });
 
+test('a committed occurrence survives restart and its existing WorkRun is claimed once', async (t) => {
+  const { core, service, dbPath, setNow } = await setup(t);
+  await service.createSchedule(scheduleInput());
+  setNow('2026-01-01T00:01:00.000Z');
+  const [wake] = await service.wakeDue();
+  const occurrenceId = wake.occurrences[0].wake_occurrence_id;
+  const original = core.reader.workRunsForOccurrence(occurrenceId)[0];
+  assert.equal(original.state, 'queued');
+  await core.close();
+
+  const reopened = openCoreDatabase({ dbPath, now: () => new Date('2026-01-01T00:01:30.000Z') });
+  const reopenedService = createCoreSchedulingService({ core: reopened, batchSize: 16 });
+  const claim = await reopenedService.claimWorkRun({
+    workRunId: original.work_run_id,
+    expectedRevision: Number(original.revision),
+    expectedFence: Number(original.fence_token),
+    leaseOwner: 'restart-worker',
+    leaseUntil: '2026-01-01T00:02:30.000Z',
+    operationKey: 'restart-worker:claim:1',
+  });
+  assert.equal(claim.disposition, 'applied');
+  assert.equal((await reopenedService.claimWorkRun({
+    workRunId: original.work_run_id,
+    expectedRevision: Number(original.revision),
+    expectedFence: Number(original.fence_token),
+    leaseOwner: 'restart-worker',
+    leaseUntil: '2026-01-01T00:02:30.000Z',
+    operationKey: 'restart-worker:claim:1',
+  })).disposition, 'already_applied');
+  assert.deepEqual(await reopenedService.wakeDue(), []);
+
+  const inspector = openTestInspector(dbPath);
+  assert.equal(rowCount(inspector, 'wake_occurrence'), 1);
+  assert.equal(rowCount(inspector, 'work_run'), 1);
+  assert.equal(rowCount(inspector, 'lease'), 1);
+  inspector.close();
+  await reopened.close();
+});
+
 test('a tick across the DST fold creates the repeated wall time exactly once at the earlier instant', async (t) => {
   const { core, service, setNow } = await setup(t, '2026-10-31T06:00:00.000Z');
   await service.createSchedule(scheduleInput({

@@ -119,11 +119,19 @@ test('explicit owner reminders bypass quiet presence through quiet policy', (t) 
   const { valve } = setup(t, { presence: 'dnd' });
   const decision = valve.evaluate({
     contentClass: 'timely', quietPolicy: 'ignore_for_explicit_reminder',
-    fingerprint: 'reminder:explicit:1', summary: '你定的提醒',
+    summary: '你定的提醒',
   });
   assert.deepEqual(decision, {
     disposition: 'deliver_now', reason: 'explicit_reminder', contentClass: 'timely',
   });
+  assert.equal(valve.listPending().length, 0);
+
+  valve.evaluate({ contentClass: 'timely', fingerprint: 'reminder:explicit:1', summary: '先进入 backlog' });
+  const promoted = valve.evaluate({
+    contentClass: 'timely', quietPolicy: 'ignore_for_explicit_reminder',
+    fingerprint: 'reminder:explicit:1', summary: '同一提醒现在明确要求绕过',
+  });
+  assert.deepEqual(promoted, decision);
   assert.equal(valve.listPending().length, 0);
 });
 
@@ -144,6 +152,27 @@ test('available presence delivers immediately and an unknown reading delays inst
   const flushed = valve.flush();
   assert.equal(flushed.length, 1);
   valve.confirmFlushed('rss:2');
+});
+
+test('an equivalent delayed fingerprint stays one candidate when presence becomes available', (t) => {
+  const { valve, setPresence } = setup(t, { presence: 'gaming' });
+  valve.evaluate({ contentClass: 'timely', fingerprint: 'rss:transition:1', summary: 'first' });
+
+  setPresence('available');
+  const equivalent = valve.evaluate({
+    contentClass: 'timely', fingerprint: 'rss:transition:1', summary: 'same fact after presence change',
+  });
+  assert.deepEqual(equivalent, {
+    disposition: 'delayed', reason: 'coalesced_existing', contentClass: 'timely',
+    fingerprint: 'rss:transition:1', coalescedCount: 2,
+  });
+
+  const flushed = valve.flush();
+  assert.equal(flushed.length, 1);
+  assert.equal(flushed[0].fingerprint, 'rss:transition:1');
+  assert.equal(flushed[0].count, 2);
+  valve.confirmFlushed('rss:transition:1');
+  assert.equal(valve.flush().length, 0);
 });
 
 test('confirming a non-flushing item fails closed', (t) => {

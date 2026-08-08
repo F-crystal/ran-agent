@@ -1,5 +1,6 @@
 import { coreError } from '../coreErrors.mjs';
 import { assertKeyedContentHashToken } from '../coreHashToken.mjs';
+import { assertScheduledWorkAuthority } from '../coreScheduling.mjs';
 import {
   providerAttemptOperationDigest,
   providerEpochOperationDigest,
@@ -138,13 +139,24 @@ export function createPackageBProviderRepository({ get, run }) {
         return epochResult(get, prior, 'already_applied');
       }
       const exchange = get('SELECT * FROM exchange WHERE exchange_id=? AND conversation_id=?', input.exchangeId, input.conversationId);
-      const source = get(`SELECT turn.active_revision_id, revision.revision FROM semantic_turn turn
+      const source = get(`SELECT turn.active_revision_id,turn.role,revision.revision FROM semantic_turn turn
         JOIN turn_revision revision ON revision.turn_revision_id=turn.active_revision_id
-        WHERE turn.semantic_turn_id=? AND turn.exchange_id=? AND turn.conversation_id=? AND turn.role='user'`,
+        WHERE turn.semantic_turn_id=? AND turn.exchange_id=? AND turn.conversation_id=?`,
       input.sourceTurnId, input.exchangeId, input.conversationId);
       if (!exchange || exchange.root_instruction_turn_id !== input.sourceTurnId || !source
         || source.active_revision_id !== input.sourceRevisionId || Number(source.revision) !== input.sourceRevision) {
-        throw coreError('CORE_PROVIDER_SOURCE_INVALID', 'provider epoch requires the adopted user source revision');
+        throw coreError('CORE_PROVIDER_SOURCE_INVALID', 'provider epoch requires the adopted source revision');
+      }
+      let scheduledWorkRunId = null;
+      if (source.role === 'system') {
+        const authority = assertScheduledWorkAuthority(get, input.workRunAuthority, {
+          exchangeId: input.exchangeId,
+          sourceTurnId: input.sourceTurnId,
+          activeAt: input.createdAt,
+        });
+        scheduledWorkRunId = authority.workRunId;
+      } else if (source.role !== 'user' || input.workRunAuthority !== undefined) {
+        throw coreError('CORE_PROVIDER_SOURCE_INVALID', 'provider source role and Work Run authority disagree');
       }
       if (get('SELECT 1 AS found FROM provider_epoch WHERE provider_epoch_id=?', input.providerEpochId)) {
         throw coreError('CORE_OPERATION_KEY_CONFLICT', 'provider epoch identity is already used');
@@ -155,7 +167,7 @@ export function createPackageBProviderRepository({ get, run }) {
         snapshot_hash_token,revision,created_at,closed_at
       ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0,?,?)`,
       input.providerEpochId, input.conversationId, input.provider, input.model, epochState, taintState,
-      input.committedEventCursor ?? null, null, input.soulRevisionId ?? null, input.capabilitySnapshotRef,
+      input.committedEventCursor ?? null, scheduledWorkRunId, input.soulRevisionId ?? null, input.capabilitySnapshotRef,
       input.canonicalSnapshotRef, input.snapshotHashToken, input.createdAt,
       epochState === 'closed' ? input.createdAt : null);
       const epochBindingState = bindingState(epochState);

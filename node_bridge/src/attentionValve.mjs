@@ -128,50 +128,67 @@ export function createAttentionValve({
     const kind = String(contentClass || '').trim();
     if (!CONTENT_CLASSES.has(kind)) throw attentionError('ATTENTION_CONTENT_CLASS_INVALID', 'content class must be ambient, timely, or critical');
     if (kind === 'ambient') return Object.freeze({ disposition: 'suppress_silent', contentClass: kind });
-    if (String(quietPolicy || '').trim() === EXPLICIT_REMINDER_POLICY) {
-      return Object.freeze({ disposition: 'deliver_now', reason: 'explicit_reminder', contentClass: kind });
-    }
-    if (kind === 'critical' && allowlist.has(String(criticalKey || '').trim())) {
-      return Object.freeze({ disposition: 'deliver_now', reason: 'critical_allowlisted', contentClass: kind });
-    }
-    const currentPresence = presence();
-    if (currentPresence === 'available') {
-      return Object.freeze({ disposition: 'deliver_now', reason: 'presence_available', contentClass: kind });
-    }
-    const key = requireFingerprint(fingerprint);
-    const state = load();
-    const at = isoNow(now);
-    const existing = state.items.find((item) => item.fingerprint === key);
+    const bypassReason = String(quietPolicy || '').trim() === EXPLICIT_REMINDER_POLICY
+      ? 'explicit_reminder'
+      : kind === 'critical' && allowlist.has(String(criticalKey || '').trim())
+        ? 'critical_allowlisted'
+        : null;
+    const fingerprintValue = String(fingerprint || '').trim();
+    const key = fingerprintValue ? requireFingerprint(fingerprint) : null;
+    const state = key ? load() : null;
+    const existing = state?.items.find((item) => item.fingerprint === key);
     if (existing) {
-      if (existing.state === 'flushing') {
+      const wasFlushing = existing.state === 'flushing';
+      if (wasFlushing) {
         // A fact that arrives while its fingerprint is mid-flush must survive
         // the old flush's confirmation: return to pending and keep the fact.
         existing.state = 'pending';
         existing.flushingSince = null;
       }
+      if (bypassReason && !wasFlushing) {
+        state.items = state.items.filter((item) => item.fingerprint !== key);
+        save(state);
+        return Object.freeze({ disposition: 'deliver_now', reason: bypassReason, contentClass: kind });
+      }
       existing.count += 1;
       existing.summary = boundedText(summary, 'summary') || existing.summary;
-      existing.lastSeenAt = at;
-    } else {
-      state.items.push({
+      existing.lastSeenAt = isoNow(now);
+      save(state);
+      return Object.freeze({
+        disposition: 'delayed',
+        reason: 'coalesced_existing',
+        contentClass: existing.contentClass,
         fingerprint: key,
-        contentClass: kind,
-        state: 'pending',
-        count: 1,
-        summary: boundedText(summary, 'summary'),
-        firstSeenAt: at,
-        lastSeenAt: at,
-        flushingSince: null,
+        coalescedCount: existing.count,
       });
     }
-    save(state);
-    const item = state.items.find((entry) => entry.fingerprint === key);
+    if (bypassReason) {
+      return Object.freeze({ disposition: 'deliver_now', reason: bypassReason, contentClass: kind });
+    }
+    const currentPresence = presence();
+    if (currentPresence === 'available') {
+      return Object.freeze({ disposition: 'deliver_now', reason: 'presence_available', contentClass: kind });
+    }
+    const delayedKey = key || requireFingerprint(fingerprint);
+    const delayedState = state || load();
+    const at = isoNow(now);
+    delayedState.items.push({
+      fingerprint: delayedKey,
+      contentClass: kind,
+      state: 'pending',
+      count: 1,
+      summary: boundedText(summary, 'summary'),
+      firstSeenAt: at,
+      lastSeenAt: at,
+      flushingSince: null,
+    });
+    save(delayedState);
     return Object.freeze({
       disposition: 'delayed',
       reason: `presence_${currentPresence}`,
       contentClass: kind,
-      fingerprint: key,
-      coalescedCount: item.count,
+      fingerprint: delayedKey,
+      coalescedCount: 1,
     });
   }
 

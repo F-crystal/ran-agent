@@ -7,8 +7,6 @@ import { runPackageBLocalDelivery } from '../../src/core/packageB/packageBDelive
 import { createTempCore, openTestInspector, rowCount } from './helpers/testCoreInspector.mjs';
 
 const AT = '2026-07-17T00:00:00.000Z';
-const LATER = '2026-07-17T00:01:00.000Z';
-const HARD = '2026-07-17T00:10:00.000Z';
 const DUE = '2026-07-17T00:05:00.000Z';
 const TOKEN = `hmac-sha256:v1:test-key:${'a'.repeat(64)}`;
 const CONVERSATION = 'conversation:owner:desktop';
@@ -22,45 +20,38 @@ function identity() {
   };
 }
 
-function ingress() {
+function epochInput(work, authority) {
   return {
-    ingressEventId: 'ingress-1', operationKey: 'ingress:1', platform: 'desktop', sourceInstanceId: 'desktop:local',
-    nativeEventIdTrust: 'trusted', nativeEventId: 'native-1', ownerId: OWNER, actorRef: 'actor:owner',
-    platformConversationBinding: 'desktop:conversation', canonicalConversationKey: CONVERSATION,
-    payloadRef: 'payload:ingress-1', payloadHashToken: TOKEN, mutationKind: 'create', mutationTargetNativeEventId: null,
-    retryOf: null, vendorEventTime: AT, receivedAt: AT, createdAt: AT,
-  };
-}
-
-function epochInput() {
-  return {
-    operationKey: 'epoch:1', providerEpochId: 'epoch-1', conversationId: CONVERSATION, exchangeId: 'exchange-1',
-    sourceTurnId: 'user-turn', sourceRevision: 1, sourceRevisionId: 'user-r1', provider: 'fixture', model: 'fixture-model',
+    operationKey: 'scheduled:epoch:1', providerEpochId: 'scheduled-epoch-1', conversationId: CONVERSATION,
+    exchangeId: work.exchange_id, sourceTurnId: 'scheduled-instruction-turn', sourceRevision: 1,
+    sourceRevisionId: 'scheduled-instruction-r1', provider: 'fixture', model: 'fixture-model',
     capabilitySnapshotRef: 'capability:1', capabilitySnapshotHashToken: TOKEN,
     canonicalSnapshotRef: 'snapshot:1', snapshotHashToken: TOKEN, committedEventCursor: null,
     soulRevisionId: null, bindingId: 'epoch-binding-1', upstreamBindingKind: 'session',
     upstreamHandle: 'fixture-session', upstreamHandleHashToken: TOKEN,
-    epochState: 'active', taintState: 'clean', requestIdentity: 'request:epoch:1', createdAt: LATER,
+    epochState: 'active', taintState: 'clean', requestIdentity: 'request:epoch:1',
+    workRunAuthority: authority, createdAt: DUE,
   };
 }
 
-function attemptInput() {
+function attemptInput(work) {
   return {
-    operationKey: 'attempt:1', requestId: 'request:1', epochId: 'epoch-1', conversationId: CONVERSATION,
-    exchangeId: 'exchange-1', sourceTurnId: 'user-turn', sourceRevision: 1, attemptNumber: 1,
-    resultClass: 'completed', errorClass: null, startedAt: AT, completedAt: LATER,
+    operationKey: 'scheduled:attempt:1', requestId: 'request:1', epochId: 'scheduled-epoch-1', conversationId: CONVERSATION,
+    exchangeId: work.exchange_id, sourceTurnId: 'scheduled-instruction-turn', sourceRevision: 1, attemptNumber: 1,
+    resultClass: 'completed', errorClass: null, startedAt: DUE, completedAt: DUE,
     snapshotRef: 'snapshot:1', snapshotHashToken: TOKEN,
     metadataRef: 'provider:metadata:1', metadataHashToken: TOKEN,
   };
 }
 
-function finalInput(attempt, overrides = {}) {
+function finalInput(attempt, work, authority, overrides = {}) {
   return {
-    operationKey: 'final:1', conversationId: CONVERSATION, exchangeId: 'exchange-1', sourceTurnId: 'user-turn', sourceRevision: 1,
-    providerEpochId: 'epoch-1', providerAttempt: 1, providerAttemptReceiptId: attempt.resultId,
-    assistantTurnId: 'assistant-turn', assistantRevisionId: 'assistant-r1', assistantActorRef: 'assistant:hermes',
+    operationKey: 'scheduled:final:1', conversationId: CONVERSATION, exchangeId: work.exchange_id,
+    sourceTurnId: 'scheduled-instruction-turn', sourceRevision: 1,
+    providerEpochId: 'scheduled-epoch-1', providerAttempt: 1, providerAttemptReceiptId: attempt.resultId,
+    assistantTurnId: 'scheduled-assistant-turn', assistantRevisionId: 'scheduled-assistant-r1', assistantActorRef: 'assistant:hermes',
     finalPayloadRef: 'payload:assistant', finalPayloadHashToken: TOKEN, expectedExchangeRevision: 1,
-    expectedProviderEpochRevision: 0, committedAt: LATER,
+    expectedProviderEpochRevision: 0, workRunAuthority: authority, committedAt: DUE,
     presentations: [
       { outboxId: 'outbox-z', operationScope: 'presentation:desktop', operationKey: 'outbox:z', bindingId: 'binding-1',
         target: 'desktop:conversation', kind: 'text', payloadRef: 'presentation:z', payloadHashToken: TOKEN },
@@ -69,42 +60,15 @@ function finalInput(attempt, overrides = {}) {
   };
 }
 
-async function seedFinalReady(core) {
+async function seedConversation(core) {
   const conversation = await core.writer.write((tx) => tx.packageBTurn.createOrResolveConversation(identity()));
-  await core.writer.write((tx) => tx.packageBIngress.commit(ingress()));
   await core.writer.write((tx) => tx.packageBPresentation.createOrReadBinding({
     operationKey: 'binding:create:1',
     bindingId: 'binding-1', conversationId: CONVERSATION, ownerId: OWNER, sourceInstanceId: 'desktop:local',
     platform: 'desktop', destinationKind: 'conversation', destinationRef: 'desktop:conversation',
     adapterMetadata: { protocol: 'fixture', receiptMode: 'fixture' }, createdAt: AT,
   }));
-  await core.writer.write((tx) => tx.packageBAssembly.create({
-    operationKey: 'assembly:create:1', assemblyId: 'assembly-1', conversationId: CONVERSATION,
-    quietDeadline: LATER, hardDeadline: HARD, createdAt: AT,
-  }));
-  await core.writer.write((tx) => tx.packageBAssembly.appendPart({
-    operationKey: 'assembly:part:1', partId: 'part-1', assemblyId: 'assembly-1', ingressEventId: 'ingress-1',
-    partKind: 'text', sequenceNo: 1, payloadRef: 'payload:part-1', sourceRevision: 0,
-    expectedAssemblyRevision: 0, createdAt: AT,
-  }));
-  await core.writer.write((tx) => tx.packageBAssembly.beginSealing({
-    operationKey: 'assembly:begin:1', assemblyId: 'assembly-1', expectedRevision: 1, updatedAt: LATER,
-  }));
-  const expectedActivePartSetDigest = core.reader.packageBAssembly.activePartSetDigest({
-    identity: conversation.identity, conversationId: CONVERSATION, assemblyId: 'assembly-1', expectedRevision: 2,
-  });
-  const sealed = await core.writer.write((tx) => tx.packageBAssembly.seal({
-    operationKey: 'assembly:seal:1', assemblyId: 'assembly-1', conversationId: CONVERSATION,
-    expectedRevision: 2, expectedActivePartSetDigest, sealedAt: LATER,
-  }));
-  await core.writer.write((tx) => tx.packageBTurn.commitUserTurn({
-    operationKey: 'user:commit:1', conversationId: CONVERSATION, exchangeId: 'exchange-1', assemblyId: 'assembly-1',
-    assemblyRevision: sealed.revision, ingressEventId: 'ingress-1', semanticTurnId: 'user-turn', turnRevisionId: 'user-r1',
-    actorRef: 'actor:owner', payloadRef: 'payload:user-r1', payloadHashToken: TOKEN, sourceEventId: sealed.resultId, committedAt: LATER,
-  }));
-  await core.writer.write((tx) => tx.packageBProvider.createEpoch(epochInput()));
-  const attempt = await core.writer.write((tx) => tx.packageBProvider.appendAttempt(attemptInput()));
-  return { conversation, attempt };
+  return { conversation };
 }
 
 async function setup(t, start = AT) {
@@ -112,7 +76,7 @@ async function setup(t, start = AT) {
   let current = new Date(start);
   const core = openCoreDatabase({ dbPath, now: () => current });
   core.migrate();
-  const seeded = await seedFinalReady(core);
+  const seeded = await seedConversation(core);
   const service = createCoreSchedulingService({ core, batchSize: 16 });
   await core.writer.write((tx) => {
     tx.journal.append({
@@ -142,6 +106,27 @@ async function setup(t, start = AT) {
   return { core, service, dbPath, seeded, setNow: (value) => { current = new Date(value); } };
 }
 
+async function prepareScheduledFinal(core, service, seeded, work, claim) {
+  const authority = Object.freeze({
+    workRunId: work.work_run_id,
+    expectedRevision: claim.revision,
+    fenceToken: claim.fenceToken,
+    leaseOwner: 'scheduled-worker',
+    leaseId: claim.lease.lease_id,
+  });
+  const instruction = await service.commitScheduledInstruction({
+    operationKey: 'scheduled:instruction:1',
+    instructionTurnId: 'scheduled-instruction-turn',
+    instructionRevisionId: 'scheduled-instruction-r1',
+    payloadHashToken: TOKEN,
+    authority,
+  });
+  assert.equal(instruction.disposition, 'applied');
+  await core.writer.write((tx) => tx.packageBProvider.createEpoch(epochInput(work, authority)));
+  const attempt = await core.writer.write((tx) => tx.packageBProvider.appendAttempt(attemptInput(work)));
+  return { authority, final: finalInput(attempt, work, authority), identity: seeded.conversation.identity };
+}
+
 async function wakeAndClaim(core, service, setNow) {
   setNow(DUE);
   const [wake] = await service.wakeDue();
@@ -161,12 +146,15 @@ async function wakeAndClaim(core, service, setNow) {
 
 test('scheduled wake delivers one synthetic effect once across reopen and replay', async (t) => {
   const { core, service, dbPath, seeded, setNow } = await setup(t);
-  const { work } = await wakeAndClaim(core, service, setNow);
+  const { wake, work, claim } = await wakeAndClaim(core, service, setNow);
 
   const inspector = openTestInspector(dbPath);
-  assert.equal(rowCount(inspector, 'semantic_turn'), 1);
+  assert.equal(rowCount(inspector, 'semantic_turn'), 0);
   assert.equal(rowCount(inspector, 'presentation_outbox'), 0);
   inspector.close();
+  const prepared = await prepareScheduledFinal(core, service, seeded, work, claim);
+  assert.equal(prepared.final.exchangeId, work.exchange_id);
+  assert.equal(prepared.authority.workRunId, work.work_run_id);
 
   let effects = 0;
   const send = async () => {
@@ -174,13 +162,36 @@ test('scheduled wake delivers one synthetic effect once across reopen and replay
     return { resultState: 'sent', evidenceRef: 'feishu:synthetic:s11:sent', evidenceHashToken: TOKEN };
   };
   const delivered = await runPackageBLocalDelivery({
-    core, identity: seeded.conversation.identity, finalInput: finalInput(seeded.attempt),
+    core, identity: prepared.identity, finalInput: prepared.final, workRunAuthority: prepared.authority,
     outboxId: 'outbox-z', workerId: 'scheduled-worker',
     claimedAt: DUE, leaseUntil: '2026-07-17T00:06:00.000Z', send,
   });
   assert.equal(delivered.delivery.state, 'sent');
   assert.equal(delivered.delivery.effectAttempted, true);
   assert.equal(effects, 1);
+
+  const chain = openTestInspector(dbPath);
+  assert.equal(chain.prepare("SELECT count(*) AS count FROM semantic_turn WHERE role='user'").get().count, 0);
+  assert.deepEqual({ ...chain.prepare(`SELECT turn.role,turn.visibility,turn.exchange_id,
+      exchange.root_instruction_turn_id FROM semantic_turn turn
+      JOIN exchange ON exchange.exchange_id=turn.exchange_id
+      WHERE turn.semantic_turn_id='scheduled-instruction-turn'`).get() }, {
+    role: 'system', visibility: 'internal', exchange_id: work.exchange_id,
+    root_instruction_turn_id: 'scheduled-instruction-turn',
+  });
+  assert.equal(chain.prepare("SELECT correlation_id FROM journal_event WHERE event_type='core_scheduled_instruction_committed'").get().correlation_id, work.work_run_id);
+  assert.equal(chain.prepare("SELECT active_speculative_work_run_id FROM provider_epoch WHERE provider_epoch_id='scheduled-epoch-1'").get().active_speculative_work_run_id, work.work_run_id);
+  assert.deepEqual({ ...chain.prepare(`SELECT exchange_id,actor_ref,correlation_id FROM journal_event
+      WHERE event_type='package_b_provider_attempt_recorded'`).get() }, {
+    exchange_id: work.exchange_id,
+    actor_ref: 'scheduled-instruction-turn',
+    correlation_id: 'scheduled-epoch-1',
+  });
+  assert.equal(chain.prepare("SELECT exchange_id FROM semantic_turn WHERE semantic_turn_id='scheduled-assistant-turn'").get().exchange_id, work.exchange_id);
+  assert.equal(chain.prepare("SELECT state FROM presentation_outbox WHERE presentation_outbox_id='outbox-z'").get().state, 'sent');
+  assert.equal(chain.prepare('SELECT schedule_spec_revision_id FROM wake_occurrence WHERE wake_occurrence_id=?').get(wake.occurrences[0].wake_occurrence_id).schedule_spec_revision_id, 'schedule-r1');
+  assert.equal(work.wake_occurrence_id, wake.occurrences[0].wake_occurrence_id);
+  chain.close();
 
   const losingClaim = await service.claimWorkRun({
     workRunId: work.work_run_id, expectedRevision: Number(work.revision), expectedFence: Number(work.fence_token),
@@ -192,7 +203,7 @@ test('scheduled wake delivers one synthetic effect once across reopen and replay
   await core.close();
   const reopened = openCoreDatabase({ dbPath, now: () => new Date('2026-07-17T00:07:00.000Z') });
   const replayed = await runPackageBLocalDelivery({
-    core: reopened, identity: seeded.conversation.identity, finalInput: finalInput(seeded.attempt),
+    core: reopened, identity: prepared.identity, finalInput: prepared.final, workRunAuthority: prepared.authority,
     outboxId: 'outbox-z', workerId: 'scheduled-worker',
     claimedAt: '2026-07-17T00:07:00.000Z', leaseUntil: '2026-07-17T00:08:00.000Z',
     send: async () => { throw new Error('terminal Core outbox must not resend'); },
@@ -206,26 +217,34 @@ test('scheduled wake delivers one synthetic effect once across reopen and replay
 
 test('a timed-out scheduled effect terminalizes ambiguous and restart never redispatches', async (t) => {
   const { core, service, dbPath, seeded, setNow } = await setup(t);
-  await wakeAndClaim(core, service, setNow);
+  const { work, claim } = await wakeAndClaim(core, service, setNow);
+  const prepared = await prepareScheduledFinal(core, service, seeded, work, claim);
 
   let effects = 0;
   const delivered = await runPackageBLocalDelivery({
-    core, identity: seeded.conversation.identity, finalInput: finalInput(seeded.attempt),
+    core, identity: prepared.identity, finalInput: prepared.final, workRunAuthority: prepared.authority,
     outboxId: 'outbox-z', workerId: 'scheduled-worker',
     claimedAt: DUE, leaseUntil: '2026-07-17T00:06:00.000Z',
+    adapterExceptionResult: {
+      resultState: 'ambiguous', evidenceRef: 'feishu:synthetic:s11:timeout',
+      evidenceHashToken: TOKEN, errorClass: 'adapter_timeout',
+    },
     send: async () => {
       effects += 1;
-      return { resultState: 'ambiguous', evidenceRef: 'feishu:synthetic:s11:timeout', evidenceHashToken: TOKEN, errorClass: 'adapter_timeout' };
+      throw Object.assign(new Error('synthetic adapter timed out after dispatch'), { code: 'ETIMEDOUT' });
     },
   });
   assert.equal(delivered.delivery.state, 'ambiguous');
   assert.equal(delivered.delivery.effectAttempted, true);
   assert.equal(effects, 1);
+  const timeoutEvidence = core.reader.journalPayload(`${delivered.delivery.receiptId}:payload`);
+  assert.equal(timeoutEvidence.payload_ref, 'feishu:synthetic:s11:timeout');
+  assert.equal(timeoutEvidence.content_hash_token, TOKEN);
 
   await core.close();
   const reopened = openCoreDatabase({ dbPath, now: () => new Date('2026-07-17T00:07:00.000Z') });
   const replayed = await runPackageBLocalDelivery({
-    core: reopened, identity: seeded.conversation.identity, finalInput: finalInput(seeded.attempt),
+    core: reopened, identity: prepared.identity, finalInput: prepared.final, workRunAuthority: prepared.authority,
     outboxId: 'outbox-z', workerId: 'scheduled-worker',
     claimedAt: '2026-07-17T00:07:00.000Z', leaseUntil: '2026-07-17T00:08:00.000Z',
     send: async () => { effects += 1; throw new Error('ambiguous outcome forbids redispatch'); },
@@ -235,4 +254,40 @@ test('a timed-out scheduled effect terminalizes ambiguous and restart never redi
   });
   assert.equal(effects, 1);
   await reopened.close();
+});
+
+test('a rotated WorkRun fence rejects the scheduled final before any effect', async (t) => {
+  const { core, service, dbPath, seeded, setNow } = await setup(t);
+  const { work, claim } = await wakeAndClaim(core, service, setNow);
+  const prepared = await prepareScheduledFinal(core, service, seeded, work, claim);
+  await core.writer.write((tx) => tx.revisions.rotateWorkRunFence({
+    workRunId: work.work_run_id,
+    expectedRevision: prepared.authority.expectedRevision,
+    expectedFence: prepared.authority.fenceToken,
+    nextFence: prepared.authority.fenceToken + 1,
+    nextState: 'running',
+    reasonCode: 'restart',
+    sourceEventId: 'delivery-causation',
+    rotationOperationKey: 'scheduled-work:cancel:1',
+    updatedAt: DUE,
+  }));
+
+  let effects = 0;
+  await assert.rejects(runPackageBLocalDelivery({
+    core,
+    identity: prepared.identity,
+    finalInput: prepared.final,
+    workRunAuthority: prepared.authority,
+    outboxId: 'outbox-z',
+    workerId: 'scheduled-worker',
+    claimedAt: DUE,
+    leaseUntil: '2026-07-17T00:06:00.000Z',
+    send: async () => { effects += 1; },
+  }), { code: 'CORE_SCHEDULE_WORK_AUTHORITY_STALE' });
+  assert.equal(effects, 0);
+  const inspector = openTestInspector(dbPath);
+  assert.equal(rowCount(inspector, 'presentation_outbox'), 0);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM semantic_turn WHERE role='assistant'").get().count, 0);
+  inspector.close();
+  await core.close();
 });

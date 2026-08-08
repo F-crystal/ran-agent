@@ -173,27 +173,35 @@ reconciliation evidence. The temporary server/local rehearsal files
 were deleted and absence rechecked. Local source also adds a hash-bound
 `recordFact`-only external-poll seam after WorkRun authority; it has no send
 surface. The Core suite passes 143 tests locally. S11 now owns synthetic
-attention/fault acceptance.
+attention/fault acceptance. The `2026-08-08T08:28:45.000Z` counts are a
+historical rehearsal snapshot, not current cutover readiness; S12 must freshly
+inspect and reconcile the production state before any cutover decision.
 
-S11 is locally verified with only synthetic, non-delivering targets and no
-production change. New fault acceptance proves a rollback clock never
-duplicates or regresses an occurrence, a six-hour downtime collapses to one
-latest occurrence with one aggregate skip event, a failure inside the tick
-transaction rolls every schedule back before commit, and a tick across the DST
-fold creates the repeated wall time exactly once at the earlier instant. One
-real synthetic delivery composes a message-capable wake, typed Exchange and
-WorkRun lease/fence claim with the existing Package B.2 final/presentation
-effect path: the synthetic Feishu target is sent exactly once across reopen
-and replay, a timed-out adapter result terminalizes `ambiguous`, and restart
-never redispatches. The new `attentionValve.mjs` implements the documented
-gaming/focus delivery-timing valve with a durable coalescing store: noncritical
-`timely` results delay and coalesce by stable fingerprint while presence is
-gaming/focused/busy/dnd or unknown, `ambient` results stay silent, only an
-owner-allowlisted critical key or an explicit owner reminder bypasses, an
-interrupted flush is recovered without loss, and a fact arriving mid-flush
-survives the stale confirmation. The valve is not wired into any production
-delivery path; that wiring is S12 scope. The Core suite passes 149 tests and
-the attention-valve suite 9 tests locally.
+S11 is locally verified after owner-audit remediation with only synthetic,
+non-delivering targets and no production change. The acceptance chain now uses
+the WakeOccurrence's exact generated Exchange and claimed WorkRun
+revision/fence/lease to commit a distinct system/internal scheduled instruction;
+that same authority binds the provider epoch and attempt, final assistant Turn,
+presentation outbox, one injected effect and durable terminal receipt. The
+fixture creates no ordinary user Turn. A real injected adapter throws
+`ETIMEDOUT` after the dispatch-start boundary; Core records hash-bound
+`ambiguous` evidence, and reopen/replay returns the terminal receipt without a
+second adapter call. Rotating the WorkRun fence rejects the stale final before
+an outbox or effect. A restart after `wakeDue()` commit claims the existing
+WorkRun once, while another tick creates no occurrence or WorkRun.
+
+The durable attention valve now coalesces an equivalent delayed fingerprint
+across gaming/focus→available instead of returning an immediate candidate while
+leaving a backlog duplicate. Ambient silence, focused/busy/dnd/unknown delay,
+owner-allowlisted critical delivery, explicit owner-reminder bypass, restart
+recovery, interrupted-flush recovery and fact-during-flush protection remain
+covered. Existing acceptance also retains concurrent duplicate/missed ticks,
+six-hour latest-only catch-up plus one aggregate skip event, clock rollback,
+DST gap/fold, all-or-nothing tick rollback, Activity stop/cancel, S10 paused
+migration candidates and the fact-only/no-send external-poll seam. The focused
+acceptance set passes 29/29 and the full Core suite passes 151/151 locally.
+Here “stale fence” means the Package E stale WorkRun revision/fence authority;
+the legacy visible-wake interlock remains exclusively S12 cutover scope.
 
 ## Source And Recovery Authority
 
@@ -253,9 +261,8 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S11 are complete; S12 production
-cutover waits on explicit owner production authorization and stays NOT STARTED
-until it is granted. The S5-era root-worktree drafts
+`docs/governance/active_sequence.md`. S0-S11 are complete. S12 production cutover waits on explicit owner production
+authorization and stays NOT STARTED until it is granted. The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the
 three retained runtime semantics were re-implemented on current main, and the
@@ -270,8 +277,8 @@ Package A and B.1 Core primitives exist in source; S5 verifies the local B.2
 final/outbox/effect/receipt loop, S7 completes local B.3 Node wiring, S8
 completes the local governed Ombre projection seam, S9 completes local Package
 C scheduling, S10 completes the migration inventory/rehearsal and external
-poll fact seam, and S11 completes the synthetic fault/attention acceptance
-including the unwired `attentionValve.mjs`. None is composed into the
+poll fact seam; S11 completes synthetic fault/attention acceptance, including
+the still-unwired `attentionValve.mjs`. None is composed into the
 production Node write path.
 Ombre Gate 5 is retired with O2 and the historical
 name is retained only as retired evidence; the single future Core production
