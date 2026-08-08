@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S2 FEISHU TRANSCRIPT CANDIDATE (2026-08-08)
+Status: S2 FEISHU TRANSCRIPT PROD_VERIFIED (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,7 +9,7 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_sha: c6c0baf6dfbcf2cc38a68986292f55649ec93932
+repository_sha: 2dc6d1a4d29ef7c9f37fb9e0076d51fd79417360
 companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
@@ -67,14 +67,23 @@ Hermes identity was observed on WeChat and Feishu, a real personal-memory hit
 was observed, and a Full-origin search capability completed through the
 unified runtime. `8643` remained absent.
 
+S2 accepted one production `feishu.minutes_to_doc` action envelope for the
+existing `个人成长` Minutes transcript with the four bounded scope fields and a
+421-character text-only DocxXML fragment. The canary stopped before the Node
+executor to avoid creating a duplicate. Before deployment, the same existing
+transcript was organized into one document directly in the uniquely matched
+`中海油` folder and passed document readback and folder-parent verification.
+The action path adds no ASR or PPT dependency.
+
 ## Source And Recovery Authority
 
 Binding.v4 completed the earlier runtime apply, rollback and reapply and records
 `runtimeRollbackAuthorized=false`; the retained Runtime controller, artifact,
 candidate ref, topology and snapshot state are evidence-only. S1 then completed
-the source dry-run, apply, source rollback and reapply at `c6c0baf`; the exact
-snapshot recorded by `source-snapshots/current-source.json` is now the source
-rollback authority. Runtime rollback remains forbidden.
+the source dry-run, apply, source rollback and reapply at `c6c0baf`. Post-S1
+source advances then accepted S2 at `2dc6d1a`; the exact snapshot recorded by
+`source-snapshots/current-source.json` is now the source rollback authority and
+retains the prior pointer chain. Runtime rollback remains forbidden.
 
 The owner authorized closing the v0.13 rollback window before the 2026-08-07
 cleanup. Closure relied on bounded v0.20 production acceptance plus the real
@@ -97,8 +106,10 @@ not the bare host-visible old profile; S1 source convergence superseded it.
 
 S1a was archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`;
 its bounded successor completed at
-`c6c0baf6dfbcf2cc38a68986292f55649ec93932`. Local, GitHub `main`, the clean
-production checkout and the accepted source pointer all converge on that SHA.
+`c6c0baf6dfbcf2cc38a68986292f55649ec93932`. The post-S1 source controller then
+advanced the clean production checkout and accepted source pointer to the S2
+runtime source `2dc6d1a4d29ef7c9f37fb9e0076d51fd79417360`. A later status-only
+documentation commit on `main` does not require runtime activation.
 The source shape keeps one `ran-agent-companion` profile, one `8642` route, the
 supported Lite/Full capability union and a fixed 15000 ms memory boundary.
 The source still aligns four production-backed contracts:
@@ -117,21 +128,13 @@ closed.
 
 ## Active Follow-Ups
 
-1. Archive, apply and accept the locally verified `feishu.minutes_to_doc`
-   candidate through the post-S1 source-pointer advance. It
-   reads an existing Minutes transcript through the authenticated user, creates
-   one structured cloud document directly in the uniquely matched destination
-   folder, and signs success only after document readback. The 2026-08-07
-   failure was an empty `actionRequests` envelope, not missing PPT input. This
-   path deliberately adds no ASR, attachment/PPT handling, polling or retry
-   framework.
-2. Improve Ombre ingestion and retrieval only after the current façade is
+1. Improve Ombre ingestion and retrieval only after the current façade is
    stable; use the existing free local embedding stack and do not add a paid
    provider by default.
 
 The remote branch set is intentionally `main` plus
-`codex/p2-memory-production-candidate`; retain the latter because it carries the
-exact production source lineage until a future main source cutover succeeds.
+`codex/p2-memory-production-candidate`; the latter is historical candidate
+lineage, not current production or rollback authority.
 
 Package A and B.1 Core primitives exist in source but are not composed into the
 production Node write path. Packages B.2/B.3 and Gate 5 have not started. O2 is

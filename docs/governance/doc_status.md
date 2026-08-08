@@ -8,23 +8,23 @@ journals belong in ignored `local_archive/` or the focused phase record.
 
 ## Current State
 
-Production, GitHub `main`, the clean source checkout and the accepted source
-pointer converge at `c6c0baf6dfbcf2cc38a68986292f55649ec93932` after the S1
-dry-run, apply, source rollback and reapply. Hermes v0.20 is `PROD_VERIFIED` for
-the bounded evidence in `current_runtime_status.md`. Runtime rollback is
-closed, retired v0.13 payloads are deleted, `18002` and O2 are inactive, and
-the direct loopback Ombre service on `18001` remains active. The earlier
-companion overlay is rollback-only evidence.
+The clean production checkout and accepted source pointer are at S2 runtime
+source `2dc6d1a4d29ef7c9f37fb9e0076d51fd79417360`; GitHub `main` contains the
+same runtime source plus status-only documentation. Hermes v0.20 is
+`PROD_VERIFIED` for the bounded evidence in `current_runtime_status.md`.
+Runtime rollback is closed, retired v0.13 payloads are deleted, `18002` and O2
+are inactive, and the direct loopback Ombre service on `18001` remains active.
+The earlier companion overlay is rollback-only evidence.
 
-The S2 source candidate adds one locally verified typed action for an existing
+S2 adds one production-verified typed action for an existing
 Feishu Minutes transcript: `feishu.minutes_to_doc`. It uses the authenticated
 user to resolve one transcript and one destination folder, creates one cloud
 document, and requires readback before a success receipt. It does not add ASR,
 PPT handling, polling or a general workflow framework. Its source controller
 also extends the existing S1 transaction to exact archived `main` descendants
 while retaining the prior source pointer as rollback authority. Production
-acceptance still requires applying the exact archived candidate and observing
-one real receipt.
+accepted a normalized action canary without replaying the executor against the
+already-created document.
 
 ## Lifecycle Stages
 
