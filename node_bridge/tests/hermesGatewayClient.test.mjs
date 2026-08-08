@@ -413,6 +413,11 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.equal(capturedBody.model, 'ran-assistant');
   assert.equal(capturedBody.stream, false);
   assert.match(capturedBody.messages[0].content, /Hermes/);
+  assert.doesNotMatch(capturedBody.messages[0].content, /"actionRequests":\[\]/);
+  assert.ok(
+    capturedBody.messages[0].content.indexOf('exact keys schemaVersion')
+      < capturedBody.messages[0].content.indexOf('For an owner request to organize an existing Feishu Minutes'),
+  );
   assert.match(capturedBody.messages[1].content, /时间/);
   assert.match(capturedBody.messages[1].content, /你好\n补一句/);
   assert.equal(response.reply_text, 'Hermes reply');
