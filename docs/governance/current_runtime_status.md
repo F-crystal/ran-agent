@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S2 FEISHU TRANSCRIPT PROD_VERIFIED (2026-08-08)
+Status: S3 PERSONAL MEMORY PROD_VERIFIED (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,7 +9,7 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_sha: 2dc6d1a4d29ef7c9f37fb9e0076d51fd79417360
+repository_sha: cc663876881e4d1f5cfb67f20d74230730a2f68c
 companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
@@ -50,7 +50,10 @@ confirmed Core events or other explicit sources.
 
 The converged source deploys main's strict query-only
 `personalMemoryMcpServer`, explicit `source_status`, Vault retrieval, Python
-extractor assembly, and a fixed 15000 ms child-process boundary.
+extractor assembly, and a fixed 15000 ms child-process boundary. For explicit
+owner requests, Hermes proposes the existing typed personal-learning action and
+Node accepts it only when the identifier, content class and exact scope format
+agree; Python remains the persistence owner.
 
 ## Delivery Evidence
 
@@ -74,6 +77,13 @@ executor to avoid creating a duplicate. Before deployment, the same existing
 transcript was organized into one document directly in the uniquely matched
 `中海油` folder and passed document readback and folder-parent verification.
 The action path adds no ASR or PPT dependency.
+
+S3 deployed source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A
+privacy-preserving production probe selected an existing active
+personal-learning record without printing its key or content and observed
+`personal_learning=hit` through `personal_memory`; the independent Ombre source
+returned the valid observable outcome `empty`. Node, Python, unified Hermes and
+direct Ombre remained active.
 
 ## Source And Recovery Authority
 
@@ -107,9 +117,9 @@ not the bare host-visible old profile; S1 source convergence superseded it.
 S1a was archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`;
 its bounded successor completed at
 `c6c0baf6dfbcf2cc38a68986292f55649ec93932`. The post-S1 source controller then
-advanced the clean production checkout and accepted source pointer to the S2
-runtime source `2dc6d1a4d29ef7c9f37fb9e0076d51fd79417360`. A later status-only
-documentation commit on `main` does not require runtime activation.
+advanced the clean production checkout and accepted source pointer through S2
+to the S3 runtime source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A later
+status-only documentation commit on `main` does not require runtime activation.
 The source shape keeps one `ran-agent-companion` profile, one `8642` route, the
 supported Lite/Full capability union and a fixed 15000 ms memory boundary.
 The source still aligns four production-backed contracts:
@@ -129,10 +139,10 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S3 is currently in progress: close one
-observable personal-memory capture-and-recall path through `personal_memory`,
-while keeping the independent read-only Ombre result observable. Reuse the
-existing free local embedding stack; do not add a paid provider by default.
+`docs/governance/active_sequence.md`. S4 is currently in progress: converge
+valid retained work, branches and worktrees, then delete the inactive O2
+compatibility implementation after proving that no active runtime depends on
+it. Preserve the root-worktree draft until its useful changes are classified.
 
 The remote branch set is intentionally `main` plus
 `codex/p2-memory-production-candidate`; the latter is historical candidate

@@ -47,18 +47,16 @@ The model has no API or token charge.
 
 ## Deployment Truth
 
-Production runs the S2 source
-`2dc6d1a4d29ef7c9f37fb9e0076d51fd79417360`, with unified Hermes and
+Production runs the S3 source
+`cc663876881e4d1f5cfb67f20d74230730a2f68c`, with unified Hermes and
 `personal_memory`; direct loopback Ombre recall on `18001` is active, while
 `18002` and O2 are inactive. The v0.13 rollback window is closed.
 
-S3 is locally verified but not deployed. Its bounded change teaches Hermes to
-emit the existing `memory.remember`, `memory.correct`, and `memory.forget`
-actions for explicit owner requests, tightens the Node valve for those scopes,
-and makes active personal learning visible through `personal_memory` recall.
-It does not mutate Ombre or enable O2. The inactive O2 compatibility
-implementation is scheduled for deletion in S4 after runtime references are
-proven absent.
+S3 is production verified: active personal learning is visible through
+`personal_memory`, the independent read-only Ombre outcome remains visible,
+and the four relevant services stayed active. It does not mutate Ombre or
+enable O2. The inactive O2 compatibility implementation is scheduled for
+deletion in S4 after runtime references are proven absent.
 
 ## Configuration
 
