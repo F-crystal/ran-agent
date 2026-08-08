@@ -142,6 +142,7 @@ test('companion receives canonical identity and validated published memory pre-t
   assert.match(prompt, /你是 Hermes Companion/);
   assert.match(prompt, /你是冉的长期个人助理/);
   assert.match(prompt, /Hermes 是 ran-agent 的前台对话 shell/);
+  assert.match(prompt, /feishu\.minutes_to_doc/);
   assert.match(prompt, /published_memory_status: loaded/);
   assert.match(prompt, new RegExp(snapshot.projection_revision.replace(':', '\\:')));
   assert.match(prompt, /activity_revision: 17/);

@@ -970,6 +970,7 @@ function buildHermesSystemInstruction() {
     'For co-reading, use co_reading only; private notes are unavailable.',
     'Do not call Tavily, OpenCLI, or Playwright unless search_hub fails and the user is debugging.',
     'Use media_reader for image/audio/video understanding.',
+    'For an owner request to organize an existing Feishu Minutes transcript into a cloud document, use lark-cli only to read the existing transcript, then return exactly one actionRequest with actionType "feishu.minutes_to_doc" and scope keys minuteTitle, folderTitle, documentTitle, contentXml. contentXml must be valid text-only DocxXML under 2400 characters and include its escaped <title>. Do not create the document with a tool, do not run ASR, and do not look for or create PPT files; the bridge performs and verifies the write.',
     'Return final json reply envelope: {"schemaVersion":1,"message":"好的，我会处理。","actionRequests":[],"activityRequest":null,"claims":[],"commitments":[]}. Keep keys exact; users see message only.',
     'Do not expose provider internals, tokens, cookies, signed URLs, or raw tool logs; if tool evidence is insufficient, say you are uncertain rather than guessing.',
     'Resolve pronouns like 她/他/这篇/这个故事/刚才那个/那张图 from recent messages before asking follow-up questions.',

@@ -36,6 +36,7 @@ import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
 import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
 import { createPersonalLearningExecutorAdapter } from './personalLearningClient.mjs';
 import { createAiDailyDigestExecutorAdapter } from './aiDailyDigestClient.mjs';
+import { createFeishuMinutesDocumentExecutorAdapter } from './feishuMinutesDocumentClient.mjs';
 import {
   deleteStickers,
   resolveStickerAsset,
@@ -66,6 +67,12 @@ export function createReplyBackend(options = {}) {
       fetchImpl: options.fetchImpl || globalThis.fetch,
     }));
     configuredExecutorAdapters.push(createAiDailyDigestExecutorAdapter({ env, fetchImpl: options.fetchImpl || globalThis.fetch }));
+  }
+  if (!options.trustedActionExecutors) {
+    configuredExecutorAdapters.push(createFeishuMinutesDocumentExecutorAdapter({
+      env,
+      execFileImpl: options.execFileImpl,
+    }));
   }
   const trustedActionExecutors = options.trustedActionExecutors || createTrustedExecutorAdapters({
     ledger: operationLedger,
@@ -221,6 +228,11 @@ export function createReplyBackend(options = {}) {
         : actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send')
           ? '日报生成或发送失败，未确认送达。'
           : '';
+      const feishuDocumentAcknowledgement = actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'feishu.minutes_to_doc' && receipt?.status === 'succeeded')
+        ? '已整理成云文档并放入目标文件夹。'
+        : actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'feishu.minutes_to_doc')
+          ? '云文档尚未通过回读确认，暂不确认已完成。'
+          : '';
       const coreAcknowledgement = commitmentBlocked
         ? ''
         : bridgeOwnedCoreAcknowledgement(replyEnvelope.commitments, durableReceiptSummaries);
@@ -232,6 +244,8 @@ export function createReplyBackend(options = {}) {
         response = { ...response, reply_text: coreAcknowledgement, follow_up_messages: [] };
       } else if (digestAcknowledgement) {
         response = { ...response, reply_text: digestAcknowledgement, follow_up_messages: [] };
+      } else if (feishuDocumentAcknowledgement) {
+        response = { ...response, reply_text: feishuDocumentAcknowledgement, follow_up_messages: [] };
       }
 
       const logger = options.logger || console;
@@ -255,6 +269,8 @@ export function createReplyBackend(options = {}) {
           ? 'bridge_learning_intent_guard'
         : digestAcknowledgement
           ? 'bridge_ai_daily_digest'
+        : feishuDocumentAcknowledgement
+          ? 'bridge_feishu_minutes_document'
         : coreAcknowledgement
           ? 'bridge_core_job_ack'
           : 'hermes';
@@ -815,6 +831,28 @@ function isActiveDurableReceipt(receipt, expected = {}) {
 
 function groundActionRequest(request, message = {}) {
   const actionType = String(request.actionType || '');
+  if (actionType === 'feishu.minutes_to_doc') {
+    const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
+    const userText = String(message.text || '');
+    const minuteTitle = String(scope.minuteTitle || '').trim();
+    const folderTitle = String(scope.folderTitle || '').trim();
+    if (!/(?:妙记|录音稿|文字稿|录音转文字)/.test(userText)
+      || !/(?:云文档|文档)/.test(userText)
+      || !minuteTitle || !folderTitle
+      || !normalizeGroundingText(userText).includes(normalizeGroundingText(minuteTitle))
+      || !normalizeGroundingText(userText).includes(normalizeGroundingText(folderTitle))) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    return {
+      ...request,
+      scope: {
+        minuteTitle,
+        folderTitle,
+        documentTitle: String(scope.documentTitle || '').trim(),
+        contentXml: String(scope.contentXml || '').trim(),
+      },
+    };
+  }
   if (actionType === 'ai_daily_digest.send') {
     const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
     const userText = String(message.text || '');

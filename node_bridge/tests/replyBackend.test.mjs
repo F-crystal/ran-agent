@@ -854,6 +854,70 @@ test('createReplyBackend issues and verifies a real receipt before preserving a 
   assert.equal(ledger.getOperation(executedOperationId).state, 'completed');
 });
 
+test('existing Feishu Minutes transcript becomes one read-back cloud document', async (t) => {
+  const env = tempStateEnv(t, {
+    HERMES_ACTION_GATE_MODE: 'enforce',
+    FEISHU_LARK_CLI_IDENTITY: 'user',
+  });
+  const calls = [];
+  const execFileImpl = async (_command, args) => {
+    calls.push(args);
+    const identity = { ok: true, identity: 'user' };
+    if (args[0] === 'minutes') return { stdout: JSON.stringify({ ...identity, data: { items: [{ token: 'minute1' }] } }) };
+    if (args[0] === 'drive') return { stdout: JSON.stringify({ ...identity, data: { results: [{ result_meta: { token: 'folder1' } }] } }) };
+    if (args[1] === '+create') return { stdout: JSON.stringify({ ...identity, data: { document: { document_id: 'doc1' } } }) };
+    if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...identity, data: { content: '<title>个人成长｜录音整理</title><p>已回读。</p>' } }) };
+    throw new Error('unexpected lark-cli call');
+  };
+  const backend = createReplyBackend({
+    env,
+    execFileImpl,
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1,
+        message: '正在整理。',
+        actionRequests: [{
+          requestRef: 'minutes-doc-1',
+          actionType: 'feishu.minutes_to_doc',
+          scope: {
+            minuteTitle: '个人成长',
+            folderTitle: '中海油',
+            documentTitle: '个人成长｜录音整理',
+            contentXml: '<title>个人成长｜录音整理</title><callout emoji="💡" background-color="light-blue"><p>整理摘要</p></callout>',
+          },
+        }],
+        activityRequest: null,
+        claims: [],
+        commitments: [],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    text: '把妙记里的个人成长录音稿整理成云文档，放到中海油文件夹',
+    sender_id: 'owner',
+    conversation_id: 'owner-conversation',
+    channel: 'wechat',
+    trusted_actor_context: {
+      actorKey: 'actor:wechat:owner:0001',
+      owner: true,
+      platform: 'wechat',
+      conversationKey: 'wechat:dm:conversation',
+    },
+  });
+
+  assert.equal(response.replyText, '已整理成云文档并放入目标文件夹。');
+  assert.equal(response.source, 'bridge_feishu_minutes_document');
+  assert.deepEqual(calls.map((args) => args.slice(0, 2)), [
+    ['minutes', '+search'],
+    ['drive', '+search'],
+    ['docs', '+create'],
+    ['docs', '+fetch'],
+  ]);
+});
+
 test('createReplyBackend grounds personal learning in the trusted user turn before execution', async (t) => {
   const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
   const ledger = createOperationLedger({ env });

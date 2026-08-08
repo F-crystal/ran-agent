@@ -69,6 +69,8 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 
 **飞书和桌面入口。** 飞书桥接通过 `lark-cli event consume im.message.receive_v1 --as bot` 消费消息，并通过 `im +messages-send` 回复；桌面客户端通过 ran-agent 的 OpenAI-compatible Proxy 接入，避免绕过 ChannelHub、统一身份/Timeline，以及 action/evidence gates。
 
+**妙记整理成云文档。** Owner 可以指定一份已存在的飞书妙记文字稿和目标文件夹；Hermes 读取现成文字稿并声明 `feishu.minutes_to_doc`，Node 以已授权 user 身份创建文档，回读成功后才确认完成。该窄链路不做 ASR，也不查找或生成 PPT。
+
 **每日 AI 日报。** 可选启用 `AI_DAILY_DIGEST_ENABLED=true`，Python scheduler 每天 08:00 拉取 AIHOT 事实，作为合成的飞书私聊 turn 进入 `ChannelHub -> Hermes`，由 Hermes 按 `src/personal_agent/prompts/ai_daily_digest_report.md` 生成报道式日报，再通过现有飞书回复路径发回给你。它不打开旧 proactive check-in、reminder 或 life-loop 外发。
 
 **联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。统一 profile 保留旧 Full 的 Playwright fallback；OpenCLI browser-backed 默认关闭。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。

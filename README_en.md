@@ -71,6 +71,8 @@ known limitations.
 
 **Feishu and desktop entries.** Feishu bridge consumes messages with `lark-cli event consume im.message.receive_v1 --as bot` and replies through `im +messages-send`; desktop clients connect to ran-agent's OpenAI-compatible proxy so they do not bypass ChannelHub, unified identity/Timeline, or action/evidence gates.
 
+**Minutes transcript to cloud document.** The owner can name one existing Feishu Minutes transcript and destination folder. Hermes reads the existing transcript and declares `feishu.minutes_to_doc`; Node creates the document as the authorized user and confirms completion only after readback. This narrow path performs no ASR and does not search for or generate PPT files.
+
 **Daily AI digest.** Optionally enable `AI_DAILY_DIGEST_ENABLED=true`; the Python scheduler fetches AIHOT facts at 08:00, sends a synthetic Feishu DM turn through `ChannelHub -> Hermes`, lets Hermes write the report-style digest from `src/personal_agent/prompts/ai_daily_digest_report.md`, and delivers it through the existing Feishu reply path. This does not re-enable old proactive check-ins, reminders, or life-loop outbound messages.
 
 **Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. The unified profile retains the old Full Playwright fallback; OpenCLI browser-backed mode remains disabled. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.

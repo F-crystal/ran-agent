@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S1 SOURCE-CUTOVER CANDIDATE (2026-08-08)
+Status: S2 FEISHU TRANSCRIPT CANDIDATE (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,8 +9,8 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_sha: 2c8e97cacd1d2eaed30738abe621f3393cffb885 before S1; accepted current-source pointer after S1
-companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 before S1; rollback-only after accepted current-source pointer
+repository_sha: c6c0baf6dfbcf2cc38a68986292f55649ec93932
+companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
 runtime_stage: PROD_VERIFIED for the bounded channel, identity, memory, capability, topology and 2026-08-07 digest evidence
@@ -48,12 +48,9 @@ facts or deployment truth. Core and governed runtime documents remain the
 authorities; future Ombre ingestion must be a rebuildable projection from
 confirmed Core events or other explicit sources.
 
-The accepted overlay deploys main's strict query-only `personalMemoryMcpServer`,
-explicit `source_status`, Vault retrieval, and Python extractor assembly. The
-active MCP child uses its 15000 ms default even though later Home/Profile env
-files still give the Hermes parent an irrelevant 5000 ms value. The current
-source candidate removes the configurable child deadline and fixes the actual
-process boundary at 15000 ms; this is locally verified but not source-deployed.
+The converged source deploys main's strict query-only
+`personalMemoryMcpServer`, explicit `source_status`, Vault retrieval, Python
+extractor assembly, and a fixed 15000 ms child-process boundary.
 
 ## Delivery Evidence
 
@@ -72,13 +69,12 @@ unified runtime. `8643` remained absent.
 
 ## Source And Recovery Authority
 
-Binding.v4 completed the earlier source apply, rollback and reapply and records
+Binding.v4 completed the earlier runtime apply, rollback and reapply and records
 `runtimeRollbackAuthorized=false`; the retained Runtime controller, artifact,
-candidate ref, topology and snapshot state are evidence-only. Before S1, its
-source controller remains the recovery authority for the accepted overlay
-baseline. After `source-snapshots/current-source.json` is accepted, the exact
-candidate controller and snapshot recorded there become the source rollback
-authority. Runtime rollback remains forbidden in both states.
+candidate ref, topology and snapshot state are evidence-only. S1 then completed
+the source dry-run, apply, source rollback and reapply at `c6c0baf`; the exact
+snapshot recorded by `source-snapshots/current-source.json` is now the source
+rollback authority. Runtime rollback remains forbidden.
 
 The owner authorized closing the v0.13 rollback window before the 2026-08-07
 cleanup. Closure relied on bounded v0.20 production acceptance plus the real
@@ -94,21 +90,17 @@ client-lifetime and rollback-readiness defects. Candidate
 `dc5fcf13f86483073c54ac046e1b238a90c91921` then ran under a transient systemd
 unit and was accepted at `2026-08-07T12:46:10Z`. Its transaction records the
 exact profile, MCP namespace, Python source, drop-in and overlay digests. The
-active rollback target is therefore the real `2c8e97c + accepted overlay`
-topology, not the bare host-visible old profile.
+historical rollback target was the real `2c8e97c + accepted overlay` topology,
+not the bare host-visible old profile; S1 source convergence superseded it.
 
 ## Main Source State
 
-S1a was archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`.
-The authorized bounded successor adds only candidate-extracted source
-dry-run/apply/rollback modes and their governance/test contract. Before its
-accepted private `source-snapshots/current-source.json` pointer exists,
-production remains `2c8e97c + accepted overlay`; after it exists, the exact
-candidate recorded there is the clean production checkout and source rollback
-authority. The source shape keeps one `ran-agent-companion` profile, one `8642`
-route, the supported Lite/Full capability union and a fixed 15000 ms memory
-boundary. The 244-file diff and consumed non-secret runtime env keys were
-already audited and are not re-reviewed during apply.
+S1a was archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`;
+its bounded successor completed at
+`c6c0baf6dfbcf2cc38a68986292f55649ec93932`. Local, GitHub `main`, the clean
+production checkout and the accepted source pointer all converge on that SHA.
+The source shape keeps one `ran-agent-companion` profile, one `8642` route, the
+supported Lite/Full capability union and a fixed 15000 ms memory boundary.
 The source still aligns four production-backed contracts:
 
 - canonical `memory_bge_vector_index.*` paths;
@@ -123,13 +115,13 @@ continues to fail closed.
 
 ## Active Follow-Ups
 
-1. After source convergence, close the existing-asset Feishu workflow as one bounded
-   typed request/receipt path: organize an existing Minutes transcript and
-   existing attachment into a cloud document, move it to the requested folder,
-   and return the verified document and move result. The 2026-08-07 probe
-   produced no action request or trusted evidence, so the completion gate
-   correctly refused to claim success. Do not add ASR or presentation
-   generation to this path.
+1. Apply and accept the locally verified `feishu.minutes_to_doc` candidate. It
+   reads an existing Minutes transcript through the authenticated user, creates
+   one structured cloud document directly in the uniquely matched destination
+   folder, and signs success only after document readback. The 2026-08-07
+   failure was an empty `actionRequests` envelope, not missing PPT input. This
+   path deliberately adds no ASR, attachment/PPT handling, polling or retry
+   framework.
 2. Improve Ombre ingestion and retrieval only after the current façade is
    stable; use the existing free local embedding stack and do not add a paid
    provider by default.

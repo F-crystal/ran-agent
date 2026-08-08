@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-07)
+Status: CURRENT (2026-08-08)
 
 This file is the public documentation index and conflict rule. Current runtime
 facts live in `docs/governance/current_runtime_status.md`; historical deployment
@@ -8,25 +8,21 @@ journals belong in ignored `local_archive/` or the focused phase record.
 
 ## Current State
 
-Before the authorized S1 source pointer exists, production is clean at
-`2c8e97cacd1d2eaed30738abe621f3393cffb885` plus the accepted overlay. After
-`source-snapshots/current-source.json` is accepted, its exact candidate is the
-clean production checkout and source rollback authority. Hermes v0.20 is
-`PROD_VERIFIED` for the bounded
-evidence recorded in `current_runtime_status.md`. Runtime rollback is closed,
-the retired v0.13 payloads are deleted, `18002` and O2 are inactive, and the
-direct loopback Ombre service on `18001` remains active. An accepted companion
-overlay from `dc5fcf13f86483073c54ac046e1b238a90c91921` supplies the active
-profile, MCP namespace and Python memory seam without changing the source
-checkout. The active child already uses a 15000 ms deadline; the locally
-verified S1a source candidate makes that value constant at the child process
-boundary but is not deployed.
+Production, GitHub `main`, the clean source checkout and the accepted source
+pointer converge at `c6c0baf6dfbcf2cc38a68986292f55649ec93932` after the S1
+dry-run, apply, source rollback and reapply. Hermes v0.20 is `PROD_VERIFIED` for
+the bounded evidence in `current_runtime_status.md`. Runtime rollback is
+closed, retired v0.13 payloads are deleted, `18002` and O2 are inactive, and
+the direct loopback Ombre service on `18001` remains active. The earlier
+companion overlay is rollback-only evidence.
 
-S1a is archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`.
-Its bounded successor adds only the authorized candidate-extracted source
-transaction and governance/tests. The exact production source line remains on
-`codex/p2-memory-production-candidate` until the accepted S1 source pointer is
-published.
+The S2 source candidate adds one locally verified typed action for an existing
+Feishu Minutes transcript: `feishu.minutes_to_doc`. It uses the authenticated
+user to resolve one transcript and one destination folder, creates one cloud
+document, and requires readback before a success receipt. It does not add ASR,
+PPT handling, polling or a general workflow framework. Production acceptance
+still requires applying the exact archived candidate and observing one real
+receipt.
 
 ## Lifecycle Stages
 
@@ -50,7 +46,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `AGENTS.md` | Repo-root operating rules |
 | `CLAUDE.md` | Claude shim pointing to canonical `AGENTS.md` |
 | `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
-| `hermes/profile/config.companion.yaml` | Next unified source profile; not deployed |
+| `hermes/profile/config.companion.yaml` | Deployed unified companion source profile |
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
 | `docs/governance/hermes-core-foundation.md` | Package A boundary and frozen Schema v1 |

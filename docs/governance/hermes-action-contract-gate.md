@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: CURRENT (2026-07-13)
+Status: CURRENT (2026-08-08)
 
 ## Why Not Prompt Only
 
@@ -14,6 +14,14 @@ reply prose. In `enforce` mode, the bridge can replace unsupported action claims
 with a short, honest fallback. In `repair` mode, only an explicitly injected,
 bounded retry for an already declared trusted action may run before the same
 safe rewrite.
+
+`feishu.minutes_to_doc` is the single document-write action currently
+registered. Hermes must first read an existing Minutes transcript, then declare
+the transcript title, destination folder title, document title and bounded
+DocxXML. Node grounds both titles in the current owner request, uniquely resolves
+the existing resources under the authenticated user, creates the document in
+that folder, and accepts success only after document readback. Ambiguous lookup
+or unknown write state fails without automatic retry.
 
 ## Delivery Boundary
 
