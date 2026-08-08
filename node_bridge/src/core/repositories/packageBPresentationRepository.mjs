@@ -452,7 +452,7 @@ export function createPackageBPresentationReader({ read, all }) {
       payload.content_hash_token AS payload_hash_token,
       substr(binding_receipt.source_kind,length('package_b_presentation_binding_destination:')+1) AS destination_kind,
       binding.destination_ref AS destination_ref, binding.source_instance_id AS route_source_instance_id,
-      binding.revision AS route_revision
+      binding.platform AS route_platform, binding.revision AS route_revision
       FROM presentation_outbox outbox
       JOIN journal_event event ON event.event_type=? AND event.correlation_id=outbox.presentation_outbox_id
       JOIN journal_payload payload ON payload.journal_event_id=event.journal_event_id
@@ -467,7 +467,7 @@ export function createPackageBPresentationReader({ read, all }) {
       payload.content_hash_token AS payload_hash_token,
       substr(binding_receipt.source_kind,length('package_b_presentation_binding_destination:')+1) AS destination_kind,
       binding.destination_ref AS destination_ref, binding.source_instance_id AS route_source_instance_id,
-      binding.revision AS route_revision
+      binding.platform AS route_platform, binding.revision AS route_revision
       FROM presentation_outbox outbox
       JOIN semantic_turn turn ON turn.semantic_turn_id=outbox.semantic_turn_id
       JOIN journal_event event ON event.event_type=? AND event.correlation_id=outbox.presentation_outbox_id

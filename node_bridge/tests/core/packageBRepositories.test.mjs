@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { openCoreDatabase } from '../../src/core/coreDb.mjs';
+import { runPackageBLocalDelivery } from '../../src/core/packageB/packageBDeliveryService.mjs';
 import { createTempCore } from './helpers/testCoreInspector.mjs';
 
 const AT = '2026-07-17T00:00:00.000Z';
@@ -784,6 +785,52 @@ test('dispatch-start is a one-time may-have-sent boundary with lease, fence, rep
   assert.equal(recovered.dispatchAuthorized, false);
   assert.equal(reopened.reader.packageBPresentation.outbox({ identity: ready.conversation.identity, conversationId: CONVERSATION, outboxId: 'outbox-z' }).state, 'ambiguous');
   assert.equal(reopened.reader.packageBPresentation.outbox({ identity: ready.conversation.identity, conversationId: 'wrong', outboxId: 'outbox-z' }), undefined);
+  await reopened.close();
+});
+
+test('Package B.2 local loop commits final, performs one effect, and replays the typed receipt', async (t) => {
+  const { core, dbPath } = await openFixture(t, 'hermes-core-b2-local-loop-');
+  const ready = await seedFinalReady(core);
+  let effects = 0;
+  const input = {
+    core,
+    identity: ready.conversation.identity,
+    finalInput: finalInput(ready.attempt, { presentations: [finalInput(ready.attempt).presentations[0]] }),
+    outboxId: 'outbox-z',
+    workerId: 'worker-b2',
+    claimedAt: LATER_2,
+    leaseUntil: HARD,
+    startedAt: LATER_2,
+    recordedAt: LATER_3,
+    send: async (item) => {
+      effects += 1;
+      assert.deepEqual(item, {
+        outboxId: 'outbox-z', target: 'desktop:conversation', platform: 'desktop',
+        destinationKind: 'conversation', presentationKind: 'text', payloadRef: 'presentation:z',
+        payloadHashToken: TOKEN, routeRevision: 0,
+      });
+      return { resultState: 'sent', evidenceRef: 'evidence:b2:sent', evidenceHashToken: TOKEN, errorClass: null };
+    },
+  };
+
+  const first = await runPackageBLocalDelivery(input);
+  assert.equal(first.final.disposition, 'applied');
+  assert.deepEqual(first.delivery, {
+    disposition: 'applied', state: 'sent', effectAttempted: true,
+    outboxId: 'outbox-z', receiptId: first.delivery.receiptId,
+  });
+  assert.equal(effects, 1);
+  await core.close();
+
+  const reopened = openCoreDatabase({ dbPath });
+  const replay = await runPackageBLocalDelivery({ ...input, core: reopened });
+  assert.equal(replay.final.disposition, 'already_applied');
+  assert.deepEqual(replay.delivery, {
+    disposition: 'terminal', state: 'sent', effectAttempted: false, outboxId: 'outbox-z',
+  });
+  assert.equal(reopened.reader.journalEvent(first.delivery.receiptId).event_type,
+    'package_b_presentation_result_recorded');
+  assert.equal(effects, 1);
   await reopened.close();
 });
 

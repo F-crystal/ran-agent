@@ -1,11 +1,12 @@
 # Hermes Core Foundation
 
-Status: CURRENT (2026-08-05)
+Status: CURRENT (2026-08-08)
 
-This document records the public source-level status of Hermes Core Package A
-and the owner-accepted Package B.1 typed business transactions. It is not a
-deployment record and does not change the current production runtime described
-by `docs/governance/current_runtime_status.md`.
+This document records the public source-level status of Hermes Core Package A,
+the owner-accepted Package B.1 typed business transactions, and the locally
+verified Package B.2 delivery seam. It is not a deployment record and does not
+change the production runtime described by
+`docs/governance/current_runtime_status.md`.
 
 ## Status Boundary
 
@@ -25,12 +26,17 @@ by `docs/governance/current_runtime_status.md`.
   The existing typed reader can discover cold-start recovery work without an
   identity seed while retaining verified Conversation scope, canonical scoped
   pagination, and fail-closed corruption handling.
-- Core is not connected to `channelHub`, `replyBackend`, any frontend,
-  provider history, or a presentation adapter.
+- Package B.2 adds one local orchestration seam in
+  `node_bridge/src/core/packageB/packageBDeliveryService.mjs`. It composes the
+  existing final transaction, outbox claim and dispatch-start boundary, one
+  injected adapter effect, and the typed result receipt. Reopen/replay returns
+  the terminal result without invoking the effect again.
+- Core is not connected to `channelHub`, `replyBackend`, any frontend, or
+  provider history. The B.2 adapter is injected only by local callers/tests.
 - Legacy Timeline, durable outbox, Python ingest/memory writers, and other
   legacy writers remain active in the current runtime.
 - No Core write path has been deployed or enabled in production. Package B.2
-  has not started, and the one-time production cutover is not authorized.
+  is local-only, and the one-time production cutover is not authorized.
 
 ## Scheduling And Runtime Target
 
@@ -111,7 +117,7 @@ transaction. Provider Epoch identity and source snapshot bindings are
 immutable; typed state transitions and sequential attempts retain sufficient
 non-secret metadata for close/reopen rebuild readback.
 
-The stable foundation available to a future Package B.2 service now includes
+The foundation composed by the local Package B.2 service includes
 atomic ingress plus immutable assembly intent, atomic part/reference plus
 processing transition, durable reference/deferred history, parent-scoped
 recovery and candidate readers, global pending-ingress cold-start discovery,
@@ -120,11 +126,11 @@ and a seal digest computed from persisted reference state.
 primitives remain compatibility and diagnostic surfaces whose half-states are
 explicitly exposed by typed readers rather than hidden.
 
-This accepted source foundation remains inactive. `node_bridge/src/index.mjs`
-does not compose the Package B path, and ChannelHub, frontends, provider
-gateway/history, Global Timeline, `durableOutbox`, and Python ingest remain on
-their existing production paths. Package B.2 service orchestration has not
-been implemented.
+This accepted source remains inactive in production.
+`node_bridge/src/index.mjs` does not compose the Package B path, and ChannelHub,
+frontends, provider gateway/history, Global Timeline, `durableOutbox`, and
+Python ingest remain on their existing production paths. Package B.2 adds no
+second store, schema migration, runtime flag, or production fallback.
 
 ## Operation Identity
 

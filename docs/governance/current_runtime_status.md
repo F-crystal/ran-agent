@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5 IN_PROGRESS (2026-08-08)
+Status: S4 PROD_VERIFIED; S5 LOCAL_VERIFIED (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -96,6 +96,12 @@ direct Ombre active. Node had no O2 environment residue; `18001` was open and
 after a verified Git bundle plus binary patches and untracked-file archives
 made their remaining drafts recoverable.
 
+S5 local verification composes the existing Package B final transaction,
+presentation outbox claim and dispatch-start boundary, one injected effect and
+typed terminal receipt. The focused reopen/replay check invokes the effect once
+and returns the durable sent state on replay; all 121 Core tests pass. No
+production service, database, route, flag or source pointer changed.
+
 ## Source And Recovery Authority
 
 Binding.v4 completed the earlier runtime apply, rollback and reapply and records
@@ -130,8 +136,9 @@ S1a was archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`;
 its bounded successor completed at
 `c6c0baf6dfbcf2cc38a68986292f55649ec93932`. The post-S1 source controller then
 advanced the clean production checkout and accepted source pointer through S4
-to runtime source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. A later
-status-only documentation commit on `main` does not require runtime activation.
+to runtime source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. GitHub `main`
+also contains the local-only S5 B.2 seam; production remains on the accepted S4
+source until a separately authorized cutover.
 The source shape keeps one `ran-agent-companion` profile, one `8642` route, the
 supported Lite/Full capability union and a fixed 15000 ms memory boundary.
 The source still aligns four production-backed contracts:
@@ -151,19 +158,20 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S4 is complete and S5 is in progress.
-S5 begins from the preserved root-worktree draft and must classify its useful
-Core B.2 changes against current `main` before integration; it does not imply a
-production cutover.
+`docs/governance/active_sequence.md`. S0-S5 are complete and the ready frontier
+is empty. The preserved root-worktree draft was classified separately from S5:
+its legacy `durableOutbox` proactive-delivery changes were not treated as Core
+B.2 or merged wholesale.
 
 The remote branch set is intentionally `main` only. Historical candidate
 branches are neither production nor rollback authority; recoverable local S4
 convergence artifacts remain ignored under `local_archive/`.
 
-Package A and B.1 Core primitives exist in source but are not composed into the
-production Node write path. Local B.2 integration is in progress; B.3 and Gate
-5 have not started. O2 is a retired migration-era path; only rollback evidence
-may remain.
+Package A and B.1 Core primitives exist in source, and S5 locally verifies one
+B.2 final-transaction/outbox/effect/result-receipt loop with 121 passing Core
+tests and reopen/replay without a second effect. It is not composed into the
+production Node write path; B.3 and Gate 5 have not started. O2 is a retired
+migration-era path; only rollback evidence may remain.
 
 ## Protected State
 

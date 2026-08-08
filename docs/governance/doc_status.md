@@ -10,8 +10,8 @@ work order and completion state live in `docs/governance/active_sequence.md`.
 ## Current State
 
 The clean production checkout and accepted source pointer are at S4 runtime
-source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; GitHub `main` contains the
-same runtime source. Hermes v0.20 is
+source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; it remains an ancestor of
+GitHub `main`. Hermes v0.20 is
 `PROD_VERIFIED` for the bounded evidence in `current_runtime_status.md`.
 Runtime rollback is closed, retired v0.13 payloads are deleted, `18002` and O2
 are absent, and the direct loopback Ombre service on `18001` remains active.
@@ -34,8 +34,11 @@ persistence and recall. An existing active fact produced
 read-only Ombre outcome remained observable. S4 is complete: production no
 longer contains the inactive O2 implementation or its dedicated
 Steward/token/model/gate seams, direct Ombre on `18001` remains active, and old
-worktrees/branches were closed after recoverable snapshots. S5 is now the only
-active stage and is local-only until separately authorized for production.
+worktrees/branches were closed after recoverable snapshots. S5 is locally
+verified and completes the current S sequence: one B.2 typed
+transaction/outbox/effect/receipt loop replays after reopen without a duplicate
+effect. It remains disconnected from production, and the ready frontier is
+empty.
 
 ## Lifecycle Stages
 
