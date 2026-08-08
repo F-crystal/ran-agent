@@ -44,7 +44,9 @@ typed adapter receipt and does not change production. S8 is locally verified:
 the owner-authorized internal projector binds content to confirmed Core payload
 hashes, recovers lost Ombre responses without duplicate growth, and supports
 scope erasure/rebuild while the public recall surface remains read-only. It is
-not composed into production. S9 Package C scheduling is now `IN_PROGRESS`.
+not composed into production. S9 Package C scheduling is locally verified:
+Schema v2, deterministic occurrences and the injected managed tick remain
+disconnected from production. S10 migration rehearsal is now `IN_PROGRESS`.
 
 ## Lifecycle Stages
 

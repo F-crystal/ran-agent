@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 
 import { coreError } from './coreErrors.mjs';
-import { CORE_SCHEMA_V1 } from './coreSchema.mjs';
+import { CORE_SCHEMA_V1, CORE_SCHEMA_V2 } from './coreSchema.mjs';
 
 function quoteIdentifier(value) {
   return `"${String(value).replaceAll('"', '""')}"`;
@@ -67,11 +67,11 @@ export function coreSchemaFingerprint(manifest) {
   return createHash('sha256').update(JSON.stringify(manifest), 'utf8').digest('hex');
 }
 
-function buildExpectedV1() {
+function buildExpected(statements) {
   const db = new DatabaseSync(':memory:');
   try {
     db.exec('PRAGMA foreign_keys=ON');
-    for (const statement of CORE_SCHEMA_V1) db.exec(statement);
+    for (const statement of statements) db.exec(statement);
     const expectedNames = db.prepare(`SELECT type, name FROM sqlite_schema
       WHERE type IN ('table','index','trigger','view')
         AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
@@ -87,7 +87,10 @@ function buildExpectedV1() {
   }
 }
 
-const EXPECTED_BY_VERSION = new Map([[1, buildExpectedV1()]]);
+const EXPECTED_BY_VERSION = new Map([
+  [1, buildExpected(CORE_SCHEMA_V1)],
+  [2, buildExpected([...CORE_SCHEMA_V1, ...CORE_SCHEMA_V2])],
+]);
 
 export function expectedCoreSchemaFingerprint(version) {
   const expected = EXPECTED_BY_VERSION.get(version);

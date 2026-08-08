@@ -394,7 +394,7 @@ test('Work Run state CAS keeps fence unchanged and fence rotation is strictly in
   assert.deepEqual({ ...raw.prepare("SELECT revision,fence_token FROM work_run WHERE work_run_id='run'").get() }, persisted);
   raw.close();
   const finalReopen = openCoreDatabase({ dbPath });
-  assert.equal(finalReopen.reader.schemaVersion(), 1);
+  assert.equal(finalReopen.reader.schemaVersion(), 2);
   await finalReopen.close();
 });
 

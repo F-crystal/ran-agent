@@ -1,6 +1,6 @@
 import { keyedContentHashSqlCheck } from './coreHashToken.mjs';
 
-export const CORE_SCHEMA_VERSION = 1;
+export const CORE_SCHEMA_VERSION = 2;
 
 const strictNonNegativeIntegerCheck = (column) => `typeof(${column}) = 'integer' AND ${column} >= 0`;
 const fenceOperationKeyCheck = (column) => `length(${column}) BETWEEN 1 AND 200
@@ -27,6 +27,7 @@ export const CORE_TABLES = Object.freeze([
   'effect_observation', 'effect_receipt', 'living_identity', 'facet_revision',
   'facet_evidence_link', 'soul_revision', 'soul_revision_facet',
   'soul_change_receipt', 'runtime_interaction_override',
+  'schedule_spec', 'schedule_spec_revision', 'wake_occurrence',
 ]);
 
 export const CORE_SCHEMA_V1 = Object.freeze([
@@ -1381,4 +1382,80 @@ export const CORE_SCHEMA_V1 = Object.freeze([
         )
     )
     BEGIN SELECT RAISE(ABORT, 'active Soul pointer requires matching successful receipt'); END`,
+]);
+
+export const CORE_SCHEMA_V2 = Object.freeze([
+  `CREATE TABLE schedule_spec_revision (
+    schedule_spec_revision_id TEXT PRIMARY KEY,
+    schedule_spec_id TEXT NOT NULL,
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    recurrence_kind TEXT NOT NULL CHECK(recurrence_kind IN ('one_shot','interval','daily')),
+    recurrence_json TEXT NOT NULL CHECK(length(trim(recurrence_json)) > 0),
+    task_kind TEXT NOT NULL CHECK(task_kind IN ('scheduled_instruction','system_maintenance','external_poll')),
+    payload_ref TEXT NOT NULL CHECK(length(trim(payload_ref)) > 0),
+    catch_up_policy TEXT NOT NULL CHECK(catch_up_policy IN ('skip','latest','bounded')),
+    catch_up_limit INTEGER NOT NULL CHECK(typeof(catch_up_limit) = 'integer' AND catch_up_limit BETWEEN 1 AND 8),
+    activity_contract_revision INTEGER NOT NULL CHECK(activity_contract_revision >= 0),
+    operation_key TEXT NOT NULL CHECK(${fenceOperationKeyCheck('operation_key')}),
+    semantic_digest TEXT NOT NULL CHECK(${operationSemanticDigestCheck('semantic_digest')}),
+    causation_id TEXT NOT NULL,
+    conversation_id TEXT,
+    presentation_binding_id TEXT,
+    expected_binding_revision INTEGER CHECK(expected_binding_revision IS NULL OR expected_binding_revision >= 0),
+    created_at TEXT NOT NULL,
+    UNIQUE(schedule_spec_id, revision),
+    UNIQUE(schedule_spec_id, operation_key),
+    UNIQUE(schedule_spec_revision_id, schedule_spec_id),
+    FOREIGN KEY (schedule_spec_id) REFERENCES schedule_spec(schedule_spec_id) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (causation_id) REFERENCES journal_event(journal_event_id),
+    FOREIGN KEY (conversation_id) REFERENCES conversation(conversation_id),
+    FOREIGN KEY (presentation_binding_id, conversation_id)
+      REFERENCES presentation_binding(presentation_binding_id, conversation_id),
+    CHECK(
+      (conversation_id IS NULL AND presentation_binding_id IS NULL AND expected_binding_revision IS NULL) OR
+      (conversation_id IS NOT NULL AND presentation_binding_id IS NOT NULL
+        AND expected_binding_revision IS NOT NULL AND task_kind = 'scheduled_instruction')
+    )
+  ) STRICT`,
+  `CREATE TABLE schedule_spec (
+    schedule_spec_id TEXT PRIMARY KEY,
+    activity_id TEXT NOT NULL,
+    current_revision_id TEXT NOT NULL,
+    next_due_at TEXT,
+    state TEXT NOT NULL CHECK(state IN ('enabled','exhausted','retired')),
+    revision INTEGER NOT NULL CHECK(revision >= 1),
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (activity_id) REFERENCES activity(activity_id),
+    FOREIGN KEY (current_revision_id, schedule_spec_id)
+      REFERENCES schedule_spec_revision(schedule_spec_revision_id, schedule_spec_id)
+      DEFERRABLE INITIALLY DEFERRED,
+    CHECK((state = 'enabled') = (next_due_at IS NOT NULL))
+  ) STRICT`,
+  `CREATE TABLE wake_occurrence (
+    wake_occurrence_id TEXT PRIMARY KEY,
+    schedule_spec_id TEXT NOT NULL,
+    schedule_spec_revision_id TEXT NOT NULL,
+    scheduled_for TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    UNIQUE(schedule_spec_id, scheduled_for),
+    FOREIGN KEY (schedule_spec_id) REFERENCES schedule_spec(schedule_spec_id),
+    FOREIGN KEY (schedule_spec_revision_id, schedule_spec_id)
+      REFERENCES schedule_spec_revision(schedule_spec_revision_id, schedule_spec_id)
+  ) STRICT`,
+  `ALTER TABLE work_run ADD COLUMN wake_occurrence_id TEXT REFERENCES wake_occurrence(wake_occurrence_id)`,
+  `CREATE INDEX schedule_due ON schedule_spec(state, next_due_at, schedule_spec_id)`,
+  `CREATE INDEX wake_occurrence_schedule ON wake_occurrence(schedule_spec_id, scheduled_for)`,
+  `CREATE TRIGGER schedule_spec_revision_no_update BEFORE UPDATE ON schedule_spec_revision
+    BEGIN SELECT RAISE(ABORT, 'schedule spec revision is append-only'); END`,
+  `CREATE TRIGGER schedule_spec_revision_no_delete BEFORE DELETE ON schedule_spec_revision
+    BEGIN SELECT RAISE(ABORT, 'schedule spec revision is append-only'); END`,
+  `CREATE TRIGGER wake_occurrence_no_update BEFORE UPDATE ON wake_occurrence
+    BEGIN SELECT RAISE(ABORT, 'wake occurrence is append-only'); END`,
+  `CREATE TRIGGER wake_occurrence_no_delete BEFORE DELETE ON wake_occurrence
+    BEGIN SELECT RAISE(ABORT, 'wake occurrence is append-only'); END`,
+  `CREATE TRIGGER work_run_occurrence_immutable
+    BEFORE UPDATE OF wake_occurrence_id ON work_run
+    WHEN NEW.wake_occurrence_id IS NOT OLD.wake_occurrence_id
+    BEGIN SELECT RAISE(ABORT, 'Work Run occurrence binding is immutable'); END`,
 ]);

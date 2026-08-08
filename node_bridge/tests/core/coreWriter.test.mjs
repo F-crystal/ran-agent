@@ -86,7 +86,7 @@ test('second Core owner for the same canonical database is rejected until close'
   assert.throws(() => openCoreDatabase({ dbPath }), { code: 'CORE_WRITER_ALREADY_ACTIVE' });
   await core.close();
   const replacement = openCoreDatabase({ dbPath });
-  assert.equal(replacement.reader.schemaVersion(), 1);
+  assert.equal(replacement.reader.schemaVersion(), 2);
   await replacement.close();
 });
 

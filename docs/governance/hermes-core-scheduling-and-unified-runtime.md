@@ -4,10 +4,10 @@ Status: CURRENT (2026-08-08)
 
 Lifecycle: Runtime Phase `PROD_VERIFIED` for the bounded channel, identity,
 memory, capability, topology and 2026-08-07 digest evidence in
-`docs/governance/current_runtime_status.md`; Core Phase `DESIGNED`.
+`docs/governance/current_runtime_status.md`; Core Package C `LOCAL_VERIFIED`.
 
 This decision record amends the implementation direction of the archived v0.4 cutover
-contract. It does not modify frozen Schema v1, authorize a production Core
+contract. It does not modify frozen Schema v1 or authorize a production Core
 write path. Runtime deployment facts are recorded separately from the still
 unimplemented Core cutover.
 
@@ -218,6 +218,33 @@ The endpoint processes a bounded batch and returns promptly. Remaining due
 specs wait for the next tick. No network, model, MCP, or adapter call occurs
 inside a Core SQLite transaction.
 
+## Attention and proactive delivery
+
+An internal wake is not permission to interrupt the owner. Forum watchers,
+RSS readers, and other external MCP sources use the same `external_poll`
+schedule class: polling records Core facts and creates WorkRun authority, but
+the poller never sends a message directly.
+
+Hermes proposes semantic content plus an attention identifier. Node validates
+that identifier against the content class and payload format, then applies the
+owner's delivery policy using active hours, current queue activity, coarse
+presence such as gaming/focused/available, and the recent proactive-notification
+budget. Presence adapters run outside Core transactions and expose only the
+minimum state needed by the valve.
+
+- `ambient` results remain silent and can be surfaced on the next owner turn;
+- `timely` results may be delayed and coalesced while the owner is gaming,
+  focused, busy, or in do-not-disturb mode;
+- only an owner-allowlisted `critical` content class may bypass those guards;
+  a model-proposed label alone cannot create that authority.
+
+Suppression never discards the Core fact or stops internal polling/work. It
+changes only visible delivery timing. Repeated equivalent source facts share a
+stable fingerprint and one presentation identity so a flapping source cannot
+produce an alert storm. Package D inventories existing external pollers under
+this split; Package E verifies gaming suppression, delayed coalescing, and the
+critical allowlist with synthetic targets.
+
 ## Unified companion runtime
 
 Lite/Full is retired as a deployment topology because it duplicates state,
@@ -355,16 +382,17 @@ stopping old wake neither loses the next future run nor replays an old one.
   accepted. Package C adds a typed scheduled/system instruction and optional
   visible-final entry; it does not weaken or impersonate the existing user-turn
   path. Current source is still inactive in production.
-- Package C gains Schema v2 ScheduleSpec/WakeOccurrence repositories,
-  `wake_due`, WorkRun creation, cancel/fence composition, and the managed clock
-  adapter.
+- Package C locally implements Schema v2 ScheduleSpec/WakeOccurrence
+  repositories, `wake_due`, WorkRun creation and lease/fence authority, plus an
+  injected managed-clock adapter. It is not composed into production.
 - Package D performs the watermark/quiesce/manifest migration above, imports
   legacy candidates paused with suppression/reconciliation Journal evidence, and uses
   the per-job disposition inventory before any old component stops. Long-lived
   dual visible wake is forbidden.
 - Package E adds duplicate/missed tick, long downtime, clock rollback/DST,
   crash before/after occurrence commit, stale WorkRun fence, stop/cancel,
-  timeout ambiguous, restart no-resend, and one real synthetic delivery.
+  timeout ambiguous, restart no-resend, gaming/focus suppression with delayed
+  coalescing, and one real synthetic delivery.
 
 The dual gateway/profile contract, regex Full routing, Full-to-Lite fallback,
 and duplicated history/cache/cron stores are removed from the target. Existing

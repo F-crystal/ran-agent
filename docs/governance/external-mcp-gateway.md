@@ -1,6 +1,6 @@
 # External MCP Gateway
 
-Status: CURRENT (2026-07-08)
+Status: CURRENT (2026-08-08)
 
 This document owns the current external MCP gateway and system-queue contract.
 The design history lives under `docs/superpowers/`; this file records the
@@ -99,6 +99,26 @@ Requirements:
 
 `silent`, `remember`, `draft`, malformed JSON, generic text, missing `why_now`,
 or missing evidence must not send visible messages.
+
+This is the current production compatibility path. The S9 local Core source
+adds the future `external_poll` ScheduleSpec class but does not compose it into
+the gateway. During S10 migration, forum, RSS, and other external MCP
+watchers must be split into:
+
+```text
+poll/scan -> sanitized Core fact -> WakeOccurrence/WorkRun -> Hermes decision
+  -> Node attention valve -> Core presentation outbox/receipt
+```
+
+The watcher never sends directly. Hermes continues to propose structured
+content and evidence plus an attention identifier; Node validates identifier,
+content class and format, then applies deduplication, notification budget,
+active-hours and coarse presence policy. Gaming/focus/do-not-disturb suppresses
+or coalesces noncritical visible delivery without stopping the watch or losing
+the Core fact. Only an owner-allowlisted critical class may bypass that state.
+The S10 migration manifest must preserve existing watch scopes as paused until
+their watermark is accepted, so historical forum or external MCP results are
+not replayed as new notifications.
 
 ## Background Activity
 

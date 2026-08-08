@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 
 import { coreError } from './coreErrors.mjs';
-import { CORE_SCHEMA_V1 } from './coreSchema.mjs';
+import { CORE_SCHEMA_V1, CORE_SCHEMA_V2 } from './coreSchema.mjs';
 
 const V1_CHECKSUM_SOURCE = `hermes-core-schema-v1\n${CORE_SCHEMA_V1.join('\n-- hermes-core-statement --\n')}`;
+const V2_CHECKSUM_SOURCE = `hermes-core-schema-v2\n${CORE_SCHEMA_V2.join('\n-- hermes-core-statement --\n')}`;
 
 export const CORE_MIGRATIONS = Object.freeze([
   Object.freeze({
@@ -12,6 +13,13 @@ export const CORE_MIGRATIONS = Object.freeze([
     toVersion: 1,
     statements: CORE_SCHEMA_V1,
     checksumSource: V1_CHECKSUM_SOURCE,
+  }),
+  Object.freeze({
+    migrationId: 'core-0002-scheduling',
+    fromVersion: 1,
+    toVersion: 2,
+    statements: CORE_SCHEMA_V2,
+    checksumSource: V2_CHECKSUM_SOURCE,
   }),
 ]);
 

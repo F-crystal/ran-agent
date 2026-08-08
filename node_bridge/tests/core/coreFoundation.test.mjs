@@ -2,10 +2,13 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
+import { DatabaseSync } from 'node:sqlite';
 
 import { openCoreDatabase } from '../../src/core/coreDb.mjs';
+import { CORE_MIGRATIONS, runCoreMigrations } from '../../src/core/coreMigrations.mjs';
 import { resolveCoreDbPath } from '../../src/core/corePaths.mjs';
 import { CORE_SCHEMA_VERSION, CORE_TABLES } from '../../src/core/coreSchema.mjs';
+import { validateCoreSchema } from '../../src/core/coreSchemaManifest.mjs';
 import { createTempCore, openTestInspector } from './helpers/testCoreInspector.mjs';
 
 test('runtime path helper computes the fixed target without creating it', (t) => {
@@ -74,19 +77,23 @@ test('business writes fail closed until migration history is validated and migra
   await core.close();
 });
 
-test('v1 migration creates all fixed Foundation objects and is idempotent', async (t) => {
+test('current migrations create all fixed Core objects and are idempotent', async (t) => {
   const { dbPath } = createTempCore(t);
   const core = openCoreDatabase({ dbPath });
-  assert.deepEqual(core.migrate().applied, ['core-0001-initial']);
+  assert.deepEqual(core.migrate().applied, ['core-0001-initial', 'core-0002-scheduling']);
   assert.deepEqual(core.migrate(), { version: CORE_SCHEMA_VERSION, applied: [] });
   const tables = new Set(core.reader.schemaObjectNames()
     .filter((entry) => entry.type === 'table').map((entry) => entry.name));
   for (const table of CORE_TABLES) assert.ok(tables.has(table), `missing ${table}`);
-  assert.equal(core.reader.schemaVersion(), 1);
-  assert.equal(core.reader.migrationHistory().length, 1);
+  assert.equal(core.reader.schemaVersion(), 2);
+  assert.equal(core.reader.migrationHistory().length, 2);
+  assert.deepEqual(core.reader.migrationHistory().map((row) => row.checksum), [
+    '0cbc7bc1afddeff8ac11ce40cf54ee54fe444fe3ba23c63cbf8271db1db31151',
+    '3918da27972ec41c2547b250abf5d659e9a93d66339001deed9dfa6a59b67ba2',
+  ]);
   assert.deepEqual(core.reader.foreignKeyViolations(), []);
   const firstFingerprint = core.reader.schemaFingerprint();
-  assert.match(firstFingerprint, /^[0-9a-f]{64}$/);
+  assert.equal(firstFingerprint, 'ee2a9d60fbbc037c28cee8870182a695635005542ca40d4fd8437616fbdf52b5');
   await core.close();
   const reopened = openCoreDatabase({ dbPath });
   assert.equal(reopened.reader.schemaFingerprint(), firstFingerprint);
@@ -95,14 +102,20 @@ test('v1 migration creates all fixed Foundation objects and is idempotent', asyn
 
 test('frozen schema v1 identity and object manifest remain exact across reopen', async (t) => {
   const { dbPath } = createTempCore(t, 'hermes-core-frozen-v1-');
-  const core = openCoreDatabase({ dbPath });
-  assert.deepEqual(core.migrate(), { version: 1, applied: ['core-0001-initial'] });
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  const core = new DatabaseSync(dbPath);
+  core.exec('PRAGMA foreign_keys=ON');
+  assert.deepEqual(runCoreMigrations(core, [CORE_MIGRATIONS[0]], { validateVersion: validateCoreSchema }), {
+    version: 1, applied: ['core-0001-initial'],
+  });
   const counts = Object.fromEntries(['table', 'index', 'trigger'].map((type) => [
     type,
-    core.reader.schemaObjectNames().filter((entry) => entry.type === type).length,
+    Number(core.prepare(`SELECT count(*) AS count FROM sqlite_schema
+      WHERE type=? AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL`).get(type).count),
   ]));
   assert.deepEqual(counts, { table: 41, index: 7, trigger: 62 });
-  assert.deepEqual(core.reader.migrationHistory().map((row) => ({
+  assert.deepEqual(core.prepare(`SELECT migration_id,from_version,to_version,checksum
+    FROM schema_migration ORDER BY to_version`).all().map((row) => ({
     migration_id: row.migration_id,
     from_version: row.from_version,
     to_version: row.to_version,
@@ -114,18 +127,18 @@ test('frozen schema v1 identity and object manifest remain exact across reopen',
     checksum: '0cbc7bc1afddeff8ac11ce40cf54ee54fe444fe3ba23c63cbf8271db1db31151',
   }]);
   assert.equal(
-    core.reader.schemaFingerprint(),
+    validateCoreSchema(core, 1),
     '9cc3f1e4a62c9d7809d31d477e1b4e41fec49b12dd44b1f3dcaf4b0235270671',
   );
-  await core.close();
+  core.close();
 
-  const reopened = openCoreDatabase({ dbPath });
-  assert.equal(reopened.reader.schemaVersion(), 1);
+  const reopened = new DatabaseSync(dbPath);
+  assert.equal(reopened.prepare('PRAGMA user_version').get().user_version, 1);
   assert.equal(
-    reopened.reader.schemaFingerprint(),
+    validateCoreSchema(reopened, 1),
     '9cc3f1e4a62c9d7809d31d477e1b4e41fec49b12dd44b1f3dcaf4b0235270671',
   );
-  await reopened.close();
+  reopened.close();
 });
 
 test('committed rows survive close/reopen and failed transactions leave no rows', async (t) => {

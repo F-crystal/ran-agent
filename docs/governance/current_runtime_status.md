@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S8 LOCAL_VERIFIED; S9 IN_PROGRESS (2026-08-08)
+Status: S4 PROD_VERIFIED; S5-S9 LOCAL_VERIFIED; S10 IN_PROGRESS (2026-08-08)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -146,6 +146,20 @@ and every other upstream mutation. Six focused tests plus the combined
 Core/Ombre suite pass locally (180 pass, one existing root-only skip). The
 projector is not composed into production and no real vault data was changed.
 
+S9 is locally verified without production composition. Immutable migration
+`core-0002-scheduling` adds ScheduleSpec revisions and WakeOccurrence while the
+frozen v1 checksum/fingerprint remains exact; a real v1 fixture upgrades in
+place. The injected managed tick supports one-shot, interval and daily
+recurrence, bounded catch-up, DST gap/fold behavior, deterministic occurrences,
+scheduled WorkRun creation and Activity-rechecked lease/fence claims. Repeated
+and missed ticks do not duplicate an occurrence. A message-capable wake creates
+only a typed Exchange: it creates no ordinary chat Turn, presentation outbox or
+adapter call. Forum/RSS/external MCP polling is therefore a future Core fact
+producer, not direct-send authority; gaming/focus-aware attention routing is an
+S10/S11 migration and synthetic-acceptance concern. The Core suite passes 140
+tests locally. No production database, clock, route, service or source pointer
+changed.
+
 ## Source And Recovery Authority
 
 Binding.v4 completed the earlier runtime apply, rollback and reapply and records
@@ -204,8 +218,8 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S8 are complete and S9 Package C
-scheduling is the sole active stage. The S5-era root-worktree drafts
+`docs/governance/active_sequence.md`. S0-S9 are complete and S10 migration
+rehearsal is the sole active stage. The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the
 three retained runtime semantics were re-implemented on current main, and the
@@ -217,9 +231,10 @@ branches are neither production nor rollback authority; recoverable local S4
 convergence artifacts remain ignored under `local_archive/`.
 
 Package A and B.1 Core primitives exist in source; S5 verifies the local B.2
-final/outbox/effect/receipt loop, S7 completes local B.3 Node wiring, and S8
-completes the local governed Ombre projection seam. None is composed into the
-production Node write path. Ombre Gate 5 is retired with O2 and the historical
+final/outbox/effect/receipt loop, S7 completes local B.3 Node wiring, S8
+completes the local governed Ombre projection seam, and S9 completes local
+Package C scheduling. None is composed into the production Node write path.
+Ombre Gate 5 is retired with O2 and the historical
 name is retained only as retired evidence; the single future Core production
 gate is uniformly named the Core Cutover Gate (S12). O2 is a retired
 migration-era path; only rollback evidence may remain.

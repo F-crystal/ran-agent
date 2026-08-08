@@ -1304,13 +1304,13 @@ test('RC-04 serialized seal/reference races admit only the ordering-consistent o
   await core.close();
 });
 
-test('additive public APIs stay inside the six accepted typed namespaces', async (t) => {
+test('additive public APIs stay inside the accepted typed namespaces', async (t) => {
   const { core, dbPath } = await openFixture(t, 'hermes-core-b13-surface-');
   await core.writer.write((tx) => {
     assert.deepEqual(Object.keys(tx).sort(), [
-      'effects', 'ingress', 'journal', 'packageBAssembly', 'packageBFinal', 'packageBIngress',
+      'activities', 'effects', 'ingress', 'journal', 'packageBAssembly', 'packageBFinal', 'packageBIngress',
       'packageBPresentation', 'packageBProvider', 'packageBTurn', 'projections', 'publications',
-      'revisions', 'soul', 'tombstones',
+      'revisions', 'schedules', 'soul', 'tombstones',
     ]);
     assert.deepEqual(Object.keys(tx.packageBIngress).sort(), [
       'commit', 'commitWithAssemblyIntent', 'transitionAssemblyProcessing',
@@ -1322,7 +1322,7 @@ test('additive public APIs stay inside the six accepted typed namespaces', async
   });
   await core.close();
   const inspector = openTestInspector(dbPath);
-  assert.equal(rowCount(inspector, 'schema_migration'), 1);
+  assert.equal(rowCount(inspector, 'schema_migration'), 2);
   inspector.close();
 });
 

@@ -362,7 +362,7 @@ test('candidate v1 rejects a legacy REAL fence fixture without coercion and rema
   db.close();
 
   const reopened = openCoreDatabase({ dbPath });
-  assert.equal(reopened.reader.schemaVersion(), 1);
+  assert.equal(reopened.reader.schemaVersion(), 2);
   await reopened.close();
   const inspector = openTestInspector(dbPath);
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM work_run WHERE work_run_id='legacy-real'").get().count, 0);

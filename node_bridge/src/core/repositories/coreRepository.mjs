@@ -9,6 +9,7 @@ import { createPackageBAssemblyRepository } from './packageBAssemblyRepository.m
 import { createPackageBProviderRepository } from './packageBProviderRepository.mjs';
 import { createPackageBTurnRepository } from './packageBTurnRepository.mjs';
 import { createPackageBPresentationRepositories } from './packageBPresentationRepository.mjs';
+import { createCoreScheduleRepository } from '../coreScheduling.mjs';
 
 function freezeNamespace(methods) {
   return Object.freeze(methods);
@@ -105,8 +106,8 @@ function projectionClaimResult({ get, prior, disposition }) {
   });
 }
 
-export function createCoreTransactionFacade({ assertActive, prepare }) {
-  if (typeof assertActive !== 'function' || typeof prepare !== 'function') {
+export function createCoreTransactionFacade({ assertActive, prepare, now = () => new Date() }) {
+  if (typeof assertActive !== 'function' || typeof prepare !== 'function' || typeof now !== 'function') {
     throw coreError('CORE_TRANSACTION_AUTHORITY_REQUIRED', 'transaction authority is required');
   }
 
@@ -127,6 +128,24 @@ export function createCoreTransactionFacade({ assertActive, prepare }) {
   });
   const packageBFinal = packageBPresentationParts.finalRepository;
   const packageBPresentation = packageBPresentationParts.presentationRepository;
+  const schedules = createCoreScheduleRepository({ get, all, run, now });
+
+  const activities = freezeNamespace({
+    create(input) {
+      run(`INSERT INTO activity(
+        activity_id,owner_id,conversation_id,title,goal_ref,domain,risk_class,
+        autonomy_level,state,contract_revision,budget_json,grant_scope_ref,
+        resume_policy,report_policy,created_at,updated_at,expires_at,archived_at
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      input.activityId, input.ownerId, input.conversationId ?? null,
+      input.title, input.goalRef, input.domain, input.riskClass,
+      input.autonomyLevel ?? 0, input.state ?? 'draft', input.contractRevision ?? 0,
+      input.budgetJson ?? '{}', input.grantScopeRef ?? null,
+      input.resumePolicy, input.reportPolicy, input.createdAt, input.updatedAt ?? input.createdAt,
+      input.expiresAt ?? null, input.archivedAt ?? null);
+      return get('SELECT * FROM activity WHERE activity_id=?', input.activityId);
+    },
+  });
 
   const journal = freezeNamespace({
     append(input) {
@@ -598,6 +617,7 @@ export function createCoreTransactionFacade({ assertActive, prepare }) {
 
   return Object.freeze({
     journal, ingress, tombstones, publications, effects, projections, revisions, soul,
+    activities, schedules,
     packageBIngress, packageBAssembly, packageBTurn, packageBProvider,
     packageBFinal, packageBPresentation,
   });

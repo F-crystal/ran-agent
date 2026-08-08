@@ -51,10 +51,13 @@ export class CoreDatabase {
   #transactionIdentity = null;
   #schemaReady = false;
   #writesStarted = false;
+  #now;
 
-  constructor({ dbPath } = {}) {
+  constructor({ dbPath, now = () => new Date() } = {}) {
     if (!String(dbPath || '').trim()) throw coreError('CORE_DB_PATH_REQUIRED', 'explicit Core database path is required');
+    if (typeof now !== 'function') throw coreError('CORE_DB_CLOCK_REQUIRED', 'Core clock must be a function');
     this.dbPath = path.resolve(dbPath);
+    this.#now = now;
   }
 
   open() {
@@ -178,10 +181,25 @@ export class CoreDatabase {
       journalPayload: (payloadId) => read('SELECT * FROM journal_payload WHERE journal_payload_id=?', payloadId),
       ingressEventCount: () => Number(read('SELECT count(*) AS count FROM ingress_event').count),
       ingressEvent: (eventId) => read('SELECT * FROM ingress_event WHERE ingress_event_id=?', eventId),
+      activity: (activityId) => read('SELECT * FROM activity WHERE activity_id=?', activityId),
+      workRun: (workRunId) => read('SELECT * FROM work_run WHERE work_run_id=?', workRunId),
       projectorCursor: (projectorId, targetScope) => read(
         'SELECT * FROM projector_cursor WHERE projector_id=? AND target_scope=?', projectorId, targetScope,
       ),
       projectionOutbox: (outboxId) => read('SELECT * FROM projection_outbox WHERE projection_outbox_id=?', outboxId),
+      scheduleSpec: (scheduleSpecId) => read('SELECT * FROM schedule_spec WHERE schedule_spec_id=?', scheduleSpecId),
+      scheduleSpecRevision: (revisionId) => read(
+        'SELECT * FROM schedule_spec_revision WHERE schedule_spec_revision_id=?', revisionId,
+      ),
+      wakeOccurrence: (occurrenceId) => read(
+        'SELECT * FROM wake_occurrence WHERE wake_occurrence_id=?', occurrenceId,
+      ),
+      wakeOccurrences: (scheduleSpecId) => all(
+        'SELECT * FROM wake_occurrence WHERE schedule_spec_id=? ORDER BY scheduled_for', scheduleSpecId,
+      ).map((row) => Object.freeze({ ...row })),
+      workRunsForOccurrence: (occurrenceId) => all(
+        'SELECT * FROM work_run WHERE wake_occurrence_id=? ORDER BY attempt_no', occurrenceId,
+      ).map((row) => Object.freeze({ ...row })),
       livingIdentity: (identityId) => read('SELECT * FROM living_identity WHERE identity_id=?', identityId),
       soulRevision: (soulRevisionId) => read('SELECT * FROM soul_revision WHERE soul_revision_id=?', soulRevisionId),
       packageBIngress,
@@ -224,6 +242,7 @@ export class CoreDatabase {
         assertActive();
         return db.prepare(sql);
       },
+      now: this.#now,
     });
     try {
       const result = callback(tx);

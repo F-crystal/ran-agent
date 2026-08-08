@@ -3,9 +3,9 @@
 Status: CURRENT (2026-08-08)
 
 This document records the public source-level status of Hermes Core Package A,
-the owner-accepted Package B.1 typed business transactions, and the locally
-verified Package B.2 delivery seam. It is not a deployment record and does not
-change the production runtime described by
+the owner-accepted Package B transactions, and locally verified Package C
+scheduling. It is not a deployment record and does not change the production
+runtime described by
 `docs/governance/current_runtime_status.md`.
 
 ## Status Boundary
@@ -14,6 +14,9 @@ change the production runtime described by
   `node_bridge/src/core/`, with tests under `node_bridge/tests/core/`.
 - Schema v1 is frozen. Its migration artifact must not be edited in place;
   every future structural change requires a new migration v2 or later.
+- Package C adds immutable migration `core-0002-scheduling`, ScheduleSpec and
+  WakeOccurrence repositories, scheduled WorkRun creation/claim, and an
+  injected `wakeDue()` clock edge. Existing v1 databases upgrade in place.
 - Package B.1 typed business transactions are implemented in the same local
   Core source and have received owner acceptance. The accepted Conversation,
   ingress, assembly, Turn, Provider Epoch, final-commit, and presentation
@@ -31,8 +34,9 @@ change the production runtime described by
   existing final transaction, outbox claim and dispatch-start boundary, one
   injected adapter effect, and the typed result receipt. Reopen/replay returns
   the terminal result without invoking the effect again.
-- Core is not connected to `channelHub`, `replyBackend`, any frontend, or
-  provider history. The B.2 adapter is injected only by local callers/tests.
+- Package B.3 provides an explicitly injected local ChannelHub-to-Core path;
+  production ChannelHub, replyBackend and provider history remain on the
+  legacy runtime path.
 - Legacy Timeline, durable outbox, Python ingest/memory writers, and other
   legacy writers remain active in the current runtime.
 - No Core write path has been deployed or enabled in production. Package B.2
@@ -41,16 +45,11 @@ change the production runtime described by
 ## Scheduling And Runtime Target
 
 `docs/governance/hermes-core-scheduling-and-unified-runtime.md` is the current
-`DESIGNED` v0.5 amendment for Package C scheduling and the eventual single
-Hermes companion runtime. It keeps Schema v1 and Package B/B.1 frozen, proposes
-an additive Schema v2, and treats one deploy-owned Hermes cron job only as the
-managed clock edge over the same idempotent `core-wake` command. The MVP does
-not prebuild a second timer fallback.
-
-That document is not implementation or deployment evidence. Current source has
-no Schema v2 ScheduleSpec/WakeOccurrence repository, no composed `core-wake`
-service, and no unified production gateway. Production remains governed by
-`docs/governance/current_runtime_status.md`.
+Package C scheduling contract and eventual single-clock cutover plan. Schema
+v2 and the injected local managed tick are implemented and locally verified;
+one deploy-owned clock projection and the production cutover remain future
+work. The MVP does not prebuild a second timer fallback. Production remains
+governed by `docs/governance/current_runtime_status.md`.
 
 ## Frozen Schema v1
 
@@ -68,6 +67,20 @@ service, and no unified production gateway. Production remains governed by
 Migration-history mismatch and actual-schema drift fail closed. Package B must
 not alter these values, reorder the v1 statements, or redefine its checksum
 source.
+
+## Additive Schema v2
+
+| Item | Current value |
+|------|---------------|
+| schema version | `2` |
+| migration ID | `core-0002-scheduling` |
+| migration range | `1 -> 2` |
+| migration checksum | `3918da27972ec41c2547b250abf5d659e9a93d66339001deed9dfa6a59b67ba2` |
+| schema fingerprint | `ee2a9d60fbbc037c28cee8870182a695635005542ca40d4fd8437616fbdf52b5` |
+
+Schema v2 adds `schedule_spec`, append-only `schedule_spec_revision`,
+append-only `wake_occurrence`, and the nullable immutable
+`work_run.wake_occurrence_id`. It does not rewrite any Schema v1 statement.
 
 ## Stable Foundation Boundary
 

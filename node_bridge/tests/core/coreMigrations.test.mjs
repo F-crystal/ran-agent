@@ -24,12 +24,33 @@ const LEDGER_SQL = `CREATE TABLE schema_migration (
   migration_id TEXT, from_version INTEGER, to_version INTEGER, checksum TEXT, applied_at TEXT
 )`;
 
-test('fresh 0->1 succeeds, applied history validates, and rerun is no-op', (t) => {
+test('fresh 0->2 succeeds, applied history validates, and rerun is no-op', (t) => {
   const { db } = rawDb(t);
-  assert.deepEqual(runCoreMigrations(db), { version: 1, applied: ['core-0001-initial'] });
-  assert.deepEqual(runCoreMigrations(db), { version: 1, applied: [] });
-  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 1);
-  assert.equal(db.prepare('SELECT count(*) AS count FROM schema_migration').get().count, 1);
+  assert.deepEqual(runCoreMigrations(db), {
+    version: 2, applied: ['core-0001-initial', 'core-0002-scheduling'],
+  });
+  assert.deepEqual(runCoreMigrations(db), { version: 2, applied: [] });
+  assert.equal(db.prepare('PRAGMA user_version').get().user_version, 2);
+  assert.equal(db.prepare('SELECT count(*) AS count FROM schema_migration').get().count, 2);
+  db.close();
+});
+
+test('frozen v1 upgrades in place to v2 without changing existing Work Runs', (t) => {
+  const { db } = rawDb(t, 'upgrade-v1-v2.sqlite3');
+  assert.deepEqual(runCoreMigrations(db, [CORE_MIGRATIONS[0]]), {
+    version: 1, applied: ['core-0001-initial'],
+  });
+  db.prepare(`INSERT INTO work_run(
+    work_run_id,attempt_no,execution_epoch_id,state,revision,fence_token,
+    contract_revision,created_at,updated_at
+  ) VALUES ('existing',1,'epoch','queued',0,0,0,?,?)`)
+    .run('2026-07-16T00:00:00.000Z', '2026-07-16T00:00:00.000Z');
+  assert.deepEqual(runCoreMigrations(db), { version: 2, applied: ['core-0002-scheduling'] });
+  assert.deepEqual({ ...db.prepare(`SELECT work_run_id,state,wake_occurrence_id
+    FROM work_run WHERE work_run_id='existing'`).get() }, {
+    work_run_id: 'existing', state: 'queued', wake_occurrence_id: null,
+  });
+  assert.equal(db.prepare('SELECT count(*) AS count FROM schedule_spec').get().count, 0);
   db.close();
 });
 
@@ -41,7 +62,7 @@ test('actual schema drift fails closed without recreating missing Core objects',
   assert.throws(() => openCoreDatabase({ dbPath }), { code: 'CORE_SCHEMA_DRIFT' });
   const damaged = new DatabaseSync(dbPath);
   assert.equal(damaged.prepare("SELECT count(*) AS count FROM sqlite_schema WHERE name='runtime_interaction_override'").get().count, 0);
-  assert.equal(damaged.prepare('PRAGMA user_version').get().user_version, 1);
+  assert.equal(damaged.prepare('PRAGMA user_version').get().user_version, 2);
   damaged.close();
   assert.throws(() => openCoreDatabase({ dbPath }), { code: 'CORE_SCHEMA_DRIFT' });
 });
@@ -97,7 +118,7 @@ test('checksum mismatch fails before any schema write', (t) => {
   const { db } = rawDb(t);
   runCoreMigrations(db);
   const before = db.prepare("SELECT group_concat(name, '|') AS names FROM sqlite_master").get().names;
-  const changed = [{ ...CORE_MIGRATIONS[0], checksumSource: 'changed immutable artifact' }];
+  const changed = [{ ...CORE_MIGRATIONS[0], checksumSource: 'changed immutable artifact' }, CORE_MIGRATIONS[1]];
   assert.throws(() => runCoreMigrations(db, changed), { code: 'CORE_MIGRATION_CHECKSUM_MISMATCH' });
   assert.equal(db.prepare("SELECT group_concat(name, '|') AS names FROM sqlite_master").get().names, before);
   db.close();
