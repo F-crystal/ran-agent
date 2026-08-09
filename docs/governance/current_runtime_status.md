@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11 LOCAL_VERIFIED (2026-08-09)
+Status: S4 PROD_VERIFIED; S5-S11 LOCAL_VERIFIED (2026-08-10)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -247,12 +247,18 @@ the WorkRun terminal and a missing Core acknowledgement marker; reopen skips the
 delivery/effect and safely completes only the idempotent Python acknowledgement.
 Focused WorkRun/scheduled-delivery/reminder checks pass 15/15, the Python
 acknowledgement check passes 1/1, and the affected Core set passes 180/180.
-Source inspection found that the archived
-candidate already stops the legacy external-MCP timer in Core mode, runs its
-existing scan/executor through an `external_poll` WorkRun, records hash-bound
-Core facts and routes any presentation candidate through Core delivery. That
-early implementation is not R1E acceptance: its authority, replay and
-no-direct-send checklist remains closed until the serial frontier reaches R1E.
+The archived R1E candidate now stops the legacy external-MCP timer in Core
+mode and runs the existing scan/executor through an `external_poll` WorkRun.
+Before provider execution it validates the exact durable WorkRun revision,
+fence, lease owner/id/expiry, active Core Activity contract, task kind and
+aggregate payload. Candidate activity/revision/checkpoint identity is checked
+against the bridge-owned runtime store, server identity is derived from that
+trusted scope, and sanitized canonical output reaches only the existing
+hash-bound Core fact writer. Duplicate candidates coalesce, terminal restart
+does not repeat provider work, and the active Core path cannot reach the legacy
+direct checkpoint sender. R1E passes the focused affected set `91/91` and full
+Core `185/185`; it is `LOCAL_VERIFIED`, `NOT_REVIEWED` and archived pending an
+independent exact-SHA review.
 Attention delay/flush still needs an actual presence producer rather than a
 guessed available state. Neither proposed timer row is activation evidence. S12
 remains `NOT STARTED` until the serial readiness nodes in `active_sequence.md`
@@ -333,15 +339,18 @@ pair inside the Feishu adapter without changing `document.write` semantics,
 create behavior, readback or replay handling. The focused set passes `6/6`;
 fresh fake-token dry-runs on production CLI `1.0.66` and isolated `1.0.85`
 both resolve to PUT, `command=overwrite` and the supplied document ID without
-performing an external write. The commit containing this update is
-`LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED` after the archive transaction;
-an independent exact-SHA delta review is next. Ombre projection is not composed
+performing an external write. R1D-L1 is archived at
+`af25198654e048cc70e7e94a4c9974f2070428e0`; its independent exact-SHA delta
+review is clear, so it is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D
+dependency compatibility is closed. Ombre projection is not composed
 by the S12 candidate and Agent
 Reach remains an optional future Search Hub provider, both `POST_CUTOVER_OK`.
 External MCP remains behind the bridge-owned gateway and passes the focused
-compatibility set `26/26`; the dependency is `COMPATIBLE_AS_IS`, while R1E
-readiness still owns its WorkRun/replay/no-direct-send acceptance. R1E and later
-nodes remain `NOT_STARTED`; no dependency or
+compatibility set `26/26`; the dependency is `COMPATIBLE_AS_IS`. R1E closes its
+local WorkRun/replay/no-direct-send acceptance with focused affected `91/91`
+and full Core `185/185`. Its archived candidate remains `NOT_REVIEWED`, so the
+independent exact-SHA R1E review is the current frontier. R1F and later nodes
+remain `NOT_STARTED`; no dependency or
 production state changed. Exact evidence and dispositions are recorded in
 `docs/governance/r1d_dependency_compatibility.v1.json`.
 

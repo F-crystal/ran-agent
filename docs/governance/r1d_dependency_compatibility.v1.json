@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "recordedAt": "2026-08-09T15:26:11Z",
-  "status": "R1D_L1_LOCAL_VERIFIED_PENDING_EXACT_SHA_REVIEW",
+  "status": "R1D_CLOSED_R1D_L1_REVIEWED",
   "sourceBaseSha": "02b8f6491f4ca3013f847decdc59974a90bebdca",
   "productionSourceSha": "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
   "productionChanged": false,
@@ -51,7 +51,7 @@
       "rollback": "No version change occurred. The one-line adapter-command repair can roll back to 4e4f49e3f2f80555ba605308fce909fdfc8302a9; a future CLI upgrade, if independently chosen, remains a separate reversible binary transaction.",
       "compatibilityClassification": "COMPATIBLE_AS_IS",
       "disposition": "BLOCKS_S12",
-      "blocker": "The dependency versions are mutually compatible and R1D-L1 repairs the caller contract locally; S12 remains blocked until the archived R1D-L1 SHA passes independent narrow review."
+      "blocker": null
     },
     {
       "id": "ombre-brain",
@@ -85,7 +85,7 @@
       },
       "candidate": {
         "version": "02b8f6491f4ca3013f847decdc59974a90bebdca",
-        "state": "local Core external_poll composition exists but R1E acceptance has not started"
+        "state": "R1E local candidate verifies pre-provider WorkRun authority, replay and no-direct-send; independent exact-SHA review is pending"
       },
       "requiredProtocolSurface": {
         "hostBoundary": "enabled registry manifest -> live MCP discovery -> bridge-owned gateway admission/policy/session/grant/receipt",
@@ -101,7 +101,7 @@
       "rollback": "No dependency/runtime change occurred in R1D. Production stays on its current source; candidate composition remains inactive until later reviewed cutover and can be source-rolled back by the governed release transaction.",
       "compatibilityClassification": "COMPATIBLE_AS_IS",
       "disposition": "BLOCKS_S12",
-      "blocker": "The dependency itself is COMPATIBLE_AS_IS; R1E readiness still owns formal external_poll WorkRun authority, replay and no-direct-send acceptance."
+      "blocker": "The dependency itself is COMPATIBLE_AS_IS; the archived R1E candidate still requires independent exact-SHA review."
     },
     {
       "id": "agent-reach",
@@ -130,8 +130,7 @@
     }
   ],
   "blocksS12": [
-    "lark-cli R1D-L1 exact-SHA review",
-    "external-mcp-runtime dependency compatible; R1E readiness acceptance pending"
+    "external-mcp-runtime dependency compatible; archived R1E candidate awaits independent review"
   ],
   "postCutoverOk": [
     "Ombre provider upgrade/refactor",
@@ -139,13 +138,22 @@
   ],
   "r1dL1": {
     "startingSha": "4e4f49e3f2f80555ba605308fce909fdfc8302a9",
-    "status": "LOCAL_VERIFIED_NOT_REVIEWED_ARCHIVE_IN_THIS_CHANGE",
+    "archivedSha": "af25198654e048cc70e7e94a4c9974f2070428e0",
+    "status": "LOCAL_VERIFIED_REVIEWED_ARCHIVED",
     "sourceChange": "Feishu adapter update argv adds exactly one --command overwrite pair",
     "focusedTests": "6/6",
     "dependencyUpgrades": false,
     "productionChanged": false
   },
-  "nextReadyNode": "independent exact-SHA R1D-L1 delta review after archive",
-  "r1eStarted": false,
+  "r1e": {
+    "implementationBase": "af25198654e048cc70e7e94a4c9974f2070428e0",
+    "status": "LOCAL_VERIFIED_NOT_REVIEWED_ARCHIVED",
+    "focusedAffectedTests": "91/91",
+    "fullCoreTests": "185/185",
+    "dependencyUpgrades": false,
+    "productionChanged": false
+  },
+  "nextReadyNode": "independent exact-SHA R1E review",
+  "r1eStarted": true,
   "s12Started": false
 }

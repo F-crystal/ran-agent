@@ -1,6 +1,6 @@
 # External MCP Gateway
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-10)
 
 This document owns the current external MCP gateway and system-queue contract.
 The design history lives under `docs/superpowers/`; this file records the
@@ -109,6 +109,16 @@ watchers must be split into:
 poll/scan -> sanitized Core fact -> WakeOccurrence/WorkRun -> Hermes decision
   -> Node attention valve -> Core presentation outbox/receipt
 ```
+
+R1E now gates the existing runtime scan before provider execution on the exact
+durable `external_poll` WorkRun revision, fence, lease owner/id/expiry, active
+Core Activity contract and aggregate payload. The existing fact repository
+rechecks that authority; candidate Activity/revision/checkpoint identity is
+exact, server identity comes from trusted runtime scope, and duplicate or
+reopened terminal work does not repeat provider execution or fact creation.
+The focused affected set passes `91/91` and full Core passes `185/185`. This is
+an archived local candidate pending independent exact-SHA review, not a
+production activation.
 
 The watcher never sends directly. Hermes continues to propose structured
 content and evidence plus an attention identifier; Node validates identifier,

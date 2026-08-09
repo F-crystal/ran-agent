@@ -48,6 +48,9 @@ test('main starts the v2 external MCP runtime instead of the legacy activity run
   assert.match(INDEX_SOURCE, /createExternalMcpAutonomyRuntime\(\{\s*env: runtimeEnv,/);
   assert.match(INDEX_SOURCE, /transport: createExternalMcpRuntimeTransport\(\{ env: runtimeEnv \}\)/);
   assert.match(INDEX_SOURCE, /if \(!coreRuntime\) await externalMcpRuntime\.start\(\)/);
+  assert.match(INDEX_SOURCE, /submitCandidate: \(candidate, context\) => coreRuntime\s*\? coreExternalMcp\.submitCandidate\(candidate, context\)\s*: submitExternalMcpCheckpoint\(\{/);
+  assert.match(INDEX_SOURCE, /coreExternalMcp = createCoreExternalMcpHandler\(\{/);
+  assert.match(INDEX_SOURCE, /externalPollHandler: coreExternalMcp\?\.handler/);
   assert.match(INDEX_SOURCE, /externalMcpRuntime\.stop\(\)/);
   assert.doesNotMatch(INDEX_SOURCE, /const activityRunner = startExternalMcpActivityRunnerLoop\(/);
 });

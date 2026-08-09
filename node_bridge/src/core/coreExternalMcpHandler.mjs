@@ -6,10 +6,17 @@ import { coreError } from './coreErrors.mjs';
 
 const AGGREGATE_POLL_REF = 'external-poll:external-mcp-runtime';
 
-function stableValue(value) {
-  if (value === null || typeof value !== 'object') return value;
-  if (Array.isArray(value)) return value.map(stableValue);
-  return Object.fromEntries(Object.keys(value).sort().map((key) => [key, stableValue(value[key])]));
+function stableValue(value, depth = 0, seen = new WeakSet()) {
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') return value;
+  if (typeof value === 'string') {
+    return value.replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').slice(0, 1_000);
+  }
+  if (typeof value !== 'object' || depth > 8) return null;
+  if (seen.has(value)) return '[Circular]';
+  seen.add(value);
+  if (Array.isArray(value)) return value.slice(0, 20).map((item) => stableValue(item, depth + 1, seen));
+  return Object.fromEntries(Object.keys(value).sort().slice(0, 50)
+    .map((key) => [key, stableValue(value[key], depth + 1, seen)]));
 }
 
 function fingerprint(value) {
@@ -24,31 +31,45 @@ export function createCoreExternalMcpHandler({
     throw coreError('CORE_EXTERNAL_MCP_DEPENDENCY_INVALID', 'external MCP runtime dependencies are invalid');
   }
   const facts = createCoreExternalPollService({ core });
-  let activeWorkRunId = null;
+  let activeAuthority = null;
   let recorded = 0;
 
   async function submitCandidate(candidate, context = {}) {
-    if (!activeWorkRunId) {
+    if (!activeAuthority) {
       throw coreError('CORE_EXTERNAL_POLL_AUTHORITY_STALE', 'external MCP candidate requires an active Core Work Run');
     }
     const activity = runtime.store.get(context.activityId);
     const serverId = String(activity?.scope?.serverId || '').trim();
     const revision = Number(context.revision);
-    if (!serverId || !Number.isSafeInteger(revision) || revision < 0) {
+    if (!serverId || activity?.activityId !== context.activityId || activity?.status !== 'active'
+      || !Number.isSafeInteger(revision) || revision < 0
+      || revision !== Number(activity.revision)
+      || candidate?.kind !== 'core_external_activity_narration_candidate'
+      || candidate?.status !== 'ready') {
       throw coreError('CORE_EXTERNAL_POLL_INPUT_INVALID', 'external MCP candidate context is invalid');
     }
-    const canonical = JSON.stringify(stableValue({ candidate, context, serverId }));
+    const checkpointDigest = String(context.checkpointDigest || '');
+    if (checkpointDigest !== String(activity.checkpoint?.stateDigest || '')) {
+      throw coreError('CORE_EXTERNAL_POLL_INPUT_INVALID', 'external MCP candidate checkpoint is stale');
+    }
+    const sanitizedCandidate = stableValue(candidate);
+    const canonical = JSON.stringify(stableValue({
+      candidate: sanitizedCandidate,
+      context: { activityId: activity.activityId, checkpointDigest, revision },
+      serverId,
+    }));
     const result = await facts.recordFact({
-      workRunId: activeWorkRunId,
+      authority: activeAuthority,
       serverId,
       sourceFingerprint: fingerprint(canonical),
       payloadRef: `external-mcp:/activity/${context.activityId}/revision/${revision}`,
       contentHashToken: hashContent('external-mcp-candidate', canonical),
     });
-    if (result.disposition === 'recorded') recorded += 1;
-    if (context.notifyTarget) {
+    if (result.disposition !== 'recorded') return result;
+    recorded += 1;
+    if (activity.notifyTarget) {
       const payloadRef = `external-mcp-task:${context.activityId}:${revision}`;
-      const summary = (Array.isArray(candidate?.facts) ? candidate.facts : [])
+      const summary = (Array.isArray(sanitizedCandidate?.facts) ? sanitizedCandidate.facts : [])
         .map((item) => String(item?.summary || '').trim()).filter(Boolean).slice(0, 3).join('\n');
       const admission = attentionValve.evaluate({
         contentClass: 'timely', fingerprint: `external-mcp:${context.activityId}`,
@@ -61,11 +82,12 @@ export function createCoreExternalMcpHandler({
     return result;
   }
 
-  async function handler({ work }) {
-    if (work.payload_ref !== AGGREGATE_POLL_REF || activeWorkRunId) {
+  async function handler({ work, authority }) {
+    if (work?.work_run_id !== authority?.workRunId || work?.task_kind !== 'external_poll'
+      || work?.payload_ref !== AGGREGATE_POLL_REF || activeAuthority) {
       throw coreError('CORE_EXTERNAL_POLL_AUTHORITY_STALE', 'external MCP poll Work Run is invalid');
     }
-    activeWorkRunId = work.work_run_id;
+    activeAuthority = await facts.assertAuthority({ authority, expectedPayloadRef: AGGREGATE_POLL_REF });
     recorded = 0;
     try {
       const result = await runtime.tick();
@@ -75,7 +97,7 @@ export function createCoreExternalMcpHandler({
       const resultRef = `core-external-mcp-poll:${work.work_run_id}:${recorded}`;
       return { resultRef, resultHashToken: hashContent('external-mcp-poll-result', resultRef) };
     } finally {
-      activeWorkRunId = null;
+      activeAuthority = null;
       recorded = 0;
     }
   }

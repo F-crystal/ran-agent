@@ -1,6 +1,6 @@
 # S12 Readiness Topology And Acceptance Ledger
 
-Status: CURRENT (2026-08-09)
+Status: CURRENT (2026-08-10)
 
 This is the canonical execution and handoff checklist for the remaining path
 from the local S12 readiness work to S13 cleanup. `active_sequence.md` owns the
@@ -48,10 +48,11 @@ flowchart TD
     R1C0 --> R1C["R1C repair 02b8f649<br/>LOCAL_VERIFIED · ARCHIVED · REVIEWED"]
     R1C --> RC["Independent exact-SHA repaired R1C review<br/>CLEAR"]
     RC --> R1D["R1D dependency compatibility decision 4e4f49e<br/>COMPLETE · ARCHIVED"]
-    R1D --> R1DL1["R1D-L1 Feishu update command repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVE IN THIS CHANGE"]
-    R1DL1 --> R1DL1R["Independent exact-SHA R1D-L1 review<br/>REQUIRED"]
-    R1DL1R --> R1E["R1E external MCP through WorkRun<br/>NOT STARTED"]
-    R1E --> R1F["R1F real presence + attention flush"]
+    R1D --> R1DL1["R1D-L1 Feishu update command repair af25198<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    R1DL1 --> R1DL1R["Independent exact-SHA R1D-L1 review<br/>CLEAR"]
+    R1DL1R --> R1E["R1E external MCP through WorkRun<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
+    R1E --> R1ER["Independent exact-SHA R1E review<br/>PENDING"]
+    R1ER --> R1F["R1F real presence + attention flush"]
     R1F --> R2["R2 fresh production-copy rehearsal"]
     R2 --> R3["R3 immutable candidate review + dry-run"]
     R3 --> OA["Explicit owner production authorization"]
@@ -69,9 +70,11 @@ status. R1C is archived by the commit containing this ledger, but remains
 the accepted candidate. R1D has completed the bounded compatibility decision.
 It found no required dependency upgrade, but both checked CLI versions require
 an update subcommand that the accepted adapter omitted. R1D-L1 adds exactly the
-missing command pair and is locally verified; the commit containing this ledger
-becomes its immutable candidate. A narrow exact-SHA delta review is the next
-boundary, and R1E has not started.
+missing command pair and is archived at
+`af25198654e048cc70e7e94a4c9974f2070428e0`; its narrow exact-SHA delta review
+is clear. R1D dependency compatibility is closed. R1E is locally verified and
+archived by the commit containing this ledger; independent exact-SHA review is
+the current frontier and R1F has not started.
 
 ## Current Frontier
 
@@ -83,8 +86,8 @@ boundary, and R1E has not started.
 | R1B.1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Independent source review is clear; grouped boundary released with R1A. |
 | R1C | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1A/R1B/R1B.1 review closure | `e416172` was review-blocked; repaired archive `02b8f6491f4ca3013f847decdc59974a90bebdca` passed independent exact-SHA review. |
 | R1D | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` at `4e4f49e3f2f80555ba605308fce909fdfc8302a9` | R1C | Decision complete: all dependencies have an explicit disposition; no dependency changed. |
-| R1D-L1 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | archive containing this ledger | R1D | Exact one-line caller-contract repair passes 6/6 and both versioned dry-runs; narrow exact-SHA review required. |
-| R1E | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1D-L1 review CLEAR | Early local composition exists; accept it only when this node becomes ready. |
+| R1D-L1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `af25198654e048cc70e7e94a4c9974f2070428e0` | R1D | Exact one-line caller-contract repair and both versioned dry-runs passed independent narrow review. |
+| R1E | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1D-L1 review CLEAR | Exact WorkRun authority gates provider execution; candidate/fact/replay/no-direct-send checks pass. Await independent exact-SHA review. |
 | R1F–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production unchanged. |
 
@@ -295,30 +298,32 @@ do not reopen `document.write` semantics or upgrade the provider.
 - [x] No dependency, R1A/R1B/R1B.1 behavior, R1E, S12 or production state
   changed.
 - [x] Archive the bounded source/test/governance delta under one exact SHA.
-- [ ] Independent exact-SHA R1D-L1 delta review is clear.
+- [x] Independent exact-SHA R1D-L1 delta review is clear for
+  `af25198654e048cc70e7e94a4c9974f2070428e0`.
 
-Completion marker after archive: `LOCAL_VERIFIED + NOT_REVIEWED + ARCHIVED`.
-R1E remains `NOT_STARTED` until the narrow review is clear.
+Completion marker: `LOCAL_VERIFIED + REVIEWED + ARCHIVED`. R1D dependency
+compatibility is closed; R1E is now `IN_PROGRESS`.
 
 ### R1E — External MCP Poll Through WorkRun Authority
 
 Purpose: connect external forum/RSS/other MCP activity without creating a
 second fact authority or allowing the provider to send directly to the owner.
 
-- [ ] Extend S10's accepted `external_poll` fact-only seam; do not introduce a
+- [x] Extend S10's accepted `external_poll` fact-only seam; do not introduce a
   second external-fact writer.
-- [ ] A claimed WorkRun validates schedule, revision, fence/lease and exact
+- [x] A claimed WorkRun validates schedule, revision, fence/lease and exact
   external-poll payload before provider execution.
-- [ ] Provider output is sanitized and recorded as one hash-bound Core fact.
-- [ ] Duplicate tick, restart and replay do not duplicate the fact or provider
+- [x] Provider output is sanitized and recorded as one hash-bound Core fact.
+- [x] Duplicate tick, restart and replay do not duplicate the fact or provider
   effect.
-- [ ] Paused/disabled external activities remain inert.
-- [ ] Owner-visible notification, when warranted, follows
+- [x] Paused/disabled external activities remain inert.
+- [x] Owner-visible notification, when warranted, follows
   `Core fact -> Hermes decision -> Node attention valve -> presentation outbox
   -> adapter receipt`.
-- [ ] Tests prove the external MCP/provider has no direct message-send surface.
-- [ ] Focused and affected full suites pass; independent review and archive are
-  complete.
+- [x] Tests prove the external MCP/provider has no direct message-send surface.
+- [x] Focused affected `91/91`, full Core `185/185`, syntax and diff checks pass;
+  the bounded candidate is archived.
+- [ ] Independent exact-SHA review is clear.
 
 ### R1F — Real Presence And Attention Admission/Flush
 

@@ -354,7 +354,7 @@ export function assertScheduledWorkAuthority(get, input, {
     payloadRef: row.schedule_payload_ref, causationId: row.causation_id });
 }
 
-function assertClaimedWorkRunAuthority(get, input, activeAt) {
+export function assertClaimedWorkRunAuthority(get, input, activeAt) {
   const authority = normalizeScheduledAuthority(input);
   const at = canonicalIso(activeAt, 'Work Run authority time');
   const row = get(`SELECT run.*,lease.state AS lease_state,lease.fence_token AS lease_fence,

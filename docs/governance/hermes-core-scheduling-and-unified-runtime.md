@@ -1,6 +1,6 @@
 # Hermes Core Scheduling and Unified Runtime
 
-Status: CURRENT (2026-08-09)
+Status: CURRENT (2026-08-10)
 
 Lifecycle: Runtime Phase `PROD_VERIFIED` for the bounded channel, identity,
 memory, capability, topology and 2026-08-07 digest evidence in
@@ -427,11 +427,14 @@ Core/attention set passes 183 tests locally; the earlier affected Python set
 passes 67 and the current affected set passes 55. The complete Node baseline
 passes 1,337 with zero failures and four declared environment skips.
 
-This is not yet a cutover candidate. The archived composition already stops
+This is not yet a cutover candidate. The archived composition stops
 the legacy external-MCP runtime timer in Core mode and runs its existing
 scan/executor through an `external_poll` WorkRun into hash-bound Core facts and
-Core delivery. R1E still owns formal authority/replay/no-direct-send acceptance
-after R1D; code presence does not skip that dependency. Attention delay/flush
+Core delivery. R1E now reuses the generic claimed-WorkRun assertion before
+provider execution, rechecks the same authority at fact commit, binds the
+current external Activity revision/checkpoint and derives server identity from
+trusted runtime scope. Its focused affected set passes `91/91` and full Core
+passes `185/185`; the archive remains `NOT_REVIEWED`. Attention delay/flush
 also needs a real presence source. The smallest accepted source shape is a coarse, expiring
 desktop signal (`available`, `gaming`, `focused`, `busy`, or `dnd`), with
 missing/stale data reported as unknown; raw window titles are not required.
@@ -485,8 +488,10 @@ and canonical XML surfaces. Both versions require
 `docs +update --command overwrite`; R1D-L1 adds exactly that pair inside the
 adapter. It leaves stable effect semantics and exact fetch/readback unchanged,
 passes the focused set `6/6`, and is accepted by fake-token dry-runs on both
-versions without a CLI upgrade or external write. Its archived exact SHA still
-requires narrow independent review before the frontier advances.
+versions without a CLI upgrade or external write. Its archived SHA
+`af25198654e048cc70e7e94a4c9974f2070428e0` passed narrow independent review;
+R1D dependency compatibility is closed. R1E is `LOCAL_VERIFIED`, archived and
+awaiting independent exact-SHA review; R1F has not started.
 
 The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` was rejected
 by independent review. The bounded repair verifies one synthetic
@@ -501,8 +506,8 @@ so R1C is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D records the exact
 dependency decisions in `r1d_dependency_compatibility.v1.json`. Ombre projection
 is not composed by the S12 candidate, Agent Reach is only a feasible future
 Search Hub provider, and both are `POST_CUTOVER_OK`. External MCP remains
-bridge-owned and is itself `COMPATIBLE_AS_IS`; R1E readiness still owns its
-WorkRun/replay/no-direct-send acceptance. No production claim follows from
+bridge-owned and is itself `COMPATIBLE_AS_IS`; R1E has locally verified its
+WorkRun/replay/no-direct-send acceptance but remains unreviewed. No production claim follows from
 these local compatibility decisions or the R1D-L1 repair.
 
 Web acquisition is a separate prerequisite, not a document subtype. Production

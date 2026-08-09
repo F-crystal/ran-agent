@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { coreError } from '../coreErrors.mjs';
 import { assertKeyedContentHashToken } from '../coreHashToken.mjs';
+import { assertClaimedWorkRunAuthority } from '../coreScheduling.mjs';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,160}$/;
 const SAFE_REF = /^[A-Za-z0-9._:/-]{1,512}$/;
@@ -34,34 +35,45 @@ function coreTimestamp(now) {
 }
 
 export function createCoreExternalPollRepository({ get, run, now }) {
+  function assertAuthority(input) {
+    let active;
+    try {
+      active = assertClaimedWorkRunAuthority(get, input.authority, coreTimestamp(now));
+    } catch (error) {
+      if (error?.code !== 'CORE_SCHEDULE_WORK_AUTHORITY_STALE') throw error;
+      throw coreError('CORE_EXTERNAL_POLL_AUTHORITY_STALE', 'external poll Work Run authority is missing or stale');
+    }
+    const { authority, row } = active;
+    const expectedPayloadRef = input.expectedPayloadRef === undefined
+      ? null : payloadReference(input.expectedPayloadRef);
+    const serverId = input.serverId === undefined ? null : identifier(input.serverId, 'serverId');
+    const validPayload = expectedPayloadRef === null
+      ? [AGGREGATE_POLL_REF, `external-poll:${serverId}`].includes(row.payload_ref)
+      : row.payload_ref === expectedPayloadRef;
+    if (row.task_kind !== 'external_poll' || !validPayload) {
+      throw coreError('CORE_EXTERNAL_POLL_AUTHORITY_STALE', 'external poll Work Run authority is missing or stale');
+    }
+    return Object.freeze({
+      ...authority,
+      activityId: row.activity_id,
+      ownerId: row.owner_id,
+      causationId: row.causation_id,
+      payloadRef: row.payload_ref,
+    });
+  }
+
   return Object.freeze({
+    assertAuthority,
     recordFact(input) {
-      const workRunId = identifier(input.workRunId, 'workRunId');
       const serverId = identifier(input.serverId, 'serverId');
+      const authority = assertAuthority({ authority: input.authority, serverId });
+      const workRunId = authority.workRunId;
       const sourceFingerprint = String(input.sourceFingerprint || '');
       if (!FINGERPRINT.test(sourceFingerprint)) {
         throw coreError('CORE_EXTERNAL_POLL_INPUT_INVALID', 'sourceFingerprint is invalid');
       }
       const payloadRef = payloadReference(input.payloadRef);
       const contentHashToken = assertKeyedContentHashToken(input.contentHashToken);
-      const authority = get(`SELECT run.work_run_id,run.state,run.contract_revision,
-          activity.activity_id,activity.owner_id,activity.state AS activity_state,
-          activity.contract_revision AS activity_contract_revision,
-          occurrence.wake_occurrence_id,revision.causation_id,revision.task_kind,
-          revision.payload_ref AS schedule_payload_ref
-        FROM work_run run
-        JOIN activity ON activity.activity_id=run.activity_id
-        JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
-        JOIN schedule_spec_revision revision
-          ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
-        WHERE run.work_run_id=?`, workRunId);
-      if (!authority || authority.task_kind !== 'external_poll'
-        || ![AGGREGATE_POLL_REF, `external-poll:${serverId}`].includes(authority.schedule_payload_ref)
-        || authority.state !== 'running' || authority.activity_state !== 'active'
-        || Number(authority.contract_revision) !== Number(authority.activity_contract_revision)) {
-        throw coreError('CORE_EXTERNAL_POLL_AUTHORITY_STALE', 'external poll Work Run authority is missing or stale');
-      }
-
       const eventId = deterministicId('external-poll-fact', workRunId, sourceFingerprint);
       const payloadId = deterministicId('external-poll-payload', workRunId, sourceFingerprint);
       const existing = get(`SELECT event.*,payload.payload_ref,payload.content_hash_token
@@ -82,8 +94,8 @@ export function createCoreExternalPollRepository({ get, run, now }) {
         source_ref,revision,causation_id,correlation_id,created_at
       ) VALUES (?,'external_poll_fact_observed',?,?,?,'core-external-poll-worker',
         'external_mcp',?,0,?,?,?)`,
-      eventId, authority.owner_id, authority.activity_id, serverId, sourceFingerprint,
-      authority.causation_id, workRunId, createdAt);
+      eventId, authority.ownerId, authority.activityId, serverId, sourceFingerprint,
+      authority.causationId, workRunId, createdAt);
       run(`INSERT INTO journal_payload(
         journal_payload_id,journal_event_id,storage_kind,payload_ref,content_hash_token,
         sensitivity,retention_class,created_at

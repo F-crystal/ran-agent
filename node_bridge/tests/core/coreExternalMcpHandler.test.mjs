@@ -17,6 +17,74 @@ function hashContent(kind, value) {
   });
 }
 
+async function setupClaimedPoll(t, {
+  taskKind = 'external_poll', payloadRef = 'external-poll:external-mcp-runtime',
+  activityState = 'active', leaseUntil = '2026-08-08T08:03:00.000Z',
+  claimWork = true,
+} = {}) {
+  const { dbPath } = createTempCore(t, 'hermes-core-external-mcp-authority-');
+  let current = new Date(START);
+  const core = openCoreDatabase({ dbPath, now: () => current });
+  core.migrate();
+  await core.writer.write((tx) => {
+    tx.journal.append({
+      eventId: 'cause', eventType: 'external_poll_requested', ownerId: 'owner',
+      originRef: 'fixture', sourceKind: 'test', sourceRef: 'fixture', createdAt: START,
+    });
+    tx.activities.create({
+      activityId: 'poll-activity', ownerId: 'owner', title: 'External MCP poll',
+      goalRef: 'system-task:external-mcp-poll', domain: 'personal', riskClass: 'reversible',
+      autonomyLevel: 1, state: activityState, contractRevision: 0,
+      resumePolicy: 'bounded_auto', reportPolicy: 'milestone', createdAt: START,
+    });
+  });
+  const scheduling = createCoreSchedulingService({ core });
+  await scheduling.createSchedule({
+    scheduleSpecId: 'poll-schedule', scheduleSpecRevisionId: 'poll-schedule-r1',
+    activityId: 'poll-activity', operationKey: 'poll:create',
+    recurrence: { kind: 'one_shot', at: '2026-08-08T08:01:00.000Z' },
+    taskKind, payloadRef, catchUpPolicy: 'latest', activityContractRevision: 0,
+    causationId: 'cause',
+  });
+  current = new Date('2026-08-08T08:01:00.000Z');
+  await scheduling.wakeDue();
+  await scheduling.wakeDue();
+  const work = core.reader.scheduledWorkQueue()[0] ?? null;
+  if (!work || !claimWork) {
+    return {
+      core, dbPath, scheduling, work, authority: null, now: () => current,
+      setNow(value) { current = new Date(value); },
+    };
+  }
+  const claim = await scheduling.claimWorkRun({
+    workRunId: work.work_run_id, expectedRevision: Number(work.revision),
+    expectedFence: Number(work.fence_token), leaseOwner: 'external-mcp-worker',
+    leaseUntil, operationKey: 'poll:claim',
+  });
+  return {
+    core, dbPath, scheduling, work,
+    authority: {
+      workRunId: claim.workRunId, expectedRevision: claim.revision,
+      fenceToken: claim.fenceToken, leaseOwner: 'external-mcp-worker', leaseId: claim.lease.lease_id,
+    },
+    now: () => current,
+    setNow(value) { current = new Date(value); },
+  };
+}
+
+function inertAttention() {
+  return {
+    evaluate: () => ({ disposition: 'silent' }), flush: () => [], confirmFlushed() {},
+  };
+}
+
+function readyCandidate(summary = 'A verified external checkpoint is ready.') {
+  return {
+    kind: 'core_external_activity_narration_candidate', status: 'ready', claim: null,
+    facts: [{ summary }], receipts: [],
+  };
+}
+
 test('Core external MCP Work Run records candidates as facts without a send surface', async (t) => {
   const { dbPath } = createTempCore(t, 'hermes-core-external-mcp-handler-');
   let current = new Date(START);
@@ -52,17 +120,34 @@ test('Core external MCP Work Run records candidates as facts without a send surf
   const registrations = [];
   const confirmed = [];
   let flushCandidates = [];
+  let providerCalls = 0;
   const runtime = {
     store: {
       get(activityId) {
-        return activityId === 'activity-1' ? { scope: { serverId: 'forum-mcp' } } : null;
+        return activityId === 'activity-1' ? {
+          activityId, status: 'active', revision: 3,
+          scope: { serverId: 'forum-mcp' }, notifyTarget: { platform: 'feishu' },
+          checkpoint: { stateDigest: 'checkpoint-1' },
+        } : null;
       },
     },
     async tick() {
-      await bridge.submitCandidate(
-        { status: 'ready', text: 'A new forum checkpoint is ready.' },
-        { activityId: 'activity-1', checkpointDigest: 'checkpoint-1', notifyTarget: { platform: 'feishu' }, revision: 3 },
-      );
+      providerCalls += 1;
+      const candidate = {
+        kind: 'core_external_activity_narration_candidate', status: 'ready',
+        serverId: 'candidate-controlled-server',
+        facts: [{ summary: 'A new forum checkpoint is ready.\u0000' }], receipts: [],
+      };
+      const context = {
+        activityId: 'activity-1', checkpointDigest: 'checkpoint-1',
+        notifyTarget: { platform: 'feishu' }, revision: 3,
+      };
+      await bridge.submitCandidate(candidate, context);
+      await bridge.submitCandidate({
+        receipts: [], facts: [{ summary: 'A new forum checkpoint is ready.' }],
+        serverId: 'candidate-controlled-server', status: 'ready',
+        kind: 'core_external_activity_narration_candidate',
+      }, { revision: 3, checkpointDigest: 'checkpoint-1', activityId: 'activity-1' });
       return { ok: true, processed: 1 };
     },
   };
@@ -73,7 +158,10 @@ test('Core external MCP Work Run records candidates as facts without a send surf
       flush: () => flushCandidates.splice(0),
       confirmFlushed: (fingerprint) => confirmed.push(fingerprint),
     },
-    notificationService: { async register(input) { registrations.push(input); } },
+    notificationService: { async register(input) {
+      assert.equal(core.reader.journalEvent(input.causationId)?.event_type, 'external_poll_fact_observed');
+      registrations.push(input);
+    } },
   });
   const worker = createCoreWorkRunWorker({
     core, hashContent, handlers: { external_poll: bridge.handler },
@@ -81,6 +169,8 @@ test('Core external MCP Work Run records candidates as facts without a send surf
   });
 
   assert.equal((await worker.runOnce())[0].state, 'completed');
+  assert.equal(providerCalls, 1);
+  assert.equal(admissions.length, 1);
   assert.equal(admissions[0].payloadRef, 'external-mcp-task:activity-1:3');
   assert.equal(registrations.length, 0);
   flushCandidates = [{
@@ -103,4 +193,159 @@ test('Core external MCP Work Run records candidates as facts without a send surf
   assert.equal(inspect.prepare('SELECT count(*) AS count FROM presentation_outbox').get().count, 0);
   assert.equal(inspect.prepare('SELECT count(*) AS count FROM effect_attempt').get().count, 0);
   inspect.close();
+});
+
+test('stale revision, fence, lease owner, or lease id rejects before provider execution', async (t) => {
+  const { core, work, authority } = await setupClaimedPoll(t);
+  let providerCalls = 0;
+  const bridge = createCoreExternalMcpHandler({
+    core, hashContent, attentionValve: inertAttention(),
+    runtime: {
+      store: { get: () => null },
+      async tick() { providerCalls += 1; return { ok: true }; },
+    },
+    notificationService: { async register() {} },
+  });
+  const invalid = [
+    { ...authority, expectedRevision: authority.expectedRevision + 1 },
+    { ...authority, fenceToken: authority.fenceToken + 1 },
+    { ...authority, leaseOwner: 'other-worker' },
+    { ...authority, leaseId: 'other-lease' },
+  ];
+  for (const candidateAuthority of invalid) {
+    await assert.rejects(bridge.handler({ work, authority: candidateAuthority }), {
+      code: 'CORE_EXTERNAL_POLL_AUTHORITY_STALE',
+    });
+  }
+  assert.equal(providerCalls, 0);
+  await core.close();
+});
+
+test('expired authority and wrong task or payload reject before provider execution', async (t) => {
+  let providerCalls = 0;
+  const runtime = {
+    store: { get: () => null },
+    async tick() { providerCalls += 1; return { ok: true }; },
+  };
+  const fixtures = [
+    await setupClaimedPoll(t, { taskKind: 'system_maintenance' }),
+    await setupClaimedPoll(t, { payloadRef: 'external-poll:forum-mcp' }),
+  ];
+  for (const fixture of fixtures) {
+    const bridge = createCoreExternalMcpHandler({
+      core: fixture.core, runtime, hashContent, attentionValve: inertAttention(),
+      notificationService: { async register() {} },
+    });
+    await assert.rejects(bridge.handler({ work: fixture.work, authority: fixture.authority }), {
+      code: 'CORE_EXTERNAL_POLL_AUTHORITY_STALE',
+    });
+    await fixture.core.close();
+  }
+  const expired = await setupClaimedPoll(t, { leaseUntil: '2026-08-08T08:01:01.000Z' });
+  const expiredBridge = createCoreExternalMcpHandler({
+    core: expired.core, runtime, hashContent, attentionValve: inertAttention(),
+    notificationService: { async register() {} },
+  });
+  expired.setNow('2026-08-08T08:01:02.000Z');
+  await assert.rejects(expiredBridge.handler({ work: expired.work, authority: expired.authority }), {
+    code: 'CORE_EXTERNAL_POLL_AUTHORITY_STALE',
+  });
+  assert.equal(providerCalls, 0);
+  await expired.core.close();
+});
+
+test('stale external activity revision rejects the candidate and records no fact', async (t) => {
+  const { core, work, authority } = await setupClaimedPoll(t);
+  let bridge;
+  let providerCalls = 0;
+  const activity = {
+    activityId: 'activity-1', status: 'active', revision: 4,
+    scope: { serverId: 'forum-mcp' }, checkpoint: { stateDigest: 'checkpoint-4' },
+  };
+  const runtime = {
+    store: { get: () => activity },
+    async tick() {
+      providerCalls += 1;
+      await bridge.submitCandidate(readyCandidate(), {
+        activityId: 'activity-1', revision: 3, checkpointDigest: 'checkpoint-4',
+      });
+      return { ok: true };
+    },
+  };
+  bridge = createCoreExternalMcpHandler({
+    core, runtime, hashContent, attentionValve: inertAttention(),
+    notificationService: { async register() {} },
+  });
+  await assert.rejects(bridge.handler({ work, authority }), {
+    code: 'CORE_EXTERNAL_POLL_INPUT_INVALID',
+  });
+  assert.equal(providerCalls, 1);
+  const inspect = openTestInspector(core.dbPath);
+  assert.equal(inspect.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='external_poll_fact_observed'").get().count, 0);
+  inspect.close();
+  await core.close();
+});
+
+test('terminal WorkRun survives reopen without another provider effect or fact', async (t) => {
+  const fixture = await setupClaimedPoll(t, { claimWork: false });
+  let providerCalls = 0;
+  let bridge;
+  const activity = {
+    activityId: 'activity-1', status: 'active', revision: 1,
+    scope: { serverId: 'forum-mcp' }, checkpoint: { stateDigest: 'checkpoint-1' },
+  };
+  const runtime = {
+    store: { get: () => activity },
+    async tick() {
+      providerCalls += 1;
+      await bridge.submitCandidate(readyCandidate(), {
+        activityId: 'activity-1', revision: 1, checkpointDigest: 'checkpoint-1',
+      });
+      return { ok: true };
+    },
+  };
+  bridge = createCoreExternalMcpHandler({
+    core: fixture.core, runtime, hashContent, attentionValve: inertAttention(),
+    notificationService: { async register() {} },
+  });
+  const worker = createCoreWorkRunWorker({
+    core: fixture.core, hashContent, handlers: { external_poll: bridge.handler },
+    workerId: 'external-mcp-worker', now: fixture.now,
+  });
+  assert.equal((await worker.runOnce())[0].state, 'completed');
+  assert.equal(providerCalls, 1);
+  await fixture.core.close();
+
+  const reopened = openCoreDatabase({ dbPath: fixture.dbPath, now: fixture.now });
+  const reopenedRuntime = {
+    store: { get: () => activity },
+    async tick() { providerCalls += 1; return { ok: true }; },
+  };
+  const reopenedBridge = createCoreExternalMcpHandler({
+    core: reopened, runtime: reopenedRuntime, hashContent, attentionValve: inertAttention(),
+    notificationService: { async register() {} },
+  });
+  const reopenedWorker = createCoreWorkRunWorker({
+    core: reopened, hashContent, handlers: { external_poll: reopenedBridge.handler },
+    workerId: 'external-mcp-worker', now: fixture.now,
+  });
+  assert.deepEqual(await reopenedWorker.runOnce(), []);
+  assert.equal(providerCalls, 1);
+  const inspect = openTestInspector(fixture.dbPath);
+  assert.equal(inspect.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='external_poll_fact_observed'").get().count, 1);
+  inspect.close();
+  await reopened.close();
+});
+
+test('paused Core external-poll activity produces no WorkRun or provider call', async (t) => {
+  const { core, work } = await setupClaimedPoll(t, { activityState: 'paused' });
+  let providerCalls = 0;
+  assert.equal(work, null);
+  const worker = createCoreWorkRunWorker({
+    core, hashContent, now: () => new Date('2026-08-08T08:01:00.000Z'),
+    handlers: { external_poll: async () => { providerCalls += 1; return { resultRef: 'unexpected' }; } },
+  });
+  assert.deepEqual(await worker.runOnce(), []);
+  assert.equal(providerCalls, 0);
+  await core.close();
 });

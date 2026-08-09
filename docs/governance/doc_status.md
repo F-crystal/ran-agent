@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-09)
+Status: CURRENT (2026-08-10)
 
 This file is the public documentation index and conflict rule. Current runtime
 facts live in `docs/governance/current_runtime_status.md`; historical deployment
@@ -53,17 +53,17 @@ disconnected from production. S10 is locally verified with the governed
 19-component migration manifest, a zero-effect production-copy rehearsal and a
 Core-fact-only external-poll seam. S11 synthetic acceptance is locally verified
 after owner-audit remediation; S12 remains not started and production is unchanged.
-Unarchived S12-R1 readiness code now covers the cutover transaction/command,
+Local S12-R1 readiness source now covers the cutover transaction/command,
 managed wake projection, WorkRun execution and terminal evidence, typed
 scheduled delivery, retained Python maintenance, and replay-safe Core reminder
 registration plus projection acknowledgement. It is not a deployable candidate:
-the early local external-MCP WorkRun composition still awaits its serial R1E
-authority/replay/no-direct-send acceptance, and a real presence source still
-needs to own attention admission/flush. The ordered R1 frontier repaired the
+the external-MCP WorkRun composition now passes its serial R1E
+authority/replay/no-direct-send acceptance locally, while a real presence
+source still needs to own attention admission/flush. The ordered R1 frontier repaired the
 observed web-tool route, locally verified the smallest effect-oriented Feishu
 document write/replan seam, and completed the bounded dependency compatibility
-decision. R1D-L1 must close the exact update-command defect before the frontier
-continues through the external-MCP and real-presence runtime boundaries. This does not
+decision. R1D-L1 has closed the exact update-command defect; R1E is archived
+pending exact-SHA review before the frontier can continue to real presence. This does not
 start S12 or authorize production. R1B is locally verified: the companion
 candidate has one generic Web surface (`mcp-search_hub`), the DLM-shaped handler
 check returned typed research evidence, and the affected Node/Python sets pass
@@ -86,11 +86,13 @@ the CLI versions are compatible, Ombre and Agent Reach are `POST_CUTOVER_OK`,
 and External MCP remains bridge-owned. R1D-L1 adds the exact update command
 required by both CLI versions; its focused set passes `6/6` and both versioned
 fake-token dry-runs accept the repaired argv without writing externally. The
-commit containing this update is `LOCAL_VERIFIED`, `NOT_REVIEWED` and
-`ARCHIVED` after the archive transaction. Its narrow exact-SHA review is next.
-External MCP itself is compatible; R1E readiness acceptance remains pending.
-R1E and later nodes, including S12, remain `NOT_STARTED`; production is
-unchanged.
+repair is archived at `af25198654e048cc70e7e94a4c9974f2070428e0` and passed
+its narrow exact-SHA review. R1D-L1 is `LOCAL_VERIFIED`, `REVIEWED` and
+`ARCHIVED`, and R1D dependency compatibility is closed. External MCP itself is
+compatible; R1E passes focused affected `91/91` and full Core `185/185`, is
+`LOCAL_VERIFIED`, `NOT_REVIEWED` and archived, and awaits independent exact-SHA
+review. R1F and later nodes, including S12, remain `NOT_STARTED`;
+production is unchanged.
 
 ## Lifecycle Stages
 

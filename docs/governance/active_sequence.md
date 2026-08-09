@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-09)
+Status: CURRENT (2026-08-10)
 
 This is the canonical order for active project work. Historical P-numbered plans
 do not control current execution. Keep exactly one stage `IN_PROGRESS` when the
@@ -63,9 +63,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> bounded R1C replan/readback repair 02b8f649 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
        -> independent exact-SHA repaired R1C review (CLEAR)
        -> R1D bounded dependency compatibility decision 4e4f49e (COMPLETE, ARCHIVED)
-       -> R1D-L1 Feishu update command repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVE IN THIS CHANGE)
-       -> independent exact-SHA R1D-L1 delta review (REQUIRED)
-       -> R1E external MCP poll through WorkRun authority (NOT STARTED)
+       -> R1D-L1 Feishu update command repair af25198 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+       -> independent exact-SHA R1D-L1 delta review (CLEAR)
+       -> R1E external MCP poll through WorkRun authority (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
+       -> independent exact-SHA R1E review (PENDING)
        -> R1F real presence and attention admission/flush
   -> S12-R2 fresh production-copy rehearsal and candidate gates (NOT STARTED)
   -> S12-R3 independent review plus exact-SHA dry-run evidence (NOT STARTED)
@@ -92,8 +93,15 @@ S12-R0 fresh read-only production audit (COMPLETE)
   adapter argument and passes its focused set `6/6`; both versions accept the
   repaired fake-token dry-run. The commit containing this update is
   `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED` after the archive transaction.
-  Its exact-SHA delta review is the next boundary. R1E through R3 remain serial
-  and `NOT_STARTED`.
+  Its exact-SHA delta review is clear; R1D dependency compatibility is closed
+  with `lark-cli` and External MCP both `COMPATIBLE_AS_IS`. R1E now validates
+  the exact claimed WorkRun revision/fence/lease, active Core Activity and
+  aggregate payload before `runtime.tick`; candidate activity/revision and
+  checkpoint identity are rechecked before the existing fact writer. Its
+  focused affected set passes `91/91` and the full Core set passes `185/185`.
+  The commit containing this update is the archived R1E candidate and remains
+  `NOT_REVIEWED`; the independent exact-SHA review is the only ready frontier.
+  R1F through R3 remain serial and `NOT_STARTED`.
   Exact exit evidence and prohibited scope are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.
 
