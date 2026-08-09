@@ -473,6 +473,13 @@ ambiguity, missing authority, payload drift and an unknown post-dispatch result
 remain deterministic stops. User-visible acknowledgement reports the actual
 stage and result rather than rewriting every failure as a readback problem.
 
+The stable `document.write` contract is independent of `lark-cli` versions and
+wire response shapes. Feishu CLI commands, parsing and normalization stay
+inside the provider adapter. R1C neither upgrades the CLI nor treats local
+`1.0.85` as production truth; production was observed at `1.0.66`. R1D later
+classifies that exact provider contract as compatible, upgrade-required or
+post-cutover-safe before any production-candidate claim.
+
 Web acquisition is a separate prerequisite, not a document subtype. Production
 Hermes uses `search_hub` for ordinary web/research and the governed social/media
 readers for those sources. A model-visible direct tool must be invoked directly;

@@ -57,7 +57,7 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> R1B web acquisition routing repair (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
        -> R1B.1 private reply envelope fail-closed (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
        -> previous R1A/R1B/R1B.1 candidate archive aabf9bc (R1A BLOCKED)
-       -> R1A-ACK-ORDER bounded repair archive (LOCAL_VERIFIED, ARCHIVED)
+       -> R1A-ACK-ORDER bounded repair archive dfb8b41 (LOCAL_VERIFIED, ARCHIVED)
        -> independent exact-SHA R1A repair delta review (CURRENT BOUNDARY)
        -> R1C effect-oriented Feishu document write and truthful reply (NEXT AFTER REVIEW)
        -> R1D bounded dependency compatibility decision
@@ -70,9 +70,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
 ```
 
 - Independent review found `R1A-ACK-ORDER` in the previous candidate
-  `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. The archive commit containing
-  this sequence is the locally verified bounded repair candidate; an independent
-  exact-SHA delta review is still required before R1A becomes `REVIEWED`.
+  `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. The locally verified bounded
+  repair candidate is `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`; an
+  independent exact-SHA delta review is still required before R1A becomes
+  `REVIEWED`.
 - R1B and R1B.1 remain source-review-clear and behaviorally unchanged, but the
   grouped R1 boundary stays `NOT_REVIEWED` until R1A closes. R1C is not active.
 - R1C through R3 remain serial. Their exact exit evidence and prohibited scope

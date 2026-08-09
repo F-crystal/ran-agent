@@ -42,7 +42,7 @@ flowchart TD
     R1A --> R1B["R1B single Web route<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
     R1B --> R1B1["R1B.1 private envelope fail-closed<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
     R1B1 --> RA["Previous candidate archive<br/>aabf9bc · R1A BLOCKED"]
-    RA --> RF["R1A-ACK-ORDER repair archive<br/>LOCAL_VERIFIED · ARCHIVED"]
+    RA --> RF["R1A-ACK-ORDER repair archive<br/>dfb8b41 · LOCAL_VERIFIED · ARCHIVED"]
     RF --> RI["Independent R1A delta review<br/>REQUIRED"]
     RI --> R1C["R1C document.write + truthful action reply<br/>NEXT AFTER REVIEW"]
     R1C --> R1D["R1D dependency compatibility decision"]
@@ -67,7 +67,7 @@ provider contract.
 | Node | Verification | Review | Delivery | Dependency | Decision |
 |---|---|---|---|---|---|
 | R0 | `LOCAL_VERIFIED` | historical review | historical evidence | S11 | Complete; re-inspect only when R2 starts. |
-| R1A | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R0 | `R1A-ACK-ORDER` blocked `aabf9bc`; the archive commit containing this ledger is the repaired candidate and requires independent delta review. |
+| R1A | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R0 | `R1A-ACK-ORDER` blocked `aabf9bc`; repaired candidate `dfb8b41` requires independent delta review. |
 | R1B | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1A | Source review clear at `aabf9bc`; grouped review status remains held until R1A closes. |
 | R1B.1 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Source review clear at `aabf9bc`; grouped review status remains held until R1A closes. |
 | R1C | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1A/R1B/R1B.1 archived and independently reviewed | Next implementation node after review. |
@@ -79,8 +79,7 @@ provider contract.
 The previous implementation candidate is
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance
 HEAD `6def06aa45a6d4c64b9a4e78cda35dd38331678f`. The replacement candidate is
-the archive commit containing this ledger, with its exact SHA recorded by the
-archive transaction and reviewer handoff. Production remains at
+`dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`. Production remains at
 `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; an archived local candidate is
 not a deployable or production-authorized SHA.
 
@@ -116,8 +115,8 @@ shape and exact cutover command without touching production.
   and Python-entry regressions `4/4`; the blocker repair adds focused Node
   `15/15`, Python acknowledgement `1/1`, and affected Core `180/180`.
 - [x] Independent review recorded `R1A-ACK-ORDER` against `aabf9bc`; the
-  intentional repair and synchronized governance are the archive commit that
-  contains this ledger.
+  intentional repair and synchronized governance are archived at
+  `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`.
 - [ ] Independent exact-SHA delta review records no blocker against the R1A
   scope.
 
@@ -182,8 +181,13 @@ universal capability framework.
 
 - [ ] Define the typed effect as `document.write`, provider `feishu`, operation
   `create|update`, exact target and content reference/hash.
+- [ ] Keep `document.write` semantics independent of `lark-cli` version and
+  response shape; CLI-specific commands, parsing and normalization stay inside
+  the Feishu adapter.
 - [ ] Reuse existing Feishu search/create/fetch/readback primitives and preserve
   the accepted `feishu.minutes_to_doc` path.
+- [ ] Do not upgrade `lark-cli` in R1C or treat local `1.0.85` as production
+  truth; the observed production version remains `1.0.66` pending R1D.
 - [ ] Node validates actor, target, payload identity, idempotency and readback;
   the model cannot self-authorize or claim success.
 - [ ] A repairable recipe/type mismatch produces one bounded internal
@@ -202,8 +206,10 @@ universal capability framework.
   Node/Core suites and `git diff --check` pass.
 - [ ] Independent review is clear and the node is archived under an exact SHA.
 
-Completion marker: local archive may precede R1D, but production-candidate
-acceptance remains conditional on R1D's Feishu compatibility decision.
+Completion marker: local archive may precede R1D, but R1C cannot claim
+production-candidate readiness. That claim remains conditional on R1D
+classifying the exact Feishu CLI contract as compatible, upgrade-required or
+post-cutover-safe.
 
 ### R1D — Bounded Dependency Compatibility Decision
 
@@ -216,8 +222,8 @@ implicit upgrade backlog.
 - [ ] Classify each dependency `BLOCKS_S12` or `POST_CUTOVER_OK` with a reason.
 - [ ] For `lark-cli`, verify the exact commands and JSON/readback shapes used by
   R1C against server `1.0.66` and candidate `1.0.85` where needed.
-- [ ] Upgrade `lark-cli` only if R1C requires the newer contract; keep the
-  version change independent and reversible.
+- [ ] R1D—not R1C—decides whether `lark-cli` stays compatible, requires a
+  separate reversible upgrade, or is post-cutover-safe.
 - [ ] If S8 projection is composed by S12, smoke Ombre `breath_advanced`,
   `hold`, `grow`, `trace`, response shape and marker reconciliation.
 - [ ] Verify External MCP Gateway retains the stable host boundary; no external
@@ -356,8 +362,9 @@ Read AGENTS.md, docs/governance/active_sequence.md,
 docs/governance/s12-readiness-topology.md and
 docs/governance/current_runtime_status.md. Audit only the exact archived
 R1A-ACK-ORDER repair delta from
-6def06aa45a6d4c64b9a4e78cda35dd38331678f through the replacement SHA in the
-archive record. Verify terminal commit -> terminal reread -> Python reminder
+6def06aa45a6d4c64b9a4e78cda35dd38331678f through
+dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1. Verify terminal commit -> terminal
+reread -> Python reminder
 acknowledgement, the post-terminal/pre-ack recovery boundary, and no duplicate
 sent/suppressed/ambiguous delivery. Confirm mechanically that R1B/R1B.1 source
 files did not change; their source review is clear but the grouped review status

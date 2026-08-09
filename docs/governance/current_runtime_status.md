@@ -222,8 +222,9 @@ Production is quiescent enough for a new rehearsal, but the implementation
 archived at `aabf9bc97ea3fcd95bf6d79798c56315543d0c37` was blocked by
 independent review finding `R1A-ACK-ORDER`; it is not a deployable S12
 candidate. The repair starts from governance HEAD
-`6def06aa45a6d4c64b9a4e78cda35dd38331678f`, and the archive commit containing
-this status is the replacement candidate. The earlier candidate supplies the cutover Journal interlock, paused
+`6def06aa45a6d4c64b9a4e78cda35dd38331678f`; its replacement candidate is
+`dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`. The earlier candidate supplies
+the cutover Journal interlock, paused
 candidate/suppression transaction path, system and managed-wake manifests,
 fail-closed `core-wake`, Node Core lifecycle composition, generic WorkRun
 claim/terminal execution, typed scheduled Hermes/Package B delivery, Python
@@ -295,7 +296,7 @@ grouped review status remains held until R1A closes.
 The previous bounded candidate archive completed at
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`, but R1A remains
 `NOT_REVIEWED` after `R1A-ACK-ORDER`. Independent review of the exact repair
-delta from `6def06a` through the archive commit containing this status is the
+delta from `6def06a` through `dfb8b41` is the
 current boundary before R1C becomes ready. R1B and R1B.1 remain source-review-clear
 without changing that grouped boundary. R1C adds the smallest effect-oriented Feishu
 `document.write` seam plus
@@ -309,6 +310,12 @@ production source and services are unchanged. The canonical per-node dependency
 and acceptance ledger is `docs/governance/s12-readiness-topology.md`; its
 verification/delivery split prevents local evidence from being mistaken for an
 archived or deployable candidate.
+
+R1C must keep `document.write` semantics independent of those CLI versions and
+contain all command/response-shape handling inside the Feishu adapter. It does
+not upgrade `lark-cli` and cannot claim production-candidate readiness; R1D
+later owns the compatibility/upgrade/post-cutover-safe classification and the
+separate Ombre/external-MCP dependency decisions.
 
 The local Python entrypoint is now the ignored repository `.venv`, created from
 the existing Anaconda Python 3.10 with system site packages. Local archive and

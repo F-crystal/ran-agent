@@ -69,9 +69,10 @@ check returned typed research evidence, and the affected Node/Python sets pass
 62/62 and 43/43. R1B.1 also locally closes the reproduced provider-origin
 `schemaVersion: "v1"` raw-envelope leak; its affected set passes 259/259. The
 project-local Python entrypoint is also fixed at ignored `.venv`, while
-production still requires an explicit absolute runtime. The bounded candidate
-is archived at `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; independent
-exact-SHA review is current, and R1C starts only after that review.
+production still requires an explicit absolute runtime. The previous candidate
+`aabf9bc97ea3fcd95bf6d79798c56315543d0c37` is blocked by `R1A-ACK-ORDER`;
+its repair is archived at `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`.
+Independent exact-SHA repair review is current, and R1C starts only after it.
 
 ## Lifecycle Stages
 
