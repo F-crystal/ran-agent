@@ -83,10 +83,14 @@ envelope/receipt/ledger checks. The repaired archive
 R1C is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D has recorded explicit
 decisions for all four dependency surfaces without upgrading any dependency:
 the CLI versions are compatible, Ombre and Agent Reach are `POST_CUTOVER_OK`,
-and External MCP remains bridge-owned. The accepted Feishu adapter still
-omits the update command required by both CLI versions, so R1D-L1 is the ready
-authorization-blocked repair node. R1E and later nodes, including S12, remain
-`NOT_STARTED`; production is unchanged.
+and External MCP remains bridge-owned. R1D-L1 adds the exact update command
+required by both CLI versions; its focused set passes `6/6` and both versioned
+fake-token dry-runs accept the repaired argv without writing externally. The
+commit containing this update is `LOCAL_VERIFIED`, `NOT_REVIEWED` and
+`ARCHIVED` after the archive transaction. Its narrow exact-SHA review is next.
+External MCP itself is compatible; R1E readiness acceptance remains pending.
+R1E and later nodes, including S12, remain `NOT_STARTED`; production is
+unchanged.
 
 ## Lifecycle Stages
 

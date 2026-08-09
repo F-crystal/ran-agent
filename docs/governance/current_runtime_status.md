@@ -328,13 +328,20 @@ is clear, so R1C is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D is now a
 complete bounded decision: server `lark-cli` `1.0.66` and candidate `1.0.85`
 are compatible on the accepted search/create/fetch/files-list and canonical
 XML surfaces, and neither version requires an upgrade for S12. Both versions
-do require `docs +update --command overwrite`, which the accepted R1C adapter
-currently omits; this caller-contract repair is the new authorization-blocked
-R1D-L1 node. Ombre projection is not composed by the S12 candidate and Agent
+do require `docs +update --command overwrite`. R1D-L1 adds exactly that missing
+pair inside the Feishu adapter without changing `document.write` semantics,
+create behavior, readback or replay handling. The focused set passes `6/6`;
+fresh fake-token dry-runs on production CLI `1.0.66` and isolated `1.0.85`
+both resolve to PUT, `command=overwrite` and the supplied document ID without
+performing an external write. The commit containing this update is
+`LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED` after the archive transaction;
+an independent exact-SHA delta review is next. Ombre projection is not composed
+by the S12 candidate and Agent
 Reach remains an optional future Search Hub provider, both `POST_CUTOVER_OK`.
 External MCP remains behind the bridge-owned gateway and passes the focused
-compatibility set `26/26`, but R1E still owns its WorkRun/replay/no-direct-send
-acceptance. R1E and later nodes remain `NOT_STARTED`; no dependency or
+compatibility set `26/26`; the dependency is `COMPATIBLE_AS_IS`, while R1E
+readiness still owns its WorkRun/replay/no-direct-send acceptance. R1E and later
+nodes remain `NOT_STARTED`; no dependency or
 production state changed. Exact evidence and dispositions are recorded in
 `docs/governance/r1d_dependency_compatibility.v1.json`.
 

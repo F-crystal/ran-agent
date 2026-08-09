@@ -482,9 +482,11 @@ inside the provider adapter. R1C neither upgrades the CLI nor treats local
 `1.0.85` as production truth; production was observed at `1.0.66`. R1D confirms
 the two versions are compatible on the required search/create/fetch/files-list
 and canonical XML surfaces. Both versions require
-`docs +update --command overwrite`; the accepted adapter omits that command,
-so the bounded R1D-L1 caller-contract repair blocks S12 without requiring a CLI
-upgrade.
+`docs +update --command overwrite`; R1D-L1 adds exactly that pair inside the
+adapter. It leaves stable effect semantics and exact fetch/readback unchanged,
+passes the focused set `6/6`, and is accepted by fake-token dry-runs on both
+versions without a CLI upgrade or external write. Its archived exact SHA still
+requires narrow independent review before the frontier advances.
 
 The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` was rejected
 by independent review. The bounded repair verifies one synthetic
@@ -499,8 +501,9 @@ so R1C is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D records the exact
 dependency decisions in `r1d_dependency_compatibility.v1.json`. Ombre projection
 is not composed by the S12 candidate, Agent Reach is only a feasible future
 Search Hub provider, and both are `POST_CUTOVER_OK`. External MCP remains
-bridge-owned and awaits R1E acceptance. No production claim follows from these
-local compatibility decisions.
+bridge-owned and is itself `COMPATIBLE_AS_IS`; R1E readiness still owns its
+WorkRun/replay/no-direct-send acceptance. No production claim follows from
+these local compatibility decisions or the R1D-L1 repair.
 
 Web acquisition is a separate prerequisite, not a document subtype. Production
 Hermes uses `search_hub` for ordinary web/research and the governed social/media

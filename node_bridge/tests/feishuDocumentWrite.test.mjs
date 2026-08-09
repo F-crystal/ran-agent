@@ -296,5 +296,9 @@ test('update keeps its exact document target and CLI shape inside the Feishu ada
   } });
   assert.equal(result.status, 'succeeded');
   assert.deepEqual(calls.map((args) => args.slice(0, 2)), [['docs', '+update'], ['docs', '+fetch']]);
-  assert.equal(calls[0].includes('doc_dlm_123'), true);
+  assert.deepEqual(calls[0], [
+    'docs', '+update', '--api-version', 'v2', '--command', 'overwrite',
+    '--doc', 'doc_dlm_123', '--content', CONTENT, '--format', 'json', '--as', 'user',
+  ]);
+  assert.equal(calls[1].includes('doc_dlm_123'), true);
 });

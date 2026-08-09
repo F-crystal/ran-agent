@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "recordedAt": "2026-08-09T13:56:28Z",
-  "status": "R1D_DECISION_COMPLETE_WITH_BLOCKERS",
+  "recordedAt": "2026-08-09T15:26:11Z",
+  "status": "R1D_L1_LOCAL_VERIFIED_PENDING_EXACT_SHA_REVIEW",
   "sourceBaseSha": "02b8f6491f4ca3013f847decdc59974a90bebdca",
   "productionSourceSha": "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
   "productionChanged": false,
@@ -43,13 +43,15 @@
         "Temporary 1.0.66 and 1.0.85 package documentation exposes the same nested create/fetch document fields; both raw files.list schemas expose folder_token, files, token, type, parent_token, has_more and page_token.",
         "1.0.85 dry-runs accept the current create, fetch and folder-search argv; its documented create response adds optional warnings/tips without moving the consumed data.document fields.",
         "Synthetic adapter smokes accepted semantically identical 1.0.66-style CRLF/inter-tag whitespace and 1.0.85-style compact XML while preserving exact document and parent identity.",
-        "Both 1.0.66 and 1.0.85 reject the accepted R1C update argv because docs +update requires --command; adding --command overwrite is accepted by both dry-runs."
+        "Both 1.0.66 and 1.0.85 reject the accepted R1C update argv because docs +update requires --command; adding --command overwrite is accepted by both dry-runs.",
+        "R1D-L1 adds exactly one --command overwrite pair inside the Feishu adapter; its focused create/update/readback/replay/ambiguous set passes 6/6.",
+        "Fresh fake-token dry-runs resolve the repaired argv to PUT plus command=overwrite and the exact supplied document_id on production 1.0.66 and isolated candidate 1.0.85; neither dry-run performs an external write."
       ],
-      "failureBehavior": "Folder ambiguity fails before dispatch; post-dispatch transport uncertainty is durable ambiguous/no-resend; fetch/body/parent mismatch is failed readback. The current update argv fails pre-dispatch validation.",
-      "rollback": "No version change occurred. A future one-line adapter-command repair must be separately reviewed and can roll back by restoring its prior source SHA; a future CLI upgrade, if independently chosen, must be a separate reversible binary transaction.",
+      "failureBehavior": "Folder ambiguity fails before dispatch; post-dispatch transport uncertainty is durable ambiguous/no-resend; fetch/body/parent mismatch is failed readback. The repaired local update argv passes CLI validation; production remains unchanged until a later reviewed cutover.",
+      "rollback": "No version change occurred. The one-line adapter-command repair can roll back to 4e4f49e3f2f80555ba605308fce909fdfc8302a9; a future CLI upgrade, if independently chosen, remains a separate reversible binary transaction.",
       "compatibilityClassification": "COMPATIBLE_AS_IS",
       "disposition": "BLOCKS_S12",
-      "blocker": "The dependency versions are mutually compatible, but the accepted adapter omits the mandatory update --command. Upgrading to 1.0.85 does not fix this caller-contract error."
+      "blocker": "The dependency versions are mutually compatible and R1D-L1 repairs the caller contract locally; S12 remains blocked until the archived R1D-L1 SHA passes independent narrow review."
     },
     {
       "id": "ombre-brain",
@@ -99,7 +101,7 @@
       "rollback": "No dependency/runtime change occurred in R1D. Production stays on its current source; candidate composition remains inactive until later reviewed cutover and can be source-rolled back by the governed release transaction.",
       "compatibilityClassification": "COMPATIBLE_AS_IS",
       "disposition": "BLOCKS_S12",
-      "blocker": "R1E still owns formal external_poll WorkRun authority, replay and no-direct-send acceptance."
+      "blocker": "The dependency itself is COMPATIBLE_AS_IS; R1E readiness still owns formal external_poll WorkRun authority, replay and no-direct-send acceptance."
     },
     {
       "id": "agent-reach",
@@ -128,14 +130,22 @@
     }
   ],
   "blocksS12": [
-    "lark-cli adapter update command contract",
-    "external-mcp-runtime R1E acceptance"
+    "lark-cli R1D-L1 exact-SHA review",
+    "external-mcp-runtime dependency compatible; R1E readiness acceptance pending"
   ],
   "postCutoverOk": [
     "Ombre provider upgrade/refactor",
     "Agent Reach Search Hub provider feasibility"
   ],
-  "nextReadyNode": "R1D-L1 bounded Feishu update command contract remediation, pending new authorization",
+  "r1dL1": {
+    "startingSha": "4e4f49e3f2f80555ba605308fce909fdfc8302a9",
+    "status": "LOCAL_VERIFIED_NOT_REVIEWED_ARCHIVE_IN_THIS_CHANGE",
+    "sourceChange": "Feishu adapter update argv adds exactly one --command overwrite pair",
+    "focusedTests": "6/6",
+    "dependencyUpgrades": false,
+    "productionChanged": false
+  },
+  "nextReadyNode": "independent exact-SHA R1D-L1 delta review after archive",
   "r1eStarted": false,
   "s12Started": false
 }

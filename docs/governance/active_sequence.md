@@ -62,8 +62,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> previous R1C candidate e416172 (INDEPENDENT REVIEW BLOCKED)
        -> bounded R1C replan/readback repair 02b8f649 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
        -> independent exact-SHA repaired R1C review (CLEAR)
-       -> R1D bounded dependency compatibility decision (DECISION COMPLETE; ARCHIVE IN THIS CHANGE)
-       -> R1D-L1 Feishu update command contract repair (READY; NEW AUTHORIZATION REQUIRED)
+       -> R1D bounded dependency compatibility decision 4e4f49e (COMPLETE, ARCHIVED)
+       -> R1D-L1 Feishu update command repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVE IN THIS CHANGE)
+       -> independent exact-SHA R1D-L1 delta review (REQUIRED)
        -> R1E external MCP poll through WorkRun authority (NOT STARTED)
        -> R1F real presence and attention admission/flush
   -> S12-R2 fresh production-copy rehearsal and candidate gates (NOT STARTED)
@@ -86,10 +87,13 @@ S12-R0 fresh read-only production audit (COMPLETE)
   independent exact-SHA review is clear. R1C is now `LOCAL_VERIFIED`,
   `REVIEWED` and `ARCHIVED`. R1D records all four dependency decisions in
   `r1d_dependency_compatibility.v1.json`: no dependency upgrade is required,
-  but the accepted adapter omits the `docs +update --command overwrite`
-  contract required by both checked CLI versions. R1D-L1 is therefore the
-  ready implementation node pending new authorization. R1E through R3 remain
-  serial and `NOT_STARTED`.
+  but the accepted adapter omitted the `docs +update --command overwrite`
+  contract required by both checked CLI versions. R1D-L1 now adds exactly that
+  adapter argument and passes its focused set `6/6`; both versions accept the
+  repaired fake-token dry-run. The commit containing this update is
+  `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED` after the archive transaction.
+  Its exact-SHA delta review is the next boundary. R1E through R3 remain serial
+  and `NOT_STARTED`.
   Exact exit evidence and prohibited scope are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.
 

@@ -98,7 +98,7 @@ async function executeDocumentWrite({ operation, run, signal, scope }) {
   } else {
     try {
       await run([
-        'docs', '+update', '--api-version', 'v2', '--doc', documentId, '--content', scope.content.body,
+        'docs', '+update', '--api-version', 'v2', '--command', 'overwrite', '--doc', documentId, '--content', scope.content.body,
       ], signal);
     } catch (error) {
       if (unknownDispatchOutcome(error)) return documentResult(operation, 'ambiguous');
