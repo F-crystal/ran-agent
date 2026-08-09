@@ -59,9 +59,10 @@ function successfulExec(calls) {
   return async (_command, args) => {
     calls.push(args);
     const base = { ok: true, identity: 'user' };
-    if (args[0] === 'drive') return { stdout: JSON.stringify({ ...base, data: { results: [{ result_meta: { token: 'folder_ai' } }] } }) };
+    if (args[0] === 'drive' && args[1] === '+search') return { stdout: JSON.stringify({ ...base, data: { results: [{ title: 'AI学习', result_meta: { token: 'folder_ai' } }] } }) };
+    if (args[0] === 'drive' && args[1] === 'files') return { stdout: JSON.stringify({ ...base, data: { files: [{ token: 'doc_dlm', type: 'docx', parent_token: 'folder_ai' }], has_more: false } }) };
     if (args[1] === '+create') return { stdout: JSON.stringify({ ...base, data: { document: { document_id: 'doc_dlm' } } }) };
-    if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...base, data: { content: CONTENT } }) };
+    if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...base, data: { document: { document_id: 'doc_dlm', content: CONTENT } } }) };
     throw new Error('unexpected lark-cli call');
   };
 }
@@ -93,7 +94,9 @@ test('Web learning note becomes one hash-bound Feishu document and restart repla
     ['drive', '+search'],
     ['docs', '+create'],
     ['docs', '+fetch'],
+    ['drive', 'files'],
   ]);
+  assert.equal(calls[0].includes('"AI学习"'), true);
 
   const state = JSON.parse(fs.readFileSync(`${runtimeEnv.RAN_AGENT_STATE_DIR}/core/operation-ledger.json`, 'utf8'));
   assert.equal(state.operations.length, 1);
@@ -142,6 +145,71 @@ test('a non-Minutes recipe mismatch receives one internal replan and then uses d
   assert.equal(calls.filter((args) => args[1] === '+create').length, 1);
 });
 
+test('document replan containing activity fails closed without activity execution', async (t) => {
+  let attempt = 0;
+  let activityCalls = 0;
+  let executorCalls = 0;
+  const backend = createReplyBackend({
+    env: env(t),
+    execFileImpl: async () => { executorCalls += 1; throw new Error('must not execute'); },
+    activityFacade: {
+      async handle() { activityCalls += 1; throw new Error('must not execute'); },
+    },
+    hermesImpl: async () => {
+      attempt += 1;
+      if (attempt === 1) return response({
+        requestRef: 'wrong-recipe-activity', actionType: 'feishu.minutes_to_doc',
+        scope: { minuteTitle: 'DLM', folderTitle: 'AI学习', documentTitle: 'DLM 学习笔记', contentXml: CONTENT },
+      });
+      const candidate = response(request('repair-with-activity'));
+      candidate.reply_envelope.activityRequest = {
+        requestRef: 'escape-activity', command: 'start_or_resume', goal: '执行其他任务', environmentHint: 'forum',
+      };
+      return candidate;
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply(OWNER_MESSAGE);
+  assert.equal(result.replyText, '文档写入在执行前被拒绝，未创建或修改文档。');
+  assert.equal(attempt, 2);
+  assert.equal(activityCalls, 0);
+  assert.equal(executorCalls, 0);
+});
+
+test('document replan containing another action family fails closed without executing either action', async (t) => {
+  let attempt = 0;
+  let executorCalls = 0;
+  const backend = createReplyBackend({
+    env: env(t),
+    trustedActionExecutors: {
+      supports() { executorCalls += 1; return true; },
+      async execute() { executorCalls += 1; throw new Error('must not execute'); },
+    },
+    hermesImpl: async () => {
+      attempt += 1;
+      if (attempt === 1) return response({
+        requestRef: 'wrong-recipe-action', actionType: 'feishu.minutes_to_doc',
+        scope: { minuteTitle: 'DLM', folderTitle: 'AI学习', documentTitle: 'DLM 学习笔记', contentXml: CONTENT },
+      });
+      const candidate = response(request('repair-with-extra-action'));
+      candidate.reply_envelope.actionRequests.push({
+        requestRef: 'escape-memory', actionType: 'memory.remember',
+        scope: { kind: 'preference', subject_key: 'preference:escape', statement: '执行额外动作' },
+      });
+      return candidate;
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply(OWNER_MESSAGE);
+  assert.equal(result.replyText, '文档写入在执行前被拒绝，未创建或修改文档。');
+  assert.equal(attempt, 2);
+  assert.equal(executorCalls, 0);
+});
+
 test('document acknowledgements separate pre-execution rejection, readback failure, and ambiguous dispatch', async (t) => {
   const rejectedCalls = [];
   const rejected = createReplyBackend({
@@ -158,14 +226,29 @@ test('document acknowledgements separate pre-execution rejection, readback failu
     execFileImpl: async (_command, args) => {
       readbackCalls.push(args);
       const base = { ok: true, identity: 'user' };
-      if (args[0] === 'drive') return { stdout: JSON.stringify({ ...base, data: { results: [{ result_meta: { token: 'folder_ai' } }] } }) };
+      if (args[0] === 'drive') return { stdout: JSON.stringify({ ...base, data: { results: [{ title: 'AI学习', result_meta: { token: 'folder_ai' } }] } }) };
       if (args[1] === '+create') return { stdout: JSON.stringify({ ...base, data: { document: { document_id: 'doc_bad_readback' } } }) };
-      return { stdout: JSON.stringify({ ...base, data: { content: '<title>别的文档</title>' } }) };
+      return { stdout: JSON.stringify({ ...base, data: { document: { document_id: 'doc_bad_readback', content: '<title>DLM 学习笔记</title><p>错误正文，但标题正确。</p>' } } }) };
     },
     hermesImpl: async () => response(), ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
   });
   const readbackResult = await readback.getReply(OWNER_MESSAGE);
   assert.equal(readbackResult.replyText, '文档操作已执行，但回读校验失败，暂不确认内容完成。');
+
+  const wrongParent = createReplyBackend({
+    env: env(t),
+    execFileImpl: async (_command, args) => {
+      const base = { ok: true, identity: 'user' };
+      if (args[0] === 'drive' && args[1] === '+search') return { stdout: JSON.stringify({ ...base, data: { results: [{ title: 'AI学习', result_meta: { token: 'folder_ai' } }] } }) };
+      if (args[1] === '+create') return { stdout: JSON.stringify({ ...base, data: { document: { document_id: 'doc_wrong_parent' } } }) };
+      if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...base, data: { document: { document_id: 'doc_wrong_parent', content: CONTENT } } }) };
+      if (args[0] === 'drive' && args[1] === 'files') return { stdout: JSON.stringify({ ...base, data: { files: [{ token: 'doc_wrong_parent', type: 'docx', parent_token: 'folder_other' }], has_more: false } }) };
+      throw new Error('unexpected lark-cli call');
+    },
+    hermesImpl: async () => response(), ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+  const wrongParentResult = await wrongParent.getReply(OWNER_MESSAGE);
+  assert.equal(wrongParentResult.replyText, '文档操作已执行，但回读校验失败，暂不确认内容完成。');
 
   const timeoutEnv = env(t);
   let createAttempts = 0;
@@ -173,7 +256,7 @@ test('document acknowledgements separate pre-execution rejection, readback failu
     env: timeoutEnv,
     execFileImpl: async (_command, args) => {
       const base = { ok: true, identity: 'user' };
-      if (args[0] === 'drive') return { stdout: JSON.stringify({ ...base, data: { results: [{ result_meta: { token: 'folder_ai' } }] } }) };
+      if (args[0] === 'drive') return { stdout: JSON.stringify({ ...base, data: { results: [{ title: 'AI学习', result_meta: { token: 'folder_ai' } }] } }) };
       if (args[1] === '+create') {
         createAttempts += 1;
         throw Object.assign(new Error('unknown result'), { code: 'ETIMEDOUT' });
@@ -197,7 +280,7 @@ test('update keeps its exact document target and CLI shape inside the Feishu ada
       calls.push(args);
       const base = { ok: true, identity: 'user' };
       if (args[1] === '+update') return { stdout: JSON.stringify({ ...base, data: { updated: true } }) };
-      if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...base, data: { content: CONTENT } }) };
+      if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...base, data: { document: { document_id: 'doc_dlm_123', content: CONTENT } } }) };
       throw new Error('unexpected lark-cli call');
     },
   });

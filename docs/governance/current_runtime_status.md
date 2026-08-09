@@ -314,14 +314,18 @@ archived or deployable candidate.
 R1C must keep `document.write` semantics independent of those CLI versions and
 contain all command/response-shape handling inside the Feishu adapter. It does
 not upgrade `lark-cli` and cannot claim production-candidate readiness. The
-local R1C implementation now validates exact Feishu target, payload hash and
-source-message causation, supports one bounded Minutes-to-document replan,
-persists truthful success/failure/ambiguous receipts and suppresses replay after
-reopen. Focused affected Node checks pass `190/190`; the Python-entry Ombre
-contract passes `44` with one declared root-only skip; the complete Node suite
-exits zero. The commit containing this update is R1C's bounded archive, so R1C
-is `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED`; it remains `NOT_REVIEWED`
-until an independent exact-SHA R1C review. R1D remains `NOT_STARTED` and later owns the
+first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` failed independent
+review because a second Hermes envelope could escape the document repair scope
+and because title-only readback could certify the wrong body or parent. The
+bounded repair extracts exactly one `document.write` request, rejects repair
+activity/commitments/claims/other actions before execution, and requires exact
+document ID, canonical body and resolved parent membership from the Feishu
+adapter. The current provider surface exposes the required exact evidence, so
+R1D was not started and no dependency changed. The final focused R1C/reply set
+passes `75/75`; the smallest shared envelope/receipt/ledger boundary set passes
+`125/125`. The commit containing this update is the repaired R1C archive, so
+R1C remains `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED` until a new
+independent exact-SHA review. R1D remains `NOT_STARTED` and later owns the
 compatibility/upgrade/post-cutover-safe classification and the separate
 Ombre/external-MCP dependency decisions.
 

@@ -865,9 +865,10 @@ test('existing Feishu Minutes transcript becomes one read-back cloud document', 
     calls.push(args);
     const identity = { ok: true, identity: 'user' };
     if (args[0] === 'minutes') return { stdout: JSON.stringify({ ...identity, data: { items: [{ token: 'minute1' }] } }) };
-    if (args[0] === 'drive') return { stdout: JSON.stringify({ ...identity, data: { results: [{ result_meta: { token: 'folder1' } }] } }) };
+    if (args[0] === 'drive' && args[1] === '+search') return { stdout: JSON.stringify({ ...identity, data: { results: [{ title: '中海油', result_meta: { token: 'folder1' } }] } }) };
+    if (args[0] === 'drive' && args[1] === 'files') return { stdout: JSON.stringify({ ...identity, data: { files: [{ token: 'doc1', type: 'docx', parent_token: 'folder1' }], has_more: false } }) };
     if (args[1] === '+create') return { stdout: JSON.stringify({ ...identity, data: { document: { document_id: 'doc1' } } }) };
-    if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...identity, data: { content: '<title>个人成长｜录音整理</title><p>已回读。</p>' } }) };
+    if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...identity, data: { document: { document_id: 'doc1', content: '<title>个人成长｜录音整理</title><callout emoji="💡" background-color="light-blue"><p>整理摘要</p></callout>' } } }) };
     throw new Error('unexpected lark-cli call');
   };
   const backend = createReplyBackend({
@@ -916,6 +917,7 @@ test('existing Feishu Minutes transcript becomes one read-back cloud document', 
     ['drive', '+search'],
     ['docs', '+create'],
     ['docs', '+fetch'],
+    ['drive', 'files'],
   ]);
 });
 

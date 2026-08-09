@@ -59,8 +59,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> previous R1A/R1B/R1B.1 candidate archive aabf9bc (R1A BLOCKED)
        -> R1A-ACK-ORDER bounded repair archive dfb8b41 (LOCAL_VERIFIED, ARCHIVED)
        -> independent exact-SHA R1A repair delta review (CLEAR)
-       -> R1C effect-oriented Feishu document write and truthful reply (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
-       -> independent exact-SHA R1C review (REQUIRED)
+       -> previous R1C candidate e416172 (INDEPENDENT REVIEW BLOCKED)
+       -> bounded R1C replan/readback repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
+       -> independent exact-SHA repaired R1C review (REQUIRED)
        -> R1D bounded dependency compatibility decision
        -> R1E external MCP poll through WorkRun authority
        -> R1F real presence and attention admission/flush
@@ -77,8 +78,11 @@ S12-R0 fresh read-only production audit (COMPLETE)
   `REVIEWED`.
 - On 2026-08-09 the owner explicitly authorized R1C local implementation while
   that review remains open. This changes the implementation frontier only:
-  R1C is locally verified and archived by the commit containing this update,
-  but remains `NOT_REVIEWED` until a later independent exact-SHA R1C review.
+  The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4`
+  failed independent review on replan authority escape and insufficient
+  readback evidence. The commit containing this update is the bounded repair:
+  it is locally verified and archived, but remains `NOT_REVIEWED` until a new
+  independent exact-SHA review.
   R1D through R3 remain serial and have not started.
   Exact exit evidence and prohibited scope are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.

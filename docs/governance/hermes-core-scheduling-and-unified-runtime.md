@@ -461,9 +461,12 @@ the same stable reversible effect: `document.write` with an explicit provider,
 operation, target and content reference. Node resolves that semantic request to
 one existing executor, validates trusted conversation/tool facts, actor,
 target, payload hash, idempotency and evidence policy, then executes or returns
-one bounded structured repair result. Hermes may revise the plan once, but it
-cannot grant itself a capability, choose its own risk class or claim success
-without the adapter receipt.
+one bounded structured repair result. Hermes may revise the document type once,
+but Node extracts only one `document.write` candidate from that repair response.
+A repair response with activity, commitments, claims or another action family
+fails closed before execution; it is never returned to the ordinary
+full-envelope pipeline. Hermes cannot grant itself a capability, choose its own
+risk class or claim success without the adapter receipt.
 
 This change is intentionally narrow. R1 adds the one missing Feishu document
 effect and reuses existing adapter/readback primitives; it does not introduce a
@@ -480,12 +483,16 @@ inside the provider adapter. R1C neither upgrades the CLI nor treats local
 classifies that exact provider contract as compatible, upgrade-required or
 post-cutover-safe before any production-candidate claim.
 
-The local R1C seam is verified for one synthetic Web-learning-note create,
-exact target and content-hash binding, one bounded recipe replan, truthful
-pre-dispatch/readback/ambiguous acknowledgements, and reopen no-resend. The
-focused affected Node set passes `190/190` and the complete Node suite exits
-zero. This is local semantic evidence only: R1C remains unreviewed/unarchived,
-and no real `lark-cli` compatibility or production claim is made before R1D.
+The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` was rejected
+by independent review. The bounded repair verifies one synthetic
+Web-learning-note create against the exact returned document ID, canonical body
+and resolved parent membership; update verifies the exact supplied document ID
+and canonical body. Adversarial repair responses cannot execute activity or an
+unrelated action, and reopen remains no-resend. The final focused R1C/reply set
+passes `75/75`; the smallest shared private-envelope, receipt and ledger
+boundary set passes `125/125`. This is local semantic evidence only: the
+repaired archive remains `NOT_REVIEWED`, and no real `lark-cli` compatibility
+or production claim is made before R1D.
 
 Web acquisition is a separate prerequisite, not a document subtype. Production
 Hermes uses `search_hub` for ordinary web/research and the governed social/media

@@ -198,7 +198,7 @@ export function createReplyBackend(options = {}) {
         };
         excludeFromHistory = true;
       }
-      let informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
+      const informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
       replyEnvelope = informationalReportPolicy.envelope;
 
       let actionExecution = await executeEnvelopeActionRequests({
@@ -218,22 +218,23 @@ export function createReplyBackend(options = {}) {
               'NODE_ACTION_REPLAN: The previous Feishu action type described a Minutes recipe, but the owner requested a non-Minutes document. Reuse the gathered content and return one document.write actionRequest using the documented Feishu schema. Do not repeat research or call tools.',
             ].filter(Boolean).join('\n'),
           }, hermesOptions);
-          const replannedEnvelope = normalizeReplyEnvelope(replanned);
-          const replannedPolicy = restrictInformationalReportEnvelope(replannedEnvelope, message);
-          const replannedExecution = await executeEnvelopeActionRequests({
-            actionRequests: replannedPolicy.envelope.actionRequests,
+          const replannedRequest = extractDocumentReplanRequest(replanned);
+          actionExecution = await executeEnvelopeActionRequests({
+            actionRequests: [replannedRequest],
             actorContext: trustedActorContext(message.trusted_actor_context),
             currentMessage: message,
             operationLedger,
             trustedActionExecutors,
             coreDurableJobExecutor,
           });
-          response = { ...replanned, reply_text: replannedPolicy.envelope.message, follow_up_messages: [] };
-          replyEnvelope = replannedPolicy.envelope;
-          informationalReportPolicy = replannedPolicy;
-          actionExecution = replannedExecution;
+          replyEnvelope = Object.freeze({
+            ...replyEnvelope,
+            actionRequests: Object.freeze([replannedRequest]),
+          });
         } catch (error) {
           loggerFor(options).warn?.(`document action replan rejected code=${String(error?.code || 'ACTION_REPLAN_FAILED')}`);
+          actionExecution = rejectedDocumentReplanExecution(replyEnvelope.actionRequests[0]);
+          replyEnvelope = Object.freeze({ ...replyEnvelope, actionRequests: Object.freeze([]) });
         }
       }
       let activityExecution = await executeEnvelopeActivityRequest({
@@ -593,6 +594,31 @@ function shouldReplanDocumentAction(envelope, actionExecution) {
     && envelope.commitments?.length === 0
     && actionExecution?.receiptSummaries?.length === 1
     && actionExecution.receiptSummaries[0]?.outcome === 'needs_replan';
+}
+
+function extractDocumentReplanRequest(candidate) {
+  const envelope = normalizeReplyEnvelope(candidate);
+  if (envelope.actionRequests.length !== 1
+    || envelope.actionRequests[0]?.actionType !== 'document.write'
+    || envelope.activityRequest !== null
+    || envelope.commitments.length !== 0
+    || envelope.claims.length !== 0) {
+    throw actionExecutionError('DOCUMENT_REPLAN_INVALID');
+  }
+  return envelope.actionRequests[0];
+}
+
+function rejectedDocumentReplanExecution(originalRequest) {
+  return Object.freeze({
+    receiptSummaries: Object.freeze([Object.freeze({
+      requestRef: String(originalRequest?.requestRef || 'document-replan'),
+      actionType: 'document.write',
+      outcome: 'denied',
+      status: 'failed',
+      errorCode: 'ACTION_NOT_GROUNDED',
+    })]),
+    evidence: Object.freeze([]),
+  });
 }
 
 async function executeEnvelopeActionRequests({
