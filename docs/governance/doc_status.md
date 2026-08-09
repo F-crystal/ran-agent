@@ -60,10 +60,10 @@ registration plus projection acknowledgement. It is not a deployable candidate:
 the early local external-MCP WorkRun composition still awaits its serial R1E
 authority/replay/no-direct-send acceptance, and a real presence source still
 needs to own attention admission/flush. The ordered R1 frontier repaired the
-observed web-tool route and has now locally verified the smallest
-effect-oriented Feishu document write/replan seam before taking a bounded
-dependency compatibility decision, then
-closes the external-MCP and real-presence runtime boundaries. This does not
+observed web-tool route, locally verified the smallest effect-oriented Feishu
+document write/replan seam, and completed the bounded dependency compatibility
+decision. R1D-L1 must close the exact update-command defect before the frontier
+continues through the external-MCP and real-presence runtime boundaries. This does not
 start S12 or authorize production. R1B is locally verified: the companion
 candidate has one generic Web surface (`mcp-search_hub`), the DLM-shaped handler
 check returned typed research evidence, and the affected Node/Python sets pass
@@ -78,9 +78,15 @@ The independent exact-SHA R1A repair review is clear; R1A, R1B and R1B.1 are
 `e4161721d253c160558aeaf22b7fda77e1a331b4` on repair-authority escape and
 title-only provider readback. The commit containing this update archives only
 the bounded repair after `75/75` focused R1C/reply checks and `125/125` shared
-envelope/receipt/ledger checks. R1C remains `LOCAL_VERIFIED`, `NOT_REVIEWED`
-and `ARCHIVED`; a new exact-SHA R1C review is next. R1D and S12 have not
-started, and production is unchanged.
+envelope/receipt/ledger checks. The repaired archive
+`02b8f6491f4ca3013f847decdc59974a90bebdca` passed independent exact-SHA review;
+R1C is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D has recorded explicit
+decisions for all four dependency surfaces without upgrading any dependency:
+the CLI versions are compatible, Ombre and Agent Reach are `POST_CUTOVER_OK`,
+and External MCP remains bridge-owned. The accepted Feishu adapter still
+omits the update command required by both CLI versions, so R1D-L1 is the ready
+authorization-blocked repair node. R1E and later nodes, including S12, remain
+`NOT_STARTED`; production is unchanged.
 
 ## Lifecycle Stages
 
@@ -108,6 +114,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/active_sequence.md` | Canonical S-stage order, current stage and exit conditions |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
+| `docs/governance/r1d_dependency_compatibility.v1.json` | R1D dependency surfaces, compatibility evidence, rollback and S12 dispositions |
 | `docs/governance/core_schedule_migration.v1.json` | S10 legacy scheduling disposition and paused-import policy manifest |
 | `docs/governance/core_managed_wake.v1.json` | Disabled-by-default Hermes `core-wake` projection contract |
 | `docs/governance/core_system_schedules.v1.json` | S12 replacement system ScheduleSpec manifest |

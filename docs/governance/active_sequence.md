@@ -60,10 +60,11 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> R1A-ACK-ORDER bounded repair archive dfb8b41 (LOCAL_VERIFIED, ARCHIVED)
        -> independent exact-SHA R1A repair delta review (CLEAR)
        -> previous R1C candidate e416172 (INDEPENDENT REVIEW BLOCKED)
-       -> bounded R1C replan/readback repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
-       -> independent exact-SHA repaired R1C review (REQUIRED)
-       -> R1D bounded dependency compatibility decision
-       -> R1E external MCP poll through WorkRun authority
+       -> bounded R1C replan/readback repair 02b8f649 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+       -> independent exact-SHA repaired R1C review (CLEAR)
+       -> R1D bounded dependency compatibility decision (DECISION COMPLETE; ARCHIVE IN THIS CHANGE)
+       -> R1D-L1 Feishu update command contract repair (READY; NEW AUTHORIZATION REQUIRED)
+       -> R1E external MCP poll through WorkRun authority (NOT STARTED)
        -> R1F real presence and attention admission/flush
   -> S12-R2 fresh production-copy rehearsal and candidate gates (NOT STARTED)
   -> S12-R3 independent review plus exact-SHA dry-run evidence (NOT STARTED)
@@ -81,9 +82,14 @@ S12-R0 fresh read-only production audit (COMPLETE)
   The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4`
   failed independent review on replan authority escape and insufficient
   readback evidence. The commit containing this update is the bounded repair:
-  it is locally verified and archived, but remains `NOT_REVIEWED` until a new
-  independent exact-SHA review.
-  R1D through R3 remain serial and have not started.
+  it is archived at `02b8f6491f4ca3013f847decdc59974a90bebdca`, and its
+  independent exact-SHA review is clear. R1C is now `LOCAL_VERIFIED`,
+  `REVIEWED` and `ARCHIVED`. R1D records all four dependency decisions in
+  `r1d_dependency_compatibility.v1.json`: no dependency upgrade is required,
+  but the accepted adapter omits the `docs +update --command overwrite`
+  contract required by both checked CLI versions. R1D-L1 is therefore the
+  ready implementation node pending new authorization. R1E through R3 remain
+  serial and `NOT_STARTED`.
   Exact exit evidence and prohibited scope are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.
 

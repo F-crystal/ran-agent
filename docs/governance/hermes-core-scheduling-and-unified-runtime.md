@@ -479,9 +479,12 @@ stage and result rather than rewriting every failure as a readback problem.
 The stable `document.write` contract is independent of `lark-cli` versions and
 wire response shapes. Feishu CLI commands, parsing and normalization stay
 inside the provider adapter. R1C neither upgrades the CLI nor treats local
-`1.0.85` as production truth; production was observed at `1.0.66`. R1D later
-classifies that exact provider contract as compatible, upgrade-required or
-post-cutover-safe before any production-candidate claim.
+`1.0.85` as production truth; production was observed at `1.0.66`. R1D confirms
+the two versions are compatible on the required search/create/fetch/files-list
+and canonical XML surfaces. Both versions require
+`docs +update --command overwrite`; the accepted adapter omits that command,
+so the bounded R1D-L1 caller-contract repair blocks S12 without requiring a CLI
+upgrade.
 
 The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` was rejected
 by independent review. The bounded repair verifies one synthetic
@@ -490,9 +493,14 @@ and resolved parent membership; update verifies the exact supplied document ID
 and canonical body. Adversarial repair responses cannot execute activity or an
 unrelated action, and reopen remains no-resend. The final focused R1C/reply set
 passes `75/75`; the smallest shared private-envelope, receipt and ledger
-boundary set passes `125/125`. This is local semantic evidence only: the
-repaired archive remains `NOT_REVIEWED`, and no real `lark-cli` compatibility
-or production claim is made before R1D.
+boundary set passes `125/125`. The repaired archive
+`02b8f6491f4ca3013f847decdc59974a90bebdca` passed independent exact-SHA review,
+so R1C is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D records the exact
+dependency decisions in `r1d_dependency_compatibility.v1.json`. Ombre projection
+is not composed by the S12 candidate, Agent Reach is only a feasible future
+Search Hub provider, and both are `POST_CUTOVER_OK`. External MCP remains
+bridge-owned and awaits R1E acceptance. No production claim follows from these
+local compatibility decisions.
 
 Web acquisition is a separate prerequisite, not a document subtype. Production
 Hermes uses `search_hub` for ordinary web/research and the governed social/media

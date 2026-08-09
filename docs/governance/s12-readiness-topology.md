@@ -45,10 +45,11 @@ flowchart TD
     RA --> RF["R1A-ACK-ORDER repair archive<br/>dfb8b41 · LOCAL_VERIFIED · ARCHIVED"]
     RF --> RI["Independent R1A delta review<br/>CLEAR"]
     RI --> R1C0["Previous R1C archive<br/>e416172 · REVIEW BLOCKED"]
-    R1C0 --> R1C["R1C replan/readback repair<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
-    R1C --> RC["Independent exact-SHA repaired R1C review<br/>REQUIRED"]
-    RC --> R1D["R1D dependency compatibility decision"]
-    R1D --> R1E["R1E external MCP through WorkRun"]
+    R1C0 --> R1C["R1C repair 02b8f649<br/>LOCAL_VERIFIED · ARCHIVED · REVIEWED"]
+    R1C --> RC["Independent exact-SHA repaired R1C review<br/>CLEAR"]
+    RC --> R1D["R1D dependency compatibility decision<br/>COMPLETE · ARCHIVE IN THIS CHANGE"]
+    R1D --> R1DL1["R1D-L1 Feishu update command repair<br/>READY · AUTHORIZATION REQUIRED"]
+    R1DL1 --> R1E["R1E external MCP through WorkRun<br/>NOT STARTED"]
     R1E --> R1F["R1F real presence + attention flush"]
     R1F --> R2["R2 fresh production-copy rehearsal"]
     R2 --> R3["R3 immutable candidate review + dry-run"]
@@ -62,11 +63,12 @@ flowchart TD
 Default execution is serial. The independent exact-SHA R1A repair review is
 clear, which also releases the already source-review-clear R1B/R1B.1 grouped
 status. R1C is archived by the commit containing this ledger, but remains
-`NOT_REVIEWED` until its own new independent exact-SHA review. The first R1C
-archive `e4161721d253c160558aeaf22b7fda77e1a331b4` is review-blocked and is not
-the current candidate. R1D has not started,
-and R1C cannot become a production candidate until R1D later accepts the exact
-Feishu provider contract.
+`REVIEWED` at `02b8f6491f4ca3013f847decdc59974a90bebdca`. The first R1C archive
+`e4161721d253c160558aeaf22b7fda77e1a331b4` remains review-blocked and is not
+the accepted candidate. R1D has completed the bounded compatibility decision.
+It found no required dependency upgrade, but both checked CLI versions require
+an update subcommand that the accepted adapter omits. R1D-L1 is therefore the
+ready node pending new implementation authorization; R1E has not started.
 
 ## Current Frontier
 
@@ -76,9 +78,10 @@ Feishu provider contract.
 | R1A | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R0 | `R1A-ACK-ORDER` blocked `aabf9bc`; the `dfb8b41` repair passed independent exact-SHA delta review. |
 | R1B | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1A | Independent source review is clear; grouped boundary released with R1A. |
 | R1B.1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Independent source review is clear; grouped boundary released with R1A. |
-| R1C | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1A/R1B/R1B.1 review closure | `e416172` was review-blocked; the commit containing this ledger is the bounded repair candidate and requires a new exact-SHA review. |
-| R1D | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1C | Not ready. |
-| R1E | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1D | Early local composition exists; accept it only when this node becomes ready. |
+| R1C | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1A/R1B/R1B.1 review closure | `e416172` was review-blocked; repaired archive `02b8f6491f4ca3013f847decdc59974a90bebdca` passed independent exact-SHA review. |
+| R1D | `LOCAL_VERIFIED` | `NOT_REVIEWED` | archive containing `r1d_dependency_compatibility.v1.json` | R1C | Decision complete: all dependencies have an explicit disposition; no dependency changed. |
+| R1D-L1 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1D | Ready, but requires new authorization: add the exact Feishu update command required by both compatible CLI versions. |
+| R1E | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1D-L1 | Early local composition exists; accept it only when this node becomes ready. |
 | R1F–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production unchanged. |
 
@@ -193,7 +196,8 @@ universal capability framework.
 - [x] Reuse existing Feishu search/create/fetch/readback primitives and preserve
   the accepted `feishu.minutes_to_doc` path.
 - [x] Do not upgrade `lark-cli` in R1C or treat local `1.0.85` as production
-  truth; the observed production version remains `1.0.66` pending R1D.
+  truth; R1D later confirmed the observed production `1.0.66` protocol is
+  version-compatible while identifying the separate update-command defect.
 - [x] Node validates actor, target, payload identity, idempotency and readback;
   the model cannot self-authorize or claim success.
 - [x] A repairable recipe/type mismatch produces one bounded internal
@@ -227,39 +231,49 @@ universal capability framework.
   `git diff --check` pass.
 - [x] The repository archive transaction containing this ledger creates the
   exact immutable R1C candidate and pushes it to `origin/main`.
-- [ ] Independent exact-SHA R1C review is clear.
+- [x] Independent exact-SHA R1C review is clear for
+  `02b8f6491f4ca3013f847decdc59974a90bebdca`.
 
 The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` is blocked by
 `R1C-REPLAN-AUTHORITY-ESCAPE` and `R1C-READBACK-EVIDENCE`. The commit containing
-this ledger is their bounded repair. Current marker after this archive:
-`LOCAL_VERIFIED + NOT_REVIEWED + ARCHIVED`.
-R1D remains `NOT_STARTED` until independent exact-SHA R1C review is clear. R1C
-cannot claim production-candidate readiness; that remains conditional on R1D
-later classifying the exact Feishu CLI contract as compatible, upgrade-required
-or post-cutover-safe.
+this ledger is their bounded repair. Accepted marker:
+`LOCAL_VERIFIED + REVIEWED + ARCHIVED` at
+`02b8f6491f4ca3013f847decdc59974a90bebdca`.
+R1D records the compatibility decision without reopening R1C or changing a
+dependency. R1C cannot claim production-candidate readiness until the separate
+R1D-L1 caller-contract repair is authorized, implemented, reviewed and
+archived.
 
 ### R1D — Bounded Dependency Compatibility Decision
 
 Purpose: turn dependency versions into explicit candidate decisions, not an
 implicit upgrade backlog.
 
-- [ ] Record production version, candidate version, required protocol surface,
+- [x] Record production version, candidate version, required protocol surface,
   failure behavior and rollback for `lark-cli`, Ombre and external-MCP runtime
   dependencies.
-- [ ] Classify each dependency `BLOCKS_S12` or `POST_CUTOVER_OK` with a reason.
-- [ ] For `lark-cli`, verify the exact commands and JSON/readback shapes used by
+- [x] Classify each dependency `BLOCKS_S12` or `POST_CUTOVER_OK` with a reason.
+- [x] For `lark-cli`, verify the exact commands and JSON/readback shapes used by
   R1C against server `1.0.66` and candidate `1.0.85` where needed.
-- [ ] R1D—not R1C—decides whether `lark-cli` stays compatible, requires a
+- [x] R1D—not R1C—decides whether `lark-cli` stays compatible, requires a
   separate reversible upgrade, or is post-cutover-safe.
-- [ ] If S8 projection is composed by S12, smoke Ombre `breath_advanced`,
-  `hold`, `grow`, `trace`, response shape and marker reconciliation.
-- [ ] Verify External MCP Gateway retains the stable host boundary; no external
+- [x] Determine that S8 projection is not composed by S12; therefore do not
+  mutate Ombre or run unnecessary write-tool smokes. Production loopback health
+  remains HTTP 200.
+- [x] Record the full Ombre tool smoke as not applicable to S12 because the
+  projector is not composed; retain it for a future composed provider change.
+- [x] Verify External MCP Gateway retains the stable host boundary; no external
   server gains direct presentation authority.
-- [ ] Record the decision in governance and archive the evidence/changes under
+- [x] Record the decision in governance and archive the evidence/changes under
   an exact SHA.
 
 Completion marker: every dependency has one recorded disposition; no optional
 provider refactor is pulled into the cutover.
+
+Decision: `lark-cli` is `COMPATIBLE_AS_IS`, but its caller contract
+`docs +update --command overwrite` blocks S12 until R1D-L1; External MCP is
+compatible but remains blocked on R1E acceptance. Ombre provider changes and
+Agent Reach feasibility are `POST_CUTOVER_OK`. No dependency was upgraded.
 
 ### R1E — External MCP Poll Through WorkRun Authority
 
@@ -382,32 +396,26 @@ Production changed: NO / YES (authorization reference)
 Do not accept a narrative “done” report without the checklist, exact evidence
 and status split above.
 
-The independent exact-SHA R1A repair review is already clear and must not be
-repeated. After the bounded R1C archive, its independent review can start from
+The independent exact-SHA R1A and R1C reviews are already clear and must not be
+repeated. An optional narrow review of the archived R1D decision can start from
 this instruction:
 
 ```text
 Read AGENTS.md, docs/governance/active_sequence.md,
 docs/governance/s12-readiness-topology.md,
-docs/governance/current_runtime_status.md and the exact bounded R1C repair delta
-from blocked candidate e4161721d253c160558aeaf22b7fda77e1a331b4. Audit only the
-two repaired blockers; do not repeat already-clear R1A/R1B/R1B.1 work.
-Trace one Web-learning-note request through Hermes document.write, Node
-grounding, one bounded wrong-Minutes-type replan, operation ledger causation,
-the Feishu adapter, exact document/body/parent readback, typed receipt and
-truthful owner acknowledgement. Prove repair activity/commitments/claims and an
-unrelated action family cannot enter execution.
-Prove the same source message reopens without a second create and changed
-content under the same causation is rejected. Reproduce a real thrown
-post-dispatch timeout and verify durable ambiguous/no-resend. Confirm ordinary
-chat, the accepted feishu.minutes_to_doc path and R1B.1 private-envelope
-fail-closed behavior do not regress. Confirm every lark-cli command and response
-shape remains inside the adapter; do not decide 1.0.66 versus 1.0.85, upgrade a
-dependency, deploy, touch production or start R1D/S12. Verify the recorded
-focused R1C/reply `75/75` result, shared boundary `125/125`, syntax and git diff
-checks. Report every repaired R1C
-checklist item PASS/FAIL, blockers, non-blocking findings, whether R1C may be
-marked REVIEWED, and the next ready node using the Reviewer Handoff Template.
+docs/governance/current_runtime_status.md and
+docs/governance/r1d_dependency_compatibility.v1.json at the archived R1D SHA.
+Audit only the bounded dependency decision; do not reopen accepted R1C or start
+R1D-L1, R1E or S12. Confirm production `lark-cli` `1.0.66` and isolated
+candidate `1.0.85` expose the required search/create/fetch/files-list fields,
+accept equivalent canonical XML, and both require
+`docs +update --command overwrite`. Confirm the accepted adapter omits that
+command and that an upgrade alone cannot fix it. Confirm the S12 runtime does
+not compose the Ombre projector, External MCP remains behind the bridge-owned
+gateway, and Agent Reach is only an optional future Search Hub provider.
+Report every R1D checklist item PASS/FAIL, any incorrect disposition, whether
+R1D may remain complete, and whether R1D-L1 is the correct ready node using the
+Reviewer Handoff Template. Do not upgrade, deploy or touch production.
 ```
 
 ## Update Protocol

@@ -298,9 +298,8 @@ The previous bounded candidate archive completed at
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; its `R1A-ACK-ORDER` repair is
 archived at `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1` and the independent
 exact-SHA delta review is clear. R1A, R1B and R1B.1 are now `REVIEWED`. R1C
-adds the smallest effect-oriented Feishu
-`document.write` seam plus
-bounded internal replan; R1D then decides exact dependency compatibility before
+adds the smallest effect-oriented Feishu `document.write` seam plus bounded
+internal replan. R1D has now decided exact dependency compatibility before
 external-MCP WorkRun composition, real presence/attention ownership and the
 fresh R2 rehearsal. The current server `lark-cli` observed during artifact
 recovery is `1.0.66` while `1.0.85` is offered; no upgrade occurred. Ombre and
@@ -321,13 +320,23 @@ bounded repair extracts exactly one `document.write` request, rejects repair
 activity/commitments/claims/other actions before execution, and requires exact
 document ID, canonical body and resolved parent membership from the Feishu
 adapter. The current provider surface exposes the required exact evidence, so
-R1D was not started and no dependency changed. The final focused R1C/reply set
+R1C did not start R1D and no dependency changed. The final focused R1C/reply set
 passes `75/75`; the smallest shared envelope/receipt/ledger boundary set passes
-`125/125`. The commit containing this update is the repaired R1C archive, so
-R1C remains `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED` until a new
-independent exact-SHA review. R1D remains `NOT_STARTED` and later owns the
-compatibility/upgrade/post-cutover-safe classification and the separate
-Ombre/external-MCP dependency decisions.
+`125/125`. The repaired archive is
+`02b8f6491f4ca3013f847decdc59974a90bebdca`; its independent exact-SHA review
+is clear, so R1C is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D is now a
+complete bounded decision: server `lark-cli` `1.0.66` and candidate `1.0.85`
+are compatible on the accepted search/create/fetch/files-list and canonical
+XML surfaces, and neither version requires an upgrade for S12. Both versions
+do require `docs +update --command overwrite`, which the accepted R1C adapter
+currently omits; this caller-contract repair is the new authorization-blocked
+R1D-L1 node. Ombre projection is not composed by the S12 candidate and Agent
+Reach remains an optional future Search Hub provider, both `POST_CUTOVER_OK`.
+External MCP remains behind the bridge-owned gateway and passes the focused
+compatibility set `26/26`, but R1E still owns its WorkRun/replay/no-direct-send
+acceptance. R1E and later nodes remain `NOT_STARTED`; no dependency or
+production state changed. Exact evidence and dispositions are recorded in
+`docs/governance/r1d_dependency_compatibility.v1.json`.
 
 The local Python entrypoint is now the ignored repository `.venv`, created from
 the existing Anaconda Python 3.10 with system site packages. Local archive and
