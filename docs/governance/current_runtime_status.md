@@ -219,9 +219,11 @@ must be suppressed/reconciled rather than replayed; its legacy dispatch state
 is from the same instant.
 
 Production is quiescent enough for a new rehearsal, but the implementation
-archived at `aabf9bc97ea3fcd95bf6d79798c56315543d0c37` is only the S12-R1
-review candidate, not a deployable S12 candidate. A later docs-only status
-writeback does not change that source candidate. It supplies the cutover Journal interlock, paused
+archived at `aabf9bc97ea3fcd95bf6d79798c56315543d0c37` was blocked by
+independent review finding `R1A-ACK-ORDER`; it is not a deployable S12
+candidate. The repair starts from governance HEAD
+`6def06aa45a6d4c64b9a4e78cda35dd38331678f`, and the archive commit containing
+this status is the replacement candidate. The earlier candidate supplies the cutover Journal interlock, paused
 candidate/suppression transaction path, system and managed-wake manifests,
 fail-closed `core-wake`, Node Core lifecycle composition, generic WorkRun
 claim/terminal execution, typed scheduled Hermes/Package B delivery, Python
@@ -233,11 +235,18 @@ Core/attention set passes 183/183; the earlier affected Python set passes 67/67
 and the current affected set passes 55/55. After binding the project Python
 explicitly, the complete Node baseline passes 1,337 with zero failures and four
 declared environment skips.
-A timed todo write now registers immediately through the authenticated local
-Core route; the reminder scan repairs a missed registration into the same
-replay-safe one-shot schedule, delivery fetches its retained content for the
-typed scheduled turn, and then acknowledges the Python projection after a
-durable send/suppress terminal. Source inspection found that the archived
+A timed todo write registers immediately through the authenticated local Core
+route; the reminder scan repairs a missed registration into the same replay-safe
+one-shot schedule. Independent review found that the scheduled suppression and
+delivery paths called the Python acknowledgement before the worker committed the
+WorkRun terminal. The repaired local path returns a typed delivery outcome to
+the worker, commits the durable WorkRun terminal, rereads `completed`, and only
+then invokes the Python acknowledgement. A post-terminal/pre-ack failure leaves
+the WorkRun terminal and a missing Core acknowledgement marker; reopen skips the
+delivery/effect and safely completes only the idempotent Python acknowledgement.
+Focused WorkRun/scheduled-delivery/reminder checks pass 15/15, the Python
+acknowledgement check passes 1/1, and the affected Core set passes 180/180.
+Source inspection found that the archived
 candidate already stops the legacy external-MCP timer in Core mode, runs its
 existing scan/executor through an `external_poll` WorkRun, records hash-bound
 Core facts and routes any presentation candidate through Core delivery. That
@@ -269,7 +278,8 @@ Both diagnostics accept that assembly. A DLM-shaped real MCP-handler call
 entered typed `research`, selected the academic provider seam and returned
 structured evidence without `web_extract`, `web_search` or `tool_describe`.
 The complete affected Node set passes 62/62, the profile/release Python set
-passes 43/43, and Shell syntax plus `git diff --check` pass.
+passes 43/43, and Shell syntax plus `git diff --check` pass. Independent source
+review found no R1B blocker; grouped review status remains held until R1A closes.
 
 Fresh owner evidence then reproduced a separate ordinary-chat failure: a
 provider-origin private reply envelope used string `"v1"` instead of numeric
@@ -279,11 +289,15 @@ instruction, canonicalizes only unambiguous `"1"`/`"v1"` aliases, and fails
 other private-envelope-shaped JSON closed to a safe reply. Rejection logs carry
 only a stable code; ordinary non-envelope JSON remains visible. The affected
 Gateway/Backend/ChannelHub/entry set passes 259/259 locally. Production still
-runs the archived parser.
+runs the archived parser. Independent source review found no R1B.1 blocker;
+grouped review status remains held until R1A closes.
 
-The bounded candidate archive completed at
-`aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; independent review of the exact
-`cacc8924..aabf9bc` delta is the current boundary before R1C becomes ready. R1C adds the smallest effect-oriented Feishu
+The previous bounded candidate archive completed at
+`aabf9bc97ea3fcd95bf6d79798c56315543d0c37`, but R1A remains
+`NOT_REVIEWED` after `R1A-ACK-ORDER`. Independent review of the exact repair
+delta from `6def06a` through the archive commit containing this status is the
+current boundary before R1C becomes ready. R1B and R1B.1 remain source-review-clear
+without changing that grouped boundary. R1C adds the smallest effect-oriented Feishu
 `document.write` seam plus
 bounded internal replan; R1D then decides exact dependency compatibility before
 external-MCP WorkRun composition, real presence/attention ownership and the

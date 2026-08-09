@@ -56,8 +56,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> R1A accepted local Core/cutover composition (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
        -> R1B web acquisition routing repair (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
        -> R1B.1 private reply envelope fail-closed (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
-       -> bounded R1A/R1B/R1B.1 candidate archive aabf9bc (COMPLETE)
-       -> independent exact-SHA delta review (CURRENT BOUNDARY)
+       -> previous R1A/R1B/R1B.1 candidate archive aabf9bc (R1A BLOCKED)
+       -> R1A-ACK-ORDER bounded repair archive (LOCAL_VERIFIED, ARCHIVED)
+       -> independent exact-SHA R1A repair delta review (CURRENT BOUNDARY)
        -> R1C effect-oriented Feishu document write and truthful reply (NEXT AFTER REVIEW)
        -> R1D bounded dependency compatibility decision
        -> R1E external MCP poll through WorkRun authority
@@ -68,9 +69,12 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> S12 Core Cutover Gate
 ```
 
-- R1A, R1B and the ordinary-chat R1B.1 envelope repair have local evidence and
-  are archived at `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. Independent
-  review of that immutable delta is the current boundary; R1C is not active yet.
+- Independent review found `R1A-ACK-ORDER` in the previous candidate
+  `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. The archive commit containing
+  this sequence is the locally verified bounded repair candidate; an independent
+  exact-SHA delta review is still required before R1A becomes `REVIEWED`.
+- R1B and R1B.1 remain source-review-clear and behaviorally unchanged, but the
+  grouped R1 boundary stays `NOT_REVIEWED` until R1A closes. R1C is not active.
 - R1C through R3 remain serial. Their exact exit evidence and prohibited scope
   are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.

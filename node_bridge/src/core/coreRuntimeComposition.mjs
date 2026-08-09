@@ -137,6 +137,7 @@ export function createCoreRuntimeComposition({
         await pythonJson(fetchImpl, pythonBaseUrl, '/tools/todo/ack', { todo_id: reminderId });
       } catch (error) {
         logger.warn?.(`[core-reminder] local acknowledgement pending: ${error?.message || error}`);
+        return false;
       }
     },
   });

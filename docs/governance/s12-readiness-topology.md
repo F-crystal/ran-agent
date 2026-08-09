@@ -41,8 +41,9 @@ flowchart TD
     R0["R0 read-only production audit<br/>COMPLETE"] --> R1A["R1A Core/cutover composition<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
     R1A --> R1B["R1B single Web route<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
     R1B --> R1B1["R1B.1 private envelope fail-closed<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
-    R1B1 --> RA["Bounded candidate archive<br/>aabf9bc · COMPLETE"]
-    RA --> RI["Independent exact-SHA delta review<br/>CURRENT"]
+    R1B1 --> RA["Previous candidate archive<br/>aabf9bc · R1A BLOCKED"]
+    RA --> RF["R1A-ACK-ORDER repair archive<br/>LOCAL_VERIFIED · ARCHIVED"]
+    RF --> RI["Independent R1A delta review<br/>REQUIRED"]
     RI --> R1C["R1C document.write + truthful action reply<br/>NEXT AFTER REVIEW"]
     R1C --> R1D["R1D dependency compatibility decision"]
     R1D --> R1E["R1E external MCP through WorkRun"]
@@ -66,19 +67,22 @@ provider contract.
 | Node | Verification | Review | Delivery | Dependency | Decision |
 |---|---|---|---|---|---|
 | R0 | `LOCAL_VERIFIED` | historical review | historical evidence | S11 | Complete; re-inspect only when R2 starts. |
-| R1A | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R0 | Candidate `aabf9bc`; current exact-SHA review scope. |
-| R1B | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1A | Candidate `aabf9bc`; current exact-SHA review scope. |
-| R1B.1 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Candidate `aabf9bc`; current exact-SHA review scope. |
+| R1A | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R0 | `R1A-ACK-ORDER` blocked `aabf9bc`; the archive commit containing this ledger is the repaired candidate and requires independent delta review. |
+| R1B | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1A | Source review clear at `aabf9bc`; grouped review status remains held until R1A closes. |
+| R1B.1 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Source review clear at `aabf9bc`; grouped review status remains held until R1A closes. |
 | R1C | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1A/R1B/R1B.1 archived and independently reviewed | Next implementation node after review. |
 | R1D | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1C | Not ready. |
 | R1E | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1D | Early local composition exists; accept it only when this node becomes ready. |
 | R1F–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production unchanged. |
 
-The review baseline is `cacc8924b7e2b67e300a67228a6891576759f555` and the
-archived candidate is `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
-Production remains at `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; an
-archived local candidate is not a deployable or production-authorized SHA.
+The previous implementation candidate is
+`aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance
+HEAD `6def06aa45a6d4c64b9a4e78cda35dd38331678f`. The replacement candidate is
+the archive commit containing this ledger, with its exact SHA recorded by the
+archive transaction and reviewer handoff. Production remains at
+`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; an archived local candidate is
+not a deployable or production-authorized SHA.
 
 ## Node Acceptance Checklists
 
@@ -98,16 +102,22 @@ shape and exact cutover command without touching production.
   scheduled delivery without a second executor.
 - [x] Timed todo registration and missed-registration repair converge on the
   same replay-safe one-shot schedule.
-- [x] Reminder projection is acknowledged only after durable send/suppress
-  terminal evidence.
+- [x] Scheduled delivery returns a typed sent/suppressed/ambiguous outcome; the
+  worker durably commits and rereads the completed WorkRun before invoking the
+  Python reminder acknowledgement.
+- [x] Failure after terminal commit but before acknowledgement leaves the
+  WorkRun completed; reopen performs no delivery/effect and retries only the
+  idempotent missing acknowledgement before recording its Core marker.
 - [x] Local project Python has one ignored `.venv` entrypoint; archive and Node
   release tests prefer it while production gates still require an explicit
   absolute `RAN_AGENT_PYTHON_BIN`.
-- [x] Local evidence: Core/attention `183/183`, earlier affected Python `67/67`,
-  current affected Python `55/55`, complete Node baseline `1337` pass with four
-  declared environment skips, and Python-entry regressions `4/4`.
-- [x] Intentional R1A files and synchronized governance are archived under
-  `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
+- [x] Existing evidence remains Core/attention `183/183`, affected Python
+  `67/67` and `55/55`, complete Node baseline `1337` with four declared skips,
+  and Python-entry regressions `4/4`; the blocker repair adds focused Node
+  `15/15`, Python acknowledgement `1/1`, and affected Core `180/180`.
+- [x] Independent review recorded `R1A-ACK-ORDER` against `aabf9bc`; the
+  intentional repair and synchronized governance are the archive commit that
+  contains this ledger.
 - [ ] Independent exact-SHA delta review records no blocker against the R1A
   scope.
 
@@ -128,8 +138,8 @@ Focused contract: `docs/governance/s12-r1b-web-routing.md`.
   `tool_describe`.
 - [x] Local evidence: affected Node `62/62`, profile/release Python `43/43`,
   shell syntax and `git diff --check` pass.
-- [ ] Independent review verifies the source delta and confirms no ordinary-Web
-  capability regression.
+- [x] Independent source review found no R1B blocker or ordinary-Web capability
+  regression; grouped review status remains `NOT_REVIEWED` until R1A closes.
 - [x] R1B is archived with its governance updates under
   `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
 
@@ -155,8 +165,9 @@ ordinary reply. This is a shared provider boundary, not a document action type.
   visible.
 - [x] Gateway, reply-envelope, reply-backend, provider-boundary, ChannelHub,
   Node entry and outbound affected tests pass `259/259`.
-- [ ] Independent review confirms the shape test is neither fail-open nor an
-  overbroad “contains schemaVersion” regex.
+- [x] Independent source review found no R1B.1 blocker and confirmed the shape
+  test is neither fail-open nor an overbroad “contains schemaVersion” regex;
+  grouped review status remains `NOT_REVIEWED` until R1A closes.
 - [x] R1B.1 is archived with R1A/R1B under
   `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
 
@@ -343,17 +354,17 @@ The current independent review session can start from this instruction:
 ```text
 Read AGENTS.md, docs/governance/active_sequence.md,
 docs/governance/s12-readiness-topology.md and
-docs/governance/current_runtime_status.md. Audit only the exact archived R1A and
-R1B/R1B.1 delta from cacc8924b7e2b67e300a67228a6891576759f555 through
-aabf9bc97ea3fcd95bf6d79798c56315543d0c37. Verify every
-R1A/R1B/R1B.1 checklist item against source and fresh evidence; distinguish
-implementation verification from independent review and archive state. Reproduce
-the pre-fix `schemaVersion: "v1"` leak mentally or from the test, then verify
-canonical alias handling, malformed-private fail-closed behavior, ordinary JSON
-non-regression and sanitized logging. Do not deploy, touch production, start
-R1C, or broaden the scope. Report blockers, non-blocking findings, exact
-tests/counts, whether R1A/R1B/R1B.1 may be marked REVIEWED, and the next ready node
-using the Reviewer Handoff Template.
+docs/governance/current_runtime_status.md. Audit only the exact archived
+R1A-ACK-ORDER repair delta from
+6def06aa45a6d4c64b9a4e78cda35dd38331678f through the replacement SHA in the
+archive record. Verify terminal commit -> terminal reread -> Python reminder
+acknowledgement, the post-terminal/pre-ack recovery boundary, and no duplicate
+sent/suppressed/ambiguous delivery. Confirm mechanically that R1B/R1B.1 source
+files did not change; their source review is clear but the grouped review status
+remains held until R1A closes. Do not deploy, touch production, start R1C, or
+broaden the scope. Report blockers, non-blocking findings, exact tests/counts,
+whether R1A may be marked REVIEWED, and the next ready node using the Reviewer
+Handoff Template.
 ```
 
 ## Update Protocol

@@ -215,6 +215,18 @@ export class CoreDatabase {
         WHERE run.state='running' AND lease.state='active' AND lease.lease_until<?
         ORDER BY lease.lease_until,run.work_run_id LIMIT ?`, at,
       Math.max(1, Math.min(128, Number(limit) || 32))).map((row) => Object.freeze({ ...row })),
+      terminalWorkRunsPendingPostTerminal: (taskKind, limit = 32) => all(`SELECT run.*,
+          revision.task_kind,revision.payload_ref,revision.causation_id,occurrence.scheduled_for
+        FROM work_run run
+        JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
+        JOIN schedule_spec_revision revision
+          ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
+        WHERE run.state='completed' AND revision.task_kind=?
+          AND NOT EXISTS (SELECT 1 FROM journal_event event
+            WHERE event.event_type='core_work_run_post_terminal_completed'
+              AND event.correlation_id=run.work_run_id)
+        ORDER BY run.ended_at,run.work_run_id LIMIT ?`, taskKind,
+      Math.max(1, Math.min(128, Number(limit) || 32))).map((row) => Object.freeze({ ...row })),
       scheduledWorkContext: (workRunId) => read(`SELECT run.work_run_id,run.exchange_id,
           exchange.conversation_id,revision.payload_ref,revision.presentation_binding_id,
           binding.destination_ref,binding.source_instance_id,binding.platform,binding.revision AS binding_revision

@@ -15,16 +15,47 @@ export function createCoreWorkRunWorker({
   now = () => new Date(),
 } = {}) {
   if (!core?.reader?.scheduledWorkQueue || !core?.reader?.expiredScheduledWorkRuns
+    || !core?.reader?.workRun || !core?.reader?.journalEvent
+    || !core?.reader?.terminalWorkRunsPendingPostTerminal
     || typeof hashContent !== 'function'
     || !Number.isSafeInteger(batchSize) || batchSize < 1 || batchSize > 128
     || !Number.isSafeInteger(leaseSeconds) || leaseSeconds < 1) {
     throw coreError('CORE_WORKER_DEPENDENCY_INVALID', 'Core Work Run worker dependencies are invalid');
   }
   const scheduling = createCoreSchedulingService({ core, batchSize });
+  const completePostTerminal = async (handler, work, outcome = null) => {
+    if (typeof handler?.afterTerminal !== 'function') return;
+    const eventId = `core-worker:post-terminal:${work.work_run_id}`;
+    if (core.reader.journalEvent(eventId)) return;
+    const terminal = core.reader.workRun(work.work_run_id);
+    if (terminal?.state !== 'completed') {
+      throw coreError('CORE_WORKER_POST_TERMINAL_EARLY', 'post-terminal work requires a durably completed Work Run');
+    }
+    const completed = await handler.afterTerminal(Object.freeze({ work, terminal, outcome }));
+    if (completed === false) return;
+    await core.writer.write((tx) => tx.journal.event(eventId) || tx.journal.append({
+      eventId,
+      eventType: 'core_work_run_post_terminal_completed',
+      actorRef: workerId,
+      originRef: `core-worker:post-terminal:${work.task_kind}`,
+      sourceKind: 'core-work-run-post-terminal',
+      sourceRef: work.payload_ref,
+      revision: Number(terminal.revision),
+      causationId: work.causation_id,
+      correlationId: work.work_run_id,
+      createdAt: now().toISOString(),
+    }));
+  };
   return Object.freeze({
     async runOnce() {
       const results = [];
       const at = now().toISOString();
+      for (const [taskKind, handler] of Object.entries(handlers)) {
+        if (typeof handler?.afterTerminal !== 'function') continue;
+        for (const work of core.reader.terminalWorkRunsPendingPostTerminal(taskKind, batchSize)) {
+          await completePostTerminal(handler, work);
+        }
+      }
       for (const work of core.reader.expiredScheduledWorkRuns(at, batchSize)) {
         await scheduling.recoverExpiredWorkRun({
           workRunId: work.work_run_id,
@@ -76,6 +107,7 @@ export function createCoreWorkRunWorker({
           resultHashToken: result.resultHashToken,
           failureClass: result.failureClass ?? null,
         });
+        await completePostTerminal(handler, work, result.deliveryOutcome ?? null);
         results.push(Object.freeze({ workRunId: work.work_run_id, state: terminal.workRun.state }));
       }
       return Object.freeze(results);

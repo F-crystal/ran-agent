@@ -27,7 +27,7 @@ export function createPackageBScheduledDeliveryHandler({
     throw coreError('CORE_SCHEDULED_DELIVERY_DEPENDENCY_INVALID', 'scheduled delivery requires Core, Hermes decision and one adapter');
   }
   const scheduling = createCoreSchedulingService({ core });
-  return async ({ work, authority }) => {
+  const handler = async ({ work, authority }) => {
     const context = core.reader.scheduledWorkContext(work.work_run_id);
     if (!context) throw coreError('CORE_SCHEDULED_DELIVERY_CONTEXT_MISSING', 'scheduled delivery context is missing');
     const identity = core.reader.conversationIdentityById(context.conversation_id);
@@ -53,10 +53,12 @@ export function createPackageBScheduledDeliveryHandler({
     }));
     if (decision?.suppressSend === true) {
       const resultRef = `scheduled-silent:${stable}`;
-      await afterTerminal(Object.freeze({ ...context, work_run_id: work.work_run_id }), {
+      const deliveryOutcome = Object.freeze({
         state: 'suppressed', resultRef,
       });
-      return Object.freeze({ resultRef, resultHashToken: hashContent('work-run-result', resultRef) });
+      return Object.freeze({
+        resultRef, resultHashToken: hashContent('work-run-result', resultRef), deliveryOutcome,
+      });
     }
     const replyText = text(decision?.replyText, 'CORE_SCHEDULED_DELIVERY_EMPTY', 'Hermes scheduled decision returned no text');
     const provider = text(decision?.provider || 'hermes', 'CORE_SCHEDULED_DELIVERY_PROVIDER_INVALID', 'scheduled provider is invalid');
@@ -118,10 +120,16 @@ export function createPackageBScheduledDeliveryHandler({
       },
       send: (view) => send(Object.freeze({ ...view, text: replyText })),
     });
-    await afterTerminal(Object.freeze({ ...context, work_run_id: work.work_run_id }), delivery.delivery);
     return Object.freeze({
       resultRef: `core-presentation-receipt:${delivery.delivery.receiptId || outboxId}:${delivery.delivery.state}`,
       resultHashToken: hashContent('work-run-result', `${outboxId}\u0000${delivery.delivery.state}`),
+      deliveryOutcome: delivery.delivery,
     });
   };
+  handler.afterTerminal = async ({ work, outcome }) => {
+    const context = core.reader.scheduledWorkContext(work.work_run_id);
+    if (!context) throw coreError('CORE_SCHEDULED_DELIVERY_CONTEXT_MISSING', 'scheduled delivery context is missing');
+    return afterTerminal(Object.freeze({ ...context, work_run_id: work.work_run_id }), outcome);
+  };
+  return handler;
 }
