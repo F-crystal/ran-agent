@@ -7,7 +7,14 @@ import path from 'node:path';
 import test from 'node:test';
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
-const PYTHON = process.env.RAN_AGENT_PYTHON_BIN || 'python3';
+const PROJECT_PYTHON = path.join(ROOT, '.venv', 'bin', 'python');
+const PYTHON = process.env.RAN_AGENT_PYTHON_BIN || (fs.existsSync(PROJECT_PYTHON) ? PROJECT_PYTHON : '');
+try {
+  if (!path.isAbsolute(PYTHON)) throw new Error('not absolute');
+  fs.accessSync(PYTHON, fs.constants.X_OK);
+} catch {
+  throw new Error('Python test prerequisite missing: set absolute RAN_AGENT_PYTHON_BIN or create the project .venv');
+}
 const CONTRACT = path.join(ROOT, 'scripts', 'ombre_o1_contract.py');
 const PIN = '0e83d4671ce1629e03ad36bb9160235bf60dbd34';
 

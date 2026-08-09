@@ -38,14 +38,15 @@ Mark a node delivered only when its evidence names the exact archived SHA.
 
 ```mermaid
 flowchart TD
-    R0["R0 read-only production audit<br/>COMPLETE"] --> R1A["R1A Core/cutover composition<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
-    R1A --> R1B["R1B single Web route<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
-    R1B --> R1B1["R1B.1 private envelope fail-closed<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
+    R0["R0 read-only production audit<br/>COMPLETE"] --> R1A["R1A Core/cutover composition<br/>LOCAL_VERIFIED · ARCHIVED · REVIEWED"]
+    R1A --> R1B["R1B single Web route<br/>LOCAL_VERIFIED · ARCHIVED · REVIEWED"]
+    R1B --> R1B1["R1B.1 private envelope fail-closed<br/>LOCAL_VERIFIED · ARCHIVED · REVIEWED"]
     R1B1 --> RA["Previous candidate archive<br/>aabf9bc · R1A BLOCKED"]
     RA --> RF["R1A-ACK-ORDER repair archive<br/>dfb8b41 · LOCAL_VERIFIED · ARCHIVED"]
-    RF --> RI["Independent R1A delta review<br/>REQUIRED"]
-    RI --> R1C["R1C document.write + truthful action reply<br/>NEXT AFTER REVIEW"]
-    R1C --> R1D["R1D dependency compatibility decision"]
+    RF --> RI["Independent R1A delta review<br/>CLEAR"]
+    RI --> R1C["R1C document.write + truthful action reply<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
+    R1C --> RC["Independent exact-SHA R1C review<br/>REQUIRED"]
+    RC --> R1D["R1D dependency compatibility decision"]
     R1D --> R1E["R1E external MCP through WorkRun"]
     R1E --> R1F["R1F real presence + attention flush"]
     R1F --> R2["R2 fresh production-copy rehearsal"]
@@ -57,20 +58,22 @@ flowchart TD
     DA --> S13["S13 legacy cleanup"]
 ```
 
-Default execution is serial. Do not start a dependent node merely because some
-of its code already exists. R1C may be implemented before the R1D decision, but
-it cannot become a production candidate until R1D accepts the exact Feishu
-provider contract.
+Default execution is serial. The independent exact-SHA R1A repair review is
+clear, which also releases the already source-review-clear R1B/R1B.1 grouped
+status. R1C is archived by the commit containing this ledger, but remains
+`NOT_REVIEWED` until its own independent exact-SHA review. R1D has not started,
+and R1C cannot become a production candidate until R1D later accepts the exact
+Feishu provider contract.
 
 ## Current Frontier
 
 | Node | Verification | Review | Delivery | Dependency | Decision |
 |---|---|---|---|---|---|
 | R0 | `LOCAL_VERIFIED` | historical review | historical evidence | S11 | Complete; re-inspect only when R2 starts. |
-| R1A | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R0 | `R1A-ACK-ORDER` blocked `aabf9bc`; repaired candidate `dfb8b41` requires independent delta review. |
-| R1B | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1A | Source review clear at `aabf9bc`; grouped review status remains held until R1A closes. |
-| R1B.1 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Source review clear at `aabf9bc`; grouped review status remains held until R1A closes. |
-| R1C | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1A/R1B/R1B.1 archived and independently reviewed | Next implementation node after review. |
+| R1A | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R0 | `R1A-ACK-ORDER` blocked `aabf9bc`; the `dfb8b41` repair passed independent exact-SHA delta review. |
+| R1B | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1A | Independent source review is clear; grouped boundary released with R1A. |
+| R1B.1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Independent source review is clear; grouped boundary released with R1A. |
+| R1C | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1A/R1B/R1B.1 review closure | The commit containing this ledger is the bounded candidate; exact-SHA R1C review is next. |
 | R1D | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1C | Not ready. |
 | R1E | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1D | Early local composition exists; accept it only when this node becomes ready. |
 | R1F–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
@@ -117,7 +120,7 @@ shape and exact cutover command without touching production.
 - [x] Independent review recorded `R1A-ACK-ORDER` against `aabf9bc`; the
   intentional repair and synchronized governance are archived at
   `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`.
-- [ ] Independent exact-SHA delta review records no blocker against the R1A
+- [x] Independent exact-SHA delta review records no blocker against the R1A
   scope.
 
 Do not redo the accepted suites unless relevant source changed or independent
@@ -138,7 +141,7 @@ Focused contract: `docs/governance/s12-r1b-web-routing.md`.
 - [x] Local evidence: affected Node `62/62`, profile/release Python `43/43`,
   shell syntax and `git diff --check` pass.
 - [x] Independent source review found no R1B blocker or ordinary-Web capability
-  regression; grouped review status remains `NOT_REVIEWED` until R1A closes.
+  regression; the grouped review status was released when R1A closed.
 - [x] R1B is archived with its governance updates under
   `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
 
@@ -166,7 +169,7 @@ ordinary reply. This is a shared provider boundary, not a document action type.
   Node entry and outbound affected tests pass `259/259`.
 - [x] Independent source review found no R1B.1 blocker and confirmed the shape
   test is neither fail-open nor an overbroad “contains schemaVersion” regex;
-  grouped review status remains `NOT_REVIEWED` until R1A closes.
+  the grouped review status was released when R1A closed.
 - [x] R1B.1 is archived with R1A/R1B under
   `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
 
@@ -179,37 +182,47 @@ Purpose: model recipes and sources without creating one action type per recipe.
 Implement only the missing stable Feishu document effect; do not create a
 universal capability framework.
 
-- [ ] Define the typed effect as `document.write`, provider `feishu`, operation
+- [x] Define the typed effect as `document.write`, provider `feishu`, operation
   `create|update`, exact target and content reference/hash.
-- [ ] Keep `document.write` semantics independent of `lark-cli` version and
+- [x] Keep `document.write` semantics independent of `lark-cli` version and
   response shape; CLI-specific commands, parsing and normalization stay inside
   the Feishu adapter.
-- [ ] Reuse existing Feishu search/create/fetch/readback primitives and preserve
+- [x] Reuse existing Feishu search/create/fetch/readback primitives and preserve
   the accepted `feishu.minutes_to_doc` path.
-- [ ] Do not upgrade `lark-cli` in R1C or treat local `1.0.85` as production
+- [x] Do not upgrade `lark-cli` in R1C or treat local `1.0.85` as production
   truth; the observed production version remains `1.0.66` pending R1D.
-- [ ] Node validates actor, target, payload identity, idempotency and readback;
+- [x] Node validates actor, target, payload identity, idempotency and readback;
   the model cannot self-authorize or claim success.
-- [ ] A repairable recipe/type mismatch produces one bounded internal
+- [x] A repairable recipe/type mismatch produces one bounded internal
   `needs_replan`; missing authority, unresolved target ambiguity and unknown
   post-dispatch outcome remain hard stops.
-- [ ] Preserve the R1B.1 invariant that private envelopes never appear as
+- [x] Preserve the R1B.1 invariant that private envelopes never appear as
   owner-visible JSON while adding action result acknowledgements.
-- [ ] Owner acknowledgement distinguishes pre-execution rejection, execution
+- [x] Owner acknowledgement distinguishes pre-execution rejection, execution
   failure, ambiguous outcome and readback failure instead of calling all of
   them “readback not confirmed”.
-- [ ] One synthetic `Web source -> learning note -> exact Feishu document`
+- [x] One synthetic `Web source -> learning note -> exact Feishu document`
   chain proves document ID, parent folder, bounded content, readback and durable
   terminal receipt.
-- [ ] Replay/reopen produces no duplicate document effect.
-- [ ] Existing ordinary Turn and Minutes regressions remain green; affected
-  Node/Core suites and `git diff --check` pass.
-- [ ] Independent review is clear and the node is archived under an exact SHA.
+- [x] Replay/reopen produces no duplicate document effect; changed content under
+  the same source-message causation is rejected instead of rewritten.
+- [x] Existing ordinary Turn and Minutes regressions remain green. The focused
+  affected Node set passes `190/190`, the Python-entry Ombre contract passes
+  `44` with one declared root-only skip, and the complete Node suite exits zero.
+- [x] The host-local test entry resolves the bundled Node `24.14.0`, and the
+  affected Python test resolves explicit `RAN_AGENT_PYTHON_BIN` or the project
+  `.venv`; production keeps explicit runtime executable inputs.
+- [x] Touched JavaScript syntax checks, the governance document inventory and
+  `git diff --check` pass.
+- [x] The repository archive transaction containing this ledger creates the
+  exact immutable R1C candidate and pushes it to `origin/main`.
+- [ ] Independent exact-SHA R1C review is clear.
 
-Completion marker: local archive may precede R1D, but R1C cannot claim
-production-candidate readiness. That claim remains conditional on R1D
-classifying the exact Feishu CLI contract as compatible, upgrade-required or
-post-cutover-safe.
+Current marker after this archive: `LOCAL_VERIFIED + NOT_REVIEWED + ARCHIVED`.
+R1D remains `NOT_STARTED` until independent exact-SHA R1C review is clear. R1C
+cannot claim production-candidate readiness; that remains conditional on R1D
+later classifying the exact Feishu CLI contract as compatible, upgrade-required
+or post-cutover-safe.
 
 ### R1D — Bounded Dependency Compatibility Decision
 
@@ -355,23 +368,29 @@ Production changed: NO / YES (authorization reference)
 Do not accept a narrative “done” report without the checklist, exact evidence
 and status split above.
 
-The current independent review session can start from this instruction:
+The independent exact-SHA R1A repair review is already clear and must not be
+repeated. After the bounded R1C archive, its independent review can start from
+this instruction:
 
 ```text
 Read AGENTS.md, docs/governance/active_sequence.md,
-docs/governance/s12-readiness-topology.md and
-docs/governance/current_runtime_status.md. Audit only the exact archived
-R1A-ACK-ORDER repair delta from
-6def06aa45a6d4c64b9a4e78cda35dd38331678f through
-dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1. Verify terminal commit -> terminal
-reread -> Python reminder
-acknowledgement, the post-terminal/pre-ack recovery boundary, and no duplicate
-sent/suppressed/ambiguous delivery. Confirm mechanically that R1B/R1B.1 source
-files did not change; their source review is clear but the grouped review status
-remains held until R1A closes. Do not deploy, touch production, start R1C, or
-broaden the scope. Report blockers, non-blocking findings, exact tests/counts,
-whether R1A may be marked REVIEWED, and the next ready node using the Reviewer
-Handoff Template.
+docs/governance/s12-readiness-topology.md,
+docs/governance/current_runtime_status.md and the exact archived R1C delta from
+implementation base 5fac3fbc2eb1dfa55877e43e34930cbef91ff253. Audit R1C only.
+Trace one Web-learning-note request through Hermes document.write, Node
+grounding, one bounded wrong-Minutes-type replan, operation ledger causation,
+the Feishu adapter, readback, typed receipt and truthful owner acknowledgement.
+Prove the same source message reopens without a second create and changed
+content under the same causation is rejected. Reproduce a real thrown
+post-dispatch timeout and verify durable ambiguous/no-resend. Confirm ordinary
+chat, the accepted feishu.minutes_to_doc path and R1B.1 private-envelope
+fail-closed behavior do not regress. Confirm every lark-cli command and response
+shape remains inside the adapter; do not decide 1.0.66 versus 1.0.85, upgrade a
+dependency, deploy, touch production or start R1D/S12. Verify the recorded
+focused 190/190 result, Python-entry Ombre 44 pass plus one declared root-only
+skip, complete Node zero exit, syntax and git diff checks. Report every R1C
+checklist item PASS/FAIL, blockers, non-blocking findings, whether R1C may be
+marked REVIEWED, and the next ready node using the Reviewer Handoff Template.
 ```
 
 ## Update Protocol

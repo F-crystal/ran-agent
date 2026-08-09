@@ -125,6 +125,19 @@ export function createOperationLedger(options = {}) {
     return record ? deepFreeze(publicOperation(record)) : null;
   }
 
+  function findByCausation({ request, actorContext } = {}) {
+    const normalizedRequest = normalizeActionRequest(request);
+    const actorKey = boundedIdentity(actorContext?.actorKey, 'actorKey');
+    const causationRef = String(normalizedRequest.scope?.causationRef || '');
+    if (!causationRef) throw operationError('OPERATION_INVALID', 'causationRef is required');
+    const record = load().operations.findLast((item) => (
+      item.actorKey === actorKey
+      && item.actionType === normalizedRequest.actionType
+      && item.scope?.causationRef === causationRef
+    ));
+    return record ? deepFreeze(publicOperation(record)) : null;
+  }
+
   function load() {
     return readJsonState(target, {
       validate: validateLedgerState,
@@ -137,7 +150,7 @@ export function createOperationLedger(options = {}) {
     writeJsonAtomic(target, state, { validate: validateLedgerState });
   }
 
-  return Object.freeze({ target, mint, claim, complete, reject, getOperation });
+  return Object.freeze({ target, mint, claim, complete, reject, getOperation, findByCausation });
 }
 
 function publicOperation(record) {

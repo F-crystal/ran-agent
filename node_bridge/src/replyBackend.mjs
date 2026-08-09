@@ -32,11 +32,15 @@ import { normalizeReplyEnvelope } from './replyEnvelope.mjs';
 import { getSemanticVerifierConfig, verifySemanticClaims } from './semanticClaimVerifier.mjs';
 import { isHermesTaskScopedRoute, isTrustedInformationalReportTask } from './hermesTaskScope.mjs';
 import { createOperationLedger } from './operationLedger.mjs';
+import { digestActionScope } from './actionRequest.mjs';
 import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
 import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
 import { createPersonalLearningExecutorAdapter } from './personalLearningClient.mjs';
 import { createAiDailyDigestExecutorAdapter } from './aiDailyDigestClient.mjs';
-import { createFeishuMinutesDocumentExecutorAdapter } from './feishuMinutesDocumentClient.mjs';
+import {
+  createFeishuDocumentWriteExecutorAdapter,
+  createFeishuMinutesDocumentExecutorAdapter,
+} from './feishuMinutesDocumentClient.mjs';
 import {
   deleteStickers,
   resolveStickerAsset,
@@ -70,6 +74,10 @@ export function createReplyBackend(options = {}) {
   }
   if (!options.trustedActionExecutors) {
     configuredExecutorAdapters.push(createFeishuMinutesDocumentExecutorAdapter({
+      env,
+      execFileImpl: options.execFileImpl,
+    }));
+    configuredExecutorAdapters.push(createFeishuDocumentWriteExecutorAdapter({
       env,
       execFileImpl: options.execFileImpl,
     }));
@@ -137,39 +145,38 @@ export function createReplyBackend(options = {}) {
           source: pendingOutcome.source || 'bridge_pending_action',
         };
       }
-      let response = await chatImpl(
-        {
-          text: message.text,
-          sender_id: message.sender_id,
-          conversation_id: message.conversation_id || message.conversationId || message.sender_id,
-          channel: message.platform || message.channel || 'wechat',
-          platform: message.platform || message.channel || 'wechat',
-          channel_type: message.channel_type || '',
-          global_user_id: message.global_user_id || '',
-          stable_conversation_key: message.stable_conversation_key || '',
-          hermes_session_id: message.hermes_session_id || '',
-          hermes_session_key: message.hermes_session_key || '',
-          recent_local_history: Array.isArray(message.recent_local_history) ? message.recent_local_history : [],
-          recent_global_history: Array.isArray(message.recent_global_history) ? message.recent_global_history : [],
-          active_topic: message.active_topic || '',
-          stale_context: message.stale_context || '',
-          continuity_note: message.continuity_note || '',
-          route_hint: message.route_hint || '',
-          message_batch: Array.isArray(message.message_batch) ? message.message_batch : [],
-          prior_messages: Array.isArray(message.prior_messages) ? message.prior_messages : [],
-          image_urls: Array.isArray(message.image_urls) ? message.image_urls : [],
-          media: normalizeMediaItems(message.media),
-        },
-        {
-          config: gatewayConfig,
-          fetchImpl: backendOptions.fetchImpl,
-          execFileImpl: backendOptions.execFileImpl,
-          env,
-          logger: options.logger || console,
-          mediaContextOptions: backendOptions.mediaContextOptions,
-          requestId,
-        }
-      );
+      const hermesInput = {
+        text: message.text,
+        sender_id: message.sender_id,
+        conversation_id: message.conversation_id || message.conversationId || message.sender_id,
+        channel: message.platform || message.channel || 'wechat',
+        platform: message.platform || message.channel || 'wechat',
+        channel_type: message.channel_type || '',
+        global_user_id: message.global_user_id || '',
+        stable_conversation_key: message.stable_conversation_key || '',
+        hermes_session_id: message.hermes_session_id || '',
+        hermes_session_key: message.hermes_session_key || '',
+        recent_local_history: Array.isArray(message.recent_local_history) ? message.recent_local_history : [],
+        recent_global_history: Array.isArray(message.recent_global_history) ? message.recent_global_history : [],
+        active_topic: message.active_topic || '',
+        stale_context: message.stale_context || '',
+        continuity_note: message.continuity_note || '',
+        route_hint: message.route_hint || '',
+        message_batch: Array.isArray(message.message_batch) ? message.message_batch : [],
+        prior_messages: Array.isArray(message.prior_messages) ? message.prior_messages : [],
+        image_urls: Array.isArray(message.image_urls) ? message.image_urls : [],
+        media: normalizeMediaItems(message.media),
+      };
+      const hermesOptions = {
+        config: gatewayConfig,
+        fetchImpl: backendOptions.fetchImpl,
+        execFileImpl: backendOptions.execFileImpl,
+        env,
+        logger: options.logger || console,
+        mediaContextOptions: backendOptions.mediaContextOptions,
+        requestId,
+      };
+      let response = await chatImpl(hermesInput, hermesOptions);
 
       let replyEnvelope;
       let excludeFromHistory = false;
@@ -191,10 +198,10 @@ export function createReplyBackend(options = {}) {
         };
         excludeFromHistory = true;
       }
-      const informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
+      let informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
       replyEnvelope = informationalReportPolicy.envelope;
 
-      const actionExecution = await executeEnvelopeActionRequests({
+      let actionExecution = await executeEnvelopeActionRequests({
         actionRequests: replyEnvelope.actionRequests,
         actorContext: trustedActorContext(message.trusted_actor_context),
         currentMessage: message,
@@ -202,6 +209,33 @@ export function createReplyBackend(options = {}) {
         trustedActionExecutors,
         coreDurableJobExecutor,
       });
+      if (shouldReplanDocumentAction(replyEnvelope, actionExecution)) {
+        try {
+          const replanned = await chatImpl({
+            ...hermesInput,
+            continuity_note: [
+              hermesInput.continuity_note,
+              'NODE_ACTION_REPLAN: The previous Feishu action type described a Minutes recipe, but the owner requested a non-Minutes document. Reuse the gathered content and return one document.write actionRequest using the documented Feishu schema. Do not repeat research or call tools.',
+            ].filter(Boolean).join('\n'),
+          }, hermesOptions);
+          const replannedEnvelope = normalizeReplyEnvelope(replanned);
+          const replannedPolicy = restrictInformationalReportEnvelope(replannedEnvelope, message);
+          const replannedExecution = await executeEnvelopeActionRequests({
+            actionRequests: replannedPolicy.envelope.actionRequests,
+            actorContext: trustedActorContext(message.trusted_actor_context),
+            currentMessage: message,
+            operationLedger,
+            trustedActionExecutors,
+            coreDurableJobExecutor,
+          });
+          response = { ...replanned, reply_text: replannedPolicy.envelope.message, follow_up_messages: [] };
+          replyEnvelope = replannedPolicy.envelope;
+          informationalReportPolicy = replannedPolicy;
+          actionExecution = replannedExecution;
+        } catch (error) {
+          loggerFor(options).warn?.(`document action replan rejected code=${String(error?.code || 'ACTION_REPLAN_FAILED')}`);
+        }
+      }
       let activityExecution = await executeEnvelopeActivityRequest({
         activityRequest: replyEnvelope.activityRequest,
         actorContext: trustedActorContext(message.trusted_actor_context),
@@ -229,11 +263,7 @@ export function createReplyBackend(options = {}) {
         : actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send')
           ? '日报生成或发送失败，未确认送达。'
           : '';
-      const feishuDocumentAcknowledgement = actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'feishu.minutes_to_doc' && receipt?.status === 'succeeded')
-        ? '已整理成云文档并放入目标文件夹。'
-        : actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'feishu.minutes_to_doc')
-          ? '云文档尚未通过回读确认，暂不确认已完成。'
-          : '';
+      const feishuDocumentAcknowledgement = buildFeishuDocumentAcknowledgement(actionExecution.receiptSummaries);
       const coreAcknowledgement = commitmentBlocked
         ? ''
         : bridgeOwnedCoreAcknowledgement(replyEnvelope.commitments, durableReceiptSummaries);
@@ -245,8 +275,8 @@ export function createReplyBackend(options = {}) {
         response = { ...response, reply_text: coreAcknowledgement, follow_up_messages: [] };
       } else if (digestAcknowledgement) {
         response = { ...response, reply_text: digestAcknowledgement, follow_up_messages: [] };
-      } else if (feishuDocumentAcknowledgement) {
-        response = { ...response, reply_text: feishuDocumentAcknowledgement, follow_up_messages: [] };
+      } else if (feishuDocumentAcknowledgement.text) {
+        response = { ...response, reply_text: feishuDocumentAcknowledgement.text, follow_up_messages: [] };
       }
 
       const logger = options.logger || console;
@@ -270,8 +300,8 @@ export function createReplyBackend(options = {}) {
           ? 'bridge_learning_intent_guard'
         : digestAcknowledgement
           ? 'bridge_ai_daily_digest'
-        : feishuDocumentAcknowledgement
-          ? 'bridge_feishu_minutes_document'
+        : feishuDocumentAcknowledgement.text
+          ? feishuDocumentAcknowledgement.source
         : coreAcknowledgement
           ? 'bridge_core_job_ack'
           : 'hermes';
@@ -557,6 +587,14 @@ function trustedActorContext(value) {
   });
 }
 
+function shouldReplanDocumentAction(envelope, actionExecution) {
+  return envelope?.actionRequests?.length === 1
+    && !envelope.activityRequest
+    && envelope.commitments?.length === 0
+    && actionExecution?.receiptSummaries?.length === 1
+    && actionExecution.receiptSummaries[0]?.outcome === 'needs_replan';
+}
+
 async function executeEnvelopeActionRequests({
   actionRequests = [],
   actorContext,
@@ -592,10 +630,11 @@ async function executeEnvelopeActionRequests({
     try {
       groundedRequest = groundActionRequest(request, currentMessage);
     } catch (error) {
+      const needsReplan = error?.code === 'ACTION_NEEDS_REPLAN';
       receiptSummaries.push({
         requestRef: request.requestRef,
         actionType: request.actionType,
-        outcome: 'denied',
+        outcome: needsReplan ? 'needs_replan' : 'denied',
         status: 'failed',
         errorCode: sanitizeExecutionCode(error?.code || 'ACTION_NOT_GROUNDED'),
       });
@@ -612,6 +651,24 @@ async function executeEnvelopeActionRequests({
       continue;
     }
     try {
+      if (groundedRequest.actionType === 'document.write' && typeof operationLedger.findByCausation === 'function') {
+        const prior = operationLedger.findByCausation({ request: groundedRequest, actorContext });
+        if (prior) {
+          if (prior.scopeDigest !== digestActionScope(groundedRequest.scope)) {
+            receiptSummaries.push({
+              requestRef: request.requestRef,
+              actionType: request.actionType,
+              outcome: 'denied',
+              status: 'failed',
+              errorCode: 'DOCUMENT_REPLAY_CONFLICT',
+              replayed: true,
+            });
+            continue;
+          }
+          receiptSummaries.push(replayedDocumentWriteSummary(request, prior));
+          continue;
+        }
+      }
       const operation = operationLedger.mint({ request: groundedRequest, actorContext });
       const receipt = await trustedActionExecutors.execute(operation);
       const verified = trustedActionExecutors.verifyReceipt(receipt, {
@@ -631,6 +688,11 @@ async function executeEnvelopeActionRequests({
         outcome: succeeded ? 'applied' : receipt.status,
         status: receipt.status,
         effectDigest: receipt.effectDigest,
+        ...(request.actionType === 'document.write' && receipt.status === 'ambiguous'
+          ? { errorCode: 'DOCUMENT_OUTCOME_AMBIGUOUS' }
+          : request.actionType === 'document.write' && receipt.status === 'failed'
+            ? { errorCode: 'DOCUMENT_READBACK_FAILED' }
+            : {}),
       });
       evidence.push(trustActionReceiptEvidence({
         type: actionEvidenceType(request.actionType),
@@ -645,7 +707,7 @@ async function executeEnvelopeActionRequests({
         actionType: request.actionType,
         outcome: 'failed',
         status: 'failed',
-        errorCode: sanitizeExecutionCode(error?.code || 'EXECUTOR_FAILED'),
+        errorCode: sanitizeExecutionCode(error?.cause?.code || error?.code || 'EXECUTOR_FAILED'),
       });
     }
   }
@@ -653,6 +715,43 @@ async function executeEnvelopeActionRequests({
     receiptSummaries: Object.freeze(receiptSummaries.map((item) => Object.freeze(item))),
     evidence: Object.freeze(evidence),
   });
+}
+
+function replayedDocumentWriteSummary(request, operation) {
+  if (operation.state === 'completed') {
+    const status = String(operation.status || 'ambiguous');
+    return {
+      requestRef: request.requestRef,
+      actionType: request.actionType,
+      outcome: status === 'succeeded' ? 'applied' : status,
+      status,
+      effectDigest: String(operation.effectDigest || ''),
+      replayed: true,
+      ...(status === 'ambiguous'
+        ? { errorCode: 'DOCUMENT_OUTCOME_AMBIGUOUS' }
+        : status === 'failed'
+          ? { errorCode: 'DOCUMENT_READBACK_FAILED' }
+          : {}),
+    };
+  }
+  if (operation.state === 'rejected') {
+    return {
+      requestRef: request.requestRef,
+      actionType: request.actionType,
+      outcome: 'failed',
+      status: 'failed',
+      errorCode: 'DOCUMENT_EXECUTION_FAILED',
+      replayed: true,
+    };
+  }
+  return {
+    requestRef: request.requestRef,
+    actionType: request.actionType,
+    outcome: 'ambiguous',
+    status: 'ambiguous',
+    errorCode: 'DOCUMENT_OUTCOME_AMBIGUOUS',
+    replayed: true,
+  };
 }
 
 async function executeCoreDurableJobRequest({ request, actorContext, currentMessage, coreDurableJobExecutor }) {
@@ -824,6 +923,41 @@ function bridgeOwnedCoreAcknowledgement(commitments, receiptSummaries) {
   return '';
 }
 
+function buildFeishuDocumentAcknowledgement(receiptSummaries = []) {
+  const receipt = receiptSummaries.find((item) => ['document.write', 'feishu.minutes_to_doc'].includes(item?.actionType));
+  if (!receipt) return { text: '', source: '' };
+  const source = receipt.actionType === 'document.write'
+    ? 'bridge_feishu_document_write'
+    : 'bridge_feishu_minutes_document';
+  if (receipt.status === 'succeeded') {
+    return {
+      text: receipt.actionType === 'document.write'
+        ? '云文档已写入并通过回读确认。'
+        : '已整理成云文档并放入目标文件夹。',
+      source,
+    };
+  }
+  if (receipt.outcome === 'needs_replan') {
+    return { text: '文档请求的执行类型仍未匹配，尚未执行。', source };
+  }
+  if (receipt.status === 'ambiguous' || receipt.errorCode === 'DOCUMENT_OUTCOME_AMBIGUOUS') {
+    return { text: '文档写入结果不确定；为避免重复创建，不会自动重试。', source };
+  }
+  if (receipt.errorCode === 'DOCUMENT_READBACK_FAILED') {
+    return { text: '文档操作已执行，但回读校验失败，暂不确认内容完成。', source };
+  }
+  if (receipt.errorCode === 'FEISHU_FOLDER_MATCH_AMBIGUOUS') {
+    return { text: '目标文件夹未能唯一匹配，未执行文档写入。', source };
+  }
+  if (['ACTION_NOT_GROUNDED', 'ACTOR_NOT_AUTHORIZED'].includes(receipt.errorCode)) {
+    return { text: '文档写入在执行前被拒绝，未创建或修改文档。', source };
+  }
+  if (receipt.errorCode === 'DOCUMENT_REPLAY_CONFLICT') {
+    return { text: '同一请求的文档内容发生变化，未再次写入。', source };
+  }
+  return { text: '文档写入执行失败，未确认已创建或修改。', source };
+}
+
 function isActiveDurableReceipt(receipt, expected = {}) {
   if (!receipt || typeof receipt !== 'object') return false;
   if (String(receipt.status || '') !== 'active'
@@ -839,8 +973,14 @@ function groundActionRequest(request, message = {}) {
     const userText = String(message.text || '');
     const minuteTitle = String(scope.minuteTitle || '').trim();
     const folderTitle = String(scope.folderTitle || '').trim();
-    if (!/(?:妙记|录音稿|文字稿|录音转文字)/.test(userText)
-      || !/(?:云文档|文档)/.test(userText)
+    if (!/(?:妙记|录音稿|文字稿|录音转文字)/.test(userText)) {
+      if (/(?:飞书|云文档|文档)/.test(userText)
+        && /(?:网页|博客|论文|文章|资料|笔记|总结|整理)/.test(userText)) {
+        throw actionExecutionError('ACTION_NEEDS_REPLAN');
+      }
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    if (!/(?:云文档|文档)/.test(userText)
       || !minuteTitle || !folderTitle
       || !normalizeGroundingText(userText).includes(normalizeGroundingText(minuteTitle))
       || !normalizeGroundingText(userText).includes(normalizeGroundingText(folderTitle))) {
@@ -855,6 +995,9 @@ function groundActionRequest(request, message = {}) {
         contentXml: String(scope.contentXml || '').trim(),
       },
     };
+  }
+  if (actionType === 'document.write') {
+    return groundDocumentWriteRequest(request, message);
   }
   if (actionType === 'ai_daily_digest.send') {
     const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
@@ -920,6 +1063,71 @@ function groundActionRequest(request, message = {}) {
     };
   }
   throw actionExecutionError('ACTION_NOT_GROUNDED');
+}
+
+function groundDocumentWriteRequest(request, message = {}) {
+  const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
+  const target = scope.target && typeof scope.target === 'object' && !Array.isArray(scope.target) ? scope.target : {};
+  const userText = String(message.text || '');
+  const operation = String(scope.operation || '');
+  const provider = String(scope.provider || '');
+  const documentTitle = String(target.documentTitle || '').trim();
+  const contentXml = String(scope.contentXml || '').trim();
+  const sourceMessageId = String(message.id || message.message_id || message.request_id || '').trim();
+  if (provider !== 'feishu'
+    || !['create', 'update'].includes(operation)
+    || !/(?:飞书|云文档|文档)/.test(userText)
+    || !documentTitle
+    || !sourceMessageId) {
+    throw actionExecutionError('ACTION_NOT_GROUNDED');
+  }
+  const groundedTarget = operation === 'create'
+    ? { folderTitle: String(target.folderTitle || '').trim(), documentTitle }
+    : { documentId: String(target.documentId || '').trim(), documentTitle };
+  const exactTarget = operation === 'create' ? groundedTarget.folderTitle : groundedTarget.documentId;
+  if (!exactTarget
+    || !normalizeGroundingText(userText).includes(normalizeGroundingText(exactTarget))) {
+    throw actionExecutionError('ACTION_NOT_GROUNDED');
+  }
+  validateDocumentContent(contentXml, documentTitle);
+  const sourceRefs = normalizeDocumentSourceRefs(scope.sourceRefs);
+  const hash = `sha256:${createHash('sha256').update(contentXml, 'utf8').digest('hex')}`;
+  const contentRef = `inline:${hash}`;
+  const causationRef = `source:sha256:${createHash('sha256').update(sourceMessageId, 'utf8').digest('hex')}`;
+  return {
+    ...request,
+    payloadRef: contentRef,
+    scope: {
+      provider,
+      operation,
+      target: groundedTarget,
+      content: { format: 'docx_xml', ref: contentRef, hash, body: contentXml },
+      causationRef,
+      ...(sourceRefs.length ? { sourceRefs } : {}),
+    },
+  };
+}
+
+function normalizeDocumentSourceRefs(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 16) throw actionExecutionError('ACTION_NOT_GROUNDED');
+  return value.map((item) => {
+    const ref = String(item || '').trim();
+    if (!ref || ref.length > 240 || /[\r\n\t\0]/.test(ref)) throw actionExecutionError('ACTION_NOT_GROUNDED');
+    return ref;
+  });
+}
+
+function validateDocumentContent(contentXml, documentTitle) {
+  if (contentXml.length < 40
+    || contentXml.length > 2_000
+    || Buffer.byteLength(contentXml, 'utf8') > 7_000
+    || contentXml.includes('\0')
+    || /<\/?(?:root|content)\b|<(?:img|source|whiteboard|sheet|task|chat_card)\b/i.test(contentXml)) {
+    throw actionExecutionError('ACTION_NOT_GROUNDED');
+  }
+  const escapedTitle = documentTitle.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  if (!contentXml.includes(`<title>${escapedTitle}</title>`)) throw actionExecutionError('ACTION_NOT_GROUNDED');
 }
 
 function normalizeMemorySubjectKey(value, kind) {

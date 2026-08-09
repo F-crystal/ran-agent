@@ -280,7 +280,8 @@ entered typed `research`, selected the academic provider seam and returned
 structured evidence without `web_extract`, `web_search` or `tool_describe`.
 The complete affected Node set passes 62/62, the profile/release Python set
 passes 43/43, and Shell syntax plus `git diff --check` pass. Independent source
-review found no R1B blocker; grouped review status remains held until R1A closes.
+review found no R1B blocker; its grouped review status is now released after the
+independent exact-SHA R1A repair review passed.
 
 Fresh owner evidence then reproduced a separate ordinary-chat failure: a
 provider-origin private reply envelope used string `"v1"` instead of numeric
@@ -290,15 +291,14 @@ instruction, canonicalizes only unambiguous `"1"`/`"v1"` aliases, and fails
 other private-envelope-shaped JSON closed to a safe reply. Rejection logs carry
 only a stable code; ordinary non-envelope JSON remains visible. The affected
 Gateway/Backend/ChannelHub/entry set passes 259/259 locally. Production still
-runs the archived parser. Independent source review found no R1B.1 blocker;
-grouped review status remains held until R1A closes.
+runs the archived parser. Independent source review found no R1B.1 blocker; its
+grouped review status is now released after the R1A review passed.
 
 The previous bounded candidate archive completed at
-`aabf9bc97ea3fcd95bf6d79798c56315543d0c37`, but R1A remains
-`NOT_REVIEWED` after `R1A-ACK-ORDER`. Independent review of the exact repair
-delta from `6def06a` through `dfb8b41` is the
-current boundary before R1C becomes ready. R1B and R1B.1 remain source-review-clear
-without changing that grouped boundary. R1C adds the smallest effect-oriented Feishu
+`aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; its `R1A-ACK-ORDER` repair is
+archived at `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1` and the independent
+exact-SHA delta review is clear. R1A, R1B and R1B.1 are now `REVIEWED`. R1C
+adds the smallest effect-oriented Feishu
 `document.write` seam plus
 bounded internal replan; R1D then decides exact dependency compatibility before
 external-MCP WorkRun composition, real presence/attention ownership and the
@@ -313,9 +313,17 @@ archived or deployable candidate.
 
 R1C must keep `document.write` semantics independent of those CLI versions and
 contain all command/response-shape handling inside the Feishu adapter. It does
-not upgrade `lark-cli` and cannot claim production-candidate readiness; R1D
-later owns the compatibility/upgrade/post-cutover-safe classification and the
-separate Ombre/external-MCP dependency decisions.
+not upgrade `lark-cli` and cannot claim production-candidate readiness. The
+local R1C implementation now validates exact Feishu target, payload hash and
+source-message causation, supports one bounded Minutes-to-document replan,
+persists truthful success/failure/ambiguous receipts and suppresses replay after
+reopen. Focused affected Node checks pass `190/190`; the Python-entry Ombre
+contract passes `44` with one declared root-only skip; the complete Node suite
+exits zero. The commit containing this update is R1C's bounded archive, so R1C
+is `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED`; it remains `NOT_REVIEWED`
+until an independent exact-SHA R1C review. R1D remains `NOT_STARTED` and later owns the
+compatibility/upgrade/post-cutover-safe classification and the separate
+Ombre/external-MCP dependency decisions.
 
 The local Python entrypoint is now the ignored repository `.venv`, created from
 the existing Anaconda Python 3.10 with system site packages. Local archive and
@@ -323,6 +331,12 @@ Node release tests resolve explicit environment input first and that project
 entrypoint second; they no longer select an arbitrary `python3` from `PATH`.
 Production release gates retain their existing explicit absolute
 `RAN_AGENT_PYTHON_BIN` contract.
+
+The desktop test host now also resolves the bundled Node `24.14.0` before the
+obsolete `/usr/local/bin` executable in Codex and fresh login shells. This is a
+host-local development fix, not a production source or deployment change;
+production release gates continue to receive their runtime executable as an
+explicit validated input.
 
 ## Source And Recovery Authority
 

@@ -480,6 +480,13 @@ inside the provider adapter. R1C neither upgrades the CLI nor treats local
 classifies that exact provider contract as compatible, upgrade-required or
 post-cutover-safe before any production-candidate claim.
 
+The local R1C seam is verified for one synthetic Web-learning-note create,
+exact target and content-hash binding, one bounded recipe replan, truthful
+pre-dispatch/readback/ambiguous acknowledgements, and reopen no-resend. The
+focused affected Node set passes `190/190` and the complete Node suite exits
+zero. This is local semantic evidence only: R1C remains unreviewed/unarchived,
+and no real `lark-cli` compatibility or production claim is made before R1D.
+
 Web acquisition is a separate prerequisite, not a document subtype. Production
 Hermes uses `search_hub` for ordinary web/research and the governed social/media
 readers for those sources. A model-visible direct tool must be invoked directly;

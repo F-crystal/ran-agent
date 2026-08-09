@@ -59,9 +59,10 @@ scheduled delivery, retained Python maintenance, and replay-safe Core reminder
 registration plus projection acknowledgement. It is not a deployable candidate:
 the early local external-MCP WorkRun composition still awaits its serial R1E
 authority/replay/no-direct-send acceptance, and a real presence source still
-needs to own attention admission/flush. The ordered R1 frontier now first repairs the
-observed web-tool route and adds the smallest effect-oriented Feishu document
-write/replan seam, takes a bounded dependency compatibility decision, then
+needs to own attention admission/flush. The ordered R1 frontier repaired the
+observed web-tool route and has now locally verified the smallest
+effect-oriented Feishu document write/replan seam before taking a bounded
+dependency compatibility decision, then
 closes the external-MCP and real-presence runtime boundaries. This does not
 start S12 or authorize production. R1B is locally verified: the companion
 candidate has one generic Web surface (`mcp-search_hub`), the DLM-shaped handler
@@ -72,7 +73,11 @@ project-local Python entrypoint is also fixed at ignored `.venv`, while
 production still requires an explicit absolute runtime. The previous candidate
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37` is blocked by `R1A-ACK-ORDER`;
 its repair is archived at `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`.
-Independent exact-SHA repair review is current, and R1C starts only after it.
+The independent exact-SHA R1A repair review is clear; R1A, R1B and R1B.1 are
+`REVIEWED`. The commit containing this update archives R1C as
+`LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED` after `190/190` focused Node
+checks and a zero-exit complete Node suite. Independent exact-SHA R1C review is
+next; R1D and S12 have not started.
 
 ## Lifecycle Stages
 

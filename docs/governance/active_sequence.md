@@ -53,13 +53,14 @@ mutation:
 ```text
 S12-R0 fresh read-only production audit (COMPLETE)
   -> S12-R1 local cutover assets and composition (IN PROGRESS)
-       -> R1A accepted local Core/cutover composition (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
-       -> R1B web acquisition routing repair (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
-       -> R1B.1 private reply envelope fail-closed (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
+       -> R1A accepted local Core/cutover composition (LOCAL_VERIFIED, ARCHIVED, REVIEWED)
+       -> R1B web acquisition routing repair (LOCAL_VERIFIED, ARCHIVED, REVIEWED)
+       -> R1B.1 private reply envelope fail-closed (LOCAL_VERIFIED, ARCHIVED, REVIEWED)
        -> previous R1A/R1B/R1B.1 candidate archive aabf9bc (R1A BLOCKED)
        -> R1A-ACK-ORDER bounded repair archive dfb8b41 (LOCAL_VERIFIED, ARCHIVED)
-       -> independent exact-SHA R1A repair delta review (CURRENT BOUNDARY)
-       -> R1C effect-oriented Feishu document write and truthful reply (NEXT AFTER REVIEW)
+       -> independent exact-SHA R1A repair delta review (CLEAR)
+       -> R1C effect-oriented Feishu document write and truthful reply (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
+       -> independent exact-SHA R1C review (REQUIRED)
        -> R1D bounded dependency compatibility decision
        -> R1E external MCP poll through WorkRun authority
        -> R1F real presence and attention admission/flush
@@ -71,13 +72,15 @@ S12-R0 fresh read-only production audit (COMPLETE)
 
 - Independent review found `R1A-ACK-ORDER` in the previous candidate
   `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. The locally verified bounded
-  repair candidate is `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`; an
-  independent exact-SHA delta review is still required before R1A becomes
+  repair candidate is `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`; its
+  independent exact-SHA delta review is clear. R1A, R1B and R1B.1 are
   `REVIEWED`.
-- R1B and R1B.1 remain source-review-clear and behaviorally unchanged, but the
-  grouped R1 boundary stays `NOT_REVIEWED` until R1A closes. R1C is not active.
-- R1C through R3 remain serial. Their exact exit evidence and prohibited scope
-  are defined in the detailed ledger.
+- On 2026-08-09 the owner explicitly authorized R1C local implementation while
+  that review remains open. This changes the implementation frontier only:
+  R1C is locally verified and archived by the commit containing this update,
+  but remains `NOT_REVIEWED` until a later independent exact-SHA R1C review.
+  R1D through R3 remain serial and have not started.
+  Exact exit evidence and prohibited scope are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.
 
 ## Update Rule
