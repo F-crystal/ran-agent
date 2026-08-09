@@ -410,8 +410,9 @@ stopping old wake neither loses the next future run nor replays an old one.
 
 ## S12 local composition status
 
-The unarchived R1 candidate now has one cutover transaction/marker, an exact
-verify/apply command, a disabled Hermes no-agent wake projection, an official
+The R1 review candidate archived at
+`aabf9bc97ea3fcd95bf6d79798c56315543d0c37` has one cutover
+transaction/marker, an exact verify/apply command, a disabled Hermes no-agent wake projection, an official
 create/pause/edit/resume reconciler, and a non-overlapping Node executor. The
 executor claims queued WorkRuns, delegates by typed task kind, records one
 terminal result and releases the lease. Visible scheduled instructions use the
@@ -426,7 +427,7 @@ Core/attention set passes 183 tests locally; the earlier affected Python set
 passes 67 and the current affected set passes 55. The complete Node baseline
 passes 1,337 with zero failures and four declared environment skips.
 
-This is not yet a cutover candidate. The unarchived composition already stops
+This is not yet a cutover candidate. The archived composition already stops
 the legacy external-MCP runtime timer in Core mode and runs its existing
 scan/executor through an `external_poll` WorkRun into hash-bound Core facts and
 Core delivery. R1E still owns formal authority/replay/no-direct-send acceptance

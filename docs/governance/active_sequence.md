@@ -53,11 +53,11 @@ mutation:
 ```text
 S12-R0 fresh read-only production audit (COMPLETE)
   -> S12-R1 local cutover assets and composition (IN PROGRESS)
-       -> R1A accepted local Core/cutover composition (LOCAL_VERIFIED, UNARCHIVED)
-       -> R1B web acquisition routing repair (LOCAL_VERIFIED, UNARCHIVED)
-       -> R1B.1 private reply envelope fail-closed (LOCAL_VERIFIED, UNARCHIVED)
-       -> bounded R1A/R1B/R1B.1 candidate archive (CURRENT BOUNDARY)
-       -> independent exact-SHA delta review
+       -> R1A accepted local Core/cutover composition (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
+       -> R1B web acquisition routing repair (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
+       -> R1B.1 private reply envelope fail-closed (LOCAL_VERIFIED, ARCHIVED, NOT_REVIEWED)
+       -> bounded R1A/R1B/R1B.1 candidate archive aabf9bc (COMPLETE)
+       -> independent exact-SHA delta review (CURRENT BOUNDARY)
        -> R1C effect-oriented Feishu document write and truthful reply (NEXT AFTER REVIEW)
        -> R1D bounded dependency compatibility decision
        -> R1E external MCP poll through WorkRun authority
@@ -68,9 +68,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> S12 Core Cutover Gate
 ```
 
-- R1A, R1B and the ordinary-chat R1B.1 envelope repair have local evidence but
-  remain unarchived. The immediate boundary is a bounded candidate archive;
-  independent review then audits that immutable delta. R1C is not active yet.
+- R1A, R1B and the ordinary-chat R1B.1 envelope repair have local evidence and
+  are archived at `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. Independent
+  review of that immutable delta is the current boundary; R1C is not active yet.
 - R1C through R3 remain serial. Their exact exit evidence and prohibited scope
   are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.

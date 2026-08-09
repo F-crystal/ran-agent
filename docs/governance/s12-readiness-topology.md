@@ -38,11 +38,11 @@ Mark a node delivered only when its evidence names the exact archived SHA.
 
 ```mermaid
 flowchart TD
-    R0["R0 read-only production audit<br/>COMPLETE"] --> R1A["R1A Core/cutover composition<br/>LOCAL_VERIFIED · UNARCHIVED"]
-    R1A --> R1B["R1B single Web route<br/>LOCAL_VERIFIED · UNARCHIVED"]
-    R1B --> R1B1["R1B.1 private envelope fail-closed<br/>LOCAL_VERIFIED · UNARCHIVED"]
-    R1B1 --> RA["Bounded candidate archive<br/>CURRENT"]
-    RA --> RI["Independent exact-SHA delta review"]
+    R0["R0 read-only production audit<br/>COMPLETE"] --> R1A["R1A Core/cutover composition<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
+    R1A --> R1B["R1B single Web route<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
+    R1B --> R1B1["R1B.1 private envelope fail-closed<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
+    R1B1 --> RA["Bounded candidate archive<br/>aabf9bc · COMPLETE"]
+    RA --> RI["Independent exact-SHA delta review<br/>CURRENT"]
     RI --> R1C["R1C document.write + truthful action reply<br/>NEXT AFTER REVIEW"]
     R1C --> R1D["R1D dependency compatibility decision"]
     R1D --> R1E["R1E external MCP through WorkRun"]
@@ -66,19 +66,19 @@ provider contract.
 | Node | Verification | Review | Delivery | Dependency | Decision |
 |---|---|---|---|---|---|
 | R0 | `LOCAL_VERIFIED` | historical review | historical evidence | S11 | Complete; re-inspect only when R2 starts. |
-| R1A | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `UNARCHIVED` | R0 | Include in the current bounded candidate archive. |
-| R1B | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `UNARCHIVED` | R1A | Include in the same candidate archive. |
-| R1B.1 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `UNARCHIVED` | R1B + observed ordinary-chat leak | Current archive boundary. |
+| R1A | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R0 | Candidate `aabf9bc`; current exact-SHA review scope. |
+| R1B | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1A | Candidate `aabf9bc`; current exact-SHA review scope. |
+| R1B.1 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Candidate `aabf9bc`; current exact-SHA review scope. |
 | R1C | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1A/R1B/R1B.1 archived and independently reviewed | Next implementation node after review. |
 | R1D | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1C | Not ready. |
 | R1E | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R1D | Early local composition exists; accept it only when this node becomes ready. |
 | R1F–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production unchanged. |
 
-Archived `main` starts at
-`cacc8924b7e2b67e300a67228a6891576759f555`; production remains at
-`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The current R1 worktree is an
-intentional unarchived composition, not a deployable SHA.
+The review baseline is `cacc8924b7e2b67e300a67228a6891576759f555` and the
+archived candidate is `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
+Production remains at `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; an
+archived local candidate is not a deployable or production-authorized SHA.
 
 ## Node Acceptance Checklists
 
@@ -106,8 +106,8 @@ shape and exact cutover command without touching production.
 - [x] Local evidence: Core/attention `183/183`, earlier affected Python `67/67`,
   current affected Python `55/55`, complete Node baseline `1337` pass with four
   declared environment skips, and Python-entry regressions `4/4`.
-- [ ] Intentional R1A files and synchronized governance are archived under an
-  exact SHA.
+- [x] Intentional R1A files and synchronized governance are archived under
+  `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
 - [ ] Independent exact-SHA delta review records no blocker against the R1A
   scope.
 
@@ -130,7 +130,8 @@ Focused contract: `docs/governance/s12-r1b-web-routing.md`.
   shell syntax and `git diff --check` pass.
 - [ ] Independent review verifies the source delta and confirms no ordinary-Web
   capability regression.
-- [ ] R1B is archived with its governance updates under an exact SHA.
+- [x] R1B is archived with its governance updates under
+  `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
 
 Completion marker: `LOCAL_VERIFIED + REVIEWED + ARCHIVED`. A live stochastic
 production-model call is not required before archive because the duplicate
@@ -156,7 +157,8 @@ ordinary reply. This is a shared provider boundary, not a document action type.
   Node entry and outbound affected tests pass `259/259`.
 - [ ] Independent review confirms the shape test is neither fail-open nor an
   overbroad “contains schemaVersion” regex.
-- [ ] R1B.1 is archived with R1A/R1B under an exact SHA.
+- [x] R1B.1 is archived with R1A/R1B under
+  `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`.
 
 Completion marker: `LOCAL_VERIFIED + REVIEWED + ARCHIVED`. Production keeps the
 old parser until an authorized later deployment.
@@ -336,15 +338,14 @@ Production changed: NO / YES (authorization reference)
 Do not accept a narrative “done” report without the checklist, exact evidence
 and status split above.
 
-After the bounded archive produces an immutable SHA, a new review session can
-start from this instruction (replace `CANDIDATE_SHA`):
+The current independent review session can start from this instruction:
 
 ```text
 Read AGENTS.md, docs/governance/active_sequence.md,
 docs/governance/s12-readiness-topology.md and
 docs/governance/current_runtime_status.md. Audit only the exact archived R1A and
 R1B/R1B.1 delta from cacc8924b7e2b67e300a67228a6891576759f555 through
-CANDIDATE_SHA. Verify every
+aabf9bc97ea3fcd95bf6d79798c56315543d0c37. Verify every
 R1A/R1B/R1B.1 checklist item against source and fresh evidence; distinguish
 implementation verification from independent review and archive state. Reproduce
 the pre-fix `schemaVersion: "v1"` leak mentally or from the test, then verify

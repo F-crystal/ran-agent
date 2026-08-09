@@ -218,9 +218,10 @@ single pending outbound item dates from `2026-07-03`, is already past due and
 must be suppressed/reconciled rather than replayed; its legacy dispatch state
 is from the same instant.
 
-Production is quiescent enough for a new rehearsal, but archived GitHub `main`
-at `cacc8924b7e2b67e300a67228a6891576759f555` is not a deployable S12 candidate.
-Local unarchived S12-R1 work now supplies the cutover Journal interlock, paused
+Production is quiescent enough for a new rehearsal, but the implementation
+archived at `aabf9bc97ea3fcd95bf6d79798c56315543d0c37` is only the S12-R1
+review candidate, not a deployable S12 candidate. A later docs-only status
+writeback does not change that source candidate. It supplies the cutover Journal interlock, paused
 candidate/suppression transaction path, system and managed-wake manifests,
 fail-closed `core-wake`, Node Core lifecycle composition, generic WorkRun
 claim/terminal execution, typed scheduled Hermes/Package B delivery, Python
@@ -236,8 +237,8 @@ A timed todo write now registers immediately through the authenticated local
 Core route; the reminder scan repairs a missed registration into the same
 replay-safe one-shot schedule, delivery fetches its retained content for the
 typed scheduled turn, and then acknowledges the Python projection after a
-durable send/suppress terminal. Source inspection found that the unarchived
-composition already stops the legacy external-MCP timer in Core mode, runs its
+durable send/suppress terminal. Source inspection found that the archived
+candidate already stops the legacy external-MCP timer in Core mode, runs its
 existing scan/executor through an `external_poll` WorkRun, records hash-bound
 Core facts and routes any presentation candidate through Core delivery. That
 early implementation is not R1E acceptance: its authority, replay and
@@ -260,7 +261,7 @@ out-of-band and read back successfully, which repairs the owner's artifact but
 is not evidence that production routing, action resolution, acknowledgement or
 envelope parsing is fixed.
 
-R1B is now locally verified in the unarchived readiness work. The companion
+R1B is locally verified in the archived review candidate. The companion
 candidate removes the built-in `web` toolset and its unused built-in provider
 block while preserving `mcp-search_hub`, its `search`/`read`/`research` tools,
 internal provider policy and the distinct Playwright browser/debug capability.
@@ -280,8 +281,9 @@ only a stable code; ordinary non-envelope JSON remains visible. The affected
 Gateway/Backend/ChannelHub/entry set passes 259/259 locally. Production still
 runs the archived parser.
 
-The bounded candidate archive is therefore the current boundary; independent
-review of that exact SHA follows before R1C becomes ready. R1C adds the smallest effect-oriented Feishu
+The bounded candidate archive completed at
+`aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; independent review of the exact
+`cacc8924..aabf9bc` delta is the current boundary before R1C becomes ready. R1C adds the smallest effect-oriented Feishu
 `document.write` seam plus
 bounded internal replan; R1D then decides exact dependency compatibility before
 external-MCP WorkRun composition, real presence/attention ownership and the

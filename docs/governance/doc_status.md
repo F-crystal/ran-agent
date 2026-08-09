@@ -70,8 +70,8 @@ check returned typed research evidence, and the affected Node/Python sets pass
 `schemaVersion: "v1"` raw-envelope leak; its affected set passes 259/259. The
 project-local Python entrypoint is also fixed at ignored `.venv`, while
 production still requires an explicit absolute runtime. The bounded candidate
-archive is next, followed by an independent exact-SHA review; R1C starts only
-after that review.
+is archived at `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; independent
+exact-SHA review is current, and R1C starts only after that review.
 
 ## Lifecycle Stages
 

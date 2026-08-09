@@ -2,8 +2,9 @@
 
 Status: CURRENT (2026-08-09)
 
-Lifecycle: `LOCAL_VERIFIED` on the unarchived S12-R1 worktree. S12 and
-production remain unchanged and not started.
+Lifecycle: `LOCAL_VERIFIED`, `ARCHIVED`, `NOT_REVIEWED` at
+`aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. S12 and production remain
+unchanged and not started.
 
 ## Objective
 
@@ -109,7 +110,6 @@ schema, external-MCP execution, or attention/presence composition in this node.
   companion profile/release Python set passed `43/43`; Shell syntax and
   `git diff --check` passed.
 - No production profile, process, service, credential, CLI binary or source
-  pointer changed. A bounded candidate archive is the next delivery boundary
-  together with the still-unarchived R1A composition and the later R1B.1
-  ordinary-chat envelope repair. Independent exact-SHA review follows; R1C is
-  the next implementation node only after that review.
+  pointer changed. R1A/R1B/R1B.1 are archived together at
+  `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. Independent exact-SHA review is
+  the current boundary; R1C is the next implementation node only after it.
