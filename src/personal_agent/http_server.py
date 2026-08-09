@@ -112,6 +112,9 @@ class BackendHttpController:
                 return HTTPStatus.BAD_REQUEST, {"error": "field 'user_text' must be a non-empty string"}
             return HTTPStatus.OK, self._message_service.update_memory(user_text)
 
+        if path == "/tools/memory/maintain":
+            return HTTPStatus.OK, self._message_service.run_memory_maintenance()
+
         if path == "/tools/session/support":
             channel = str(body.get("channel", "wechat")).strip() or "wechat"
             return HTTPStatus.OK, self._message_service.get_session_support(channel)
@@ -175,6 +178,12 @@ class BackendHttpController:
 
         if path == "/tools/todo/list":
             return self._handle_todo_list(body)
+
+        if path == "/tools/todo/get":
+            return self._handle_todo_get(body)
+
+        if path == "/tools/todo/ack":
+            return self._handle_todo_ack(body)
 
         if path == "/tools/todo/complete":
             return self._handle_todo_complete(body)
@@ -360,10 +369,25 @@ class BackendHttpController:
 
             if result.success:
                 todo_content = text
+                core_registration = "not_required"
                 if result.todo_id is not None:
                     stored_todo = self._message_service._database.get_todo_by_id(result.todo_id)
                     if stored_todo and stored_todo["content"]:
                         todo_content = str(stored_todo["content"])
+                if (
+                    result.todo_id is not None
+                    and result.parsed_time
+                    and os.getenv("RAN_AGENT_CORE_ENABLED", "false").strip().lower() == "true"
+                ):
+                    try:
+                        self._message_service.register_core_reminder(
+                            todo_id=result.todo_id,
+                            scheduled_for=result.parsed_time,
+                        )
+                        core_registration = "registered"
+                    except Exception:
+                        self._logger.exception("immediate Core reminder registration pending reconciliation")
+                        core_registration = "pending_reconciliation"
                 return HTTPStatus.OK, {
                     "success": True,
                     "todo_id": result.todo_id,
@@ -371,6 +395,7 @@ class BackendHttpController:
                     "parsed_time": result.parsed_time,
                     "explanation": result.explanation,
                     "needs_confirmation": result.needs_confirmation,
+                    "core_registration": core_registration,
                 }
             else:
                 return HTTPStatus.INTERNAL_SERVER_ERROR, {
@@ -397,6 +422,7 @@ class BackendHttpController:
                         "id": t.id,
                         "content": t.content,
                         "reminder_at": t.reminder_at,
+                        "last_reminded_at": t.last_reminded_at,
                         "status": t.status,
                     }
                     for t in todos
@@ -405,6 +431,41 @@ class BackendHttpController:
         except Exception as exc:
             self._logger.exception("todo list failed")
             return HTTPStatus.INTERNAL_SERVER_ERROR, {"error": str(exc)}
+
+    def _handle_todo_get(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        try:
+            todo_id = int(payload.get("todo_id", 0))
+        except (TypeError, ValueError):
+            todo_id = 0
+        if todo_id < 1:
+            return HTTPStatus.BAD_REQUEST, {"success": False, "error": "todo_id must be a positive integer"}
+        todo = self._message_service._database.get_todo_by_id(todo_id)
+        if todo is None:
+            return HTTPStatus.NOT_FOUND, {"success": False, "error": "todo not found"}
+        return HTTPStatus.OK, {
+            "success": True,
+            "todo": {
+                "id": int(todo["id"]),
+                "content": str(todo["content"]),
+                "reminder_at": todo["reminder_at"],
+                "last_reminded_at": todo["last_reminded_at"],
+                "status": str(todo["status"]),
+            },
+        }
+
+    def _handle_todo_ack(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        try:
+            todo_id = int(payload.get("todo_id", 0))
+        except (TypeError, ValueError):
+            todo_id = 0
+        if todo_id < 1:
+            return HTTPStatus.BAD_REQUEST, {"success": False, "error": "todo_id must be a positive integer"}
+        todo = self._message_service._database.get_todo_by_id(todo_id)
+        if todo is None:
+            return HTTPStatus.NOT_FOUND, {"success": False, "error": "todo not found"}
+        if todo["last_reminded_at"] is None:
+            self._message_service._database.mark_todo_reminded(todo_id)
+        return HTTPStatus.OK, {"success": True, "todo_id": todo_id, "acknowledged": True}
 
     def _handle_todo_complete(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         try:

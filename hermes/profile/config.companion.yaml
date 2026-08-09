@@ -12,10 +12,6 @@ model:
 agent:
   reasoning_effort: none
 
-web:
-  search_backend: tavily
-  extract_backend: tavily
-
 terminal:
   backend: local
   cwd: /opt/ran_agent
@@ -28,6 +24,9 @@ compression:
   target_ratio: 0.12
   protect_last_n: 8
   hygiene_hard_message_limit: 160
+
+cron:
+  script_timeout_seconds: 30
 
 security:
   allow_lazy_installs: false
@@ -58,7 +57,6 @@ disabled_tools:
 
 platform_toolsets:
   cli: &companion_toolsets
-    - web
     - terminal
     - file
     - skills

@@ -9,6 +9,7 @@ import {
   createOutboundServer,
   getOutboundServerConfig,
   handleEnvironmentSensorRequest,
+  handleCoreReminderRegisterRequest,
   handleExternalMcpSystemQueueRequest,
   handleHermesLiteSoftResetControlRequest,
   handleOutboundRequest,
@@ -55,6 +56,19 @@ test('getOutboundServerConfig reads host and port from environment', () => {
   assert.equal(config.host, '127.0.0.2');
   assert.equal(config.port, 9901);
   assert.equal(config.accountId, 'personal_agent');
+});
+
+test('Core reminder control route is authenticated and unavailable before Core cutover', async (t) => {
+  const env = tempEnv(t, { RAN_AGENT_INTERNAL_CONTROL_SECRET: 'owner-control-secret' });
+  const base = {
+    env, method: 'POST', url: '/internal/core/reminders/register',
+    remoteAddress: '127.0.0.1', bodyText: JSON.stringify({ todoId: 7, scheduledFor: '2026-08-09 15:00:00' }),
+  };
+  assert.equal((await handleCoreReminderRegisterRequest({ ...base, headers: {} })).status, 401);
+  const unavailable = await handleCoreReminderRegisterRequest({
+    ...base, headers: { authorization: 'Bearer owner-control-secret' },
+  });
+  assert.deepEqual(unavailable, { status: 503, payload: { ok: false, error: 'core_runtime_unavailable' } });
 });
 
 test('Hermes lite reset control route is exact, loopback-only, and bearer-authenticated', async (t) => {

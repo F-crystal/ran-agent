@@ -79,8 +79,10 @@ function collectKeys(value, output = []) {
 }
 
 test('current companion profile retains personal memory and retires standalone Obsidian', async () => {
-  const text = await readFile(path.join(ROOT, 'hermes/profile/config.yaml'), 'utf8');
+  const text = await readFile(path.join(ROOT, 'hermes/profile/config.companion.yaml'), 'utf8');
   const values = yamlList(text.replace('cli: &companion_toolsets', 'cli:'), 'platform_toolsets', 'cli');
+  assert.equal(values.includes('web'), false);
+  assert.equal(values.includes('mcp-search_hub'), true);
   assert.equal(values.includes('mcp-personal_memory'), true);
   assert.equal(values.includes('mcp-obsidian_memory'), false);
   assert.match(text, /^  api_server: \*companion_toolsets$/m);

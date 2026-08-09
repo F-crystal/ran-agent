@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "status": "CURRENT",
+  "timeZone": "Asia/Shanghai",
+  "schedules": [
+    { "id": "life-loop", "source": "python.scheduler.life_loop", "title": "Life loop fact scan", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "interval", "everySeconds": 5400 } },
+    { "id": "knowledge-06", "source": "python.scheduler.knowledge_agent", "title": "Knowledge maintenance 06", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "daily", "time": "06:00:00" } },
+    { "id": "knowledge-12", "source": "python.scheduler.knowledge_agent", "title": "Knowledge maintenance 12", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "daily", "time": "12:00:00" } },
+    { "id": "knowledge-18", "source": "python.scheduler.knowledge_agent", "title": "Knowledge maintenance 18", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "daily", "time": "18:00:00" } },
+    { "id": "knowledge-23", "source": "python.scheduler.knowledge_agent", "title": "Knowledge maintenance 23", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "daily", "time": "23:00:00" } },
+    { "id": "daily-carryover", "source": "python.scheduler.daily_carryover", "title": "Daily carryover", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "daily", "time": "04:00:00" } },
+    { "id": "self-reflection", "source": "python.scheduler.self_reflection", "title": "Self reflection", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "interval", "everySeconds": 43200 } },
+    { "id": "hermes-bounded-context", "source": "python.scheduler.hermes_bounded_context", "title": "Hermes bounded context", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "interval", "everySeconds": 43200 } },
+    { "id": "night-cycle", "source": "python.scheduler.night_cycle", "title": "Night cycle", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "daily", "time": "00:00:00" } },
+    { "id": "ai-daily-digest", "source": "python.scheduler.ai_daily_digest", "title": "AI daily digest", "taskKind": "scheduled_instruction", "visible": true, "recurrence": { "kind": "daily", "time": "08:00:00" } },
+    { "id": "reminder-check", "source": "python.scheduler.reminder_check", "title": "Reminder scan", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "interval", "everySeconds": 300 } },
+    { "id": "attention-flush", "source": "node.attention_valve.flush", "title": "Attention backlog flush", "taskKind": "system_maintenance", "visible": false, "recurrence": { "kind": "interval", "everySeconds": 60 } },
+    { "id": "external-mcp-poll", "source": "node.external_mcp.autonomy_tick", "title": "External MCP fact poll", "taskKind": "external_poll", "payloadRef": "external-poll:external-mcp-runtime", "visible": false, "recurrence": { "kind": "interval", "everySeconds": 60 } }
+  ]
+}

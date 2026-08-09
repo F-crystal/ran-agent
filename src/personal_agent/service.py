@@ -617,6 +617,11 @@ class PersonalAgentService:
             "advisory_only": True,
         }
 
+    def run_memory_maintenance(self) -> dict[str, object]:
+        """Run the existing bounded background memory maintenance pass."""
+
+        return dict(self._memory_specialist.execute_background_maintenance())
+
     def get_knowledge_state(self) -> dict[str, object]:
         """Return latest lightweight knowledge-maintenance state."""
 
@@ -1028,6 +1033,14 @@ class PersonalAgentService:
             "reason": reason,
             "error": "legacy proactive text route retired; use send_proactive_event",
         }
+
+    def register_core_reminder(self, *, todo_id: int, scheduled_for: str) -> dict[str, object]:
+        """Best-effort immediate registration; the managed reminder scan is the recovery path."""
+
+        return self._outbound_client.register_core_reminder(
+            todo_id=todo_id,
+            scheduled_for=scheduled_for,
+        )
 
     def send_proactive_event(self, event: dict[str, object]) -> dict[str, object]:
         """Submit one structured proactive event through the Node bridge."""

@@ -8,6 +8,7 @@ set -euo pipefail
 REPO_ROOT="${RAN_AGENT_REPO_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}"
 LITE_HOME="${HERMES_LITE_HOME:-$HERMES_HOME/lite}"
+COMPANION_CONFIG="$REPO_ROOT/hermes/profile/config.companion.yaml"
 FULL_CONFIG="$HERMES_HOME/config.yaml"
 LITE_CONFIG="$LITE_HOME/config.yaml"
 FULL_ENV="$HERMES_HOME/.env"
@@ -32,6 +33,13 @@ toolset_has() {
   local file="$1"
   local value="$2"
   [ -f "$file" ] && awk '/^mcp_servers:/ { in_toolsets=0 } /^platform_toolsets:/ { in_toolsets=1 } in_toolsets { print }' "$file" | grep -q "$value"
+}
+
+toolset_has_exact() {
+  local file="$1"
+  local value="$2"
+  [ -f "$file" ] && awk '/^mcp_servers:/ { in_toolsets=0 } /^platform_toolsets:/ { in_toolsets=1 } in_toolsets { print }' "$file" \
+    | grep -Eq "^[[:space:]]+-[[:space:]]+${value}[[:space:]]*$"
 }
 
 env_value() {
@@ -64,8 +72,11 @@ cd "$REPO_ROOT"
 
 section "1. Repo source config"
 present_in_file ".mcp.json search_hub" "$REPO_ROOT/.mcp.json" '"search_hub"'
+present_in_file "companion profile mcp-search_hub" "$COMPANION_CONFIG" 'mcp-search_hub'
 present_in_file "full profile mcp-search_hub" "$REPO_ROOT/hermes/profile/config.yaml" 'mcp-search_hub'
 present_in_file "lite profile mcp-search_hub" "$REPO_ROOT/hermes/profile/config.lite.yaml" 'mcp-search_hub'
+if toolset_has_exact "$COMPANION_CONFIG" web; then echo "FAIL: companion exposes built-in web toolset"; else echo "companion built-in web toolset: ABSENT (OK)"; fi
+if grep -q '^web:[[:space:]]*$' "$COMPANION_CONFIG"; then echo "FAIL: companion retains built-in web provider block"; else echo "companion built-in web provider block: ABSENT (OK)"; fi
 if [ -x "$REPO_ROOT/scripts/start_search_hub_mcp.sh" ]; then
   echo "start_search_hub_mcp.sh: EXECUTABLE"
 else
@@ -76,6 +87,8 @@ section "2. Runtime config"
 present_in_file "full runtime search_hub server" "$FULL_CONFIG" '^  search_hub:'
 present_in_file "lite runtime search_hub server" "$LITE_CONFIG" '^  search_hub:'
 if toolset_has "$FULL_CONFIG" 'mcp-search_hub'; then echo "full mcp-search_hub toolset: PRESENT"; else echo "full mcp-search_hub toolset: MISSING"; fi
+if toolset_has_exact "$FULL_CONFIG" web; then echo "FAIL: runtime exposes built-in web toolset"; else echo "runtime built-in web toolset: ABSENT (OK)"; fi
+if [ -f "$FULL_CONFIG" ] && grep -q '^web:[[:space:]]*$' "$FULL_CONFIG"; then echo "FAIL: runtime retains built-in web provider block"; else echo "runtime built-in web provider block: ABSENT (OK)"; fi
 if toolset_has "$LITE_CONFIG" 'mcp-search_hub'; then echo "lite mcp-search_hub toolset: PRESENT"; else echo "lite mcp-search_hub toolset: MISSING"; fi
 if toolset_has "$LITE_CONFIG" 'mcp-playwright'; then echo "WARNING: lite exposes mcp-playwright"; else echo "lite mcp-playwright toolset: ABSENT (OK)"; fi
 if toolset_has "$LITE_CONFIG" 'mcp-media_generation'; then echo "WARNING: lite exposes mcp-media_generation"; else echo "lite mcp-media_generation toolset: ABSENT (OK)"; fi

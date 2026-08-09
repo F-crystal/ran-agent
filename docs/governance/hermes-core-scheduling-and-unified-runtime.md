@@ -1,6 +1,6 @@
 # Hermes Core Scheduling and Unified Runtime
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-09)
 
 Lifecycle: Runtime Phase `PROD_VERIFIED` for the bounded channel, identity,
 memory, capability, topology and 2026-08-07 digest evidence in
@@ -407,6 +407,106 @@ stopping old wake neither loses the next future run nor replays an old one.
   fence” here is WorkRun authority; disabling legacy visible wake remains S12.
   The focused set passes 29/29 and the full Core suite 151/151 locally.
   Production is unchanged.
+
+## S12 local composition status
+
+The unarchived R1 candidate now has one cutover transaction/marker, an exact
+verify/apply command, a disabled Hermes no-agent wake projection, an official
+create/pause/edit/resume reconciler, and a non-overlapping Node executor. The
+executor claims queued WorkRuns, delegates by typed task kind, records one
+terminal result and releases the lease. Visible scheduled instructions use the
+real system/internal Turn, Hermes provider epoch/attempt, Package B final,
+presentation outbox and typed adapter receipt; non-visible knowledge,
+reflection, memory and night-cycle work reuses the existing Python tool
+endpoints. Timed todo writes now register immediately through the local Core
+control route, while the managed scan repairs a missed registration into the
+same Core-owned one-shot schedule; delivery fetches the retained todo content
+and acknowledges that projection only after a durable terminal. The expanded
+Core/attention set passes 183 tests locally; the earlier affected Python set
+passes 67 and the current affected set passes 55. The complete Node baseline
+passes 1,337 with zero failures and four declared environment skips.
+
+This is not yet a cutover candidate. The unarchived composition already stops
+the legacy external-MCP runtime timer in Core mode and runs its existing
+scan/executor through an `external_poll` WorkRun into hash-bound Core facts and
+Core delivery. R1E still owns formal authority/replay/no-direct-send acceptance
+after R1D; code presence does not skip that dependency. Attention delay/flush
+also needs a real presence source. The smallest accepted source shape is a coarse, expiring
+desktop signal (`available`, `gaming`, `focused`, `busy`, or `dnd`), with
+missing/stale data reported as unknown; raw window titles are not required.
+ActivityWatch's local active-window/AFK watchers are suitable as an optional
+producer, but Core must not poll Steam or invent `available` when the desktop
+signal is absent. The external-poll and `attention-flush` timer shapes are
+therefore design inventory, not permission to activate either consumer.
+Production and S12 remain unchanged/not started.
+
+## Semantic request, stable effect and provider boundary
+
+Routing follows an assembly truth principle: governed wording, the actual
+profile/toolset capability surface, and a representative runtime call must
+agree. Prompt preference without assembly evidence is not a valid route.
+
+Private reply protocol follows the same principle. Provider-origin content that
+has the private envelope shape must be normalized and validated before any
+owner-visible release. The unambiguous version aliases `"1"` and `"v1"` may be
+canonicalized to numeric `1`; every other malformed private envelope fails
+closed to a safe bridge reply and a content-free error code. It must never fall
+back to raw `reply_text`. Ordinary JSON without the private envelope shape is
+still user-visible when requested.
+
+Task recipes and input sources do not create authority. `minutes -> note`,
+`web -> study note` and `paper -> study note` are recipes that may all end in
+the same stable reversible effect: `document.write` with an explicit provider,
+operation, target and content reference. Node resolves that semantic request to
+one existing executor, validates trusted conversation/tool facts, actor,
+target, payload hash, idempotency and evidence policy, then executes or returns
+one bounded structured repair result. Hermes may revise the plan once, but it
+cannot grant itself a capability, choose its own risk class or claim success
+without the adapter receipt.
+
+This change is intentionally narrow. R1 adds the one missing Feishu document
+effect and reuses existing adapter/readback primitives; it does not introduce a
+universal capability registry or replace the contained Minutes recipe. A
+repairable source/recipe mismatch is `needs_replan`; unresolved target
+ambiguity, missing authority, payload drift and an unknown post-dispatch result
+remain deterministic stops. User-visible acknowledgement reports the actual
+stage and result rather than rewriting every failure as a readback problem.
+
+Web acquisition is a separate prerequisite, not a document subtype. Production
+Hermes uses `search_hub` for ordinary web/research and the governed social/media
+readers for those sources. A model-visible direct tool must be invoked directly;
+deferred discovery is only for a capability that is not already exposed. The
+archived companion profile exposes both the built-in `web` toolset and
+`mcp-search_hub`; this conflicts with the otherwise explicit route. The local
+R1B candidate proves that `search_hub` covers the accepted generic
+search/read/research surface and removes the built-in `web` toolset plus its
+provider block from the default companion surface. It retains the distinct
+Playwright browser/debug capability because Search Hub's Playwright fallback is
+not yet implemented. The DLM-shaped MCP-handler check observes typed
+`search_hub.research`; this closes the local assembly defect that prompt wording
+alone did not prevent. Production still runs the archived dual-entry profile.
+
+External MCP remains behind `external_mcp_gateway`. Its dynamic server/tool
+schema, risk class and grant scope are execution descriptors, not new global
+task types. A poll may create a sanitized Core fact under WorkRun authority;
+if that fact should interrupt the owner, Hermes proposes the presentation and
+Node still applies attention policy before the Core outbox and channel adapter.
+No MCP server receives owner-visible send authority merely because it can emit
+events or protocol notifications.
+
+This boundary follows mature prior art rather than inventing a new framework:
+MCP keeps orchestration and authorization in the host while servers expose
+focused negotiated tools; Home Assistant separates trigger/condition recipes
+from reusable actions such as `notify.send_message`; Temporal separates durable
+Workflow orchestration from idempotent side-effecting Activities; Kubernetes
+controllers reconcile recorded desired state with observed provider state and
+report status back to the authority. These patterns support the design, but
+ran-agent implements only the existing seams needed by the current incident.
+
+- MCP architecture: <https://modelcontextprotocol.io/docs/learn/architecture>
+- Home Assistant automations: <https://www.home-assistant.io/docs/automation/>
+- Temporal Activity idempotency: <https://docs.temporal.io/activity-definition>
+- Kubernetes controllers: <https://kubernetes.io/docs/concepts/architecture/controller/>
 
 The dual gateway/profile contract, regex Full routing, Full-to-Lite fallback,
 and duplicated history/cache/cron stores are removed from the target. Existing

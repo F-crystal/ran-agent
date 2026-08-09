@@ -58,7 +58,16 @@ function buildLegacyCopy(t) {
     schemaVersion: 1, revision: 1, events: [{ status: 'sent' }, { status: 'reserved' }],
   }));
   fs.writeFileSync(path.join(stateDir, 'core', 'durable-outbox.json'), JSON.stringify({
-    schemaVersion: 1, items: [{ delivery: 'sent' }, { delivery: 'sending' }],
+    schemaVersion: 1, items: [{ delivery: 'sent' }, { delivery: 'sending' }, {
+      delivery: 'ambiguous', attemptCount: 1,
+      sendStartedAt: '2026-08-08T07:59:00.000Z',
+      deliveryCommittedAt: '2026-08-08T07:59:01.000Z',
+      delivery_terminal_revision: 1,
+      delivery_terminal_receipt_id: 'terminal:ambiguous:1',
+      deliveryTerminalReceipts: [{
+        delivery_terminal_receipt_id: 'terminal:ambiguous:1', delivery: 'ambiguous',
+      }],
+    }],
   }));
   fs.writeFileSync(path.join(stateDir, 'node-bridge-runtime', 'proactive-events.json'), JSON.stringify([
     { status: 'sent' }, { status: 'reserved' },
@@ -83,6 +92,9 @@ test('S10 rehearsal stages only future reminder/watch identities paused and crea
   assert.equal(inspected.counts.historicalReminders, 2);
   assert.equal(inspected.counts.externalWatchCandidates, 2);
   assert.equal(inspected.counts.externalActivityCandidates, 1);
+  assert.equal(inspected.counts.externalActivityStates.active, 1);
+  assert.equal(inspected.counts.outboxAmbiguousTerminalNoResend, 1);
+  assert.equal(inspected.counts.outboxAmbiguousUnsafe, 0);
   assert.ok(inspected.staged.reminders.every((item) => item.state === 'paused'));
   assert.ok(inspected.staged.externalWatches.every((item) => item.state === 'paused'));
   assert.ok(inspected.staged.externalActivities.every((item) => item.state === 'paused'));

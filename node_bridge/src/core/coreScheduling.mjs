@@ -227,6 +227,35 @@ function workRunClaimDigest(input, sourceEventId) {
   return assertOperationSemanticDigest(`sha256:v1:${createHash('sha256').update(canonical).digest('hex')}`);
 }
 
+function workRunTerminalDigest(input, authority) {
+  const canonical = JSON.stringify([
+    ['operation_schema', 'core-work-run-terminal:v1'],
+    ['operation_key', input.operationKey],
+    ['work_run_id', authority.workRunId],
+    ['work_run_revision', authority.expectedRevision],
+    ['work_run_fence', authority.fenceToken],
+    ['lease_owner', authority.leaseOwner],
+    ['lease_id', authority.leaseId],
+    ['result_state', input.resultState],
+    ['result_ref', input.resultRef],
+    ['result_hash_token', input.resultHashToken],
+    ['failure_class', input.failureClass ?? null],
+  ]);
+  return assertOperationSemanticDigest(`sha256:v1:${createHash('sha256').update(canonical).digest('hex')}`);
+}
+
+function workRunRecoveryDigest(input, sourceEventId) {
+  const canonical = JSON.stringify([
+    ['operation_schema', 'core-work-run-recovery:v1'],
+    ['operation_key', input.operationKey],
+    ['work_run_id', input.workRunId],
+    ['expected_revision', input.expectedRevision],
+    ['expected_fence', input.expectedFence],
+    ['causation_id', sourceEventId],
+  ]);
+  return assertOperationSemanticDigest(`sha256:v1:${createHash('sha256').update(canonical).digest('hex')}`);
+}
+
 function deterministicId(prefix, ...parts) {
   return `${prefix}:v1:${createHash('sha256').update(parts.join('\0')).digest('hex')}`;
 }
@@ -323,6 +352,40 @@ export function assertScheduledWorkAuthority(get, input, {
   }
   return Object.freeze({ ...authority, exchangeId: row.exchange_id, conversationId: row.exchange_conversation_id,
     payloadRef: row.schedule_payload_ref, causationId: row.causation_id });
+}
+
+function assertClaimedWorkRunAuthority(get, input, activeAt) {
+  const authority = normalizeScheduledAuthority(input);
+  const at = canonicalIso(activeAt, 'Work Run authority time');
+  const row = get(`SELECT run.*,lease.state AS lease_state,lease.fence_token AS lease_fence,
+      lease.lease_owner AS claimed_lease_owner,lease.lease_until AS claimed_lease_until,
+      activity.owner_id,activity.state AS activity_state,
+      activity.contract_revision AS activity_contract_revision,
+      occurrence.schedule_spec_revision_id,revision.task_kind,revision.payload_ref,
+      revision.causation_id
+    FROM work_run run
+    JOIN lease ON lease.lease_id=run.lease_id AND lease.work_run_id=run.work_run_id
+    JOIN activity ON activity.activity_id=run.activity_id
+    JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
+    JOIN schedule_spec_revision revision
+      ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
+    WHERE run.work_run_id=?`, authority.workRunId);
+  const valid = row && row.state === 'running'
+    && Number(row.revision) === authority.expectedRevision
+    && Number(row.fence_token) === authority.fenceToken
+    && row.lease_id === authority.leaseId
+    && row.lease_owner === authority.leaseOwner
+    && row.lease_state === 'active'
+    && Number(row.lease_fence) === authority.fenceToken
+    && row.claimed_lease_owner === authority.leaseOwner
+    && row.claimed_lease_until === row.lease_until
+    && new Date(row.lease_until).getTime() >= new Date(at).getTime()
+    && row.activity_state === 'active'
+    && Number(row.contract_revision) === Number(row.activity_contract_revision);
+  if (!valid) {
+    throw coreError('CORE_SCHEDULE_WORK_AUTHORITY_STALE', 'scheduled Work Run authority is missing or stale');
+  }
+  return Object.freeze({ authority, row });
 }
 
 function scheduledInstructionDigest(input, authority) {
@@ -617,6 +680,111 @@ export function createCoreScheduleRepository({ get, all, run, now }) {
       });
     },
 
+    completeWorkRun(input) {
+      const at = coreNow();
+      const operationKey = assertOperationKey(input.operationKey);
+      if (!['completed', 'failed'].includes(input.resultState)
+        || typeof input.resultRef !== 'string' || !input.resultRef.trim()
+        || (input.resultState === 'failed' && (typeof input.failureClass !== 'string' || !input.failureClass.trim()))) {
+        throw coreError('CORE_SCHEDULE_WORK_RESULT_INVALID', 'scheduled Work Run result is invalid');
+      }
+      const resultHashToken = assertKeyedContentHashToken(input.resultHashToken);
+      const authority = normalizeScheduledAuthority(input.authority);
+      const semanticDigest = workRunTerminalDigest({ ...input, operationKey, resultHashToken }, authority);
+      const eventId = deterministicId('scheduled-work-terminal', authority.workRunId, operationKey);
+      const prior = get(`SELECT * FROM journal_event
+        WHERE journal_event_id=? AND event_type='core_work_run_terminal'`, eventId);
+      if (prior) {
+        if (prior.source_ref !== semanticDigest || prior.correlation_id !== authority.workRunId
+          || prior.actor_ref !== authority.leaseOwner || Number(prior.revision) !== authority.expectedRevision + 1) {
+          throw coreError('CORE_OPERATION_KEY_CONFLICT', 'scheduled Work Run result key has different semantics');
+        }
+        return Object.freeze({ disposition: 'already_applied', eventId,
+          workRun: get('SELECT * FROM work_run WHERE work_run_id=?', authority.workRunId) });
+      }
+      const { row } = assertClaimedWorkRunAuthority(get, authority, at);
+      run(`INSERT INTO journal_event(
+        journal_event_id,event_type,owner_id,conversation_id,exchange_id,activity_id,
+        actor_ref,origin_ref,source_kind,source_ref,revision,causation_id,correlation_id,created_at
+      ) VALUES (?,'core_work_run_terminal',?,?,?,?,?,?,?, ?,?,?,?,?)`,
+      eventId, row.owner_id, row.exchange_id ? get('SELECT conversation_id FROM exchange WHERE exchange_id=?', row.exchange_id).conversation_id : null,
+      row.exchange_id, row.activity_id, authority.leaseOwner, operationKey,
+      `core-work-run-terminal:${input.resultState}`, semanticDigest, authority.expectedRevision + 1,
+      row.causation_id, authority.workRunId, at);
+      run(`INSERT INTO journal_payload(
+        journal_payload_id,journal_event_id,storage_kind,payload_ref,content_hash_token,
+        sensitivity,retention_class,created_at
+      ) VALUES (?,?,'external_ref',?,?,'normal','diagnostic',?)`,
+      `${eventId}:payload`, eventId, input.resultRef, resultHashToken, at);
+      const changed = run(`UPDATE work_run
+        SET state=?,revision=revision+1,lease_owner=NULL,lease_until=NULL,
+            heartbeat_at=?,ended_at=?,failure_class=?,updated_at=?
+        WHERE work_run_id=? AND state='running' AND revision=? AND fence_token=?
+          AND lease_id=? AND lease_owner=?`,
+      input.resultState, at, at, input.resultState === 'failed' ? input.failureClass : null, at,
+      authority.workRunId, authority.expectedRevision, authority.fenceToken,
+      authority.leaseId, authority.leaseOwner);
+      if (changed.changes !== 1) throw coreError('CORE_SCHEDULE_WORK_RESULT_STALE', 'scheduled Work Run changed before result commit');
+      const released = run(`UPDATE lease SET state='revoked',revision=revision+1,revoked_at=?
+        WHERE lease_id=? AND work_run_id=? AND state='active' AND fence_token=? AND lease_owner=?`,
+      at, authority.leaseId, authority.workRunId, authority.fenceToken, authority.leaseOwner);
+      if (released.changes !== 1) throw coreError('CORE_SCHEDULE_WORK_RESULT_STALE', 'scheduled Work Run lease changed before result commit');
+      return Object.freeze({ disposition: 'applied', eventId,
+        workRun: get('SELECT * FROM work_run WHERE work_run_id=?', authority.workRunId) });
+    },
+
+    recoverExpiredWorkRun(input) {
+      const at = coreNow();
+      const operationKey = assertOperationKey(input.operationKey);
+      if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 1
+        || !Number.isSafeInteger(input.expectedFence) || input.expectedFence < 1) {
+        throw coreError('CORE_SCHEDULE_WORK_RECOVERY_INVALID', 'expired Work Run recovery authority is invalid');
+      }
+      const work = get(`SELECT run.*,revision.causation_id,lease.state AS lease_state,
+          lease.fence_token AS lease_fence,lease.lease_owner AS claimed_lease_owner,
+          lease.lease_until AS claimed_lease_until
+        FROM work_run run
+        JOIN lease ON lease.lease_id=run.lease_id AND lease.work_run_id=run.work_run_id
+        JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
+        JOIN schedule_spec_revision revision
+          ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
+        WHERE run.work_run_id=?`, input.workRunId);
+      if (!work) return null;
+      const semanticDigest = workRunRecoveryDigest({ ...input, operationKey }, work.causation_id);
+      const prior = get(`SELECT * FROM fence
+        WHERE domain='work_run' AND work_run_id=? AND operation_key=?`, input.workRunId, operationKey);
+      if (prior) {
+        if (prior.operation_semantic_digest !== semanticDigest) {
+          throw coreError('CORE_OPERATION_KEY_CONFLICT', 'expired Work Run recovery key has different semantics');
+        }
+        return Object.freeze({ disposition: 'already_applied', workRunId: input.workRunId,
+          revision: Number(prior.new_revision), fenceToken: Number(prior.new_fence) });
+      }
+      const valid = work.state === 'running' && work.lease_state === 'active'
+        && Number(work.revision) === input.expectedRevision
+        && Number(work.fence_token) === input.expectedFence
+        && Number(work.lease_fence) === input.expectedFence
+        && work.claimed_lease_owner === work.lease_owner
+        && work.claimed_lease_until === work.lease_until
+        && new Date(work.lease_until).getTime() < new Date(at).getTime();
+      if (!valid) return null;
+      const released = run(`UPDATE lease SET state='revoked',revision=revision+1,revoked_at=?
+        WHERE lease_id=? AND work_run_id=? AND state='active' AND fence_token=?`,
+      at, work.lease_id, input.workRunId, input.expectedFence);
+      if (released.changes !== 1) throw coreError('CORE_SCHEDULE_WORK_RECOVERY_STALE', 'expired Work Run lease changed during recovery');
+      const changed = run(`UPDATE work_run
+        SET state='waiting',revision=revision+1,fence_token=fence_token+1,
+            lease_owner=NULL,lease_until=NULL,fence_reason_code='restart',
+            fence_causation_id=?,fence_operation_key=?,fence_operation_digest=?,
+            fence_committed_at=?,heartbeat_at=?,updated_at=?
+        WHERE work_run_id=? AND state='running' AND revision=? AND fence_token=? AND lease_id=?`,
+      work.causation_id, operationKey, semanticDigest, at, at, at,
+      input.workRunId, input.expectedRevision, input.expectedFence, work.lease_id);
+      if (changed.changes !== 1) throw coreError('CORE_SCHEDULE_WORK_RECOVERY_STALE', 'expired Work Run changed during recovery');
+      return Object.freeze({ disposition: 'applied', workRunId: input.workRunId,
+        revision: input.expectedRevision + 1, fenceToken: input.expectedFence + 1 });
+    },
+
     wakeDue(input) {
       const at = coreNow();
       if (!Number.isSafeInteger(input.batchSize) || input.batchSize < 1 || input.batchSize > 128) {
@@ -738,6 +906,8 @@ export function createCoreSchedulingService({ core, batchSize = 32 } = {}) {
     reviseSchedule: (input) => core.writer.write((tx) => tx.schedules.revise(input)),
     commitScheduledInstruction: (input) => core.writer.write((tx) => tx.schedules.commitInstruction(input)),
     claimWorkRun: (input) => core.writer.write((tx) => tx.schedules.claimWorkRun(input)),
+    completeWorkRun: (input) => core.writer.write((tx) => tx.schedules.completeWorkRun(input)),
+    recoverExpiredWorkRun: (input) => core.writer.write((tx) => tx.schedules.recoverExpiredWorkRun(input)),
     wakeDue: () => core.writer.write((tx) => tx.schedules.wakeDue({ batchSize })),
   });
 }

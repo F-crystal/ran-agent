@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "status": "CURRENT",
+  "runtime": {
+    "provider": "hermes-cron",
+    "home": "/home/ubuntu/.hermes-ran-agent/lite",
+    "scriptTimeoutSeconds": 30
+  },
+  "job": {
+    "name": "ran-agent-core-wake",
+    "schedule": "every 1m",
+    "script": "core-wake.sh",
+    "scriptTarget": "/home/ubuntu/.hermes-ran-agent/lite/scripts/core-wake.sh",
+    "scriptSource": "hermes/profile/scripts/core-wake.sh",
+    "workdir": "/opt/ran_agent",
+    "no_agent": true,
+    "deliver": "local",
+    "enabled": false,
+    "state": "paused",
+    "pauseReason": "awaiting-owner-s12-production-authorization"
+  }
+}

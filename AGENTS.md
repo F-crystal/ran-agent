@@ -53,7 +53,7 @@ This is the canonical repo-root rule file for agents in this checkout and must s
   archive/commit/push preparation, security, identity, idempotency, or
   irreversible state work, run the applicable separately authorized,
   read-only final check through
-  `python3 scripts/workflow_guard.py verify --label <label> -- <command>`.
+  `.venv/bin/python scripts/workflow_guard.py verify --label <label> -- <command>`.
 - For long validation windows, use the explicit snapshot/run flow documented in
   `docs/governance/delivery-evidence.md` instead of taking a late baseline.
 - Evidence automation does not authorize commit, push, deploy, migration, risk

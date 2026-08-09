@@ -150,6 +150,9 @@ export function createCoreTransactionFacade({ assertActive, prepare, now = () =>
   });
 
   const journal = freezeNamespace({
+    event(eventId) {
+      return get('SELECT * FROM journal_event WHERE journal_event_id=?', eventId);
+    },
     append(input) {
       run(`INSERT INTO journal_event(
         journal_event_id, event_type, owner_id, conversation_id, exchange_id, activity_id,

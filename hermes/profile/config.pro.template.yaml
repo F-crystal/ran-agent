@@ -4,7 +4,7 @@ model:
   provider: deepseek
   default: deepseek-v4-pro
 
-# Keep MCP config aligned with config.yaml when creating another profile.
+# Keep MCP config aligned with config.companion.yaml when creating another profile.
 # Suggested install pattern:
 #   hermes profile install /Users/fengran/ran_agent/hermes/profile --name ran-assistant-pro --force -y
 #   then copy this model block into the machine-local ran-assistant-pro config.

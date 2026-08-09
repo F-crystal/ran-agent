@@ -21,6 +21,12 @@ import { callExternalMcpTool } from './externalMcp/executor.mjs';
 import { createExternalMcpAutonomyRuntime } from './externalMcp/runtime.mjs';
 import { createReplyBackend } from './replyBackend.mjs';
 import { createDurableOutbox } from './durableOutbox.mjs';
+import { bindCoreChannelHub, openCommittedCoreRuntime } from './core/coreRuntime.mjs';
+import { createCoreRuntimeComposition } from './core/coreRuntimeComposition.mjs';
+import { createCoreExternalMcpHandler } from './core/coreExternalMcpHandler.mjs';
+import { createCoreExternalNotificationService } from './core/coreExternalNotificationService.mjs';
+import { createAttentionValve } from './attentionValve.mjs';
+import { createDesktopPresenceProvider } from './desktopPresence.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
@@ -482,7 +488,7 @@ async function sendExternalMcpActivityText(target = {}, text = '', { env = proce
   throw new Error('unsupported external MCP activity target');
 }
 
-export function buildAgent({ logger, env }) {
+export function buildAgent({ logger, env, channelHub = handleIncomingMessage }) {
   const mergeWindowMs = Number(env.NODE_BRIDGE_MERGE_WINDOW_MS || '1200');
   const mergeCoordinator = new InboundMergeCoordinator({ windowMs: mergeWindowMs });
   const followUpDelayMs = Number(env.NODE_BRIDGE_FOLLOW_UP_DELAY_MS || '800');
@@ -539,6 +545,7 @@ export function buildAgent({ logger, env }) {
       logger,
       env,
       backend: env.replyBackend,
+      channelHub,
       returnResult: true,
     }), { env, logger });
   }
@@ -816,34 +823,63 @@ async function main() {
   const durableOutbox = createDurableOutbox({ env: runtimeEnv });
   runtimeEnv.durableOutbox = durableOutbox;
   await durableOutbox.recover();
+  const coreRuntime = await openCommittedCoreRuntime(runtimeEnv);
+  const channelHub = bindCoreChannelHub(handleIncomingMessage, coreRuntime);
+  let coreExternalMcp = null;
   const externalMcpRuntime = createExternalMcpAutonomyRuntime({
     env: runtimeEnv,
     logger: console,
     transport: createExternalMcpRuntimeTransport({ env: runtimeEnv }),
-    submitCandidate: (candidate, context) => submitExternalMcpCheckpoint({
-      candidate,
-      context,
-      replyBackend: runtimeEnv.replyBackend,
-      outbox: durableOutbox,
-      sendWechat: (text) => proactiveBot.sendMessage(text),
-      env: runtimeEnv,
-    }),
+    submitCandidate: (candidate, context) => coreRuntime
+      ? coreExternalMcp.submitCandidate(candidate, context)
+      : submitExternalMcpCheckpoint({
+        candidate,
+        context,
+        replyBackend: runtimeEnv.replyBackend,
+        outbox: durableOutbox,
+        sendWechat: (text) => proactiveBot.sendMessage(text),
+        env: runtimeEnv,
+      }),
   });
+  if (coreRuntime) {
+    const presenceProvider = createDesktopPresenceProvider({
+      statePath: path.join(resolveStateDir(runtimeEnv), 'attention', 'presence.json'),
+      externalMcpRuntime,
+    });
+    const attentionValve = createAttentionValve({
+      statePath: path.join(resolveStateDir(runtimeEnv), 'attention', 'delayed.json'),
+      presenceProvider,
+    });
+    coreExternalMcp = createCoreExternalMcpHandler({
+      core: coreRuntime.core, runtime: externalMcpRuntime, hashContent: coreRuntime.hashContent,
+      attentionValve,
+      notificationService: createCoreExternalNotificationService({ core: coreRuntime.core }),
+    });
+  }
   runtimeEnv.replyBackend = createReplyBackend({
     env: runtimeEnv,
     logger: console,
     activityFacade: externalMcpRuntime.facade,
   });
+  const coreWorkRuntime = createCoreRuntimeComposition({
+    runtime: coreRuntime, channelHub, externalPollHandler: coreExternalMcp?.handler,
+    attentionFlushHandler: coreExternalMcp?.attentionFlushHandler, externalMcpRuntime,
+    env: runtimeEnv, logger: console,
+  });
   const agent = buildAgent({
     logger: console,
     env: runtimeEnv,
+    channelHub,
   });
   const outboundConfig = getOutboundServerConfig(process.env);
-  const outboundServer = createOutboundServer({ bot: proactiveBot, logger: console, env: runtimeEnv });
-  const feishuBridge = startFeishuBridge({ env: runtimeEnv, logger: console, outbox: durableOutbox });
-  const desktopProxyServer = startDesktopProxyServer({ env: runtimeEnv, logger: console, outbox: durableOutbox });
+  const outboundServer = createOutboundServer({
+    bot: proactiveBot, logger: console, env: runtimeEnv, channelHub, coreRuntime,
+  });
+  const feishuBridge = startFeishuBridge({ env: runtimeEnv, logger: console, outbox: durableOutbox, channelHub });
+  const desktopProxyServer = startDesktopProxyServer({ env: runtimeEnv, logger: console, outbox: durableOutbox, channelHub });
   const coReadingWebServer = startCoReadingWebServer({ env: process.env, logger: console });
-  await externalMcpRuntime.start();
+  if (!coreRuntime) await externalMcpRuntime.start();
+  coreWorkRuntime?.start();
 
   await new Promise((resolve, reject) => {
     outboundServer.once('error', reject);
@@ -857,10 +893,12 @@ async function main() {
     await startWithRetry(agent, weixinAccountConfig);
   } finally {
     externalMcpRuntime.stop();
+    await coreWorkRuntime?.stop();
     feishuBridge?.stop?.();
     await new Promise((resolve) => coReadingWebServer?.close ? coReadingWebServer.close(resolve) : resolve());
     await new Promise((resolve) => desktopProxyServer?.close ? desktopProxyServer.close(resolve) : resolve());
     await new Promise((resolve) => outboundServer.close(resolve));
+    await coreRuntime?.core.close();
   }
 }
 

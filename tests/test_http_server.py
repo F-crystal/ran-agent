@@ -80,6 +80,17 @@ class BackendHttpControllerTest(unittest.TestCase):
         self.assertEqual(payload["knowledge_hits"][0]["path"], "wiki/hermes.md")
         self.assertIn("统一前台运行时", payload["rendered_context"])
 
+    def test_memory_maintenance_route_reuses_the_existing_bounded_worker(self) -> None:
+        expected = {"working_memories_reviewed": 2, "old_memories_cleaned": 1}
+        with patch.object(
+            self.service.get_memory_specialist(),
+            "execute_background_maintenance",
+            return_value=expected,
+        ):
+            status_code, payload = self.controller.handle_tools("/tools/memory/maintain", {})
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload, expected)
+
     def test_handle_ingest_records_external_exchange_without_model_generation(self) -> None:
         status_code, response_payload = self.controller.handle_ingest(
             {
@@ -433,6 +444,25 @@ class BackendHttpControllerTest(unittest.TestCase):
         self.assertIn("开会", str(todo["content"]))
         self.assertTrue(str(todo["reminder_at"]).endswith("15:00:00"))
         self.assertEqual(todo["source"], "hermes")
+        self.assertEqual(response_payload["core_registration"], "not_required")
+
+    def test_timed_todo_registers_immediately_with_Core_when_cutover_runtime_is_enabled(self) -> None:
+        with patch.dict(os.environ, {"RAN_AGENT_CORE_ENABLED": "true"}), patch.object(
+            self.service,
+            "register_core_reminder",
+            return_value={"ok": True, "disposition": "registered"},
+        ) as register:
+            status_code, response_payload = self.controller.handle_tools(
+                "/tools/todo/create",
+                {"text": "提醒我明天下午三点开会", "source": "hermes", "extract_time": True},
+            )
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(response_payload["core_registration"], "registered")
+        register.assert_called_once_with(
+            todo_id=response_payload["todo_id"],
+            scheduled_for=response_payload["parsed_time"],
+        )
 
     def test_handle_tools_returns_not_found_for_unknown_route(self) -> None:
         status_code, response_payload = self.controller.handle_tools("/tools/unknown", {})
@@ -471,6 +501,31 @@ class BackendHttpControllerTest(unittest.TestCase):
         self.assertEqual(response_payload["success"], False)
         self.assertEqual(response_payload["parsed_time"], None)
         self.assertEqual(response_payload["needs_confirmation"], True)
+
+    def test_handle_tools_todo_get_and_ack_are_idempotent(self) -> None:
+        todo_id = self.database.create_todo(
+            content="交房租",
+            reminder_at="2026-08-09 15:00:00",
+            source="hermes",
+        )
+
+        status_code, response_payload = self.controller.handle_tools(
+            "/tools/todo/get", {"todo_id": todo_id}
+        )
+        self.assertEqual(status_code, 200)
+        self.assertEqual(response_payload["todo"]["content"], "交房租")
+        self.assertIsNone(response_payload["todo"]["last_reminded_at"])
+
+        for _ in range(2):
+            status_code, response_payload = self.controller.handle_tools(
+                "/tools/todo/ack", {"todo_id": todo_id}
+            )
+            self.assertEqual(status_code, 200)
+            self.assertTrue(response_payload["acknowledged"])
+
+        todo = self.database.get_todo_by_id(todo_id)
+        assert todo is not None
+        self.assertIsNotNone(todo["last_reminded_at"])
 
     def test_handle_tools_todo_complete_marks_latest_pending_todo_done(self) -> None:
         todo_id = self.database.create_todo(

@@ -27,22 +27,27 @@ import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 const INDEX_SOURCE = fs.readFileSync(new URL('../src/index.mjs', import.meta.url), 'utf8');
 
 test('main injects the shared runtime env into the outbound control server', () => {
-  assert.match(INDEX_SOURCE, /createOutboundServer\(\{\s*bot: proactiveBot,\s*logger: console,\s*env: runtimeEnv,?\s*\}\)/);
+  assert.match(INDEX_SOURCE, /createOutboundServer\(\{[\s\S]*?bot: proactiveBot, logger: console, env: runtimeEnv, channelHub, coreRuntime,[\s\S]*?\}\)/);
 });
 
 test('main creates and recovers one shared durable outbox before wiring live channel entries', () => {
   assert.match(INDEX_SOURCE, /const durableOutbox = createDurableOutbox\(\{ env: runtimeEnv \}\)/);
   assert.match(INDEX_SOURCE, /runtimeEnv\.durableOutbox = durableOutbox/);
   assert.match(INDEX_SOURCE, /await durableOutbox\.recover\(\)/);
-  assert.match(INDEX_SOURCE, /startFeishuBridge\(\{ env: runtimeEnv, logger: console, outbox: durableOutbox \}\)/);
-  assert.match(INDEX_SOURCE, /startDesktopProxyServer\(\{ env: runtimeEnv, logger: console, outbox: durableOutbox \}\)/);
+  assert.match(INDEX_SOURCE, /const coreRuntime = await openCommittedCoreRuntime\(runtimeEnv\)/);
+  assert.match(INDEX_SOURCE, /const channelHub = bindCoreChannelHub\(handleIncomingMessage, coreRuntime\)/);
+  assert.match(INDEX_SOURCE, /const coreWorkRuntime = createCoreRuntimeComposition\(\{/);
+  assert.match(INDEX_SOURCE, /coreWorkRuntime\?\.start\(\)/);
+  assert.match(INDEX_SOURCE, /await coreWorkRuntime\?\.stop\(\)/);
+  assert.match(INDEX_SOURCE, /startFeishuBridge\(\{ env: runtimeEnv, logger: console, outbox: durableOutbox, channelHub \}\)/);
+  assert.match(INDEX_SOURCE, /startDesktopProxyServer\(\{ env: runtimeEnv, logger: console, outbox: durableOutbox, channelHub \}\)/);
   assert.doesNotMatch(INDEX_SOURCE, /ombreCompatRuntime/);
 });
 
 test('main starts the v2 external MCP runtime instead of the legacy activity runner loop', () => {
   assert.match(INDEX_SOURCE, /createExternalMcpAutonomyRuntime\(\{\s*env: runtimeEnv,/);
   assert.match(INDEX_SOURCE, /transport: createExternalMcpRuntimeTransport\(\{ env: runtimeEnv \}\)/);
-  assert.match(INDEX_SOURCE, /await externalMcpRuntime\.start\(\)/);
+  assert.match(INDEX_SOURCE, /if \(!coreRuntime\) await externalMcpRuntime\.start\(\)/);
   assert.match(INDEX_SOURCE, /externalMcpRuntime\.stop\(\)/);
   assert.doesNotMatch(INDEX_SOURCE, /const activityRunner = startExternalMcpActivityRunnerLoop\(/);
 });

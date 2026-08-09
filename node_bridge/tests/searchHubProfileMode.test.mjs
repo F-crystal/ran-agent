@@ -53,6 +53,17 @@ test('source Hermes configs register search_hub in lite and full profiles', () =
   assert.match(platformToolsets(full), /mcp-media_generation/);
 });
 
+test('companion profile exposes search_hub without the competing generic web toolset', () => {
+  const companion = readFileSync(new URL('../../hermes/profile/config.companion.yaml', import.meta.url), 'utf8');
+  const toolsets = platformToolsets(companion);
+
+  assert.match(toolsets, /mcp-search_hub/);
+  assert.doesNotMatch(toolsets, /^\s*- web\s*$/m);
+  assert.doesNotMatch(companion, /^web:\s*$/m);
+  assert.match(companion, /^  search_hub:\s*$/m);
+  assert.match(companion, /SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK:\s+"true"/);
+});
+
 test('lite profile keeps co_reading out of conversational toolset while full keeps it', () => {
   const full = readFileSync(new URL('../../hermes/profile/config.yaml', import.meta.url), 'utf8');
   const lite = readFileSync(new URL('../../hermes/profile/config.lite.yaml', import.meta.url), 'utf8');

@@ -24,6 +24,7 @@ class TodoItem:
     id: int
     content: str
     reminder_at: str | None
+    last_reminded_at: str | None
     status: str
     source: str
     created_at: str
@@ -35,6 +36,7 @@ class TodoItem:
             id=int(row["id"]),
             content=str(row["content"]),
             reminder_at=str(row["reminder_at"]) if row["reminder_at"] else None,
+            last_reminded_at=str(row["last_reminded_at"]) if row["last_reminded_at"] else None,
             status=str(row["status"]),
             source=str(row["source"]),
             created_at=str(row["created_at"]),

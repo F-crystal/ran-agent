@@ -27,9 +27,14 @@ Before a completion claim for high-risk work, run the applicable final
 validation through the one-command project entry point:
 
 ```bash
-python3 scripts/workflow_guard.py verify \
-  --label focused-risk-tests -- python3 -m pytest tests/example.py -q
+PYTHONPATH=src .venv/bin/python scripts/workflow_guard.py verify \
+  --label focused-risk-tests -- .venv/bin/python -m pytest tests/example.py -q
 ```
+
+Local project commands use the ignored repository `.venv` as their single
+Python entrypoint. Bootstrap it from the approved local Python when absent;
+production release gates still receive an explicit absolute
+`RAN_AGENT_PYTHON_BIN` and never infer a runtime from this desktop convention.
 
 `verify` creates a unique snapshot/evidence pair under ignored
 `local_archive/runtime/workflow-evidence/`, executes the command through the
@@ -76,10 +81,10 @@ Use `scripts/workflow_guard.py` at three checkpoints:
 Example:
 
 ```bash
-python3 scripts/workflow_guard.py snapshot \
+.venv/bin/python scripts/workflow_guard.py snapshot \
   --output local_archive/runtime/workflow-evidence/task-snapshot.json
 
-python3 scripts/workflow_guard.py check \
+.venv/bin/python scripts/workflow_guard.py check \
   --snapshot local_archive/runtime/workflow-evidence/task-snapshot.json
 ```
 
@@ -94,10 +99,10 @@ new baseline, not for hiding drift.
 Run a validation command against an exact snapshot:
 
 ```bash
-python3 scripts/workflow_guard.py run \
+PYTHONPATH=src .venv/bin/python scripts/workflow_guard.py run \
   --snapshot local_archive/runtime/workflow-evidence/task-snapshot.json \
   --evidence local_archive/runtime/workflow-evidence/task-evidence.json \
-  --label targeted-risk-tests -- python3 -m pytest tests/example.py -q
+  --label targeted-risk-tests -- .venv/bin/python -m pytest tests/example.py -q
 ```
 
 The evidence stores a command hash, resolved executable path/hash, unique label,

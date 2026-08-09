@@ -611,7 +611,7 @@ async function sendChatToHermesApi(message, options = {}) {
       taskScoped: options.taskScoped,
     });
   }
-  return buildHermesReply(body, config);
+  return buildHermesReply(body, config, options.logger);
 }
 
 function createTimeoutAbortSignal(timeoutMs) {
@@ -678,7 +678,7 @@ async function sendChatToHermesOneShot(message, options = {}) {
   return buildHermesReply({
     reply_text: String(stdout || '').trim(),
     model: config.model,
-  }, config);
+  }, config, options.logger);
 }
 
 async function buildHermesUserMessage(payload = {}, options = {}) {
@@ -970,7 +970,7 @@ function buildHermesSystemInstruction() {
     'For co-reading, use co_reading only; private notes are unavailable.',
     'Do not call Tavily, OpenCLI, or Playwright unless search_hub fails and the user is debugging.',
     'Use media_reader for image/audio/video understanding.',
-    'Return a final JSON reply envelope with the exact keys schemaVersion, message, actionRequests, activityRequest, claims, commitments. actionRequests is [] only when no action is requested; users see message only.',
+    'Return a final JSON reply envelope with the exact keys schemaVersion, message, actionRequests, activityRequest, claims, commitments. schemaVersion MUST be the JSON number 1, never a string such as "1", "v1", or "V1". actionRequests is [] only when no action is requested; users see message only.',
     'When the owner explicitly asks you to remember a personal preference, routine, relationship, or operating lesson, return one memory.remember actionRequest with scope keys kind, subject_key, statement. Choose kind from preference, routine, relationship, operating_lesson; use a lowercase semantic subject_key with a matching prefix such as preference:tea, reply:structure, routine:night_reading, person:friend, or operating:delivery; copy statement from the owner message. For an explicit correction use memory.correct with subject_key and statement; for an explicit deletion use memory.forget with subject_key. The bridge validates the identifier, content, and format before writing.',
     'For an owner request to organize an existing Feishu Minutes transcript into a cloud document, use lark-cli only to read the existing transcript, then return exactly one actionRequest with a short requestRef such as "feishu-minutes-doc-1", actionType "feishu.minutes_to_doc", and scope keys minuteTitle, folderTitle, documentTitle, contentXml. contentXml must be a single-line, rootless, text-only DocxXML fragment under 1800 characters, begin with its escaped <title>, and use elements such as <heading1>, <p>, <bullet>, or <callout> without <root> or <content> wrappers. Do not create the document with a tool, do not run ASR, and do not look for or create PPT files; the bridge performs and verifies the write. This rule overrides the empty actionRequests case.',
     'Do not expose provider internals, tokens, cookies, signed URLs, or raw tool logs; if tool evidence is insufficient, say you are uncertain rather than guessing.',
@@ -1907,8 +1907,20 @@ async function parseHermesJson(response) {
   }
 }
 
-function buildHermesReply(body = {}, config = {}) {
-  const contentEnvelope = extractReplyEnvelopeFromChoice(body);
+function buildHermesReply(body = {}, config = {}, logger = console) {
+  let contentEnvelope;
+  try {
+    contentEnvelope = extractReplyEnvelopeFromChoice(body);
+  } catch (error) {
+    if (error?.code !== 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID') throw error;
+    logger?.warn?.(`[hermes-private-reply-envelope] rejected=true code=${error.code}`);
+    return {
+      reply_text: '回复格式校验失败，请稍后重试。',
+      follow_up_messages: [],
+      media: null,
+      model: body.model || config.model,
+    };
+  }
   const replyText = (contentEnvelope?.message ?? extractHermesReplyText(body)).trim();
   const media = normalizeOutgoingMedia(body.media);
   const reply = {
@@ -1946,18 +1958,45 @@ function extractReplyEnvelopeFromChoice(body = {}) {
     candidates.push({ text: content.slice(index + 1).trim(), prefix: content.slice(0, index).trim() });
   }
   for (const candidate of candidates) {
+    let parsed;
     try {
-      const parsed = JSON.parse(candidate.text);
-      const normalized = normalizeReplyEnvelope({ reply_envelope: parsed });
-      if (candidate.prefix !== null
-        && candidate.prefix !== normalized.message
-        && !/(?:^|\n)\s*(?:我的\s*)?(?:回复信封|reply envelope)\s*[:：]?\s*$/iu.test(candidate.prefix)) continue;
-      return parsed;
+      parsed = JSON.parse(candidate.text);
     } catch {
       // Try an earlier line boundary; model output may prefix the private envelope with prose.
+      continue;
     }
+    const privateShape = looksLikePrivateReplyEnvelope(parsed);
+    const canonical = privateShape && ['1', 'v1'].includes(String(parsed.schemaVersion).toLowerCase())
+      ? { ...parsed, schemaVersion: 1 }
+      : parsed;
+    let normalized;
+    try {
+      normalized = normalizeReplyEnvelope({ reply_envelope: canonical });
+    } catch (error) {
+      if (privateShape) throw privateReplyEnvelopeError(error);
+      continue;
+    }
+    if (candidate.prefix !== null
+      && candidate.prefix !== normalized.message
+      && !/(?:^|\n)\s*(?:我的\s*)?(?:回复信封|reply envelope)\s*[:：]?\s*$/iu.test(candidate.prefix)) {
+      if (privateShape) throw privateReplyEnvelopeError();
+      continue;
+    }
+    return normalized;
   }
   return null;
+}
+
+function looksLikePrivateReplyEnvelope(value) {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value)
+    && Object.hasOwn(value, 'schemaVersion')
+    && Object.hasOwn(value, 'message'));
+}
+
+function privateReplyEnvelopeError(cause) {
+  const error = new Error('Hermes returned an invalid private reply envelope', { cause });
+  error.code = 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID';
+  return error;
 }
 
 function extractHermesReplyText(body = {}) {

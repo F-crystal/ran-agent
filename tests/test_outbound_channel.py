@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import json
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
@@ -64,3 +65,15 @@ class NodeBridgeOutboundClientTest(TestCase):
                 self.client.send_ai_daily_digest("verified facts")
 
         urlopen.assert_not_called()
+
+    def test_core_reminder_uses_the_private_local_control_route(self) -> None:
+        with (
+            patch.dict(os.environ, {"RAN_AGENT_INTERNAL_CONTROL_SECRET": "private-control-secret"}, clear=True),
+            patch("personal_agent.outbound_channel.urllib.request.urlopen", return_value=_Response()) as urlopen,
+        ):
+            self.client.register_core_reminder(todo_id=7, scheduled_for="2026-08-09 15:00:00")
+
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:8791/internal/core/reminders/register")
+        self.assertEqual(request.get_header("Authorization"), "Bearer private-control-secret")
+        self.assertEqual(json.loads(request.data), {"todoId": 7, "scheduledFor": "2026-08-09 15:00:00"})

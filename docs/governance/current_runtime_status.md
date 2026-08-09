@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11 LOCAL_VERIFIED (2026-08-08)
+Status: S4 PROD_VERIFIED; S5-S11 LOCAL_VERIFIED (2026-08-09)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -202,6 +202,104 @@ migration candidates and the fact-only/no-send external-poll seam. The focused
 acceptance set passes 29/29 and the full Core suite passes 151/151 locally.
 Here “stale fence” means the Package E stale WorkRun revision/fence authority;
 the legacy visible-wake interlock remains exclusively S12 cutover scope.
+
+An S12 read-only readiness audit at `2026-08-08T14:42:15Z` reconfirmed a clean
+production checkout and accepted source pointer at
+`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. Python, Node and Hermes are active;
+the retained non-visible soft-reset timer is active/enabled; Hermes native cron
+contains zero jobs and zero executions. The refreshed legacy snapshot has 14
+todos, zero future reminder candidates, three historical reminders, zero
+invalid reminder times, zero active/leased durable jobs, zero watches, and zero
+notification reservations. All 13 external activities are paused with no
+lease, next wake or pending operation. The durable outbox has 58 `sent` and 65
+`ambiguous` rows; every ambiguous row has one attempt and durable terminal
+receipt evidence, so none may be resent. Proactive reservations are zero. The
+single pending outbound item dates from `2026-07-03`, is already past due and
+must be suppressed/reconciled rather than replayed; its legacy dispatch state
+is from the same instant.
+
+Production is quiescent enough for a new rehearsal, but archived GitHub `main`
+at `cacc8924b7e2b67e300a67228a6891576759f555` is not a deployable S12 candidate.
+Local unarchived S12-R1 work now supplies the cutover Journal interlock, paused
+candidate/suppression transaction path, system and managed-wake manifests,
+fail-closed `core-wake`, Node Core lifecycle composition, generic WorkRun
+claim/terminal execution, typed scheduled Hermes/Package B delivery, Python
+maintenance reuse, a non-overlapping Node executor, an attention-flush WorkRun
+owner and the non-empty adapter-exception evidence rule. The exact cutover
+command, legacy Python scheduler disable projection and official Hermes
+create/pause/edit/resume reconciler also exist locally. The expanded local
+Core/attention set passes 183/183; the earlier affected Python set passes 67/67
+and the current affected set passes 55/55. After binding the project Python
+explicitly, the complete Node baseline passes 1,337 with zero failures and four
+declared environment skips.
+A timed todo write now registers immediately through the authenticated local
+Core route; the reminder scan repairs a missed registration into the same
+replay-safe one-shot schedule, delivery fetches its retained content for the
+typed scheduled turn, and then acknowledges the Python projection after a
+durable send/suppress terminal. Source inspection found that the unarchived
+composition already stops the legacy external-MCP timer in Core mode, runs its
+existing scan/executor through an `external_poll` WorkRun, records hash-bound
+Core facts and routes any presentation candidate through Core delivery. That
+early implementation is not R1E acceptance: its authority, replay and
+no-direct-send checklist remains closed until the serial frontier reaches R1E.
+Attention delay/flush still needs an actual presence producer rather than a
+guessed available state. Neither proposed timer row is activation evidence. S12
+remains `NOT STARTED` until the serial readiness nodes in `active_sequence.md`
+pass and the owner separately authorizes production.
+
+A 2026-08-09 owner-visible incident adds two serial R1 blockers without
+changing production. For an ordinary DLM web-research task, Hermes attempted an
+already exposed `web_extract` surface through deferred tool discovery instead
+of the governed `search_hub` route; the research step did not complete. It then
+selected the Minutes-only `feishu.minutes_to_doc` action for a non-Minutes
+document request. Node correctly rejected the ungrounded action before document
+execution but incorrectly collapsed that pre-execution failure into “document
+readback not confirmed”; a separate response-envelope shape gap exposed private
+JSON to the owner. The requested learning note has since been recovered
+out-of-band and read back successfully, which repairs the owner's artifact but
+is not evidence that production routing, action resolution, acknowledgement or
+envelope parsing is fixed.
+
+R1B is now locally verified in the unarchived readiness work. The companion
+candidate removes the built-in `web` toolset and its unused built-in provider
+block while preserving `mcp-search_hub`, its `search`/`read`/`research` tools,
+internal provider policy and the distinct Playwright browser/debug capability.
+Both diagnostics accept that assembly. A DLM-shaped real MCP-handler call
+entered typed `research`, selected the academic provider seam and returned
+structured evidence without `web_extract`, `web_search` or `tool_describe`.
+The complete affected Node set passes 62/62, the profile/release Python set
+passes 43/43, and Shell syntax plus `git diff --check` pass.
+
+Fresh owner evidence then reproduced a separate ordinary-chat failure: a
+provider-origin private reply envelope used string `"v1"` instead of numeric
+version `1`, strict parsing rejected it, and the Gateway degraded the same JSON
+to ordinary `reply_text`. Local R1B.1 now requires numeric `1` in the producer
+instruction, canonicalizes only unambiguous `"1"`/`"v1"` aliases, and fails
+other private-envelope-shaped JSON closed to a safe reply. Rejection logs carry
+only a stable code; ordinary non-envelope JSON remains visible. The affected
+Gateway/Backend/ChannelHub/entry set passes 259/259 locally. Production still
+runs the archived parser.
+
+The bounded candidate archive is therefore the current boundary; independent
+review of that exact SHA follows before R1C becomes ready. R1C adds the smallest effect-oriented Feishu
+`document.write` seam plus
+bounded internal replan; R1D then decides exact dependency compatibility before
+external-MCP WorkRun composition, real presence/attention ownership and the
+fresh R2 rehearsal. The current server `lark-cli` observed during artifact
+recovery is `1.0.66` while `1.0.85` is offered; no upgrade occurred. Ombre and
+external providers remain optional adapters behind stable Hermes-facing product
+surfaces and cannot replace Core or Node authority. S12 remains `NOT STARTED`;
+production source and services are unchanged. The canonical per-node dependency
+and acceptance ledger is `docs/governance/s12-readiness-topology.md`; its
+verification/delivery split prevents local evidence from being mistaken for an
+archived or deployable candidate.
+
+The local Python entrypoint is now the ignored repository `.venv`, created from
+the existing Anaconda Python 3.10 with system site packages. Local archive and
+Node release tests resolve explicit environment input first and that project
+entrypoint second; they no longer select an arbitrary `python3` from `PATH`.
+Production release gates retain their existing explicit absolute
+`RAN_AGENT_PYTHON_BIN` contract.
 
 ## Source And Recovery Authority
 

@@ -4,7 +4,7 @@ from pathlib import Path
 import yaml
 
 
-PROFILE = Path(__file__).parents[1] / "hermes/profile/config.yaml"
+PROFILE = Path(__file__).parents[1] / "hermes/profile/config.companion.yaml"
 MUTATION = Path(__file__).parents[1] / "docs/governance/hermes_runtime_mutation.v1.json"
 FORBIDDEN_TOOLS = {"cronjob", "delegate_task", "execute_code"}
 
@@ -14,7 +14,7 @@ def test_companion_profile_is_the_capability_union_behind_one_memory_facade() ->
     cli = config["platform_toolsets"]["cli"]
     api = config["platform_toolsets"]["api_server"]
     expected_tools = {
-        "web", "terminal", "file", "skills", "memory", "session_search", "safe",
+        "terminal", "file", "skills", "memory", "session_search", "safe",
         "mcp-time", "mcp-social_reader", "mcp-media_reader", "mcp-search_hub",
         "mcp-co_reading", "mcp-sticker_catalog", "mcp-media_generation",
         "mcp-personal_memory", "mcp-playwright", "mcp-external_mcp_gateway",
@@ -27,6 +27,9 @@ def test_companion_profile_is_the_capability_union_behind_one_memory_facade() ->
 
     assert cli == api
     assert set(api) == expected_tools
+    assert "web" not in config
+    assert "web" not in api
+    assert "mcp-search_hub" in api
     assert set(config["mcp_servers"]) == expected_mcp
     assert "mcp-personal_memory" in api
     assert FORBIDDEN_TOOLS.issubset(config["disabled_tools"])

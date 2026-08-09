@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
+import { handleSearchHubMcpRequest } from '../src/searchHubMcpServer.mjs';
 import { routeSearchHubRead, routeSearchHubResearch, routeSearchHubSearch } from '../src/searchHub/router.mjs';
 import { getSearchHubConfig } from '../src/searchHub/schema.mjs';
 
@@ -161,4 +162,51 @@ test('research returns a brief with curated sources', async () => {
 
   assert.match(result.brief, /OpenAI/);
   assert.equal(result.sources.length, 1);
+});
+
+test('DLM research-shaped MCP call reaches the typed search_hub research handler', async () => {
+  const providerCalls = [];
+  const result = await handleSearchHubMcpRequest({
+    method: 'tools/call',
+    params: {
+      name: 'research',
+      arguments: {
+        query: '扩散语言模型 DLM 与自回归语言模型的原理对比和入门资料',
+        intent: 'academic',
+        max_sources: 2,
+      },
+    },
+  }, {
+    config: getSearchHubConfig({ SEARCH_HUB_PROFILE_MODE: 'full' }),
+    providers: {
+      opencliProvider: {
+        async search(args) {
+          providerCalls.push({ provider: 'opencli', query: args.query, commandText: args.commandText });
+          return {
+            items: [{
+              title: 'Diffusion language models',
+              url: 'https://arxiv.org/abs/2502.09992',
+              snippet: 'A diffusion language model overview.',
+              provider: 'opencli',
+            }],
+            used_providers: ['opencli'],
+            warnings: [],
+          };
+        },
+      },
+      tavilyProvider: {
+        async search(args) {
+          providerCalls.push({ provider: 'tavily', query: args.query });
+          return { items: [], used_providers: ['tavily'], warnings: [] };
+        },
+      },
+    },
+  });
+
+  assert.equal(result.isError, undefined);
+  assert.equal(providerCalls[0].provider, 'opencli');
+  assert.match(providerCalls[0].commandText, /google-scholar search/);
+  assert.equal(result.structuredContent.sources.length, 1);
+  assert.match(result.structuredContent.brief, /Diffusion language models/);
+  assert.doesNotMatch(JSON.stringify(result), /web_extract|web_search|tool_describe/);
 });

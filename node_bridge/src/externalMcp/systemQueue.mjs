@@ -10,8 +10,9 @@ const VALID_DELIVERABILITY = new Set(['silent_only', 'draft_allowed', 'notify_al
 const VALID_TIERS = new Set(['T0', 'T1', 'T2', 'T3']);
 
 export function buildExternalMcpSyntheticTurn(input = {}) {
-  const event = input.proactiveEvent || normalizeProactiveEvent(input, {
-    kind: inferExternalMcpKind(input.kind || input.watchKind || input.watch_kind),
+  const normalizedKind = inferExternalMcpKind(input.kind || input.watchKind || input.watch_kind);
+  const event = input.proactiveEvent || normalizeProactiveEvent({ ...input, kind: normalizedKind }, {
+    kind: normalizedKind,
     eventId: input.id,
     globalUserId: input.globalUserId || input.global_user_id || input.senderId || input.sender_id,
     watchScope: input.watchScope || input.watch_scope,

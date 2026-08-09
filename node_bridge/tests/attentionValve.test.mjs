@@ -33,14 +33,16 @@ function setup(t, { presence = 'available', criticalAllowlist = [] } = {}) {
 test('timely results are delayed and coalesced by fingerprint while the owner is gaming', (t) => {
   const { valve, setPresence } = setup(t, { presence: 'gaming' });
   const first = valve.evaluate({
-    contentClass: 'timely', fingerprint: 'rss:kinmen:1', summary: '第一条更新',
+    contentClass: 'timely', fingerprint: 'rss:kinmen:1', summary: '第一条更新', payloadRef: 'source:revision:1',
   });
   assert.deepEqual(first, {
     disposition: 'delayed', reason: 'presence_gaming', contentClass: 'timely',
     fingerprint: 'rss:kinmen:1', coalescedCount: 1,
   });
   valve.evaluate({ contentClass: 'timely', fingerprint: 'rss:kinmen:1', summary: '第二条更新' });
-  const third = valve.evaluate({ contentClass: 'timely', fingerprint: 'rss:kinmen:1', summary: '第三条更新' });
+  const third = valve.evaluate({
+    contentClass: 'timely', fingerprint: 'rss:kinmen:1', summary: '第三条更新', payloadRef: 'source:revision:3',
+  });
   assert.equal(third.coalescedCount, 3);
   valve.evaluate({ contentClass: 'timely', fingerprint: 'forum:topic:9', summary: '另一个来源' });
 
@@ -49,6 +51,7 @@ test('timely results are delayed and coalesced by fingerprint while the owner is
   const coalesced = pending.find((item) => item.fingerprint === 'rss:kinmen:1');
   assert.equal(coalesced.count, 3);
   assert.equal(coalesced.summary, '第三条更新');
+  assert.equal(coalesced.payloadRef, 'source:revision:3');
   assert.equal(coalesced.state, 'pending');
 
   setPresence('focused');

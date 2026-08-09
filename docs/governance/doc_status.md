@@ -1,11 +1,14 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-09)
 
 This file is the public documentation index and conflict rule. Current runtime
 facts live in `docs/governance/current_runtime_status.md`; historical deployment
 journals belong in ignored `local_archive/` or the focused phase record. Active
-work order and completion state live in `docs/governance/active_sequence.md`.
+S-stage order and completion state live in
+`docs/governance/active_sequence.md`; the detailed S12 R-node topology,
+acceptance checklists and review handoff live in
+`docs/governance/s12-readiness-topology.md`.
 
 ## Current State
 
@@ -50,6 +53,25 @@ disconnected from production. S10 is locally verified with the governed
 19-component migration manifest, a zero-effect production-copy rehearsal and a
 Core-fact-only external-poll seam. S11 synthetic acceptance is locally verified
 after owner-audit remediation; S12 remains not started and production is unchanged.
+Unarchived S12-R1 readiness code now covers the cutover transaction/command,
+managed wake projection, WorkRun execution and terminal evidence, typed
+scheduled delivery, retained Python maintenance, and replay-safe Core reminder
+registration plus projection acknowledgement. It is not a deployable candidate:
+the early local external-MCP WorkRun composition still awaits its serial R1E
+authority/replay/no-direct-send acceptance, and a real presence source still
+needs to own attention admission/flush. The ordered R1 frontier now first repairs the
+observed web-tool route and adds the smallest effect-oriented Feishu document
+write/replan seam, takes a bounded dependency compatibility decision, then
+closes the external-MCP and real-presence runtime boundaries. This does not
+start S12 or authorize production. R1B is locally verified: the companion
+candidate has one generic Web surface (`mcp-search_hub`), the DLM-shaped handler
+check returned typed research evidence, and the affected Node/Python sets pass
+62/62 and 43/43. R1B.1 also locally closes the reproduced provider-origin
+`schemaVersion: "v1"` raw-envelope leak; its affected set passes 259/259. The
+project-local Python entrypoint is also fixed at ignored `.venv`, while
+production still requires an explicit absolute runtime. The bounded candidate
+archive is next, followed by an independent exact-SHA review; R1C starts only
+after that review.
 
 ## Lifecycle Stages
 
@@ -78,8 +100,12 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/active_sequence.md` | Canonical S-stage order, current stage and exit conditions |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
 | `docs/governance/core_schedule_migration.v1.json` | S10 legacy scheduling disposition and paused-import policy manifest |
+| `docs/governance/core_managed_wake.v1.json` | Disabled-by-default Hermes `core-wake` projection contract |
+| `docs/governance/core_system_schedules.v1.json` | S12 replacement system ScheduleSpec manifest |
 | `docs/governance/hermes-core-foundation.md` | Package A boundary and frozen Schema v1 |
 | `docs/governance/hermes-core-scheduling-and-unified-runtime.md` | Schema v2 scheduling and unified-runtime target |
+| `docs/governance/s12-readiness-topology.md` | Canonical S12 R-node dependency topology, acceptance ledger and reviewer handoff |
+| `docs/governance/s12-r1b-web-routing.md` | Current R1B Web capability assembly task and acceptance boundary |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/hermes_release_deployment.md` | Immutable-SHA deployment and rollback contract |
 | `docs/governance/hermes_release_bootstrap.v1.sha256` | Bootstrap source-digest manifest |

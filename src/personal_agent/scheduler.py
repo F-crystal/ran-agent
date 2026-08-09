@@ -42,6 +42,9 @@ def create_scheduler(
     """Create a scheduler with lightweight recurring maintenance and candidate jobs."""
 
     scheduler = BackgroundScheduler(timezone=config.scheduler_timezone)
+    if os.getenv("RAN_AGENT_CORE_ENABLED", "false").strip().lower() == "true":
+        logger.info("legacy APScheduler registration disabled because Core is authoritative")
+        return scheduler
     durable_dispatcher = DurableJobDispatcher(
         DurableJobStore(database),
         handlers=durable_job_handlers or {},

@@ -85,3 +85,21 @@ class NodeBridgeOutboundClient:
         if payload.get("ok") is not True:
             raise RuntimeError("node bridge scheduled digest response missing ok=true")
         return payload
+
+    def register_core_reminder(self, *, todo_id: int, scheduled_for: str) -> dict[str, object]:
+        """Register one explicit todo reminder with the local Core authority."""
+
+        secret = os.getenv("RAN_AGENT_INTERNAL_CONTROL_SECRET", "").strip()
+        if not secret:
+            raise RuntimeError("node bridge internal control secret is unavailable")
+        request = urllib.request.Request(
+            url=f"{self._config.node_bridge_outbound_base_url}/internal/core/reminders/register",
+            data=json.dumps({"todoId": todo_id, "scheduledFor": scheduled_for}).encode("utf-8"),
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"},
+            method="POST",
+        )
+        with urllib.request.urlopen(request, timeout=10) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        if payload.get("ok") is not True:
+            raise RuntimeError("node bridge Core reminder response missing ok=true")
+        return payload

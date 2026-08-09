@@ -35,7 +35,7 @@ if [ -f "$CONFIG" ]; then
 fi
 
 echo ""
-echo "=== 4. Check disabled_tools completeness ==="
+echo "=== 4. Check disabled_tools and generic Web assembly ==="
 if [ -f "$CONFIG" ]; then
   for tool in vision_analyze browser_vision video_analyze image_generate text_to_speech; do
     if grep -A10 'disabled_tools' "$CONFIG" | grep -q "$tool"; then
@@ -44,13 +44,17 @@ if [ -f "$CONFIG" ]; then
       echo "WARNING: $tool NOT in disabled_tools"
     fi
   done
-  for tool in web_search web_extract; do
-    if grep -A10 'disabled_tools' "$CONFIG" | grep -q "$tool"; then
-      echo "WARNING: $tool is DISABLED (should be enabled)"
-    else
-      echo "$tool: enabled (OK)"
-    fi
-  done
+  TOOLSETS="$(awk '/^mcp_servers:/ { in_toolsets=0 } /^platform_toolsets:/ { in_toolsets=1 } in_toolsets { print }' "$CONFIG")"
+  if printf '%s\n' "$TOOLSETS" | grep -Eq '^[[:space:]]+-[[:space:]]+web[[:space:]]*$'; then
+    echo "FAIL: built-in web toolset competes with mcp-search_hub"
+  else
+    echo "built-in web toolset: ABSENT (OK)"
+  fi
+  if grep -q '^web:[[:space:]]*$' "$CONFIG"; then
+    echo "FAIL: built-in web provider block remains in companion assembly"
+  else
+    echo "built-in web provider block: ABSENT (OK)"
+  fi
 fi
 
 echo ""

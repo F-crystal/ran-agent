@@ -283,6 +283,19 @@ class ConfigLoadingTest(unittest.TestCase):
         self.assertEqual(job_map["hermes_bounded_context"]["trigger"].interval, timedelta(minutes=720))
         self.assertEqual(job_map["reminder_check"]["trigger"].interval, timedelta(minutes=5))
 
+    def test_scheduler_registers_no_legacy_jobs_when_core_is_authoritative(self) -> None:
+        fake_scheduler = MagicMock()
+        fake_scheduler.jobs = []
+        with patch.dict(os.environ, {"RAN_AGENT_CORE_ENABLED": "true"}, clear=False), patch(
+            "personal_agent.scheduler.BackgroundScheduler", return_value=fake_scheduler
+        ):
+            scheduler = create_scheduler(
+                config=load_config(), database=MagicMock(),
+                message_service=MagicMock(), logger=MagicMock(),
+            )
+        self.assertIs(scheduler, fake_scheduler)
+        fake_scheduler.add_job.assert_not_called()
+
     def test_scheduler_registers_ai_daily_digest_independently_of_proactive(self) -> None:
         class FakeScheduler:
             def __init__(self, timezone: str) -> None:

@@ -6,6 +6,7 @@ import { assertKeyedContentHashToken } from '../coreHashToken.mjs';
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,160}$/;
 const SAFE_REF = /^[A-Za-z0-9._:/-]{1,512}$/;
 const FINGERPRINT = /^sha256:v1:[0-9a-f]{64}$/;
+const AGGREGATE_POLL_REF = 'external-poll:external-mcp-runtime';
 
 function identifier(value, field) {
   if (typeof value !== 'string' || !SAFE_ID.test(value)) {
@@ -55,7 +56,7 @@ export function createCoreExternalPollRepository({ get, run, now }) {
           ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
         WHERE run.work_run_id=?`, workRunId);
       if (!authority || authority.task_kind !== 'external_poll'
-        || authority.schedule_payload_ref !== `external-poll:${serverId}`
+        || ![AGGREGATE_POLL_REF, `external-poll:${serverId}`].includes(authority.schedule_payload_ref)
         || authority.state !== 'running' || authority.activity_state !== 'active'
         || Number(authority.contract_revision) !== Number(authority.activity_contract_revision)) {
         throw coreError('CORE_EXTERNAL_POLL_AUTHORITY_STALE', 'external poll Work Run authority is missing or stale');

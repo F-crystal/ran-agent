@@ -25,6 +25,8 @@ import { verifyExternalMcpEvidenceRefs } from './externalMcp/evidenceLog.mjs';
 import { sendFeishuReply } from './feishuBridge.mjs';
 import { runHermesLiteSoftReset } from './hermesSessionMaintenance.mjs';
 import { createDurableOutbox } from './durableOutbox.mjs';
+import { createCoreReminderService } from './core/coreReminderService.mjs';
+import { legacyReminderInstant } from './core/coreScheduleMigration.mjs';
 import {
   commitProactiveEventDelivery,
   releaseProactiveEventDelivery,
@@ -50,6 +52,7 @@ const AI_DAILY_DIGEST_TEMPLATE_PATH = path.join(
 );
 const HERMES_LITE_SOFT_RESET_CONTROL_ROUTE = '/control/hermes-lite-soft-reset';
 const AI_DAILY_DIGEST_CONTROL_ROUTE = '/scheduled/ai-daily-digest';
+const CORE_REMINDER_REGISTER_ROUTE = '/internal/core/reminders/register';
 
 function normalizeAccountId(raw) {
   return String(raw).trim().toLowerCase().replace(/[@.]/g, '-');
@@ -769,7 +772,7 @@ function normalizeOutboundMediaPayload(media) {
   return fileName ? { type, url, fileName } : { type, url };
 }
 
-export function createOutboundServer({ bot, logger = console, env = process.env } = {}) {
+export function createOutboundServer({ bot, logger = console, env = process.env, coreRuntime = null } = {}) {
   return http.createServer(async (request, response) => {
     let rawBody = '';
     request.on('data', (chunk) => {
@@ -797,6 +800,11 @@ export function createOutboundServer({ bot, logger = console, env = process.env 
           remoteAddress: request.socket.remoteAddress,
           bodyText: rawBody,
         });
+      } else if (request.method === 'POST' && request.url === CORE_REMINDER_REGISTER_ROUTE) {
+        result = await handleCoreReminderRegisterRequest({
+          coreRuntime, env, method: request.method, url: request.url,
+          headers: request.headers, remoteAddress: request.socket.remoteAddress, bodyText: rawBody,
+        });
       } else if (request.method === 'POST' && request.url === '/proactive/event') {
         result = await handleProactiveEventRequest({ logger, env, bodyText: rawBody });
       } else if (request.method === 'POST' && request.url === '/external-mcp/system-queue') {
@@ -821,6 +829,28 @@ export function createOutboundServer({ bot, logger = console, env = process.env 
       response.end(JSON.stringify(result.payload));
     });
   });
+}
+
+export async function handleCoreReminderRegisterRequest({
+  coreRuntime, env = process.env, method, url, headers, remoteAddress, bodyText,
+} = {}) {
+  const denied = internalControlAccessDenial({
+    env, method, url, headers, remoteAddress, route: CORE_REMINDER_REGISTER_ROUTE,
+  });
+  if (denied) return denied;
+  if (!coreRuntime?.core) return { status: 503, payload: { ok: false, error: 'core_runtime_unavailable' } };
+  let body;
+  try {
+    body = JSON.parse(bodyText || '{}');
+    const scheduledFor = legacyReminderInstant(body.scheduledFor);
+    if (!scheduledFor) throw new Error('invalid reminder time');
+    const result = await createCoreReminderService({ core: coreRuntime.core }).register({
+      todoId: body.todoId, scheduledFor,
+    });
+    return { status: 200, payload: { ok: true, ...result } };
+  } catch (error) {
+    return { status: 400, payload: { ok: false, error: error?.code || 'invalid_core_reminder' } };
+  }
 }
 
 function firstHeader(headers, name) {

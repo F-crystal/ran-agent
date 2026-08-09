@@ -58,6 +58,7 @@ export async function runPackageBLocalDelivery({
   if (adapterExceptionResult !== undefined
     && (adapterExceptionResult?.resultState !== 'ambiguous'
       || typeof adapterExceptionResult.evidenceRef !== 'string'
+      || !adapterExceptionResult.evidenceRef.trim()
       || typeof adapterExceptionResult.evidenceHashToken !== 'string')) {
     throw coreError('CORE_B2_ADAPTER_EXCEPTION_RESULT_INVALID', 'adapter exception evidence must be durable ambiguous');
   }

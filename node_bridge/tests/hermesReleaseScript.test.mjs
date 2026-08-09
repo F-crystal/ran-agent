@@ -10,7 +10,9 @@ import test from 'node:test';
 
 const root = new URL('../..', import.meta.url).pathname;
 const nodeBin = process.execPath;
-const pythonBin = process.env.RAN_AGENT_PYTHON_BIN || realpathSync(execFileSync('/bin/sh', ['-c', 'command -v python3'], { encoding: 'utf8' }).trim());
+const projectPython = join(root, '.venv', 'bin', 'python');
+const pythonBin = process.env.RAN_AGENT_PYTHON_BIN
+  || (existsSync(projectPython) ? realpathSync(projectPython) : '');
 const runtimeUser = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
 const runtimeGroup = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
 const linuxRoot = process.platform === 'linux' && process.geteuid?.() === 0;
@@ -123,7 +125,7 @@ function requiredGatePython() {
   assert.match(
     pythonBin,
     /^\//,
-    'RAN_AGENT_PYTHON_BIN test prerequisite missing: pass the parent gate-validated absolute Python path',
+    'Python test prerequisite missing: set RAN_AGENT_PYTHON_BIN or create the project .venv',
   );
   assert.doesNotThrow(
     () => accessSync(pythonBin, constants.X_OK),

@@ -53,7 +53,7 @@ function tableExists(db, table) {
   return Boolean(db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name=?").get(table));
 }
 
-function legacyReminderInstant(value) {
+export function legacyReminderInstant(value) {
   const text = String(value || '').trim();
   if (!text) return null;
   // ponytail: legacy reminders are stored in the project's fixed Asia/Shanghai scheduler time.
@@ -72,6 +72,22 @@ function countBy(rows, allowed, valueOf) {
     else counts.other += 1;
   }
   return counts;
+}
+
+function hasTerminalNoResendEvidence(item, watermarkMs) {
+  const receipts = Array.isArray(item?.deliveryTerminalReceipts) ? item.deliveryTerminalReceipts : [];
+  return item?.delivery === 'ambiguous'
+    && Number(item.attemptCount) === 1
+    && Number.isSafeInteger(item.delivery_terminal_revision)
+    && item.delivery_terminal_revision > 0
+    && typeof item.delivery_terminal_receipt_id === 'string'
+    && item.delivery_terminal_receipt_id.length > 0
+    && receipts.some((receipt) => receipt?.delivery_terminal_receipt_id === item.delivery_terminal_receipt_id
+      && receipt?.delivery === 'ambiguous')
+    && Number.isFinite(Date.parse(item.sendStartedAt))
+    && Date.parse(item.sendStartedAt) <= watermarkMs
+    && Number.isFinite(Date.parse(item.deliveryCommittedAt))
+    && Date.parse(item.deliveryCommittedAt) <= watermarkMs;
 }
 
 export function loadCoreScheduleMigrationManifest(manifestPath) {
@@ -180,8 +196,12 @@ export function inspectLegacySchedulingCopy({ legacyDbPath, stateDir, watermark 
       state: 'paused',
     }));
   const durableJobStates = countBy(durableJobs, ['active', 'leased', 'terminal'], (row) => row.state);
+  const externalActivityStates = countBy(activities, ['active', 'leased', 'paused', 'blocked'],
+    (row) => row.status || row.state);
   const notificationStates = countBy(notifications, ['reserved', 'sent', 'failed', 'released'], (row) => row.status || 'sent');
   const outboxStates = countBy(outbox, DELIVERY_STATES, (row) => row.delivery);
+  const ambiguousTerminalNoResend = outbox.filter((item) => hasTerminalNoResendEvidence(item, watermarkMs)).length;
+  const ambiguousUnsafe = outboxStates.ambiguous - ambiguousTerminalNoResend;
   const proactiveLedgerStates = countBy(proactiveLedger, ['reserved', 'sent'], (row) => row.status);
 
   return Object.freeze({
@@ -204,9 +224,12 @@ export function inspectLegacySchedulingCopy({ legacyDbPath, stateDir, watermark 
       digestReceipts,
       externalWatchCandidates: watchCandidates.length,
       externalActivityCandidates: activityCandidates.length,
+      externalActivityStates: Object.freeze(externalActivityStates),
       durableJobStates: Object.freeze(durableJobStates),
       notificationStates: Object.freeze(notificationStates),
       outboxStates: Object.freeze(outboxStates),
+      outboxAmbiguousTerminalNoResend: ambiguousTerminalNoResend,
+      outboxAmbiguousUnsafe: ambiguousUnsafe,
       proactiveLedgerStates: Object.freeze(proactiveLedgerStates),
       pendingOutboundMessages: pendingOutbound.length,
       proactiveDispatchStatePresent: fs.existsSync(proactiveDispatchPath),
@@ -237,10 +260,10 @@ export async function rehearseCoreScheduleMigration({
   if (snapshot.counts.durableJobStates.active + snapshot.counts.durableJobStates.leased > 0) {
     cutoverBlockers.push('legacy_durable_jobs_not_quiesced');
   }
-  if (snapshot.counts.externalActivityCandidates > 0) {
+  if (snapshot.counts.externalActivityStates.active + snapshot.counts.externalActivityStates.leased > 0) {
     cutoverBlockers.push('legacy_external_activities_not_quiesced');
   }
-  if (snapshot.counts.outboxStates.sending + snapshot.counts.outboxStates.ambiguous > 0) {
+  if (snapshot.counts.outboxStates.sending + snapshot.counts.outboxAmbiguousUnsafe > 0) {
     cutoverBlockers.push('legacy_outbox_requires_reconciliation');
   }
   if (snapshot.counts.proactiveLedgerStates.reserved > 0) {

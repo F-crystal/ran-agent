@@ -12,6 +12,7 @@ import { createPackageBIngressReader } from './repositories/packageBIngressRepos
 import { createPackageBAssemblyReader } from './repositories/packageBAssemblyRepository.mjs';
 import { createPackageBProviderReader } from './repositories/packageBProviderRepository.mjs';
 import { createPackageBTurnReader } from './repositories/packageBTurnRepository.mjs';
+import { conversationIdentityFromReceipt } from './repositories/packageBRepositorySupport.mjs';
 import {
   createPackageBFinalReader,
   createPackageBPresentationReader,
@@ -200,6 +201,37 @@ export class CoreDatabase {
       workRunsForOccurrence: (occurrenceId) => all(
         'SELECT * FROM work_run WHERE wake_occurrence_id=? ORDER BY attempt_no', occurrenceId,
       ).map((row) => Object.freeze({ ...row })),
+      scheduledWorkQueue: (limit = 32) => all(`SELECT run.*,revision.task_kind,revision.payload_ref,
+          revision.causation_id,occurrence.scheduled_for
+        FROM work_run run
+        JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
+        JOIN schedule_spec_revision revision
+          ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
+        WHERE run.state IN ('queued','waiting')
+        ORDER BY run.created_at,run.work_run_id LIMIT ?`,
+      Math.max(1, Math.min(128, Number(limit) || 32))).map((row) => Object.freeze({ ...row })),
+      expiredScheduledWorkRuns: (at, limit = 32) => all(`SELECT run.work_run_id,run.revision,run.fence_token
+        FROM work_run run JOIN lease ON lease.lease_id=run.lease_id AND lease.work_run_id=run.work_run_id
+        WHERE run.state='running' AND lease.state='active' AND lease.lease_until<?
+        ORDER BY lease.lease_until,run.work_run_id LIMIT ?`, at,
+      Math.max(1, Math.min(128, Number(limit) || 32))).map((row) => Object.freeze({ ...row })),
+      scheduledWorkContext: (workRunId) => read(`SELECT run.work_run_id,run.exchange_id,
+          exchange.conversation_id,revision.payload_ref,revision.presentation_binding_id,
+          binding.destination_ref,binding.source_instance_id,binding.platform,binding.revision AS binding_revision
+        FROM work_run run
+        JOIN exchange ON exchange.exchange_id=run.exchange_id
+        JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
+        JOIN schedule_spec_revision revision
+          ON revision.schedule_spec_revision_id=occurrence.schedule_spec_revision_id
+        JOIN presentation_binding binding
+          ON binding.presentation_binding_id=revision.presentation_binding_id
+          AND binding.conversation_id=exchange.conversation_id
+        WHERE run.work_run_id=? AND revision.task_kind='scheduled_instruction'`, workRunId),
+      conversationIdentityById: (conversationId) => {
+        const receipt = read(`SELECT * FROM journal_event
+          WHERE event_type='package_b_conversation_identity_bound' AND conversation_id=?`, conversationId);
+        return receipt ? conversationIdentityFromReceipt(receipt) : undefined;
+      },
       livingIdentity: (identityId) => read('SELECT * FROM living_identity WHERE identity_id=?', identityId),
       soulRevision: (soulRevisionId) => read('SELECT * FROM soul_revision WHERE soul_revision_id=?', soulRevisionId),
       packageBIngress,

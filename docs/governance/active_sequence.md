@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-09)
 
 This is the canonical order for active project work. Historical P-numbered plans
 do not control current execution. Keep exactly one stage `IN_PROGRESS` when the
@@ -41,6 +41,39 @@ S0 facts/runtime selection
 | S11 | COMPLETE | S10 | Synthetic acceptance: duplicate/missed ticks, DST, crash, stale WorkRun fence, ambiguous outcomes, restart no-resend, and gaming/focus suppression with delayed coalescing. | One synthetic chain binds the WakeOccurrence to its exact generated Exchange, claimed WorkRun revision/fence/lease, typed system/internal instruction, provider epoch/attempt, final, presentation outbox, single injected effect and durable terminal receipt. A thrown post-dispatch `ETIMEDOUT` records durable `ambiguous` evidence and replay never calls the adapter; a post-commit restart claims the existing WorkRun without another occurrence; stale WorkRun authority rejects before final/effect; an equivalent delayed fingerprint remains one candidate across gaming→available while explicit owner bypasses remain intact. The focused set passes 29/29 and the full Core suite 151/151 locally. Production is unchanged. |
 | S12 | NOT STARTED | S11 + production authorization | Stop ingress, let legacy effect/outbox drain, execute the single Core Cutover Gate, enable one tick, disable legacy visible wake. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
 | S13 | NOT STARTED | S12 + observation window + separate owner deletion authorization | After observation, remove the legacy scheduler, JSON outbox and compatibility writer. | No duplicate delivery; the legacy writer and legacy clock are truly gone. |
+
+## S12 Readiness Topology
+
+The detailed node topology, acceptance checklists, evidence ledger and reviewer
+handoff template are canonical in
+`docs/governance/s12-readiness-topology.md`. This summary records only the
+current ready frontier without starting S12 or authorizing a production
+mutation:
+
+```text
+S12-R0 fresh read-only production audit (COMPLETE)
+  -> S12-R1 local cutover assets and composition (IN PROGRESS)
+       -> R1A accepted local Core/cutover composition (LOCAL_VERIFIED, UNARCHIVED)
+       -> R1B web acquisition routing repair (LOCAL_VERIFIED, UNARCHIVED)
+       -> R1B.1 private reply envelope fail-closed (LOCAL_VERIFIED, UNARCHIVED)
+       -> bounded R1A/R1B/R1B.1 candidate archive (CURRENT BOUNDARY)
+       -> independent exact-SHA delta review
+       -> R1C effect-oriented Feishu document write and truthful reply (NEXT AFTER REVIEW)
+       -> R1D bounded dependency compatibility decision
+       -> R1E external MCP poll through WorkRun authority
+       -> R1F real presence and attention admission/flush
+  -> S12-R2 fresh production-copy rehearsal and candidate gates (NOT STARTED)
+  -> S12-R3 independent review plus exact-SHA dry-run evidence (NOT STARTED)
+  -> explicit owner production authorization
+  -> S12 Core Cutover Gate
+```
+
+- R1A, R1B and the ordinary-chat R1B.1 envelope repair have local evidence but
+  remain unarchived. The immediate boundary is a bounded candidate archive;
+  independent review then audits that immutable delta. R1C is not active yet.
+- R1C through R3 remain serial. Their exact exit evidence and prohibited scope
+  are defined in the detailed ledger.
+- S12 remains `NOT STARTED`; production source and services are unchanged.
 
 ## Update Rule
 

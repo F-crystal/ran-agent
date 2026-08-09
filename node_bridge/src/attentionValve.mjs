@@ -45,6 +45,8 @@ function normalizeItem(item) {
     state: item.state,
     count: item.count,
     summary: boundedText(item?.summary, 'summary'),
+    payloadRef: boundedText(item?.payloadRef, 'payloadRef', 512),
+    causationId: boundedText(item?.causationId, 'causationId', 240),
     firstSeenAt: String(item?.firstSeenAt || ''),
     lastSeenAt: String(item?.lastSeenAt || ''),
     flushingSince: item?.flushingSince ? String(item.flushingSince) : null,
@@ -124,7 +126,10 @@ export function createAttentionValve({
     return KNOWN_PRESENCE.has(value) ? value : 'unknown';
   }
 
-  function evaluate({ contentClass, fingerprint, summary = '', quietPolicy = 'respect', criticalKey = '' } = {}) {
+  function evaluate({
+    contentClass, fingerprint, summary = '', payloadRef = '', causationId = '',
+    quietPolicy = 'respect', criticalKey = '',
+  } = {}) {
     const kind = String(contentClass || '').trim();
     if (!CONTENT_CLASSES.has(kind)) throw attentionError('ATTENTION_CONTENT_CLASS_INVALID', 'content class must be ambient, timely, or critical');
     if (kind === 'ambient') return Object.freeze({ disposition: 'suppress_silent', contentClass: kind });
@@ -152,6 +157,8 @@ export function createAttentionValve({
       }
       existing.count += 1;
       existing.summary = boundedText(summary, 'summary') || existing.summary;
+      existing.payloadRef = boundedText(payloadRef, 'payloadRef', 512) || existing.payloadRef;
+      existing.causationId = boundedText(causationId, 'causationId', 240) || existing.causationId;
       existing.lastSeenAt = isoNow(now);
       save(state);
       return Object.freeze({
@@ -178,6 +185,8 @@ export function createAttentionValve({
       state: 'pending',
       count: 1,
       summary: boundedText(summary, 'summary'),
+      payloadRef: boundedText(payloadRef, 'payloadRef', 512),
+      causationId: boundedText(causationId, 'causationId', 240),
       firstSeenAt: at,
       lastSeenAt: at,
       flushingSince: null,

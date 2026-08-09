@@ -421,6 +421,7 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
     capturedBody.messages[0].content.indexOf('exact keys schemaVersion')
       < capturedBody.messages[0].content.indexOf('For an owner request to organize an existing Feishu Minutes'),
   );
+  assert.match(capturedBody.messages[0].content, /schemaVersion MUST be the JSON number 1/);
   assert.match(capturedBody.messages[1].content, /时间/);
   assert.match(capturedBody.messages[1].content, /你好\n补一句/);
   assert.equal(response.reply_text, 'Hermes reply');
@@ -437,6 +438,7 @@ test('parses the private reply envelope from real OpenAI-compatible message cont
     schemaVersion: 1,
     message: '我会记住这件事。',
     actionRequests: [{ requestRef: 'save-1', actionType: 'memory.remember', scope: {} }],
+    activityRequest: null,
     claims: [{ type: 'memory_saved', requestRef: 'save-1' }],
     commitments: [],
   };
@@ -463,6 +465,34 @@ test('parses the private reply envelope from real OpenAI-compatible message cont
   assert.deepEqual(response.reply_envelope, envelope);
   assert.deepEqual(response.action_requests, envelope.actionRequests);
   assert.deepEqual(response.claims, envelope.claims);
+});
+
+test('canonicalizes an unambiguous v1 private envelope without exposing protocol JSON', async () => {
+  const content = JSON.stringify({
+    schemaVersion: 'v1',
+    message: '普通回复',
+    actionRequests: [],
+    activityRequest: null,
+    claims: [],
+    commitments: [],
+  });
+  const response = await sendChatToHermesGateway(
+    { text: '正常聊天', sender_id: 'envelope-sender', conversation_id: 'envelope-conversation', channel: 'feishu' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content } }] }),
+      logger: { log() {}, warn() {} },
+    },
+  );
+
+  assert.equal(response.reply_text, '普通回复');
+  assert.equal(response.reply_envelope.schemaVersion, 1);
+  assert.doesNotMatch(response.reply_text, /schemaVersion|actionRequests|commitments/);
 });
 
 test('parses a trailing private reply envelope without exposing duplicate JSON', async () => {
@@ -523,30 +553,42 @@ test('parses a labelled trailing private reply envelope without exposing protoco
   assert.deepEqual(response.reply_envelope, envelope);
 });
 
-test('keeps invalid or non-duplicate trailing JSON visible', async () => {
-  for (const suffix of [
-    { schemaVersion: 1, message: null },
-    { schemaVersion: 999, message: '正文' },
-    { schemaVersion: 1, message: '不同内容' },
-    { schemaVersion: 1, message: '正文', unexpected: true },
-  ]) {
-    const content = `正文\n${JSON.stringify(suffix)}`;
-    const response = await sendChatToHermesGateway(
-      { text: '返回 JSON 示例', sender_id: 'json-sender', conversation_id: 'json-conversation', channel: 'wechat' },
-      {
-        config: getHermesGatewayConfig({
-          HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
-          HERMES_API_KEY: 'token',
-          HERMES_REPLY_MODE: 'api',
-          RAN_AGENT_CONTEXT_SIZE_LOG: '0',
-        }),
-        fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content } }] }),
-        logger: { log() {}, warn() {} },
-      },
-    );
-    assert.equal(response.reply_text, content);
-    assert.equal(response.reply_envelope, undefined);
-  }
+test('fails closed for malformed private protocol but keeps ordinary requested JSON visible', async () => {
+  const config = getHermesGatewayConfig({
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+  });
+  const request = { text: '返回 JSON 示例', sender_id: 'json-sender', conversation_id: 'json-conversation', channel: 'wechat' };
+  const malformed = JSON.stringify({
+    schemaVersion: 999,
+    message: '正文',
+    actionRequests: [],
+    activityRequest: null,
+    claims: [],
+    commitments: [],
+  });
+  const warnings = [];
+  const rejected = await sendChatToHermesGateway(request, {
+    config,
+    fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: malformed } }] }),
+    logger: { log() {}, warn(value) { warnings.push(String(value)); } },
+  });
+  assert.equal(rejected.reply_text, '回复格式校验失败，请稍后重试。');
+  assert.equal(rejected.reply_envelope, undefined);
+  assert.doesNotMatch(rejected.reply_text, /schemaVersion|actionRequests|commitments/);
+  assert.match(warnings.join('\n'), /HERMES_PRIVATE_REPLY_ENVELOPE_INVALID/);
+  assert.doesNotMatch(warnings.join('\n'), /schemaVersion|actionRequests|commitments/);
+
+  const ordinary = JSON.stringify({ schemaVersion: 'v1', example: 'requested JSON' });
+  const visible = await sendChatToHermesGateway(request, {
+    config,
+    fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: ordinary } }] }),
+    logger: { log() {}, warn() {} },
+  });
+  assert.equal(visible.reply_text, ordinary);
+  assert.equal(visible.reply_envelope, undefined);
 });
 
 test('sendChatToHermesGateway aborts Hermes API fetch on reply timeout', async () => {
