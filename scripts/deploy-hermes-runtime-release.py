@@ -77,6 +77,10 @@ COMPANION_OVERLAY_TARGET_ROOT = Path("/opt/ran_agent")
 SOURCE_SHAPE_BASE = "0fef0427683a8f3f77deec9e6cff937f7ab0a02e"
 SOURCE_CONTROLLER_BASE = "3a3fa44e087ac24efa1828f32df22a69ddbea936"
 SOURCE_PRODUCTION_BASE = "2c8e97cacd1d2eaed30738abe621f3393cffb885"
+SOURCE_PROFILE_MIGRATION_PATH = "docs/governance/hermes_source_profile_migration.v1.json"
+SOURCE_MANAGED_WAKE_PATH = "docs/governance/core_managed_wake.v1.json"
+SOURCE_PROFILE_TEMPLATE_PATH = "hermes/profile/config.pro.template.yaml"
+SOURCE_PROFILE_MIGRATION_STATUS = "RELEASE_CANDIDATE_READY_FOR_SOURCE_PROFILE_MIGRATION"
 SOURCE_OVERLAY_CANDIDATE = "dc5fcf13f86483073c54ac046e1b238a90c91921"
 SOURCE_OVERLAY_TRANSACTION = ARTIFACT_ROOT / "companion-overlay-transactions/20260807T124548Z-dc5fcf13f864"
 SOURCE_BINDING = ARTIFACT_ROOT / "runtime-source-bindings/runtime-20260806T010417Z-0b793e8fea85/binding.v4.json"
@@ -1464,7 +1468,7 @@ def current_source_pointer() -> dict[str, Any] | None:
 
 
 def validate_unified_source_shape(candidate: str) -> None:
-    profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml").decode()
+    profile = candidate_blob(REPO, candidate, PROFILE_PATH).decode()
     unit = candidate_blob(REPO, candidate, UNIT_SOURCE_PATH).decode()
     gateway = candidate_blob(REPO, candidate, "node_bridge/src/hermesGatewayClient.mjs").decode()
     memory = candidate_blob(REPO, candidate, "node_bridge/src/personalMemoryMcpServer.mjs").decode()
@@ -1480,9 +1484,87 @@ def validate_unified_source_shape(candidate: str) -> None:
         raise ReleaseError("candidate personal-memory deadline is not a single 15-second truth")
 
 
-def validate_source_advance_paths(paths: list[str]) -> None:
-    if any(path == "hermes/profile" or path.startswith("hermes/profile/") for path in paths):
-        raise ReleaseError("source advance contains a profile change requiring a dedicated migration")
+def source_profile_targets() -> tuple[Path, Path]:
+    return LITE_HOME / "config.yaml", SOURCE_PROFILE_DIR / "config.yaml"
+
+
+def validate_companion_profile(profile: bytes) -> None:
+    try:
+        text = profile.decode("utf-8")
+        toolsets = text.split("\nplatform_toolsets:\n", 1)[1].split("\nmcp_servers:\n", 1)[0]
+        servers = text.split("\nmcp_servers:\n", 1)[1]
+    except (UnicodeDecodeError, IndexError) as exc:
+        raise ReleaseError("candidate companion profile shape is invalid") from exc
+    if (
+        "\n    - mcp-search_hub\n" not in toolsets
+        or "\n    - mcp-playwright\n" not in toolsets
+        or "\n    - web\n" in toolsets
+        or re.search(r"(?m)^web:\s*$", text)
+        or re.search(r"(?m)^\s+(?:search_backend|extract_backend):", text)
+        or not re.search(r"(?m)^  search_hub:\s*$", servers)
+        or not re.search(r"(?m)^  playwright:\s*$", servers)
+    ):
+        raise ReleaseError("candidate companion profile violates the R1B assembly invariant")
+
+
+def validate_source_profile_migration(candidate: str, prior: str, profile_paths: set[str]) -> None:
+    try:
+        migration = load_candidate_json(REPO, candidate, SOURCE_PROFILE_MIGRATION_PATH)
+        managed_wake = load_candidate_json(REPO, candidate, SOURCE_MANAGED_WAKE_PATH)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        raise ReleaseError("source profile migration contract is missing or invalid") from exc
+    wake_job = managed_wake.get("job") if isinstance(managed_wake.get("job"), dict) else {}
+    wake_source = wake_job.get("scriptSource")
+    if (
+        managed_wake.get("schemaVersion") != 1
+        or managed_wake.get("status") != "CURRENT"
+        or wake_job.get("name") != "ran-agent-core-wake"
+        or wake_source != "hermes/profile/scripts/core-wake.sh"
+    ):
+        raise ReleaseError("managed Core wake source contract is invalid")
+    migrated_paths = profile_paths - {wake_source}
+    expected_delta = {PROFILE_PATH, SOURCE_PROFILE_TEMPLATE_PATH}
+    active_profile = migration.get("activeProfile") if isinstance(migration.get("activeProfile"), dict) else {}
+    rollback = migration.get("rollback") if isinstance(migration.get("rollback"), dict) else {}
+    profile = candidate_blob(REPO, candidate, PROFILE_PATH)
+    if (
+        set(migration) != {
+            "schemaVersion", "status", "priorAcceptedSource", "activeProfile",
+            "allowedProfileDeltaPaths", "inertSources", "rollback", "additionalRuntimeAuthority",
+        }
+        or migration.get("schemaVersion") != 1
+        or migration.get("status") != SOURCE_PROFILE_MIGRATION_STATUS
+        or migration.get("priorAcceptedSource") != prior
+        or migration.get("allowedProfileDeltaPaths") != sorted(expected_delta)
+        or migrated_paths != expected_delta
+        or migration.get("inertSources") != [SOURCE_PROFILE_TEMPLATE_PATH]
+        or migration.get("additionalRuntimeAuthority") is not False
+        or active_profile != {
+            "name": SOURCE_PROFILE,
+            "canonicalSource": PROFILE_PATH,
+            "sourceSha256": sha256_bytes(profile),
+            "destinations": [str(path) for path in source_profile_targets()],
+        }
+        or rollback != {
+            "mechanism": "source-transaction-snapshot",
+            "restores": ["active-profile", "source-pointer"],
+            "partialStateAccepted": False,
+        }
+    ):
+        raise ReleaseError("source profile migration contract does not match the candidate")
+    validate_companion_profile(profile)
+
+
+def validate_source_advance_paths(
+    paths: list[str], *, candidate: str | None = None, prior: str | None = None
+) -> None:
+    profile_paths = {
+        path for path in paths if path == "hermes/profile" or path.startswith("hermes/profile/")
+    }
+    if profile_paths:
+        if candidate is None or prior is None:
+            raise ReleaseError("source advance contains a profile change requiring a dedicated migration")
+        validate_source_profile_migration(candidate, prior, profile_paths)
     if any(
         path in SOURCE_ADVANCE_FORBIDDEN_PATHS
         or any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in SOURCE_ADVANCE_FORBIDDEN_PREFIXES)
@@ -1505,7 +1587,7 @@ def validate_source_candidate(candidate: str, *, allow_current: bool = False) ->
         ], check=False).returncode:
             raise ReleaseError("source candidate is not a forward descendant of the accepted source")
         changed = git(REPO, "diff", "--name-only", prior, candidate).stdout.splitlines()
-        validate_source_advance_paths(changed)
+        validate_source_advance_paths(changed, candidate=candidate, prior=prior)
         if Path(__file__).read_bytes() != candidate_blob(REPO, candidate, CONTROLLER_PATH):
             raise ReleaseError("running source controller is not candidate-extracted")
         if git(REPO, "rev-parse", "--verify", "refs/remotes/origin/main").stdout.strip() != candidate:
@@ -1729,6 +1811,22 @@ def restore_source_services(state: dict[str, Any], *, expected_profile: str) -> 
         run(["systemctl", "stop", timer], check=False)
 
 
+def activate_source_profile(candidate: str) -> None:
+    profile = candidate_blob(REPO, candidate, PROFILE_PATH)
+    validate_companion_profile(profile)
+    for target in source_profile_targets():
+        if target.is_symlink() or not target.is_file():
+            raise ReleaseError(f"active companion profile target is invalid: {target}")
+        value = target.stat()
+        atomic_write_existing(
+            target,
+            profile,
+            mode=stat.S_IMODE(value.st_mode),
+            uid=value.st_uid,
+            gid=value.st_gid,
+        )
+
+
 def activate_source_candidate(candidate: str, stage: Path, snapshot: Path, *, install_profile: bool) -> None:
     git_as_checkout_owner("checkout", "--detach", candidate)
     live_modules = REPO / "node_modules"
@@ -1759,10 +1857,7 @@ def activate_source_candidate(candidate: str, stage: Path, snapshot: Path, *, in
             str(SOURCE_HERMES_BIN), "profile", "install", str(REPO / "hermes/profile"),
             "--name", SOURCE_PROFILE, "--force", "-y",
         ])
-    profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml")
-    root_config = LITE_HOME / "config.yaml"
-    value = root_config.stat()
-    atomic_write_existing(root_config, profile, mode=0o644, uid=value.st_uid, gid=value.st_gid)
+    activate_source_profile(candidate)
     if SOURCE_LEGACY_PROFILE_DIR.exists():
         shutil.rmtree(SOURCE_LEGACY_PROFILE_DIR)
     atomic_write(LITE_UNIT, candidate_blob(REPO, candidate, UNIT_SOURCE_PATH), mode=0o644, uid=0, gid=0)
@@ -1815,8 +1910,9 @@ def validate_source_acceptance(candidate: str) -> None:
         raise ReleaseError("companion overlay drop-in remains active")
     if SOURCE_NODE_STEWARD_DROPIN.exists() or (REPO / "node_bridge/src/ombreCompat").exists():
         raise ReleaseError("retired O2 source or systemd drop-in remains active")
-    profile = candidate_blob(REPO, candidate, "hermes/profile/config.yaml")
-    if (LITE_HOME / "config.yaml").read_bytes() != profile or (SOURCE_PROFILE_DIR / "config.yaml").read_bytes() != profile:
+    profile = candidate_blob(REPO, candidate, PROFILE_PATH)
+    validate_companion_profile(profile)
+    if any(target.read_bytes() != profile for target in source_profile_targets()):
         raise ReleaseError("live companion profile differs from candidate")
     if SOURCE_LEGACY_PROFILE_DIR.exists():
         raise ReleaseError("legacy Lite profile remains deployable")

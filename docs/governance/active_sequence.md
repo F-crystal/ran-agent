@@ -73,8 +73,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> S12-R2 fresh production audit/copy rehearsal (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
   -> S12-R3A independent exact-SHA source review (CLEAR except server proofs)
   -> first R3 gate repair d70a08fc (INDEPENDENT REVIEW BLOCKED)
-  -> R3 gate repair 2 (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
-  -> independent exact-SHA gate-repair-2 review (REQUIRED)
+  -> R3 gate repair 2 d6adb106 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+  -> independent exact-SHA gate-repair-2 review (CLEAR)
+  -> R3-R1B profile delivery repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
+  -> independent exact-SHA profile-delivery review (REQUIRED)
   -> S12-R3B immutable server gate/dry-run proof (NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
@@ -144,9 +146,16 @@ S12-R0 fresh read-only production audit (COMPLETE)
   gate checks pass `2/2`; focused Python checks pass `4/4`; the affected release
   and portability file reports 83 total tests: 80 pass and three unchanged
   Linux root-only skips. The desktop has no truthful v0.20 runtime fixture, so
-  a complete service-managed `--all` proof remains R3-B. R3 remains incomplete
-  pending independent exact-SHA repair-2 review and R3-B server proof; R3-B is
-  `NOT STARTED`.
+  a complete service-managed `--all` proof remains R3-B. Independent exact-SHA
+  review of repair 2 is clear at
+  `d6adb1061b5a819407582690ca6a9adcb63c8d26`. Follow-up delivery inspection
+  then confirmed `R3-R1B-PROFILE-DELIVERY-GAP`: the post-S1 source transaction
+  rejected the accepted R1B companion-profile delta and still activated legacy
+  `config.yaml`. The bounded repair adds an exact prior-source/profile-digest
+  migration contract, makes `config.companion.yaml` the only active companion
+  source, and reuses the existing profile/source snapshot for rollback. R3
+  remains incomplete pending independent exact-SHA review of this repair and
+  the R3-B server proof; R3-B is `NOT STARTED`.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

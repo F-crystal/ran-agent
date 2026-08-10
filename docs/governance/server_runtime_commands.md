@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-10)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -81,8 +81,14 @@ This source transaction preserves the accepted v0.20 runtime, personal data
 and direct Ombre service. It snapshots the prior source pointer, checkout
 dependencies, two env files and Hermes unit/profile; it does not copy databases
 or durable delivery state. A rollback restores the exact prior source pointer.
-Post-S1 advances reuse the installed profile and reject profile-distribution
-changes; those require a separately reviewed profile migration.
+Post-S1 advances activate the canonical companion source
+`hermes/profile/config.companion.yaml`; legacy `config.yaml` is never an active
+companion source. An unchanged companion passes ordinary advances. Any changed
+profile still fails closed unless the candidate contains a separately reviewed
+`hermes_source_profile_migration.v1.json` binding the prior source, exact
+companion digest, allowed delta and existing live destinations. The Pro template
+is inert. The source transaction's existing profile/source snapshot owns
+rollback; the historical companion-overlay transaction is not a second writer.
 
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy

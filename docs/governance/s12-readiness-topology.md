@@ -57,9 +57,10 @@ flowchart TD
     R1F --> R1FR["Independent exact-SHA R1F review<br/>CLEAR"]
     R1FR --> R2["R2 fresh audit + production-copy rehearsal<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     R2 --> R3A["R3-A exact-SHA source review<br/>CLEAR except server proofs"]
-    R3A --> RG["R3 gate topology repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    RG --> RGR["Independent exact-SHA repair review<br/>REQUIRED"]
-    RGR --> R3B["R3-B immutable server gate + dry-run<br/>NOT STARTED"]
+    R3A --> RG["R3 gate topology repair 2<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    RG --> RP["R3-R1B profile delivery repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    RP --> RPR["Independent exact-SHA profile review<br/>REQUIRED"]
+    RPR --> R3B["R3-B immutable server gate + dry-run<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -91,8 +92,11 @@ frozen candidate `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` clear except for
 server proofs, then follow-up inspection confirmed a stale split-v0.13
 immutable-gate contract. Independent review found first repair `d70a08fc` still
 blocked on the unproven persistent Full condition and stale v0.13 Python probe.
-Bounded repair 2 is the current review frontier; R3-B server proof must not
-start before its independent exact-SHA review.
+Bounded repair 2 passed independent exact-SHA review at `d6adb106`. A later
+delivery audit confirmed that the accepted R1B companion profile could not
+pass or become active through the post-S1 source transaction. The bounded
+profile-delivery repair is the current review frontier; R3-B must not start
+before its independent exact-SHA review.
 
 ## Current Frontier
 
@@ -109,8 +113,9 @@ start before its independent exact-SHA review.
 | R1F | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `08e3eea81c336ac48f3e0b85a87b0b5c6d445307` | R1E review CLEAR | Default timely delivery no longer depends on desktop presence; one existing Core attention-flush schedule owns durable backlog recovery. |
 | R2 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` by the evidence commit | R1F review CLEAR | Fresh R2-A audit and isolated R2-B rehearsal are clear; runtime rehearsal SHA is `08e3eea8`, distinct from the evidence archive. |
 | R3-A | `LOCAL_VERIFIED` | `REVIEWED` except server proofs | `ARCHIVED` at `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` | R2 review CLEAR | Candidate areas were clear, but follow-up source inspection found the stale Hermes release-gate topology blocker. |
-| R3-GATE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | first repair `d70a08fc` review blocked | Repair 2 proves the governed Full condition block and exact-v0.20 Python probe; exact-SHA delta review is required. |
-| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R3-GATE exact-SHA review CLEAR | Run the real immutable Linux/systemd identity and dry-run proof; local fixtures cannot claim production service-managed PASS. |
+| R3-GATE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `d6adb1061b5a819407582690ca6a9adcb63c8d26` | first repair `d70a08fc` review blocked | Repair 2 proves the governed Full condition block and exact-v0.20 Python probe; independent review is clear. |
+| R3-R1B-PROFILE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | R3-GATE review CLEAR | Exact prior-source/profile-digest contract delivers only `config.companion.yaml` as active plus the inert Pro template; rollback reuses the source transaction snapshot. |
+| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R3-R1B-PROFILE exact-SHA review CLEAR | Run the real immutable Linux/systemd identity and dry-run proof; local fixtures cannot claim production service-managed PASS. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
@@ -430,7 +435,18 @@ recovery is recorded independently and leaves
 - [x] Local focused resolver/gate checks pass `2/2`, focused Python checks pass
   `4/4`, and the affected release/portability file reports 83 total tests: 80
   pass and three unchanged Linux root-only skips.
-- [ ] Independent exact-SHA review of bounded gate repair 2 reports `CLEAR`.
+- [x] Independent exact-SHA review of bounded gate repair 2 reports `CLEAR` at
+  `d6adb1061b5a819407582690ca6a9adcb63c8d26`.
+- [x] Confirm `R3-R1B-PROFILE-DELIVERY-GAP`: source validation rejected R1B's
+  companion delta and activation still selected legacy `config.yaml`.
+- [x] Bind the exact prior source, companion digest, allowed two-file profile
+  delta and existing live destinations in one governed migration contract.
+- [x] Activate `config.companion.yaml`, keep the Pro template inert, preserve
+  Search Hub/Playwright and reject the built-in web surface.
+- [x] Reuse the source transaction snapshot so rollback restores the prior
+  profiles and source pointer together.
+- [ ] Independent exact-SHA review of the profile-delivery repair reports
+  `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
 - [ ] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,

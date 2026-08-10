@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "status": "RELEASE_CANDIDATE_READY_FOR_SOURCE_PROFILE_MIGRATION",
+  "priorAcceptedSource": "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
+  "activeProfile": {
+    "name": "ran-agent-companion",
+    "canonicalSource": "hermes/profile/config.companion.yaml",
+    "sourceSha256": "403a90dcec431dbff70f952becb92fdd99056d62863de5c9a4b358080f02c0b7",
+    "destinations": [
+      "/home/ubuntu/.hermes-ran-agent/lite/config.yaml",
+      "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-agent-companion/config.yaml"
+    ]
+  },
+  "allowedProfileDeltaPaths": [
+    "hermes/profile/config.companion.yaml",
+    "hermes/profile/config.pro.template.yaml"
+  ],
+  "inertSources": [
+    "hermes/profile/config.pro.template.yaml"
+  ],
+  "rollback": {
+    "mechanism": "source-transaction-snapshot",
+    "restores": [
+      "active-profile",
+      "source-pointer"
+    ],
+    "partialStateAccepted": false
+  },
+  "additionalRuntimeAuthority": false
+}

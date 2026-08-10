@@ -113,7 +113,10 @@ Full condition and a stale v0.13 Python probe. Repair 2 proves the exact governe
 Full condition block without using Full as runtime authority and updates the
 provider probe to exact v0.20 plus explicit import-capable runtime Python. It is
 `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this update;
-R3-B and S12 remain `NOT_STARTED`.
+Repair 2 passed independent review at `d6adb106`. Follow-up delivery inspection
+found `R3-R1B-PROFILE-DELIVERY-GAP`; its bounded local repair makes the
+companion config canonical through an exact migration contract and remains
+`NOT_REVIEWED`. R3-B and S12 remain `NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.
@@ -174,6 +177,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/hermes_runtime_linux_verification.v1.json` | LOCAL_VERIFIED Linux artifact/profile evidence |
 | `docs/governance/hermes_runtime_mutation.v1.json` | Deployed v0.20 mutation evidence; bounded production verification is recorded in current runtime status; retained snapshot is evidence-only |
 | `docs/governance/hermes_companion_overlay.v1.json` | Exact production baseline and companion source/profile/Python-memory overlay contract; current acceptance truth remains in the runtime status and private transaction record |
+| `docs/governance/hermes_source_profile_migration.v1.json` | Candidate-bound post-S1 companion profile migration contract: prior source, exact profile digest, allowed delta, destinations and rollback authority |
 | `docs/governance/hermes-context-optimization.md` | Context optimization, cache and soft-reset contract |
 | `docs/governance/external-mcp-gateway.md` | External MCP admission and system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |

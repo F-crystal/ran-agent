@@ -1,6 +1,6 @@
 # S12-R1B Web Routing Task
 
-Status: CURRENT (2026-08-09)
+Status: CURRENT (2026-08-10)
 
 Lifecycle: `LOCAL_VERIFIED`, `ARCHIVED`, `NOT_REVIEWED` at
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. S12 and production remain
@@ -113,3 +113,16 @@ schema, external-MCP execution, or attention/presence composition in this node.
   pointer changed. R1A/R1B/R1B.1 are archived together at
   `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`. Independent exact-SHA review is
   the current boundary; R1C is the next implementation node only after it.
+
+## Production delivery closure
+
+R1B's implementation and source review remain accepted, but R3 later found a
+delivery gap: post-S1 source advances rejected its companion-profile delta and
+activation still selected legacy `config.yaml`. The bounded R3 repair makes
+`hermes/profile/config.companion.yaml` the canonical source for active
+`HERMES_PROFILE=ran-agent-companion`, requires an exact candidate-bound profile
+migration contract for future changes, and keeps
+`config.pro.template.yaml` inert. Acceptance now proves Search Hub and
+Playwright are present while the built-in web toolset/provider is absent at the
+actual live companion destinations. No production profile was contacted by the
+local repair.

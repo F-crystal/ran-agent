@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 gate repair LOCAL_VERIFIED (2026-08-10)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 profile-delivery repair LOCAL_VERIFIED (2026-08-10)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -346,11 +346,24 @@ import-capable runtime Python without a `Project:`/PYTHONPATH layout. Focused
 resolver/gate checks pass `2/2`, focused Python checks pass `4/4`, and the
 affected release/portability file reports 83 total tests: 80 pass and three
 unchanged Linux root-only skips. No Core or runtime product behavior changed.
-Repair 2 is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing
-this update. A complete service-managed v0.20 `--all` proof is not representable
-on the v0.13-only desktop and remains R3-B. R3 remains incomplete, R3-B is
-`NOT_STARTED`, and S12 remains `NOT_STARTED` pending exact-SHA repair-2 review,
-server proof and separate owner production authorization.
+Repair 2 is `LOCAL_VERIFIED / REVIEWED / ARCHIVED` at
+`d6adb1061b5a819407582690ca6a9adcb63c8d26`; its independent exact-SHA review is
+clear. A complete service-managed v0.20 `--all` proof is not representable on
+the v0.13-only desktop and remains R3-B.
+
+Follow-up source-delivery inspection confirmed
+`R3-R1B-PROFILE-DELIVERY-GAP`: the accepted R1B changes existed in
+`config.companion.yaml`, but the post-S1 source controller rejected every
+profile delta and source activation still copied legacy `config.yaml` into the
+active companion destinations. The local bounded repair introduces
+`hermes_source_profile_migration.v1.json`, binds the exact prior source and
+companion digest, permits only the companion plus inert Pro-template delta,
+and activates the exact companion bytes at both existing live destinations.
+The existing source snapshot restores both profiles and the prior source
+pointer together. The historical overlay stays fail-closed and gains no
+authority. This repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the
+commit containing this status; R3-B and S12 remain `NOT_STARTED`. Production
+was not contacted.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

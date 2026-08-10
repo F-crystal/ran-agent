@@ -92,6 +92,218 @@ def test_source_advance_rejects_private_or_migrating_paths() -> None:
             MODULE.validate_source_advance_paths([path])
 
 
+def _source_profile_blobs() -> dict[str, bytes]:
+    root = Path(__file__).parents[1]
+    return {
+        MODULE.PROFILE_PATH: (root / MODULE.PROFILE_PATH).read_bytes(),
+        MODULE.SOURCE_PROFILE_MIGRATION_PATH: (root / MODULE.SOURCE_PROFILE_MIGRATION_PATH).read_bytes(),
+        MODULE.SOURCE_MANAGED_WAKE_PATH: (root / MODULE.SOURCE_MANAGED_WAKE_PATH).read_bytes(),
+    }
+
+
+def test_source_profile_migration_requires_and_accepts_only_the_exact_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prior = "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d"
+    candidate = "b" * 40
+    changed = [
+        MODULE.PROFILE_PATH,
+        MODULE.SOURCE_PROFILE_TEMPLATE_PATH,
+        "hermes/profile/scripts/core-wake.sh",
+    ]
+    with pytest.raises(MODULE.ReleaseError, match="missing or invalid"):
+        monkeypatch.setattr(
+            MODULE,
+            "candidate_blob",
+            lambda _repo, _candidate, _path: (_ for _ in ()).throw(subprocess.CalledProcessError(1, [])),
+        )
+        MODULE.validate_source_advance_paths(changed, candidate=candidate, prior=prior)
+
+    blobs = _source_profile_blobs()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    MODULE.validate_source_advance_paths(changed, candidate=candidate, prior=prior)
+
+
+@pytest.mark.parametrize("mutation", ("prior", "digest"))
+def test_source_profile_migration_rejects_wrong_authority(
+    monkeypatch: pytest.MonkeyPatch, mutation: str
+) -> None:
+    prior = "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d"
+    blobs = _source_profile_blobs()
+    contract = json.loads(blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
+    if mutation == "prior":
+        contract["priorAcceptedSource"] = "0" * 40
+    else:
+        contract["activeProfile"]["sourceSha256"] = "0" * 64
+    blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH] = json.dumps(contract).encode()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    with pytest.raises(MODULE.ReleaseError, match="does not match"):
+        MODULE.validate_source_advance_paths(
+            [MODULE.PROFILE_PATH, MODULE.SOURCE_PROFILE_TEMPLATE_PATH],
+            candidate="b" * 40,
+            prior=prior,
+        )
+
+
+def test_source_profile_migration_rejects_an_unexpected_profile_path(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blobs = _source_profile_blobs()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    with pytest.raises(MODULE.ReleaseError, match="does not match"):
+        MODULE.validate_source_advance_paths(
+            [
+                MODULE.PROFILE_PATH,
+                MODULE.SOURCE_PROFILE_TEMPLATE_PATH,
+                "hermes/profile/unexpected.yaml",
+            ],
+            candidate="b" * 40,
+            prior="98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
+        )
+
+
+def test_governed_companion_migration_passes_source_dry_run_validation(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    root = Path(__file__).parents[1]
+    prior = "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d"
+    candidate = "b" * 40
+    changed = [
+        MODULE.PROFILE_PATH,
+        MODULE.SOURCE_PROFILE_TEMPLATE_PATH,
+        "hermes/profile/scripts/core-wake.sh",
+    ]
+    blobs = {
+        **_source_profile_blobs(),
+        MODULE.CONTROLLER_PATH: SCRIPT.read_bytes(),
+        MODULE.UNIT_SOURCE_PATH: (root / MODULE.UNIT_SOURCE_PATH).read_bytes(),
+        "node_bridge/src/hermesGatewayClient.mjs": (root / "node_bridge/src/hermesGatewayClient.mjs").read_bytes(),
+        "node_bridge/src/personalMemoryMcpServer.mjs": (root / "node_bridge/src/personalMemoryMcpServer.mjs").read_bytes(),
+    }
+    monkeypatch.setattr(MODULE, "check_candidate", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: {"candidate": prior})
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    monkeypatch.setattr(
+        MODULE,
+        "run",
+        lambda *args, **_kwargs: subprocess.CompletedProcess(args[0], 0, "", ""),
+    )
+
+    def fake_git(_repo: Path, *args: str, **_kwargs):
+        if args[:2] == ("diff", "--name-only"):
+            return subprocess.CompletedProcess(args, 0, "\n".join(changed) + "\n", "")
+        if args == ("rev-parse", "--verify", "refs/remotes/origin/main"):
+            return subprocess.CompletedProcess(args, 0, candidate + "\n", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(MODULE, "git", fake_git)
+    monkeypatch.setattr(MODULE, "require_source_baseline", lambda: {"kind": "converged"})
+    monkeypatch.setattr(MODULE, "refuse_unfinished_source_transaction", lambda: None)
+    monkeypatch.setattr(
+        MODULE.shutil,
+        "disk_usage",
+        lambda _path: SimpleNamespace(free=10 * 1024 * 1024 * 1024),
+    )
+
+    assert MODULE.source_main(SimpleNamespace(candidate=candidate, mode="source-dry-run", snapshot=None)) == 0
+    assert json.loads(capsys.readouterr().out)["status"] == "SOURCE_DRY_RUN_OK"
+
+
+def test_source_profile_activation_uses_companion_for_current_and_future_advances(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    lite_home = tmp_path / "lite"
+    profile_dir = lite_home / "profiles/ran-agent-companion"
+    profile_dir.mkdir(parents=True)
+    targets = (lite_home / "config.yaml", profile_dir / "config.yaml")
+    for target in targets:
+        target.write_text("legacy-web-profile\n")
+    companion = (Path(__file__).parents[1] / MODULE.PROFILE_PATH).read_bytes()
+    monkeypatch.setattr(MODULE, "LITE_HOME", lite_home)
+    monkeypatch.setattr(MODULE, "SOURCE_PROFILE_DIR", profile_dir)
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: companion if path == MODULE.PROFILE_PATH else b"inert\n")
+
+    MODULE.validate_source_advance_paths(["README.md"], candidate="b" * 40, prior="a" * 40)
+    MODULE.activate_source_profile("b" * 40)
+
+    assert all(target.read_bytes() == companion for target in targets)
+    assert b"mcp-search_hub" in companion and b"mcp-playwright" in companion
+    assert b"\n    - web\n" not in companion
+    assert b"search_backend:" not in companion and b"extract_backend:" not in companion
+
+
+def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    prior_head = "a" * 40
+    candidate = "b" * 40
+    repo = tmp_path / "repo"
+    lite_home = tmp_path / "lite"
+    profile_dir = lite_home / "profiles/ran-agent-companion"
+    profile_dir.mkdir(parents=True)
+    root_config = lite_home / "config.yaml"
+    profile_config = profile_dir / "config.yaml"
+    root_config.write_bytes(b"prior-root\n")
+    profile_config.write_bytes(b"prior-profile\n")
+    snapshot_root = tmp_path / "snapshots"
+    snapshot = snapshot_root / "source-new"
+    (snapshot / "files").mkdir(parents=True)
+    records = [MODULE.backup_path(snapshot, path, index) for index, path in enumerate((root_config, profile_dir))]
+    overlay = tmp_path / "overlay"
+    overlay.mkdir()
+    (overlay / "state.json").write_text('{"status":"accepted"}\n')
+    prior_pointer = {
+        "schemaVersion": 1,
+        "candidate": prior_head,
+        "snapshot": str(snapshot_root / "prior"),
+        "controller": str(tmp_path / "prior-controller.py"),
+    }
+    state = {
+        "candidate": candidate,
+        "phase": "accepted",
+        "baselineKind": "converged",
+        "priorHead": prior_head,
+        "priorRef": "",
+        "priorPointer": prior_pointer,
+        "overlayStateSha256": MODULE.sha256_file(overlay / "state.json"),
+        "paths": records,
+        "services": {},
+    }
+    (snapshot / "state.json").write_text(json.dumps(state))
+    pointer = snapshot_root / "current-source.json"
+    pointer.write_text(json.dumps({"candidate": candidate, "snapshot": str(snapshot)}))
+    repo.mkdir()
+    companion = (Path(__file__).parents[1] / MODULE.PROFILE_PATH).read_bytes()
+    monkeypatch.setattr(MODULE, "REPO", repo)
+    monkeypatch.setattr(MODULE, "LITE_HOME", lite_home)
+    monkeypatch.setattr(MODULE, "SOURCE_PROFILE_DIR", profile_dir)
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshot_root)
+    monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer)
+    monkeypatch.setattr(MODULE, "SOURCE_OVERLAY_TRANSACTION", overlay)
+    monkeypatch.setattr(MODULE, "SOURCE_HERMES_OVERLAY_DROPIN", tmp_path / "missing-hermes-dropin")
+    monkeypatch.setattr(MODULE, "SOURCE_PYTHON_OVERLAY_DROPIN", tmp_path / "missing-python-dropin")
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, _path: companion)
+    monkeypatch.setattr(MODULE, "stop_source_services", lambda: None)
+    monkeypatch.setattr(MODULE, "restore_source_services", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(MODULE, "restore_metadata", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "git_as_checkout_owner", lambda *_args: None)
+    monkeypatch.setattr(
+        MODULE,
+        "git",
+        lambda _repo, *args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, f"{prior_head}\n" if args[:2] == ("rev-parse", "HEAD") else "", ""
+        ),
+    )
+
+    MODULE.activate_source_profile(candidate)
+    assert root_config.read_bytes() == companion and profile_config.read_bytes() == companion
+    MODULE.source_rollback(snapshot, candidate)
+
+    assert root_config.read_bytes() == b"prior-root\n"
+    assert profile_config.read_bytes() == b"prior-profile\n"
+    assert json.loads(pointer.read_text()) == prior_pointer
+
+
 def test_converged_source_rollback_restores_prior_pointer(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
