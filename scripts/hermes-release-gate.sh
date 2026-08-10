@@ -124,10 +124,20 @@ if [[ -z "$RELEASE_CANDIDATE" && -e "$REPO_ROOT/.git" ]]; then
 fi
 [[ "$RELEASE_CANDIDATE" =~ ^[0-9a-f]{40}$ ]] || fail release_candidate_invalid
 
+RUNTIME_ARTIFACT_MANIFEST="$REPO_ROOT/docs/governance/hermes_runtime_artifact.v1.json"
+EXPECTED_HERMES_VERSION="$(run_clean "$NODE_BIN" -e '
+  const fs = require("node:fs");
+  const manifest = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const source = manifest?.source?.version;
+  const installed = manifest?.dependencies?.installed?.["hermes-agent"];
+  if (source !== "0.20.0" || installed !== source) process.exit(1);
+  process.stdout.write(source);
+' "$RUNTIME_ARTIFACT_MANIFEST")" || fail hermes_runtime_contract_invalid
+
 HERMES_TEST_BIN=''
 HERMES_TEST_PYTHON_BIN=''
 resolve_test_hermes_bin() {
-  local resolver version runtime_pair extra
+  local resolver runtime_probe runtime_root runtime_pair extra
   [[ -n "$HERMES_TEST_BIN" ]] && return
   if [[ "$STAGED_CANDIDATE" == 1 ]]; then
     resolver="$REPO_ROOT/scripts/resolve-hermes-gate-runtime.mjs"
@@ -142,18 +152,19 @@ resolve_test_hermes_bin() {
     HERMES_TEST_BIN="${RAN_AGENT_HERMES_TEST_BIN:-}"
     HERMES_TEST_PYTHON_BIN="${RAN_AGENT_HERMES_TEST_PYTHON_BIN:-}"
     [[ "$HERMES_TEST_BIN" == /* && -x "$HERMES_TEST_BIN" ]] || fail hermes_v0_20_runtime_required
-    version="$(run_clean "$NODE_BIN" -e '
-      const { spawnSync } = require("node:child_process");
-      const result = spawnSync(process.argv[1], ["version"], { encoding: "utf8", timeout: 10000 });
-      if (result.error || result.status !== 0) process.exit(1);
-      process.stdout.write(result.stdout);
-    ' "$HERMES_TEST_BIN")" || fail hermes_v0_20_runtime_required
-    [[ "$version" =~ ^Hermes\ Agent\ v0\.20\.0$ ]] || fail hermes_v0_20_runtime_required
     [[ "$HERMES_TEST_PYTHON_BIN" == /* && -x "$HERMES_TEST_PYTHON_BIN" ]] ||
       fail hermes_runtime_python_required
-    run_clean "$HERMES_TEST_PYTHON_BIN" -I \
-      -c 'import gateway, hermes_cli, httpx, openai' >/dev/null 2>&1 ||
-      fail hermes_runtime_python_invalid
+    runtime_root="$(run_clean "$NODE_BIN" -e '
+      const fs = require("node:fs");
+      const path = require("node:path");
+      process.stdout.write(path.dirname(path.dirname(fs.realpathSync(process.argv[1]))));
+    ' "$HERMES_TEST_BIN")" || fail hermes_v0_20_runtime_required
+    runtime_probe="$REPO_ROOT/scripts/hermes-sealed-runtime-probe.py"
+    [[ -f "$runtime_probe" && ! -L "$runtime_probe" ]] || fail hermes_runtime_probe_required
+    run_clean "$HERMES_TEST_PYTHON_BIN" -I "$runtime_probe" \
+      --install-root "$runtime_root" --hermes "$HERMES_TEST_BIN" \
+      --python "$HERMES_TEST_PYTHON_BIN" --expected-version "$EXPECTED_HERMES_VERSION" \
+      >/dev/null 2>&1 || fail hermes_runtime_contract_invalid
   fi
 }
 
@@ -200,11 +211,12 @@ chmod -R a-w "$SOURCE_ROOT"
 
 run_node_test() {
   local test_file="$1"
-  local test_name case_root hermes_test_bin=''
+  local test_name case_root hermes_test_bin='' hermes_test_python_bin=''
   test_name="$(basename "$test_file" .test.mjs)"
   if [[ "$(basename "$test_file")" == hermesGatewayProviderBoundary.integration.test.mjs ]]; then
     resolve_test_hermes_bin
     hermes_test_bin="$HERMES_TEST_BIN"
+    hermes_test_python_bin="$HERMES_TEST_PYTHON_BIN"
   fi
   case_root="$SANDBOX_ROOT/node-test-$test_name"
   mkdir -p "$case_root/home" "$case_root/tmp/state" "$case_root/cache" "$case_root/config" \
@@ -225,6 +237,7 @@ run_node_test() {
       RAN_AGENT_PYTHON_BIN="$PYTHON_BIN" \
       RAN_AGENT_RELEASE_CANDIDATE="$RELEASE_CANDIDATE" \
       RAN_AGENT_HERMES_TEST_BIN="$hermes_test_bin" \
+      RAN_AGENT_HERMES_TEST_PYTHON_BIN="$hermes_test_python_bin" \
       SOCIAL_READER_NODE_BIN="$NODE_BIN" \
       EXTERNAL_MCP_GATEWAY_NODE_BIN="$NODE_BIN" \
       RAN_AGENT_GLOBAL_TIMELINE_PATH="$case_root/tmp/state/global-timeline.jsonl" \

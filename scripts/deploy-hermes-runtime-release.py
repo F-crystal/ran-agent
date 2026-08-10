@@ -90,6 +90,7 @@ SOURCE_ARTIFACT_ROOT = ARTIFACT_ROOT / "source-artifacts"
 SOURCE_STAGE_ROOT = ARTIFACT_ROOT / "source-stages"
 SOURCE_REF_ROOT = "refs/ran-agent/source-candidates"
 SOURCE_HERMES_BIN = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes")
+SOURCE_RUNTIME_PYTHON = SOURCE_HERMES_BIN.parents[1] / "python/bin/python3.12"
 SOURCE_NODE_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/node")
 SOURCE_NPM_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/npm")
 SOURCE_PROFILE = "ran-agent-companion"
@@ -1468,7 +1469,9 @@ def current_source_pointer() -> dict[str, Any] | None:
 
 
 def validate_unified_source_shape(candidate: str) -> None:
-    profile = candidate_blob(REPO, candidate, PROFILE_PATH).decode()
+    profile_bytes = candidate_blob(REPO, candidate, PROFILE_PATH)
+    validate_companion_profile(profile_bytes)
+    profile = profile_bytes.decode()
     unit = candidate_blob(REPO, candidate, UNIT_SOURCE_PATH).decode()
     gateway = candidate_blob(REPO, candidate, "node_bridge/src/hermesGatewayClient.mjs").decode()
     memory = candidate_blob(REPO, candidate, "node_bridge/src/personalMemoryMcpServer.mjs").decode()
@@ -1489,23 +1492,58 @@ def source_profile_targets() -> tuple[Path, Path]:
 
 
 def validate_companion_profile(profile: bytes) -> None:
+    parser = SOURCE_RUNTIME_PYTHON
     try:
-        text = profile.decode("utf-8")
-        toolsets = text.split("\nplatform_toolsets:\n", 1)[1].split("\nmcp_servers:\n", 1)[0]
-        servers = text.split("\nmcp_servers:\n", 1)[1]
-    except (UnicodeDecodeError, IndexError) as exc:
+        if parser.is_symlink() or not parser.is_file() or not os.access(parser, os.X_OK):
+            raise ReleaseError("sealed profile parser runtime is unavailable")
+        result = subprocess.run(
+            [
+                str(parser), "-I", "-c",
+                """
+import json, sys, yaml
+value = yaml.safe_load(sys.stdin.buffer.read())
+if not isinstance(value, dict):
+    raise SystemExit(2)
+toolsets = value.get("platform_toolsets")
+servers = value.get("mcp_servers")
+if not isinstance(toolsets, dict) or not isinstance(servers, dict):
+    raise SystemExit(2)
+print(json.dumps({
+    "cli": toolsets.get("cli"),
+    "api_server": toolsets.get("api_server"),
+    "top_level_web": "web" in value,
+    "servers": sorted(str(key) for key in servers),
+}, sort_keys=True))
+""",
+            ],
+            input=profile,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+            check=False,
+        )
+        if result.returncode != 0:
+            raise ReleaseError("candidate companion profile shape is invalid")
+        semantic = json.loads(result.stdout)
+    except (OSError, json.JSONDecodeError) as exc:
         raise ReleaseError("candidate companion profile shape is invalid") from exc
+    cli = semantic.get("cli")
+    api = semantic.get("api_server")
+    servers = semantic.get("servers")
     if (
-        "\n    - mcp-search_hub\n" not in toolsets
-        or "\n    - mcp-playwright\n" not in toolsets
-        or "\n    - web\n" in toolsets
-        or re.search(r"(?m)^web:\s*$", text)
-        or re.search(r"(?m)^\s+(?:search_backend|extract_backend):", text)
-        or not re.search(r"(?m)^  search_hub:\s*$", servers)
-        or not re.search(r"(?m)^  playwright:\s*$", servers)
+        not isinstance(cli, list)
+        or not all(isinstance(item, str) for item in cli)
+        or len(cli) != len(set(cli))
+        or api != cli
+        or "mcp-search_hub" not in cli
+        or "mcp-playwright" not in cli
+        or "web" in cli
+        or semantic.get("top_level_web") is not False
+        or not isinstance(servers, list)
+        or "search_hub" not in servers
+        or "playwright" not in servers
     ):
         raise ReleaseError("candidate companion profile violates the R1B assembly invariant")
-
 
 def validate_source_profile_migration(candidate: str, prior: str, profile_paths: set[str]) -> None:
     try:

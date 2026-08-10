@@ -5,6 +5,7 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tarfile
 from pathlib import Path
 from types import SimpleNamespace
@@ -17,6 +18,11 @@ SPEC = importlib.util.spec_from_file_location("hermes_runtime_release", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+
+
+@pytest.fixture(autouse=True)
+def _local_sealed_profile_parser(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(MODULE, "SOURCE_RUNTIME_PYTHON", Path(sys.executable).resolve())
 
 
 def test_env_patch_changes_only_managed_keys_and_collapses_duplicates() -> None:
@@ -160,6 +166,28 @@ def test_source_profile_migration_rejects_an_unexpected_profile_path(
             candidate="b" * 40,
             prior="98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
         )
+
+
+def test_companion_profile_validation_uses_yaml_semantics() -> None:
+    profile = (Path(__file__).parents[1] / MODULE.PROFILE_PATH).read_bytes()
+    MODULE.validate_companion_profile(profile)
+    for malicious in (
+        profile.replace(b"    - mcp-playwright\n", b"    - mcp-playwright\n    - \"web\"\n", 1),
+        b"""
+platform_toolsets:
+  cli: &tools
+    - mcp-search_hub
+    - mcp-playwright
+    - web
+  api_server: *tools
+mcp_servers:
+  search_hub: {}
+  playwright: {}
+""",
+        profile + b"\n\"web\": {}\n",
+    ):
+        with pytest.raises(MODULE.ReleaseError, match="R1B assembly invariant"):
+            MODULE.validate_companion_profile(malicious)
 
 
 def test_governed_companion_migration_passes_source_dry_run_validation(

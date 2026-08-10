@@ -141,6 +141,69 @@ function requiredGatePython() {
   return pythonBin;
 }
 
+function writeRuntimeArtifactFixture(stage) {
+  mkdirSync(join(stage, 'docs', 'governance'), { recursive: true });
+  writeFileSync(join(stage, 'docs', 'governance', 'hermes_runtime_artifact.v1.json'), JSON.stringify({
+    source: { version: '0.20.0' },
+    dependencies: { installed: { 'hermes-agent': '0.20.0' } },
+  }));
+}
+
+function makeSealedRuntimeFixture(runtimeRoot, name, {
+  version = '0.20.0',
+  metadataVersion = '0.20.0',
+  imports = true,
+} = {}) {
+  const pythonVersion = execFileSync(requiredGatePython(), [
+    '-c', 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")',
+  ], { encoding: 'utf8' }).trim();
+  const installRoot = join(runtimeRoot, name);
+  const hermes = join(installRoot, 'bin', 'hermes');
+  execFileSync(requiredGatePython(), [
+    '-m', 'venv', '--without-pip', '--copies', join(installRoot, 'python'),
+  ], { stdio: 'pipe' });
+  const fixturePython = join(installRoot, 'python', 'bin', `python${pythonVersion}`);
+  const python = join(installRoot, 'python', 'bin', 'python3.12');
+  copyFileSync(fixturePython, python);
+  chmodSync(python, 0o755);
+  const site = execFileSync(python, [
+    '-I', '-c', 'import sysconfig; print(sysconfig.get_path("purelib"))',
+  ], { encoding: 'utf8' }).trim();
+  const app = join(installRoot, 'app');
+  mkdirSync(dirname(hermes), { recursive: true });
+  for (const moduleName of ['gateway', 'hermes_cli']) {
+    mkdirSync(join(app, moduleName), { recursive: true });
+    if (imports) writeFileSync(join(app, moduleName, '__init__.py'), '');
+  }
+  for (const moduleName of ['httpx', 'openai']) {
+    mkdirSync(join(site, moduleName), { recursive: true });
+    if (imports) writeFileSync(join(site, moduleName, '__init__.py'), '');
+  }
+  const metadata = join(site, `hermes_agent-${metadataVersion}.dist-info`);
+  mkdirSync(metadata);
+  writeFileSync(join(metadata, 'METADATA'), `Metadata-Version: 2.1\nName: hermes-agent\nVersion: ${metadataVersion}\n`);
+  writeFileSync(join(app, 'hermes_cli', 'main.py'), [
+    `print('Hermes Agent v${version} (fixture build 2026.8.3)')`,
+    "print('Install directory: fixture')",
+    "print('Install method: sealed')",
+    "print('Python: fixture')",
+    "print('OpenAI SDK: fixture')",
+    '',
+  ].join('\n'));
+  writeFileSync(hermes, [
+    '#!/bin/sh',
+    'set -eu',
+    'ROOT=$(CDPATH= cd "$(dirname "$0")/.." && pwd -P)',
+    'unset PYTHONHOME',
+    'export PYTHONNOUSERSITE=1 PYTHONDONTWRITEBYTECODE=1 PYTHONSAFEPATH=1',
+    'export PYTHONPATH="$ROOT/app"',
+    'exec "$ROOT/python/bin/python3" -m hermes_cli.main "$@"',
+    '',
+  ].join('\n'));
+  chmodSync(hermes, 0o755);
+  return { installRoot, hermes, python, app };
+}
+
 function makeBootstrapFixture({ corruptManifest = false } = {}) {
   const repo = mkdtempSync(join(tmpdir(), 'ran-agent-bootstrap-'));
   const runGit = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
@@ -3371,9 +3434,10 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$HERMES_TEST_BIN"[\s\S]*-m pytest/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_PYTHON_BIN="\$HERMES_TEST_PYTHON_BIN"[\s\S]*-m pytest/);
   assert.doesNotMatch(source, /HERMES_TEST_PYTHON_BIN="\$project\/venv\/bin\/python"/);
-  assert.match(providerProbe, /Hermes Agent v0\.20\.0/);
+  assert.match(providerProbe, /hermes-sealed-runtime-probe\.py/);
   assert.doesNotMatch(providerProbe, /Project:/);
-  assert.match(providerProbe, /runtime_env\.pop\("PYTHONPATH", None\)/);
+  assert.match(providerProbe, /"PYTHONPATH": str\(runtime_app\)/);
+  assert.match(providerProbe, /str\(runtime_python\),\s+"-P"/);
   assert.match(source, /resolve-hermes-gate-runtime\.mjs/);
   assert.match(source, /STAGED_CANDIDATE.*RAN_AGENT_RELEASE_STAGED_CANDIDATE/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\]; then\s+PATH=\/usr\/bin:\/bin/);
@@ -3383,7 +3447,7 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.doesNotMatch(source, /(^|[^/])\benv -i/);
   assert.match(source, /run_clean "\$NODE_BIN" "\$resolver" \/usr\/bin\/systemctl "\$RUNTIME_USER" "\$RUNTIME_GROUP" \/proc/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\][\s\S]*\/usr\/bin\/systemctl[\s\S]*else\s+HERMES_TEST_BIN="\$\{RAN_AGENT_HERMES_TEST_BIN:-\}"/);
-  assert.match(source, /spawnSync\(process\.argv\[1\].*timeout: 10000/);
+  assert.match(source, /hermes-sealed-runtime-probe\.py/);
   assert.match(hermesResolver, /ran-agent-hermes\.service/);
   assert.match(hermesResolver, /ran-agent-hermes-full\.service/);
   assert.match(hermesResolver, /hermes_runtime_mutation\.v1\.json/);
@@ -3394,11 +3458,12 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.doesNotMatch(hermesResolver, /\[resolver, 'ran-agent-hermes-full\.service'\]/);
   assert.doesNotMatch(hermesResolver, /liteReal !== fullReal/);
   assert.match(hermesResolver, /path\.join\(installRoot, 'python', 'bin'/);
-  assert.match(hermesResolver, /artifact\?\.source\?\.version !== '0\.20\.0'/);
+  assert.match(hermesResolver, /expectedVersion !== '0\.20\.0'/);
   assert.doesNotMatch(hermesResolver, /process\.env\.RAN_AGENT_(?:HERMES_TEST_BIN|SYSTEMCTL_BIN)/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$hermes_test_bin"/);
+  assert.match(source, /RAN_AGENT_HERMES_TEST_PYTHON_BIN="\$hermes_test_python_bin"/);
   assert.match(providerBoundary, /process\.env\.RAN_AGENT_HERMES_TEST_BIN/);
-  assert.match(providerBoundary, /Hermes Agent v0\.20\.0/);
+  assert.match(providerBoundary, /hermes-sealed-runtime-probe\.py/);
   assert.match(providerBoundary, /timeout: 30_000/);
   assert.doesNotMatch(providerBoundary, /\/Users\/fengran/);
   assert.match(ombreContract, /process\.env\.RAN_AGENT_PYTHON_BIN/);
@@ -3418,6 +3483,57 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.doesNotMatch(source, /skip tests\/test_hermes_deepseek_provider\.py|--ignore tests\/test_hermes_deepseek_provider\.py/);
 });
 
+test('local release gate uses the same sealed runtime contract and rejects cross-runtime Python', () => {
+  const stage = mkdtempSync(join(tmpdir(), 'ran-agent-local-gate-stage-'));
+  const runtimeRoot = mkdtempSync(join(tmpdir(), 'ran-agent-local-gate-runtimes-'));
+  try {
+    mkdirSync(join(stage, 'scripts'), { recursive: true });
+    mkdirSync(join(stage, 'node_bridge', 'tests'), { recursive: true });
+    mkdirSync(join(stage, 'tests'), { recursive: true });
+    for (const name of ['hermes-release-gate.sh', 'verify-runtime-service-identity.sh', 'hermes-sealed-runtime-probe.py']) {
+      copyFileSync(join(root, 'scripts', name), join(stage, 'scripts', name));
+    }
+    chmodSync(join(stage, 'scripts', 'hermes-release-gate.sh'), 0o755);
+    chmodSync(join(stage, 'scripts', 'verify-runtime-service-identity.sh'), 0o755);
+    writeRuntimeArtifactFixture(stage);
+    writeFileSync(join(stage, 'node_bridge', 'tests', 'hermesGatewayProviderBoundary.integration.test.mjs'), [
+      "import test from 'node:test';",
+      "test('local runtime contract fixture reached provider boundary', () => {});",
+      '',
+    ].join('\n'));
+    writeFileSync(join(stage, 'scripts', 'hermes-release-smoke.mjs'), 'process.exit(0);\n');
+    writeFileSync(join(stage, 'tests', 'test_stage.py'), 'def test_local_stage():\n    assert True\n');
+    execFileSync('git', ['init'], { cwd: stage, stdio: 'pipe' });
+    execFileSync('git', ['add', '.'], { cwd: stage, stdio: 'pipe' });
+    const runtime = makeSealedRuntimeFixture(runtimeRoot, 'valid');
+    const other = makeSealedRuntimeFixture(runtimeRoot, 'other');
+    const runLocal = (python) => spawnSync('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--core'], {
+      cwd: stage,
+      env: {
+        PATH: '/usr/bin:/bin',
+        RAN_AGENT_NODE_BIN: nodeBin,
+        RAN_AGENT_PYTHON_BIN: requiredGatePython(),
+        RAN_AGENT_RELEASE_CANDIDATE: 'c'.repeat(40),
+        RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
+        RAN_AGENT_HERMES_TEST_BIN: runtime.hermes,
+        RAN_AGENT_HERMES_TEST_PYTHON_BIN: python,
+        RAN_AGENT_RUNTIME_USER: runtimeUser,
+        RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
+      },
+      encoding: 'utf8',
+    });
+    const valid = runLocal(runtime.python);
+    assert.equal(valid.status, 0, valid.stderr);
+    assert.match(valid.stdout, /hermes-release-gate: ok/);
+    const mismatched = runLocal(other.python);
+    assert.notEqual(mismatched.status, 0);
+    assert.match(mismatched.stderr, /hermes_runtime_contract_invalid/);
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+    rmSync(runtimeRoot, { recursive: true, force: true });
+  }
+});
+
 test('release gate executes a git-less staged candidate from its explicit immutable source root', () => {
   const pythonBin = requiredGatePython();
   const stage = mkdtempSync(join(tmpdir(), 'ran-agent-gitless-stage-'));
@@ -3429,6 +3545,7 @@ test('release gate executes a git-less staged candidate from its explicit immuta
     copyFileSync(join(root, 'scripts', 'verify-runtime-service-identity.sh'), join(stage, 'scripts', 'verify-runtime-service-identity.sh'));
     chmodSync(join(stage, 'scripts', 'hermes-release-gate.sh'), 0o755);
     chmodSync(join(stage, 'scripts', 'verify-runtime-service-identity.sh'), 0o755);
+    writeRuntimeArtifactFixture(stage);
     writeFileSync(join(stage, 'node_bridge', 'tests', 'coreReliabilityJourney.test.mjs'), [
       "import test from 'node:test';",
       "test('gitless staged candidate fixture', () => {});",
@@ -3501,6 +3618,7 @@ test('non-root gate skips only root tooling and never skips provider checks', ()
     copyFileSync(join(root, 'scripts', 'verify-runtime-service-identity.sh'), join(stage, 'scripts', 'verify-runtime-service-identity.sh'));
     chmodSync(join(stage, 'scripts', 'hermes-release-gate.sh'), 0o755);
     chmodSync(join(stage, 'scripts', 'verify-runtime-service-identity.sh'), 0o755);
+    writeRuntimeArtifactFixture(stage);
     writeFileSync(join(stage, 'node_bridge', 'tests', 'coreReliabilityJourney.test.mjs'), [
       "import test from 'node:test';",
       "test('covered suite passes', () => {});",
@@ -3907,22 +4025,12 @@ test('staged Hermes gate binds one service-managed unified v0.20 runtime and ret
   mkdirSync(governance, { recursive: true });
   copyFileSync(join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs'), join(scripts, 'resolve-hermes-gate-runtime.mjs'));
   copyFileSync(join(root, 'scripts', 'resolve-hermes-service-runtime.sh'), join(scripts, 'resolve-hermes-service-runtime.sh'));
+  copyFileSync(join(root, 'scripts', 'hermes-sealed-runtime-probe.py'), join(scripts, 'hermes-sealed-runtime-probe.py'));
   chmodSync(join(scripts, 'resolve-hermes-service-runtime.sh'), 0o755);
   const gateResolver = join(scripts, 'resolve-hermes-gate-runtime.mjs');
   const fixtures = [];
 
-  const makeRuntime = (name, { version = 'v0.20.0', imports = true } = {}) => {
-    const installRoot = join(runtimeRoot, name);
-    const hermes = join(installRoot, 'bin', 'hermes');
-    const python = join(installRoot, 'python', 'bin', 'python3.12');
-    mkdirSync(dirname(hermes), { recursive: true });
-    mkdirSync(dirname(python), { recursive: true });
-    writeFileSync(hermes, `#!/bin/sh\nprintf "Hermes Agent ${version}\\n"\n`);
-    writeFileSync(python, `#!/bin/sh\nexit ${imports ? 0 : 1}\n`);
-    chmodSync(hermes, 0o755);
-    chmodSync(python, 0o755);
-    return { installRoot, hermes, python };
-  };
+  const makeRuntime = (name, options) => makeSealedRuntimeFixture(runtimeRoot, name, options);
 
   const writeContracts = (runtime, { pythonDigest = sha256(readFileSync(runtime.python)) } = {}) => {
     const tarGzSha256 = '1'.repeat(64);
@@ -3969,12 +4077,24 @@ test('staged Hermes gate binds one service-managed unified v0.20 runtime and ret
     fullEnabled = false,
     effectiveFullDropIn = fullDropIn,
     conditionResult = 'no',
+    processArgs = [processPython, '-P', '-m', 'hermes_cli.main', 'gateway', 'run'],
+    processEnvironment = {
+      PYTHONPATH: runtime.app,
+      PYTHONNOUSERSITE: '1',
+      PYTHONSAFEPATH: '1',
+      PYTHONDONTWRITEBYTECODE: '1',
+    },
   } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), 'ran-agent-hermes-gate-systemctl-'));
     const systemctl = join(dir, 'systemctl');
     const procRoot = join(dir, 'proc');
     mkdirSync(join(procRoot, mainPid), { recursive: true });
     symlinkSync(processPython, join(procRoot, mainPid, 'exe'));
+    writeFileSync(join(procRoot, mainPid, 'cmdline'), `${processArgs.join('\0')}\0`);
+    writeFileSync(
+      join(procRoot, mainPid, 'environ'),
+      `${Object.entries(processEnvironment).map(([key, value]) => `${key}=${value}`).join('\0')}\0`,
+    );
     writeFileSync(systemctl, `#!/bin/sh
 cmd="$1"; shift
 case "$cmd" in
@@ -4013,9 +4133,10 @@ esac
   }).trim();
 
   const valid = makeRuntime('valid');
-  const legacy = makeRuntime('legacy', { version: 'v0.13.0' });
+  const legacy = makeRuntime('legacy', { version: '0.13.0' });
   const other = makeRuntime('other');
   const badImports = makeRuntime('bad-imports', { imports: false });
+  const badMetadata = makeRuntime('bad-metadata', { metadataVersion: '0.19.0' });
   const missingPython = makeRuntime('missing-python');
   try {
     writeFullBlock();
@@ -4059,6 +4180,10 @@ esac
     assert.throws(() => runGateResolver(makeSystemctl(valid, { configuredHermes: other.hermes })), /Command failed/);
     assert.throws(() => runGateResolver(makeSystemctl(valid, { processPython: other.python })), /Command failed/);
     assert.throws(() => runGateResolver(makeSystemctl(valid, { user: '' })), /Command failed/);
+    assert.throws(
+      () => runGateResolver(makeSystemctl(valid, { group: 'wrong-group' })),
+      /runtime_identity_mismatch/,
+    );
     assert.throws(() => runGateResolver(makeSystemctl(valid, { fullActive: true })), /Command failed/);
     assert.throws(() => runGateResolver(makeSystemctl(valid, { fullEnabled: true })), /Command failed/);
     assert.throws(() => runGateResolver(makeSystemctl(valid, { unifiedActive: false })), /Command failed/);
@@ -4073,6 +4198,22 @@ esac
 
     writeContracts(badImports);
     assert.throws(() => runGateResolver(makeSystemctl(badImports)), /Command failed/);
+
+    writeContracts(badMetadata);
+    assert.throws(() => runGateResolver(makeSystemctl(badMetadata)), /Command failed/);
+
+    writeContracts(valid);
+    assert.throws(() => runGateResolver(makeSystemctl(valid, {
+      processArgs: [valid.python, '-m', 'hermes_cli.main', 'gateway', 'run'],
+    })), /Command failed/);
+    assert.throws(() => runGateResolver(makeSystemctl(valid, {
+      processEnvironment: {
+        PYTHONPATH: other.app,
+        PYTHONNOUSERSITE: '1',
+        PYTHONSAFEPATH: '1',
+        PYTHONDONTWRITEBYTECODE: '1',
+      },
+    })), /Command failed/);
   } finally {
     rmSync(stage, { recursive: true, force: true });
     for (const fixture of fixtures) rmSync(fixture.dir, { recursive: true, force: true });

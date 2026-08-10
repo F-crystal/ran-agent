@@ -112,11 +112,13 @@ review found first repair `d70a08fc` still blocked by an unproven persistent
 Full condition and a stale v0.13 Python probe. Repair 2 proves the exact governed
 Full condition block without using Full as runtime authority and updates the
 provider probe to exact v0.20 plus explicit import-capable runtime Python. It is
-`LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this update;
-Repair 2 passed independent review at `d6adb106`. Follow-up delivery inspection
-found `R3-R1B-PROFILE-DELIVERY-GAP`; its bounded local repair makes the
-companion config canonical through an exact migration contract and remains
-`NOT_REVIEWED`. R3-B and S12 remain `NOT_STARTED`.
+`LOCAL_VERIFIED / REVIEWED / ARCHIVED` at `d6adb106`; follow-up delivery inspection
+found `R3-R1B-PROFILE-DELIVERY-GAP`; its bounded repair passed independent
+review at `790546a3`. The first R3-B attempt then passed exact candidate YAML
+semantics and source dry-run but stopped fail-closed on stale one-line CLI and
+flat-runtime import assumptions. The class-level sealed-runtime contract repair
+is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
+update. R3-B retry and S12 remain `NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

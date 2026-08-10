@@ -58,9 +58,11 @@ flowchart TD
     R1FR --> R2["R2 fresh audit + production-copy rehearsal<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     R2 --> R3A["R3-A exact-SHA source review<br/>CLEAR except server proofs"]
     R3A --> RG["R3 gate topology repair 2<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
-    RG --> RP["R3-R1B profile delivery repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    RP --> RPR["Independent exact-SHA profile review<br/>REQUIRED"]
-    RPR --> R3B["R3-B immutable server gate + dry-run<br/>NOT STARTED"]
+    RG --> RP["R3-R1B profile delivery repair 790546a3<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    RP --> R3B0["First R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
+    R3B0 --> RR["Sealed-runtime contract repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    RR --> RRR["Independent exact-SHA repair review<br/>REQUIRED"]
+    RRR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -92,11 +94,12 @@ frozen candidate `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` clear except for
 server proofs, then follow-up inspection confirmed a stale split-v0.13
 immutable-gate contract. Independent review found first repair `d70a08fc` still
 blocked on the unproven persistent Full condition and stale v0.13 Python probe.
-Bounded repair 2 passed independent exact-SHA review at `d6adb106`. A later
-delivery audit confirmed that the accepted R1B companion profile could not
-pass or become active through the post-S1 source transaction. The bounded
-profile-delivery repair is the current review frontier; R3-B must not start
-before its independent exact-SHA review.
+Bounded repair 2 passed independent exact-SHA review at `d6adb106`. The later
+profile-delivery repair passed review at `790546a3`. The first R3-B run proved
+the exact candidate YAML semantics and source dry-run, then stopped fail-closed
+on stale one-line CLI presentation and flat-runtime import assumptions. The
+current review frontier is the class-level sealed-runtime contract repair;
+R3-B retry must not start before its independent exact-SHA review.
 
 ## Current Frontier
 
@@ -114,8 +117,9 @@ before its independent exact-SHA review.
 | R2 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` by the evidence commit | R1F review CLEAR | Fresh R2-A audit and isolated R2-B rehearsal are clear; runtime rehearsal SHA is `08e3eea8`, distinct from the evidence archive. |
 | R3-A | `LOCAL_VERIFIED` | `REVIEWED` except server proofs | `ARCHIVED` at `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` | R2 review CLEAR | Candidate areas were clear, but follow-up source inspection found the stale Hermes release-gate topology blocker. |
 | R3-GATE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `d6adb1061b5a819407582690ca6a9adcb63c8d26` | first repair `d70a08fc` review blocked | Repair 2 proves the governed Full condition block and exact-v0.20 Python probe; independent review is clear. |
-| R3-R1B-PROFILE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | R3-GATE review CLEAR | Exact prior-source/profile-digest contract delivers only `config.companion.yaml` as active plus the inert Pro template; rollback reuses the source transaction snapshot. |
-| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R3-R1B-PROFILE exact-SHA review CLEAR | Run the real immutable Linux/systemd identity and dry-run proof; local fixtures cannot claim production service-managed PASS. |
+| R3-R1B-PROFILE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `790546a34285a101948e301363381d094ec14b83` | R3-GATE review CLEAR | Exact prior-source/profile-digest contract delivers only `config.companion.yaml` as active plus the inert Pro template; rollback reuses the source transaction snapshot. |
+| R3-B-RUNTIME-CONTRACT | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | first R3-B stopped fail-closed | One runtime matrix now governs semantic version, sealed app/site-packages imports, live process argv/env, local/staged parity and semantic companion YAML. |
+| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | runtime-contract exact-SHA review CLEAR | Retry the real immutable Linux/systemd identity and dry-run proof; the first run's source/profile evidence remains valid but the runtime gate did not pass. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
@@ -445,7 +449,16 @@ recovery is recorded independently and leaves
   Search Hub/Playwright and reject the built-in web surface.
 - [x] Reuse the source transaction snapshot so rollback restores the prior
   profiles and source pointer together.
-- [ ] Independent exact-SHA review of the profile-delivery repair reports
+- [x] Independent exact-SHA review of the profile-delivery repair reports
+  `CLEAR` at `790546a34285a101948e301363381d094ec14b83`.
+- [x] Record the first R3-B attempt as `FIX_REQUIRED / STOPPED FAIL-CLOSED`:
+  exact candidate R1B YAML semantics and source dry-run passed; root resolver
+  rejected stale one-line CLI and flat-runtime import assumptions; non-root
+  did not run; production post-check was unchanged.
+- [x] Replace all immutable/local A/B/C version and import consumers with one
+  sealed v0.20 runtime contract and reject semantic YAML variants that restore
+  the built-in `web` capability.
+- [ ] Independent exact-SHA review of the sealed-runtime contract repair is
   `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
@@ -456,14 +469,13 @@ recovery is recorded independently and leaves
 - [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
   authorization with the exact SHA and summarized mutation.
 
-Local repair 2 does not impersonate a real Linux systemd/`ubuntu:ubuntu` or
-service-managed v0.20 `--all` pass. Those proofs remain exclusively R3-B and
-are `NOT_STARTED`.
+The local runtime-contract repair does not impersonate a real Linux
+systemd/`ubuntu:ubuntu` or service-managed v0.20 `--all` pass. The R3-B retry
+remains exclusively server-side and is `NOT_STARTED`.
 
-Reviewer missing-proof items remain non-blocking for this bounded repair: an
-explicit local Python is not independently proven to belong to an explicit
-local Hermes binary, there is no dedicated wrong-group negative, and real
-Linux `ubuntu:ubuntu`/systemd/proc behavior remains R3-B. The v0.13/dual-runtime
+The former local Hermes/Python binding and wrong-group missing proofs are
+closed by the shared runtime probe and focused negative. Real Linux
+`ubuntu:ubuntu`/systemd/proc behavior remains R3-B. The v0.13/dual-runtime
 `diagnose-hermes-provider-boundary.sh` is a `NON_BLOCKING_STALE_DIAGNOSTIC`;
 it is not called by the immutable release gate or S12 execution authority.
 

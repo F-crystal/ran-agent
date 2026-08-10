@@ -75,9 +75,11 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> first R3 gate repair d70a08fc (INDEPENDENT REVIEW BLOCKED)
   -> R3 gate repair 2 d6adb106 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
   -> independent exact-SHA gate-repair-2 review (CLEAR)
-  -> R3-R1B profile delivery repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
-  -> independent exact-SHA profile-delivery review (REQUIRED)
-  -> S12-R3B immutable server gate/dry-run proof (NOT STARTED)
+  -> R3-R1B profile delivery repair 790546a3 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+  -> first S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
+  -> R3-B sealed-runtime contract repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
+  -> independent exact-SHA runtime-contract review (REQUIRED)
+  -> S12-R3B immutable server gate/dry-run retry (NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
 ```
@@ -153,9 +155,21 @@ S12-R0 fresh read-only production audit (COMPLETE)
   rejected the accepted R1B companion-profile delta and still activated legacy
   `config.yaml`. The bounded repair adds an exact prior-source/profile-digest
   migration contract, makes `config.companion.yaml` the only active companion
-  source, and reuses the existing profile/source snapshot for rollback. R3
-  remains incomplete pending independent exact-SHA review of this repair and
-  the R3-B server proof; R3-B is `NOT STARTED`.
+  source, and reuses the existing profile/source snapshot for rollback. That
+  repair passed independent exact-SHA review at
+  `790546a34285a101948e301363381d094ec14b83`. The first R3-B server proof
+  confirmed the exact candidate profile semantics and source dry-run, then
+  stopped fail-closed in the root runtime resolver: the real sealed v0.20 CLI
+  emits five presentation lines, while the gate required one exact line, and
+  the sealed Python correctly could not import application modules without
+  the governed `runtime/app` path. The non-root gate did not run. Production
+  remained unchanged. The bounded class-level repair now derives version from
+  artifact/package metadata, treats CLI output semantically, uses one explicit
+  sealed-app import probe in local/staged/provider boundaries, verifies live
+  process argv/environment against the same launcher contract, and parses the
+  companion YAML semantically. It is `LOCAL_VERIFIED`, `NOT_REVIEWED` and
+  `ARCHIVED` by the commit containing this status. R3 remains incomplete; the
+  independent repair review and R3-B retry are required and not started.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

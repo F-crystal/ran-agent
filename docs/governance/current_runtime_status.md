@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 profile-delivery repair LOCAL_VERIFIED (2026-08-10)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 runtime-contract repair LOCAL_VERIFIED (2026-08-10)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -361,9 +361,31 @@ companion digest, permits only the companion plus inert Pro-template delta,
 and activates the exact companion bytes at both existing live destinations.
 The existing source snapshot restores both profiles and the prior source
 pointer together. The historical overlay stays fail-closed and gains no
-authority. This repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the
-commit containing this status; R3-B and S12 remain `NOT_STARTED`. Production
-was not contacted.
+authority. This repair passed independent exact-SHA review at
+`790546a34285a101948e301363381d094ec14b83`.
+
+The first R3-B run proved that candidate's R1B YAML semantics and exact source
+dry-run, then stopped fail-closed during the root runtime resolver. The sealed
+Hermes v0.20 CLI reported the correct version across five
+presentation/build lines, but the gate required one exact output line; the
+sealed Python also correctly kept `gateway` and `hermes_cli` under the governed
+`runtime/app` path rather than site-packages. The non-root gate did not run.
+The post-check found the same production source, worktree, Hermes PID/services,
+Core state and profile.
+
+The class-level repair archived by the commit containing this status audits all
+immutable/local provider-version and import consumers. Exact package metadata
+is the version authority, CLI output is checked semantically, one shared sealed
+runtime probe binds launcher/Python/app/site-packages, and the live process is
+checked against the launcher's argv and non-secret environment contract. The
+source controller now parses companion YAML through that explicit sealed
+runtime instead of textual list matching. This repair is `LOCAL_VERIFIED /
+NOT_REVIEWED / ARCHIVED`. Fresh local evidence is `8/8` realistic runtime
+fixtures, `41/41` source/profile release tests, and the affected release file at
+`81` pass plus three unchanged Linux root-only skips; the three real sealed
+provider cases remain server-only rather than being falsely skipped locally.
+R3-B retry and S12 remain `NOT_STARTED`. Production was not contacted during
+the repair.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

@@ -19,6 +19,35 @@ import { runHermesProviderBoundaryCanary } from '../src/hermesProviderBoundaryCa
 
 const ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 const HERMES = process.env.RAN_AGENT_HERMES_TEST_BIN || '';
+const HERMES_PYTHON = process.env.RAN_AGENT_HERMES_TEST_PYTHON_BIN || '';
+
+function assertSealedHermesRuntime() {
+  assert.equal(fs.existsSync(HERMES), true, 'explicit unified Hermes executable is required');
+  assert.equal(fs.existsSync(HERMES_PYTHON), true, 'explicit unified Hermes Python is required');
+  const artifact = JSON.parse(fs.readFileSync(
+    path.join(ROOT, 'docs', 'governance', 'hermes_runtime_artifact.v1.json'),
+    'utf8',
+  ));
+  const expectedVersion = artifact?.source?.version;
+  assert.equal(expectedVersion, '0.20.0');
+  assert.equal(artifact?.dependencies?.installed?.['hermes-agent'], expectedVersion);
+  const hermes = fs.realpathSync(HERMES);
+  const installRoot = path.dirname(path.dirname(hermes));
+  const result = JSON.parse(execFileSync(HERMES_PYTHON, [
+    '-I', path.join(ROOT, 'scripts', 'hermes-sealed-runtime-probe.py'),
+    '--install-root', installRoot,
+    '--hermes', HERMES,
+    '--python', HERMES_PYTHON,
+    '--expected-version', expectedVersion,
+  ], {
+    encoding: 'utf8',
+    timeout: 30_000,
+    env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent' },
+  }));
+  assert.equal(result.status, 'PASS');
+  assert.equal(result.cliVersion, expectedVersion);
+  assert.equal(result.metadataVersion, expectedVersion);
+}
 
 function listen(server) {
   return new Promise((resolve, reject) => {
@@ -117,11 +146,7 @@ async function stopChild(child) {
 test('real unified Hermes v0.20 gateway preserves system-priority Canon at provider boundary', {
   timeout: 120_000,
 }, async (t) => {
-  assert.equal(fs.existsSync(HERMES), true, 'explicit unified Hermes v0.20.0 executable is required');
-  assert.equal(
-    execFileSync(HERMES, ['version'], { encoding: 'utf8', timeout: 30_000 }).trim(),
-    'Hermes Agent v0.20.0',
-  );
+  assertSealedHermesRuntime();
   const requests = [];
   const provider = http.createServer(async (request, response) => {
     let body = '';

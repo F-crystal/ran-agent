@@ -23,6 +23,7 @@ try {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const resolver = path.join(repoRoot, 'scripts', 'resolve-hermes-service-runtime.sh');
+const runtimeProbe = path.join(repoRoot, 'scripts', 'hermes-sealed-runtime-probe.py');
 const mutationPath = path.join(repoRoot, 'docs', 'governance', 'hermes_runtime_mutation.v1.json');
 const artifactPath = path.join(repoRoot, 'docs', 'governance', 'hermes_runtime_artifact.v1.json');
 
@@ -58,6 +59,7 @@ const installRoot = mutation?.artifactManifest?.installRoot;
 const expectedHermes = mutation?.artifactManifest?.executable;
 const pythonVersion = artifact?.python?.version;
 const expectedPythonDigest = artifact?.python?.executableSha256;
+const expectedVersion = artifact?.source?.version;
 const gateways = mutation?.topology?.after?.gateways;
 const retiredFull = mutation?.unitMutations?.find((item) => item?.unit === 'ran-agent-hermes-full.service');
 const retiredFullDropIn = retiredFull?.dropIn;
@@ -65,8 +67,8 @@ if (mutation?.schemaVersion !== 1
     || mutation?.deploymentStatus !== 'DEPLOYED'
     || mutation?.artifactManifest?.path !== 'docs/governance/hermes_runtime_artifact.v1.json'
     || artifact?.schemaVersion !== 1
-    || artifact?.source?.version !== '0.20.0'
-    || artifact?.dependencies?.installed?.['hermes-agent'] !== '0.20.0'
+    || expectedVersion !== '0.20.0'
+    || artifact?.dependencies?.installed?.['hermes-agent'] !== expectedVersion
     || mutation?.artifactManifest?.tarGzSha256 !== artifact?.artifact?.tarGzSha256
     || mutation?.artifactManifest?.treeSha256 !== artifact?.artifact?.treeSha256
     || !/^3\.12\.[0-9]+$/.test(pythonVersion || '')
@@ -124,25 +126,45 @@ let hermesReal;
 let expectedHermesReal;
 let runtimePython;
 let runtimePythonReal;
+let runtimeAppReal;
 try {
   hermesReal = fs.realpathSync(serviceHermes);
   expectedHermesReal = fs.realpathSync(expectedHermes);
   runtimePython = path.join(installRoot, 'python', 'bin', `python${pythonVersion.split('.').slice(0, 2).join('.')}`);
   runtimePythonReal = fs.realpathSync(runtimePython);
+  runtimeAppReal = fs.realpathSync(path.join(installRoot, 'app'));
 } catch {
   fail('runtime_unavailable');
 }
 if (hermesReal !== expectedHermesReal) fail('service_runtime_contract_mismatch');
-if (run(hermesReal, ['version'], 'version_probe_failed') !== 'Hermes Agent v0.20.0') {
-  fail('Hermes_v0.20.0_required');
-}
 try {
   fs.accessSync(runtimePythonReal, fs.constants.X_OK);
 } catch {
   fail('runtime_python_required');
 }
 if (sha256(runtimePythonReal) !== expectedPythonDigest) fail('runtime_python_identity_mismatch');
-run(runtimePythonReal, ['-I', '-c', 'import gateway, hermes_cli, httpx, openai'], 'runtime_python_invalid');
+let runtimeIdentity;
+try {
+  const metadata = fs.lstatSync(runtimeProbe);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) fail('runtime_probe_invalid');
+  runtimeIdentity = JSON.parse(run(runtimePythonReal, [
+    '-I', runtimeProbe,
+    '--install-root', installRoot,
+    '--hermes', hermesReal,
+    '--python', runtimePythonReal,
+    '--expected-version', expectedVersion,
+  ], 'runtime_contract_invalid'));
+} catch {
+  fail('runtime_contract_invalid');
+}
+if (runtimeIdentity?.status !== 'PASS'
+    || runtimeIdentity?.cliVersion !== expectedVersion
+    || runtimeIdentity?.metadataVersion !== expectedVersion
+    || runtimeIdentity?.appRoot !== runtimeAppReal
+    || runtimeIdentity?.hermesExecutable !== hermesReal
+    || runtimeIdentity?.pythonExecutable !== runtimePythonReal) {
+  fail('runtime_contract_invalid');
+}
 
 const mainPid = run(systemctlBin, ['show', 'ran-agent-hermes.service', '--property=MainPID', '--value'], 'runtime_main_pid_unavailable');
 if (!/^[0-9]+$/.test(mainPid) || Number(mainPid) <= 1) fail('runtime_main_pid_invalid');
@@ -153,5 +175,44 @@ try {
   fail('runtime_process_unavailable');
 }
 if (processPython !== runtimePythonReal) fail('runtime_process_contract_mismatch');
+
+let processArgs;
+let processEnvironment;
+try {
+  processArgs = fs.readFileSync(path.join(procRoot, mainPid, 'cmdline'))
+    .toString('utf8').split('\0').filter(Boolean);
+  const entries = fs.readFileSync(path.join(procRoot, mainPid, 'environ'))
+    .toString('utf8').split('\0').filter(Boolean);
+  processEnvironment = new Map();
+  for (const entry of entries) {
+    const separator = entry.indexOf('=');
+    if (separator <= 0) fail('runtime_process_environment_invalid');
+    const key = entry.slice(0, separator);
+    if (processEnvironment.has(key)) fail('runtime_process_environment_invalid');
+    processEnvironment.set(key, entry.slice(separator + 1));
+  }
+} catch {
+  fail('runtime_process_contract_unavailable');
+}
+let processArgv0;
+try {
+  processArgv0 = fs.realpathSync(processArgs[0] || '');
+} catch {
+  fail('runtime_process_argv_invalid');
+}
+if (processArgv0 !== runtimePythonReal
+    || processArgs[1] !== '-P'
+    || processArgs[2] !== '-m'
+    || processArgs[3] !== 'hermes_cli.main') {
+  fail('runtime_process_argv_mismatch');
+}
+for (const [key, value] of [
+  ['PYTHONPATH', path.join(installRoot, 'app')],
+  ['PYTHONNOUSERSITE', '1'],
+  ['PYTHONSAFEPATH', '1'],
+  ['PYTHONDONTWRITEBYTECODE', '1'],
+]) {
+  if (processEnvironment.get(key) !== value) fail(`runtime_process_environment_mismatch:${key}`);
+}
 
 process.stdout.write(`${hermesReal}\t${runtimePythonReal}\n`);
