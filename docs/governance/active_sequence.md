@@ -72,8 +72,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> independent exact-SHA R1F review (CLEAR)
   -> S12-R2 fresh production audit/copy rehearsal (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
   -> S12-R3A independent exact-SHA source review (CLEAR except server proofs)
-  -> R3-GATE-HERMES-TOPOLOGY-STALE repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
-  -> independent exact-SHA gate-repair review (REQUIRED)
+  -> first R3 gate repair d70a08fc (INDEPENDENT REVIEW BLOCKED)
+  -> R3 gate repair 2 (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
+  -> independent exact-SHA gate-repair-2 review (REQUIRED)
   -> S12-R3B immutable server gate/dry-run proof (NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
@@ -131,14 +132,21 @@ S12-R0 fresh read-only production audit (COMPLETE)
   but follow-up source inspection confirmed
   `R3-GATE-HERMES-TOPOLOGY-STALE`: the immutable gate still required two
   executable Hermes v0.13 runtimes even though the accepted production
-  topology is one unified v0.20 runtime on `8642`. The commit containing this
-  update is the bounded local gate repair; it validates the service-managed
-  unified executable, matching runtime Python/imports and runtime identity,
-  while treating the retired Full unit only as an inactive/disabled negative
-  invariant. Focused resolver/gate checks pass `3/3`; the affected release and
-  portability file reports 83 total tests: 80 pass and three unchanged Linux
-  root-only skips. R3 remains incomplete pending independent exact-SHA repair
-  review and R3-B server proof; R3-B is `NOT STARTED`.
+  topology is one unified v0.20 runtime on `8642`. Independent review of the
+  first repair `d70a08fc19699f439d50845b846678a9f65a2ef9` returned
+  `R3-GATE-HERMES-TOPOLOGY-STALE = NOT_RESOLVED` because it did not prove the
+  retired Full unit's governed persistent condition block and the Python
+  provider probe still required v0.13/`Project:` semantics. Repair 2 derives
+  the exact Full drop-in from the existing mutation contract, verifies its
+  installed/effective blocking condition without requiring a Full executable,
+  and makes the provider probe require exact v0.20 plus explicit import-capable
+  runtime Python without the obsolete Project-line layout. Focused resolver and
+  gate checks pass `2/2`; focused Python checks pass `4/4`; the affected release
+  and portability file reports 83 total tests: 80 pass and three unchanged
+  Linux root-only skips. The desktop has no truthful v0.20 runtime fixture, so
+  a complete service-managed `--all` proof remains R3-B. R3 remains incomplete
+  pending independent exact-SHA repair-2 review and R3-B server proof; R3-B is
+  `NOT STARTED`.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

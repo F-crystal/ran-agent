@@ -89,8 +89,10 @@ that was actually rehearsed. The later governance/evidence-only archive must
 not be described as the rehearsed runtime. R2 review is clear. R3-A found
 frozen candidate `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` clear except for
 server proofs, then follow-up inspection confirmed a stale split-v0.13
-immutable-gate contract. The bounded repair is the current review frontier;
-R3-B server proof must not start before its independent exact-SHA review.
+immutable-gate contract. Independent review found first repair `d70a08fc` still
+blocked on the unproven persistent Full condition and stale v0.13 Python probe.
+Bounded repair 2 is the current review frontier; R3-B server proof must not
+start before its independent exact-SHA review.
 
 ## Current Frontier
 
@@ -107,7 +109,7 @@ R3-B server proof must not start before its independent exact-SHA review.
 | R1F | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `08e3eea81c336ac48f3e0b85a87b0b5c6d445307` | R1E review CLEAR | Default timely delivery no longer depends on desktop presence; one existing Core attention-flush schedule owns durable backlog recovery. |
 | R2 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` by the evidence commit | R1F review CLEAR | Fresh R2-A audit and isolated R2-B rehearsal are clear; runtime rehearsal SHA is `08e3eea8`, distinct from the evidence archive. |
 | R3-A | `LOCAL_VERIFIED` | `REVIEWED` except server proofs | `ARCHIVED` at `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` | R2 review CLEAR | Candidate areas were clear, but follow-up source inspection found the stale Hermes release-gate topology blocker. |
-| R3-GATE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | confirmed `R3-GATE-HERMES-TOPOLOGY-STALE` | One unified v0.20 service runtime replaces split v0.13 gate authority; exact-SHA delta review is required. |
+| R3-GATE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | first repair `d70a08fc` review blocked | Repair 2 proves the governed Full condition block and exact-v0.20 Python probe; exact-SHA delta review is required. |
 | R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R3-GATE exact-SHA review CLEAR | Run the real immutable Linux/systemd identity and dry-run proof; local fixtures cannot claim production service-managed PASS. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
@@ -415,14 +417,20 @@ recovery is recorded independently and leaves
 - [x] Record blocker `R3-GATE-HERMES-TOPOLOGY-STALE`: frozen candidate
   `08ea6b0c` still required both Lite and retired Full executables, equality,
   Hermes v0.13 and its obsolete adjacent-Python layout.
-- [x] Repair only the immutable gate: resolve the single active managed
+- [x] First repair resolved the single active managed
   `ran-agent-hermes.service` executable, exact v0.20.0 contract, sealed matching
-  Python/imports, runtime identity and process interpreter; require retired
-  Full inactive/disabled without using it as runtime authority.
-- [x] Local focused checks pass `3/3`; the affected release/portability file
-  reports 83 total tests: 80 pass and three unchanged Linux root-only skips. Provider fixture now
-  models one unified v0.20 gateway and requires explicit runtime injection.
-- [ ] Independent exact-SHA review of the bounded gate repair reports `CLEAR`.
+  Python/imports, runtime identity and process interpreter, but its independent
+  review returned `R3-GATE-HERMES-TOPOLOGY-STALE = NOT_RESOLVED` because
+  `R3-GATE-FULL-CONDITION-BLOCK-UNPROVEN` and
+  `R3-GATE-PYTHON-PROBE-STALE` remained.
+- [x] Repair 2 derives the governed Full drop-in, proves the effective missing
+  condition target and rejects absent/wrong/neutralized blocks without a Full
+  executable; the Python provider probe now requires exact v0.20 and explicit
+  import-capable runtime Python without obsolete `Project:` semantics.
+- [x] Local focused resolver/gate checks pass `2/2`, focused Python checks pass
+  `4/4`, and the affected release/portability file reports 83 total tests: 80
+  pass and three unchanged Linux root-only skips.
+- [ ] Independent exact-SHA review of bounded gate repair 2 reports `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
 - [ ] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,
@@ -432,8 +440,16 @@ recovery is recorded independently and leaves
 - [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
   authorization with the exact SHA and summarized mutation.
 
-The local repair does not impersonate a real Linux systemd/`ubuntu:ubuntu`
-pass. That proof remains exclusively R3-B and is `NOT_STARTED`.
+Local repair 2 does not impersonate a real Linux systemd/`ubuntu:ubuntu` or
+service-managed v0.20 `--all` pass. Those proofs remain exclusively R3-B and
+are `NOT_STARTED`.
+
+Reviewer missing-proof items remain non-blocking for this bounded repair: an
+explicit local Python is not independently proven to belong to an explicit
+local Hermes binary, there is no dedicated wrong-group negative, and real
+Linux `ubuntu:ubuntu`/systemd/proc behavior remains R3-B. The v0.13/dual-runtime
+`diagnose-hermes-provider-boundary.sh` is a `NON_BLOCKING_STALE_DIAGNOSTIC`;
+it is not called by the immutable release gate or S12 execution authority.
 
 ### S12 — Core Cutover Gate
 

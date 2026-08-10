@@ -60,6 +60,7 @@ const pythonVersion = artifact?.python?.version;
 const expectedPythonDigest = artifact?.python?.executableSha256;
 const gateways = mutation?.topology?.after?.gateways;
 const retiredFull = mutation?.unitMutations?.find((item) => item?.unit === 'ran-agent-hermes-full.service');
+const retiredFullDropIn = retiredFull?.dropIn;
 if (mutation?.schemaVersion !== 1
     || mutation?.deploymentStatus !== 'DEPLOYED'
     || mutation?.artifactManifest?.path !== 'docs/governance/hermes_runtime_artifact.v1.json'
@@ -76,9 +77,30 @@ if (mutation?.schemaVersion !== 1
     || gateways.length !== 1
     || gateways[0]?.unit !== 'ran-agent-hermes.service'
     || gateways[0]?.port !== 8642
-    || retiredFull?.after !== 'inactive-disabled-and-condition-blocked') {
+    || retiredFull?.after !== 'inactive-disabled-and-condition-blocked'
+    || !path.isAbsolute(retiredFullDropIn || '')) {
   fail('unified_runtime_contract_invalid');
 }
+
+let retirementConditionPath;
+try {
+  const metadata = fs.lstatSync(retiredFullDropIn);
+  if (!metadata.isFile() || metadata.isSymbolicLink()) {
+    fail('retired_full_dropin_invalid');
+  }
+  const lines = fs.readFileSync(retiredFullDropIn, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith('#'));
+  const match = lines[1]?.match(/^ConditionPathExists=(\/[^|!\s]*)$/);
+  if (lines.length !== 2 || lines[0] !== '[Unit]' || !match) {
+    fail('retired_full_condition_invalid');
+  }
+  retirementConditionPath = match[1];
+} catch {
+  fail('retired_full_dropin_invalid');
+}
+if (fs.existsSync(retirementConditionPath)) fail('retired_full_condition_satisfied');
 
 if (run(systemctlBin, ['show', 'ran-agent-hermes.service', '--property=ActiveState', '--value'], 'unified_service_state_unavailable') !== 'active') {
   fail('unified_service_inactive');
@@ -86,6 +108,11 @@ if (run(systemctlBin, ['show', 'ran-agent-hermes.service', '--property=ActiveSta
 if (run(systemctlBin, ['show', 'ran-agent-hermes-full.service', '--property=ActiveState', '--value'], 'retired_full_active_state_unavailable') !== 'inactive'
     || run(systemctlBin, ['show', 'ran-agent-hermes-full.service', '--property=UnitFileState', '--value'], 'retired_full_unit_state_unavailable') !== 'disabled') {
   fail('retired_full_service_runnable');
+}
+const effectiveDropIns = run(systemctlBin, ['show', 'ran-agent-hermes-full.service', '--property=DropInPaths', '--value'], 'retired_full_dropins_unavailable').split(/\s+/);
+if (!effectiveDropIns.includes(retiredFullDropIn)
+    || run(systemctlBin, ['show', 'ran-agent-hermes-full.service', '--property=ConditionResult', '--value'], 'retired_full_condition_state_unavailable') !== 'no') {
+  fail('retired_full_condition_block_unproven');
 }
 if (run(systemctlBin, ['show', 'ran-agent-hermes.service', '--property=User', '--value'], 'runtime_user_unavailable') !== runtimeUser
     || run(systemctlBin, ['show', 'ran-agent-hermes.service', '--property=Group', '--value'], 'runtime_group_unavailable') !== runtimeGroup) {

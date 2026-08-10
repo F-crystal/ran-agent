@@ -3360,6 +3360,7 @@ test('release smoke executes named core and external journey suites without sele
 test('release gate has an all mode that invokes the named smoke matrix after isolated suites', () => {
   const source = readFileSync(join(root, 'scripts', 'hermes-release-gate.sh'), 'utf8');
   const hermesResolver = readFileSync(join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs'), 'utf8');
+  const providerProbe = readFileSync(join(root, 'tests', 'test_hermes_deepseek_provider.py'), 'utf8');
   const providerBoundary = readFileSync(join(root, 'node_bridge', 'tests', 'hermesGatewayProviderBoundary.integration.test.mjs'), 'utf8');
   const ombreContract = readFileSync(join(root, 'node_bridge', 'tests', 'ombreO1Contract.test.mjs'), 'utf8');
   assert.match(source, /--core\|--all\|--preflight-only/);
@@ -3370,6 +3371,9 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$HERMES_TEST_BIN"[\s\S]*-m pytest/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_PYTHON_BIN="\$HERMES_TEST_PYTHON_BIN"[\s\S]*-m pytest/);
   assert.doesNotMatch(source, /HERMES_TEST_PYTHON_BIN="\$project\/venv\/bin\/python"/);
+  assert.match(providerProbe, /Hermes Agent v0\.20\.0/);
+  assert.doesNotMatch(providerProbe, /Project:/);
+  assert.match(providerProbe, /runtime_env\.pop\("PYTHONPATH", None\)/);
   assert.match(source, /resolve-hermes-gate-runtime\.mjs/);
   assert.match(source, /STAGED_CANDIDATE.*RAN_AGENT_RELEASE_STAGED_CANDIDATE/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\]; then\s+PATH=\/usr\/bin:\/bin/);
@@ -3897,6 +3901,8 @@ test('staged Hermes gate binds one service-managed unified v0.20 runtime and ret
   const runtimeRoot = join(stage, 'runtimes');
   const scripts = join(stage, 'scripts');
   const governance = join(stage, 'docs', 'governance');
+  const fullDropIn = join(stage, 'systemd', 'ran-agent-hermes-full.service.d', '99-unified-topology.conf');
+  const retirementConditionPath = join(stage, 'retired-full-must-not-start');
   mkdirSync(scripts, { recursive: true });
   mkdirSync(governance, { recursive: true });
   copyFileSync(join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs'), join(scripts, 'resolve-hermes-gate-runtime.mjs'));
@@ -3942,8 +3948,14 @@ test('staged Hermes gate binds one service-managed unified v0.20 runtime and ret
       unitMutations: [{
         unit: 'ran-agent-hermes-full.service',
         after: 'inactive-disabled-and-condition-blocked',
+        dropIn: fullDropIn,
       }],
     }));
+  };
+
+  const writeFullBlock = (content = `[Unit]\nConditionPathExists=${retirementConditionPath}\n`) => {
+    mkdirSync(dirname(fullDropIn), { recursive: true });
+    writeFileSync(fullDropIn, content);
   };
 
   const makeSystemctl = (runtime, {
@@ -3955,6 +3967,8 @@ test('staged Hermes gate binds one service-managed unified v0.20 runtime and ret
     unifiedActive = true,
     fullActive = false,
     fullEnabled = false,
+    effectiveFullDropIn = fullDropIn,
+    conditionResult = 'no',
   } = {}) => {
     const dir = mkdtempSync(join(tmpdir(), 'ran-agent-hermes-gate-systemctl-'));
     const systemctl = join(dir, 'systemctl');
@@ -3975,6 +3989,8 @@ case "$cmd" in
       ran-agent-hermes.service:ActiveState) printf '%s\\n' ${JSON.stringify(unifiedActive ? 'active' : 'inactive')} ;;
       ran-agent-hermes-full.service:ActiveState) printf '%s\\n' ${JSON.stringify(fullActive ? 'active' : 'inactive')} ;;
       ran-agent-hermes-full.service:UnitFileState) printf '%s\\n' ${JSON.stringify(fullEnabled ? 'enabled' : 'disabled')} ;;
+      ran-agent-hermes-full.service:DropInPaths) printf '%s\\n' ${JSON.stringify(effectiveFullDropIn)} ;;
+      ran-agent-hermes-full.service:ConditionResult) printf '%s\\n' ${JSON.stringify(conditionResult)} ;;
     esac ;;
   cat)
     [ "$1" = ran-agent-hermes.service ] && printf '%s\\n' 'ExecStart=${configuredHermes} gateway run'
@@ -4002,13 +4018,39 @@ esac
   const badImports = makeRuntime('bad-imports', { imports: false });
   const missingPython = makeRuntime('missing-python');
   try {
+    writeFullBlock();
     writeContracts(valid);
     const accepted = makeSystemctl(valid);
+    assert.equal(existsSync(join(runtimeRoot, 'full', 'bin', 'hermes')), false, 'retired Full supplies no executable');
     assert.equal(runGateResolver(accepted, {
       PATH: join(stage, 'attacker-bin'),
       RAN_AGENT_HERMES_TEST_BIN: other.hermes,
       RAN_AGENT_SYSTEMCTL_BIN: '/attacker/systemctl',
     }), `${realpathSync(valid.hermes)}\t${realpathSync(valid.python)}`);
+
+    rmSync(fullDropIn);
+    assert.throws(() => runGateResolver(makeSystemctl(valid)), /Command failed/, 'missing retirement drop-in must fail');
+    writeFullBlock();
+    assert.throws(() => runGateResolver(makeSystemctl(valid, {
+      effectiveFullDropIn: join(stage, 'systemd', 'wrong.conf'),
+    })), /Command failed/, 'wrong effective drop-in must fail');
+    writeFullBlock(`[Unit]\nConditionPathExists=!${retirementConditionPath}\n`);
+    assert.throws(() => runGateResolver(makeSystemctl(valid)), /Command failed/, 'neutralized condition must fail');
+    writeFullBlock();
+    writeFileSync(retirementConditionPath, 'present');
+    assert.throws(() => runGateResolver(makeSystemctl(valid)), /Command failed/, 'satisfied condition must fail');
+    rmSync(retirementConditionPath);
+    const fullDropInTarget = `${fullDropIn}.target`;
+    writeFileSync(fullDropInTarget, `[Unit]\nConditionPathExists=${retirementConditionPath}\n`);
+    rmSync(fullDropIn);
+    symlinkSync(fullDropInTarget, fullDropIn);
+    assert.throws(() => runGateResolver(makeSystemctl(valid)), /Command failed/, 'symlinked retirement drop-in must fail');
+    rmSync(fullDropIn);
+    rmSync(fullDropInTarget);
+    writeFullBlock();
+    assert.throws(() => runGateResolver(makeSystemctl(valid, {
+      conditionResult: 'yes',
+    })), /Command failed/, 'effective condition must remain blocking');
 
     writeContracts(legacy);
     assert.throws(() => runGateResolver(makeSystemctl(legacy)), /Command failed/, 'v0.13 cannot be current unified authority');

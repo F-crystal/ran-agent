@@ -335,21 +335,22 @@ redacted evidence. That governance-only archive was not the runtime rehearsed
 by R2-B. R3-A reviewed frozen candidate
 `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` clear except for server proofs.
 Follow-up source inspection then confirmed blocker
-`R3-GATE-HERMES-TOPOLOGY-STALE`: the final immutable gate still resolved both
-Lite and retired Full executables, required equality, hard-coded Hermes v0.13
-and assumed its old adjacent-Python layout. The bounded local repair instead
-binds the gate to the existing deployed unified-v0.20 mutation/artifact
-contracts, the sole active `ran-agent-hermes.service`, its exact managed
-executable, the sealed `python/bin/python3.12`, required imports, service
-identity and running process interpreter. `ran-agent-hermes-full.service` is
-only required to remain inactive and disabled. The provider-boundary fixture
-now models one v0.20 gateway and no arbitrary user-binary fallback. Focused
-checks pass `3/3`; the affected release/portability file reports 83 total tests:
-80 pass and three unchanged Linux root-only skips. No Core or runtime product behavior changed.
-The gate repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit
-containing this update. R3 remains incomplete, R3-B is `NOT_STARTED`, and S12
-remains `NOT_STARTED` pending exact-SHA repair review, server proof and separate
-owner production authorization.
+`R3-GATE-HERMES-TOPOLOGY-STALE`. Independent review of first repair
+`d70a08fc19699f439d50845b846678a9f65a2ef9` classified that blocker
+`NOT_RESOLVED` and added `R3-GATE-FULL-CONDITION-BLOCK-UNPROVEN` plus
+`R3-GATE-PYTHON-PROBE-STALE`. Repair 2 keeps one unified v0.20 runtime authority,
+derives the retired Full drop-in from `hermes_runtime_mutation.v1.json`, proves
+the installed/effective condition is blocking without resolving a Full
+executable, and updates the provider probe to require exact v0.20 and explicit
+import-capable runtime Python without a `Project:`/PYTHONPATH layout. Focused
+resolver/gate checks pass `2/2`, focused Python checks pass `4/4`, and the
+affected release/portability file reports 83 total tests: 80 pass and three
+unchanged Linux root-only skips. No Core or runtime product behavior changed.
+Repair 2 is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing
+this update. A complete service-managed v0.20 `--all` proof is not representable
+on the v0.13-only desktop and remains R3-B. R3 remains incomplete, R3-B is
+`NOT_STARTED`, and S12 remains `NOT_STARTED` pending exact-SHA repair-2 review,
+server proof and separate owner production authorization.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an
