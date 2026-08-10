@@ -23,6 +23,11 @@ test('cutover seeds every replacement schedule active with first due after the w
   const manifest = loadCoreSystemScheduleManifest(MANIFEST_PATH);
   assert.equal(manifest.schedules.length, 13);
   assert.equal(new Set(manifest.schedules.map((item) => item.source)).has('python.scheduler.brain_loop'), false);
+  assert.deepEqual(manifest.schedules.filter((item) => item.id === 'attention-flush'), [{
+    id: 'attention-flush', source: 'node.attention_valve.flush', title: 'Attention backlog flush',
+    taskKind: 'system_maintenance', visible: false,
+    recurrence: { kind: 'interval', everySeconds: 60 },
+  }]);
 
   await commitCoreCutover({
     core,
@@ -50,6 +55,7 @@ test('cutover seeds every replacement schedule active with first due after the w
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE task_kind='scheduled_instruction'").get().count, 1);
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE task_kind='external_poll'").get().count, 1);
   assert.equal(inspector.prepare("SELECT payload_ref FROM schedule_spec_revision WHERE task_kind='external_poll'").get().payload_ref, 'external-poll:external-mcp-runtime');
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE payload_ref='system-task:attention-flush'").get().count, 1);
   assert.equal(inspector.prepare('SELECT count(*) AS count FROM wake_occurrence').get().count, 0);
   assert.equal(inspector.prepare('SELECT count(*) AS count FROM work_run').get().count, 0);
   inspector.close();

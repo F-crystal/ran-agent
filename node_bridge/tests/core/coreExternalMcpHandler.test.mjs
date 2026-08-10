@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
+import fs from 'node:fs';
 import test from 'node:test';
 
 import { openCoreDatabase } from '../../src/core/coreDb.mjs';
@@ -11,6 +12,7 @@ import {
 } from '../../src/core/coreExternalNotificationService.mjs';
 import { formatKeyedContentHashToken } from '../../src/core/coreHashToken.mjs';
 import { createCoreSchedulingService } from '../../src/core/coreScheduling.mjs';
+import { createCoreRuntimeComposition } from '../../src/core/coreRuntimeComposition.mjs';
 import { createCoreWorkRunWorker } from '../../src/core/coreWorkRunWorker.mjs';
 import { createTempCore, openTestInspector } from './helpers/testCoreInspector.mjs';
 
@@ -204,6 +206,7 @@ test('Core external MCP Work Run records candidates as facts without a send surf
     causationId: admissions[0].causationId,
   }];
   await bridge.attentionFlushHandler({ work: { work_run_id: 'attention-flush-work' } });
+  await bridge.attentionFlushHandler({ work: { work_run_id: 'attention-flush-work-replay' } });
   assert.deepEqual(registrations, [{
     payloadRef: admissions[0].payloadRef, causationId: admissions[0].causationId,
   }]);
@@ -218,6 +221,76 @@ test('Core external MCP Work Run records candidates as facts without a send surf
   assert.equal(inspect.prepare('SELECT count(*) AS count FROM presentation_outbox').get().count, 0);
   assert.equal(inspect.prepare('SELECT count(*) AS count FROM effect_attempt').get().count, 0);
   inspect.close();
+});
+
+test('ordinary proactive delivery reaches the typed Core receipt seam without desktop presence', async (t) => {
+  const fixture = await setupClaimedPoll(t);
+  await seedOwnerBinding(fixture.core);
+  const activity = {
+    activityId: 'activity-1', status: 'active', revision: 3, domain: 'forum',
+    scope: { serverId: 'forum-mcp', resourceId: 'topic-1' },
+    notifyTarget: { platform: 'feishu' },
+    checkpoint: { stateDigest: 'checkpoint-3', summary: 'The watched topic has a worthy update.' },
+  };
+  let bridge;
+  let providerCalls = 0;
+  const externalMcpRuntime = {
+    store: { get: () => activity },
+    async tick() {
+      providerCalls += 1;
+      await bridge.submitCandidate(readyCandidate(activity.checkpoint.summary), {
+        activityId: activity.activityId, revision: activity.revision,
+        checkpointDigest: activity.checkpoint.stateDigest,
+      });
+      return { ok: true };
+    },
+  };
+  bridge = createCoreExternalMcpHandler({
+    core: fixture.core, runtime: externalMcpRuntime, hashContent,
+    attentionValve: createAttentionValve({
+      statePath: `${fixture.root}/attention/delayed.json`, now: fixture.now,
+    }),
+    notificationService: createCoreExternalNotificationService({ core: fixture.core, now: fixture.now }),
+  });
+  await bridge.handler({ work: fixture.work, authority: fixture.authority });
+  assert.equal(providerCalls, 1);
+  assert.equal(fs.existsSync(`${fixture.root}/attention/presence.json`), false);
+  assert.equal(fixture.core.reader.pendingExternalPollProjections().length, 0);
+
+  const beforeDelivery = openTestInspector(fixture.dbPath);
+  const fact = beforeDelivery.prepare("SELECT journal_event_id FROM journal_event WHERE event_type='external_poll_fact_observed'").get();
+  assert.equal(beforeDelivery.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE task_kind='scheduled_instruction'").get().count, 1);
+  beforeDelivery.close();
+  fixture.setNow('2026-08-08T08:01:01.000Z');
+  await fixture.scheduling.wakeDue();
+
+  const messages = [];
+  const sends = [];
+  const runtime = createCoreRuntimeComposition({
+    runtime: { core: fixture.core, hashContent }, externalMcpRuntime,
+    channelHub: async (message) => {
+      messages.push(message);
+      return {
+        replyText: JSON.stringify({
+          action: 'notify', message: '关注的外部活动有一条值得查看的更新。',
+          evidence_refs: [`core-external-mcp:${fact.journal_event_id}`], why_now: 'worthy update',
+        }),
+        provider: 'hermes', model: 'synthetic',
+      };
+    },
+    sendFeishu: async (input) => { sends.push(input); },
+    now: fixture.now, env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
+  });
+  runtime.start();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await runtime.stop();
+  assert.equal(messages.length, 1);
+  assert.equal(sends.length, 1);
+  const afterDelivery = openTestInspector(fixture.dbPath);
+  assert.equal(afterDelivery.prepare('SELECT state FROM presentation_outbox').get().state, 'sent');
+  assert.equal(afterDelivery.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='package_b_presentation_result_recorded'").get().count, 1);
+  afterDelivery.close();
+  await fixture.core.close();
 });
 
 test('fact projection recovery crosses crash boundaries without replaying the provider or duplicating schedules', async (t) => {

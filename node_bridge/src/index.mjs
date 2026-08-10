@@ -26,7 +26,6 @@ import { createCoreRuntimeComposition } from './core/coreRuntimeComposition.mjs'
 import { createCoreExternalMcpHandler } from './core/coreExternalMcpHandler.mjs';
 import { createCoreExternalNotificationService } from './core/coreExternalNotificationService.mjs';
 import { createAttentionValve } from './attentionValve.mjs';
-import { createDesktopPresenceProvider } from './desktopPresence.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
@@ -842,13 +841,8 @@ async function main() {
       }),
   });
   if (coreRuntime) {
-    const presenceProvider = createDesktopPresenceProvider({
-      statePath: path.join(resolveStateDir(runtimeEnv), 'attention', 'presence.json'),
-      externalMcpRuntime,
-    });
     const attentionValve = createAttentionValve({
       statePath: path.join(resolveStateDir(runtimeEnv), 'attention', 'delayed.json'),
-      presenceProvider,
     });
     coreExternalMcp = createCoreExternalMcpHandler({
       core: coreRuntime.core, runtime: externalMcpRuntime, hashContent: coreRuntime.hashContent,

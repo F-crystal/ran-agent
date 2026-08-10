@@ -66,9 +66,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> R1D-L1 Feishu update command repair af25198 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
        -> independent exact-SHA R1D-L1 delta review (CLEAR)
        -> previous R1E candidate c8e5a882 (INDEPENDENT REVIEW BLOCKED)
-       -> bounded R1E projection/evidence repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
-       -> independent exact-SHA repaired R1E review (PENDING)
-       -> R1F real presence and attention admission/flush
+       -> bounded R1E projection/evidence repair 493c77aa (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+       -> independent exact-SHA repaired R1E review (CLEAR)
+       -> R1F owner attention policy and proactive delivery (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
+       -> independent exact-SHA R1F review (PENDING)
   -> S12-R2 fresh production-copy rehearsal and candidate gates (NOT STARTED)
   -> S12-R3 independent review plus exact-SHA dry-run evidence (NOT STARTED)
   -> explicit owner production authorization
@@ -106,9 +107,18 @@ S12-R0 fresh read-only production audit (COMPLETE)
   without provider replay, and binds any decision to the exact fact, Activity
   revision and checkpoint digest. Fresh repair evidence passes focused `18/18`
   and the smallest shared affected set `52/52`. The commit containing this
-  update is `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED`; its independent
-  exact-SHA review is the only ready frontier.
-  R1F through R3 remain serial and `NOT_STARTED`.
+  update is archived at `493c77aa90fe53bba8a10fd94dd03136ba51d4eb`;
+  its independent exact-SHA review is clear, so R1E is `LOCAL_VERIFIED`,
+  `REVIEWED` and `ARCHIVED`. R1F recalibrates the S12 attention policy without
+  adding another runtime: ordinary timely proactive content is eligible under
+  the valve's default state, ambient content stays silent, and synthetic quiet
+  states continue to exercise the durable delayed backlog. Desktop presence is
+  uncomposed and `POST_CUTOVER_OK`; Hermes game activity is not owner presence;
+  Telegram is future channel work; the existing Core-managed
+  `system-task:attention-flush` schedule remains the only flush clock. Fresh
+  focused evidence passes `60/60`. The commit containing this update is
+  `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED`; its exact-SHA review is the
+  current frontier. R2 and R3 remain serial and `NOT_STARTED`.
   Exact exit evidence and prohibited scope are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.
 

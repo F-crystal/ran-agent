@@ -7,13 +7,11 @@ function validSignal(value) {
     && Number.isFinite(Date.parse(value.observedAt)) && Number.isFinite(Date.parse(value.expiresAt)));
 }
 
-export function createDesktopPresenceProvider({ statePath, externalMcpRuntime, now = () => new Date() } = {}) {
+export function createDesktopPresenceProvider({ statePath, now = () => new Date() } = {}) {
   if (typeof statePath !== 'string' || !statePath.trim()) {
     throw Object.assign(new Error('desktop presence requires one state path'), { code: 'PRESENCE_STATE_PATH_REQUIRED' });
   }
   return () => {
-    const activities = externalMcpRuntime?.store?.list?.() || [];
-    if (activities.some((item) => item?.status === 'active' && item?.domain === 'game')) return 'gaming';
     const signal = readJsonState(statePath, {
       validate: validSignal, missingValue: null, critical: false,
     });

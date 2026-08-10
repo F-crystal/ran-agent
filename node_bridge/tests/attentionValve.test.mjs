@@ -30,6 +30,33 @@ function setup(t, { presence = 'available', criticalAllowlist = [] } = {}) {
   };
 }
 
+test('default owner-attention policy needs no presence signal and makes ordinary timely content eligible', (t) => {
+  const env = createIsolatedTestEnv(t, {}, 'attention-default-');
+  const valve = createAttentionValve({
+    statePath: path.join(env.RAN_AGENT_STATE_DIR, 'attention', 'delayed.json'),
+  });
+  assert.deepEqual(valve.evaluate({
+    contentClass: 'timely', fingerprint: 'external:default:1', summary: 'worthy update',
+  }), {
+    disposition: 'deliver_now', reason: 'presence_available', contentClass: 'timely',
+  });
+  assert.deepEqual(valve.evaluate({
+    contentClass: 'ambient', fingerprint: 'external:ambient:1', summary: 'background only',
+  }), { disposition: 'suppress_silent', contentClass: 'ambient' });
+  assert.equal(valve.listPending().length, 0);
+});
+
+test('synthetic delayed policies remain injectable without becoming S12 presence dependencies', (t) => {
+  for (const presence of ['focused', 'gaming', 'busy', 'dnd', 'unknown']) {
+    const { valve } = setup(t, { presence });
+    const decision = valve.evaluate({
+      contentClass: 'timely', fingerprint: `external:${presence}:1`, summary: 'policy-delayed update',
+    });
+    assert.equal(decision.disposition, 'delayed');
+    assert.equal(decision.reason, `presence_${presence}`);
+  }
+});
+
 test('timely results are delayed and coalesced by fingerprint while the owner is gaming', (t) => {
   const { valve, setPresence } = setup(t, { presence: 'gaming' });
   const first = valve.evaluate({

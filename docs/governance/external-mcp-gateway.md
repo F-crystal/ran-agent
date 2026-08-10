@@ -123,15 +123,20 @@ projection are one transaction; recovery replays only attention/schedule
 projection, never the provider. A notification is released only while the
 current external Activity exactly matches the projection's revision and
 checkpoint digest, and its evidence names the same Core fact. Fresh focused
-repair checks pass `18/18` and shared affected checks pass `52/52`. This is an
-archived local repair pending independent exact-SHA rereview, not production.
+repair checks pass `18/18` and shared affected checks pass `52/52`. The repaired
+archive `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` passed independent
+exact-SHA rereview; it remains local and is not production.
 
 The watcher never sends directly. Hermes continues to propose structured
 content and evidence plus an attention identifier; Node validates identifier,
-content class and format, then applies deduplication, notification budget,
-active-hours and coarse presence policy. Gaming/focus/do-not-disturb suppresses
-or coalesces noncritical visible delivery without stopping the watch or losing
-the Core fact. Only an owner-allowlisted critical class may bypass that state.
+content class and format. In the S12 candidate, ordinary timely content is
+eligible under the attention valve's no-provider default and ambient content is
+silent. Synthetic focused/gaming/busy/dnd/unknown policies still prove durable
+delay and coalescing, but desktop presence and explicit owner DND are
+`POST_CUTOVER_OK`, not runtime dependencies. Hermes activity in a game MCP does
+not establish owner gaming. The existing Core-managed attention-flush schedule
+is the single flush clock, and only an owner-allowlisted critical class or
+explicit reminder bypasses a synthetic quiet policy.
 The S10 migration manifest preserves existing watch scopes as paused until
 their watermark is accepted, so historical forum or external MCP results are
 not replayed as new notifications. The local target seam now records only an

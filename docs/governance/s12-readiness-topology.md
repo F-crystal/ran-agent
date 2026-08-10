@@ -51,10 +51,11 @@ flowchart TD
     R1D --> R1DL1["R1D-L1 Feishu update command repair af25198<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     R1DL1 --> R1DL1R["Independent exact-SHA R1D-L1 review<br/>CLEAR"]
     R1DL1R --> R1E0["Previous R1E c8e5a882<br/>REVIEW BLOCKED"]
-    R1E0 --> R1E["R1E projection/evidence repair<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
-    R1E --> R1ER["Independent exact-SHA repaired R1E review<br/>PENDING"]
-    R1ER --> R1F["R1F real presence + attention flush"]
-    R1F --> R2["R2 fresh production-copy rehearsal"]
+    R1E0 --> R1E["R1E repair 493c77aa<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    R1E --> R1ER["Independent exact-SHA repaired R1E review<br/>CLEAR"]
+    R1ER --> R1F["R1F owner attention policy + proactive delivery<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
+    R1F --> R1FR["Independent exact-SHA R1F review<br/>PENDING"]
+    R1FR --> R2["R2 fresh production-copy rehearsal"]
     R2 --> R3["R3 immutable candidate review + dry-run"]
     R3 --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
@@ -76,8 +77,10 @@ missing command pair and is archived at
 is clear. R1D dependency compatibility is closed. The first R1E archive
 `c8e5a88291bfe7e66a607a753a4994617aab0565` is review-blocked by
 `R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. The commit containing
-this ledger is the bounded repaired candidate; independent exact-SHA rereview
-is the current frontier and R1F has not started.
+the bounded repair is accepted at
+`493c77aa90fe53bba8a10fd94dd03136ba51d4eb` after a clear independent
+exact-SHA rereview. The commit containing this ledger is the
+recalibrated R1F candidate; its independent review is the current frontier.
 
 ## Current Frontier
 
@@ -90,8 +93,9 @@ is the current frontier and R1F has not started.
 | R1C | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1A/R1B/R1B.1 review closure | `e416172` was review-blocked; repaired archive `02b8f6491f4ca3013f847decdc59974a90bebdca` passed independent exact-SHA review. |
 | R1D | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` at `4e4f49e3f2f80555ba605308fce909fdfc8302a9` | R1C | Decision complete: all dependencies have an explicit disposition; no dependency changed. |
 | R1D-L1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `af25198654e048cc70e7e94a4c9974f2070428e0` | R1D | Exact one-line caller-contract repair and both versioned dry-runs passed independent narrow review. |
-| R1E | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1D-L1 review CLEAR | `c8e5a882` was review-blocked; repaired fact/projection atomicity and exact fact/revision/checkpoint binding await exact-SHA rereview. |
-| R1F–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
+| R1E | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` | R1D-L1 review CLEAR | `c8e5a882` was review-blocked; repaired fact/projection atomicity and exact fact/revision/checkpoint binding passed exact-SHA rereview. |
+| R1F | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1E review CLEAR | Default timely delivery no longer depends on desktop presence; one existing Core attention-flush schedule owns durable backlog recovery. |
+| R2–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production unchanged. |
 
 The previous implementation candidate is
@@ -305,7 +309,8 @@ do not reopen `document.write` semantics or upgrade the provider.
   `af25198654e048cc70e7e94a4c9974f2070428e0`.
 
 Completion marker: `LOCAL_VERIFIED + REVIEWED + ARCHIVED`. R1D dependency
-compatibility is closed; the repaired R1E archive now awaits exact-SHA rereview.
+compatibility is closed; repaired R1E is accepted at
+`493c77aa90fe53bba8a10fd94dd03136ba51d4eb`.
 
 ### R1E — External MCP Poll Through WorkRun Authority
 
@@ -333,28 +338,32 @@ second fact authority or allowing the provider to send directly to the owner.
   checkpoint digest and Core fact; later revision/digest mismatch suppresses.
 - [x] Fresh focused repair `18/18`, shared affected `52/52`, syntax and diff
   checks pass; the bounded repaired candidate is archived.
-- [ ] Independent exact-SHA repaired review is clear.
+- [x] Independent exact-SHA repaired review is clear for
+  `493c77aa90fe53bba8a10fd94dd03136ba51d4eb`.
 
-### R1F — Real Presence And Attention Admission/Flush
+### R1F — Owner Attention Policy And Proactive Delivery
 
-Purpose: prevent both disruptive interruptions and indefinite suppression with
-one real, coarse, expiring presence source.
+Purpose: let a worthy proactive fact reach the owner without a desktop-presence
+feed while preserving durable suppression/coalescing for policies that actually
+require delay.
 
-- [ ] One producer supplies only `available`, `gaming`, `focused`, `busy` or
-  `dnd` plus freshness; raw window titles are unnecessary.
-- [ ] Missing, malformed or stale state becomes `unknown`, never guessed
-  `available`.
-- [ ] One owner composes attention admission and backlog flush; no second
-  visible notification clock is created.
-- [ ] Gaming/focused/busy/dnd/unknown delay ordinary timely items; ambient stays
-  silent; allowlisted critical and explicit owner reminders retain bypass.
-- [ ] Equivalent fingerprints coalesce across quiet-to-available transition and
-  restart; facts arriving during flush are not lost or duplicated.
-- [ ] Available presence eventually flushes eligible backlog once.
-- [ ] Tests use synthetic state and targets; no production desktop probing or
-  real delivery occurs.
-- [ ] Focused and affected full suites pass; independent review and archive are
-  complete.
+- [x] The active S12 composition uses the existing attention valve without a
+  desktop presence provider; ordinary timely content is eligible by default.
+- [x] Ambient content remains silent. Synthetic focused/gaming/busy/dnd/unknown
+  states delay ordinary timely content without becoming production telemetry.
+- [x] Stable fingerprints coalesce; arrivals during flush survive stale
+  confirmation; interrupted flushes recover to pending after reopen.
+- [x] The existing managed Core manifest contains exactly one
+  `system-task:attention-flush` producer, and repeated flush executions do not
+  duplicate notification schedules.
+- [x] A synthetic external fact reaches attention admission, a replay-safe
+  notification schedule, Hermes decision and typed presentation receipt without
+  `presence.json`, a desktop reporter, a presence endpoint or a real send.
+- [x] Hermes game activity no longer infers owner gaming. Desktop presence and
+  explicit owner DND remain `POST_CUTOVER_OK`; Telegram is future channel work.
+- [x] Focused and smallest affected tests pass `60/60`; syntax, diff and
+  governance checks pass. The bounded candidate is archived.
+- [ ] Independent exact-SHA R1F review is clear.
 
 ### R2 — Fresh Production-Copy Rehearsal
 
@@ -436,24 +445,28 @@ Production changed: NO / YES (authorization reference)
 Do not accept a narrative “done” report without the checklist, exact evidence
 and status split above.
 
-The independent exact-SHA R1A and R1C reviews are already clear and must not be
-repeated. Review the archived R1D-L1 delta with this instruction:
+The independent R1A, R1C, R1D-L1 and repaired R1E reviews are already clear and
+must not be repeated. Review the archived R1F delta with this instruction:
 
 ```text
 Read AGENTS.md, docs/governance/active_sequence.md,
 docs/governance/s12-readiness-topology.md,
-docs/governance/current_runtime_status.md and
-docs/governance/r1d_dependency_compatibility.v1.json. Audit only the exact delta
-from `4e4f49e3f2f80555ba605308fce909fdfc8302a9` to the archived R1D-L1 SHA;
-do not reopen accepted R1C/R1D or start R1E/S12. Confirm the production adapter
-contains exactly one `--command overwrite` pair on `docs +update`, preserves the
-exact supplied document ID through update and fetch, and leaves exact canonical
-body readback, create behavior and ambiguous/no-resend unchanged. Verify the
-recorded focused `6/6` result and the fake-token dry-run evidence for CLI
-`1.0.66` and `1.0.85`. Confirm no CLI/dependency upgrade or unrelated source,
-provider, R1E, S12 or production change entered the delta. Report each R1D-L1
-checklist item PASS/FAIL, blockers, whether R1D-L1 may become `REVIEWED`, and
-whether R1E is the next ready node using the Reviewer Handoff Template.
+docs/governance/current_runtime_status.md and the R1F source/tests. Audit only
+the exact delta from accepted R1E
+`493c77aa90fe53bba8a10fd94dd03136ba51d4eb` to the archived R1F SHA; do not
+reopen accepted R1E or start R2/S12. Confirm the active Core composition no
+longer injects desktop presence; ordinary timely content defaults to eligible,
+ambient remains silent, and synthetic focused/gaming/busy/dnd/unknown states
+retain durable coalesced delay. Confirm Hermes game activity cannot infer owner
+gaming, exactly one managed `system-task:attention-flush` schedule exists,
+repeated flush/restart cannot duplicate or lose notification schedules, and the
+synthetic external fact reaches the typed presentation receipt without a
+presence file or direct provider send. Verify focused `14/14`, affected `46/46`
+and guarded aggregate `60/60` evidence. Confirm no desktop telemetry endpoint,
+Telegram implementation, explicit-DND action, second clock, dependency upgrade,
+R2/S12 or production change entered the delta. Report every R1F checklist item
+PASS/FAIL, blockers, whether R1F may become `REVIEWED`, and whether R2 is the
+next ready node using the Reviewer Handoff Template.
 ```
 
 ## Update Protocol

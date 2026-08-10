@@ -58,13 +58,18 @@ managed wake projection, WorkRun execution and terminal evidence, typed
 scheduled delivery, retained Python maintenance, and replay-safe Core reminder
 registration plus projection acknowledgement. It is not a deployable candidate:
 the external-MCP WorkRun composition now passes its serial R1E
-authority/replay/no-direct-send acceptance locally, while a real presence
-source still needs to own attention admission/flush. The ordered R1 frontier repaired the
+authority/replay/no-direct-send acceptance locally. R1F removes desktop
+presence from the S12 authority path: ordinary timely proactive content is
+eligible by default, ambient content remains silent, and the existing single
+Core-owned attention-flush schedule retains durable delayed/coalesced handling.
+The ordered R1 frontier repaired the
 observed web-tool route, locally verified the smallest effect-oriented Feishu
 document write/replan seam, and completed the bounded dependency compatibility
 decision. R1D-L1 has closed the exact update-command defect; the first R1E
-archive was review-blocked and its bounded repair is archived pending exact-SHA
-rereview before the frontier can continue to real presence. This does not
+archive was review-blocked and its bounded repair is accepted at
+`493c77aa90fe53bba8a10fd94dd03136ba51d4eb`. The recalibrated R1F archive now
+awaits exact-SHA review. Desktop presence and explicit DND are
+`POST_CUTOVER_OK`; Telegram is future channel work. This does not
 start S12 or authorize production. R1B is locally verified: the companion
 candidate has one generic Web surface (`mcp-search_hub`), the DLM-shaped handler
 check returned typed research evidence, and the affected Node/Python sets pass
@@ -95,8 +100,10 @@ compatible. Independent review blocked R1E archive `c8e5a882` on
 atomically reserves each fact projection, recovers it without provider replay,
 and requires exact fact/revision/checkpoint identity before presentation. Fresh
 repair evidence passes `18/18` focused and `52/52` shared affected. The repaired
-archive is `LOCAL_VERIFIED`, `NOT_REVIEWED` and awaits exact-SHA rereview. R1F
-and later nodes, including S12, remain `NOT_STARTED`;
+archive passed exact-SHA rereview and R1E is `LOCAL_VERIFIED`, `REVIEWED` and
+`ARCHIVED`. The commit containing this update is the R1F `LOCAL_VERIFIED`,
+`NOT_REVIEWED`, `ARCHIVED` candidate; R2 and later nodes, including S12, remain
+`NOT_STARTED`;
 production is unchanged.
 
 ## Lifecycle Stages

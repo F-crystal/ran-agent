@@ -228,10 +228,11 @@ the poller never sends a message directly.
 
 Hermes proposes semantic content plus an attention identifier. Node validates
 that identifier against the content class and payload format, then applies the
-owner's delivery policy using active hours, current queue activity, coarse
-presence such as gaming/focused/available, and the recent proactive-notification
-budget. Presence adapters run outside Core transactions and expose only the
-minimum state needed by the valve.
+owner's delivery policy. The S12 candidate treats ordinary timely content as
+eligible by default and ambient content as silent. Optional future policy
+providers may inject coarse quiet states such as gaming/focused/dnd, but they
+run outside Core transactions, expose only the minimum state needed by the
+valve, and are not prerequisites for proactive delivery.
 
 - `ambient` results remain silent and can be surfaced on the next owner turn;
 - `timely` results may be delayed and coalesced while the owner is gaming,
@@ -441,14 +442,15 @@ attention/schedule projection idempotently after the transaction, and recovers
 it without another provider call. Notification tasks carry the exact Activity
 revision, checkpoint digest and fact event; any mismatch suppresses before
 Hermes. Fresh repair evidence is `18/18` focused and `52/52` shared affected;
-the repaired archive remains `NOT_REVIEWED`. Attention delay/flush
-also needs a real presence source. The smallest accepted source shape is a coarse, expiring
-desktop signal (`available`, `gaming`, `focused`, `busy`, or `dnd`), with
-missing/stale data reported as unknown; raw window titles are not required.
-ActivityWatch's local active-window/AFK watchers are suitable as an optional
-producer, but Core must not poll Steam or invent `available` when the desktop
-signal is absent. The external-poll and `attention-flush` timer shapes are
-therefore design inventory, not permission to activate either consumer.
+the repaired archive `493c77aa90fe53bba8a10fd94dd03136ba51d4eb`
+passed independent exact-SHA rereview. R1F deliberately does not make owner
+attention depend on desktop presence. The S12 composition leaves the existing
+valve's no-provider default in authority: ordinary timely proactive content is
+eligible, ambient content is silent, and synthetic quiet policies exercise the
+durable delayed backlog. Hermes game activity never establishes owner gaming.
+Desktop presence and explicit owner DND are optional `POST_CUTOVER_OK` provider
+work, not S12 dependencies. The existing managed `attention-flush` schedule is
+the single Core-owned flush clock; no desktop callback or second timer is added.
 Production and S12 remain unchanged/not started.
 
 ## Semantic request, stable effect and provider boundary
@@ -500,8 +502,10 @@ versions without a CLI upgrade or external write. Its archived SHA
 R1D dependency compatibility is closed. The first R1E archive `c8e5a882` is
 review-blocked by `R1E-FACT-PROJECTION-GAP` and
 `R1E-REVISION-EVIDENCE-SKEW`; the commit containing the bounded repair is
-`LOCAL_VERIFIED`, `ARCHIVED`, `NOT_REVIEWED` and awaiting exact-SHA rereview.
-R1F has not started.
+accepted at `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` after exact-SHA
+rereview. The commit containing this update is the recalibrated R1F candidate:
+`LOCAL_VERIFIED`, `ARCHIVED`, `NOT_REVIEWED`. Desktop presence remains
+uncomposed, Telegram remains future channel work, and R2/S12 have not started.
 
 The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` was rejected
 by independent review. The bounded repair verifies one synthetic

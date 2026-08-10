@@ -264,11 +264,22 @@ resumes attention or deterministic notification registration without rerunning
 the provider; scheduled presentation requires the exact bound Activity
 revision, checkpoint digest and fact event. Fresh focused crash/binding checks
 pass `18/18`, and the smallest shared affected set passes `52/52`. The repaired
-archive is `LOCAL_VERIFIED` and `NOT_REVIEWED` pending exact-SHA rereview.
-Attention delay/flush still needs an actual presence producer rather than a
-guessed available state. Neither proposed timer row is activation evidence. S12
-remains `NOT STARTED` until the serial readiness nodes in `active_sequence.md`
-pass and the owner separately authorizes production.
+archive `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` passed independent
+exact-SHA rereview, so R1E is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`.
+
+R1F is recalibrated around owner attention policy rather than desktop sensing.
+The S12 candidate composes the existing attention valve without a desktop
+presence provider: ordinary timely proactive content is eligible under its
+default state, ambient content remains silent, and synthetic quiet states prove
+the durable delayed/coalescing seam. Hermes activity in a game domain no longer
+implies that the owner is gaming. The existing managed
+`system-task:attention-flush` schedule is the single Core-owned flush clock;
+focused local evidence passes `60/60`, including a typed synthetic delivery with
+no presence file or real send. Desktop presence and explicit owner DND are
+`POST_CUTOVER_OK`; Telegram is future channel work. The commit containing this
+update is the archived, not-yet-reviewed R1F candidate. S12 remains
+`NOT STARTED` until the remaining serial readiness nodes pass and the owner
+separately authorizes production.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an
@@ -312,7 +323,7 @@ archived at `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1` and the independent
 exact-SHA delta review is clear. R1A, R1B and R1B.1 are now `REVIEWED`. R1C
 adds the smallest effect-oriented Feishu `document.write` seam plus bounded
 internal replan. R1D has now decided exact dependency compatibility before
-external-MCP WorkRun composition, real presence/attention ownership and the
+external-MCP WorkRun composition, owner-attention policy acceptance and the
 fresh R2 rehearsal. The current server `lark-cli` observed during artifact
 recovery is `1.0.66` while `1.0.85` is offered; no upgrade occurred. Ombre and
 external providers remain optional adapters behind stable Hermes-facing product
@@ -355,10 +366,10 @@ External MCP remains behind the bridge-owned gateway and passes the focused
 compatibility set `26/26`; the dependency is `COMPATIBLE_AS_IS`. R1E preserves
 its accepted WorkRun/replay/no-direct-send acceptance while repairing
 `R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. Its repaired archive
-remains `NOT_REVIEWED`, so independent exact-SHA rereview is the current
-frontier. R1F and later nodes
-remain `NOT_STARTED`; no dependency or
-production state changed. Exact evidence and dispositions are recorded in
+`493c77aa90fe53bba8a10fd94dd03136ba51d4eb` passed independent exact-SHA
+rereview. R1F is now the locally verified, archived, not-yet-reviewed frontier;
+R2 and later nodes remain `NOT_STARTED`. No dependency or production state
+changed. Exact evidence and dispositions are recorded in
 `docs/governance/r1d_dependency_compatibility.v1.json`.
 
 The local Python entrypoint is now the ignored repository `.venv`, created from

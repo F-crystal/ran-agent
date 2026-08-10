@@ -55,6 +55,12 @@ test('main starts the v2 external MCP runtime instead of the legacy activity run
   assert.doesNotMatch(INDEX_SOURCE, /const activityRunner = startExternalMcpActivityRunnerLoop\(/);
 });
 
+test('Core owner attention defaults available without desktop telemetry or a second channel policy', () => {
+  assert.match(INDEX_SOURCE, /const attentionValve = createAttentionValve\(\{\s*statePath: path\.join\(resolveStateDir\(runtimeEnv\), 'attention', 'delayed\.json'\),\s*\}\)/);
+  assert.doesNotMatch(INDEX_SOURCE, /createDesktopPresenceProvider|presence\.json|\/v1\/presence/i);
+  assert.doesNotMatch(INDEX_SOURCE, /telegram/i);
+});
+
 test('runtime provider transport forwards only the selected manifest tool call after the bridge has authorized it', async () => {
   let received = null;
   const transport = createExternalMcpRuntimeTransport({
