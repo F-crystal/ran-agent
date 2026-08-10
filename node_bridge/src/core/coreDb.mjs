@@ -180,6 +180,7 @@ export class CoreDatabase {
       journalEventCount: () => Number(read('SELECT count(*) AS count FROM journal_event').count),
       journalEvent: (eventId) => read('SELECT * FROM journal_event WHERE journal_event_id=?', eventId),
       journalPayload: (payloadId) => read('SELECT * FROM journal_payload WHERE journal_payload_id=?', payloadId),
+      journalPayloadForEvent: (eventId) => read('SELECT * FROM journal_payload WHERE journal_event_id=?', eventId),
       ingressEventCount: () => Number(read('SELECT count(*) AS count FROM ingress_event').count),
       ingressEvent: (eventId) => read('SELECT * FROM ingress_event WHERE ingress_event_id=?', eventId),
       activity: (activityId) => read('SELECT * FROM activity WHERE activity_id=?', activityId),
@@ -188,6 +189,17 @@ export class CoreDatabase {
         'SELECT * FROM projector_cursor WHERE projector_id=? AND target_scope=?', projectorId, targetScope,
       ),
       projectionOutbox: (outboxId) => read('SELECT * FROM projection_outbox WHERE projection_outbox_id=?', outboxId),
+      externalPollProjectionForFact: (eventId) => read(`SELECT * FROM projection_outbox
+        WHERE projector_id='core-external-attention-v1' AND source_event_id=?`, eventId),
+      pendingExternalPollProjections: (limit = 32) => all(`SELECT outbox.*,event.correlation_id AS work_run_id
+        FROM projection_outbox outbox JOIN journal_event event
+          ON event.journal_event_id=outbox.source_event_id
+        WHERE outbox.projector_id='core-external-attention-v1'
+          AND outbox.state IN ('pending','failed')
+        ORDER BY outbox.source_sequence LIMIT ?`,
+      Math.max(1, Math.min(128, Number(limit) || 32))).map((row) => Object.freeze({ ...row })),
+      externalPollFactCountForWorkRun: (workRunId) => Number(read(`SELECT count(*) AS count
+        FROM journal_event WHERE event_type='external_poll_fact_observed' AND correlation_id=?`, workRunId).count),
       scheduleSpec: (scheduleSpecId) => read('SELECT * FROM schedule_spec WHERE schedule_spec_id=?', scheduleSpecId),
       scheduleSpecRevision: (revisionId) => read(
         'SELECT * FROM schedule_spec_revision WHERE schedule_spec_revision_id=?', revisionId,

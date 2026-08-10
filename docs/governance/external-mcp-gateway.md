@@ -116,9 +116,15 @@ Core Activity contract and aggregate payload. The existing fact repository
 rechecks that authority; candidate Activity/revision/checkpoint identity is
 exact, server identity comes from trusted runtime scope, and duplicate or
 reopened terminal work does not repeat provider execution or fact creation.
-The focused affected set passes `91/91` and full Core passes `185/185`. This is
-an archived local candidate pending independent exact-SHA review, not a
-production activation.
+Independent review blocked the first R1E candidate `c8e5a882` on
+`R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. The bounded repair
+uses the existing Core projection outbox: the fact and deterministic pending
+projection are one transaction; recovery replays only attention/schedule
+projection, never the provider. A notification is released only while the
+current external Activity exactly matches the projection's revision and
+checkpoint digest, and its evidence names the same Core fact. Fresh focused
+repair checks pass `18/18` and shared affected checks pass `52/52`. This is an
+archived local repair pending independent exact-SHA rereview, not production.
 
 The watcher never sends directly. Hermes continues to propose structured
 content and evidence plus an attention identifier; Node validates identifier,

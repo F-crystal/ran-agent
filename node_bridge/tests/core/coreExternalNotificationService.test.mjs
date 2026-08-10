@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { openCoreDatabase } from '../../src/core/coreDb.mjs';
-import { createCoreExternalNotificationService } from '../../src/core/coreExternalNotificationService.mjs';
+import {
+  createCoreExternalNotificationService,
+  formatExternalMcpTaskRef,
+} from '../../src/core/coreExternalNotificationService.mjs';
 import { createTempCore, openTestInspector } from './helpers/testCoreInspector.mjs';
 
 const NOW = '2026-08-08T10:00:00.000Z';
@@ -29,9 +32,33 @@ test('an admitted external fact creates one replay-safe scheduled instruction on
       eventId: 'external-fact-1', eventType: 'external_poll_fact_observed', ownerId: 'owner',
       originRef: 'fixture', sourceKind: 'external_mcp', sourceRef: 'fingerprint', createdAt: NOW,
     });
+    tx.journal.appendPayload({
+      payloadId: 'external-fact-payload-1', eventId: 'external-fact-1', storageKind: 'external_ref',
+      payloadRef: 'external-mcp:/activity/activity-1/revision/3',
+      contentHashToken: `hmac-sha256:v1:test:${'a'.repeat(64)}`,
+      sensitivity: 'sensitive', retentionClass: 'canonical', createdAt: NOW,
+    });
+    const payloadRef = formatExternalMcpTaskRef({
+      activityId: 'activity-1', revision: 3, checkpointDigest: 'checkpoint-3', factEventId: 'external-fact-1',
+    });
+    tx.projections.createCursor({
+      cursorId: 'external-fact-cursor-1', projectorId: 'core-external-attention-v1',
+      targetScope: 'external-fact-1', createdAt: NOW,
+    });
+    tx.projections.reserve({
+      outboxId: 'external-fact-projection-1', operationScope: 'external-notification:test',
+      operationKey: 'external-notification:test:1', projectorId: 'core-external-attention-v1',
+      targetScope: 'external-fact-1', sourceEventId: 'external-fact-1', sourceRevision: 0,
+      payloadRef, createdAt: NOW,
+    });
   });
   const service = createCoreExternalNotificationService({ core, now: () => new Date(NOW) });
-  const input = { payloadRef: 'external-mcp-task:activity-1:3', causationId: 'external-fact-1' };
+  const input = {
+    payloadRef: formatExternalMcpTaskRef({
+      activityId: 'activity-1', revision: 3, checkpointDigest: 'checkpoint-3', factEventId: 'external-fact-1',
+    }),
+    causationId: 'external-fact-1',
+  };
   const registered = await service.register(input);
   assert.equal(registered.disposition, 'registered');
   assert.equal((await service.register(input)).disposition, 'already_registered');

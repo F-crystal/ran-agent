@@ -8,6 +8,7 @@ const SAFE_ID = /^[A-Za-z0-9._:-]{1,160}$/;
 const SAFE_REF = /^[A-Za-z0-9._:/-]{1,512}$/;
 const FINGERPRINT = /^sha256:v1:[0-9a-f]{64}$/;
 const AGGREGATE_POLL_REF = 'external-poll:external-mcp-runtime';
+const PROJECTOR_ID = 'core-external-attention-v1';
 
 function identifier(value, field) {
   if (typeof value !== 'string' || !SAFE_ID.test(value)) {
@@ -34,7 +35,21 @@ function coreTimestamp(now) {
   return new Date(Math.floor(milliseconds / 1_000) * 1_000).toISOString();
 }
 
-export function createCoreExternalPollRepository({ get, run, now }) {
+export function createCoreExternalPollRepository({ get, run, now, projections }) {
+  function ensureProjection(eventId, payloadRef, createdAt) {
+    const stable = createHash('sha256').update(eventId).digest('hex').slice(0, 32);
+    const targetScope = eventId;
+    const cursorId = `cursor:external-attention:${stable}`;
+    const outboxId = `projection:external-attention:${stable}`;
+    projections.createCursor({ cursorId, projectorId: PROJECTOR_ID, targetScope, createdAt });
+    const outbox = projections.reserve({
+      outboxId, operationScope: `${PROJECTOR_ID}:${targetScope}`,
+      operationKey: `external-attention:${stable}`, projectorId: PROJECTOR_ID, targetScope,
+      sourceEventId: eventId, sourceRevision: 0, payloadRef, createdAt,
+    });
+    return Object.freeze({ cursorId, outboxId, outbox });
+  }
+
   function assertAuthority(input) {
     let active;
     try {
@@ -73,6 +88,7 @@ export function createCoreExternalPollRepository({ get, run, now }) {
         throw coreError('CORE_EXTERNAL_POLL_INPUT_INVALID', 'sourceFingerprint is invalid');
       }
       const payloadRef = payloadReference(input.payloadRef);
+      const projectionPayloadRef = payloadReference(input.projectionPayloadRef);
       const contentHashToken = assertKeyedContentHashToken(input.contentHashToken);
       const eventId = deterministicId('external-poll-fact', workRunId, sourceFingerprint);
       const payloadId = deterministicId('external-poll-payload', workRunId, sourceFingerprint);
@@ -85,7 +101,10 @@ export function createCoreExternalPollRepository({ get, run, now }) {
           || existing.payload_ref !== payloadRef || existing.content_hash_token !== contentHashToken) {
           throw coreError('CORE_OPERATION_KEY_CONFLICT', 'external poll fact identity has different semantics');
         }
-        return Object.freeze({ disposition: 'already_applied', eventId, payloadId });
+        return Object.freeze({
+          disposition: 'already_applied', eventId, payloadId,
+          projection: ensureProjection(eventId, projectionPayloadRef, coreTimestamp(now)),
+        });
       }
 
       const createdAt = coreTimestamp(now);
@@ -101,7 +120,10 @@ export function createCoreExternalPollRepository({ get, run, now }) {
         sensitivity,retention_class,created_at
       ) VALUES (?,?,'external_ref',?,?,'sensitive','canonical',?)`,
       payloadId, eventId, payloadRef, contentHashToken, createdAt);
-      return Object.freeze({ disposition: 'recorded', eventId, payloadId });
+      return Object.freeze({
+        disposition: 'recorded', eventId, payloadId,
+        projection: ensureProjection(eventId, projectionPayloadRef, createdAt),
+      });
     },
   });
 }

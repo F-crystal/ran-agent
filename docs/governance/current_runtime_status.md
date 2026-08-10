@@ -256,9 +256,15 @@ against the bridge-owned runtime store, server identity is derived from that
 trusted scope, and sanitized canonical output reaches only the existing
 hash-bound Core fact writer. Duplicate candidates coalesce, terminal restart
 does not repeat provider work, and the active Core path cannot reach the legacy
-direct checkpoint sender. R1E passes the focused affected set `91/91` and full
-Core `185/185`; it is `LOCAL_VERIFIED`, `NOT_REVIEWED` and archived pending an
-independent exact-SHA review.
+direct checkpoint sender. Independent review blocked the first R1E archive
+`c8e5a88291bfe7e66a607a753a4994617aab0565` on a fact-to-projection crash gap
+and revision/evidence skew. The bounded repair writes each external fact and
+its deterministic `projection_outbox` intent in one Core transaction. Recovery
+resumes attention or deterministic notification registration without rerunning
+the provider; scheduled presentation requires the exact bound Activity
+revision, checkpoint digest and fact event. Fresh focused crash/binding checks
+pass `18/18`, and the smallest shared affected set passes `52/52`. The repaired
+archive is `LOCAL_VERIFIED` and `NOT_REVIEWED` pending exact-SHA rereview.
 Attention delay/flush still needs an actual presence producer rather than a
 guessed available state. Neither proposed timer row is activation evidence. S12
 remains `NOT STARTED` until the serial readiness nodes in `active_sequence.md`
@@ -346,10 +352,11 @@ dependency compatibility is closed. Ombre projection is not composed
 by the S12 candidate and Agent
 Reach remains an optional future Search Hub provider, both `POST_CUTOVER_OK`.
 External MCP remains behind the bridge-owned gateway and passes the focused
-compatibility set `26/26`; the dependency is `COMPATIBLE_AS_IS`. R1E closes its
-local WorkRun/replay/no-direct-send acceptance with focused affected `91/91`
-and full Core `185/185`. Its archived candidate remains `NOT_REVIEWED`, so the
-independent exact-SHA R1E review is the current frontier. R1F and later nodes
+compatibility set `26/26`; the dependency is `COMPATIBLE_AS_IS`. R1E preserves
+its accepted WorkRun/replay/no-direct-send acceptance while repairing
+`R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. Its repaired archive
+remains `NOT_REVIEWED`, so independent exact-SHA rereview is the current
+frontier. R1F and later nodes
 remain `NOT_STARTED`; no dependency or
 production state changed. Exact evidence and dispositions are recorded in
 `docs/governance/r1d_dependency_compatibility.v1.json`.

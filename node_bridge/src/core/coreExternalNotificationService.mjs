@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 
 import { coreError } from './coreErrors.mjs';
 
-const PAYLOAD = /^external-mcp-task:([A-Za-z0-9._:-]{1,160}):(\d+)$/;
+const PAYLOAD = /^external-mcp-task:v2:([A-Za-z0-9_-]{1,480})$/;
+const SAFE_ID = /^[A-Za-z0-9._:-]{1,180}$/;
 
 function key(value) {
   return createHash('sha256').update(value).digest('hex').slice(0, 32);
@@ -10,9 +11,28 @@ function key(value) {
 
 export function parseExternalMcpTaskRef(value) {
   const match = String(value || '').match(PAYLOAD);
-  const revision = match ? Number(match[2]) : -1;
-  return match && Number.isSafeInteger(revision)
-    ? Object.freeze({ activityId: match[1], revision }) : null;
+  if (!match) return null;
+  try {
+    const decoded = JSON.parse(
+      Buffer.from(match[1], 'base64url').toString('utf8'),
+    );
+    if (!Array.isArray(decoded) || decoded.length !== 4) return null;
+    const [activityId, revision, checkpointDigest, factEventId] = decoded;
+    if (!SAFE_ID.test(activityId) || !Number.isSafeInteger(revision) || revision < 0
+      || typeof checkpointDigest !== 'string' || checkpointDigest.length < 1 || checkpointDigest.length > 240
+      || !SAFE_ID.test(factEventId)) return null;
+    return Object.freeze({ activityId, revision, checkpointDigest, factEventId });
+  } catch { return null; }
+}
+
+export function formatExternalMcpTaskRef({ activityId, revision, checkpointDigest, factEventId } = {}) {
+  const encoded = Buffer.from(JSON.stringify([activityId, revision, checkpointDigest, factEventId]), 'utf8')
+    .toString('base64url');
+  const payloadRef = `external-mcp-task:v2:${encoded}`;
+  if (!parseExternalMcpTaskRef(payloadRef) || payloadRef.length > 512) {
+    throw coreError('CORE_EXTERNAL_NOTIFICATION_INPUT_INVALID', 'external notification payload is invalid');
+  }
+  return payloadRef;
 }
 
 export function createCoreExternalNotificationService({
@@ -25,7 +45,13 @@ export function createCoreExternalNotificationService({
     async register({ payloadRef, causationId } = {}) {
       const parsed = parseExternalMcpTaskRef(payloadRef);
       if (!parsed) throw coreError('CORE_EXTERNAL_NOTIFICATION_INPUT_INVALID', 'external notification payload is invalid');
-      if (typeof causationId !== 'string' || !core.reader.journalEvent(causationId)) {
+      const fact = core.reader.journalEvent(causationId);
+      const factPayload = core.reader.journalPayloadForEvent?.(causationId);
+      const projection = core.reader.externalPollProjectionForFact?.(causationId);
+      if (parsed.factEventId !== causationId || fact?.event_type !== 'external_poll_fact_observed'
+        || fact.invalidated_at !== null
+        || factPayload?.payload_ref !== `external-mcp:/activity/${parsed.activityId}/revision/${parsed.revision}`
+        || projection?.payload_ref !== payloadRef) {
         throw coreError('CORE_EXTERNAL_NOTIFICATION_CAUSATION_INVALID', 'external notification requires its Core fact');
       }
       const identity = core.reader.conversationIdentityById(conversationId);

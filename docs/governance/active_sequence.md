@@ -65,8 +65,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> R1D bounded dependency compatibility decision 4e4f49e (COMPLETE, ARCHIVED)
        -> R1D-L1 Feishu update command repair af25198 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
        -> independent exact-SHA R1D-L1 delta review (CLEAR)
-       -> R1E external MCP poll through WorkRun authority (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
-       -> independent exact-SHA R1E review (PENDING)
+       -> previous R1E candidate c8e5a882 (INDEPENDENT REVIEW BLOCKED)
+       -> bounded R1E projection/evidence repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
+       -> independent exact-SHA repaired R1E review (PENDING)
        -> R1F real presence and attention admission/flush
   -> S12-R2 fresh production-copy rehearsal and candidate gates (NOT STARTED)
   -> S12-R3 independent review plus exact-SHA dry-run evidence (NOT STARTED)
@@ -98,9 +99,15 @@ S12-R0 fresh read-only production audit (COMPLETE)
   the exact claimed WorkRun revision/fence/lease, active Core Activity and
   aggregate payload before `runtime.tick`; candidate activity/revision and
   checkpoint identity are rechecked before the existing fact writer. Its
-  focused affected set passes `91/91` and the full Core set passes `185/185`.
-  The commit containing this update is the archived R1E candidate and remains
-  `NOT_REVIEWED`; the independent exact-SHA review is the only ready frontier.
+  first candidate `c8e5a88291bfe7e66a607a753a4994617aab0565` passed its
+  original focused/full sets but independent review found
+  `R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. The bounded
+  repair atomically reserves a projection with each fact, recovers projection
+  without provider replay, and binds any decision to the exact fact, Activity
+  revision and checkpoint digest. Fresh repair evidence passes focused `18/18`
+  and the smallest shared affected set `52/52`. The commit containing this
+  update is `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED`; its independent
+  exact-SHA review is the only ready frontier.
   R1F through R3 remain serial and `NOT_STARTED`.
   Exact exit evidence and prohibited scope are defined in the detailed ledger.
 - S12 remains `NOT STARTED`; production source and services are unchanged.

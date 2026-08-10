@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { openCoreDatabase } from '../../src/core/coreDb.mjs';
 import { createCoreExternalPollService } from '../../src/core/coreExternalPoll.mjs';
+import { formatExternalMcpTaskRef } from '../../src/core/coreExternalNotificationService.mjs';
 import { formatKeyedContentHashToken } from '../../src/core/coreHashToken.mjs';
 import { createCoreSchedulingService } from '../../src/core/coreScheduling.mjs';
 import { createTempCore, openTestInspector } from './helpers/testCoreInspector.mjs';
@@ -45,6 +47,11 @@ test('external poll worker records one Core fact and has no visible-send surface
     payloadRef: 'vault:/external-mcp/fact-1',
     contentHashToken: formatKeyedContentHashToken({ keyId: 'core-test', digest: 'b'.repeat(64) }),
   };
+  const factEventId = `external-poll-fact:v1:${createHash('sha256')
+    .update(`${work.work_run_id}\0${input.sourceFingerprint}`).digest('hex')}`;
+  input.projectionPayloadRef = formatExternalMcpTaskRef({
+    activityId: 'activity-1', revision: 1, checkpointDigest: 'checkpoint-1', factEventId,
+  });
   await assert.rejects(facts.recordFact({ ...input, authority: {
     workRunId: work.work_run_id, expectedRevision: 1, fenceToken: 1,
     leaseOwner: 'external-poll-worker', leaseId: 'missing',
@@ -66,11 +73,37 @@ test('external poll worker records one Core fact and has no visible-send surface
   await assert.rejects(facts.recordFact({ ...input, authority, payloadRef: 'vault:/external-mcp/fact-2' }), {
     code: 'CORE_OPERATION_KEY_CONFLICT',
   });
-  assert.deepEqual(Object.keys(facts), ['assertAuthority', 'recordFact']);
+  assert.equal(core.reader.externalPollProjectionForFact(factEventId)?.state, 'pending');
+  const legacyFingerprint = `sha256:v1:${'c'.repeat(64)}`;
+  const legacySuffix = createHash('sha256').update(`${work.work_run_id}\0${legacyFingerprint}`).digest('hex');
+  const legacyEventId = `external-poll-fact:v1:${legacySuffix}`;
+  const legacyPayloadId = `external-poll-payload:v1:${legacySuffix}`;
+  const legacyInput = {
+    ...input,
+    sourceFingerprint: legacyFingerprint,
+    projectionPayloadRef: formatExternalMcpTaskRef({
+      activityId: 'activity-1', revision: 1, checkpointDigest: 'checkpoint-1', factEventId: legacyEventId,
+    }),
+  };
+  await core.writer.write((tx) => {
+    tx.journal.append({
+      eventId: legacyEventId, eventType: 'external_poll_fact_observed', ownerId: 'owner',
+      activityId: 'external-poll-activity', actorRef: 'forum-mcp', originRef: 'core-external-poll-worker',
+      sourceKind: 'external_mcp', sourceRef: legacyFingerprint, revision: 0,
+      causationId: 'external-poll-causation', correlationId: work.work_run_id, createdAt: current.toISOString(),
+    });
+    tx.journal.appendPayload({
+      payloadId: legacyPayloadId, eventId: legacyEventId, storageKind: 'external_ref',
+      payloadRef: legacyInput.payloadRef, contentHashToken: legacyInput.contentHashToken,
+      sensitivity: 'sensitive', retentionClass: 'canonical', createdAt: current.toISOString(),
+    });
+  });
+  assert.equal((await facts.recordFact({ ...legacyInput, authority })).disposition, 'already_applied');
+  assert.equal(core.reader.externalPollProjectionForFact(legacyEventId)?.state, 'pending');
   await core.close();
 
   const inspect = openTestInspector(dbPath);
-  assert.equal(inspect.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='external_poll_fact_observed'").get().count, 1);
+  assert.equal(inspect.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='external_poll_fact_observed'").get().count, 2);
   assert.equal(inspect.prepare('SELECT count(*) AS count FROM presentation_outbox').get().count, 0);
   assert.equal(inspect.prepare('SELECT count(*) AS count FROM effect_attempt').get().count, 0);
   inspect.close();

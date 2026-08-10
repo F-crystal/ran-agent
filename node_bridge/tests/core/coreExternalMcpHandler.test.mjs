@@ -3,7 +3,12 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 
 import { openCoreDatabase } from '../../src/core/coreDb.mjs';
+import { createAttentionValve } from '../../src/attentionValve.mjs';
 import { createCoreExternalMcpHandler } from '../../src/core/coreExternalMcpHandler.mjs';
+import {
+  createCoreExternalNotificationService,
+  parseExternalMcpTaskRef,
+} from '../../src/core/coreExternalNotificationService.mjs';
 import { formatKeyedContentHashToken } from '../../src/core/coreHashToken.mjs';
 import { createCoreSchedulingService } from '../../src/core/coreScheduling.mjs';
 import { createCoreWorkRunWorker } from '../../src/core/coreWorkRunWorker.mjs';
@@ -22,7 +27,7 @@ async function setupClaimedPoll(t, {
   activityState = 'active', leaseUntil = '2026-08-08T08:03:00.000Z',
   claimWork = true,
 } = {}) {
-  const { dbPath } = createTempCore(t, 'hermes-core-external-mcp-authority-');
+  const { root, dbPath } = createTempCore(t, 'hermes-core-external-mcp-authority-');
   let current = new Date(START);
   const core = openCoreDatabase({ dbPath, now: () => current });
   core.migrate();
@@ -52,7 +57,7 @@ async function setupClaimedPoll(t, {
   const work = core.reader.scheduledWorkQueue()[0] ?? null;
   if (!work || !claimWork) {
     return {
-      core, dbPath, scheduling, work, authority: null, now: () => current,
+      core, root, dbPath, scheduling, work, authority: null, now: () => current,
       setNow(value) { current = new Date(value); },
     };
   }
@@ -62,7 +67,7 @@ async function setupClaimedPoll(t, {
     leaseUntil, operationKey: 'poll:claim',
   });
   return {
-    core, dbPath, scheduling, work,
+    core, root, dbPath, scheduling, work,
     authority: {
       workRunId: claim.workRunId, expectedRevision: claim.revision,
       fenceToken: claim.fenceToken, leaseOwner: 'external-mcp-worker', leaseId: claim.lease.lease_id,
@@ -70,6 +75,23 @@ async function setupClaimedPoll(t, {
     now: () => current,
     setNow(value) { current = new Date(value); },
   };
+}
+
+async function seedOwnerBinding(core) {
+  await core.writer.write((tx) => {
+    tx.packageBTurn.createOrResolveConversation({
+      conversationId: 'system-owner-conversation', canonicalConversationKey: 'system-owner-conversation',
+      ownerId: 'owner', actorRef: 'owner:verified', platform: 'feishu', primaryFrontend: 'feishu',
+      sourceInstanceId: 'node-channel-hub:feishu', platformConversationBinding: 'feishu:owner', createdAt: START,
+    });
+    tx.packageBPresentation.createOrReadBinding({
+      operationKey: 'external:test:binding', bindingId: 'system-owner-binding',
+      conversationId: 'system-owner-conversation', ownerId: 'owner',
+      sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu',
+      destinationKind: 'conversation', destinationRef: 'owner-dm',
+      adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
+    });
+  });
 }
 
 function inertAttention() {
@@ -171,7 +193,10 @@ test('Core external MCP Work Run records candidates as facts without a send surf
   assert.equal((await worker.runOnce())[0].state, 'completed');
   assert.equal(providerCalls, 1);
   assert.equal(admissions.length, 1);
-  assert.equal(admissions[0].payloadRef, 'external-mcp-task:activity-1:3');
+  assert.deepEqual(parseExternalMcpTaskRef(admissions[0].payloadRef), {
+    activityId: 'activity-1', revision: 3, checkpointDigest: 'checkpoint-1',
+    factEventId: admissions[0].causationId,
+  });
   assert.equal(registrations.length, 0);
   flushCandidates = [{
     fingerprint: admissions[0].fingerprint,
@@ -193,6 +218,83 @@ test('Core external MCP Work Run records candidates as facts without a send surf
   assert.equal(inspect.prepare('SELECT count(*) AS count FROM presentation_outbox').get().count, 0);
   assert.equal(inspect.prepare('SELECT count(*) AS count FROM effect_attempt').get().count, 0);
   inspect.close();
+});
+
+test('fact projection recovery crosses crash boundaries without replaying the provider or duplicating schedules', async (t) => {
+  for (const mode of ['before_attention', 'before_register', 'after_register', 'after_delayed']) {
+    await t.test(mode, async (st) => {
+      const fixture = await setupClaimedPoll(st);
+      await seedOwnerBinding(fixture.core);
+      const activity = {
+        activityId: 'activity-1', status: 'active', revision: 3,
+        scope: { serverId: 'forum-mcp' }, notifyTarget: { platform: 'feishu' },
+        checkpoint: { stateDigest: 'checkpoint-3', summary: 'A durable external checkpoint is ready.' },
+      };
+      let providerCalls = 0;
+      let bridge;
+      const durableValve = mode === 'after_delayed' ? createAttentionValve({
+        statePath: `${fixture.root}/attention.json`, now: fixture.now, presenceProvider: () => 'gaming',
+      }) : null;
+      const firstService = createCoreExternalNotificationService({ core: fixture.core, now: fixture.now });
+      const runtime = {
+        store: { get: () => activity },
+        async tick() {
+          providerCalls += 1;
+          await bridge.submitCandidate(readyCandidate(), {
+            activityId: activity.activityId, revision: activity.revision,
+            checkpointDigest: activity.checkpoint.stateDigest,
+          });
+          return { ok: true };
+        },
+      };
+      bridge = createCoreExternalMcpHandler({
+        core: fixture.core, runtime, hashContent,
+        attentionValve: durableValve || {
+          evaluate() {
+            if (mode === 'before_attention') throw new Error('injected crash before attention');
+            return { disposition: 'deliver_now' };
+          },
+          flush: () => [], confirmFlushed() {},
+        },
+        notificationService: {
+          async register(input) {
+            if (mode === 'before_register') throw new Error('injected crash before register');
+            return firstService.register(input);
+          },
+        },
+        afterProjectionEffect: async () => {
+          if (['after_register', 'after_delayed'].includes(mode)) throw new Error('injected crash before projection completion');
+        },
+      });
+      await assert.rejects(bridge.handler({ work: fixture.work, authority: fixture.authority }));
+      assert.equal(providerCalls, 1);
+      assert.equal(fixture.core.reader.pendingExternalPollProjections().length, 1);
+      await fixture.core.close();
+
+      const reopened = openCoreDatabase({ dbPath: fixture.dbPath, now: fixture.now });
+      const recoveredValve = mode === 'after_delayed' ? createAttentionValve({
+        statePath: `${fixture.root}/attention.json`, now: fixture.now, presenceProvider: () => 'gaming',
+      }) : { evaluate: () => ({ disposition: 'deliver_now' }), flush: () => [], confirmFlushed() {} };
+      const recovered = createCoreExternalMcpHandler({
+        core: reopened,
+        runtime: { store: { get: () => activity }, async tick() { providerCalls += 1; return { ok: true }; } },
+        hashContent, attentionValve: recoveredValve,
+        notificationService: createCoreExternalNotificationService({ core: reopened, now: fixture.now }),
+      });
+      await recovered.recoverPendingProjections();
+      assert.equal(reopened.reader.pendingExternalPollProjections().length, 0);
+      if (mode === 'after_delayed') assert.equal(recoveredValve.listPending().length, 1);
+      const resumed = await recovered.handler({ work: fixture.work, authority: fixture.authority });
+      assert.match(resumed.resultRef, /core-external-mcp-poll:/);
+      assert.equal(providerCalls, 1);
+      const inspect = openTestInspector(fixture.dbPath);
+      assert.equal(inspect.prepare('SELECT count(*) AS count FROM schedule_spec').get().count,
+        mode === 'after_delayed' ? 1 : 2);
+      assert.equal(inspect.prepare("SELECT count(*) AS count FROM projection_outbox WHERE projector_id='core-external-attention-v1' AND state='completed'").get().count, 1);
+      inspect.close();
+      await reopened.close();
+    });
+  }
 });
 
 test('stale revision, fence, lease owner, or lease id rejects before provider execution', async (t) => {

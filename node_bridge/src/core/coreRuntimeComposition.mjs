@@ -62,10 +62,18 @@ export function createCoreRuntimeComposition({
       const externalTask = parseExternalMcpTaskRef(task.payloadRef);
       if (externalTask) {
         const activity = externalMcpRuntime?.store?.get?.(externalTask.activityId);
-        if (!activity || Number(activity.revision) < externalTask.revision) {
+        const fact = runtime.core.reader.journalEvent(externalTask.factEventId);
+        const factPayload = runtime.core.reader.journalPayloadForEvent(externalTask.factEventId);
+        const projection = runtime.core.reader.externalPollProjectionForFact(externalTask.factEventId);
+        if (!activity || activity.status !== 'active'
+          || Number(activity.revision) !== externalTask.revision
+          || String(activity.checkpoint?.stateDigest || '') !== externalTask.checkpointDigest
+          || fact?.event_type !== 'external_poll_fact_observed' || fact.invalidated_at !== null
+          || factPayload?.payload_ref !== `external-mcp:/activity/${externalTask.activityId}/revision/${externalTask.revision}`
+          || projection?.state !== 'completed' || projection.payload_ref !== task.payloadRef) {
           return { suppressSend: true, provider: 'core', model: 'external-fact-state-check' };
         }
-        const evidenceRef = `core-external-mcp:${externalTask.activityId}:${externalTask.revision}`;
+        const evidenceRef = `core-external-mcp:${externalTask.factEventId}`;
         const message = buildExternalMcpSyntheticTurn({
           id: `core-external-${digest(task.workRunId)}`,
           kind: activity.domain === 'game' ? 'game' : activity.domain === 'forum' ? 'forum' : 'external_mcp',
@@ -152,7 +160,7 @@ export function createCoreRuntimeComposition({
     : reminderSync.canHandle(input.work) ? reminderSync(input) : pythonMaintenance(input));
   maintenance.canHandle = (work) => Boolean(attentionFlushHandler?.canHandle?.(work))
     || reminderSync.canHandle(work) || pythonMaintenance.canHandle(work);
-  const worker = createCoreWorkRunWorker({
+  const workRunWorker = createCoreWorkRunWorker({
     core: runtime.core,
     hashContent: runtime.hashContent,
     handlers: {
@@ -162,6 +170,13 @@ export function createCoreRuntimeComposition({
     },
     now,
   });
+  const worker = typeof externalPollHandler?.recoverPendingProjections === 'function'
+    ? Object.freeze({
+      async runOnce() {
+        await externalPollHandler.recoverPendingProjections();
+        return workRunWorker.runOnce();
+      },
+    }) : workRunWorker;
   return createCoreWorkRunRuntime({
     worker, logger, intervalMs: Math.max(250, Number(env.RAN_AGENT_CORE_WORK_POLL_MS || 5_000)),
   });

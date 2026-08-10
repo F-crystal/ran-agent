@@ -130,7 +130,6 @@ export function createCoreTransactionFacade({ assertActive, prepare, now = () =>
   const packageBFinal = packageBPresentationParts.finalRepository;
   const packageBPresentation = packageBPresentationParts.presentationRepository;
   const schedules = createCoreScheduleRepository({ get, all, run, now });
-  const externalPoll = createCoreExternalPollRepository({ get, run, now });
 
   const activities = freezeNamespace({
     create(input) {
@@ -451,6 +450,7 @@ export function createCoreTransactionFacade({ assertActive, prepare, now = () =>
       });
     },
   });
+  const externalPoll = createCoreExternalPollRepository({ get, run, now, projections });
 
   const revisions = freezeNamespace({
     compareAndSetWorkRunState(input) {

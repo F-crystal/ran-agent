@@ -433,8 +433,15 @@ scan/executor through an `external_poll` WorkRun into hash-bound Core facts and
 Core delivery. R1E now reuses the generic claimed-WorkRun assertion before
 provider execution, rechecks the same authority at fact commit, binds the
 current external Activity revision/checkpoint and derives server identity from
-trusted runtime scope. Its focused affected set passes `91/91` and full Core
-passes `185/185`; the archive remains `NOT_REVIEWED`. Attention delay/flush
+trusted runtime scope. The first archive `c8e5a882` was review-blocked because
+a committed fact had no atomic replayable attention projection and an old
+notification could read a newer mutable checkpoint. The repaired path reserves
+a deterministic Core projection in the same transaction as the fact, completes
+attention/schedule projection idempotently after the transaction, and recovers
+it without another provider call. Notification tasks carry the exact Activity
+revision, checkpoint digest and fact event; any mismatch suppresses before
+Hermes. Fresh repair evidence is `18/18` focused and `52/52` shared affected;
+the repaired archive remains `NOT_REVIEWED`. Attention delay/flush
 also needs a real presence source. The smallest accepted source shape is a coarse, expiring
 desktop signal (`available`, `gaming`, `focused`, `busy`, or `dnd`), with
 missing/stale data reported as unknown; raw window titles are not required.
@@ -490,8 +497,11 @@ adapter. It leaves stable effect semantics and exact fetch/readback unchanged,
 passes the focused set `6/6`, and is accepted by fake-token dry-runs on both
 versions without a CLI upgrade or external write. Its archived SHA
 `af25198654e048cc70e7e94a4c9974f2070428e0` passed narrow independent review;
-R1D dependency compatibility is closed. R1E is `LOCAL_VERIFIED`, archived and
-awaiting independent exact-SHA review; R1F has not started.
+R1D dependency compatibility is closed. The first R1E archive `c8e5a882` is
+review-blocked by `R1E-FACT-PROJECTION-GAP` and
+`R1E-REVISION-EVIDENCE-SKEW`; the commit containing the bounded repair is
+`LOCAL_VERIFIED`, `ARCHIVED`, `NOT_REVIEWED` and awaiting exact-SHA rereview.
+R1F has not started.
 
 The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` was rejected
 by independent review. The bounded repair verifies one synthetic

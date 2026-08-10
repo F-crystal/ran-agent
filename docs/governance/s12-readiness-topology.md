@@ -50,8 +50,9 @@ flowchart TD
     RC --> R1D["R1D dependency compatibility decision 4e4f49e<br/>COMPLETE · ARCHIVED"]
     R1D --> R1DL1["R1D-L1 Feishu update command repair af25198<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     R1DL1 --> R1DL1R["Independent exact-SHA R1D-L1 review<br/>CLEAR"]
-    R1DL1R --> R1E["R1E external MCP through WorkRun<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
-    R1E --> R1ER["Independent exact-SHA R1E review<br/>PENDING"]
+    R1DL1R --> R1E0["Previous R1E c8e5a882<br/>REVIEW BLOCKED"]
+    R1E0 --> R1E["R1E projection/evidence repair<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
+    R1E --> R1ER["Independent exact-SHA repaired R1E review<br/>PENDING"]
     R1ER --> R1F["R1F real presence + attention flush"]
     R1F --> R2["R2 fresh production-copy rehearsal"]
     R2 --> R3["R3 immutable candidate review + dry-run"]
@@ -72,9 +73,11 @@ It found no required dependency upgrade, but both checked CLI versions require
 an update subcommand that the accepted adapter omitted. R1D-L1 adds exactly the
 missing command pair and is archived at
 `af25198654e048cc70e7e94a4c9974f2070428e0`; its narrow exact-SHA delta review
-is clear. R1D dependency compatibility is closed. R1E is locally verified and
-archived by the commit containing this ledger; independent exact-SHA review is
-the current frontier and R1F has not started.
+is clear. R1D dependency compatibility is closed. The first R1E archive
+`c8e5a88291bfe7e66a607a753a4994617aab0565` is review-blocked by
+`R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. The commit containing
+this ledger is the bounded repaired candidate; independent exact-SHA rereview
+is the current frontier and R1F has not started.
 
 ## Current Frontier
 
@@ -87,7 +90,7 @@ the current frontier and R1F has not started.
 | R1C | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1A/R1B/R1B.1 review closure | `e416172` was review-blocked; repaired archive `02b8f6491f4ca3013f847decdc59974a90bebdca` passed independent exact-SHA review. |
 | R1D | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` at `4e4f49e3f2f80555ba605308fce909fdfc8302a9` | R1C | Decision complete: all dependencies have an explicit disposition; no dependency changed. |
 | R1D-L1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `af25198654e048cc70e7e94a4c9974f2070428e0` | R1D | Exact one-line caller-contract repair and both versioned dry-runs passed independent narrow review. |
-| R1E | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1D-L1 review CLEAR | Exact WorkRun authority gates provider execution; candidate/fact/replay/no-direct-send checks pass. Await independent exact-SHA review. |
+| R1E | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1D-L1 review CLEAR | `c8e5a882` was review-blocked; repaired fact/projection atomicity and exact fact/revision/checkpoint binding await exact-SHA rereview. |
 | R1F–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production unchanged. |
 
@@ -302,7 +305,7 @@ do not reopen `document.write` semantics or upgrade the provider.
   `af25198654e048cc70e7e94a4c9974f2070428e0`.
 
 Completion marker: `LOCAL_VERIFIED + REVIEWED + ARCHIVED`. R1D dependency
-compatibility is closed; R1E is now `IN_PROGRESS`.
+compatibility is closed; the repaired R1E archive now awaits exact-SHA rereview.
 
 ### R1E — External MCP Poll Through WorkRun Authority
 
@@ -321,9 +324,16 @@ second fact authority or allowing the provider to send directly to the owner.
   `Core fact -> Hermes decision -> Node attention valve -> presentation outbox
   -> adapter receipt`.
 - [x] Tests prove the external MCP/provider has no direct message-send surface.
-- [x] Focused affected `91/91`, full Core `185/185`, syntax and diff checks pass;
-  the bounded candidate is archived.
-- [ ] Independent exact-SHA review is clear.
+- [x] Record first archive `c8e5a88291bfe7e66a607a753a4994617aab0565`
+  as blocked by `R1E-FACT-PROJECTION-GAP` and
+  `R1E-REVISION-EVIDENCE-SKEW`.
+- [x] Fact commit atomically reserves one deterministic Core projection;
+  restart resumes attention/schedule projection without provider replay.
+- [x] Notification payload and evidence bind exact Activity ID/revision,
+  checkpoint digest and Core fact; later revision/digest mismatch suppresses.
+- [x] Fresh focused repair `18/18`, shared affected `52/52`, syntax and diff
+  checks pass; the bounded repaired candidate is archived.
+- [ ] Independent exact-SHA repaired review is clear.
 
 ### R1F — Real Presence And Attention Admission/Flush
 

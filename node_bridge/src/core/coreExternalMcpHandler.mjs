@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 
 import { createAttentionFlushWorker } from '../attentionFlushWorker.mjs';
 import { createCoreExternalPollService } from './coreExternalPoll.mjs';
+import {
+  formatExternalMcpTaskRef,
+  parseExternalMcpTaskRef,
+} from './coreExternalNotificationService.mjs';
 import { coreError } from './coreErrors.mjs';
 
 const AGGREGATE_POLL_REF = 'external-poll:external-mcp-runtime';
@@ -25,14 +29,45 @@ function fingerprint(value) {
 
 export function createCoreExternalMcpHandler({
   core, runtime, hashContent, attentionValve, notificationService,
+  afterProjectionEffect = async () => {},
 } = {}) {
   if (!runtime?.tick || !runtime?.store?.get || typeof hashContent !== 'function'
-    || !attentionValve?.evaluate || !attentionValve?.flush || !notificationService?.register) {
+    || !attentionValve?.evaluate || !attentionValve?.flush || !notificationService?.register
+    || typeof afterProjectionEffect !== 'function') {
     throw coreError('CORE_EXTERNAL_MCP_DEPENDENCY_INVALID', 'external MCP runtime dependencies are invalid');
   }
   const facts = createCoreExternalPollService({ core });
   let activeAuthority = null;
   let recorded = 0;
+
+  async function project(row) {
+    if (row?.state === 'completed') return row;
+    const task = parseExternalMcpTaskRef(row?.payload_ref);
+    if (!task || task.factEventId !== row.source_event_id) {
+      throw coreError('CORE_EXTERNAL_PROJECTION_INVALID', 'external fact projection binding is invalid');
+    }
+    const activity = runtime.store.get(task.activityId);
+    if (!activity) throw coreError('CORE_EXTERNAL_PROJECTION_STATE_MISSING', 'external activity state is unavailable');
+    if (activity.status !== 'active' || Number(activity.revision) !== task.revision
+      || String(activity.checkpoint?.stateDigest || '') !== task.checkpointDigest
+      || !activity.notifyTarget) {
+      return facts.completeProjection(row);
+    }
+    const admission = attentionValve.evaluate({
+      contentClass: 'timely', fingerprint: `external-mcp:${task.activityId}`,
+      summary: String(activity.checkpoint?.summary || '').trim(),
+      payloadRef: row.payload_ref, causationId: task.factEventId,
+    });
+    if (admission.disposition === 'deliver_now') {
+      await notificationService.register({ payloadRef: row.payload_ref, causationId: task.factEventId });
+    }
+    await afterProjectionEffect(Object.freeze({ admission, factEventId: task.factEventId }));
+    return facts.completeProjection(row);
+  }
+
+  async function recoverPendingProjections() {
+    for (const row of facts.pendingProjections()) await project(row);
+  }
 
   async function submitCandidate(candidate, context = {}) {
     if (!activeAuthority) {
@@ -58,27 +93,21 @@ export function createCoreExternalMcpHandler({
       context: { activityId: activity.activityId, checkpointDigest, revision },
       serverId,
     }));
+    const factEventId = `external-poll-fact:v1:${createHash('sha256')
+      .update(`${activeAuthority.workRunId}\0${fingerprint(canonical)}`).digest('hex')}`;
+    const projectionPayloadRef = formatExternalMcpTaskRef({
+      activityId: context.activityId, revision, checkpointDigest, factEventId,
+    });
     const result = await facts.recordFact({
       authority: activeAuthority,
       serverId,
       sourceFingerprint: fingerprint(canonical),
       payloadRef: `external-mcp:/activity/${context.activityId}/revision/${revision}`,
+      projectionPayloadRef,
       contentHashToken: hashContent('external-mcp-candidate', canonical),
     });
-    if (result.disposition !== 'recorded') return result;
-    recorded += 1;
-    if (activity.notifyTarget) {
-      const payloadRef = `external-mcp-task:${context.activityId}:${revision}`;
-      const summary = (Array.isArray(sanitizedCandidate?.facts) ? sanitizedCandidate.facts : [])
-        .map((item) => String(item?.summary || '').trim()).filter(Boolean).slice(0, 3).join('\n');
-      const admission = attentionValve.evaluate({
-        contentClass: 'timely', fingerprint: `external-mcp:${context.activityId}`,
-        summary, payloadRef, causationId: result.eventId,
-      });
-      if (admission.disposition === 'deliver_now') {
-        await notificationService.register({ payloadRef, causationId: result.eventId });
-      }
-    }
+    if (result.disposition === 'recorded') recorded += 1;
+    await project(result.projection.outbox);
     return result;
   }
 
@@ -90,6 +119,12 @@ export function createCoreExternalMcpHandler({
     activeAuthority = await facts.assertAuthority({ authority, expectedPayloadRef: AGGREGATE_POLL_REF });
     recorded = 0;
     try {
+      await recoverPendingProjections();
+      const priorFacts = facts.factCountForWorkRun(work.work_run_id);
+      if (priorFacts > 0) {
+        const resultRef = `core-external-mcp-poll:${work.work_run_id}:${priorFacts}`;
+        return { resultRef, resultHashToken: hashContent('external-mcp-poll-result', resultRef) };
+      }
       const result = await runtime.tick();
       if (result?.skipped && result.reason === 'tick_failed') {
         throw coreError('CORE_EXTERNAL_MCP_TICK_FAILED', 'external MCP poll failed');
@@ -102,6 +137,7 @@ export function createCoreExternalMcpHandler({
     }
   }
   handler.canHandle = (work) => work?.payload_ref === AGGREGATE_POLL_REF;
+  handler.recoverPendingProjections = recoverPendingProjections;
   const flushWorker = createAttentionFlushWorker({
     valve: attentionValve,
     deliver: async (candidate) => {
@@ -117,5 +153,5 @@ export function createCoreExternalMcpHandler({
     return { resultRef, resultHashToken: hashContent('attention-flush-result', resultRef) };
   };
   attentionFlushHandler.canHandle = (work) => work?.payload_ref === 'system-task:attention-flush';
-  return Object.freeze({ handler, submitCandidate, attentionFlushHandler });
+  return Object.freeze({ handler, submitCandidate, attentionFlushHandler, recoverPendingProjections });
 }
