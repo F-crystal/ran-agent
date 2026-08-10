@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED (2026-08-10)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 gate repair LOCAL_VERIFIED (2026-08-10)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -330,11 +330,26 @@ used, so `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`. Shared or unproven Chrome/Xvfb
 processes were left untouched; legacy XHS env-name residue there is a
 non-blocking hygiene observation, not an active account-backed route.
 
-R2 is `LOCAL_VERIFIED`, `NOT_REVIEWED` and archived by the commit containing
-the redacted evidence. That governance-only archive was not the runtime
-rehearsed by R2-B. R3 is `READY / NOT_STARTED` and must independently review
-and dry-run the exact evidence-archive SHA. S12 remains `NOT_STARTED` pending
-R3 and separate owner production authorization.
+R2 is `LOCAL_VERIFIED`, `REVIEWED` and archived by the commit containing the
+redacted evidence. That governance-only archive was not the runtime rehearsed
+by R2-B. R3-A reviewed frozen candidate
+`08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` clear except for server proofs.
+Follow-up source inspection then confirmed blocker
+`R3-GATE-HERMES-TOPOLOGY-STALE`: the final immutable gate still resolved both
+Lite and retired Full executables, required equality, hard-coded Hermes v0.13
+and assumed its old adjacent-Python layout. The bounded local repair instead
+binds the gate to the existing deployed unified-v0.20 mutation/artifact
+contracts, the sole active `ran-agent-hermes.service`, its exact managed
+executable, the sealed `python/bin/python3.12`, required imports, service
+identity and running process interpreter. `ran-agent-hermes-full.service` is
+only required to remain inactive and disabled. The provider-boundary fixture
+now models one v0.20 gateway and no arbitrary user-binary fallback. Focused
+checks pass `3/3`; the affected release/portability file reports 83 total tests:
+80 pass and three unchanged Linux root-only skips. No Core or runtime product behavior changed.
+The gate repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit
+containing this update. R3 remains incomplete, R3-B is `NOT_STARTED`, and S12
+remains `NOT_STARTED` pending exact-SHA repair review, server proof and separate
+owner production authorization.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

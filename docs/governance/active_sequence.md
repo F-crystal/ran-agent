@@ -70,8 +70,11 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> independent exact-SHA repaired R1E review (CLEAR)
        -> R1F owner attention policy and proactive delivery 08e3eea8 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
        -> independent exact-SHA R1F review (CLEAR)
-  -> S12-R2 fresh production audit/copy rehearsal (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
-  -> S12-R3 independent review plus exact-SHA dry-run evidence (READY, NOT STARTED)
+  -> S12-R2 fresh production audit/copy rehearsal (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+  -> S12-R3A independent exact-SHA source review (CLEAR except server proofs)
+  -> R3-GATE-HERMES-TOPOLOGY-STALE repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
+  -> independent exact-SHA gate-repair review (REQUIRED)
+  -> S12-R3B immutable server gate/dry-run proof (NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
 ```
@@ -122,9 +125,20 @@ S12-R0 fresh read-only production audit (COMPLETE)
   production truth at `2026-08-10T02:14:52Z` and the isolated R2-B copy-only
   rehearsal are `CLEAR`; the runtime actually rehearsed was exactly `08e3eea8`,
   while the commit containing the redacted evidence is only its governance
-  archive and was not itself rehearsed. R2 is `LOCAL_VERIFIED`, `NOT_REVIEWED`
-  and `ARCHIVED`; R3 is the ready, not-started exact-SHA review/dry-run node.
-  Exact evidence and prohibited scope are defined in the detailed ledger.
+  archive and was not itself rehearsed. R2 is `LOCAL_VERIFIED`, `REVIEWED`
+  and `ARCHIVED`. R3-A found the frozen candidate
+  `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` clear except for server proofs,
+  but follow-up source inspection confirmed
+  `R3-GATE-HERMES-TOPOLOGY-STALE`: the immutable gate still required two
+  executable Hermes v0.13 runtimes even though the accepted production
+  topology is one unified v0.20 runtime on `8642`. The commit containing this
+  update is the bounded local gate repair; it validates the service-managed
+  unified executable, matching runtime Python/imports and runtime identity,
+  while treating the retired Full unit only as an inactive/disabled negative
+  invariant. Focused resolver/gate checks pass `3/3`; the affected release and
+  portability file reports 83 total tests: 80 pass and three unchanged Linux
+  root-only skips. R3 remains incomplete pending independent exact-SHA repair
+  review and R3-B server proof; R3-B is `NOT STARTED`.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

@@ -105,8 +105,13 @@ archive passed exact-SHA rereview and R1E is `LOCAL_VERIFIED`, `REVIEWED` and
 `ARCHIVED`. R1F is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. Fresh R2-A
 production audit and R2-B isolated copy rehearsal are clear; the runtime
 actually rehearsed was `08e3eea8`, while the commit containing this update is
-its governance/evidence-only archive. R2 is `LOCAL_VERIFIED`, `NOT_REVIEWED`
-and `ARCHIVED`; R3 is `READY / NOT_STARTED`, and S12 remains `NOT_STARTED`.
+its governance/evidence-only archive. R2 is `LOCAL_VERIFIED`, `REVIEWED` and
+`ARCHIVED`. R3-A was clear except server proofs, but follow-up inspection found
+`R3-GATE-HERMES-TOPOLOGY-STALE` in frozen candidate `08ea6b0c`. The bounded
+repair makes the immutable gate validate the one service-managed Hermes
+v0.20.0 runtime and treats retired Full only as an inactive/disabled negative
+invariant. It is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit
+containing this update; R3-B and S12 remain `NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

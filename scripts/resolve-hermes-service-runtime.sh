@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Resolve and validate the exact managed Hermes executable used by a service.
+# Resolve the exact managed Hermes launcher configured by a service.
 set -euo pipefail
 
 fail() { printf 'resolve-hermes-service-runtime: failed:%s\n' "$1" >&2; exit 1; }
@@ -16,6 +16,4 @@ if [[ -z "$hermes_bin" ]]; then
   [[ -z "$activate" ]] || hermes_bin="${activate%/activate}/hermes"
 fi
 [[ "$hermes_bin" == /* && -x "$hermes_bin" ]] || fail hermes_service_path_unavailable
-version="$("$hermes_bin" version 2>/dev/null || true)"
-printf '%s\n' "$version" | grep -Eq '^Hermes Agent v0\.13\.' || fail Hermes_v0.13_required
 printf '%s\n' "$hermes_bin"

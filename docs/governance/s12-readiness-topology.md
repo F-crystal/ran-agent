@@ -55,9 +55,12 @@ flowchart TD
     R1E --> R1ER["Independent exact-SHA repaired R1E review<br/>CLEAR"]
     R1ER --> R1F["R1F owner attention policy + proactive delivery<br/>08e3eea8 · LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     R1F --> R1FR["Independent exact-SHA R1F review<br/>CLEAR"]
-    R1FR --> R2["R2 fresh audit + production-copy rehearsal<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    R2 --> R3["R3 immutable evidence-archive review + dry-run<br/>READY · NOT_STARTED"]
-    R3 --> OA["Explicit owner production authorization"]
+    R1FR --> R2["R2 fresh audit + production-copy rehearsal<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    R2 --> R3A["R3-A exact-SHA source review<br/>CLEAR except server proofs"]
+    R3A --> RG["R3 gate topology repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    RG --> RGR["Independent exact-SHA repair review<br/>REQUIRED"]
+    RGR --> R3B["R3-B immutable server gate + dry-run<br/>NOT STARTED"]
+    R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
     OBS --> DA["Separate owner deletion authorization"]
@@ -82,10 +85,12 @@ the bounded repair is accepted at
 exact-SHA rereview. R1F candidate
 `08e3eea81c336ac48f3e0b85a87b0b5c6d445307` also passed independent review.
 R2-A and the copy-only R2-B rehearsal are clear; `08e3eea8` is the runtime SHA
-that was actually rehearsed. The commit containing this ledger is a later
-governance/evidence-only archive and must not be described as the rehearsed
-runtime. R3 is the current ready frontier and must review/dry-run that exact
-archive before any production authorization.
+that was actually rehearsed. The later governance/evidence-only archive must
+not be described as the rehearsed runtime. R2 review is clear. R3-A found
+frozen candidate `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` clear except for
+server proofs, then follow-up inspection confirmed a stale split-v0.13
+immutable-gate contract. The bounded repair is the current review frontier;
+R3-B server proof must not start before its independent exact-SHA review.
 
 ## Current Frontier
 
@@ -100,8 +105,10 @@ archive before any production authorization.
 | R1D-L1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `af25198654e048cc70e7e94a4c9974f2070428e0` | R1D | Exact one-line caller-contract repair and both versioned dry-runs passed independent narrow review. |
 | R1E | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` | R1D-L1 review CLEAR | `c8e5a882` was review-blocked; repaired fact/projection atomicity and exact fact/revision/checkpoint binding passed exact-SHA rereview. |
 | R1F | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `08e3eea81c336ac48f3e0b85a87b0b5c6d445307` | R1E review CLEAR | Default timely delivery no longer depends on desktop presence; one existing Core attention-flush schedule owns durable backlog recovery. |
-| R2 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | R1F review CLEAR | Fresh R2-A audit and isolated R2-B rehearsal are clear; runtime rehearsal SHA is `08e3eea8`, distinct from the evidence archive. |
-| R3 | `NOT_STARTED` (`READY`) | `NOT_REVIEWED` | `UNARCHIVED` | R2 evidence archive | Review and dry-run the final governance-only descendant at its exact SHA. |
+| R2 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` by the evidence commit | R1F review CLEAR | Fresh R2-A audit and isolated R2-B rehearsal are clear; runtime rehearsal SHA is `08e3eea8`, distinct from the evidence archive. |
+| R3-A | `LOCAL_VERIFIED` | `REVIEWED` except server proofs | `ARCHIVED` at `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` | R2 review CLEAR | Candidate areas were clear, but follow-up source inspection found the stale Hermes release-gate topology blocker. |
+| R3-GATE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | confirmed `R3-GATE-HERMES-TOPOLOGY-STALE` | One unified v0.20 service runtime replaces split v0.13 gate authority; exact-SHA delta review is required. |
+| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | R3-GATE exact-SHA review CLEAR | Run the real immutable Linux/systemd identity and dry-run proof; local fixtures cannot claim production service-managed PASS. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
@@ -400,12 +407,22 @@ recovery is recorded independently and leaves
 
 ### R3 — Immutable Candidate Review And Dry-Run
 
-- [ ] Confirm the final immutable candidate is the governance-only R2 evidence
+- [x] Confirm the frozen candidate is the governance-only R2 evidence
   archive descended from rehearsed runtime `08e3eea8`; do not claim that R2-B
   rehearsed the later archive SHA.
-- [ ] Independent adversarial review reports `CLEAR` or all findings are closed.
-- [ ] Required Core, Node, Python and release portability suites pass against
-  the exact candidate.
+- [x] R3-A independent review was clear except server proofs; preserve that
+  evidence rather than repeating the review.
+- [x] Record blocker `R3-GATE-HERMES-TOPOLOGY-STALE`: frozen candidate
+  `08ea6b0c` still required both Lite and retired Full executables, equality,
+  Hermes v0.13 and its obsolete adjacent-Python layout.
+- [x] Repair only the immutable gate: resolve the single active managed
+  `ran-agent-hermes.service` executable, exact v0.20.0 contract, sealed matching
+  Python/imports, runtime identity and process interpreter; require retired
+  Full inactive/disabled without using it as runtime authority.
+- [x] Local focused checks pass `3/3`; the affected release/portability file
+  reports 83 total tests: 80 pass and three unchanged Linux root-only skips. Provider fixture now
+  models one unified v0.20 gateway and requires explicit runtime injection.
+- [ ] Independent exact-SHA review of the bounded gate repair reports `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
 - [ ] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,
@@ -414,6 +431,9 @@ recovery is recorded independently and leaves
   writer, schedule or outbox state.
 - [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
   authorization with the exact SHA and summarized mutation.
+
+The local repair does not impersonate a real Linux systemd/`ubuntu:ubuntu`
+pass. That proof remains exclusively R3-B and is `NOT_STARTED`.
 
 ### S12 — Core Cutover Gate
 
@@ -464,21 +484,23 @@ Production changed: NO / YES (authorization reference)
 Do not accept a narrative “done” report without the checklist, exact evidence
 and status split above.
 
-The independent R1A, R1C, R1D-L1, repaired R1E and R1F reviews are already
-clear and must not be repeated. R3 must inspect the exact R2 evidence archive:
+The independent R1A, R1C, R1D-L1, repaired R1E, R1F and R2 reviews are already
+clear and must not be repeated. The next review is a narrow exact-SHA delta
+review of the R3 gate repair only:
 
 ```text
-Read AGENTS.md, active_sequence.md, this ledger, current_runtime_status.md and
-r2_fresh_production_copy_rehearsal.v1.json. Start from the exact R2 archive SHA.
-Confirm its delta from `08e3eea81c336ac48f3e0b85a87b0b5c6d445307`
-contains governance/evidence only and changes no runtime-consumed source,
-profiles, tests, scripts or Core manifests. Independently reconcile the fresh
-R2-A counts, R2-B watermark/digests/dispositions, zero real effects and cleanup.
-Keep the separate XHS public-only maintenance outside R2 attribution and verify
-`XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`. Then run the required exact-SHA review,
-release portability gates and server dry-run without starting S12. Report CLEAR
-or exact blockers, the final candidate SHA, and whether explicit owner
-production authorization may be requested.
+Start from blocked frozen candidate
+`08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` and review only its delta to the
+new R3 gate-repair archive. Confirm the immutable gate now derives one unified
+Hermes v0.20.0 runtime from the existing mutation/artifact contracts and
+`ran-agent-hermes.service`; requires exact managed executable, sealed matching
+Python/imports, service identity and process interpreter; rejects v0.13,
+arbitrary user binaries and mismatched paths; and treats
+`ran-agent-hermes-full.service` only as an inactive/disabled negative topology
+invariant. Confirm provider-boundary fixtures no longer preserve a hidden split
+or v0.13 success path. Preserve the declared three Linux root-only skips and
+verify no Core/runtime product behavior changed. Do not run R3-B, access
+production or start S12. Report CLEAR or exact blockers and the reviewed SHA.
 ```
 
 ## Update Protocol
