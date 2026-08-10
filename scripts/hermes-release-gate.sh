@@ -161,7 +161,7 @@ resolve_test_hermes_bin() {
     ' "$HERMES_TEST_BIN")" || fail hermes_v0_20_runtime_required
     runtime_probe="$REPO_ROOT/scripts/hermes-sealed-runtime-probe.py"
     [[ -f "$runtime_probe" && ! -L "$runtime_probe" ]] || fail hermes_runtime_probe_required
-    run_clean "$HERMES_TEST_PYTHON_BIN" -I "$runtime_probe" \
+    run_clean "$HERMES_TEST_PYTHON_BIN" -B -I "$runtime_probe" \
       --install-root "$runtime_root" --hermes "$HERMES_TEST_BIN" \
       --python "$HERMES_TEST_PYTHON_BIN" --expected-version "$EXPECTED_HERMES_VERSION" \
       >/dev/null 2>&1 || fail hermes_runtime_contract_invalid

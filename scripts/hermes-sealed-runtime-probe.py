@@ -3,6 +3,11 @@
 
 from __future__ import annotations
 
+import sys
+
+if not sys.dont_write_bytecode or "-B" not in getattr(sys, "orig_argv", ()):
+    raise SystemExit("hermes-sealed-runtime-probe: failed:bytecode_write_guard_required")
+
 import argparse
 import importlib
 import importlib.metadata
@@ -10,7 +15,6 @@ import json
 import os
 import re
 import subprocess
-import sys
 import sysconfig
 from pathlib import Path
 

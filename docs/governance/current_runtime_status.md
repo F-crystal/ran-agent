@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 runtime-contract repair LOCAL_VERIFIED (2026-08-10)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 no-write runtime-contract repair LOCAL_VERIFIED (2026-08-10)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -386,6 +386,18 @@ fixtures, `41/41` source/profile release tests, and the affected release file at
 provider cases remain server-only rather than being falsely skipped locally.
 R3-B retry and S12 remain `NOT_STARTED`. Production was not contacted during
 the repair.
+
+Before independent review, `R3-GATE-SEALED-PROBE-BYTECODE-WRITE-RISK` was
+confirmed against archived candidate `d845e994`: `-I` isolates imports but does
+not disable bytecode writes, so a root gate could mutate a writable sealed
+runtime. The bounded superseding repair makes explicit `-B` mandatory at every
+A/B/C sealed-Python import/parser/self-check call, makes the shared probe reject
+callers without explicit `-B` before imports, and proves a writable synthetic
+runtime tree remains identical. Focused evidence is `9/9` realistic runtime
+fixtures, `41/41` source/profile checks, and the affected release file at
+`81 passed / 0 failed / 3 environment skips`; real sealed-provider execution
+remains an R3-B server proof. The blocker is `RESOLVED`; this repair is
+`LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this status.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

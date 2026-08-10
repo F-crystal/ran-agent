@@ -148,7 +148,7 @@ try {
   const metadata = fs.lstatSync(runtimeProbe);
   if (!metadata.isFile() || metadata.isSymbolicLink()) fail('runtime_probe_invalid');
   runtimeIdentity = JSON.parse(run(runtimePythonReal, [
-    '-I', runtimeProbe,
+    '-B', '-I', runtimeProbe,
     '--install-root', installRoot,
     '--hermes', hermesReal,
     '--python', runtimePythonReal,

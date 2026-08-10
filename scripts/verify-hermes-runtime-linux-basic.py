@@ -93,11 +93,11 @@ print(len(set(modules)))
     }
     Path(clean["HOME"]).mkdir()
     Path(clean["TMPDIR"]).mkdir()
-    imported = run([str(python), "-I", "-c", import_probe, str(app), str(site), str(runtime / "python/lib/python3.12/lib-dynload")], env=clean).strip()
+    imported = run([str(python), "-B", "-I", "-c", import_probe, str(app), str(site), str(runtime / "python/lib/python3.12/lib-dynload")], env=clean).strip()
     curses_probe = "import curses,sys; curses.setupterm(); colors=curses.tigetnum('colors'); print(colors); sys.exit(0 if colors >= 256 else 1)"
-    term_colors = int(run([str(python), "-I", "-c", curses_probe], env=clean).strip())
+    term_colors = int(run([str(python), "-B", "-I", "-c", curses_probe], env=clean).strip())
     version = run([str(runtime / "bin/hermes"), "--version"], env=clean).strip()
-    metadata_version = run([str(python), "-I", "-c", "from importlib.metadata import version; print(version('hermes-agent'))"], env={**clean, "PYTHONPATH": str(site)}).strip()
+    metadata_version = run([str(python), "-B", "-I", "-c", "from importlib.metadata import version; print(version('hermes-agent'))"], env={**clean, "PYTHONPATH": str(site)}).strip()
     if "0.20.0" not in version or metadata_version != "0.20.0":
         raise RuntimeError(f"version mismatch: cli={version!r} metadata={metadata_version!r}")
 
@@ -110,9 +110,9 @@ print(len(set(modules)))
     if any(path.lstat().st_mode & 0o222 for path in [relocated, *builder.walk_tree(relocated)] if not path.is_symlink()):
         raise RuntimeError("runtime remains writable")
     run([str(relocated / "bin/hermes"), "--version"], env=clean)
-    run([str(relocated / "python/bin/python3"), "-I", "-c", curses_probe], env=clean)
+    run([str(relocated / "python/bin/python3"), "-B", "-I", "-c", curses_probe], env=clean)
     run([
-        str(relocated / "python/bin/python3"), "-I", "-c", import_probe,
+        str(relocated / "python/bin/python3"), "-B", "-I", "-c", import_probe,
         str(relocated / "app"), str(relocated / "python/lib/python3.12/site-packages"),
         str(relocated / "python/lib/python3.12/lib-dynload"),
     ], env=clean)

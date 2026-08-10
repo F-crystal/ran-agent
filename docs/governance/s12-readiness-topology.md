@@ -60,7 +60,8 @@ flowchart TD
     R3A --> RG["R3 gate topology repair 2<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     RG --> RP["R3-R1B profile delivery repair 790546a3<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     RP --> R3B0["First R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
-    R3B0 --> RR["Sealed-runtime contract repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    R3B0 --> RR0["Sealed-runtime contract d845e994<br/>SUPERSEDED BEFORE REVIEW"]
+    RR0 --> RR["Sealed-probe no-write repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
     RR --> RRR["Independent exact-SHA repair review<br/>REQUIRED"]
     RRR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
@@ -118,7 +119,8 @@ R3-B retry must not start before its independent exact-SHA review.
 | R3-A | `LOCAL_VERIFIED` | `REVIEWED` except server proofs | `ARCHIVED` at `08ea6b0ccb499bb84ddd4d20a2ebad6a48c1af92` | R2 review CLEAR | Candidate areas were clear, but follow-up source inspection found the stale Hermes release-gate topology blocker. |
 | R3-GATE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `d6adb1061b5a819407582690ca6a9adcb63c8d26` | first repair `d70a08fc` review blocked | Repair 2 proves the governed Full condition block and exact-v0.20 Python probe; independent review is clear. |
 | R3-R1B-PROFILE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `790546a34285a101948e301363381d094ec14b83` | R3-GATE review CLEAR | Exact prior-source/profile-digest contract delivers only `config.companion.yaml` as active plus the inert Pro template; rollback reuses the source transaction snapshot. |
-| R3-B-RUNTIME-CONTRACT | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | first R3-B stopped fail-closed | One runtime matrix now governs semantic version, sealed app/site-packages imports, live process argv/env, local/staged parity and semantic companion YAML. |
+| R3-B-RUNTIME-CONTRACT | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` at `d845e994ac256d5d4c2e729eb8dd46224b52b746`; superseded before review | first R3-B stopped fail-closed | One runtime matrix governs semantic version, sealed app/site-packages imports, live process argv/env, local/staged parity and semantic companion YAML. |
+| R3-B-NO-WRITE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | bytecode-write blocker on d845e994 | Explicit `-B` plus shared self-guard makes every A/B/C sealed-Python validation non-writing; writable-tree fixture proves no path/content/mode drift. |
 | R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | runtime-contract exact-SHA review CLEAR | Retry the real immutable Linux/systemd identity and dry-run proof; the first run's source/profile evidence remains valid but the runtime gate did not pass. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
@@ -458,6 +460,9 @@ recovery is recorded independently and leaves
 - [x] Replace all immutable/local A/B/C version and import consumers with one
   sealed v0.20 runtime contract and reject semantic YAML variants that restore
   the built-in `web` capability.
+- [x] Resolve `R3-GATE-SEALED-PROBE-BYTECODE-WRITE-RISK`: every direct A/B/C
+  sealed-Python import uses explicit `-B`, the shared probe rejects omission
+  before imports, and the writable fixture has identical before/after trees.
 - [ ] Independent exact-SHA review of the sealed-runtime contract repair is
   `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required

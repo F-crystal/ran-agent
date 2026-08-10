@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -31,13 +32,17 @@ def _runtime() -> tuple[Path, Path]:
     install_root = hermes_path.resolve().parents[1]
     probe = subprocess.run(
         [
-            str(python_path), "-I", str(ROOT / "scripts/hermes-sealed-runtime-probe.py"),
+            str(python_path), "-B", "-I", str(ROOT / "scripts/hermes-sealed-runtime-probe.py"),
             "--install-root", str(install_root),
             "--hermes", str(hermes_path),
             "--python", str(python_path),
             "--expected-version", expected_version,
         ],
-        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+        env={
+            "PATH": "/usr/bin:/bin",
+            "HOME": "/nonexistent",
+            "PYTHONDONTWRITEBYTECODE": "1",
+        },
         text=True,
         capture_output=True,
     )
@@ -80,6 +85,7 @@ def test_real_hermes_v020_final_http_body_is_non_thinking(
     result = subprocess.run(
         [
             str(runtime_python),
+            "-B",
             "-P",
             str(ROOT / "scripts/hermes-provider-boundary-self-check.py"),
             "--hermes-home",
@@ -120,6 +126,7 @@ def test_real_provider_policy_fails_closed_if_env_requests_enabled(
     result = subprocess.run(
         [
             str(runtime_python),
+            "-B",
             "-P",
             str(ROOT / "scripts/hermes-provider-boundary-self-check.py"),
             "--hermes-home",
@@ -148,7 +155,7 @@ def _write_runtime_fixture(
     ], check=True)
     runtime_python = runtime / "python/bin" / f"python{sys.version_info.major}.{sys.version_info.minor}"
     site = Path(subprocess.check_output([
-        str(runtime_python), "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
+        str(runtime_python), "-B", "-I", "-c", "import sysconfig; print(sysconfig.get_path('purelib'))",
     ], text=True).strip())
     metadata = site / f"hermes_agent-{metadata_version}.dist-info"
     metadata.mkdir()
@@ -191,6 +198,54 @@ def _write_runtime_fixture(
     )
     hermes.chmod(0o755)
     return hermes, runtime_python
+
+
+def _runtime_tree_snapshot(runtime: Path) -> tuple[tuple[str, str, int, str], ...]:
+    records = []
+    for path in sorted(runtime.rglob("*"), key=lambda item: item.as_posix()):
+        relative = path.relative_to(runtime).as_posix()
+        mode = path.lstat().st_mode & 0o7777
+        if path.is_symlink():
+            records.append((relative, "symlink", mode, os.readlink(path)))
+        elif path.is_dir():
+            records.append((relative, "directory", mode, ""))
+        else:
+            records.append((relative, "file", mode, hashlib.sha256(path.read_bytes()).hexdigest()))
+    return tuple(records)
+
+
+def test_shared_probe_requires_bytecode_guard_and_preserves_runtime_tree(tmp_path: Path) -> None:
+    hermes, runtime_python = _write_runtime_fixture(tmp_path)
+    runtime = hermes.parents[1]
+    probe = ROOT / "scripts/hermes-sealed-runtime-probe.py"
+    arguments = [
+        str(probe),
+        "--install-root", str(runtime),
+        "--hermes", str(hermes),
+        "--python", str(runtime_python),
+        "--expected-version", "0.20.0",
+    ]
+    before = _runtime_tree_snapshot(runtime)
+    unguarded = subprocess.run(
+        [str(runtime_python), "-I", *arguments],
+        text=True,
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+    )
+    assert unguarded.returncode != 0
+    assert "bytecode_write_guard_required" in unguarded.stderr
+    assert _runtime_tree_snapshot(runtime) == before
+
+    guarded = subprocess.run(
+        [str(runtime_python), "-B", "-I", *arguments],
+        text=True,
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+    )
+    assert guarded.returncode == 0, guarded.stderr
+    after = _runtime_tree_snapshot(runtime)
+    assert after == before
+    assert not any(path.name == "__pycache__" or path.suffix == ".pyc" for path in runtime.rglob("*"))
 
 
 def test_runtime_v020_without_project_line_uses_explicit_python(

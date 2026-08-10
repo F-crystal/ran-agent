@@ -1498,7 +1498,7 @@ def validate_companion_profile(profile: bytes) -> None:
             raise ReleaseError("sealed profile parser runtime is unavailable")
         result = subprocess.run(
             [
-                str(parser), "-I", "-c",
+                str(parser), "-B", "-I", "-c",
                 """
 import json, sys, yaml
 value = yaml.safe_load(sys.stdin.buffer.read())

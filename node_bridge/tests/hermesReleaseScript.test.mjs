@@ -3425,6 +3425,7 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   const hermesResolver = readFileSync(join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs'), 'utf8');
   const providerProbe = readFileSync(join(root, 'tests', 'test_hermes_deepseek_provider.py'), 'utf8');
   const providerBoundary = readFileSync(join(root, 'node_bridge', 'tests', 'hermesGatewayProviderBoundary.integration.test.mjs'), 'utf8');
+  const runtimeController = readFileSync(join(root, 'scripts', 'deploy-hermes-runtime-release.py'), 'utf8');
   const ombreContract = readFileSync(join(root, 'node_bridge', 'tests', 'ombreO1Contract.test.mjs'), 'utf8');
   assert.match(source, /--core\|--all\|--preflight-only/);
   assert.match(source, /hermes-release-smoke\.mjs/);
@@ -3435,9 +3436,10 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /RAN_AGENT_HERMES_TEST_PYTHON_BIN="\$HERMES_TEST_PYTHON_BIN"[\s\S]*-m pytest/);
   assert.doesNotMatch(source, /HERMES_TEST_PYTHON_BIN="\$project\/venv\/bin\/python"/);
   assert.match(providerProbe, /hermes-sealed-runtime-probe\.py/);
+  assert.match(providerProbe, /str\(python_path\), "-B", "-I"/);
+  assert.match(providerProbe, /str\(runtime_python\),\s+"-B",\s+"-P"/);
   assert.doesNotMatch(providerProbe, /Project:/);
   assert.match(providerProbe, /"PYTHONPATH": str\(runtime_app\)/);
-  assert.match(providerProbe, /str\(runtime_python\),\s+"-P"/);
   assert.match(source, /resolve-hermes-gate-runtime\.mjs/);
   assert.match(source, /STAGED_CANDIDATE.*RAN_AGENT_RELEASE_STAGED_CANDIDATE/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\]; then\s+PATH=\/usr\/bin:\/bin/);
@@ -3448,6 +3450,7 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(source, /run_clean "\$NODE_BIN" "\$resolver" \/usr\/bin\/systemctl "\$RUNTIME_USER" "\$RUNTIME_GROUP" \/proc/);
   assert.match(source, /if \[\[ "\$STAGED_CANDIDATE" == 1 \]\][\s\S]*\/usr\/bin\/systemctl[\s\S]*else\s+HERMES_TEST_BIN="\$\{RAN_AGENT_HERMES_TEST_BIN:-\}"/);
   assert.match(source, /hermes-sealed-runtime-probe\.py/);
+  assert.match(source, /HERMES_TEST_PYTHON_BIN" -B -I "\$runtime_probe"/);
   assert.match(hermesResolver, /ran-agent-hermes\.service/);
   assert.match(hermesResolver, /ran-agent-hermes-full\.service/);
   assert.match(hermesResolver, /hermes_runtime_mutation\.v1\.json/);
@@ -3459,11 +3462,14 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.doesNotMatch(hermesResolver, /liteReal !== fullReal/);
   assert.match(hermesResolver, /path\.join\(installRoot, 'python', 'bin'/);
   assert.match(hermesResolver, /expectedVersion !== '0\.20\.0'/);
+  assert.match(hermesResolver, /'-B', '-I', runtimeProbe/);
   assert.doesNotMatch(hermesResolver, /process\.env\.RAN_AGENT_(?:HERMES_TEST_BIN|SYSTEMCTL_BIN)/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$hermes_test_bin"/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_PYTHON_BIN="\$hermes_test_python_bin"/);
   assert.match(providerBoundary, /process\.env\.RAN_AGENT_HERMES_TEST_BIN/);
   assert.match(providerBoundary, /hermes-sealed-runtime-probe\.py/);
+  assert.match(providerBoundary, /'-B', '-I', path\.join\(ROOT, 'scripts', 'hermes-sealed-runtime-probe\.py'\)/);
+  assert.match(runtimeController, /str\(parser\), "-B", "-I", "-c"/);
   assert.match(providerBoundary, /timeout: 30_000/);
   assert.doesNotMatch(providerBoundary, /\/Users\/fengran/);
   assert.match(ombreContract, /process\.env\.RAN_AGENT_PYTHON_BIN/);

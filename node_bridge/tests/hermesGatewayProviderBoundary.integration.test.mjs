@@ -34,7 +34,7 @@ function assertSealedHermesRuntime() {
   const hermes = fs.realpathSync(HERMES);
   const installRoot = path.dirname(path.dirname(hermes));
   const result = JSON.parse(execFileSync(HERMES_PYTHON, [
-    '-I', path.join(ROOT, 'scripts', 'hermes-sealed-runtime-probe.py'),
+    '-B', '-I', path.join(ROOT, 'scripts', 'hermes-sealed-runtime-probe.py'),
     '--install-root', installRoot,
     '--hermes', HERMES,
     '--python', HERMES_PYTHON,

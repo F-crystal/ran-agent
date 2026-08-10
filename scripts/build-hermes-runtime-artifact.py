@@ -372,7 +372,7 @@ def build(args: argparse.Namespace) -> dict[str, object]:
         metadata_output = work / "metadata"
         metadata_output.mkdir()
         metadata_env = {"PATH": os.environ.get("PATH", ""), "PYTHONNOUSERSITE": "1"}
-        run([str(metadata_python), "-I", "setup.py", "dist_info", "--output-dir", str(metadata_output)], cwd=runtime / "app", env=metadata_env)
+        run([str(metadata_python), "-B", "-I", "setup.py", "dist_info", "--output-dir", str(metadata_output)], cwd=runtime / "app", env=metadata_env)
         generated = list(metadata_output.glob("hermes_agent-0.20.0.dist-info"))
         if len(generated) != 1:
             raise ValueError("Hermes dist-info generation failed")

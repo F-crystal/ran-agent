@@ -117,8 +117,15 @@ found `R3-R1B-PROFILE-DELIVERY-GAP`; its bounded repair passed independent
 review at `790546a3`. The first R3-B attempt then passed exact candidate YAML
 semantics and source dry-run but stopped fail-closed on stale one-line CLI and
 flat-runtime import assumptions. The class-level sealed-runtime contract repair
-is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
-update. R3-B retry and S12 remain `NOT_STARTED`.
+is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` at `d845e994`, but was superseded
+before independent review after confirming
+`R3-GATE-SEALED-PROBE-BYTECODE-WRITE-RISK`: direct sealed-Python validation used
+`-I` without a bytecode no-write guard. The bounded successor requires explicit
+`-B` at every current gate/test probe, makes the shared probe reject callers
+that omit it before importing runtime modules, and proves a writable synthetic
+runtime tree remains unchanged. The commit containing this update is
+`LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED`. R3-B retry and S12 remain
+`NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

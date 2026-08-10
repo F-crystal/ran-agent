@@ -244,7 +244,7 @@ if tirith_security.ensure_installed(log_failures=False) is not None:
     subprocess.run(
         [
             "/usr/sbin/runuser", "-u", args.service_user, "--", "/usr/bin/env", "-i", *env_args,
-            str(runtime / "python/bin/python3"), "-P", "-c", lazy_probe,
+            str(runtime / "python/bin/python3"), "-B", "-P", "-c", lazy_probe,
         ],
         cwd=runtime / "app",
         check=True,

@@ -77,7 +77,8 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> independent exact-SHA gate-repair-2 review (CLEAR)
   -> R3-R1B profile delivery repair 790546a3 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
   -> first S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
-  -> R3-B sealed-runtime contract repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
+  -> R3-B sealed-runtime contract repair d845e994 (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED; SUPERSEDED BEFORE REVIEW)
+  -> R3-B sealed-probe no-write repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
   -> independent exact-SHA runtime-contract review (REQUIRED)
   -> S12-R3B immutable server gate/dry-run retry (NOT STARTED)
   -> explicit owner production authorization
@@ -167,9 +168,15 @@ S12-R0 fresh read-only production audit (COMPLETE)
   artifact/package metadata, treats CLI output semantically, uses one explicit
   sealed-app import probe in local/staged/provider boundaries, verifies live
   process argv/environment against the same launcher contract, and parses the
-  companion YAML semantically. It is `LOCAL_VERIFIED`, `NOT_REVIEWED` and
-  `ARCHIVED` by the commit containing this status. R3 remains incomplete; the
-  independent repair review and R3-B retry are required and not started.
+  companion YAML semantically. Candidate `d845e994` was `LOCAL_VERIFIED /
+  NOT_REVIEWED / ARCHIVED`, then superseded before review when
+  `R3-GATE-SEALED-PROBE-BYTECODE-WRITE-RISK` was confirmed: isolated mode did
+  not itself prevent root from writing bytecode into the sealed tree. The
+  bounded repair requires explicit `-B` at every A/B/C sealed-Python probe,
+  self-rejects a shared-probe caller that omits it, and proves a writable
+  synthetic runtime tree is unchanged. The blocker is `RESOLVED`; the commit
+  containing this status is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED`. R3
+  remains incomplete; independent review and R3-B retry are not started.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only
