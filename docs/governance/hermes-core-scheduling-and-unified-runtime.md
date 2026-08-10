@@ -451,7 +451,11 @@ durable delayed backlog. Hermes game activity never establishes owner gaming.
 Desktop presence and explicit owner DND are optional `POST_CUTOVER_OK` provider
 work, not S12 dependencies. The existing managed `attention-flush` schedule is
 the single Core-owned flush clock; no desktop callback or second timer is added.
-Production and S12 remain unchanged/not started.
+R1F archive `08e3eea81c336ac48f3e0b85a87b0b5c6d445307` passed independent
+review. R2 then rehearsed that exact runtime against a fresh isolated
+production copy and recorded clear zero-effect evidence; the later R2 archive
+contains governance/evidence only. Production Core/source remains unchanged
+and S12 is not started.
 
 ## Semantic request, stable effect and provider boundary
 
@@ -503,9 +507,11 @@ R1D dependency compatibility is closed. The first R1E archive `c8e5a882` is
 review-blocked by `R1E-FACT-PROJECTION-GAP` and
 `R1E-REVISION-EVIDENCE-SKEW`; the commit containing the bounded repair is
 accepted at `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` after exact-SHA
-rereview. The commit containing this update is the recalibrated R1F candidate:
-`LOCAL_VERIFIED`, `ARCHIVED`, `NOT_REVIEWED`. Desktop presence remains
-uncomposed, Telegram remains future channel work, and R2/S12 have not started.
+rereview. The recalibrated R1F candidate
+`08e3eea81c336ac48f3e0b85a87b0b5c6d445307` is `LOCAL_VERIFIED`, `ARCHIVED`
+and `REVIEWED`. Desktop presence remains uncomposed and Telegram remains future
+channel work. Fresh R2-A/R2-B evidence is clear and archived separately; R3 is
+ready but not started, and S12 has not started.
 
 The first R1C archive `e4161721d253c160558aeaf22b7fda77e1a331b4` was rejected
 by independent review. The bounded repair verifies one synthetic

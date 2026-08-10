@@ -39,7 +39,7 @@ S0 facts/runtime selection
 | S9 | COMPLETE | S8 | Schema v2, ScheduleSpec, WakeOccurrence, WorkRun, `wake_due`, and the single managed tick. | Schema v1 remains frozen; v1 upgrades in place to v2. One-shot, interval and daily schedules, immutable revisions, duplicate/missed tick catch-up, DST, scheduled Exchange isolation and WorkRun lease/fence authority pass locally; the managed tick has no network or direct presentation path. |
 | S10 | COMPLETE | S9 | Inventory legacy scheduler, reminders, daily digest, external MCP/forum/RSS pollers and dispatchers; split polling facts from visible attention; build manifest/watermark; rehearse on a production copy. | The 19-row machine manifest gives every legacy component one disposition. A production SQLite/state copy at `2026-08-08T08:28:45.000Z` migrated 0→2 with zero business rows/effects; three historical reminders were suppressed, future reminders and watches were zero, 13 legacy external activities were staged paused, one pending outbound item was held for reconciliation, and 58 sent plus 65 ambiguous legacy outbox rows became receipt/no-resend evidence only. These counts are historical rehearsal evidence, not current cutover readiness, and must be freshly inspected and reconciled at the S12 gate. The local external-poll worker seam records one hash-bound Core fact after WorkRun authority and exposes no send operation. |
 | S11 | COMPLETE | S10 | Synthetic acceptance: duplicate/missed ticks, DST, crash, stale WorkRun fence, ambiguous outcomes, restart no-resend, and gaming/focus suppression with delayed coalescing. | One synthetic chain binds the WakeOccurrence to its exact generated Exchange, claimed WorkRun revision/fence/lease, typed system/internal instruction, provider epoch/attempt, final, presentation outbox, single injected effect and durable terminal receipt. A thrown post-dispatch `ETIMEDOUT` records durable `ambiguous` evidence and replay never calls the adapter; a post-commit restart claims the existing WorkRun without another occurrence; stale WorkRun authority rejects before final/effect; an equivalent delayed fingerprint remains one candidate across gaming→available while explicit owner bypasses remain intact. The focused set passes 29/29 and the full Core suite 151/151 locally. Production is unchanged. |
-| S12 | NOT STARTED | S11 + production authorization | Stop ingress, let legacy effect/outbox drain, execute the single Core Cutover Gate, enable one tick, disable legacy visible wake. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
+| S12 | NOT STARTED | S11 + R3 + production authorization | Stop ingress, let legacy effect/outbox drain, execute the single Core Cutover Gate, enable one tick, disable legacy visible wake. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
 | S13 | NOT STARTED | S12 + observation window + separate owner deletion authorization | After observation, remove the legacy scheduler, JSON outbox and compatibility writer. | No duplicate delivery; the legacy writer and legacy clock are truly gone. |
 
 ## S12 Readiness Topology
@@ -52,7 +52,7 @@ mutation:
 
 ```text
 S12-R0 fresh read-only production audit (COMPLETE)
-  -> S12-R1 local cutover assets and composition (IN PROGRESS)
+  -> S12-R1 local cutover assets and composition (COMPLETE)
        -> R1A accepted local Core/cutover composition (LOCAL_VERIFIED, ARCHIVED, REVIEWED)
        -> R1B web acquisition routing repair (LOCAL_VERIFIED, ARCHIVED, REVIEWED)
        -> R1B.1 private reply envelope fail-closed (LOCAL_VERIFIED, ARCHIVED, REVIEWED)
@@ -68,10 +68,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
        -> previous R1E candidate c8e5a882 (INDEPENDENT REVIEW BLOCKED)
        -> bounded R1E projection/evidence repair 493c77aa (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
        -> independent exact-SHA repaired R1E review (CLEAR)
-       -> R1F owner attention policy and proactive delivery (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
-       -> independent exact-SHA R1F review (PENDING)
-  -> S12-R2 fresh production-copy rehearsal and candidate gates (NOT STARTED)
-  -> S12-R3 independent review plus exact-SHA dry-run evidence (NOT STARTED)
+       -> R1F owner attention policy and proactive delivery 08e3eea8 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+       -> independent exact-SHA R1F review (CLEAR)
+  -> S12-R2 fresh production audit/copy rehearsal (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED)
+  -> S12-R3 independent review plus exact-SHA dry-run evidence (READY, NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
 ```
@@ -116,11 +116,19 @@ S12-R0 fresh read-only production audit (COMPLETE)
   uncomposed and `POST_CUTOVER_OK`; Hermes game activity is not owner presence;
   Telegram is future channel work; the existing Core-managed
   `system-task:attention-flush` schedule remains the only flush clock. Fresh
-  focused evidence passes `60/60`. The commit containing this update is
-  `LOCAL_VERIFIED`, `NOT_REVIEWED` and `ARCHIVED`; its exact-SHA review is the
-  current frontier. R2 and R3 remain serial and `NOT_STARTED`.
-  Exact exit evidence and prohibited scope are defined in the detailed ledger.
-- S12 remains `NOT STARTED`; production source and services are unchanged.
+  focused evidence passes `60/60`. The archived implementation
+  `08e3eea81c336ac48f3e0b85a87b0b5c6d445307` passed independent exact-SHA
+  review, so R1F is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. Fresh R2-A
+  production truth at `2026-08-10T02:14:52Z` and the isolated R2-B copy-only
+  rehearsal are `CLEAR`; the runtime actually rehearsed was exactly `08e3eea8`,
+  while the commit containing the redacted evidence is only its governance
+  archive and was not itself rehearsed. R2 is `LOCAL_VERIFIED`, `NOT_REVIEWED`
+  and `ARCHIVED`; R3 is the ready, not-started exact-SHA review/dry-run node.
+  Exact evidence and prohibited scope are defined in the detailed ledger.
+- S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
+  no production mutation. A separately authorized XHS maintenance transaction
+  retired the account-backed route and activated the existing public-only
+  sidecar; it is not R2 evidence or a Core/source change.
 
 ## Update Rule
 

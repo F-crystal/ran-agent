@@ -53,10 +53,10 @@ flowchart TD
     R1DL1R --> R1E0["Previous R1E c8e5a882<br/>REVIEW BLOCKED"]
     R1E0 --> R1E["R1E repair 493c77aa<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     R1E --> R1ER["Independent exact-SHA repaired R1E review<br/>CLEAR"]
-    R1ER --> R1F["R1F owner attention policy + proactive delivery<br/>LOCAL_VERIFIED · ARCHIVED · NOT_REVIEWED"]
-    R1F --> R1FR["Independent exact-SHA R1F review<br/>PENDING"]
-    R1FR --> R2["R2 fresh production-copy rehearsal"]
-    R2 --> R3["R3 immutable candidate review + dry-run"]
+    R1ER --> R1F["R1F owner attention policy + proactive delivery<br/>08e3eea8 · LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    R1F --> R1FR["Independent exact-SHA R1F review<br/>CLEAR"]
+    R1FR --> R2["R2 fresh audit + production-copy rehearsal<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    R2 --> R3["R3 immutable evidence-archive review + dry-run<br/>READY · NOT_STARTED"]
     R3 --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -79,14 +79,19 @@ is clear. R1D dependency compatibility is closed. The first R1E archive
 `R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. The commit containing
 the bounded repair is accepted at
 `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` after a clear independent
-exact-SHA rereview. The commit containing this ledger is the
-recalibrated R1F candidate; its independent review is the current frontier.
+exact-SHA rereview. R1F candidate
+`08e3eea81c336ac48f3e0b85a87b0b5c6d445307` also passed independent review.
+R2-A and the copy-only R2-B rehearsal are clear; `08e3eea8` is the runtime SHA
+that was actually rehearsed. The commit containing this ledger is a later
+governance/evidence-only archive and must not be described as the rehearsed
+runtime. R3 is the current ready frontier and must review/dry-run that exact
+archive before any production authorization.
 
 ## Current Frontier
 
 | Node | Verification | Review | Delivery | Dependency | Decision |
 |---|---|---|---|---|---|
-| R0 | `LOCAL_VERIFIED` | historical review | historical evidence | S11 | Complete; re-inspect only when R2 starts. |
+| R0 | `LOCAL_VERIFIED` | historical review | historical evidence | S11 | Complete; R2-A performed the required fresh reinspection at `2026-08-10T02:14:52Z`. |
 | R1A | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R0 | `R1A-ACK-ORDER` blocked `aabf9bc`; the `dfb8b41` repair passed independent exact-SHA delta review. |
 | R1B | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1A | Independent source review is clear; grouped boundary released with R1A. |
 | R1B.1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` | R1B + observed ordinary-chat leak | Independent source review is clear; grouped boundary released with R1A. |
@@ -94,9 +99,10 @@ recalibrated R1F candidate; its independent review is the current frontier.
 | R1D | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` at `4e4f49e3f2f80555ba605308fce909fdfc8302a9` | R1C | Decision complete: all dependencies have an explicit disposition; no dependency changed. |
 | R1D-L1 | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `af25198654e048cc70e7e94a4c9974f2070428e0` | R1D | Exact one-line caller-contract repair and both versioned dry-runs passed independent narrow review. |
 | R1E | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` | R1D-L1 review CLEAR | `c8e5a882` was review-blocked; repaired fact/projection atomicity and exact fact/revision/checkpoint binding passed exact-SHA rereview. |
-| R1F | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` | R1E review CLEAR | Default timely delivery no longer depends on desktop presence; one existing Core attention-flush schedule owns durable backlog recovery. |
-| R2–R3 | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | topology below | Not ready. |
-| S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production unchanged. |
+| R1F | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `08e3eea81c336ac48f3e0b85a87b0b5c6d445307` | R1E review CLEAR | Default timely delivery no longer depends on desktop presence; one existing Core attention-flush schedule owns durable backlog recovery. |
+| R2 | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | R1F review CLEAR | Fresh R2-A audit and isolated R2-B rehearsal are clear; runtime rehearsal SHA is `08e3eea8`, distinct from the evidence archive. |
+| R3 | `NOT_STARTED` (`READY`) | `NOT_REVIEWED` | `UNARCHIVED` | R2 evidence archive | Review and dry-run the final governance-only descendant at its exact SHA. |
+| S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance
@@ -363,27 +369,40 @@ require delay.
   explicit owner DND remain `POST_CUTOVER_OK`; Telegram is future channel work.
 - [x] Focused and smallest affected tests pass `60/60`; syntax, diff and
   governance checks pass. The bounded candidate is archived.
-- [ ] Independent exact-SHA R1F review is clear.
+- [x] Independent exact-SHA R1F review is clear for
+  `08e3eea81c336ac48f3e0b85a87b0b5c6d445307`.
 
 ### R2 — Fresh Production-Copy Rehearsal
 
-- [ ] Re-read current production source, services, clocks and aggregate state;
+- [x] Re-read current production source, services, clocks and aggregate state;
   do not reuse the 2026-08-08 counts as cutover truth.
-- [ ] Snapshot/copy production state through the governed reversible procedure.
-- [ ] Run the exact candidate migration/cutover rehearsal on the copy only.
-- [ ] Every imported reminder/activity candidate starts paused.
-- [ ] Historical `ambiguous` rows become receipt/no-resend evidence only.
-- [ ] The historical pending outbound item is suppressed/reconciled, never
+- [x] Snapshot/copy production state through the governed reversible procedure.
+- [x] Run exact candidate `08e3eea8` migration/cutover rehearsal on the copy only.
+- [x] Every imported reminder/activity candidate starts paused.
+- [x] Historical `ambiguous` rows become receipt/no-resend evidence only.
+- [x] The historical pending outbound item is suppressed/reconciled, never
   delivered.
-- [ ] Watermarks, counts, hashes and schedule dispositions reconcile.
-- [ ] Duplicate/missed ticks, crash/restart and adapter ambiguity use synthetic,
+- [x] Watermarks, counts, hashes and schedule dispositions reconcile.
+- [x] Duplicate/missed ticks, crash/restart and adapter ambiguity use synthetic,
   non-delivering targets.
-- [ ] Record exact candidate SHA, fresh counts and rehearsal result; archive the
+- [x] Record exact candidate SHA, fresh counts and rehearsal result; archive the
   evidence without changing production.
+
+The redacted aggregate evidence is
+`docs/governance/r2_fresh_production_copy_rehearsal.v1.json`. The first apply
+used an unsupported pure `synthetic` platform and failed before commit with
+zero Journal, Activity and Schedule rows; the valid Feishu protocol identity
+with a synthetic non-delivering destination then succeeded. This is
+`NON_BLOCKING_OPERATING_INPUT_CORRECTION`, not a source defect. R2 caused no
+production mutation. The separately authorized XHS public-only runtime
+recovery is recorded independently and leaves
+`XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.
 
 ### R3 — Immutable Candidate Review And Dry-Run
 
-- [ ] All R1/R2 nodes point to one immutable archived candidate SHA.
+- [ ] Confirm the final immutable candidate is the governance-only R2 evidence
+  archive descended from rehearsed runtime `08e3eea8`; do not claim that R2-B
+  rehearsed the later archive SHA.
 - [ ] Independent adversarial review reports `CLEAR` or all findings are closed.
 - [ ] Required Core, Node, Python and release portability suites pass against
   the exact candidate.
@@ -445,28 +464,21 @@ Production changed: NO / YES (authorization reference)
 Do not accept a narrative “done” report without the checklist, exact evidence
 and status split above.
 
-The independent R1A, R1C, R1D-L1 and repaired R1E reviews are already clear and
-must not be repeated. Review the archived R1F delta with this instruction:
+The independent R1A, R1C, R1D-L1, repaired R1E and R1F reviews are already
+clear and must not be repeated. R3 must inspect the exact R2 evidence archive:
 
 ```text
-Read AGENTS.md, docs/governance/active_sequence.md,
-docs/governance/s12-readiness-topology.md,
-docs/governance/current_runtime_status.md and the R1F source/tests. Audit only
-the exact delta from accepted R1E
-`493c77aa90fe53bba8a10fd94dd03136ba51d4eb` to the archived R1F SHA; do not
-reopen accepted R1E or start R2/S12. Confirm the active Core composition no
-longer injects desktop presence; ordinary timely content defaults to eligible,
-ambient remains silent, and synthetic focused/gaming/busy/dnd/unknown states
-retain durable coalesced delay. Confirm Hermes game activity cannot infer owner
-gaming, exactly one managed `system-task:attention-flush` schedule exists,
-repeated flush/restart cannot duplicate or lose notification schedules, and the
-synthetic external fact reaches the typed presentation receipt without a
-presence file or direct provider send. Verify focused `14/14`, affected `46/46`
-and guarded aggregate `60/60` evidence. Confirm no desktop telemetry endpoint,
-Telegram implementation, explicit-DND action, second clock, dependency upgrade,
-R2/S12 or production change entered the delta. Report every R1F checklist item
-PASS/FAIL, blockers, whether R1F may become `REVIEWED`, and whether R2 is the
-next ready node using the Reviewer Handoff Template.
+Read AGENTS.md, active_sequence.md, this ledger, current_runtime_status.md and
+r2_fresh_production_copy_rehearsal.v1.json. Start from the exact R2 archive SHA.
+Confirm its delta from `08e3eea81c336ac48f3e0b85a87b0b5c6d445307`
+contains governance/evidence only and changes no runtime-consumed source,
+profiles, tests, scripts or Core manifests. Independently reconcile the fresh
+R2-A counts, R2-B watermark/digests/dispositions, zero real effects and cleanup.
+Keep the separate XHS public-only maintenance outside R2 attribution and verify
+`XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`. Then run the required exact-SHA review,
+release portability gates and server dry-run without starting S12. Report CLEAR
+or exact blockers, the final candidate SHA, and whether explicit owner
+production authorization may be requested.
 ```
 
 ## Update Protocol

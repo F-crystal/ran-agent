@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11 LOCAL_VERIFIED (2026-08-10)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED (2026-08-10)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -276,10 +276,65 @@ implies that the owner is gaming. The existing managed
 `system-task:attention-flush` schedule is the single Core-owned flush clock;
 focused local evidence passes `60/60`, including a typed synthetic delivery with
 no presence file or real send. Desktop presence and explicit owner DND are
-`POST_CUTOVER_OK`; Telegram is future channel work. The commit containing this
-update is the archived, not-yet-reviewed R1F candidate. S12 remains
-`NOT STARTED` until the remaining serial readiness nodes pass and the owner
-separately authorizes production.
+`POST_CUTOVER_OK`; Telegram is future channel work. Candidate
+`08e3eea81c336ac48f3e0b85a87b0b5c6d445307` passed independent exact-SHA
+review, so R1F is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`.
+
+## Fresh R2 Readiness Evidence
+
+R2-A re-audited production at `2026-08-10T02:14:52Z`: the detached clean
+checkout remained at `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; Core was
+disabled with no database, cutover marker or managed tick, and legacy visible
+clocks remained authority. Cutover-relevant aggregates were 14 todos, zero
+future reminder candidates, three historical reminders, zero active/leased
+durable jobs, zero watches, 13 paused and zero active/leased external
+activities, 65 sent plus 65 terminal/no-resend ambiguous legacy outbox rows,
+zero proactive reservations, and one historical past-due outbound item. Sent
+history drifted from the earlier rehearsal's 58 to 65; this was captured as
+fresh truth rather than normalized away.
+
+R2-B copied only migration inputs into an isolated private root. SQLite used a
+read-only source connection plus backup API/WAL-consistent snapshot; atomic
+state inputs passed pre/post inode, size, mtime and hash stability. The copy
+matched R2-A, migrated legacy/no-Core to Schema v2, suppressed all three
+historical reminders, staged all 13 external activities paused, converted the
+65 sent and 65 ambiguous rows to non-runnable evidence, and held the one old
+pending outbound item for reconciliation with zero adapter calls. The cutover
+rehearsal bound exact runtime SHA
+`08e3eea81c336ac48f3e0b85a87b0b5c6d445307`, seeded 13 enabled schedules with
+exactly one attention-flush and one external-mcp-poll schedule, and reopened as
+`already_applied`. Synthetic fault/replay probes passed `33/33`; real model,
+MCP, channel and Ombre effects were zero. The private copy and candidate were
+deleted with no residual private data. Aggregate evidence, watermark and exact
+digests are in `r2_fresh_production_copy_rehearsal.v1.json`.
+
+The first rehearsal apply used an unsupported pure `synthetic` platform and
+failed before transaction commit with zero Journal, Activity and Schedule
+rows. Re-running with a valid Feishu protocol identity shape and a synthetic
+non-delivering destination succeeded. This is
+`NON_BLOCKING_OPERATING_INPUT_CORRECTION`, not a Core identity or source defect.
+R2 caused no production mutation.
+
+A separate authorized production maintenance transaction completed at
+`2026-08-10T03:07:02Z`: it terminated exact orphaned account-backed XHS
+mcporter PID `269670`, removed its exact legacy token cache without backup, and
+started the existing enabled `ran-agent-xhs-public-sidecar.service`. The public
+sidecar was active on loopback `18061` only with observed MainPID `672255`, a
+valid public marker, empty cookie, downloads disabled and public fallback ready;
+legacy `18060`, account login and cookie consumption were absent. No
+Node/Python/Hermes/Ombre restart, Core change or source/worktree change occurred.
+This mutation is not attributable to R2. Account-backed/cookie/login XHS is
+retired; public cookie-free XHS is the only accepted production path and may
+never fall back to account login. A real public fixture was intentionally not
+used, so `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`. Shared or unproven Chrome/Xvfb
+processes were left untouched; legacy XHS env-name residue there is a
+non-blocking hygiene observation, not an active account-backed route.
+
+R2 is `LOCAL_VERIFIED`, `NOT_REVIEWED` and archived by the commit containing
+the redacted evidence. That governance-only archive was not the runtime
+rehearsed by R2-B. R3 is `READY / NOT_STARTED` and must independently review
+and dry-run the exact evidence-archive SHA. S12 remains `NOT_STARTED` pending
+R3 and separate owner production authorization.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an
@@ -367,9 +422,11 @@ compatibility set `26/26`; the dependency is `COMPATIBLE_AS_IS`. R1E preserves
 its accepted WorkRun/replay/no-direct-send acceptance while repairing
 `R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. Its repaired archive
 `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` passed independent exact-SHA
-rereview. R1F is now the locally verified, archived, not-yet-reviewed frontier;
-R2 and later nodes remain `NOT_STARTED`. No dependency or production state
-changed. Exact evidence and dispositions are recorded in
+rereview. R1F is accepted at `08e3eea8`; R2-A/R2-B are clear and archived as
+governance/evidence only. R3 is the ready, not-started frontier. No dependency
+or production source changed; the separately authorized XHS public-only runtime
+maintenance is recorded above and is not attributable to R2. Exact dependency
+evidence and dispositions are recorded in
 `docs/governance/r1d_dependency_compatibility.v1.json`.
 
 The local Python entrypoint is now the ignored repository `.venv`, created from

@@ -52,7 +52,7 @@ Schema v2, deterministic occurrences and the injected managed tick remain
 disconnected from production. S10 is locally verified with the governed
 19-component migration manifest, a zero-effect production-copy rehearsal and a
 Core-fact-only external-poll seam. S11 synthetic acceptance is locally verified
-after owner-audit remediation; S12 remains not started and production is unchanged.
+after owner-audit remediation; S12 remains not started.
 Local S12-R1 readiness source now covers the cutover transaction/command,
 managed wake projection, WorkRun execution and terminal evidence, typed
 scheduled delivery, retained Python maintenance, and replay-safe Core reminder
@@ -67,8 +67,9 @@ observed web-tool route, locally verified the smallest effect-oriented Feishu
 document write/replan seam, and completed the bounded dependency compatibility
 decision. R1D-L1 has closed the exact update-command defect; the first R1E
 archive was review-blocked and its bounded repair is accepted at
-`493c77aa90fe53bba8a10fd94dd03136ba51d4eb`. The recalibrated R1F archive now
-awaits exact-SHA review. Desktop presence and explicit DND are
+`493c77aa90fe53bba8a10fd94dd03136ba51d4eb`. The recalibrated R1F archive
+`08e3eea81c336ac48f3e0b85a87b0b5c6d445307` passed exact-SHA review. Desktop
+presence and explicit DND are
 `POST_CUTOVER_OK`; Telegram is future channel work. This does not
 start S12 or authorize production. R1B is locally verified: the companion
 candidate has one generic Web surface (`mcp-search_hub`), the DLM-shaped handler
@@ -101,10 +102,14 @@ atomically reserves each fact projection, recovers it without provider replay,
 and requires exact fact/revision/checkpoint identity before presentation. Fresh
 repair evidence passes `18/18` focused and `52/52` shared affected. The repaired
 archive passed exact-SHA rereview and R1E is `LOCAL_VERIFIED`, `REVIEWED` and
-`ARCHIVED`. The commit containing this update is the R1F `LOCAL_VERIFIED`,
-`NOT_REVIEWED`, `ARCHIVED` candidate; R2 and later nodes, including S12, remain
-`NOT_STARTED`;
-production is unchanged.
+`ARCHIVED`. R1F is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. Fresh R2-A
+production audit and R2-B isolated copy rehearsal are clear; the runtime
+actually rehearsed was `08e3eea8`, while the commit containing this update is
+its governance/evidence-only archive. R2 is `LOCAL_VERIFIED`, `NOT_REVIEWED`
+and `ARCHIVED`; R3 is `READY / NOT_STARTED`, and S12 remains `NOT_STARTED`.
+Production source remains `98fd8b3`; R2 attributable production mutation is
+none. The separately authorized XHS public-only recovery is recorded apart
+from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.
 
 ## Lifecycle Stages
 
@@ -133,6 +138,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/active_sequence.md` | Canonical S-stage order, current stage and exit conditions |
 | `docs/governance/current_runtime_status.md` | Compact current runtime truth |
 | `docs/governance/r1d_dependency_compatibility.v1.json` | R1D dependency surfaces, compatibility evidence, rollback and S12 dispositions |
+| `docs/governance/r2_fresh_production_copy_rehearsal.v1.json` | Redacted R2-A fresh production aggregates, R2-B copy-only rehearsal evidence and separately attributed XHS public-only recovery |
 | `docs/governance/core_schedule_migration.v1.json` | S10 legacy scheduling disposition and paused-import policy manifest |
 | `docs/governance/core_managed_wake.v1.json` | Disabled-by-default Hermes `core-wake` projection contract |
 | `docs/governance/core_system_schedules.v1.json` | S12 replacement system ScheduleSpec manifest |

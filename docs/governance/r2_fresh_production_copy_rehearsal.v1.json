@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "status": "CURRENT",
+  "recordedDate": "2026-08-10",
+  "scope": "redacted aggregate R2 production audit and copy-only rehearsal evidence",
+  "r1f": {
+    "status": [
+      "LOCAL_VERIFIED",
+      "REVIEWED",
+      "ARCHIVED"
+    ],
+    "acceptedImplementationSha": "08e3eea81c336ac48f3e0b85a87b0b5c6d445307",
+    "independentReview": "CLEAR"
+  },
+  "r2a": {
+    "result": "CLEAR",
+    "auditTimestamp": "2026-08-10T02:14:52Z",
+    "productionSourceSha": "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
+    "checkout": {
+      "headMode": "detached",
+      "worktree": "clean"
+    },
+    "todos": {
+      "total": 14,
+      "futureReminderCandidates": 0,
+      "historicalReminders": 3,
+      "invalidReminderTimes": 0
+    },
+    "durableJobs": {
+      "active": 0,
+      "leased": 0
+    },
+    "watches": 0,
+    "externalActivities": {
+      "total": 13,
+      "active": 0,
+      "paused": 13,
+      "leased": 0,
+      "nextWakeNonEmpty": 0,
+      "pendingOperationNonEmpty": 0
+    },
+    "legacyOutbox": {
+      "sent": 65,
+      "ambiguous": 65,
+      "sending": 0,
+      "failed": 0,
+      "reserved": 0,
+      "ambiguousTerminalNoResendEvidence": 65,
+      "historicalSentDrift": {
+        "from": 58,
+        "to": 65
+      }
+    },
+    "proactiveReservations": 0,
+    "pendingOutbound": {
+      "count": 1,
+      "createdAt": "2026-07-03T16:51:14.311Z",
+      "nextAttemptAt": "2026-07-03T17:51:14.309Z",
+      "state": "past_due"
+    },
+    "productionCore": {
+      "enabled": false,
+      "databasePresent": false,
+      "cutoverMarkerPresent": false,
+      "managedCoreTickPresent": false
+    },
+    "visibleClockAuthority": "legacy"
+  },
+  "r2b": {
+    "result": "CLEAR",
+    "rehearsedRuntimeSha": "08e3eea81c336ac48f3e0b85a87b0b5c6d445307",
+    "evidenceArchiveSemantics": "The commit containing this record is a governance-only descendant and was not the runtime rehearsed by R2-B.",
+    "copyWatermark": "2026-08-10T02:47:36.000Z",
+    "cutoverCommittedAt": "2026-08-10T02:49:20.000Z",
+    "migrationSnapshotDigest": "sha256:890e9a6892ca47ea91142e8c368721530af94cb7119e174930d9ac7610700011",
+    "scheduleManifestDigest": "sha256:12ad37f3dded70df5bb4e7d00ecfeb195cab145541e82e6615fcb5ec7c6e6d34",
+    "copy": {
+      "scope": "minimal migration-only state",
+      "sqliteMethod": "read-only source connection plus SQLite backup API with WAL-consistent snapshot",
+      "atomicStateMethod": "pre/post inode, size, mtime and hash stability",
+      "matchedR2a": true,
+      "privateCopyRemoved": true,
+      "residualPrivateData": 0
+    },
+    "migration": {
+      "schemaBefore": "legacy/no-Core",
+      "schemaAfter": 2,
+      "migrationsApplied": [
+        "core-0001-initial",
+        "core-0002-scheduling"
+      ],
+      "historicalRemindersSuppressed": 3,
+      "futureReminderCandidates": 0,
+      "externalActivitiesStagedPaused": 13,
+      "externalActivitiesActive": 0,
+      "externalActivitiesLeased": 0,
+      "externalActivitiesRunnable": 0,
+      "legacySentReceiptOnly": 65,
+      "legacyAmbiguousTerminalNoResend": 65,
+      "replayableAmbiguous": 0,
+      "pendingOutboundReconciliationOnly": 1,
+      "pendingOutboundAdapterCalls": 0,
+      "proactiveReservations": 0,
+      "historicalDailyDigestReceiptKeys": 64,
+      "historicalDailyDigestRunnable": 0,
+      "unexplainedReconciliationState": "NONE"
+    },
+    "cutover": {
+      "exactCandidateBound": true,
+      "cutoverMarkerPresent": true,
+      "enabledSystemSchedules": 13,
+      "attentionFlushSchedules": 1,
+      "externalMcpPollSchedules": 1,
+      "reopenResult": "already_applied"
+    },
+    "syntheticFaultReplayChecks": {
+      "passed": 33,
+      "failed": 0
+    },
+    "realExternalEffects": {
+      "modelCalls": 0,
+      "mcpCalls": 0,
+      "feishuSends": 0,
+      "wechatSends": 0,
+      "telegramSends": 0,
+      "ombreMutations": 0
+    },
+    "firstAttempt": {
+      "classification": "NON_BLOCKING_OPERATING_INPUT_CORRECTION",
+      "input": "unsupported pure synthetic platform",
+      "failedBeforeCommit": true,
+      "journalRows": 0,
+      "activityRows": 0,
+      "scheduleRows": 0,
+      "correction": "valid Feishu protocol identity with synthetic non-delivering destination",
+      "candidateSourceBlocker": false
+    },
+    "r2AttributableProductionMutation": "NONE"
+  },
+  "separateAuthorizedXhsMaintenance": {
+    "classification": "PUBLIC_XHS_RUNTIME_RECOVERED",
+    "completedAt": "2026-08-10T03:07:02Z",
+    "productionSourceSha": "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
+    "attributableToR2": false,
+    "authorizedMutations": {
+      "retiredLegacyAccountBackedMcporterPid": 269670,
+      "signal": "SIGTERM",
+      "deletedLegacyTokenCache": "/opt/ran_agent/.ran_agent_state/.openclaw_state/social_reader/xhs-note-token-cache.json",
+      "tokenCacheBackupRetained": false,
+      "startedExistingService": "ran-agent-xhs-public-sidecar.service"
+    },
+    "acceptedRuntime": {
+      "serviceState": "active/running",
+      "observedMainPid": 672255,
+      "listener": "127.0.0.1:18061",
+      "publicMarkerValid": true,
+      "cookieConfigured": false,
+      "downloadEnabled": false,
+      "genericPublicFallback": "READY",
+      "legacyPort18060Present": false,
+      "accountBackedRouteActive": false,
+      "ownerLoginUsed": false,
+      "cookieConsumed": false,
+      "nodePythonHermesOmbreRestarted": false,
+      "coreChanged": false,
+      "sourceOrWorktreeChanged": false
+    },
+    "pendingEvidence": "XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3",
+    "policy": {
+      "accountBackedCookieLoginXhs": "RETIRED",
+      "publicCookieFreeXhs": "ONLY_ACCEPTED_PRODUCTION_XHS_PATH",
+      "publicFailureMayFallbackToAccountLogin": false
+    },
+    "nonBlockingHygieneObservation": "LEGACY_XHS_ENV_NAME_RESIDUE_ON_SHARED_OR_UNPROVEN_BROWSER_PROCESSES"
+  },
+  "statusAfterEvidenceArchive": {
+    "r1f": [
+      "LOCAL_VERIFIED",
+      "REVIEWED",
+      "ARCHIVED"
+    ],
+    "r2": [
+      "LOCAL_VERIFIED",
+      "NOT_REVIEWED",
+      "ARCHIVED"
+    ],
+    "r3": [
+      "READY",
+      "NOT_STARTED"
+    ],
+    "s12": "NOT_STARTED",
+    "independentR3Required": true,
+    "productionSourceChanged": false
+  }
+}
