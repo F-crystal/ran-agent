@@ -62,8 +62,11 @@ flowchart TD
     RP --> R3B0["First R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
     R3B0 --> RR0["Sealed-runtime contract d845e994<br/>SUPERSEDED BEFORE REVIEW"]
     RR0 --> RR["Sealed-probe no-write repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    RR --> RRR["Independent exact-SHA repair review<br/>REQUIRED"]
-    RRR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
+    RR --> RRR["Independent exact-SHA runtime review<br/>250a39fc · CLEAR"]
+    RRR --> R3B1["Second R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
+    R3B1 --> RFIX["Root-gate self-test fixture repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    RFIX --> RFR["Independent exact-SHA fixture review<br/>REQUIRED"]
+    RFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -99,8 +102,20 @@ Bounded repair 2 passed independent exact-SHA review at `d6adb106`. The later
 profile-delivery repair passed review at `790546a3`. The first R3-B run proved
 the exact candidate YAML semantics and source dry-run, then stopped fail-closed
 on stale one-line CLI presentation and flat-runtime import assumptions. The
-current review frontier is the class-level sealed-runtime contract repair;
-R3-B retry must not start before its independent exact-SHA review.
+combined runtime/no-write repair passed independent review at `250a39fc`. A
+second server proof passed the source dry-run and sealed-runtime resolver, then
+stopped in six root-run Node self-tests. All six were reproduced and classified
+as test-fixture drift; the current frontier is the bounded fixture repair and
+its required independent exact-SHA review.
+
+| Second R3-B root failure | Observed boundary | Classification and repair |
+|---|---|---|
+| Same read-only copy under the production `0700` topology | `candidate_stage_incomplete` | Complete-stage fixture omitted `verify-runtime-service-identity.sh`; reuse the bounded current stage surface. |
+| Missing Python 3.12 fails before mutation | later checkout probe / stale Python override | Focused fixture drift; use the current Ombre-Python key and isolate the later checkout probe. |
+| Preserve runtime shape without Hermes CLI | root runtime identity rejected | Outer-runner identity leak; bind named runtime and writable projection/Ombre paths to the explicit non-root fixture identity. |
+| Local sealed-runtime contract | root runtime identity rejected | Outer-runner identity leak; use the explicit non-root runtime identity. |
+| Git-less staged candidate | root runtime identity rejected | Outer-runner identity leak; use the explicit non-root runtime identity. |
+| Non-root gate skip policy | root runtime identity rejected | Outer-runner identity leak; execute the modeled nested gate through the explicit non-root identity on Linux/root. |
 
 ## Current Frontier
 
@@ -121,7 +136,9 @@ R3-B retry must not start before its independent exact-SHA review.
 | R3-R1B-PROFILE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `790546a34285a101948e301363381d094ec14b83` | R3-GATE review CLEAR | Exact prior-source/profile-digest contract delivers only `config.companion.yaml` as active plus the inert Pro template; rollback reuses the source transaction snapshot. |
 | R3-B-RUNTIME-CONTRACT | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` at `d845e994ac256d5d4c2e729eb8dd46224b52b746`; superseded before review | first R3-B stopped fail-closed | One runtime matrix governs semantic version, sealed app/site-packages imports, live process argv/env, local/staged parity and semantic companion YAML. |
 | R3-B-NO-WRITE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | bytecode-write blocker on d845e994 | Explicit `-B` plus shared self-guard makes every A/B/C sealed-Python validation non-writing; writable-tree fixture proves no path/content/mode drift. |
-| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | runtime-contract exact-SHA review CLEAR | Retry the real immutable Linux/systemd identity and dry-run proof; the first run's source/profile evidence remains valid but the runtime gate did not pass. |
+| R3-B-RUNTIME-REVIEW | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `250a39fc1ce40ea8e5fa2fa27a50d4f058dd7ea4` | R3-B-NO-WRITE | Independent exact-SHA review is clear. |
+| R3-B-SELFTEST-FIXTURE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | second R3-B stopped fail-closed | Test-only repair separates outer runner identity from runtime identity and keeps complete candidate fixtures aligned with the current stage contract. |
+| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | self-test fixture exact-SHA review CLEAR | Retry the complete immutable root/non-root gate; the second run retained the baseline, source dry-run and sealed resolver proofs but did not reach Python/non-root completion. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
@@ -463,8 +480,20 @@ recovery is recorded independently and leaves
 - [x] Resolve `R3-GATE-SEALED-PROBE-BYTECODE-WRITE-RISK`: every direct A/B/C
   sealed-Python import uses explicit `-B`, the shared probe rejects omission
   before imports, and the writable fixture has identical before/after trees.
-- [ ] Independent exact-SHA review of the sealed-runtime contract repair is
-  `CLEAR`.
+- [x] Independent exact-SHA review of the sealed-runtime contract repair is
+  `CLEAR` at `250a39fc1ce40ea8e5fa2fa27a50d4f058dd7ea4`.
+- [x] Record the second R3-B attempt: baseline and source dry-run passed; the
+  sealed runtime resolver passed; root `--all` stopped in six Node self-tests;
+  non-root and Python did not run; production remained unchanged.
+- [x] Reproduce all six failures under the exact root/candidate environment and
+  classify them before editing: four outer-root identity leaks, one complete
+  stage-helper omission and one stale focused-prerequisite fixture; no real
+  gate-authority defect.
+- [x] Verify the bounded fixture repair locally (`85/85`, four declared
+  platform skips) and under Linux/root (`85/85`, 84 pass, one declared
+  desktop-only skip), including the same read-only copy and nested non-root
+  gate.
+- [ ] Independent exact-SHA review of the root-gate fixture repair is `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
 - [ ] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,
@@ -474,9 +503,9 @@ recovery is recorded independently and leaves
 - [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
   authorization with the exact SHA and summarized mutation.
 
-The local runtime-contract repair does not impersonate a real Linux
-systemd/`ubuntu:ubuntu` or service-managed v0.20 `--all` pass. The R3-B retry
-remains exclusively server-side and is `NOT_STARTED`.
+The fixture repair does not claim a complete service-managed v0.20 `--all`
+pass. It closes only the six root self-test failures from the second R3-B
+attempt; the next complete R3-B retry remains server-side and `NOT_STARTED`.
 
 The former local Hermes/Python binding and wrong-group missing proofs are
 closed by the shared runtime probe and focused negative. Real Linux

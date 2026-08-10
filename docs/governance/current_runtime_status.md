@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 no-write runtime-contract repair LOCAL_VERIFIED (2026-08-10)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 root-gate fixture repair LOCAL_VERIFIED (2026-08-10)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -398,6 +398,30 @@ fixtures, `41/41` source/profile checks, and the affected release file at
 `81 passed / 0 failed / 3 environment skips`; real sealed-provider execution
 remains an R3-B server proof. The blocker is `RESOLVED`; this repair is
 `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this status.
+
+Independent exact-SHA review of the complete runtime-contract/no-write repair
+is clear at `250a39fc1ce40ea8e5fa2fa27a50d4f058dd7ea4`. The second R3-B server
+proof kept the production source at `98fd8b38`, passed the exact-candidate
+source dry-run and the sealed v0.20 resolver/live-process/Full-retirement
+checks, then stopped fail-closed in six tests inside
+`hermesReleaseScript.test.mjs`. The non-root gate and Python provider suite did
+not run; production remained unchanged.
+
+An exact root reproduction of only that Node file produced the complete six-row
+failure set. No row demonstrated a production gate-authority defect: four used
+the outer root runner as the modeled runtime identity, one manually assembled
+complete candidate omitted the newly mandatory runtime-identity verifier, and
+one focused Python-prerequisite test had not isolated the newer checkout-access
+probe. The bounded repair changes only the test fixture plus this synchronized
+governance. It resolves an existing non-root fixture identity independently of
+the runner, centralizes the bounded complete-stage helper surface, keeps root
+identity rejection explicit, runs the modeled non-root nested gate through
+`runuser` on Linux/root, and gives runtime-owned synthetic paths their truthful
+identity. Local evidence is 85 tests with 81 pass and four declared platform
+skips; Linux/root evidence is 85 tests with 84 pass and the one declared
+desktop-only skip. The repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by
+the commit containing this status. Another R3-B run awaits independent
+exact-SHA review; S12 remains `NOT_STARTED`.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

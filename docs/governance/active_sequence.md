@@ -79,7 +79,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> first S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
   -> R3-B sealed-runtime contract repair d845e994 (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED; SUPERSEDED BEFORE REVIEW)
   -> R3-B sealed-probe no-write repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
-  -> independent exact-SHA runtime-contract review (REQUIRED)
+  -> independent exact-SHA runtime-contract review at 250a39fc (CLEAR)
+  -> second S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
+  -> R3-B root-gate self-test fixture repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
+  -> independent exact-SHA fixture-repair review (REQUIRED)
   -> S12-R3B immutable server gate/dry-run retry (NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
@@ -174,9 +177,24 @@ S12-R0 fresh read-only production audit (COMPLETE)
   not itself prevent root from writing bytecode into the sealed tree. The
   bounded repair requires explicit `-B` at every A/B/C sealed-Python probe,
   self-rejects a shared-probe caller that omits it, and proves a writable
-  synthetic runtime tree is unchanged. The blocker is `RESOLVED`; the commit
-  containing this status is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED`. R3
-  remains incomplete; independent review and R3-B retry are not started.
+  synthetic runtime tree is unchanged. The combined repair passed independent
+  exact-SHA review at `250a39fc1ce40ea8e5fa2fa27a50d4f058dd7ea4`.
+  The second R3-B server proof retained the expected production baseline,
+  exact-candidate source dry-run, sealed v0.20 resolver, live `/proc` contract
+  and Full retirement, then stopped fail-closed in six Node self-tests before
+  the Python and non-root gates. Reproduction of the exact test file under the
+  same root environment classified all six as fixture drift: four leaked the
+  outer `root:root` identity into a non-root runtime fixture, one complete
+  stage omitted `verify-runtime-service-identity.sh`, and one focused
+  prerequisite fixture hit a later checkout probe before its intended Python
+  failure. The bounded test-only repair uses an explicit existing non-root
+  fixture identity, one current complete-stage surface and truthful effective
+  process ownership. Desktop evidence is `85/85` with four declared platform
+  skips; the Linux root fixture is `85/85` with 84 pass and the single declared
+  desktop-only skip. Production gate authority is unchanged. The repair is
+  `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
+  status. R3 remains incomplete; independent review and another R3-B retry are
+  not started.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

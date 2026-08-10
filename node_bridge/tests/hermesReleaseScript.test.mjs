@@ -13,9 +13,22 @@ const nodeBin = process.execPath;
 const projectPython = join(root, '.venv', 'bin', 'python');
 const pythonBin = process.env.RAN_AGENT_PYTHON_BIN
   || (existsSync(projectPython) ? realpathSync(projectPython) : '');
-const runtimeUser = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
-const runtimeGroup = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
 const linuxRoot = process.platform === 'linux' && process.geteuid?.() === 0;
+const processUser = execFileSync('id', ['-un'], { encoding: 'utf8' }).trim();
+const processGroup = execFileSync('id', ['-gn'], { encoding: 'utf8' }).trim();
+const fixtureRuntimeIdentity = (() => {
+  const candidates = linuxRoot ? ['ubuntu', 'ran-agent', 'nobody'] : [processUser];
+  for (const user of candidates) {
+    try {
+      const uid = Number(execFileSync('id', ['-u', user], { encoding: 'utf8' }).trim());
+      const gid = Number(execFileSync('id', ['-g', user], { encoding: 'utf8' }).trim());
+      const group = execFileSync('id', ['-gn', user], { encoding: 'utf8' }).trim();
+      if (uid > 0 && gid > 0 && group) return { user, group, uid, gid };
+    } catch {}
+  }
+  throw new Error('release test prerequisite missing: an existing non-root fixture identity is required');
+})();
+const { user: fixtureRuntimeUser, group: fixtureRuntimeGroup } = fixtureRuntimeIdentity;
 const bootstrapFrameworkFiles = [
   'bootstrap-hermes-release.sh',
   'deploy-hermes-release.sh',
@@ -26,6 +39,25 @@ const bootstrapFrameworkFiles = [
   'ombre_o1_contract.py',
   'verify-runtime-service-identity.sh',
 ];
+const candidateStageExecutables = [
+  'apply-hermes-runtime-split.sh',
+  'verify-hermes-release.sh',
+  'hermes-release-candidate-preflight.mjs',
+];
+const candidateStageHelpers = [
+  'check-hermes-snapshot-capacity.py',
+  'prune-hermes-release-artifacts.sh',
+  'ombre_o1_contract.py',
+  'verify-runtime-service-identity.sh',
+];
+
+function writeCompleteCandidateStageFixture(scripts) {
+  for (const name of candidateStageExecutables) {
+    writeFileSync(join(scripts, name), '#!/bin/sh\nexit 0\n');
+    chmodSync(join(scripts, name), 0o755);
+  }
+  for (const name of candidateStageHelpers) writeFileSync(join(scripts, name), '# fixture\n');
+}
 
 function candidate() {
   const explicit = process.env.RAN_AGENT_RELEASE_CANDIDATE;
@@ -62,14 +94,24 @@ function identityFixturePrefix(name) {
 
 function runAsCheckoutOperator(command, args, options, fixtureRoot) {
   if (!linuxRoot) return execFileSync(command, args, options);
-  const uid = execFileSync('id', ['-u', 'ubuntu'], { encoding: 'utf8' }).trim();
-  const gid = execFileSync('id', ['-g', 'ubuntu'], { encoding: 'utf8' }).trim();
-  execFileSync('chown', ['-R', `${uid}:${gid}`, fixtureRoot]);
+  execFileSync('chown', ['-R', `${fixtureRuntimeIdentity.uid}:${fixtureRuntimeIdentity.gid}`, fixtureRoot]);
   chmodSync(fixtureRoot, 0o755);
   const { env = {}, ...runOptions } = options;
   const assignments = Object.entries(env).map(([key, value]) => `${key}=${value}`);
   return execFileSync('/usr/sbin/runuser', [
-    '--user', 'ubuntu', '--group', 'ubuntu', '--', '/usr/bin/env', '-i',
+    '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--', '/usr/bin/env', '-i',
+    'HOME=/tmp', 'TMPDIR=/tmp', ...assignments, command, ...args,
+  ], runOptions);
+}
+
+function spawnAsFixtureRuntime(command, args, options, fixtureRoot) {
+  if (!linuxRoot) return spawnSync(command, args, options);
+  execFileSync('chown', ['-R', `${fixtureRuntimeIdentity.uid}:${fixtureRuntimeIdentity.gid}`, fixtureRoot]);
+  chmodSync(fixtureRoot, 0o755);
+  const { env = {}, ...runOptions } = options;
+  const assignments = Object.entries(env).map(([key, value]) => `${key}=${value}`);
+  return spawnSync('/usr/sbin/runuser', [
+    '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--', '/usr/bin/env', '-i',
     'HOME=/tmp', 'TMPDIR=/tmp', ...assignments, command, ...args,
   ], runOptions);
 }
@@ -89,6 +131,24 @@ test('Node runtime imports are direct, lock-synchronized production dependencies
   assert.deepEqual(Object.keys(manifest.dependencies).sort(), expected);
   assert.deepEqual(lock.packages[''].dependencies, manifest.dependencies);
   assert.equal(Object.hasOwn(lock.packages, 'node_modules/openclaw'), false);
+});
+
+test('Linux root fixtures keep the runtime identity non-root and reject the outer runner identity', {
+  skip: !linuxRoot,
+}, () => {
+  const verifier = join(root, 'scripts', 'verify-runtime-service-identity.sh');
+  const accepted = spawnSync('/bin/bash', [verifier, '--identity', fixtureRuntimeUser, fixtureRuntimeGroup], {
+    env: { PATH: '/usr/bin:/bin' }, encoding: 'utf8',
+  });
+  assert.equal(accepted.status, 0, accepted.stderr);
+  assert.notEqual(fixtureRuntimeIdentity.uid, 0);
+  assert.notEqual(fixtureRuntimeIdentity.gid, 0);
+
+  const rejected = spawnSync('/bin/bash', [verifier, '--identity', processUser, processGroup], {
+    env: { PATH: '/usr/bin:/bin' }, encoding: 'utf8',
+  });
+  assert.notEqual(rejected.status, 0);
+  assert.match(rejected.stderr, /runtime_identity_must_be_non_root/);
 });
 
 function writeRetentionState(directory, overrides = {}) {
@@ -2180,21 +2240,11 @@ test('candidate staging fails closed on missing release assets and remains reada
     const footer = deploy.lastIndexOf('if [[ "$MODE" == --rollback ]]');
     writeFileSync(join(scripts, 'deploy-hermes-release.sh'), deploy.slice(0, footer));
     copyFileSync(join(root, 'scripts', 'resolve-hermes-service-node.sh'), join(scripts, 'resolve-hermes-service-node.sh'));
-    for (const name of [
-      'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
-      'hermes-release-candidate-preflight.mjs',
-      'hermes-release-gate.sh',
-    ]) writeFileSync(join(scripts, name), '#!/bin/sh\nexit 0\n');
-    for (const name of [
-      'check-hermes-snapshot-capacity.py', 'prune-hermes-release-artifacts.sh', 'ombre_o1_contract.py',
-      'verify-runtime-service-identity.sh',
-    ]) writeFileSync(join(scripts, name), '# fixture\n');
-    for (const name of [
-      'deploy-hermes-release.sh', 'resolve-hermes-service-node.sh',
-      'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
-      'hermes-release-candidate-preflight.mjs',
-      'hermes-release-gate.sh', 'verify-runtime-service-identity.sh',
-    ]) chmodSync(join(scripts, name), 0o755);
+    writeCompleteCandidateStageFixture(scripts);
+    writeFileSync(join(scripts, 'hermes-release-gate.sh'), '#!/bin/sh\nexit 0\n');
+    for (const name of ['deploy-hermes-release.sh', 'resolve-hermes-service-node.sh', 'hermes-release-gate.sh']) {
+      chmodSync(join(scripts, name), 0o755);
+    }
     writeFileSync(join(bin, 'sha256sum'), '#!/bin/sh\nexec /usr/bin/shasum -a 256 "$@"\n');
     chmodSync(join(bin, 'sha256sum'), 0o755);
     runGit(['init']);
@@ -2243,24 +2293,24 @@ test('candidate staging fails closed on missing release assets and remains reada
     );
     if (process.getuid?.() === 0 && existsSync('/usr/sbin/runuser')) {
       // Production topology: the artifact store stays root-private (0700), so
-      // the ran-agent identity can never read the stage directly and must use
+      // the governed non-root identity can never read the stage directly and must use
       // the traversable read-only gate copy instead.
       for (const path of [dir, artifacts, join(artifacts, 'stages')]) {
         chmodSync(path, 0o700);
         assert.equal(statSync(path).mode & 0o777, 0o700);
       }
       assert.throws(() => execFileSync('/usr/sbin/runuser', [
-        '--user', 'ran-agent', '--group', 'ran-agent', '--',
+        '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--',
         '/usr/bin/test', '-r', join(completeStage, 'scripts', 'hermes-release-gate.sh'),
-      ], { stdio: 'pipe' }), /Command failed/, 'private stage must stay unreadable to the ran-agent identity');
+      ], { stdio: 'pipe' }), /Command failed/, 'private stage must stay unreadable to the runtime identity');
       assert.doesNotThrow(() => execFileSync('/usr/sbin/runuser', [
-        '--user', 'ran-agent', '--group', 'ran-agent', '--',
+        '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--',
         '/usr/bin/test', '-r', join(completeGateCopy, 'scripts', 'hermes-release-gate.sh'),
       ], { stdio: 'pipe' }));
       assert.throws(() => execFileSync('/usr/sbin/runuser', [
-        '--user', 'ran-agent', '--group', 'ran-agent', '--',
+        '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--',
         '/usr/bin/test', '-w', join(completeGateCopy, 'scripts', 'hermes-release-gate.sh'),
-      ], { stdio: 'pipe' }), /Command failed/, 'gate copy must stay read-only to the ran-agent identity');
+      ], { stdio: 'pipe' }), /Command failed/, 'gate copy must stay read-only to the runtime identity');
     }
 
     runGit(['rm', 'scripts/verify-runtime-service-identity.sh']);
@@ -2299,7 +2349,7 @@ test('candidate staging fails closed on missing release assets and remains reada
   }
 });
 
-test('Linux root gates execute the same read-only copy as root and ran-agent under the production 0700 artifact topology', {
+test('Linux root gates execute the same read-only copy as root and the governed non-root identity', {
   skip: process.platform !== 'linux' || process.geteuid?.() !== 0 || !existsSync('/usr/sbin/runuser'),
 }, () => {
   const dir = mkdtempSync(identityFixturePrefix('ran-agent-gate-copy-'));
@@ -2321,18 +2371,10 @@ test('Linux root gates execute the same read-only copy as root and ran-agent und
       'printf \'%s %s\\n\' "$(/usr/bin/id -un)" "${digest%% *}" >> ' + JSON.stringify(trace),
       'exit 0',
     ].join('\n') + '\n');
-    for (const name of [
-      'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
-      'hermes-release-candidate-preflight.mjs',
-    ]) writeFileSync(join(scripts, name), '#!/bin/sh\nexit 0\n');
-    for (const name of [
-      'check-hermes-snapshot-capacity.py', 'prune-hermes-release-artifacts.sh', 'ombre_o1_contract.py',
-    ]) writeFileSync(join(scripts, name), '# fixture\n');
-    for (const name of [
-      'deploy-hermes-release.sh', 'resolve-hermes-service-node.sh', 'hermes-release-gate.sh',
-      'apply-hermes-runtime-split.sh', 'verify-hermes-release.sh',
-      'hermes-release-candidate-preflight.mjs',
-    ]) chmodSync(join(scripts, name), 0o755);
+    writeCompleteCandidateStageFixture(scripts);
+    for (const name of ['deploy-hermes-release.sh', 'resolve-hermes-service-node.sh', 'hermes-release-gate.sh']) {
+      chmodSync(join(scripts, name), 0o755);
+    }
     runGit(['init']);
     runGit(['config', 'user.email', 'gate-copy@example.invalid']);
     runGit(['config', 'user.name', 'gate copy']);
@@ -2350,6 +2392,8 @@ test('Linux root gates execute the same read-only copy as root and ran-agent und
       RAN_AGENT_PYTHON_BIN: pythonBin,
       RAN_AGENT_RELEASE_CONTROL_ROOT: repo,
       RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifacts,
+      RAN_AGENT_RUNTIME_USER: fixtureRuntimeUser,
+      RAN_AGENT_RUNTIME_GROUP: fixtureRuntimeGroup,
     };
     const [completeStage, completeGateCopy] = execFileSync('/bin/bash', ['-c', [
       'set -euo pipefail',
@@ -2373,20 +2417,20 @@ test('Linux root gates execute the same read-only copy as root and ran-agent und
     assert.equal(statSync(completeGateCopy).mode & 0o777, 0o555);
     assert.equal(statSync(completeGateCopy).uid, 0);
     assert.equal(statSync(completeGateCopy).gid, 0);
-    // The ran-agent identity can never traverse the root-private store into
+    // The governed runtime identity can never traverse the root-private store into
     // the stage; it reads the traversable read-only gate copy instead.
     assert.throws(() => execFileSync('/usr/sbin/runuser', [
-      '--user', 'ran-agent', '--group', 'ran-agent', '--',
+      '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--',
       '/usr/bin/test', '-r', join(completeStage, 'scripts', 'hermes-release-gate.sh'),
-    ], { stdio: 'pipe' }), /Command failed/, 'private stage must stay unreadable to the ran-agent identity');
+    ], { stdio: 'pipe' }), /Command failed/, 'private stage must stay unreadable to the runtime identity');
     assert.doesNotThrow(() => execFileSync('/usr/sbin/runuser', [
-      '--user', 'ran-agent', '--group', 'ran-agent', '--',
+      '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--',
       '/usr/bin/test', '-r', join(completeGateCopy, 'scripts', 'hermes-release-gate.sh'),
     ], { stdio: 'pipe' }));
     assert.throws(() => execFileSync('/usr/sbin/runuser', [
-      '--user', 'ran-agent', '--group', 'ran-agent', '--',
+      '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--',
       '/usr/bin/test', '-w', join(completeGateCopy, 'scripts', 'hermes-release-gate.sh'),
-    ], { stdio: 'pipe' }), /Command failed/, 'gate copy must stay read-only to the ran-agent identity');
+    ], { stdio: 'pipe' }), /Command failed/, 'gate copy must stay read-only to the runtime identity');
     // Both gates succeed against the same read-only copy before any snapshot,
     // checkout, service stop, or runtime write.
     execFileSync('/bin/bash', ['-c', [
@@ -2405,7 +2449,7 @@ test('Linux root gates execute the same read-only copy as root and ran-agent und
     const gateRuns = readFileSync(trace, 'utf8').trim().split('\n').map((line) => line.split(' '));
     assert.equal(gateRuns.length, 2, 'root gate and ran-agent gate must both execute');
     assert.equal(gateRuns[0][0], 'root');
-    assert.equal(gateRuns[1][0], 'ran-agent');
+    assert.equal(gateRuns[1][0], fixtureRuntimeUser);
     assert.match(gateRuns[0][1], /^[a-f0-9]{64}$/);
     assert.equal(gateRuns[0][1], gateRuns[1][1], 'both gates must read the identical verified copy');
     // The copy is removed by the transaction cleanup on every outcome.
@@ -2519,7 +2563,8 @@ test('apply rejects a missing Python 3.12 before snapshot or checkout side effec
         'require_artifact_layout() { :; }',
         'require_service_environment() { :; }',
         'require_atomic_state() { :; }',
-        `RAN_AGENT_OMBRE_PATCH_PYTHON_BIN=${JSON.stringify(join(dir, 'missing-python3.12'))}`,
+        'runtime_checkout_access() { :; }',
+        `RAN_AGENT_OMBRE_PYTHON_BIN=${JSON.stringify(join(dir, 'missing-python3.12'))}`,
         `snapshot_node_durable_state() { printf snapshot > ${JSON.stringify(marker)}; }`,
         `activate_candidate_checkout() { printf checkout > ${JSON.stringify(marker)}; }`,
         'require_apply_prerequisites',
@@ -2827,7 +2872,7 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   mkdirSync(join(state, 'core'), { recursive: true });
   const proc = join(dir, 'proc');
   mkdirSync(join(proc, '123'), { recursive: true });
-  writeFileSync(join(proc, '123', 'status'), `Uid:\t${process.getuid()}\t${process.getuid()}\t${process.getuid()}\t${process.getuid()}\nGid:\t${process.getgid()}\t${process.getgid()}\t${process.getgid()}\t${process.getgid()}\n`);
+  writeFileSync(join(proc, '123', 'status'), `Uid:\t${fixtureRuntimeIdentity.uid}\t${fixtureRuntimeIdentity.uid}\t${fixtureRuntimeIdentity.uid}\t${fixtureRuntimeIdentity.uid}\nGid:\t${fixtureRuntimeIdentity.gid}\t${fixtureRuntimeIdentity.gid}\t${fixtureRuntimeIdentity.gid}\t${fixtureRuntimeIdentity.gid}\n`);
   const core = new DatabaseSync(join(state, 'core', 'core-state.sqlite3'));
   core.exec('CREATE TABLE activity (activity_id TEXT PRIMARY KEY, title TEXT NOT NULL, domain TEXT NOT NULL, state TEXT NOT NULL, contract_revision INTEGER NOT NULL, updated_at TEXT NOT NULL)');
   core.close();
@@ -2859,15 +2904,12 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   writeFileSync(join(bin, 'id'), [
     '#!/bin/sh',
     'case "$*" in',
-    '  "ran-agent") exit 0 ;;',
-    '  "-u ran-agent") printf "%s\\n" 999 ;;',
-    '  "-g ran-agent") printf "%s\\n" 999 ;;',
-    '  "-gn ran-agent") printf "%s\\n" ran-agent ;;',
-    `  "-u ${runtimeUser}") printf "%s\\n" ${process.getuid()} ;;`,
-    `  "-g ${runtimeUser}") printf "%s\\n" ${process.getgid()} ;;`,
-    `  "-gn ${runtimeUser}") printf "%s\\n" ${JSON.stringify(runtimeGroup)} ;;`,
-    `  "-u") printf "%s\\n" ${process.getuid()} ;;`,
-    `  "-g") printf "%s\\n" ${process.getgid()} ;;`,
+    `  ${JSON.stringify(fixtureRuntimeUser)}) exit 0 ;;`,
+    `  "-u ${fixtureRuntimeUser}") printf "%s\\n" ${fixtureRuntimeIdentity.uid} ;;`,
+    `  "-g ${fixtureRuntimeUser}") printf "%s\\n" ${fixtureRuntimeIdentity.gid} ;;`,
+    `  "-gn ${fixtureRuntimeUser}") printf "%s\\n" ${JSON.stringify(fixtureRuntimeGroup)} ;;`,
+    '  "-u") exec /usr/bin/id -u ;;',
+    '  "-g") exec /usr/bin/id -g ;;',
     '  *) exec /usr/bin/id "$@" ;;',
     'esac',
     '',
@@ -2875,8 +2917,8 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   writeFileSync(join(bin, 'getent'), [
     '#!/bin/sh',
     'case "$1:$2" in',
-    '  group:ran-agent) printf "%s\\n" "ran-agent:x:999:" ;;',
-    '  passwd:ran-agent) printf "%s\\n" "ran-agent:x:999:999::/opt/ran_agent:/usr/sbin/nologin" ;;',
+    `  group:${fixtureRuntimeGroup}) printf "%s\\n" ${JSON.stringify(`${fixtureRuntimeGroup}:x:${fixtureRuntimeIdentity.gid}:`)} ;;`,
+    `  passwd:${fixtureRuntimeUser}) printf "%s\\n" ${JSON.stringify(`${fixtureRuntimeUser}:x:${fixtureRuntimeIdentity.uid}:${fixtureRuntimeIdentity.gid}::/opt/ran_agent:/usr/sbin/nologin`)} ;;`,
     '  *) exit 2 ;;',
     'esac',
     '',
@@ -2890,10 +2932,10 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   chmodSync(join(bin, 'chown'), 0o755);
 
   const baseEnv = {
-    PATH: `${bin}:/usr/bin:/bin`,
+    PATH: `${bin}:/usr/sbin:/usr/bin:/bin`,
     RAN_AGENT_NO_SUDO: '1',
-    RAN_AGENT_RUNTIME_USER: runtimeUser,
-    RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
+    RAN_AGENT_RUNTIME_USER: fixtureRuntimeUser,
+    RAN_AGENT_RUNTIME_GROUP: fixtureRuntimeGroup,
     RAN_AGENT_PYTHON_BIN: pythonBin,
     RAN_AGENT_OMBRE_PYTHON_BIN: join(bin, 'ombre-python'),
     RAN_AGENT_NODE_BIN: nodeBin,
@@ -2915,10 +2957,21 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
     OMBRE_BRAIN_UPDATE_SOURCE: 'false',
     RAN_AGENT_DEPLOY_OMBRE_BUCKETS_DIR: join(dir, 'buckets'),
     SYSTEMCTL_TRACE: trace,
-    MOCK_RUNTIME_USER: runtimeUser,
-    MOCK_RUNTIME_GROUP: runtimeGroup,
+    MOCK_RUNTIME_USER: fixtureRuntimeUser,
+    MOCK_RUNTIME_GROUP: fixtureRuntimeGroup,
   };
   try {
+    if (linuxRoot) {
+      const buckets = join(dir, 'buckets');
+      const projectionRoot = join(state, 'hermes');
+      mkdirSync(buckets);
+      mkdirSync(projectionRoot);
+      chmodSync(dir, 0o755);
+      execFileSync('chown', [
+        '-R', `${fixtureRuntimeIdentity.uid}:${fixtureRuntimeIdentity.gid}`,
+        ombreHome, buckets, projectionRoot,
+      ]);
+    }
     assert.doesNotThrow(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
       cwd: root,
       env: baseEnv,
@@ -2958,18 +3011,18 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
     for (const directory of [join(state, 'hermes'), `${projection}.revisions`, `${projection}.manifests`]) {
       const metadata = statSync(directory);
       assert.equal(metadata.mode & 0o777, 0o700);
-      assert.equal(metadata.uid, process.getuid());
-      assert.equal(metadata.gid, process.getgid());
+      assert.equal(metadata.uid, fixtureRuntimeIdentity.uid);
+      assert.equal(metadata.gid, fixtureRuntimeIdentity.gid);
     }
     for (const file of [projection, `${projection}.publication-state.json`, manifestPath, revisionPath]) {
       const metadata = statSync(file);
       assert.equal(metadata.mode & 0o777, 0o600);
-      assert.equal(metadata.uid, process.getuid());
-      assert.equal(metadata.gid, process.getgid());
+      assert.equal(metadata.uid, fixtureRuntimeIdentity.uid);
+      assert.equal(metadata.gid, fixtureRuntimeIdentity.gid);
     }
-    assert.match(log, new RegExp(`chown ${runtimeUser}:${runtimeGroup} .*\\/hermes`));
+    assert.match(log, new RegExp(`chown ${fixtureRuntimeUser}:${fixtureRuntimeGroup} .*\\/hermes`));
     assert.match(log, new RegExp(
-      `chown -R ${runtimeUser}:${runtimeGroup} ${ombreHome.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')} ${join(dir, 'buckets').replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
+      `chown -R ${fixtureRuntimeUser}:${fixtureRuntimeGroup} ${ombreHome.replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')} ${join(dir, 'buckets').replaceAll(/[.*+?^${}()|[\]\\]/g, '\\$&')}`,
     ));
 
     for (const mode of ['lite', 'full']) {
@@ -3523,8 +3576,8 @@ test('local release gate uses the same sealed runtime contract and rejects cross
         RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
         RAN_AGENT_HERMES_TEST_BIN: runtime.hermes,
         RAN_AGENT_HERMES_TEST_PYTHON_BIN: python,
-        RAN_AGENT_RUNTIME_USER: runtimeUser,
-        RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
+        RAN_AGENT_RUNTIME_USER: fixtureRuntimeUser,
+        RAN_AGENT_RUNTIME_GROUP: fixtureRuntimeGroup,
       },
       encoding: 'utf8',
     });
@@ -3579,8 +3632,8 @@ test('release gate executes a git-less staged candidate from its explicit immuta
         RAN_AGENT_SYSTEMCTL_BIN: '/attacker/systemctl',
         RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
         RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
-        RAN_AGENT_RUNTIME_USER: runtimeUser,
-        RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
+        RAN_AGENT_RUNTIME_USER: fixtureRuntimeUser,
+        RAN_AGENT_RUNTIME_GROUP: fixtureRuntimeGroup,
       },
       encoding: 'utf8',
       stdio: 'pipe',
@@ -3597,8 +3650,8 @@ test('release gate executes a git-less staged candidate from its explicit immuta
           RAN_AGENT_RELEASE_CANDIDATE: 'a'.repeat(40),
           RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
           RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
-          RAN_AGENT_RUNTIME_USER: runtimeUser,
-          RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
+          RAN_AGENT_RUNTIME_USER: fixtureRuntimeUser,
+          RAN_AGENT_RUNTIME_GROUP: fixtureRuntimeGroup,
         },
         encoding: 'utf8',
         stdio: 'pipe',
@@ -3616,7 +3669,7 @@ test('non-root gate skips only root tooling and never skips provider checks', ()
   const boundaryStub = 'hermesGatewayProviderBoundary.integration.test.mjs';
   const toolingStubs = ['hermesModelCutover.test.mjs', 'searchHubApplyScript.test.mjs'];
   const buildStage = (stubs) => {
-    const stage = mkdtempSync(join(tmpdir(), 'ran-agent-gate-skip-'));
+    const stage = mkdtempSync(identityFixturePrefix('ran-agent-gate-skip-'));
     mkdirSync(join(stage, 'scripts'), { recursive: true });
     mkdirSync(join(stage, 'node_bridge', 'tests'), { recursive: true });
     mkdirSync(join(stage, 'tests'), { recursive: true });
@@ -3641,7 +3694,7 @@ test('non-root gate skips only root tooling and never skips provider checks', ()
     writeFileSync(join(stage, 'tests', 'test_stage.py'), 'def test_gitless_stage():\n    assert True\n');
     return stage;
   };
-  const runGate = (stage, extraEnv = {}) => spawnSync('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--all'], {
+  const runGate = (stage, extraEnv = {}) => spawnAsFixtureRuntime('/bin/bash', [join(stage, 'scripts', 'hermes-release-gate.sh'), '--all'], {
     cwd: stage,
     env: {
       PATH: '/usr/bin:/bin',
@@ -3650,12 +3703,12 @@ test('non-root gate skips only root tooling and never skips provider checks', ()
       RAN_AGENT_RELEASE_CANDIDATE: 'b'.repeat(40),
       RAN_AGENT_RELEASE_SOURCE_ROOT: stage,
       RAN_AGENT_RELEASE_STAGED_CANDIDATE: '1',
-      RAN_AGENT_RUNTIME_USER: runtimeUser,
-      RAN_AGENT_RUNTIME_GROUP: runtimeGroup,
+      RAN_AGENT_RUNTIME_USER: fixtureRuntimeUser,
+      RAN_AGENT_RUNTIME_GROUP: fixtureRuntimeGroup,
       ...extraEnv,
     },
     encoding: 'utf8',
-  });
+  }, stage);
   const stages = [];
   try {
     // Flagged: every privileged check is skipped with a printed reason, the
@@ -4075,8 +4128,8 @@ test('staged Hermes gate binds one service-managed unified v0.20 runtime and ret
   const makeSystemctl = (runtime, {
     configuredHermes = runtime.hermes,
     processPython = runtime.python,
-    user = runtimeUser,
-    group = runtimeGroup,
+    user = fixtureRuntimeUser,
+    group = fixtureRuntimeGroup,
     mainPid = '123',
     unifiedActive = true,
     fullActive = false,
@@ -4131,7 +4184,7 @@ esac
   };
 
   const runGateResolver = (fixture, env = {}) => execFileSync(nodeBin, [
-    gateResolver, fixture.path, runtimeUser, runtimeGroup, fixture.procRoot,
+    gateResolver, fixture.path, fixtureRuntimeUser, fixtureRuntimeGroup, fixture.procRoot,
   ], {
     env: { PATH: '/usr/bin:/bin', ...env },
     encoding: 'utf8',

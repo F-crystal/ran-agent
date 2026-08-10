@@ -123,9 +123,14 @@ before independent review after confirming
 `-I` without a bytecode no-write guard. The bounded successor requires explicit
 `-B` at every current gate/test probe, makes the shared probe reject callers
 that omit it before importing runtime modules, and proves a writable synthetic
-runtime tree remains unchanged. The commit containing this update is
-`LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED`. R3-B retry and S12 remain
-`NOT_STARTED`.
+runtime tree remains unchanged. The combined repair passed independent review
+at `250a39fc`. The second R3-B proof passed baseline, source dry-run and the real
+sealed-runtime resolver, then stopped fail-closed in six root-run Node
+self-tests. Exact reproduction classified all six as fixture drift, not gate
+authority defects. The bounded test-only repair passes the 85-test file on both
+desktop and Linux/root with only their explicit platform skips and is
+`LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
+update. Another R3-B retry and S12 remain `NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.
