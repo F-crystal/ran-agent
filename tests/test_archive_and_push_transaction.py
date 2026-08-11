@@ -283,6 +283,31 @@ def test_reused_validation_is_durable_before_merge_and_rendered_from_journal(tmp
     assert transaction.parent.is_relative_to(repo / "local_archive")
 
 
+def test_reused_validation_rejects_final_symlink_without_git_mutation(tmp_path: Path) -> None:
+    repo, remote = setup_feature_repo(tmp_path)
+    (repo / "feature.txt").write_text("feature\n", encoding="utf-8")
+    git(repo, "add", "feature.txt")
+    git(repo, "commit", "-m", "feature")
+    source_head = git(repo, "rev-parse", "HEAD")
+    validation = write_validation_record(repo, source_head)
+    outside = tmp_path / "outside-validation.json"
+    outside.write_bytes(validation.read_bytes())
+    validation.unlink()
+    validation.symlink_to(outside)
+    digest = hashlib.sha256(outside.read_bytes()).hexdigest()
+
+    result = run_archive(repo, "--push", "--reuse-validation", str(validation))
+
+    assert result.returncode == 34
+    assert validation.is_symlink()
+    assert hashlib.sha256(outside.read_bytes()).hexdigest() == digest
+    assert git(repo, "rev-parse", "HEAD") == source_head
+    assert git(repo, "--git-dir", str(remote), "rev-parse", "main") != source_head
+    _transaction, journal = journal_for(repo)
+    assert journal["phase"] == "validation"
+    assert journal["failure_stage"] == "validation"
+
+
 def journal_for(repo: Path) -> tuple[Path, dict[str, object]]:
     path = next((repo / "local_archive" / "runtime" / "archive-and-push").glob("*/transaction.json"))
     return path, json.loads(path.read_text(encoding="utf-8"))
@@ -851,8 +876,9 @@ def test_dead_prejournal_lock_is_recovered_without_an_orphan_transaction(tmp_pat
 
 
 def test_archive_lock_rejects_non_regular_paths_before_transaction(tmp_path: Path) -> None:
-    for kind in ("fifo", "directory", "symlink", "world-writable"):
-        repo, _remote = setup_feature_repo(tmp_path / kind)
+    for kind in ("fifo", "directory", "symlink", "world-writable", "hard-link"):
+        repo, remote = setup_feature_repo(tmp_path / kind)
+        base = git(repo, "rev-parse", "HEAD")
         runtime = repo / "local_archive" / "runtime" / "archive-and-push"
         runtime.mkdir(parents=True)
         lock = runtime / ".flock"
@@ -863,18 +889,35 @@ def test_archive_lock_rejects_non_regular_paths_before_transaction(tmp_path: Pat
             lock.mkdir()
         elif kind == "symlink":
             target.write_text("do not touch\n", encoding="utf-8")
+            target.chmod(0o600)
             lock.symlink_to(target)
+        elif kind == "hard-link":
+            target.write_text("do not touch\n", encoding="utf-8")
+            target.chmod(0o600)
+            os.link(target, lock)
         else:
             lock.write_text("pid=none\n", encoding="utf-8")
             lock.chmod(0o666)
+
+        target_digest = hashlib.sha256(target.read_bytes()).hexdigest() if target.exists() else None
+        target_status = target.stat() if target.exists() else None
 
         result = run_archive(repo, "--push")
 
         assert result.returncode == 74
         assert "archive transaction lock" in result.stderr
         assert not list(runtime.glob("*/transaction.json"))
+        assert git(repo, "rev-parse", "HEAD") == base
+        assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == base
         if kind == "symlink":
-            assert target.read_text(encoding="utf-8") == "do not touch\n"
+            assert lock.is_symlink()
+        if target_status is not None:
+            assert hashlib.sha256(target.read_bytes()).hexdigest() == target_digest
+            after = target.stat()
+            assert (after.st_uid, stat.S_IMODE(after.st_mode)) == (
+                target_status.st_uid,
+                stat.S_IMODE(target_status.st_mode),
+            )
         if kind == "world-writable":
             assert stat.S_IMODE(lock.stat().st_mode) == 0o666
 
@@ -923,6 +966,111 @@ def test_archive_lock_rejects_missing_or_unrelated_inherited_fd(tmp_path: Path) 
     assert not list(runtime.glob("*/transaction.json"))
 
 
+def test_archive_helper_rejects_final_symlinks_without_touching_targets(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    runtime = root / "local_archive" / "runtime"
+    runtime.mkdir(parents=True)
+    protected = runtime / "protected"
+    protected.write_text("do not touch\n", encoding="utf-8")
+    protected.chmod(0o600)
+    before = protected.stat()
+    digest = hashlib.sha256(protected.read_bytes()).hexdigest()
+    lock = runtime / ".flock"
+    lock.symlink_to(protected)
+
+    with protected.open("r+") as descriptor:
+        verified = subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+                "lock-verify",
+                "--root",
+                str(root),
+                "--lock",
+                str(lock),
+                "--fd",
+                str(descriptor.fileno()),
+            ],
+            text=True,
+            capture_output=True,
+            pass_fds=(descriptor.fileno(),),
+        )
+
+    source = runtime / "source.md"
+    source.symlink_to(protected)
+    destination = root / "local_archive" / "docs" / "record.md"
+    published = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "archive-publish",
+            "--root",
+            str(root),
+            "--source",
+            str(source),
+            "--target",
+            str(destination),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert verified.returncode == 74
+    assert published.returncode == 82
+    assert lock.is_symlink() and source.is_symlink()
+    assert not destination.exists()
+    assert hashlib.sha256(protected.read_bytes()).hexdigest() == digest
+    after = protected.stat()
+    assert (after.st_uid, stat.S_IMODE(after.st_mode)) == (
+        before.st_uid,
+        stat.S_IMODE(before.st_mode),
+    )
+
+
+def test_local_archive_containment_precedes_parent_creation(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    source = root / "local_archive" / "runtime" / "source.md"
+    source.parent.mkdir(parents=True)
+    source.write_text("archive\n", encoding="utf-8")
+    outside = root / "outside"
+
+    lock = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "lock-exec",
+            "--root",
+            str(root),
+            "--lock",
+            str(root / "local_archive" / ".." / "outside" / "lock" / ".flock"),
+            "--",
+            "/usr/bin/true",
+        ],
+        text=True,
+        capture_output=True,
+    )
+    published = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "archive-publish",
+            "--root",
+            str(root),
+            "--source",
+            str(source),
+            "--target",
+            str(root / "local_archive" / ".." / "outside" / "archive" / "record.md"),
+        ],
+        text=True,
+        capture_output=True,
+    )
+
+    assert lock.returncode == 74
+    assert published.returncode == 82
+    assert not outside.exists()
+    assert source.read_text(encoding="utf-8") == "archive\n"
+
+
 def test_archive_publish_never_replaces_and_rejects_symlinked_parent(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     source = root / "local_archive" / "runtime" / "source.md"
@@ -950,6 +1098,30 @@ def test_archive_publish_never_replaces_and_rejects_symlinked_parent(tmp_path: P
     assert target.read_text(encoding="utf-8") == "old\n"
     assert source.read_text(encoding="utf-8") == "new\n"
 
+    symlink_target = root / "local_archive" / "docs" / "resolved.md"
+    symlink_target.write_text("symlink target\n", encoding="utf-8")
+    target_symlink = root / "local_archive" / "docs" / "record-link.md"
+    target_symlink.symlink_to(symlink_target)
+    symlinked = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "archive-publish",
+            "--root",
+            str(root),
+            "--source",
+            str(source),
+            "--target",
+            str(target_symlink),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert symlinked.returncode == 17
+    assert target_symlink.is_symlink()
+    assert symlink_target.read_text(encoding="utf-8") == "symlink target\n"
+    assert source.read_text(encoding="utf-8") == "new\n"
+
     outside = tmp_path / "outside-archive"
     outside.mkdir()
     escaped_parent = root / "local_archive" / "escaped"
@@ -972,6 +1144,68 @@ def test_archive_publish_never_replaces_and_rejects_symlinked_parent(tmp_path: P
     assert escaped.returncode == 82
     assert not (outside / "record.md").exists()
     assert source.read_text(encoding="utf-8") == "new\n"
+
+    source_alias = source.with_name("source-alias.md")
+    os.link(source, source_alias)
+    hard_linked_target = root / "local_archive" / "docs" / "hard-linked.md"
+    hard_linked = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "archive-publish",
+            "--root",
+            str(root),
+            "--source",
+            str(source),
+            "--target",
+            str(hard_linked_target),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert hard_linked.returncode == 82
+    assert not hard_linked_target.exists()
+    source_alias.unlink()
+
+    successful_target = root / "local_archive" / "new" / "record.md"
+    source_inode = source.stat().st_ino
+    successful = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+            "archive-publish",
+            "--root",
+            str(root),
+            "--source",
+            str(source),
+            "--target",
+            str(successful_target),
+        ],
+        text=True,
+        capture_output=True,
+    )
+    assert successful.returncode == 0, successful.stderr
+    assert not source.exists()
+    assert successful_target.read_text(encoding="utf-8") == "new\n"
+    assert successful_target.stat().st_ino == source_inode
+
+
+def test_explicit_archive_record_final_symlink_is_rejected_before_transaction(tmp_path: Path) -> None:
+    repo, remote = setup_feature_repo(tmp_path)
+    base = git(repo, "rev-parse", "HEAD")
+    record = repo / "local_archive" / "docs" / "governance" / "archive" / "record.md"
+    resolved = record.with_name("resolved.md")
+    record.parent.mkdir(parents=True)
+    record.symlink_to(resolved)
+
+    result = run_archive(repo, "--push", "--record", str(record))
+
+    assert result.returncode != 0
+    assert record.is_symlink()
+    assert not resolved.exists()
+    assert not list((repo / "local_archive" / "runtime" / "archive-and-push").glob("*/transaction.json"))
+    assert git(repo, "rev-parse", "HEAD") == base
+    assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == base
 
 
 def test_origin_change_after_validation_fails_closed(tmp_path: Path) -> None:

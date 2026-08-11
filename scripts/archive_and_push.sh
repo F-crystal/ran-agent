@@ -67,15 +67,12 @@ json_quote() { printf '%s' "$1" | "$PYTHON_BIN" -c 'import json,sys; print(json.
 json_or_null() { [ -n "$1" ] && json_quote "$1" || printf null; }
 repo_relative_path() {
   local path
-  path="$(canonical_path "$1")" || return 1
+  path="$(helper local-archive-path --root "$ROOT_DIR" --path "$1")" || return 1
   case "$path" in "$ROOT_DIR"/*) printf '%s\n' "${path#"$ROOT_DIR"/}" ;; *) return 1 ;; esac
 }
 canonical_path() { "$PYTHON_BIN" -c 'import os,sys; print(os.path.realpath(os.path.abspath(sys.argv[1])))' "$1"; }
 ensure_archive_record_path() {
-  local archive_root resolved
-  archive_root="$(canonical_path "$ROOT_DIR/local_archive")" || return 1
-  resolved="$(canonical_path "$ARCHIVE_RECORD")" || return 1
-  case "$resolved" in "$archive_root"/*) ARCHIVE_RECORD="$resolved" ;; *) return 1 ;; esac
+  ARCHIVE_RECORD="$(helper local-archive-path --root "$ROOT_DIR" --path "$ARCHIVE_RECORD")" || return 1
 }
 archive_record_for_transaction() {
   case "$1" in
@@ -84,13 +81,13 @@ archive_record_for_transaction() {
   esac
 }
 select_default_archive_record() {
-  [ ! -e "$ARCHIVE_RECORD" ] || [ "$ARCHIVE_RECORD_EXPLICIT" -eq 0 ] || die "archive record already exists: $ARCHIVE_RECORD"
-  [ ! -e "$ARCHIVE_RECORD" ] || ARCHIVE_RECORD="$(archive_record_for_transaction "$ARCHIVE_RECORD")"
+  [ ! -e "$ARCHIVE_RECORD" ] && [ ! -L "$ARCHIVE_RECORD" ] || [ "$ARCHIVE_RECORD_EXPLICIT" -eq 0 ] || die "archive record already exists: $ARCHIVE_RECORD"
+  if [ -e "$ARCHIVE_RECORD" ] || [ -L "$ARCHIVE_RECORD" ]; then ARCHIVE_RECORD="$(archive_record_for_transaction "$ARCHIVE_RECORD")"; fi
   ensure_archive_record_path || die "archive record must stay inside $ROOT_DIR/local_archive"
-  [ ! -e "$ARCHIVE_RECORD" ] || die "transaction archive record already exists: $ARCHIVE_RECORD"
+  [ ! -e "$ARCHIVE_RECORD" ] && [ ! -L "$ARCHIVE_RECORD" ] || die "transaction archive record already exists: $ARCHIVE_RECORD"
 }
 select_resumable_archive_record() {
-  [ -e "$ARCHIVE_RECORD" ] || return 0
+  [ -e "$ARCHIVE_RECORD" ] || [ -L "$ARCHIVE_RECORD" ] || return 0
   helper archive-verify --journal "$JOURNAL" --record "$ARCHIVE_RECORD" >/dev/null 2>&1 && return 0
   case "$ARCHIVE_RECORD" in *-"$TRANSACTION_ID".md|*-"$TRANSACTION_ID") return 1 ;; esac
   local previous candidate relative
@@ -99,7 +96,7 @@ select_resumable_archive_record() {
   ARCHIVE_RECORD="$candidate"
   ensure_archive_record_path || return 1
   candidate="$ARCHIVE_RECORD"
-  if [ -e "$candidate" ]; then
+  if [ -e "$candidate" ] || [ -L "$candidate" ]; then
     helper archive-verify --journal "$JOURNAL" --record "$candidate" >/dev/null 2>&1 || return 1
   fi
   relative="$(repo_relative_path "$ARCHIVE_RECORD")" || return 1
@@ -107,10 +104,7 @@ select_resumable_archive_record() {
 }
 local_archive_path() {
   case "$1" in local_archive/*) ;; *) return 1 ;; esac
-  local archive_root candidate
-  archive_root="$(canonical_path "$ROOT_DIR/local_archive")"
-  candidate="$(canonical_path "$ROOT_DIR/$1")"
-  case "$candidate" in "$archive_root"/*) printf '%s\n' "$candidate" ;; *) return 1 ;; esac
+  helper local-archive-path --root "$ROOT_DIR" --path "$ROOT_DIR/$1"
 }
 
 usage() {
@@ -847,7 +841,7 @@ initialize_recovery() {
   common="$(git -C "$ROOT_DIR" merge-base "$ORIGINAL_FEATURE_COMMIT" "$current_main")" || recovery_fail "feature and main have no verifiable common ancestor"
   ORIGINAL_BASE_COMMIT="$(git -C "$ROOT_DIR" merge-base "$ORIGINAL_FEATURE_COMMIT" "$ORIGINAL_MAIN_COMMIT")" || recovery_fail "original feature and main have no common ancestor"
   related_worktrees_safe || recovery_fail "related worktree or index is dirty, or a Git operation is unfinished"
-  [ ! -e "$ARCHIVE_RECORD" ] || recovery_fail "archive record already exists"
+  [ ! -e "$ARCHIVE_RECORD" ] && [ ! -L "$ARCHIVE_RECORD" ] || recovery_fail "archive record already exists"
 
   if [ "$LEGACY_STUCK_RECOVERY" -eq 1 ]; then
     persist_legacy_qualification
@@ -995,14 +989,17 @@ temporary=output+".tmp"; open(temporary,"w",encoding="utf-8").write(json.dumps(r
 # checksum and the journaled checksum, and its content equals what the same
 # algorithm regenerates from the journaled commits and live Git facts.
 recovery_manifest_valid() {
-  "$PYTHON_BIN" -c 'import hashlib,json,subprocess,sys
+  "$PYTHON_BIN" -c 'import hashlib,json,os,stat,subprocess,sys
 path,journaled,repo,base,feature,main,effective=sys.argv[1:8]
 def git(*args): return subprocess.check_output(["git","-C",repo,*args])
 def paths(left,right):
     raw=git("diff","--name-only","-z",left,right)
     return sorted(item.decode("utf-8","surrogateescape") for item in raw.rstrip(b"\0").split(b"\0") if item)
 try:
-    manifest=json.load(open(path))
+    if not hasattr(os,"O_NOFOLLOW"): raise OSError("no-follow open unavailable")
+    descriptor=os.open(path,os.O_RDONLY|os.O_NOFOLLOW)
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode): os.close(descriptor); raise OSError("manifest is not regular")
+    with os.fdopen(descriptor) as manifest_file: manifest=json.load(manifest_file)
 except (OSError,ValueError):
     print("manifest integrity failure: unreadable manifest"); raise SystemExit(1)
 stored=manifest.get("checksum")
@@ -1107,12 +1104,14 @@ render_recovery_archive_record() {
 
 ensure_recovery_archive_generated() {
   local pending="$TRANSACTION_DIR/recovery-archive-record.md"
+  [ ! -L "$ARCHIVE_RECORD" ] || recovery_fail "archive record path is a symlink"
   if [ -e "$ARCHIVE_RECORD" ]; then
     if ! grep -Fq -- "- Transaction ID: $TRANSACTION_ID" "$ARCHIVE_RECORD" || ! grep -Fq -- "- Effective feature tip: $EFFECTIVE_FEATURE_TIP" "$ARCHIVE_RECORD"; then
       recovery_fail "existing archive record does not match recovery journal"
     fi
     return 0
   fi
+  [ ! -L "$pending" ] || recovery_fail "pending recovery archive is a symlink"
   if [ -e "$pending" ]; then
     if ! grep -Fq -- "- Transaction ID: $TRANSACTION_ID" "$pending" || ! grep -Fq -- "- Effective feature tip: $EFFECTIVE_FEATURE_TIP" "$pending"; then
       recovery_fail "pending recovery archive does not match journal"
@@ -1156,15 +1155,20 @@ ensure_recovery_push() {
 }
 
 publish_recovery_archive() {
-  local pending="$TRANSACTION_DIR/recovery-archive-record.md"
+  local pending="$TRANSACTION_DIR/recovery-archive-record.md" source="$TRANSACTION_DIR/recovery-archive-publish.md" publish_status=0
+  [ ! -L "$ARCHIVE_RECORD" ] || recovery_fail "archive record path is a symlink"
   if [ -e "$ARCHIVE_RECORD" ]; then
     if ! grep -Fq -- "- Transaction ID: $TRANSACTION_ID" "$ARCHIVE_RECORD" || ! grep -Fq -- "- Effective feature tip: $EFFECTIVE_FEATURE_TIP" "$ARCHIVE_RECORD"; then
       recovery_fail "published archive record does not match recovery journal"
     fi
+    journal_update --set-json "recovery_archive_record=$(json_quote "$(repo_relative_path "$ARCHIVE_RECORD")")"
     return 0
   fi
-  mkdir -p "$(dirname "$ARCHIVE_RECORD")" || recovery_fail "unable to create archive record directory"
-  render_recovery_archive_record "$ARCHIVE_RECORD" ARCHIVE || recovery_fail "unable to publish recovery archive record"
+  render_recovery_archive_record "$source" ARCHIVE || recovery_fail "unable to generate recovery archive record"
+  helper archive-publish --root "$ROOT_DIR" --source "$source" --target "$ARCHIVE_RECORD" || publish_status=$?
+  if [ "$publish_status" -ne 0 ]; then
+    [ "$publish_status" -eq 17 ] && [ -f "$ARCHIVE_RECORD" ] && [ ! -L "$ARCHIVE_RECORD" ] && grep -Fq -- "- Transaction ID: $TRANSACTION_ID" "$ARCHIVE_RECORD" && grep -Fq -- "- Effective feature tip: $EFFECTIVE_FEATURE_TIP" "$ARCHIVE_RECORD" || recovery_fail "unable to publish recovery archive record"
+  fi
   journal_update --set-json "recovery_archive_record=$(json_quote "$(repo_relative_path "$ARCHIVE_RECORD")")"
   [ ! -e "$pending" ] || rm -f "$pending"
 }
@@ -1172,7 +1176,7 @@ publish_recovery_archive() {
 recovery_resume() {
   initialize_recovery
   if [ "$(journal_optional recovery_phase)" = recovery/completed ]; then
-    if [ -z "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ ! -e "$ARCHIVE_RECORD" ]; then
+    if [ -z "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$ORIGINAL_FEATURE_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/heads/$TARGET_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ "$(git -C "$ROOT_DIR" rev-parse "refs/remotes/$REMOTE_NAME/$TARGET_BRANCH")" != "$EFFECTIVE_FEATURE_TIP" ] || [ ! -e "$ARCHIVE_RECORD" ] || [ -L "$ARCHIVE_RECORD" ]; then
       recovery_fail "completed recovery evidence is inconsistent"
     fi
     recovery_validation_valid || recovery_fail "completed recovery validation record failed integrity or command-binding verification${RECOVERY_VALIDATION_FAILURE_REASON:+: $RECOVERY_VALIDATION_FAILURE_REASON}" 95

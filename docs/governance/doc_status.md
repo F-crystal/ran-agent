@@ -150,8 +150,19 @@ bounded test-only repair makes that injection self-proving and preserves the
 restart boundary. Its Linux/root named test is `1/1`, full release file is 85
 total / 84 pass / zero fail / one governed skip, direct projection file is
 `39/39`, and local release file is 85 total / 81 pass / zero fail / four
-governed platform skips. It is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by
-the commit containing this update. Another R3-B retry and S12 remain
+governed platform skips. That repair entered reviewed candidate `0d7c5ce2`.
+The fifth R3-B passed baseline, source dry-run and all three root provider
+proofs, then root `--all` stopped fail-closed at Node 1177 total / 1176 pass /
+zero fail / one governed skip and Python 462 pass / one fail plus nine passing
+subtests. Non-root did not run and production remained unchanged. The sole
+blocker, `R3-B-ARCHIVE-LOCAL-PATH-SYMLINK-RESOLUTION-BYPASS`, resolved final
+lock/archive leaves before their no-follow boundary. The bounded repair now
+canonicalizes only parents, validates containment before parent creation,
+preserves final leaves, and reuses the hard-link no-replace publisher for
+recovery. The complete archive transaction file passes 36/36 and the exact
+Git-less Linux/root regression passes under EUID 0 with `umask 077`. It is
+`LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
+update. Independent exact-SHA review, another R3-B retry and S12 remain
 `NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart

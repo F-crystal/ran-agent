@@ -88,7 +88,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> independent exact-SHA Ombre fixture review (CLEAR)
   -> fourth S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
   -> R3-B projection negative-injection harness repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
-  -> independent exact-SHA projection-injection repair review (REQUIRED)
+  -> independent exact-SHA projection-injection repair review (CLEAR at 0d7c5ce2)
+  -> fifth S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
+  -> R3-B archive local-path authority repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
+  -> independent exact-SHA archive local-path repair review (REQUIRED)
   -> S12-R3B immutable server gate/dry-run retry (NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
@@ -230,9 +233,23 @@ S12-R0 fresh read-only production audit (COMPLETE)
   cross the projection boundary. Linux/root evidence is the named test `1/1`,
   the full release test file 85 total / 84 pass / zero fail / one governed skip,
   and direct projection tests `39/39`; the local file is 85 total / 81 pass /
-  zero fail / four governed platform skips. The repair is `LOCAL_VERIFIED /
-  NOT_REVIEWED / ARCHIVED` by the commit containing this status. R3 remains
-  incomplete; independent review and another R3-B retry are not started.
+  zero fail / four governed platform skips. The repair entered the reviewed
+  candidate `0d7c5ce200567425b791d79ff78dcd04a17d293b`. The fifth R3-B then
+  passed baseline and source dry-run. Root `--all` reached Node 1177 total /
+  1176 pass / zero fail / one governed skip and Python 462 pass / one fail plus
+  nine passing pytest subtests. All three root provider proofs passed: sealed
+  Hermes Node, DeepSeek non-thinking and the enabled-thinking fail-closed
+  negative. Non-root did not run. The sole failure was
+  `R3-B-ARCHIVE-LOCAL-PATH-SYMLINK-RESOLUTION-BYPASS`: full-leaf path
+  canonicalization erased the final lock symlink before the no-follow boundary,
+  allowing a root `umask 077` transaction to mutate and publish its target.
+  The bounded repair canonicalizes only parents, validates containment before
+  parent creation, preserves final leaves for no-follow verification and uses
+  the same no-replace publisher for recovery records. The exact root regression
+  passes under Linux EUID 0 and `umask 077`; the complete archive transaction
+  file passes 36/36. The repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED`
+  by the commit containing this status. R3 remains incomplete; independent
+  exact-SHA repair review and another R3-B retry are not started.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

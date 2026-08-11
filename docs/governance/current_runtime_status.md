@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 projection-injection fixture repair LOCAL_VERIFIED (2026-08-11)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 archive-path authority repair LOCAL_VERIFIED (2026-08-11)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -465,10 +465,32 @@ propagates the real Node status, and asserts that Hermes/Node restart does not
 proceed. The Linux/root named test passes `1/1`; the full Linux/root file is 85
 total with 84 pass, zero fail and one declared skip; direct projection tests
 pass `39/39`; the local file is 85 total with 81 pass, zero fail and four
-declared platform skips. Production remained unchanged, full R3-B was not
-rerun, and S12 remains `NOT_STARTED`. This repair is `LOCAL_VERIFIED /
-NOT_REVIEWED / ARCHIVED` by the commit containing this status and requires
-independent exact-SHA review before another R3-B retry.
+declared platform skips. That repair entered reviewed candidate
+`0d7c5ce200567425b791d79ff78dcd04a17d293b`.
+
+The fifth R3-B run on that candidate passed baseline and source dry-run. Root
+`--all` reached Node 1177 total / 1176 pass / zero fail / one governed skip and
+Python 462 pass / one fail plus nine passing pytest subtests. The sealed Hermes
+Node provider boundary, DeepSeek non-thinking proof and enabled-thinking
+fail-closed negative all passed. Non-root did not run. The sole blocker was
+`R3-B-ARCHIVE-LOCAL-PATH-SYMLINK-RESOLUTION-BYPASS`: the archive helper
+resolved the final lock leaf into a root-owned `0600` target before
+`O_NOFOLLOW` and path-inode verification, so the transaction succeeded and
+published the target. The same full-leaf assumption also affected archive
+record normalization and recovery publication.
+
+The bounded authority repair resolves parents for containment while preserving
+the final leaf, rejects parent escape before `mkdir`, requires no-follow opens,
+and routes normal and recovery publication through the existing hard-link
+no-replace publisher. Final lock/source/record symlinks, unsafe lock types and
+hard-linked inputs fail closed without changing their targets; valid lock and
+publication paths retain exact inode checks and directory durability. The
+complete archive transaction file passes 36/36, focused recovery publication
+and manifest-symlink checks pass, and the exact Git-less Linux/root regression
+passes under EUID 0 with `umask 077`. Production remained unchanged and S12
+remains `NOT_STARTED`. This repair is `LOCAL_VERIFIED / NOT_REVIEWED /
+ARCHIVED` by the commit containing this status and requires independent
+exact-SHA review before another R3-B retry.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

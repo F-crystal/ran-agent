@@ -886,6 +886,25 @@ def test_completed_resume_rejects_manifest_effective_tip_tamper(tmp_path: Path) 
     assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == effective
 
 
+def test_completed_resume_rejects_manifest_final_symlink(tmp_path: Path) -> None:
+    repo, remote, journal, _base, _feature, _main, effective = completed_recovery(tmp_path)
+    manifest_file = journal.parent / "recovery-manifest.json"
+    outside = tmp_path / "outside-manifest.json"
+    outside.write_bytes(manifest_file.read_bytes())
+    digest = hashlib.sha256(outside.read_bytes()).hexdigest()
+    manifest_file.unlink()
+    manifest_file.symlink_to(outside)
+
+    result = recover(repo, journal)
+
+    assert result.returncode != 0
+    assert manifest_file.is_symlink()
+    assert hashlib.sha256(outside.read_bytes()).hexdigest() == digest
+    assert git(repo, "rev-parse", "feature/archive") == effective
+    assert git(repo, "rev-parse", "main") == effective
+    assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == effective
+
+
 def test_completed_resume_rejects_manifest_parent_tamper(tmp_path: Path) -> None:
     repo, remote, journal, _base, _feature, _main, effective = completed_recovery(tmp_path)
     manifest_file = journal.parent / "recovery-manifest.json"

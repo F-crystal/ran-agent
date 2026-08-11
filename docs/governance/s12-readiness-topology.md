@@ -71,8 +71,11 @@ flowchart TD
     OFIX --> OFR["Independent exact-SHA Ombre fixture review<br/>CLEAR"]
     OFR --> R3B3["Fourth R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
     R3B3 --> PFIX["Projection negative-injection harness repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    PFIX --> PFR["Independent exact-SHA projection-injection review<br/>REQUIRED"]
-    PFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
+    PFIX --> PFR["Independent exact-SHA projection-injection review<br/>0d7c5ce2 · CLEAR"]
+    PFR --> R3B4["Fifth R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
+    R3B4 --> AFIX["Archive local-path authority repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    AFIX --> AFR["Independent exact-SHA archive-path review<br/>REQUIRED"]
+    AFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -536,7 +539,20 @@ recovery is recorded independently and leaves
   full Linux/root file 84 pass/zero fail/one declared skip, direct projection
   file `39/39`, local release file 81 pass/zero fail/four declared platform
   skips, workflow guard/syntax/diff pass.
-- [ ] Independent exact-SHA review of the projection-injection fixture repair
+- [x] Independent exact-SHA review of the projection-injection fixture repair
+  is `CLEAR` in candidate `0d7c5ce200567425b791d79ff78dcd04a17d293b`.
+- [x] Record the fifth R3-B attempt: baseline and source dry-run passed; root
+  Node reached 1177 total / 1176 pass / zero fail / one governed skip, Python
+  reached 462 pass / one fail plus nine passing subtests, and all three root
+  provider proofs passed. Non-root did not run and production was unchanged.
+- [x] Resolve `R3-B-ARCHIVE-LOCAL-PATH-SYMLINK-RESOLUTION-BYPASS` at the shared
+  authority boundary: preserve final leaves, reject parent escape before
+  `mkdir`, retain no-follow inode verification and use hard-link no-replace
+  publication for both normal and recovery records.
+- [x] Verify the exact lock regression under Git-less Linux/root with EUID 0
+  and `umask 077`, plus the complete archive transaction file at 36/36 and the
+  focused sibling source/target/recovery checks.
+- [ ] Independent exact-SHA review of the archive local-path authority repair
   is `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
@@ -547,10 +563,10 @@ recovery is recorded independently and leaves
 - [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
   authorization with the exact SHA and summarized mutation.
 
-The projection-injection repair does not claim a complete service-managed
-v0.20 `--all` pass. It closes only the negative-harness evidence defect exposed
-by the fourth R3-B attempt; the next complete R3-B retry remains server-side
-and `NOT_STARTED`.
+The archive local-path repair does not claim a complete service-managed v0.20
+`--all` pass. It closes only the evidence/archive authority defect exposed by
+the fifth R3-B attempt; the next complete R3-B retry remains server-side and
+`NOT_STARTED`.
 
 The former local Hermes/Python binding and wrong-group missing proofs are
 closed by the shared runtime probe and focused negative. Real Linux

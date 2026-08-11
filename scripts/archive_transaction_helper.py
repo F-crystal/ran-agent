@@ -48,10 +48,32 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def local_archive_path(root: str, path: str) -> Path:
     archive_root = Path(root).resolve() / "local_archive"
-    resolved = Path(path).resolve()
-    if resolved == archive_root or archive_root not in resolved.parents:
+    requested = Path(path)
+    if requested.name in {"", ".", ".."}:
+        raise OSError("path must name a local_archive entry")
+    resolved = requested.parent.resolve() / requested.name
+    if archive_root not in resolved.parents:
         raise OSError("path is outside repository local_archive")
     return resolved
+
+
+def no_follow_flag() -> int:
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise OSError("platform does not support no-follow file opens")
+    return os.O_NOFOLLOW
+
+
+def open_regular_no_follow(path: str) -> int:
+    descriptor = os.open(path, os.O_RDONLY | no_follow_flag())
+    if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+        os.close(descriptor)
+        raise OSError("path is not a regular file")
+    return descriptor
+
+
+def command_local_archive_path(args: argparse.Namespace) -> int:
+    print(local_archive_path(args.root, args.path))
+    return 0
 
 
 def command_journal_init(args: argparse.Namespace) -> int:
@@ -129,13 +151,10 @@ def command_lock_exec(args: argparse.Namespace) -> int:
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         raise SystemExit("lock-exec requires a command after --")
-    flags = os.O_RDWR | os.O_CREAT
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
     try:
-        lock_path = Path(args.lock)
+        flags = os.O_RDWR | os.O_CREAT | no_follow_flag()
+        lock_path = local_archive_path(args.root, args.lock)
         lock_path.parent.mkdir(parents=True, exist_ok=True)
-        lock_path = local_archive_path(args.root, str(lock_path))
         descriptor = os.open(lock_path, flags, 0o600)
     except OSError as error:
         print(f"ERROR: unable to open archive transaction lock: {error.strerror or error}", file=sys.stderr)
@@ -201,12 +220,9 @@ def command_archive_publish(args: argparse.Namespace) -> int:
     source_descriptor = target_directory = source_directory = None
     try:
         source = local_archive_path(args.root, args.source)
-        requested_target = Path(args.target)
-        requested_target.parent.mkdir(parents=True, exist_ok=True)
-        target = local_archive_path(args.root, str(requested_target))
-        flags = os.O_RDONLY
-        if hasattr(os, "O_NOFOLLOW"):
-            flags |= os.O_NOFOLLOW
+        target = local_archive_path(args.root, args.target)
+        flags = os.O_RDONLY | os.O_NONBLOCK | no_follow_flag()
+        target.parent.mkdir(parents=True, exist_ok=True)
         source_descriptor = os.open(source, flags)
         source_status = os.fstat(source_descriptor)
         if not stat.S_ISREG(source_status.st_mode) or source_status.st_uid != os.geteuid() or source_status.st_nlink != 1:
@@ -432,14 +448,7 @@ def atomic_text(path: Path, value: str) -> None:
 
 def command_archive_verify(args: argparse.Namespace) -> int:
     journal = read_json(Path(args.journal))
-    flags = os.O_RDONLY
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    descriptor = os.open(args.record, flags)
-    status = os.fstat(descriptor)
-    if not stat.S_ISREG(status.st_mode):
-        os.close(descriptor)
-        raise SystemExit("archive record is not a regular file")
+    descriptor = open_regular_no_follow(args.record)
     with os.fdopen(descriptor, encoding="utf-8") as record_file:
         content = record_file.read()
     expected = {
@@ -483,7 +492,9 @@ def command_validation_create(args: argparse.Namespace) -> int:
 
 
 def command_validation_verify(args: argparse.Namespace) -> int:
-    record = read_json(Path(args.record))
+    descriptor = open_regular_no_follow(args.record)
+    with os.fdopen(descriptor, encoding="utf-8") as record_file:
+        record = json.load(record_file)
     if record.get("schema_version") != SCHEMA_VERSION or record.get("checksum") != record_digest(record):
         raise SystemExit("validation record checksum or schema is invalid")
     if record.get("repository_realpath") != os.path.realpath(args.repository):
@@ -500,6 +511,10 @@ def command_validation_verify(args: argparse.Namespace) -> int:
 def parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser()
     sub = root.add_subparsers(dest="subcommand", required=True)
+    local_path = sub.add_parser("local-archive-path")
+    local_path.add_argument("--root", required=True)
+    local_path.add_argument("--path", required=True)
+    local_path.set_defaults(function=command_local_archive_path)
     init = sub.add_parser("journal-init")
     init.add_argument("--path", required=True)
     init.add_argument("--transaction-id", required=True)
