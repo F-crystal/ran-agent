@@ -42,7 +42,7 @@ function assertSealedHermesRuntime() {
   ], {
     encoding: 'utf8',
     timeout: 30_000,
-    env: { PATH: '/usr/bin:/bin', HOME: '/nonexistent' },
+    env: { PATH: '/usr/bin:/bin' },
   }));
   assert.equal(result.status, 'PASS');
   assert.equal(result.cliVersion, expectedVersion);

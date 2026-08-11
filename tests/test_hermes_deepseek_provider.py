@@ -40,7 +40,6 @@ def _runtime() -> tuple[Path, Path]:
         ],
         env={
             "PATH": "/usr/bin:/bin",
-            "HOME": "/nonexistent",
             "PYTHONDONTWRITEBYTECODE": "1",
         },
         text=True,
@@ -246,6 +245,193 @@ def test_shared_probe_requires_bytecode_guard_and_preserves_runtime_tree(tmp_pat
     after = _runtime_tree_snapshot(runtime)
     assert after == before
     assert not any(path.name == "__pycache__" or path.suffix == ".pyc" for path in runtime.rglob("*"))
+
+
+def test_shared_probe_uses_and_removes_fresh_home_without_ambient_config(tmp_path: Path) -> None:
+    hermes, runtime_python = _write_runtime_fixture(tmp_path)
+    runtime = hermes.parents[1]
+    marker = tmp_path / "observed-home"
+    caller_home = tmp_path / "caller-home"
+    caller_config = caller_home / ".hermes/.env"
+    caller_config.parent.mkdir(parents=True)
+    caller_config.write_text("MUST_NOT_BE_READ=1\n", encoding="utf-8")
+    (runtime / "app/hermes_cli/main.py").write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "home = Path(os.environ['HOME'])\n"
+        "assert os.environ['TMPDIR'] == str(home)\n"
+        "assert os.environ['XDG_CACHE_HOME'] == str(home / '.cache')\n"
+        "assert os.environ['XDG_CONFIG_HOME'] == str(home / '.config')\n"
+        "assert os.environ['XDG_STATE_HOME'] == str(home / '.local/state')\n"
+        "assert os.environ['XDG_DATA_HOME'] == str(home / '.local/share')\n"
+        "assert not any(home.iterdir())\n"
+        "(home / '.hermes').mkdir()\n"
+        "(home / '.hermes/config.yaml').write_text('ephemeral: true\\n', encoding='utf-8')\n"
+        "Path(os.environ['XDG_STATE_HOME']).mkdir(parents=True)\n"
+        f"Path({str(marker)!r}).write_text(str(home), encoding='utf-8')\n"
+        "print('Hermes Agent v0.20.0 (fixture build 2026.8.3)')\n",
+        encoding="utf-8",
+    )
+    before = _runtime_tree_snapshot(runtime)
+    caller_home.chmod(0o000)
+    try:
+        result = subprocess.run(
+            [
+                str(runtime_python), "-B", "-I", str(ROOT / "scripts/hermes-sealed-runtime-probe.py"),
+                "--install-root", str(runtime),
+                "--hermes", str(hermes),
+                "--python", str(runtime_python),
+                "--expected-version", "0.20.0",
+            ],
+            text=True,
+            capture_output=True,
+            env={
+                "PATH": "/usr/bin:/bin",
+                "HOME": str(caller_home),
+                "TMPDIR": str(caller_home / "tmp"),
+                "XDG_CACHE_HOME": str(caller_home / "cache"),
+                "XDG_CONFIG_HOME": str(caller_home / "config"),
+                "XDG_STATE_HOME": str(caller_home / "state"),
+                "XDG_DATA_HOME": str(caller_home / "data"),
+            },
+        )
+    finally:
+        caller_home.chmod(0o700)
+    assert result.returncode == 0, result.stderr
+    scratch_home = Path(marker.read_text(encoding="utf-8"))
+    assert scratch_home != caller_home
+    assert scratch_home.parent == Path("/tmp")
+    assert scratch_home.name.startswith("ran-agent-hermes-probe-home-")
+    assert not scratch_home.exists()
+    assert caller_config.read_text(encoding="utf-8") == "MUST_NOT_BE_READ=1\n"
+    assert _runtime_tree_snapshot(runtime) == before
+
+
+def test_shared_probe_fails_closed_for_scratch_creation_cli_and_cleanup_failure(tmp_path: Path) -> None:
+    hermes, runtime_python = _write_runtime_fixture(tmp_path)
+    runtime = hermes.parents[1]
+    probe = ROOT / "scripts/hermes-sealed-runtime-probe.py"
+    arguments = [
+        "--install-root", str(runtime),
+        "--hermes", str(hermes),
+        "--python", str(runtime_python),
+        "--expected-version", "0.20.0",
+    ]
+    creation_failure = subprocess.run(
+        [
+            str(runtime_python), "-B", "-I", "-c",
+            "import runpy,sys,tempfile\n"
+            "def unavailable(*args, **kwargs): raise OSError('unavailable')\n"
+            "tempfile.mkdtemp = unavailable\n"
+            f"sys.argv = [{str(probe)!r}, *{arguments!r}]\n"
+            f"runpy.run_path({str(probe)!r}, run_name='__main__')\n",
+        ],
+        text=True,
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+    )
+    assert creation_failure.returncode != 0
+    assert "hermes_cli_home_unavailable" in creation_failure.stderr
+
+    cli_main = runtime / "app/hermes_cli/main.py"
+    cli_main.write_text("raise SystemExit(9)\n", encoding="utf-8")
+    cli_failure = subprocess.run(
+        [str(runtime_python), "-B", "-I", str(probe), *arguments],
+        text=True,
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+    )
+    assert cli_failure.returncode != 0
+    assert "hermes_cli_version_failed" in cli_failure.stderr
+
+    marker = tmp_path / "cleanup-home"
+    cli_main.write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        "home = Path(os.environ['HOME'])\n"
+        f"Path({str(marker)!r}).write_text(str(home), encoding='utf-8')\n"
+        "print('Hermes Agent v0.20.0')\n",
+        encoding="utf-8",
+    )
+    cleanup_failure = subprocess.run(
+        [
+            str(runtime_python), "-B", "-I", "-c",
+            "import runpy,shutil,sys\n"
+            "real_rmtree = shutil.rmtree\n"
+            "def unavailable(path):\n"
+            "    real_rmtree(path)\n"
+            "    raise OSError('cleanup unavailable')\n"
+            "shutil.rmtree = unavailable\n"
+            f"sys.argv = [{str(probe)!r}, *{arguments!r}]\n"
+            f"runpy.run_path({str(probe)!r}, run_name='__main__')\n",
+        ],
+        text=True,
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+    )
+    assert cleanup_failure.returncode != 0
+    assert "hermes_cli_home_cleanup_failed" in cleanup_failure.stderr
+    assert not Path(marker.read_text(encoding="utf-8")).exists()
+
+    failed_marker = tmp_path / "failed-cleanup-home"
+    cli_main.write_text(
+        "import os\n"
+        "from pathlib import Path\n"
+        f"Path({str(failed_marker)!r}).write_text(os.environ['HOME'], encoding='utf-8')\n"
+        "raise SystemExit(9)\n",
+        encoding="utf-8",
+    )
+    cli_and_cleanup_failure = subprocess.run(
+        cleanup_failure.args,
+        text=True,
+        capture_output=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+    )
+    assert cli_and_cleanup_failure.returncode != 0
+    assert "hermes_cli_version_failed:hermes_cli_home_cleanup_failed" in cli_and_cleanup_failure.stderr
+    assert not Path(failed_marker.read_text(encoding="utf-8")).exists()
+
+
+def test_shared_probe_concurrent_invocations_use_distinct_owned_scratch(tmp_path: Path) -> None:
+    hermes, runtime_python = _write_runtime_fixture(tmp_path)
+    runtime = hermes.parents[1]
+    markers = tmp_path / "homes"
+    markers.mkdir()
+    (runtime / "app/hermes_cli/main.py").write_text(
+        "import os, stat, time\n"
+        "from pathlib import Path\n"
+        "home = Path(os.environ['HOME'])\n"
+        "metadata = home.stat()\n"
+        "assert metadata.st_uid == os.geteuid()\n"
+        "assert stat.S_IMODE(metadata.st_mode) == 0o700\n"
+        f"Path({str(markers)!r}, str(os.getpid())).write_text(str(home), encoding='utf-8')\n"
+        "time.sleep(0.25)\n"
+        "print('Hermes Agent v0.20.0')\n",
+        encoding="utf-8",
+    )
+    command = [
+        str(runtime_python), "-B", "-I", str(ROOT / "scripts/hermes-sealed-runtime-probe.py"),
+        "--install-root", str(runtime),
+        "--hermes", str(hermes),
+        "--python", str(runtime_python),
+        "--expected-version", "0.20.0",
+    ]
+    processes = [
+        subprocess.Popen(
+            command,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent"},
+        )
+        for _ in range(2)
+    ]
+    results = [process.communicate(timeout=15) for process in processes]
+    assert [process.returncode for process in processes] == [0, 0], results
+    homes = [Path(path.read_text(encoding="utf-8")) for path in markers.iterdir()]
+    assert len(homes) == 2
+    assert homes[0] != homes[1]
+    assert all(not home.exists() for home in homes)
 
 
 def test_runtime_v020_without_project_line_uses_explicit_python(

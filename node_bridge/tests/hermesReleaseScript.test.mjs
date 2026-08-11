@@ -3594,6 +3594,7 @@ test('release smoke executes named core and external journey suites without sele
 test('release gate has an all mode that invokes the named smoke matrix after isolated suites', () => {
   const source = readFileSync(join(root, 'scripts', 'hermes-release-gate.sh'), 'utf8');
   const hermesResolver = readFileSync(join(root, 'scripts', 'resolve-hermes-gate-runtime.mjs'), 'utf8');
+  const runtimeProbe = readFileSync(join(root, 'scripts', 'hermes-sealed-runtime-probe.py'), 'utf8');
   const providerProbe = readFileSync(join(root, 'tests', 'test_hermes_deepseek_provider.py'), 'utf8');
   const providerBoundary = readFileSync(join(root, 'node_bridge', 'tests', 'hermesGatewayProviderBoundary.integration.test.mjs'), 'utf8');
   const runtimeController = readFileSync(join(root, 'scripts', 'deploy-hermes-runtime-release.py'), 'utf8');
@@ -3608,6 +3609,7 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.doesNotMatch(source, /HERMES_TEST_PYTHON_BIN="\$project\/venv\/bin\/python"/);
   assert.match(providerProbe, /hermes-sealed-runtime-probe\.py/);
   assert.match(providerProbe, /str\(python_path\), "-B", "-I"/);
+  assert.doesNotMatch(providerProbe.match(/def _runtime\(\)[\s\S]*?\n\ndef /)?.[0] || '', /\/nonexistent/);
   assert.match(providerProbe, /str\(runtime_python\),\s+"-B",\s+"-P"/);
   assert.doesNotMatch(providerProbe, /Project:/);
   assert.match(providerProbe, /"PYTHONPATH": str\(runtime_app\)/);
@@ -3635,11 +3637,16 @@ test('release gate has an all mode that invokes the named smoke matrix after iso
   assert.match(hermesResolver, /expectedVersion !== '0\.20\.0'/);
   assert.match(hermesResolver, /'-B', '-I', runtimeProbe/);
   assert.doesNotMatch(hermesResolver, /process\.env\.RAN_AGENT_(?:HERMES_TEST_BIN|SYSTEMCTL_BIN)/);
+  assert.match(runtimeProbe, /mkdtemp\(prefix="ran-agent-hermes-probe-home-", dir="\/tmp"\)/);
+  assert.match(runtimeProbe, /"XDG_STATE_HOME": str\(home \/ "\.local\/state"\)/);
+  assert.match(runtimeProbe, /shutil\.rmtree\(home\)/);
+  assert.doesNotMatch(runtimeProbe, /"HOME": "\/nonexistent"/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_BIN="\$hermes_test_bin"/);
   assert.match(source, /RAN_AGENT_HERMES_TEST_PYTHON_BIN="\$hermes_test_python_bin"/);
   assert.match(providerBoundary, /process\.env\.RAN_AGENT_HERMES_TEST_BIN/);
   assert.match(providerBoundary, /hermes-sealed-runtime-probe\.py/);
   assert.match(providerBoundary, /'-B', '-I', path\.join\(ROOT, 'scripts', 'hermes-sealed-runtime-probe\.py'\)/);
+  assert.doesNotMatch(providerBoundary, /HOME:\s*['"]\/nonexistent/);
   assert.match(runtimeController, /str\(parser\), "-B", "-I", "-c"/);
   assert.match(providerBoundary, /timeout: 30_000/);
   assert.doesNotMatch(providerBoundary, /\/Users\/fengran/);

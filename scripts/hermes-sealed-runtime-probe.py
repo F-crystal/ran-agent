@@ -14,8 +14,11 @@ import importlib.metadata
 import json
 import os
 import re
+import shutil
+import stat
 import subprocess
 import sysconfig
+import tempfile
 from pathlib import Path
 
 
@@ -49,6 +52,78 @@ def contained(file: str | None, root: Path) -> bool:
         return True
     except (OSError, ValueError):
         return False
+
+
+def scratch_identity(home: Path) -> tuple[int, int] | None:
+    try:
+        metadata = home.lstat()
+    except OSError:
+        return None
+    if (
+        not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_uid != os.geteuid()
+        or stat.S_IMODE(metadata.st_mode) != 0o700
+    ):
+        return None
+    return metadata.st_dev, metadata.st_ino
+
+
+def run_cli_version(hermes: Path) -> subprocess.CompletedProcess[str]:
+    home: Path | None = None
+    identity: tuple[int, int] | None = None
+    cli: subprocess.CompletedProcess[str] | None = None
+    failure: str | None = None
+    try:
+        home = Path(tempfile.mkdtemp(prefix="ran-agent-hermes-probe-home-", dir="/tmp"))
+        identity = scratch_identity(home)
+        if identity is None or any(home.iterdir()):
+            failure = "hermes_cli_home_invalid"
+        else:
+            cli = subprocess.run(
+                [str(hermes), "version"],
+                check=False,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=10,
+                env={
+                    "PATH": "/usr/bin:/bin",
+                    "HOME": str(home),
+                    "TMPDIR": str(home),
+                    "XDG_CACHE_HOME": str(home / ".cache"),
+                    "XDG_CONFIG_HOME": str(home / ".config"),
+                    "XDG_STATE_HOME": str(home / ".local/state"),
+                    "XDG_DATA_HOME": str(home / ".local/share"),
+                    "PYTHONNOUSERSITE": "1",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                    "PYTHONSAFEPATH": "1",
+                },
+            )
+            if cli.returncode != 0:
+                failure = "hermes_cli_version_failed"
+            if scratch_identity(home) != identity:
+                failure = failure or "hermes_cli_home_invalid"
+    except (OSError, subprocess.TimeoutExpired):
+        if failure is None:
+            failure = "hermes_cli_version_failed" if home is not None else "hermes_cli_home_unavailable"
+    cleanup_failed = False
+    if home is not None:
+        if identity is None or scratch_identity(home) != identity:
+            cleanup_failed = home.exists() or home.is_symlink()
+        else:
+            try:
+                shutil.rmtree(home)
+            except OSError:
+                cleanup_failed = True
+            else:
+                cleanup_failed = home.exists() or home.is_symlink()
+    if cleanup_failed:
+        failure = f"{failure}:hermes_cli_home_cleanup_failed" if failure else "hermes_cli_home_cleanup_failed"
+    if failure:
+        fail(failure)
+    if cli is None:
+        fail("hermes_cli_version_failed")
+    return cli
 
 
 def main() -> None:
@@ -108,23 +183,7 @@ def main() -> None:
         if not contained(getattr(module, "__file__", None), expected_site):
             fail(f"runtime_dependency_origin_mismatch:{name}")
 
-    cli = subprocess.run(
-        [str(hermes), "version"],
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        timeout=10,
-        env={
-            "PATH": "/usr/bin:/bin",
-            "HOME": "/nonexistent",
-            "PYTHONNOUSERSITE": "1",
-            "PYTHONDONTWRITEBYTECODE": "1",
-            "PYTHONSAFEPATH": "1",
-        },
-    )
-    if cli.returncode != 0:
-        fail("hermes_cli_version_failed")
+    cli = run_cli_version(hermes)
     versions = re.findall(
         r"(?m)^Hermes Agent v([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)",
         cli.stdout,

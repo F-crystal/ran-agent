@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 archive-path raw-final repair LOCAL_VERIFIED (2026-08-11)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 sealed-runtime scratch-home repair LOCAL_VERIFIED (2026-08-11)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -496,9 +496,36 @@ forms, then canonicalizes only the parent. Safe parent normalization, final
 symlink preservation, containment, no-follow inode checks and no-replace
 publication remain unchanged. The complete archive transaction file passes
 39/39, focused recovery path tests pass 3/3, and a Git-less read-only Linux/root
-probe passes under EUID 0 with `umask 077`. Production remains unchanged; the
-corrected repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit
-containing this status. R3-B retry and S12 remain `NOT_STARTED` pending an
+probe passes under EUID 0 with `umask 077`. Independent review cleared that
+raw-final repair at `e4a6d205afc4183cfda503aa6bb4977dac29fb25`.
+
+The sixth R3-B run on `e4a6d205` passed baseline, source dry-run and root
+immutable `--all`. Root evidence was Node 1177 total / 1176 pass / zero fail /
+one governed skip, Python 472 pass plus nine passing subtests, sealed Hermes
+Node, DeepSeek non-thinking, enabled-thinking fail-closed and Linux/root
+portability all passing. Non-root reached 524/524 passing Node tests before the
+shared sealed-runtime resolver stopped fail-closed. Its `HOME=/nonexistent`
+sentinel was not an absence guarantee: the host had root-owned mode `0700`
+`/nonexistent/.hermes`, which root could inspect but the governed `ubuntu`
+identity could not read. The resolver therefore returned
+`runtime_contract_invalid` and `hermes_v0_20_runtime_required`. Production was
+unchanged.
+
+The shared probe repair creates a unique caller-owned mode `0700` scratch
+namespace per invocation and replaces the child environment so HOME, TMPDIR and
+the XDG config/cache/state/data roots all remain beneath it. Hermes may create
+legitimate ephemeral initialization state there; the probe instead verifies
+the same scratch inode, owner and mode after the CLI, recursively removes only
+that invocation's namespace on success or failure, and refuses success if
+cleanup fails. The sealed runtime no-write/import/origin/version checks remain
+unchanged. Exact unarchived implementation bytes passed bounded scratch-only
+TECserver validation under both root and `ubuntu`: the shared probe, staged
+resolver, Node provider route, Python non-thinking route and enabled-thinking
+negative all passed; ambient HOME/XDG/TMP and `/nonexistent` had zero influence;
+sealed-runtime content/metadata hashes, service PIDs/restarts, production HEAD,
+worktree and source pointer were unchanged. The repair is `LOCAL_VERIFIED /
+NOT_REVIEWED`; delivery is contingent on the archive transaction containing
+this status. Complete R3-B retry and S12 remain `NOT_STARTED` pending
 independent exact-SHA review.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without

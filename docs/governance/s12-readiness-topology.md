@@ -75,9 +75,12 @@ flowchart TD
     PFR --> R3B4["Fifth R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
     R3B4 --> AFIX["Archive local-path authority repair<br/>28c40549 · LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     AFIX --> AFR["Independent exact-SHA archive-path review<br/>RAW-FINAL blocker · FIX_REQUIRED"]
-    AFR --> ARFIX["Raw final-component repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    ARFIX --> ARFR["Independent exact-SHA corrected review<br/>REQUIRED"]
-    ARFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
+    AFR --> ARFIX["Raw final-component repair e4a6d205<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    ARFIX --> ARFR["Independent exact-SHA corrected review<br/>CLEAR"]
+    ARFR --> R3B5["Sixth R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
+    R3B5 --> HFIX["Sealed-runtime scratch-home lifecycle repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVE PENDING"]
+    HFIX --> HFR["Independent exact-SHA scratch-home review<br/>REQUIRED"]
+    HFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -125,8 +128,12 @@ independent exact-SHA review at `7019c805`. The fourth R3-B retry again reached
 655 total / 653 pass / one fail / one declared skip; the Ombre path-access case
 passed and the only failure moved to its projection-mode negative assertion.
 Root instrumentation proved the active manifest became `0644` and production
-verification rejected it. The current frontier is the bounded self-proving
-negative-harness repair and required independent exact-SHA review.
+verification rejected it. That harness repair, the later archive-path repair
+and its raw-final successor all passed their bounded reviews. The sixth R3-B
+then passed the complete root surface but stopped fail-closed after 524/524
+non-root Node tests because `HOME=/nonexistent` exposed identity-dependent host
+state. The current frontier is the shared scratch-home lifecycle repair and its
+required independent exact-SHA review.
 
 | Second R3-B root failure | Observed boundary | Classification and repair |
 |---|---|---|
@@ -161,8 +168,9 @@ negative-harness repair and required independent exact-SHA review.
 | R3-B-OMBRE-FIXTURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `7019c805342084797c1e1bd201001d80ef1dd4ee` | third R3-B stopped fail-closed | Test-only repair makes the root-created authority/tool/state path truthfully accessible while preserving root read-only and runtime-writable boundaries; independent exact-SHA review is clear. |
 | R3-B-PROJECTION-INJECTION | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | fourth R3-B stopped fail-closed | Test-only repair identifies and mutates the pointer's active manifest, verifies the before/after graph mode and marker, propagates the wrapped publisher status, and proves restart remains blocked. |
 | R3-B-ARCHIVE-PATH | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `28c4054989c1176a4d8988872c43363b09c74494` | fifth R3-B stopped fail-closed | Parent containment and final-symlink no-follow repair was accepted, but raw trailing separators/final `.` normalized before validation. |
-| R3-B-RAW-FINAL | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | `RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS` on `28c40549` | Validate the raw terminal entry before `Path`, preserving safe parent normalization and all accepted no-follow/no-replace boundaries. |
-| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | corrected raw-final exact-SHA review required | Retry the complete immutable root/non-root gate only after the corrected archive authority passes independent review. |
+| R3-B-RAW-FINAL | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `e4a6d205afc4183cfda503aa6bb4977dac29fb25` | `RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS` on `28c40549` | Raw terminal validation precedes `Path`; safe parent normalization and accepted no-follow/no-replace boundaries remain intact. |
+| R3-B-SCRATCH-HOME | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVE_PENDING` for the transaction containing this ledger | sixth R3-B stopped fail-closed | Replace the fixed `/nonexistent` HOME sentinel with one caller-owned isolated scratch lifecycle shared by resolver and provider routes; bounded TECserver root/ubuntu parity is clear. |
+| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | scratch-home exact-SHA review required | Retry the complete immutable root/non-root gate only after the shared probe repair passes independent review. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
@@ -563,7 +571,24 @@ recovery is recorded independently and leaves
   `.` and `..` final entries while retaining safe parent `..`, contained parent
   symlinks and literal final symlinks. Verify transaction 39/39, focused
   recovery 3/3 and Git-less Linux/root EUID 0 with `umask 077`.
-- [ ] Independent exact-SHA review of the corrected raw-final repair is
+- [x] Independent exact-SHA review of the corrected raw-final repair is
+  `CLEAR` at `e4a6d205afc4183cfda503aa6bb4977dac29fb25`.
+- [x] Record the sixth R3-B attempt: baseline, source dry-run and root immutable
+  `--all` passed with Node 1177 total / 1176 pass / zero fail / one governed
+  skip, Python 472 pass plus nine passing subtests, all root provider proofs and
+  Linux/root portability. Non-root passed 524/524 Node tests before the shared
+  sealed-runtime probe stopped fail-closed; production remained unchanged.
+- [x] Resolve
+  `R3-B-NONROOT-SEALED-RUNTIME-PROBE-HOME-SENTINEL-PERMISSION-ASYMMETRY` in the
+  shared probe: unique caller-owned mode `0700` scratch, isolated HOME/TMP/XDG,
+  legitimate ephemeral writes confined inside, identity-bound recursive
+  cleanup required before success, and sealed-runtime no-write preserved.
+- [x] Bind exact unarchived bytes to bounded TECserver root and `ubuntu`
+  evidence: shared probe, staged resolver, Node provider route, Python
+  non-thinking route and enabled-thinking negative pass; `/nonexistent` and
+  ambient HOME/XDG/TMP have zero influence; production hashes/state remain
+  unchanged.
+- [ ] Independent exact-SHA review of the scratch-home lifecycle repair is
   `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
@@ -574,10 +599,10 @@ recovery is recorded independently and leaves
 - [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
   authorization with the exact SHA and summarized mutation.
 
-The archive local-path repair does not claim a complete service-managed v0.20
-`--all` pass. It closes only the evidence/archive authority defect exposed by
-the fifth R3-B attempt; the next complete R3-B retry remains server-side and
-`NOT_STARTED`.
+The scratch-home lifecycle repair does not claim a complete service-managed
+root/non-root v0.20 `--all` pass. It closes only the shared HOME-sentinel defect
+exposed by the sixth R3-B attempt; the next complete R3-B retry remains
+server-side and `NOT_STARTED`.
 
 The former local Hermes/Python binding and wrong-group missing proofs are
 closed by the shared runtime probe and focused negative. Real Linux

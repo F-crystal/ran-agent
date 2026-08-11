@@ -254,10 +254,26 @@ S12-R0 fresh read-only production audit (COMPLETE)
   terminal entries including repeated-separator forms, then canonicalizes only
   the parent. Its complete archive transaction file passes 39/39, focused
   recovery path tests pass 3/3, and the Git-less Linux/root probe passes under
-  EUID 0 with `umask 077`. The corrected repair is
-  `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
-  status. R3 remains incomplete; corrected exact-SHA review and another R3-B
-  retry are `NOT_STARTED`.
+  EUID 0 with `umask 077`. Independent review cleared that raw-final repair at
+  `e4a6d205afc4183cfda503aa6bb4977dac29fb25`, which became the sixth R3-B
+  candidate. That run passed baseline, source dry-run and root immutable
+  `--all`: Node 1177 total / 1176 pass / zero fail / one governed skip, Python
+  472 pass plus nine passing subtests, all three root provider proofs and
+  Linux/root portability. Non-root then passed 524/524 Node tests before
+  stopping fail-closed because the shared sealed-runtime probe used
+  `HOME=/nonexistent`; the host's root-owned `0700` `/nonexistent/.hermes` was
+  inspectable by root but raised `PermissionError` for the governed `ubuntu`
+  identity. Production remained unchanged. The new shared-probe repair replaces
+  that host-global sentinel with one unique caller-owned `0700` scratch
+  namespace, isolates HOME/TMP/XDG state beneath it, permits legitimate
+  ephemeral Hermes initialization, verifies the scratch identity, and fails
+  closed unless recursive cleanup completes. Exact unarchived repair bytes
+  passed bounded TECserver root/ubuntu probe, resolver, Node-provider and both
+  Python-provider-route proofs with sealed-runtime hashes and production state
+  unchanged. The new repair is `LOCAL_VERIFIED / NOT_REVIEWED`; delivery is
+  contingent on the archive transaction containing this status. R3 remains
+  incomplete; independent exact-SHA review and another complete R3-B retry are
+  `NOT_STARTED`.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

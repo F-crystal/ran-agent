@@ -166,8 +166,23 @@ separators and final `.` before raw final-entry validation. The bounded
 successor validates the raw final entry first, retains safe parent
 normalization, and passes the complete archive transaction file 39/39, focused
 recovery path tests 3/3, and the Git-less Linux/root probe under EUID 0 with
-`umask 077`. It is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit
-containing this update. Corrected exact-SHA review, another R3-B retry and S12
+`umask 077`. Independent review cleared that raw-final repair at
+`e4a6d205afc4183cfda503aa6bb4977dac29fb25`. The sixth R3-B then passed
+baseline, source dry-run and root immutable `--all`: Node 1177 total / 1176
+pass / zero fail / one governed skip, Python 472 pass plus nine passing
+subtests, all three root provider proofs and Linux/root portability. Non-root
+passed 524/524 Node tests before stopping fail-closed at the shared sealed
+runtime probe. Its fixed `HOME=/nonexistent` sentinel was root-readable but not
+traversable by the governed `ubuntu` identity because the host contained a
+root-owned mode `0700` `/nonexistent/.hermes`; production remained unchanged.
+The shared repair uses a unique caller-owned mode `0700` scratch namespace,
+confines HOME/TMP/XDG state beneath it, permits legitimate ephemeral Hermes
+initialization and requires identity-bound recursive cleanup before success.
+Exact unarchived bytes passed bounded TECserver root/ubuntu probe, resolver,
+Node-provider and Python-provider-route parity with sealed-runtime and
+production hashes/state unchanged. The repair is `LOCAL_VERIFIED /
+NOT_REVIEWED`; delivery is contingent on the archive transaction containing
+this update. Independent exact-SHA review, another complete R3-B retry and S12
 remain `NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
