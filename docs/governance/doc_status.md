@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-10)
+Status: CURRENT (2026-08-11)
 
 This file is the public documentation index and conflict rule. Current runtime
 facts live in `docs/governance/current_runtime_status.md`; historical deployment
@@ -136,9 +136,23 @@ Python provider proof was not reached. Exact Linux/root reproduction under
 `R3-B-PRESERVE-OMBRE-FIXTURE-PATH-ACCESS-DRIFT`, not a gate-authority defect.
 The bounded test-only permission-model repair passes the exact root test, the
 Linux/root file at 84 pass/zero fail/one declared skip and the local file at 81
-pass/zero fail/four declared platform skips. It is `LOCAL_VERIFIED /
-NOT_REVIEWED / ARCHIVED` by the commit containing this update. Another R3-B
-retry and S12 remain `NOT_STARTED`.
+pass/zero fail/four declared platform skips. It passed independent exact-SHA
+review at `7019c805342084797c1e1bd201001d80ef1dd4ee`. The fourth R3-B retry
+again passed baseline and source dry-run; root `--all` reached 655 total / 653
+pass / one fail / one declared skip. The Ombre permission case passed, and the
+sole failure moved to the projection-mode negative assertion (`Missing expected
+exception`). Non-root did not run, Python provider proof was not reached and
+production remained unchanged. Root instrumentation proved the active manifest
+changed from `0600` to `0644` and production verification correctly failed with
+`projection_runtime_mode_invalid`; the defect was a negative harness that
+discarded the wrapped status and did not prove its target or mutation. The
+bounded test-only repair makes that injection self-proving and preserves the
+restart boundary. Its Linux/root named test is `1/1`, full release file is 85
+total / 84 pass / zero fail / one governed skip, direct projection file is
+`39/39`, and local release file is 85 total / 81 pass / zero fail / four
+governed platform skips. It is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by
+the commit containing this update. Another R3-B retry and S12 remain
+`NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

@@ -3115,30 +3115,86 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
       /restart ran-agent-hermes(?:-full)?\.service|restart ran-agent-node\.service/,
     );
 
+    const projectionFaultMarker = join(state, 'hermes', 'projection-mode-fault.json');
+    const projectionFaultInjector = join(dir, 'projection-mode-fault-injector.mjs');
+    writeFileSync(projectionFaultInjector, [
+      "import fs from 'node:fs';",
+      "import path from 'node:path';",
+      'const [pointerPath, markerPath] = process.argv.slice(2);',
+      "if (!pointerPath || !markerPath) throw new Error('projection_fault_arguments_invalid');",
+      "const pointer = JSON.parse(fs.readFileSync(pointerPath, 'utf8'));",
+      'const activeManifest = path.join(`${pointerPath}.manifests`, pointer.manifest_file);',
+      'const before = fs.lstatSync(activeManifest);',
+      "if (!before.isFile() || before.isSymbolicLink() || (before.mode & 0o777) !== 0o600) throw new Error('projection_fault_precondition_invalid');",
+      'fs.chmodSync(activeManifest, 0o644);',
+      'const after = fs.lstatSync(activeManifest);',
+      "if (!after.isFile() || after.isSymbolicLink() || after.uid !== before.uid || after.gid !== before.gid || (after.mode & 0o777) !== 0o644) throw new Error('projection_fault_injection_failed');",
+      'fs.writeFileSync(markerPath, `${JSON.stringify({',
+      '  schema_version: 1, pointer_path: pointerPath, manifest_file: pointer.manifest_file,',
+      '  active_manifest: activeManifest, uid: after.uid, gid: after.gid,',
+      '  mode_before: before.mode & 0o777, mode_after: after.mode & 0o777,',
+      '})}\\n`, { encoding: \'utf8\', mode: 0o600, flag: \'wx\' });',
+      '',
+    ].join('\n'));
+    chmodSync(projectionFaultInjector, 0o444);
     const corruptingNode = join(bin, 'node-corrupt-projection-owner-shape');
     writeFileSync(corruptingNode, [
       '#!/bin/sh',
       'if [ "$1" = "$RAN_AGENT_REPO_ROOT/node_bridge/src/hermesIdentityProjection.mjs" ] && [ "${2:-}" != verify-runtime ]; then',
       '  "$REAL_NODE" "$@"',
-      '  find "$3.manifests" -type f -exec chmod 0644 {} +',
-      '  exit 0',
+      '  wrapped_status=$?',
+      '  [ "$wrapped_status" -eq 0 ] || exit "$wrapped_status"',
+      '  [ "$#" -eq 4 ] || exit 64',
+      '  [ "$3" = "$RAN_AGENT_PROJECTION_FAULT_OUTPUT" ] || exit 65',
+      '  exec "$REAL_NODE" "$RAN_AGENT_PROJECTION_FAULT_INJECTOR" "$3" "$RAN_AGENT_PROJECTION_FAULT_MARKER"',
       'fi',
       'exec "$REAL_NODE" "$@"',
       '',
     ].join('\n'));
     chmodSync(corruptingNode, 0o755);
+    const falseBin = existsSync('/usr/bin/false') ? '/usr/bin/false' : '/bin/false';
+    const wrappedFailure = spawnSync(corruptingNode, [
+      join(authority, 'node_bridge', 'src', 'hermesIdentityProjection.mjs'),
+      join(state, 'core', 'core-state.sqlite3'), projection, authority,
+    ], { env: { ...baseEnv, REAL_NODE: falseBin }, stdio: 'pipe' });
+    assert.notEqual(wrappedFailure.status, 0);
+    assert.equal(existsSync(projectionFaultMarker), false);
     writeFileSync(trace, '');
+    let projectionFailure;
     assert.throws(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
       cwd: root,
-      env: { ...baseEnv, RAN_AGENT_NODE_BIN: corruptingNode, REAL_NODE: nodeBin },
+      env: {
+        ...baseEnv,
+        RAN_AGENT_NODE_BIN: corruptingNode,
+        RAN_AGENT_PROJECTION_FAULT_INJECTOR: projectionFaultInjector,
+        RAN_AGENT_PROJECTION_FAULT_MARKER: projectionFaultMarker,
+        RAN_AGENT_PROJECTION_FAULT_OUTPUT: projection,
+        REAL_NODE: nodeBin,
+      },
       stdio: 'pipe',
-    }), /Command failed/);
+    }), (error) => {
+      projectionFailure = error;
+      return /Command failed/.test(String(error?.message));
+    });
+    assert.match(String(projectionFailure?.stderr), /projection_runtime_mode_invalid:.*\.manifests\//);
+    const injectedFault = JSON.parse(readFileSync(projectionFaultMarker, 'utf8'));
+    const activePointer = JSON.parse(readFileSync(projection, 'utf8'));
+    const activeManifest = join(`${projection}.manifests`, activePointer.manifest_file);
+    assert.equal(injectedFault.pointer_path, projection);
+    assert.equal(injectedFault.manifest_file, activePointer.manifest_file);
+    assert.equal(injectedFault.active_manifest, activeManifest);
+    assert.equal(injectedFault.mode_before, 0o600);
+    assert.equal(injectedFault.mode_after, 0o644);
+    assert.equal(injectedFault.uid, fixtureRuntimeIdentity.uid);
+    assert.equal(injectedFault.gid, fixtureRuntimeIdentity.gid);
+    assert.equal(statSync(activeManifest).mode & 0o777, 0o644);
     const unreadableGraphLog = readFileSync(trace, 'utf8');
     assert.doesNotMatch(
       unreadableGraphLog,
       /restart ran-agent-hermes(?:-full)?\.service|restart ran-agent-node\.service/,
     );
-    chmodSync(manifestPath, 0o600);
+    chmodSync(activeManifest, 0o600);
+    rmSync(projectionFaultMarker);
 
     writeFileSync(join(bin, 'curl'), '#!/bin/sh\nexit 1\n');
     chmodSync(join(bin, 'curl'), 0o755);

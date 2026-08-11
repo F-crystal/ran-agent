@@ -1,6 +1,6 @@
 # S12 Readiness Topology And Acceptance Ledger
 
-Status: CURRENT (2026-08-10)
+Status: CURRENT (2026-08-11)
 
 This is the canonical execution and handoff checklist for the remaining path
 from the local S12 readiness work to S13 cleanup. `active_sequence.md` owns the
@@ -67,9 +67,12 @@ flowchart TD
     R3B1 --> RFIX["Root-gate six-fixture repair 76c72988<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     RFIX --> RFR["Independent exact-SHA six-fixture review<br/>CLEAR"]
     RFR --> R3B2["Third R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
-    R3B2 --> OFIX["Ombre path-access fixture repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    OFIX --> OFR["Independent exact-SHA Ombre fixture review<br/>REQUIRED"]
-    OFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
+    R3B2 --> OFIX["Ombre path-access fixture repair<br/>7019c805 · LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    OFIX --> OFR["Independent exact-SHA Ombre fixture review<br/>CLEAR"]
+    OFR --> R3B3["Fourth R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
+    R3B3 --> PFIX["Projection negative-injection harness repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    PFIX --> PFR["Independent exact-SHA projection-injection review<br/>REQUIRED"]
+    PFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -112,8 +115,13 @@ as test-fixture drift; their bounded repair passed independent review at
 `76c72988`. The third R3-B retry passed baseline and source dry-run, then stopped
 in the single Ombre preserve-runtime-shape fixture at 655 total / 653 pass / one
 fail / one declared skip. Exact root reproduction classified the remaining
-blocker as synthetic path-access drift. The current frontier is its bounded
-test-only repair and required independent exact-SHA review.
+blocker as synthetic path-access drift. Its bounded test-only repair passed
+independent exact-SHA review at `7019c805`. The fourth R3-B retry again reached
+655 total / 653 pass / one fail / one declared skip; the Ombre path-access case
+passed and the only failure moved to its projection-mode negative assertion.
+Root instrumentation proved the active manifest became `0644` and production
+verification rejected it. The current frontier is the bounded self-proving
+negative-harness repair and required independent exact-SHA review.
 
 | Second R3-B root failure | Observed boundary | Classification and repair |
 |---|---|---|
@@ -145,8 +153,9 @@ test-only repair and required independent exact-SHA review.
 | R3-B-NO-WRITE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | bytecode-write blocker on d845e994 | Explicit `-B` plus shared self-guard makes every A/B/C sealed-Python validation non-writing; writable-tree fixture proves no path/content/mode drift. |
 | R3-B-RUNTIME-REVIEW | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `250a39fc1ce40ea8e5fa2fa27a50d4f058dd7ea4` | R3-B-NO-WRITE | Independent exact-SHA review is clear. |
 | R3-B-SELFTEST-FIXTURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `76c72988e8f6e989cd6d2ea61b09e8e7cc9ac917` | second R3-B stopped fail-closed | Test-only repair separates outer runner identity from runtime identity and keeps complete candidate fixtures aligned with the current stage contract. |
-| R3-B-OMBRE-FIXTURE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | third R3-B stopped fail-closed | Test-only repair makes the root-created authority/tool/state path truthfully accessible while preserving root read-only and runtime-writable boundaries. |
-| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | Ombre fixture exact-SHA review CLEAR | Retry the complete immutable root/non-root gate; the third run retained baseline and source dry-run but root stopped at 653 pass, one fail and one declared skip before Python/non-root completion. |
+| R3-B-OMBRE-FIXTURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `7019c805342084797c1e1bd201001d80ef1dd4ee` | third R3-B stopped fail-closed | Test-only repair makes the root-created authority/tool/state path truthfully accessible while preserving root read-only and runtime-writable boundaries; independent exact-SHA review is clear. |
+| R3-B-PROJECTION-INJECTION | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | fourth R3-B stopped fail-closed | Test-only repair identifies and mutates the pointer's active manifest, verifies the before/after graph mode and marker, propagates the wrapped publisher status, and proves restart remains blocked. |
+| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | projection-injection exact-SHA review CLEAR | Retry the complete immutable root/non-root gate; the fourth run retained baseline and source dry-run but root stopped at 653 pass, one fail and one declared skip before Python/non-root completion. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
@@ -513,7 +522,22 @@ recovery is recorded independently and leaves
 - [x] Verify the bounded permission-model repair: exact root test `1/1`, full
   Linux/root file 84 pass/zero fail/one declared skip, local file 81 pass/zero
   fail/four declared platform skips, workflow guard/syntax/diff pass.
-- [ ] Independent exact-SHA review of the Ombre fixture repair is `CLEAR`.
+- [x] Independent exact-SHA review of the Ombre fixture repair is `CLEAR` at
+  `7019c805342084797c1e1bd201001d80ef1dd4ee`.
+- [x] Record the fourth R3-B attempt: baseline and source dry-run passed; root
+  `--all` reached 655 total / 653 pass / one fail / one declared skip; the
+  Ombre path-access case passed, the projection-mode negative assertion failed,
+  non-root did not run, Python provider proof was not reached and production
+  remained unchanged.
+- [x] Instrument the projection negative under Linux/root: the pointer's active
+  manifest changed from `0600` to `0644`, and production `verify-runtime`
+  returned status 1 with `projection_runtime_mode_invalid`.
+- [x] Verify the bounded self-proving harness repair: named root test `1/1`,
+  full Linux/root file 84 pass/zero fail/one declared skip, direct projection
+  file `39/39`, local release file 81 pass/zero fail/four declared platform
+  skips, workflow guard/syntax/diff pass.
+- [ ] Independent exact-SHA review of the projection-injection fixture repair
+  is `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
 - [ ] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,
@@ -523,10 +547,10 @@ recovery is recorded independently and leaves
 - [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
   authorization with the exact SHA and summarized mutation.
 
-The Ombre fixture repair does not claim a complete service-managed v0.20
-`--all` pass. It closes only the remaining root self-test failure from the
-third R3-B attempt; the next complete R3-B retry remains server-side and
-`NOT_STARTED`.
+The projection-injection repair does not claim a complete service-managed
+v0.20 `--all` pass. It closes only the negative-harness evidence defect exposed
+by the fourth R3-B attempt; the next complete R3-B retry remains server-side
+and `NOT_STARTED`.
 
 The former local Hermes/Python binding and wrong-group missing proofs are
 closed by the shared runtime probe and focused negative. Real Linux

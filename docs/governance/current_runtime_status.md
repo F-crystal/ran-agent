@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 root-gate fixture repair LOCAL_VERIFIED (2026-08-10)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 projection-injection fixture repair LOCAL_VERIFIED (2026-08-11)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -442,7 +442,30 @@ Ombre/Core/projection leaves, and asserts those boundaries through `runuser`.
 The exact Linux/root test passes under `umask 077`; the full Linux/root file is
 85 total with 84 pass, zero fail and one declared skip; the local file is 85
 total with 81 pass, zero fail and four declared platform skips. Workflow guard,
-syntax and diff checks pass. Production remained unchanged, full R3-B was not
+syntax and diff checks pass. The repair passed independent exact-SHA review at
+`7019c805342084797c1e1bd201001d80ef1dd4ee`.
+
+The fourth R3-B retry again kept production at `98fd8b38`, passed baseline and
+source dry-run, then stopped fail-closed in root immutable `--all`: 655 total,
+653 pass, one declared skip and one failure. The Ombre path-access case passed;
+the sole failure moved to the projection-mode negative assertion with `Missing
+expected exception`. Non-root did not run and the Python provider proof was not
+reached. Bounded Linux/root instrumentation showed the injector selected the
+pointer's active manifest, changed its mode from `0600` to `0644`, and then the
+production `verify-runtime` command returned status 1 with
+`projection_runtime_mode_invalid`. The production verifier is correct. The
+negative fixture discarded the wrapped publisher status and did not prove its
+mutation or target, so its result was not auditable across the root authority
+copy and `runuser` boundary.
+
+The bounded repair remains test-only. It derives the exact active manifest from
+the publication pointer, checks the `0600` precondition, verifies the `0644`
+postcondition and unchanged UID/GID, writes a required one-shot marker,
+propagates the real Node status, and asserts that Hermes/Node restart does not
+proceed. The Linux/root named test passes `1/1`; the full Linux/root file is 85
+total with 84 pass, zero fail and one declared skip; direct projection tests
+pass `39/39`; the local file is 85 total with 81 pass, zero fail and four
+declared platform skips. Production remained unchanged, full R3-B was not
 rerun, and S12 remains `NOT_STARTED`. This repair is `LOCAL_VERIFIED /
 NOT_REVIEWED / ARCHIVED` by the commit containing this status and requires
 independent exact-SHA review before another R3-B retry.

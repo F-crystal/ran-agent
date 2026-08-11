@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-10)
+Status: CURRENT (2026-08-11)
 
 This is the canonical order for active project work. Historical P-numbered plans
 do not control current execution. Keep exactly one stage `IN_PROGRESS` when the
@@ -84,8 +84,11 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> R3-B root-gate six-fixture repair 76c72988 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
   -> independent exact-SHA six-fixture repair review (CLEAR)
   -> third S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
-  -> R3-B Ombre path-access fixture repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
-  -> independent exact-SHA Ombre fixture review (REQUIRED)
+  -> R3-B Ombre path-access fixture repair 7019c805 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+  -> independent exact-SHA Ombre fixture review (CLEAR)
+  -> fourth S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
+  -> R3-B projection negative-injection harness repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
+  -> independent exact-SHA projection-injection repair review (REQUIRED)
   -> S12-R3B immutable server gate/dry-run retry (NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
@@ -210,9 +213,26 @@ S12-R0 fresh read-only production audit (COMPLETE)
   passes `1/1`; the Linux/root file is 85 total, 84 pass, zero fail and one
   declared skip; the local file is 85 total, 81 pass, zero fail and four
   declared platform skips. Workflow guard, syntax and diff checks pass. The
-  repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing
-  this status. R3 remains incomplete; independent review and another R3-B
-  retry are not started.
+  repair passed independent exact-SHA review at
+  `7019c805342084797c1e1bd201001d80ef1dd4ee`. The fourth R3-B retry again
+  passed baseline and source dry-run; root immutable `--all` reached 655 total,
+  653 pass, one declared skip and one failure. The Ombre path-access case now
+  passed, and the sole failure moved to its projection-mode negative assertion:
+  `Missing expected exception`. Non-root did not run, Python provider proof was
+  not reached and production remained unchanged. Bounded root instrumentation
+  proved the wrapper selected the active manifest and changed it from `0600` to
+  `0644`, while the production `verify-runtime` command correctly failed with
+  `projection_runtime_mode_invalid`. The defect was the negative harness: it
+  discarded the wrapped command status and never proved that its target or
+  mutation was active. The test-only repair resolves the active manifest from
+  the pointer, verifies the exact before/after mode and identity, requires an
+  injection marker, propagates the wrapped status, and proves restart does not
+  cross the projection boundary. Linux/root evidence is the named test `1/1`,
+  the full release test file 85 total / 84 pass / zero fail / one governed skip,
+  and direct projection tests `39/39`; the local file is 85 total / 81 pass /
+  zero fail / four governed platform skips. The repair is `LOCAL_VERIFIED /
+  NOT_REVIEWED / ARCHIVED` by the commit containing this status. R3 remains
+  incomplete; independent review and another R3-B retry are not started.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only
