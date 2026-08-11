@@ -419,9 +419,33 @@ identity rejection explicit, runs the modeled non-root nested gate through
 `runuser` on Linux/root, and gives runtime-owned synthetic paths their truthful
 identity. Local evidence is 85 tests with 81 pass and four declared platform
 skips; Linux/root evidence is 85 tests with 84 pass and the one declared
-desktop-only skip. The repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by
-the commit containing this status. Another R3-B run awaits independent
-exact-SHA review; S12 remains `NOT_STARTED`.
+desktop-only skip. That repair passed independent exact-SHA review at
+`76c72988e8f6e989cd6d2ea61b09e8e7cc9ac917`.
+
+The third R3-B retry kept production at `98fd8b38`, passed baseline and source
+dry-run, then stopped fail-closed in root immutable `--all`: 655 total, 653
+pass, one declared skip and one failure in `preserve runtime shape prepares
+Ombre and starts recall before lite and full without requiring Hermes CLI`.
+Non-root did not run and the Python provider proof was not reached. Exact
+read-only production-host reproduction under root and `umask 077` captured
+`/bin/bash: .../scripts/prepare-ombre-brain.sh: Permission denied`. The
+candidate source and fixture `bin`/`state` leaves were behind root-created
+`0700` parents, so modeled non-root `ubuntu:ubuntu` could not traverse them.
+This is `R3-B-PRESERVE-OMBRE-FIXTURE-PATH-ACCESS-DRIFT`, not a production gate
+or runtime defect.
+
+The bounded repair changes only `hermesReleaseScript.test.mjs`: it supplies the
+modeled runtime with a minimal root-owned, read-only authority copy, keeps the
+fake tool path readable/executable but non-writable, makes the state parent
+traversable but non-writable, preserves runtime ownership and writability for
+Ombre/Core/projection leaves, and asserts those boundaries through `runuser`.
+The exact Linux/root test passes under `umask 077`; the full Linux/root file is
+85 total with 84 pass, zero fail and one declared skip; the local file is 85
+total with 81 pass, zero fail and four declared platform skips. Workflow guard,
+syntax and diff checks pass. Production remained unchanged, full R3-B was not
+rerun, and S12 remains `NOT_STARTED`. This repair is `LOCAL_VERIFIED /
+NOT_REVIEWED / ARCHIVED` by the commit containing this status and requires
+independent exact-SHA review before another R3-B retry.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

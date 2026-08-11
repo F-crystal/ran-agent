@@ -2817,9 +2817,10 @@ test('acceptance removes an in-flight authenticated header when terminated', asy
 });
 
 test('preserve runtime shape prepares Ombre and starts recall before lite and full without requiring Hermes CLI', () => {
-  const dir = mkdtempSync(join(tmpdir(), 'hermes-preserve-no-cli-'));
+  const dir = mkdtempSync(identityFixturePrefix('hermes-preserve-no-cli-'));
   chownSync(dir, process.getuid(), process.getgid());
   chmodSync(dir, 0o700);
+  const authority = linuxRoot ? join(dir, 'authority') : root;
   const bin = join(dir, 'bin');
   const trace = join(dir, 'systemctl.log');
   const state = join(dir, 'state');
@@ -2931,6 +2932,37 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   chmodSync(join(bin, 'systemctl'), 0o755);
   chmodSync(join(bin, 'chown'), 0o755);
 
+  if (linuxRoot) {
+    const authorityFiles = [
+      ['scripts/verify-runtime-service-identity.sh', 0o555],
+      ['scripts/ombre_o1_contract.py', 0o444],
+      ['scripts/prepare-ombre-brain.sh', 0o555],
+      ['node_bridge/src/hermesIdentityProjection.mjs', 0o444],
+      ['hermes/profile/IDENTITY.md', 0o444],
+      ['hermes/profile/SOUL.md', 0o444],
+      ['hermes/profile/AGENTS.md', 0o444],
+      ['hermes/profile/plugins/model-providers/deepseek/__init__.py', 0o444],
+      ['hermes/profile/plugins/model-providers/deepseek/plugin.yaml', 0o444],
+    ];
+    for (const [relative, mode] of authorityFiles) {
+      const target = join(authority, relative);
+      mkdirSync(dirname(target), { recursive: true });
+      copyFileSync(join(root, relative), target);
+      chmodSync(target, mode);
+    }
+    for (const directory of [
+      authority,
+      join(authority, 'scripts'),
+      join(authority, 'node_bridge'),
+      join(authority, 'node_bridge', 'src'),
+      join(authority, 'hermes'),
+      join(authority, 'hermes', 'profile'),
+      join(authority, 'hermes', 'profile', 'plugins'),
+      join(authority, 'hermes', 'profile', 'plugins', 'model-providers'),
+      join(authority, 'hermes', 'profile', 'plugins', 'model-providers', 'deepseek'),
+    ]) chmodSync(directory, 0o555);
+  }
+
   const baseEnv = {
     PATH: `${bin}:/usr/sbin:/usr/bin:/bin`,
     RAN_AGENT_NO_SUDO: '1',
@@ -2942,7 +2974,7 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
     RAN_AGENT_TEST_MODE: '1',
     RAN_AGENT_TEST_PROC_ROOT: proc,
     RAN_AGENT_PROVIDER_CANARY_TEST_COMMAND: join(bin, 'provider-canary'),
-    RAN_AGENT_REPO_ROOT: root,
+    RAN_AGENT_REPO_ROOT: authority,
     RAN_AGENT_NODE_ENV_FILE: join(dir, 'node.env'),
     RAN_AGENT_NODE_BRIDGE_ENV_FILE: join(dir, 'bridge.env'),
     RAN_AGENT_DEPLOY_STATE_DIR: state,
@@ -2963,14 +2995,44 @@ test('preserve runtime shape prepares Ombre and starts recall before lite and fu
   try {
     if (linuxRoot) {
       const buckets = join(dir, 'buckets');
+      const coreRoot = join(state, 'core');
       const projectionRoot = join(state, 'hermes');
       mkdirSync(buckets);
       mkdirSync(projectionRoot);
       chmodSync(dir, 0o755);
+      chmodSync(bin, 0o555);
+      chmodSync(state, 0o755);
       execFileSync('chown', [
         '-R', `${fixtureRuntimeIdentity.uid}:${fixtureRuntimeIdentity.gid}`,
-        ombreHome, buckets, projectionRoot,
+        ombreHome, buckets, coreRoot, projectionRoot,
       ]);
+      for (const runtimeDirectory of [
+        ombreHome, ombreSource, join(ombreSource, 'src'), ombreVenv, join(ombreVenv, 'bin'),
+        buckets, coreRoot, projectionRoot,
+      ]) chmodSync(runtimeDirectory, 0o700);
+
+      const runtimeCan = (flag, target) => spawnSync('/usr/sbin/runuser', [
+        '--user', fixtureRuntimeUser, '--group', fixtureRuntimeGroup, '--',
+        '/usr/bin/test', flag, target,
+      ], { stdio: 'pipe' }).status === 0;
+      assert.equal(process.geteuid(), 0);
+      assert.ok(fixtureRuntimeIdentity.uid > 0 && fixtureRuntimeIdentity.gid > 0);
+      assert.equal(runtimeCan('-x', dir), true);
+      assert.equal(runtimeCan('-x', bin), true);
+      assert.equal(runtimeCan('-r', join(bin, 'ombre-python')), true);
+      assert.equal(runtimeCan('-x', join(bin, 'ombre-python')), true);
+      assert.equal(runtimeCan('-w', bin), false);
+      assert.equal(runtimeCan('-w', join(bin, 'ombre-python')), false);
+      assert.equal(runtimeCan('-r', join(authority, 'scripts', 'prepare-ombre-brain.sh')), true);
+      assert.equal(runtimeCan('-x', join(authority, 'scripts', 'prepare-ombre-brain.sh')), true);
+      assert.equal(runtimeCan('-w', authority), false);
+      assert.equal(runtimeCan('-w', join(authority, 'scripts', 'prepare-ombre-brain.sh')), false);
+      assert.equal(runtimeCan('-x', state), true);
+      assert.equal(runtimeCan('-w', state), false);
+      for (const runtimeDirectory of [ombreHome, ombreSource, ombreVenv, buckets, coreRoot, projectionRoot]) {
+        assert.equal(runtimeCan('-x', runtimeDirectory), true);
+        assert.equal(runtimeCan('-w', runtimeDirectory), true);
+      }
     }
     assert.doesNotThrow(() => execFileSync('bash', [join(root, 'scripts', 'apply-hermes-runtime-split.sh'), '--preserve-runtime-shape'], {
       cwd: root,

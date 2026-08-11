@@ -81,8 +81,11 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> R3-B sealed-probe no-write repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
   -> independent exact-SHA runtime-contract review at 250a39fc (CLEAR)
   -> second S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
-  -> R3-B root-gate self-test fixture repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
-  -> independent exact-SHA fixture-repair review (REQUIRED)
+  -> R3-B root-gate six-fixture repair 76c72988 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+  -> independent exact-SHA six-fixture repair review (CLEAR)
+  -> third S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
+  -> R3-B Ombre path-access fixture repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
+  -> independent exact-SHA Ombre fixture review (REQUIRED)
   -> S12-R3B immutable server gate/dry-run retry (NOT STARTED)
   -> explicit owner production authorization
   -> S12 Core Cutover Gate
@@ -191,10 +194,25 @@ S12-R0 fresh read-only production audit (COMPLETE)
   fixture identity, one current complete-stage surface and truthful effective
   process ownership. Desktop evidence is `85/85` with four declared platform
   skips; the Linux root fixture is `85/85` with 84 pass and the single declared
-  desktop-only skip. Production gate authority is unchanged. The repair is
-  `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
-  status. R3 remains incomplete; independent review and another R3-B retry are
-  not started.
+  desktop-only skip. Production gate authority is unchanged. That repair passed
+  independent exact-SHA review at
+  `76c72988e8f6e989cd6d2ea61b09e8e7cc9ac917`. The third R3-B retry then passed
+  baseline and source dry-run. Root immutable `--all` reached 655 tests with
+  653 pass, one declared skip and one failure: `preserve runtime shape prepares
+  Ombre and starts recall before lite and full without requiring Hermes CLI`.
+  Non-root did not run, Python provider proof was not reached and production
+  remained unchanged. Exact Linux/root reproduction under `umask 077` exposed
+  `/bin/bash: .../scripts/prepare-ombre-brain.sh: Permission denied`: modeled
+  `ubuntu:ubuntu` could not traverse root-created `0700` synthetic parents. The
+  bounded test-only repair provides a root-owned read-only authority copy,
+  makes only required tool/state parents traversable, preserves runtime-owned
+  writable leaves and asserts the cross-UID boundary. The exact root test
+  passes `1/1`; the Linux/root file is 85 total, 84 pass, zero fail and one
+  declared skip; the local file is 85 total, 81 pass, zero fail and four
+  declared platform skips. Workflow guard, syntax and diff checks pass. The
+  repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing
+  this status. R3 remains incomplete; independent review and another R3-B
+  retry are not started.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

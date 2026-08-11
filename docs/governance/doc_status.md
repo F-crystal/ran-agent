@@ -127,10 +127,18 @@ runtime tree remains unchanged. The combined repair passed independent review
 at `250a39fc`. The second R3-B proof passed baseline, source dry-run and the real
 sealed-runtime resolver, then stopped fail-closed in six root-run Node
 self-tests. Exact reproduction classified all six as fixture drift, not gate
-authority defects. The bounded test-only repair passes the 85-test file on both
-desktop and Linux/root with only their explicit platform skips and is
-`LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
-update. Another R3-B retry and S12 remain `NOT_STARTED`.
+authority defects; their bounded repair passed independent review at
+`76c72988`. The third R3-B retry passed baseline and source dry-run, then root
+immutable `--all` stopped on the single Ombre preserve-runtime-shape fixture
+(655 total, 653 pass, one fail, one declared skip); non-root did not run and the
+Python provider proof was not reached. Exact Linux/root reproduction under
+`umask 077` classified inaccessible root-created synthetic parents as
+`R3-B-PRESERVE-OMBRE-FIXTURE-PATH-ACCESS-DRIFT`, not a gate-authority defect.
+The bounded test-only permission-model repair passes the exact root test, the
+Linux/root file at 84 pass/zero fail/one declared skip and the local file at 81
+pass/zero fail/four declared platform skips. It is `LOCAL_VERIFIED /
+NOT_REVIEWED / ARCHIVED` by the commit containing this update. Another R3-B
+retry and S12 remain `NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

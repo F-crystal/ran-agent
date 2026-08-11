@@ -64,9 +64,12 @@ flowchart TD
     RR0 --> RR["Sealed-probe no-write repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
     RR --> RRR["Independent exact-SHA runtime review<br/>250a39fc · CLEAR"]
     RRR --> R3B1["Second R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
-    R3B1 --> RFIX["Root-gate self-test fixture repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    RFIX --> RFR["Independent exact-SHA fixture review<br/>REQUIRED"]
-    RFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
+    R3B1 --> RFIX["Root-gate six-fixture repair 76c72988<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    RFIX --> RFR["Independent exact-SHA six-fixture review<br/>CLEAR"]
+    RFR --> R3B2["Third R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
+    R3B2 --> OFIX["Ombre path-access fixture repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    OFIX --> OFR["Independent exact-SHA Ombre fixture review<br/>REQUIRED"]
+    OFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -105,8 +108,12 @@ on stale one-line CLI presentation and flat-runtime import assumptions. The
 combined runtime/no-write repair passed independent review at `250a39fc`. A
 second server proof passed the source dry-run and sealed-runtime resolver, then
 stopped in six root-run Node self-tests. All six were reproduced and classified
-as test-fixture drift; the current frontier is the bounded fixture repair and
-its required independent exact-SHA review.
+as test-fixture drift; their bounded repair passed independent review at
+`76c72988`. The third R3-B retry passed baseline and source dry-run, then stopped
+in the single Ombre preserve-runtime-shape fixture at 655 total / 653 pass / one
+fail / one declared skip. Exact root reproduction classified the remaining
+blocker as synthetic path-access drift. The current frontier is its bounded
+test-only repair and required independent exact-SHA review.
 
 | Second R3-B root failure | Observed boundary | Classification and repair |
 |---|---|---|
@@ -137,8 +144,9 @@ its required independent exact-SHA review.
 | R3-B-RUNTIME-CONTRACT | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` at `d845e994ac256d5d4c2e729eb8dd46224b52b746`; superseded before review | first R3-B stopped fail-closed | One runtime matrix governs semantic version, sealed app/site-packages imports, live process argv/env, local/staged parity and semantic companion YAML. |
 | R3-B-NO-WRITE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | bytecode-write blocker on d845e994 | Explicit `-B` plus shared self-guard makes every A/B/C sealed-Python validation non-writing; writable-tree fixture proves no path/content/mode drift. |
 | R3-B-RUNTIME-REVIEW | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `250a39fc1ce40ea8e5fa2fa27a50d4f058dd7ea4` | R3-B-NO-WRITE | Independent exact-SHA review is clear. |
-| R3-B-SELFTEST-FIXTURE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | second R3-B stopped fail-closed | Test-only repair separates outer runner identity from runtime identity and keeps complete candidate fixtures aligned with the current stage contract. |
-| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | self-test fixture exact-SHA review CLEAR | Retry the complete immutable root/non-root gate; the second run retained the baseline, source dry-run and sealed resolver proofs but did not reach Python/non-root completion. |
+| R3-B-SELFTEST-FIXTURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `76c72988e8f6e989cd6d2ea61b09e8e7cc9ac917` | second R3-B stopped fail-closed | Test-only repair separates outer runner identity from runtime identity and keeps complete candidate fixtures aligned with the current stage contract. |
+| R3-B-OMBRE-FIXTURE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | third R3-B stopped fail-closed | Test-only repair makes the root-created authority/tool/state path truthfully accessible while preserving root read-only and runtime-writable boundaries. |
+| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | Ombre fixture exact-SHA review CLEAR | Retry the complete immutable root/non-root gate; the third run retained baseline and source dry-run but root stopped at 653 pass, one fail and one declared skip before Python/non-root completion. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
@@ -493,7 +501,19 @@ recovery is recorded independently and leaves
   platform skips) and under Linux/root (`85/85`, 84 pass, one declared
   desktop-only skip), including the same read-only copy and nested non-root
   gate.
-- [ ] Independent exact-SHA review of the root-gate fixture repair is `CLEAR`.
+- [x] Independent exact-SHA review of the six-fixture repair is `CLEAR` at
+  `76c72988e8f6e989cd6d2ea61b09e8e7cc9ac917`.
+- [x] Record the third R3-B attempt: baseline and source dry-run passed; root
+  `--all` reached 655 total / 653 pass / one fail / one declared skip; non-root
+  did not run, Python provider proof was not reached and production remained
+  unchanged.
+- [x] Reproduce only the Ombre preserve-runtime-shape failure under Linux/root
+  and `umask 077`; classify the inaccessible synthetic authority/tool/state
+  parents as `R3-B-PRESERVE-OMBRE-FIXTURE-PATH-ACCESS-DRIFT`.
+- [x] Verify the bounded permission-model repair: exact root test `1/1`, full
+  Linux/root file 84 pass/zero fail/one declared skip, local file 81 pass/zero
+  fail/four declared platform skips, workflow guard/syntax/diff pass.
+- [ ] Independent exact-SHA review of the Ombre fixture repair is `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
 - [ ] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,
@@ -503,9 +523,10 @@ recovery is recorded independently and leaves
 - [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
   authorization with the exact SHA and summarized mutation.
 
-The fixture repair does not claim a complete service-managed v0.20 `--all`
-pass. It closes only the six root self-test failures from the second R3-B
-attempt; the next complete R3-B retry remains server-side and `NOT_STARTED`.
+The Ombre fixture repair does not claim a complete service-managed v0.20
+`--all` pass. It closes only the remaining root self-test failure from the
+third R3-B attempt; the next complete R3-B retry remains server-side and
+`NOT_STARTED`.
 
 The former local Hermes/Python binding and wrong-group missing proofs are
 closed by the shared runtime probe and focused negative. Real Linux
