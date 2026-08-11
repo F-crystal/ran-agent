@@ -244,12 +244,20 @@ S12-R0 fresh read-only production audit (COMPLETE)
   canonicalization erased the final lock symlink before the no-follow boundary,
   allowing a root `umask 077` transaction to mutate and publish its target.
   The bounded repair canonicalizes only parents, validates containment before
-  parent creation, preserves final leaves for no-follow verification and uses
-  the same no-replace publisher for recovery records. The exact root regression
-  passes under Linux EUID 0 and `umask 077`; the complete archive transaction
-  file passes 36/36. The repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED`
-  by the commit containing this status. R3 remains incomplete; independent
-  exact-SHA repair review and another R3-B retry are not started.
+  parent creation, preserves ordinary final leaves for no-follow verification
+  and uses the same no-replace publisher for recovery records. It was archived
+  at `28c4054989c1176a4d8988872c43363b09c74494`; independent review accepted
+  those boundaries but returned `FIX_REQUIRED` for
+  `RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS`, because `Path(path)` erased a
+  trailing separator or final `.` before `.name` validation. The bounded
+  successor splits the raw POSIX pathname first, rejects empty, `.` and `..`
+  terminal entries including repeated-separator forms, then canonicalizes only
+  the parent. Its complete archive transaction file passes 39/39, focused
+  recovery path tests pass 3/3, and the Git-less Linux/root probe passes under
+  EUID 0 with `umask 077`. The corrected repair is
+  `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
+  status. R3 remains incomplete; corrected exact-SHA review and another R3-B
+  retry are `NOT_STARTED`.
 - S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only

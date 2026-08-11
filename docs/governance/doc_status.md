@@ -156,14 +156,19 @@ proofs, then root `--all` stopped fail-closed at Node 1177 total / 1176 pass /
 zero fail / one governed skip and Python 462 pass / one fail plus nine passing
 subtests. Non-root did not run and production remained unchanged. The sole
 blocker, `R3-B-ARCHIVE-LOCAL-PATH-SYMLINK-RESOLUTION-BYPASS`, resolved final
-lock/archive leaves before their no-follow boundary. The bounded repair now
-canonicalizes only parents, validates containment before parent creation,
-preserves final leaves, and reuses the hard-link no-replace publisher for
-recovery. The complete archive transaction file passes 36/36 and the exact
-Git-less Linux/root regression passes under EUID 0 with `umask 077`. It is
-`LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit containing this
-update. Independent exact-SHA review, another R3-B retry and S12 remain
-`NOT_STARTED`.
+lock/archive leaves before their no-follow boundary. The first bounded repair
+archived at `28c4054989c1176a4d8988872c43363b09c74494` canonicalizes only
+parents, validates containment before parent creation, preserves ordinary final
+leaves, and reuses the hard-link no-replace publisher for recovery. Independent
+review accepted those boundaries but returned `FIX_REQUIRED` for
+`RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS`: `Path(path)` normalized trailing
+separators and final `.` before raw final-entry validation. The bounded
+successor validates the raw final entry first, retains safe parent
+normalization, and passes the complete archive transaction file 39/39, focused
+recovery path tests 3/3, and the Git-less Linux/root probe under EUID 0 with
+`umask 077`. It is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit
+containing this update. Corrected exact-SHA review, another R3-B retry and S12
+remain `NOT_STARTED`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

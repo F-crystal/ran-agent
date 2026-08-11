@@ -73,9 +73,11 @@ flowchart TD
     R3B3 --> PFIX["Projection negative-injection harness repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
     PFIX --> PFR["Independent exact-SHA projection-injection review<br/>0d7c5ce2 · CLEAR"]
     PFR --> R3B4["Fifth R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
-    R3B4 --> AFIX["Archive local-path authority repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
-    AFIX --> AFR["Independent exact-SHA archive-path review<br/>REQUIRED"]
-    AFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
+    R3B4 --> AFIX["Archive local-path authority repair<br/>28c40549 · LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    AFIX --> AFR["Independent exact-SHA archive-path review<br/>RAW-FINAL blocker · FIX_REQUIRED"]
+    AFR --> ARFIX["Raw final-component repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED"]
+    ARFIX --> ARFR["Independent exact-SHA corrected review<br/>REQUIRED"]
+    ARFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
     R3B --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -158,7 +160,9 @@ negative-harness repair and required independent exact-SHA review.
 | R3-B-SELFTEST-FIXTURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `76c72988e8f6e989cd6d2ea61b09e8e7cc9ac917` | second R3-B stopped fail-closed | Test-only repair separates outer runner identity from runtime identity and keeps complete candidate fixtures aligned with the current stage contract. |
 | R3-B-OMBRE-FIXTURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `7019c805342084797c1e1bd201001d80ef1dd4ee` | third R3-B stopped fail-closed | Test-only repair makes the root-created authority/tool/state path truthfully accessible while preserving root read-only and runtime-writable boundaries; independent exact-SHA review is clear. |
 | R3-B-PROJECTION-INJECTION | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | fourth R3-B stopped fail-closed | Test-only repair identifies and mutates the pointer's active manifest, verifies the before/after graph mode and marker, propagates the wrapped publisher status, and proves restart remains blocked. |
-| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | projection-injection exact-SHA review CLEAR | Retry the complete immutable root/non-root gate; the fourth run retained baseline and source dry-run but root stopped at 653 pass, one fail and one declared skip before Python/non-root completion. |
+| R3-B-ARCHIVE-PATH | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `28c4054989c1176a4d8988872c43363b09c74494` | fifth R3-B stopped fail-closed | Parent containment and final-symlink no-follow repair was accepted, but raw trailing separators/final `.` normalized before validation. |
+| R3-B-RAW-FINAL | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | `RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS` on `28c40549` | Validate the raw terminal entry before `Path`, preserving safe parent normalization and all accepted no-follow/no-replace boundaries. |
+| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | corrected raw-final exact-SHA review required | Retry the complete immutable root/non-root gate only after the corrected archive authority passes independent review. |
 | S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
 
 The previous implementation candidate is
@@ -552,8 +556,15 @@ recovery is recorded independently and leaves
 - [x] Verify the exact lock regression under Git-less Linux/root with EUID 0
   and `umask 077`, plus the complete archive transaction file at 36/36 and the
   focused sibling source/target/recovery checks.
-- [ ] Independent exact-SHA review of the archive local-path authority repair
-  is `CLEAR`.
+- [x] Independent exact-SHA review of archive repair `28c40549` accepts the
+  parent/final-symlink authority but returns `FIX_REQUIRED` for
+  `RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS`.
+- [x] Repair raw terminal parsing before `Path` normalization; reject empty,
+  `.` and `..` final entries while retaining safe parent `..`, contained parent
+  symlinks and literal final symlinks. Verify transaction 39/39, focused
+  recovery 3/3 and Git-less Linux/root EUID 0 with `umask 077`.
+- [ ] Independent exact-SHA review of the corrected raw-final repair is
+  `CLEAR`.
 - [ ] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
 - [ ] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,

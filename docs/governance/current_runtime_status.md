@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 archive-path authority repair LOCAL_VERIFIED (2026-08-11)
+Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 archive-path raw-final repair LOCAL_VERIFIED (2026-08-11)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -479,18 +479,27 @@ resolved the final lock leaf into a root-owned `0600` target before
 published the target. The same full-leaf assumption also affected archive
 record normalization and recovery publication.
 
-The bounded authority repair resolves parents for containment while preserving
-the final leaf, rejects parent escape before `mkdir`, requires no-follow opens,
-and routes normal and recovery publication through the existing hard-link
-no-replace publisher. Final lock/source/record symlinks, unsafe lock types and
-hard-linked inputs fail closed without changing their targets; valid lock and
-publication paths retain exact inode checks and directory durability. The
-complete archive transaction file passes 36/36, focused recovery publication
-and manifest-symlink checks pass, and the exact Git-less Linux/root regression
-passes under EUID 0 with `umask 077`. Production remained unchanged and S12
-remains `NOT_STARTED`. This repair is `LOCAL_VERIFIED / NOT_REVIEWED /
-ARCHIVED` by the commit containing this status and requires independent
-exact-SHA review before another R3-B retry.
+The bounded authority repair archived at
+`28c4054989c1176a4d8988872c43363b09c74494` resolves parents for containment
+while preserving ordinary final leaves, rejects parent escape before `mkdir`,
+requires no-follow opens, and routes normal and recovery publication through
+the existing hard-link no-replace publisher. Independent review accepted those
+boundaries but returned `FIX_REQUIRED` for
+`RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS`: `Path(path)` discarded a trailing
+separator or final `.` before `.name` validation, so `foo/` and `foo/.` could
+silently become `foo`. Candidate `28c40549` is therefore
+`LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED`, not retry-ready.
+
+The bounded successor validates the raw POSIX final entry before constructing
+a `Path`, rejects empty, `.` and `..` final entries including repeated-separator
+forms, then canonicalizes only the parent. Safe parent normalization, final
+symlink preservation, containment, no-follow inode checks and no-replace
+publication remain unchanged. The complete archive transaction file passes
+39/39, focused recovery path tests pass 3/3, and a Git-less read-only Linux/root
+probe passes under EUID 0 with `umask 077`. Production remains unchanged; the
+corrected repair is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` by the commit
+containing this status. R3-B retry and S12 remain `NOT_STARTED` pending an
+independent exact-SHA review.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

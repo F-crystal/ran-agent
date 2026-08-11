@@ -48,10 +48,10 @@ def read_json(path: Path) -> dict[str, Any]:
 
 def local_archive_path(root: str, path: str) -> Path:
     archive_root = Path(root).resolve() / "local_archive"
-    requested = Path(path)
-    if requested.name in {"", ".", ".."}:
+    raw_parent, final_entry = os.path.split(path)
+    if final_entry in {"", ".", ".."}:
         raise OSError("path must name a local_archive entry")
-    resolved = requested.parent.resolve() / requested.name
+    resolved = Path(raw_parent).resolve() / final_entry
     if archive_root not in resolved.parents:
         raise OSError("path is outside repository local_archive")
     return resolved

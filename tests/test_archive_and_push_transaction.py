@@ -1027,6 +1027,161 @@ def test_archive_helper_rejects_final_symlinks_without_touching_targets(tmp_path
     )
 
 
+def test_local_archive_path_validates_raw_final_entry_before_normalization(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    archive = root / "local_archive"
+    contained = archive / "contained"
+    outside = tmp_path / "outside"
+    contained.mkdir(parents=True)
+    outside.mkdir()
+    (archive / "contained-link").symlink_to(contained, target_is_directory=True)
+    (archive / "escape-link").symlink_to(outside, target_is_directory=True)
+
+    def resolve(raw_path: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            [
+                sys.executable,
+                str(REPO_ROOT / "scripts" / "archive_transaction_helper.py"),
+                "local-archive-path",
+                "--root",
+                str(root),
+                "--path",
+                raw_path,
+            ],
+            text=True,
+            capture_output=True,
+        )
+
+    valid = {
+        str(archive / "foo"): archive / "foo",
+        f"{archive}/a/../foo": archive / "foo",
+        str(archive / "contained-link" / "foo"): contained / "foo",
+    }
+    for raw_path, expected in valid.items():
+        result = resolve(raw_path)
+        assert result.returncode == 0, (raw_path, result.stderr)
+        assert Path(result.stdout.strip()) == expected
+
+    final_symlink = archive / "foo"
+    final_symlink.symlink_to(contained / "target")
+    preserved = resolve(str(final_symlink))
+    assert preserved.returncode == 0
+    assert Path(preserved.stdout.strip()) == final_symlink
+
+    rejected = (
+        f"{archive}/foo/",
+        f"{archive}/foo//",
+        f"{archive}/foo/.",
+        f"{archive}/foo//.",
+        f"{archive}/foo/..",
+        f"{archive}/foo//..",
+        str(archive),
+        str(outside / "foo"),
+        f"{archive}/../outside/foo",
+        str(archive / "escape-link" / "foo"),
+    )
+    for raw_path in rejected:
+        assert resolve(raw_path).returncode != 0, raw_path
+
+
+def test_raw_directory_designators_fail_before_helper_mutation(tmp_path: Path) -> None:
+    root = tmp_path / "repo"
+    runtime = root / "local_archive" / "runtime"
+    runtime.mkdir(parents=True)
+    helper = str(REPO_ROOT / "scripts" / "archive_transaction_helper.py")
+
+    for index, suffix in enumerate(("/", "/.")):
+        lock = runtime / f"lock-{index}"
+        marker = tmp_path / f"command-ran-{index}"
+        result = subprocess.run(
+            [
+                sys.executable,
+                helper,
+                "lock-exec",
+                "--root",
+                str(root),
+                "--lock",
+                f"{lock}{suffix}",
+                "--",
+                sys.executable,
+                "-c",
+                f"from pathlib import Path; Path({str(marker)!r}).touch()",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 74
+        assert not lock.exists()
+        assert not marker.exists()
+
+    verified_lock = runtime / "verified-lock"
+    verified_lock.touch(mode=0o600)
+    with verified_lock.open("r+") as descriptor:
+        verified = subprocess.run(
+            [
+                sys.executable,
+                helper,
+                "lock-verify",
+                "--root",
+                str(root),
+                "--lock",
+                f"{verified_lock}/.",
+                "--fd",
+                str(descriptor.fileno()),
+            ],
+            text=True,
+            capture_output=True,
+            pass_fds=(descriptor.fileno(),),
+        )
+    assert verified.returncode == 74
+
+    for index, suffix in enumerate(("/", "/.")):
+        source = runtime / f"source-{index}.md"
+        target = root / "local_archive" / "docs" / f"source-target-{index}.md"
+        source.write_text("archive\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                helper,
+                "archive-publish",
+                "--root",
+                str(root),
+                "--source",
+                f"{source}{suffix}",
+                "--target",
+                str(target),
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 82
+        assert source.read_text(encoding="utf-8") == "archive\n"
+        assert not target.exists()
+
+    for index, suffix in enumerate(("/", "/.")):
+        source = runtime / f"target-source-{index}.md"
+        target = root / "local_archive" / f"uncreated-{index}" / "record.md"
+        source.write_text("archive\n", encoding="utf-8")
+        result = subprocess.run(
+            [
+                sys.executable,
+                helper,
+                "archive-publish",
+                "--root",
+                str(root),
+                "--source",
+                str(source),
+                "--target",
+                f"{target}{suffix}",
+            ],
+            text=True,
+            capture_output=True,
+        )
+        assert result.returncode == 82
+        assert source.read_text(encoding="utf-8") == "archive\n"
+        assert not target.parent.exists()
+
+
 def test_local_archive_containment_precedes_parent_creation(tmp_path: Path) -> None:
     root = tmp_path / "repo"
     source = root / "local_archive" / "runtime" / "source.md"
@@ -1206,6 +1361,21 @@ def test_explicit_archive_record_final_symlink_is_rejected_before_transaction(tm
     assert not list((repo / "local_archive" / "runtime" / "archive-and-push").glob("*/transaction.json"))
     assert git(repo, "rev-parse", "HEAD") == base
     assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == base
+
+
+def test_explicit_archive_record_rejects_raw_directory_designators(tmp_path: Path) -> None:
+    for index, suffix in enumerate(("/", "/.")):
+        repo, remote = setup_feature_repo(tmp_path / str(index))
+        base = git(repo, "rev-parse", "HEAD")
+        record = repo / "local_archive" / "docs" / "governance" / "archive" / "record.md"
+
+        result = run_archive(repo, "--push", "--record", f"{record}{suffix}")
+
+        assert result.returncode != 0
+        assert not record.exists()
+        assert not list((repo / "local_archive" / "runtime" / "archive-and-push").glob("*/transaction.json"))
+        assert git(repo, "rev-parse", "HEAD") == base
+        assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == base
 
 
 def test_origin_change_after_validation_fails_closed(tmp_path: Path) -> None:

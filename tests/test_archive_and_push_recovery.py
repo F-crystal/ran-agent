@@ -711,6 +711,21 @@ def test_normal_transaction_persists_replayable_validation_evidence(tmp_path: Pa
     assert verified.returncode == 0, (verified.stdout, verified.stderr)
 
 
+def test_recovery_rejects_raw_final_entry_in_validation_path(tmp_path: Path) -> None:
+    repo, remote, journal, _base, feature, main = failed_divergent_transaction(tmp_path)
+    recorded = read_journal(journal)
+    recorded["validation_record_path"] = f'{recorded["validation_record_path"]}/.'
+    journal.write_text(json.dumps(recorded), encoding="utf-8")
+
+    result = recover(repo, journal)
+
+    assert result.returncode == 95
+    assert git(repo, "rev-parse", "feature/archive") == feature
+    assert git(repo, "rev-parse", "main") == main
+    assert git(repo, "--git-dir", str(remote), "rev-parse", "main") == main
+    assert not (journal.parent / "recovery-worktree").exists()
+
+
 def test_recovery_uses_bound_node_provenance_without_current_node(tmp_path: Path) -> None:
     repo, _remote, journal, _base, _feature, _main = failed_divergent_transaction(tmp_path)
     original = json.loads(
