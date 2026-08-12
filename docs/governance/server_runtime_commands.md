@@ -105,7 +105,11 @@ source pointer/snapshot, S12 journal, Core business state, wake or effect. It
 observes the existing release lock without creating one. A repeated accepted
 APPLY reads and validates `core-cutover:v1`, worker/writer, managed wake and the
 terminal acceptance receipt without restarting services or producing an
-effect.
+effect. The controller materializes the exact Git candidate once into a private
+read-only `/tmp` execution closure and uses that same closure for every S12
+subordinate, manifest and relative Core import through P0-P10. `/opt/ran_agent`
+remains the production state root, never fallback S12 control-code authority;
+the closure is removed when the invocation ends.
 
 Configuration prerequisites are the project virtualenv, the exact archived
 candidate, its candidate-extracted S12 controller and bootstrap, the fresh

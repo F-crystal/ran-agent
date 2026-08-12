@@ -4,7 +4,11 @@ import importlib.util
 import copy
 import hashlib
 import json
+import os
+import shutil
 import sqlite3
+import stat
+import subprocess
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -117,7 +121,7 @@ def write_core_marker(
 def accepted_operations(core_db: Path) -> MODULE.ProductionOperations:
     return MODULE.ProductionOperations(SimpleNamespace(
         core_db=core_db, owner_id="owner", authorization_ref="auth", candidate="a" * 40,
-    ), core_db.parent / "transaction")
+    ), core_db.parent / "transaction", Path("/candidate"))
 
 
 def tree_digest(root: Path) -> str:
@@ -140,7 +144,7 @@ class ComposedRollbackOperations(MODULE.ProductionOperations):
     }
 
     def __init__(self, transaction_dir: Path):
-        super().__init__(SimpleNamespace(), transaction_dir)
+        super().__init__(SimpleNamespace(), transaction_dir, Path("/candidate"))
         self.authority = {
             "head": "baseline", "sourcePointer": "baseline", "sourceSnapshotPhase": "accepted",
             "env": b"BASE_ENV\n", "profile": b"legacy\n", "dropin": b"legacy-dropin\n",
@@ -273,6 +277,7 @@ def test_failure_immediately_before_core_commit_rolls_back(tmp_path: Path) -> No
     state = journal(tmp_path)
     with pytest.raises(MODULE.S12Error, match="failed:cutover"):
         MODULE.run_apply(operations, state)
+    assert operations.calls[:2] == ["verify", "source_apply"]
     assert state.state["status"] == "ROLLED_BACK"
     assert operations.calls[-1] == "rollback:/source/snapshot"
 
@@ -296,7 +301,7 @@ def test_source_crash_recovery_binds_pointer_snapshot_and_prior_head(
     monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer)
     operations = MODULE.ProductionOperations(SimpleNamespace(
         candidate=candidate, production_baseline=baseline,
-    ), tmp_path / "transaction")
+    ), tmp_path / "transaction", tmp_path / "candidate")
     monkeypatch.setattr(operations, "git", lambda *_args: candidate)
     assert operations.recover_source_apply() == {
         "status": "SOURCE_APPLIED_RECOVERED", "snapshot": str(snapshot),
@@ -556,6 +561,125 @@ def test_verify_plan_is_read_only_state_machine_surface() -> None:
     )
 
 
+def test_candidate_execution_closure_is_exact_read_only_and_import_complete(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = SCRIPT.parents[1]
+    candidate = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"], check=True,
+        text=True, stdout=subprocess.PIPE,
+    ).stdout.strip()
+    monkeypatch.setattr(MODULE, "PRODUCTION_STATE_ROOT", repository)
+    node = (os.environ.get("RAN_AGENT_NODE_BIN") or os.environ.get("ARCHIVE_NODE_BIN")
+            or shutil.which("node"))
+    if not node:
+        pytest.skip("Node executable is required for candidate import closure proof")
+
+    with MODULE.candidate_execution_closure(candidate) as closure:
+        retained = closure
+        assert stat.S_IMODE(closure.stat().st_mode) == 0o555
+        for relative in (
+            "scripts/rehearse-core-schedule-migration.mjs",
+            "scripts/core-cutover.mjs",
+            "scripts/core-s12-acceptance.mjs",
+            "node_bridge/src/core/coreDb.mjs",
+        ):
+            target = closure / relative
+            assert target.is_file() and not target.is_symlink()
+            assert target.stat().st_mode & 0o222 == 0
+            expected = subprocess.run(
+                ["git", "-C", str(repository), "show", f"{candidate}:{relative}"],
+                check=True, stdout=subprocess.PIPE,
+            ).stdout
+            assert target.read_bytes() == expected
+        for script, expected_error in (
+            ("scripts/rehearse-core-schedule-migration.mjs", "--manifest is required"),
+            ("scripts/core-cutover.mjs", "--core-db is required"),
+            ("scripts/core-s12-acceptance.mjs", "--mode is required"),
+            ("scripts/core-wake.mjs", "CORE_WAKE_DISABLED"),
+        ):
+            result = subprocess.run(
+                [node, str(closure / script)], text=True,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            assert result.returncode != 0
+            assert expected_error in result.stderr
+            assert "ERR_MODULE_NOT_FOUND" not in result.stderr
+    assert not retained.exists()
+
+
+def test_p0_routes_candidate_code_against_old_or_conflicting_production_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = SCRIPT.parents[1]
+    archived_candidate = subprocess.run(
+        ["git", "-C", str(repository), "rev-parse", "HEAD"], check=True,
+        text=True, stdout=subprocess.PIPE,
+    ).stdout.strip()
+    production = tmp_path / "old-production"
+    transaction = tmp_path / "verify"
+    scratch_root = tmp_path / "scratch"
+    production.mkdir()
+    transaction.mkdir()
+    tampered = production / "scripts/core-cutover.mjs"
+    tampered.parent.mkdir(parents=True)
+    tampered.write_text("candidate-b-live\n")
+    monkeypatch.setattr(MODULE, "PRODUCTION_STATE_ROOT", repository)
+
+    class RoutingOperations(MODULE.ProductionOperations):
+        def __init__(self, candidate: Path):
+            super().__init__(SimpleNamespace(
+                core_db=tmp_path / "absent-core.sqlite3",
+                production_baseline="baseline", visible_binding=tmp_path / "binding.json",
+                candidate="a" * 40, committed_at="2026-08-12T00:00:00Z",
+                legacy_db=tmp_path / "legacy.sqlite3", state_dir=tmp_path / "state",
+            ), transaction, candidate)
+            self.commands: list[list[str]] = []
+            self.scratch_count = 0
+
+        def assert_candidate_binding(self): pass
+
+        @contextmanager
+        def runtime_scratch(self):
+            self.scratch_count += 1
+            scratch = scratch_root / str(self.scratch_count)
+            scratch.mkdir(parents=True)
+            try:
+                yield scratch
+            finally:
+                shutil.rmtree(scratch)
+
+        def run(self, command, **_kwargs):
+            self.commands.append(command)
+            if "reconcile-core-managed-wake.py" in command[1]:
+                return {"status": "verified", "active": False, "present": False}
+            return {"status": "SOURCE_VERIFY_OK" if command[0] == "bash" else "CUTOVER_VERIFY_OK"}
+
+        def runtime_run(self, command, **_kwargs):
+            self.commands.append(command)
+            output = Path(command[command.index("--output") + 1])
+            output.write_text('{"status":"REHEARSED","cutoverBlockers":[]}\n')
+            return {"status": "REHEARSED", "cutoverBlockers": []}
+
+    with MODULE.candidate_execution_closure(archived_candidate) as candidate:
+        monkeypatch.setattr(MODULE, "PRODUCTION_STATE_ROOT", production)
+        assert not (production / "scripts/rehearse-core-schedule-migration.mjs").exists()
+        assert not (production / "scripts/reconcile-core-managed-wake.py").exists()
+        operations = RoutingOperations(candidate)
+        receipt = operations.verify()
+        assert receipt["status"] == "VERIFIED"
+        invoked = "\n".join(" ".join(command) for command in operations.commands)
+        assert str(candidate / "scripts/bootstrap-hermes-release.sh") in invoked
+        assert str(candidate / "scripts/reconcile-core-managed-wake.py") in invoked
+        assert str(candidate / "scripts/rehearse-core-schedule-migration.mjs") in invoked
+        assert str(candidate / "scripts/core-cutover.mjs") in invoked
+        assert str(candidate / MODULE.MANAGED_WAKE_MANIFEST_PATH) in invoked
+        assert str(candidate / MODULE.MIGRATION_MANIFEST_PATH) in invoked
+        assert str(candidate / MODULE.SCHEDULE_MANIFEST_PATH) in invoked
+        assert str(tampered) not in invoked
+        assert all("--apply" not in command for command in operations.commands)
+
+
 def test_s12_git_observation_disables_optional_locks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -564,7 +688,7 @@ def test_s12_git_observation_disables_optional_locks(
         observed.append((command, kwargs["env"]))
         or SimpleNamespace(stdout="", stderr="", returncode=0)
     ))
-    operations = MODULE.ProductionOperations(SimpleNamespace(), tmp_path)
+    operations = MODULE.ProductionOperations(SimpleNamespace(), tmp_path, tmp_path / "candidate")
     assert operations.git("status", "--porcelain") == ""
     assert observed[0][1]["GIT_OPTIONAL_LOCKS"] == "0"
 
@@ -600,7 +724,8 @@ def test_s12_verify_preserves_the_complete_persistent_state_vector(
                                              production_baseline="baseline",
                                              visible_binding=tmp_path / "binding.json",
                                              candidate="a" * 40,
-                                             committed_at="2026-08-12T00:00:00Z"), transaction)
+                                             committed_at="2026-08-12T00:00:00Z"),
+                             transaction, tmp_path / "candidate")
             self.source_modes: list[str] = []
 
         def assert_candidate_binding(self): pass
@@ -647,7 +772,9 @@ def test_core_handoff_env_is_replay_safe_and_quiescence_is_bounded() -> None:
 
 
 def test_worker_status_rejects_zero_or_duplicate_node_writers(monkeypatch: pytest.MonkeyPatch) -> None:
-    operations = MODULE.ProductionOperations(SimpleNamespace(), Path("/transaction"))
+    operations = MODULE.ProductionOperations(
+        SimpleNamespace(), Path("/transaction"), Path("/candidate"),
+    )
     monkeypatch.setattr(operations, "main_pid", lambda unit: 11 if "node" in unit else 12)
     monkeypatch.setattr(operations, "process_env", lambda _pid: {"RAN_AGENT_CORE_ENABLED": "true"})
     for writers in ([], [11, 13]):

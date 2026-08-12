@@ -85,8 +85,9 @@ flowchart TD
     OGAP --> ORCH["S12 candidate e6ce78aa<br/>LOCAL_VERIFIED · REVIEWED/FIX_REQUIRED · ARCHIVED"]
     ORCH --> REM["Authority-order remediation 91172d4c<br/>LOCAL_VERIFIED · REVIEWED/FIX_REQUIRED · ARCHIVED"]
     REM --> ROFIX["Final read-only primitives 959b8f0d<br/>LOCAL_VERIFIED · REVIEWED/FIX_REQUIRED · ARCHIVED"]
-    ROFIX --> SYSFIX["Systemic byte-authority + SQLite-test repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED BY COMMIT"]
-    SYSFIX --> ORR["Independent exact-SHA systemic review<br/>REQUIRED"]
+    ROFIX --> SYSFIX["Systemic byte-authority repair e120f1c2<br/>LOCAL_VERIFIED · REVIEWED · production proof STOPPED"]
+    SYSFIX --> CLOSURE["Candidate execution closure repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED BY COMMIT"]
+    CLOSURE --> ORR["Independent exact-SHA closure review<br/>REQUIRED"]
     ORR --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -190,7 +191,8 @@ remain unchanged/not started.
 | S12-ORCHESTRATION | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `e6ce78aaeb3c7117daac25ccbeb7b66b570cd0b1` | R3-B CLEAR; `S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP` | Overall transaction retained; review found VERIFY source-ref mutation, ACCEPTED-before-SQLite ordering and missing composed P0-P4 restoration proof. |
 | S12-AUTHORITY-ORDER | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `91172d4c1925aa82a6d153671165b1c20473c4e7` | S12-ORCHESTRATION review findings | SQLite precedence, P0-P4 restoration and rollback recovery were accepted; Git index refresh and writable Core inspection remained. |
 | S12-READ-ONLY-PRIMITIVES | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `959b8f0d4503448da3bb44205d40bddd7d32e43a` | final two `91172d4c` review findings | Native no-optional-lock Git status and true Core read-only inspect were accepted; exact review found duplicate bootstrap digest authority. |
-| S12-SYSTEMIC-FINAL | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | `BOOTSTRAP-MANIFEST-DUPLICATE-AUTHORITY-DRIFT` | Exact Git candidate is the sole bootstrap byte authority; explicit paths bind extraction scope; live-WAL SHM is derived coordination while durable DB/WAL/receipt state remains unchanged. |
+| S12-SYSTEMIC-FINAL | `LOCAL_VERIFIED / production critical proof STOPPED` | `REVIEWED` | `ARCHIVED` at `e120f1c246135d566e58847684e14521ea15809d` | `BOOTSTRAP-MANIFEST-DUPLICATE-AUTHORITY-DRIFT` | Exact Git candidate is the sole bootstrap byte authority; production P0 exposed candidate-subordinate resolution through the older live checkout. |
+| S12-CANDIDATE-CLOSURE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | `S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP` | One private read-only exact-Git closure owns S12 code/manifests across P0-P10; `/opt/ran_agent` remains state and never supplies fallback control code. |
 | S12 | `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` | not applicable | not applicable | S12 successor review + explicit production authorization | Production source remains `98fd8b3`; neither S12 VERIFY nor APPLY occurred. |
 
 The previous implementation candidate is
@@ -644,7 +646,11 @@ The remediation keeps that topology unchanged. VERIFY delegates to the
 candidate-extracted bootstrap/controller `source-verify` path and creates no
 persistent source ref, lock, pointer, snapshot, S12 journal, Core state, wake or
 effect. APPLY consults `core-cutover:v1` before interpreting ACCEPTED,
-ROLLED_BACK or stale pre-marker journal state.
+ROLLED_BACK or stale pre-marker journal state. The controller materializes the
+exact Git candidate once into private read-only `/tmp`, uses it for every S12
+subordinate, manifest and relative Core import, and removes it afterward; the
+live checkout remains production state only. The root-owned mode `0600` visible
+binding remains a downstream owner input / `MISSING_PROOF`.
 
 - [ ] Stop new ingress and drain/reconcile legacy effect/outbox state.
 - [ ] Execute the one authorized Core cutover transaction against the exact SHA.

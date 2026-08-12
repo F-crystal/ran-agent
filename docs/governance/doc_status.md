@@ -195,12 +195,17 @@ only residual Git index refresh and writable Core inspection. Candidate
 `959b8f0d` repaired those primitives and is `LOCAL_VERIFIED / REVIEWED /
 FIX_REQUIRED / ARCHIVED`; its review found a stale manually synchronized
 bootstrap digest, while the reported live-WAL SHM read-mark change is derived
-SQLite coordination rather than product mutation. The bounded successor makes
-the exact Git candidate the sole framework byte authority, keeps the explicit
-extraction scope, and tests durable DB/WAL/receipt stability without requiring
-SHM byte identity. It is `LOCAL_VERIFIED / NOT_REVIEWED` and archived by its
-containing commit.
-Production is unchanged and no S12 mode has run.
+SQLite coordination rather than product mutation. Candidate
+`e120f1c246135d566e58847684e14521ea15809d` makes the exact Git candidate the
+sole framework byte authority and is `LOCAL_VERIFIED / REVIEWED / ARCHIVED`, but
+production critical proof stopped before P0 on
+`S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP`: candidate-only
+subordinates still resolved from the older live checkout. The bounded successor
+derives one immutable scratch execution closure from the exact Git object, uses
+it for all S12 code/manifests, keeps live paths state-only, and is
+`LOCAL_VERIFIED / NOT_REVIEWED` plus archived by its containing commit.
+Production is unchanged; S12 remains `NOT_STARTED`. The protected visible
+binding is a downstream owner input / `MISSING_PROOF`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

@@ -7,6 +7,7 @@ import argparse
 import contextlib
 import fcntl
 import hashlib
+import io
 import json
 import os
 import pwd
@@ -16,14 +17,15 @@ import sqlite3
 import stat
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
-REPO = Path("/opt/ran_agent")
+PRODUCTION_STATE_ROOT = Path("/opt/ran_agent")
 ARTIFACT_ROOT = Path("/opt/ran_agent-release")
 TRANSACTION_ROOT = ARTIFACT_ROOT / "s12-transactions"
 LOCK_PATH = ARTIFACT_ROOT / ".s12-cutover.lock"
@@ -34,10 +36,10 @@ BOOTSTRAP_PATH = "scripts/bootstrap-hermes-release.sh"
 NODE_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/node")
 HERMES_BIN = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes")
 HERMES_HOME = Path("/home/ubuntu/.hermes-ran-agent/lite")
-MANAGED_WAKE_MANIFEST = REPO / "docs/governance/core_managed_wake.v1.json"
-SCHEDULE_MANIFEST = REPO / "docs/governance/core_system_schedules.v1.json"
-MIGRATION_MANIFEST = REPO / "docs/governance/core_schedule_migration.v1.json"
-ENV_FILES = (REPO / ".env.local", REPO / "node_bridge/.env.local")
+MANAGED_WAKE_MANIFEST_PATH = Path("docs/governance/core_managed_wake.v1.json")
+SCHEDULE_MANIFEST_PATH = Path("docs/governance/core_system_schedules.v1.json")
+MIGRATION_MANIFEST_PATH = Path("docs/governance/core_schedule_migration.v1.json")
+ENV_FILES = (PRODUCTION_STATE_ROOT / ".env.local", PRODUCTION_STATE_ROOT / "node_bridge/.env.local")
 PHASES = (
     "P0_VERIFIED",
     "P1_SOURCE_APPLIED",
@@ -227,10 +229,90 @@ def parse_json_output(result: subprocess.CompletedProcess[str]) -> dict[str, Any
     raise S12Error("subordinate command returned no JSON receipt")
 
 
+def git_observe(*args: str) -> str:
+    result = subprocess.run([
+        "git", "-c", f"safe.directory={PRODUCTION_STATE_ROOT}",
+        "-C", str(PRODUCTION_STATE_ROOT), *args,
+    ], check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
+    return result.stdout.strip()
+
+
+def validate_candidate_execution_inputs(args: argparse.Namespace) -> None:
+    candidate = args.candidate
+    if len(candidate) != 40 or any(value not in "0123456789abcdef" for value in candidate):
+        raise S12Error("candidate must be an exact lowercase SHA")
+    if git_observe("rev-parse", "--verify", f"{candidate}^{{commit}}") != candidate:
+        raise S12Error("candidate object mismatch")
+    if git_observe("rev-parse", "--verify", "refs/remotes/origin/main") != candidate:
+        raise S12Error("candidate is not exact archived main")
+    for path, raw_local in ((CONTROLLER_PATH, Path(__file__)), (BOOTSTRAP_PATH, args.bootstrap)):
+        if raw_local.is_symlink() or not raw_local.is_file():
+            raise S12Error(f"running {path} is not a regular candidate file")
+        expected = subprocess.run([
+            "git", "-c", f"safe.directory={PRODUCTION_STATE_ROOT}",
+            "-C", str(PRODUCTION_STATE_ROOT), "show", f"{candidate}:{path}",
+        ], check=True, stdout=subprocess.PIPE,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}).stdout
+        if raw_local.resolve().read_bytes() != expected:
+            raise S12Error(f"running {path} is not candidate-extracted")
+
+
+@contextlib.contextmanager
+def candidate_execution_closure(candidate: str):
+    root = Path(tempfile.mkdtemp(
+        prefix=f"ran-agent-s12-candidate-{candidate[:12]}-", dir="/tmp",
+    ))
+    created = root.lstat()
+    if (not stat.S_ISDIR(created.st_mode) or stat.S_IMODE(created.st_mode) != 0o700
+            or created.st_uid != os.geteuid()):
+        raise S12Error("candidate execution closure root identity/mode is invalid")
+    try:
+        archive = subprocess.run([
+            "git", "-c", f"safe.directory={PRODUCTION_STATE_ROOT}",
+            "-C", str(PRODUCTION_STATE_ROOT), "archive", "--format=tar", candidate,
+        ], check=True, stdout=subprocess.PIPE,
+            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}).stdout
+        with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as source:
+            for member in source.getmembers():
+                parts = PurePosixPath(member.name).parts
+                if member.name.startswith("/") or ".." in parts or not (member.isfile() or member.isdir()):
+                    raise S12Error(f"unsupported candidate closure member: {member.name}")
+            source.extractall(root)
+        for path in root.rglob("*"):
+            value = path.lstat()
+            if stat.S_ISLNK(value.st_mode) or value.st_uid != os.geteuid():
+                raise S12Error("candidate execution closure identity is invalid")
+            if stat.S_ISDIR(value.st_mode):
+                path.chmod(0o555)
+            elif stat.S_ISREG(value.st_mode):
+                path.chmod(0o555 if value.st_mode & 0o111 else 0o444)
+            else:
+                raise S12Error("candidate execution closure contains an unsupported file")
+        root.chmod(0o555)
+        yield root
+    finally:
+        current = root.lstat()
+        if ((current.st_dev, current.st_ino, current.st_uid)
+                != (created.st_dev, created.st_ino, created.st_uid)
+                or not stat.S_ISDIR(current.st_mode)):
+            raise S12Error("candidate execution closure identity changed before cleanup")
+        for path in root.rglob("*"):
+            if path.is_symlink():
+                raise S12Error("candidate execution closure symlink appeared before cleanup")
+            if path.is_dir():
+                path.chmod(0o700)
+        root.chmod(0o700)
+        shutil.rmtree(root)
+        if root.exists():
+            raise S12Error("candidate execution closure cleanup failed")
+
+
 class ProductionOperations:
-    def __init__(self, args: argparse.Namespace, transaction_dir: Path):
+    def __init__(self, args: argparse.Namespace, transaction_dir: Path, candidate_code_root: Path):
         self.args = args
         self.transaction_dir = transaction_dir
+        self.candidate_code_root = candidate_code_root
         self.snapshot = transaction_dir / "migration-snapshot.json"
         self.final_snapshot = transaction_dir / "quiesced-migration-snapshot.json"
         self.allow_inactive_core_reuse = False
@@ -273,41 +355,26 @@ class ProductionOperations:
             shutil.rmtree(directory)
 
     def git(self, *args: str, check: bool = True) -> str:
-        result = subprocess.run(["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), *args],
+        result = subprocess.run(["git", "-c", f"safe.directory={PRODUCTION_STATE_ROOT}",
+                                 "-C", str(PRODUCTION_STATE_ROOT), *args],
                                 check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                 env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
         return result.stdout.strip()
 
     def assert_candidate_binding(self) -> None:
-        candidate = self.args.candidate
-        if len(candidate) != 40 or any(value not in "0123456789abcdef" for value in candidate):
-            raise S12Error("candidate must be an exact lowercase SHA")
-        if self.git("rev-parse", "--verify", f"{candidate}^{{commit}}") != candidate:
-            raise S12Error("candidate object mismatch")
-        if self.git("rev-parse", "--verify", "refs/remotes/origin/main") != candidate:
-            raise S12Error("candidate is not exact archived main")
         if self.git("rev-parse", "HEAD") != self.args.production_baseline:
             raise S12Error("production source baseline differs")
         if self.git("status", "--porcelain"):
             raise S12Error("production worktree is dirty")
-        for path, raw_local in ((CONTROLLER_PATH, Path(__file__)), (BOOTSTRAP_PATH, self.args.bootstrap)):
-            if raw_local.is_symlink() or not raw_local.is_file():
-                raise S12Error(f"running {path} is not a regular candidate file")
-            local = raw_local.resolve()
-            expected = subprocess.run(["git", "-C", str(REPO), "show", f"{candidate}:{path}"],
-                                      check=True, stdout=subprocess.PIPE,
-                                      env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}).stdout
-            if local.read_bytes() != expected:
-                raise S12Error(f"running {path} is not candidate-extracted")
 
     def source(self, mode: str, snapshot: str | None = None) -> dict[str, Any]:
-        command = ["bash", str(self.args.bootstrap), f"--{mode}", self.args.candidate]
+        command = ["bash", str(self.candidate_code_root / BOOTSTRAP_PATH), f"--{mode}", self.args.candidate]
         if snapshot:
             command.append(snapshot)
         environment = {
             "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
             "RAN_AGENT_RELEASE_UNIFIED_SOURCE": "1",
-            "RAN_AGENT_RELEASE_CONTROL_ROOT": str(REPO),
+            "RAN_AGENT_RELEASE_CONTROL_ROOT": str(PRODUCTION_STATE_ROOT),
             "RAN_AGENT_RELEASE_ARTIFACT_ROOT": str(ARTIFACT_ROOT),
         }
         return self.run(command, env=environment)
@@ -317,8 +384,9 @@ class ProductionOperations:
             actual_core = core_db or scratch / "core.sqlite3"
             scratch_output = scratch / "snapshot.json"
             result = self.runtime_run([
-                str(NODE_BIN), str(REPO / "scripts/rehearse-core-schedule-migration.mjs"),
-                "--manifest", str(MIGRATION_MANIFEST), "--legacy-db", str(self.args.legacy_db),
+                str(NODE_BIN), str(self.candidate_code_root / "scripts/rehearse-core-schedule-migration.mjs"),
+                "--manifest", str(self.candidate_code_root / MIGRATION_MANIFEST_PATH),
+                "--legacy-db", str(self.args.legacy_db),
                 "--state-dir", str(self.args.state_dir), "--core-db", str(actual_core),
                 "--watermark", self.args.committed_at, "--output", str(scratch_output),
             ])
@@ -327,8 +395,8 @@ class ProductionOperations:
 
     def wake(self, mode: str, *, expect_active: bool = False) -> dict[str, Any]:
         command = [
-            sys.executable, str(REPO / "scripts/reconcile-core-managed-wake.py"),
-            "--mode", mode, "--manifest", str(MANAGED_WAKE_MANIFEST),
+            sys.executable, str(self.candidate_code_root / "scripts/reconcile-core-managed-wake.py"),
+            "--mode", mode, "--manifest", str(self.candidate_code_root / MANAGED_WAKE_MANIFEST_PATH),
             "--hermes-home", str(HERMES_HOME), "--hermes-bin", str(HERMES_BIN),
             "--core-db", str(self.args.core_db),
         ]
@@ -351,9 +419,10 @@ class ProductionOperations:
             verify_core = scratch / "core.sqlite3"
             rehearsal = self.rehearse(verify_core, verify_snapshot)
             cutover = self.run([
-                str(NODE_BIN), str(REPO / "scripts/core-cutover.mjs"), "--mode", "verify",
+                str(NODE_BIN), str(self.candidate_code_root / "scripts/core-cutover.mjs"), "--mode", "verify",
                 "--core-db", str(verify_core), "--snapshot", str(verify_snapshot),
-                "--system-manifest", str(SCHEDULE_MANIFEST), "--visible-binding", str(self.args.visible_binding),
+                "--system-manifest", str(self.candidate_code_root / SCHEDULE_MANIFEST_PATH),
+                "--visible-binding", str(self.args.visible_binding),
                 "--candidate-sha", self.args.candidate, "--committed-at", self.args.committed_at,
             ])
         return {
@@ -394,9 +463,10 @@ class ProductionOperations:
         binding_fd = os.open(self.args.visible_binding, os.O_RDONLY | os.O_NOFOLLOW)
         try:
             verified = self.runtime_run([
-                str(NODE_BIN), str(REPO / "scripts/core-cutover.mjs"), "--mode", "verify",
+                str(NODE_BIN), str(self.candidate_code_root / "scripts/core-cutover.mjs"), "--mode", "verify",
                 "--core-db", str(self.args.core_db), "--snapshot", f"/proc/self/fd/{snapshot_fd}",
-                "--system-manifest", str(SCHEDULE_MANIFEST), "--visible-binding", f"/proc/self/fd/{binding_fd}",
+                "--system-manifest", str(self.candidate_code_root / SCHEDULE_MANIFEST_PATH),
+                "--visible-binding", f"/proc/self/fd/{binding_fd}",
                 "--candidate-sha", self.args.candidate, "--committed-at", self.args.committed_at,
             ], pass_fds=(snapshot_fd, binding_fd))
         finally:
@@ -456,9 +526,10 @@ class ProductionOperations:
         binding_fd = os.open(self.args.visible_binding, os.O_RDONLY | os.O_NOFOLLOW)
         try:
             return self.runtime_run([
-                str(NODE_BIN), str(REPO / "scripts/core-cutover.mjs"), "--mode", "apply",
+                str(NODE_BIN), str(self.candidate_code_root / "scripts/core-cutover.mjs"), "--mode", "apply",
                 "--core-db", str(self.args.core_db), "--snapshot", f"/proc/self/fd/{snapshot_fd}",
-                "--system-manifest", str(SCHEDULE_MANIFEST), "--visible-binding", f"/proc/self/fd/{binding_fd}",
+                "--system-manifest", str(self.candidate_code_root / SCHEDULE_MANIFEST_PATH),
+                "--visible-binding", f"/proc/self/fd/{binding_fd}",
                 "--candidate-sha", self.args.candidate, "--committed-at", self.args.committed_at,
                 "--owner-id", self.args.owner_id, "--authorization-ref", self.args.authorization_ref,
                 "--s12-transaction-fd", str(journal_fd),
@@ -512,7 +583,7 @@ class ProductionOperations:
 
     @staticmethod
     def node_writer_pids() -> list[int]:
-        expected = str(REPO / "node_bridge/src/index.mjs").encode()
+        expected = str(PRODUCTION_STATE_ROOT / "node_bridge/src/index.mjs").encode()
         found = []
         for process in Path("/proc").iterdir():
             if not process.name.isdigit():
@@ -546,7 +617,7 @@ class ProductionOperations:
     def acceptance(self, mode: str) -> dict[str, Any]:
         binding = json.loads(self.args.visible_binding.read_text(encoding="utf-8"))
         command = [
-            str(NODE_BIN), str(REPO / "scripts/core-s12-acceptance.mjs"), "--mode", mode,
+            str(NODE_BIN), str(self.candidate_code_root / "scripts/core-s12-acceptance.mjs"), "--mode", mode,
             "--core-db", str(self.args.core_db), "--transaction-id", self.args.transaction_id,
             "--candidate-sha", self.args.candidate, "--owner-id", self.args.owner_id,
             "--authorization-ref", self.args.authorization_ref,
@@ -571,7 +642,7 @@ class ProductionOperations:
                 "/usr/sbin/runuser", "-u", "ubuntu", "--", "/usr/bin/env", "-i",
                 "HOME=/home/ubuntu", "PATH=/opt/nodejs/node-v22.22.2-linux-x64/bin:/usr/bin:/bin",
                 f"RAN_AGENT_STATE_DIR={self.args.state_dir}", "RAN_AGENT_CORE_WAKE_ENABLED=true",
-                str(NODE_BIN), str(REPO / "scripts/core-wake.mjs"),
+                str(NODE_BIN), str(self.candidate_code_root / "scripts/core-wake.mjs"),
             ])
             result = {**result, "initialWake": wake}
         return result
@@ -796,6 +867,7 @@ def main() -> int:
     root = ARTIFACT_ROOT.stat()
     if root.st_uid != 0 or root.st_gid != 0 or stat.S_IMODE(root.st_mode) != 0o700:
         raise S12Error("release artifact authority root identity/mode is invalid")
+    validate_candidate_execution_inputs(args)
     owner = args.owner_id or "verify-only"
     authorization = args.authorization_ref or "verify-only"
     visible_binding_digest = protected_file_digest(args.visible_binding)
@@ -811,8 +883,9 @@ def main() -> int:
     }
     args.transaction_id = identity["transactionId"]
     if args.mode == "verify":
-        with tempfile.TemporaryDirectory(prefix="s12-verify-") as temporary:
-            result = ProductionOperations(args, Path(temporary)).verify()
+        with candidate_execution_closure(args.candidate) as candidate_code_root:
+            with tempfile.TemporaryDirectory(prefix="s12-verify-") as temporary:
+                result = ProductionOperations(args, Path(temporary), candidate_code_root).verify()
         print(json.dumps(result, sort_keys=True))
         return 0
     TRANSACTION_ROOT.mkdir(mode=0o700, exist_ok=True)
@@ -821,9 +894,12 @@ def main() -> int:
             or transaction_root.st_uid != 0):
         raise S12Error("S12 transaction authority root identity/mode is invalid")
     with transaction_lock(LOCK_PATH):
-        journal = Journal(TRANSACTION_ROOT, identity)
-        journal.open()
-        result = run_apply(ProductionOperations(args, journal.directory), journal)
+        with candidate_execution_closure(args.candidate) as candidate_code_root:
+            journal = Journal(TRANSACTION_ROOT, identity)
+            journal.open()
+            result = run_apply(ProductionOperations(
+                args, journal.directory, candidate_code_root,
+            ), journal)
     print(json.dumps({"status": result["status"], "transaction": str(journal.path),
                       "phase": result["phase"]}, sort_keys=True))
     return 0

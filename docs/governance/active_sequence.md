@@ -97,8 +97,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> S12 orchestration / rollback-interlock candidate e6ce78aa (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
   -> S12 authority-order remediation 91172d4c (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
   -> final S12 read-only primitive remediation 959b8f0d (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
-  -> systemic byte-authority / SQLite-test remediation (LOCAL_VERIFIED, NOT_REVIEWED, archived by containing commit)
-  -> independent exact-SHA systemic remediation review (REQUIRED)
+  -> systemic byte-authority / SQLite-test remediation e120f1c2 (LOCAL_VERIFIED, REVIEWED, ARCHIVED; production critical proof STOPPED)
+  -> candidate execution-closure remediation (LOCAL_VERIFIED, NOT_REVIEWED, archived by containing commit)
+  -> independent exact-SHA candidate-closure review (REQUIRED)
   -> explicit owner production authorization
   -> canonical S12 transaction VERIFY, then separately authorized APPLY
 ```
@@ -297,16 +298,24 @@ S12-R0 fresh read-only production audit (COMPLETE)
   synchronized bootstrap digest manifest, so canonical VERIFY stopped
   fail-closed. The same review's live-WAL SHM-byte observation is
   `NON_BLOCKING`: SQLite read marks are derived coordination state, not durable
-  product authority. The bounded successor removes the redundant manifest from
-  execution authority, retains the exact Git candidate as the sole byte
-  authority plus the explicit extraction allowlist, and tests live accepted
-  inspection against unchanged DB/WAL business authority while allowing
-  SQLite-managed SHM coordination. It is `LOCAL_VERIFIED / NOT_REVIEWED` and
-  archived by the containing commit.
+  product authority. Candidate
+  `e120f1c246135d566e58847684e14521ea15809d` removes the redundant manifest and
+  is `LOCAL_VERIFIED / REVIEWED / ARCHIVED`; its production critical proof
+  stopped before P0 because candidate-only subordinates were still loaded from
+  the older live checkout. The bounded successor materializes the exact Git
+  candidate once under private read-only `/tmp`, uses that closure for all S12
+  code/manifests while keeping `/opt/ran_agent` state-only, and removes it
+  afterward. It is `LOCAL_VERIFIED / NOT_REVIEWED` and archived by the
+  containing commit.
 - S12 remains `NOT STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` pending the
   successor's independent exact-SHA review and a later explicit production
-  authorization. Production source remains `98fd8b3`, and R2 caused
-  no production mutation. A separately authorized XHS maintenance transaction
+  authorization. The current blocker is
+  `S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP`; production proof made
+  only the allowed candidate fetch/source-candidate-ref validation metadata and
+  otherwise left production at `98fd8b3`. The protected visible-binding record
+  remains a downstream owner input / `MISSING_PROOF`, not this implementation
+  defect. R2 caused no production mutation. A separately authorized XHS
+  maintenance transaction
   retired the account-backed route and activated the existing public-only
   sidecar; it is not R2 evidence or a Core/source change.
 

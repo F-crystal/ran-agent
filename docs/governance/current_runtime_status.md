@@ -550,12 +550,20 @@ manifest still named older controller bytes, so canonical VERIFY correctly
 failed closed. The review also observed SQLite-managed live-WAL SHM read-mark
 changes; first-principles analysis classifies those derived coordination bytes
 as `NON_BLOCKING`, because DB/WAL business state, schema, receipt, permissions,
-writer/wake/service authority and effects remain unchanged. The bounded
-successor removes the duplicate manifest byte authority, keeps the exact Git
-candidate plus explicit extraction paths as the single authority model, and
-corrects the live-WAL regression without changing Core production code. It is
-`LOCAL_VERIFIED / NOT_REVIEWED` and archived by the containing commit.
-Production is unchanged; neither S12 VERIFY nor APPLY ran.
+writer/wake/service authority and effects remain unchanged. Candidate
+`e120f1c246135d566e58847684e14521ea15809d` removes the duplicate manifest
+authority and is `LOCAL_VERIFIED / REVIEWED / ARCHIVED`. Its production
+critical proof stopped before P0 with
+`S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP`: candidate-only S12
+code/manifests still resolved from the older production checkout. The bounded
+successor establishes one scratch-only read-only execution closure from the
+exact Git candidate and uses it across P0-P10; `/opt/ran_agent` remains state,
+never fallback S12 control code. It is `LOCAL_VERIFIED / NOT_REVIEWED` and
+archived by the containing commit. The protected visible-binding record remains
+a downstream owner input / `MISSING_PROOF`.
+Production is unchanged; canonical S12 VERIFY stopped before P0 and APPLY did
+not run. Only candidate fetch/source-candidate-ref validation metadata changed.
+S12 is `NOT_STARTED`.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an
