@@ -187,11 +187,15 @@ base is `CLEAR`. S12 remains `NOT_STARTED`. Its sole current blocker is
 candidate `e6ce78aa` is `LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED / ARCHIVED`:
 VERIFY created a source candidate ref, an ACCEPTED journal bypassed SQLite, and
 the P0-P4 rollback proof mocked the composed rollback. The bounded successor is
-`LOCAL_VERIFIED / NOT_REVIEWED` and archived by its containing commit. Its
+archived at `91172d4c` and is `LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED`. Its
 canonical source-verify path is persistently read-only, SQLite is read before
 terminal journal interpretation, accepted replay is read-only, and one
-stateful composed matrix proves exact P0-P4 authority restoration. Production
-is unchanged and no S12 mode has run.
+stateful composed matrix proves exact P0-P4 authority restoration; review found
+only residual Git index refresh and writable Core inspection. The final bounded
+successor disables optional Git locks, preserves dirty detection, and uses the
+existing Core DB owner's non-creating, non-migrating read-only open for inspect.
+It is `LOCAL_VERIFIED / NOT_REVIEWED` and archived by its containing commit.
+Production is unchanged and no S12 mode has run.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

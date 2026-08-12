@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { pathToFileURL } from 'node:url';
 
 import { CoreError, coreError } from './coreErrors.mjs';
 import { CORE_MIGRATIONS, runCoreMigrations } from './coreMigrations.mjs';
@@ -52,23 +53,49 @@ export class CoreDatabase {
   #transactionIdentity = null;
   #schemaReady = false;
   #writesStarted = false;
+  #readOnly;
   #now;
 
-  constructor({ dbPath, now = () => new Date(Math.floor(Date.now() / 1_000) * 1_000) } = {}) {
+  constructor({ dbPath, readOnly = false, now = () => new Date(Math.floor(Date.now() / 1_000) * 1_000) } = {}) {
     if (!String(dbPath || '').trim()) throw coreError('CORE_DB_PATH_REQUIRED', 'explicit Core database path is required');
+    if (typeof readOnly !== 'boolean') throw coreError('CORE_DB_READ_ONLY_INVALID', 'Core read-only mode must be boolean');
     if (typeof now !== 'function') throw coreError('CORE_DB_CLOCK_REQUIRED', 'Core clock must be a function');
     this.dbPath = path.resolve(dbPath);
+    this.#readOnly = readOnly;
     this.#now = now;
   }
 
   open() {
     if (this.#db) return this;
     const directory = path.dirname(this.dbPath);
-    fs.mkdirSync(directory, { recursive: true, mode: CORE_DIRECTORY_MODE });
-    fs.chmodSync(directory, CORE_DIRECTORY_MODE);
     let db;
     try {
-      db = new DatabaseSync(this.dbPath);
+      if (this.#readOnly) {
+        if (!fs.lstatSync(directory).isDirectory() || !fs.lstatSync(this.dbPath).isFile()) {
+          throw coreError('CORE_DB_READ_ONLY_TARGET_INVALID', 'read-only Core database must already exist');
+        }
+      } else {
+        fs.mkdirSync(directory, { recursive: true, mode: CORE_DIRECTORY_MODE });
+        fs.chmodSync(directory, CORE_DIRECTORY_MODE);
+      }
+      const walExists = fs.existsSync(`${this.dbPath}-wal`);
+      const shmExists = fs.existsSync(`${this.dbPath}-shm`);
+      if (this.#readOnly && walExists !== shmExists) {
+        throw coreError('CORE_DB_READ_ONLY_SIDECAR_INVALID', 'read-only Core database WAL sidecars are incomplete');
+      }
+      const openPath = this.#readOnly && !walExists
+        ? `${pathToFileURL(this.dbPath).href}?mode=ro&immutable=1`
+        : this.dbPath;
+      db = new DatabaseSync(openPath, { readOnly: this.#readOnly });
+      if (this.#readOnly) {
+        this.#db = db;
+        const existingVersion = Number(scalar(db, 'PRAGMA user_version'));
+        if (existingVersion <= 0) throw coreError('CORE_SCHEMA_NOT_READY', 'Core schema is not validated');
+        validateCoreSchema(db, existingVersion);
+        this.#schemaReady = true;
+        this.#reader = this.#createReader();
+        return this;
+      }
       fs.chmodSync(this.dbPath, CORE_DATABASE_MODE);
       db.exec('PRAGMA journal_mode=WAL');
       db.exec('PRAGMA foreign_keys=ON');
@@ -119,6 +146,7 @@ export class CoreDatabase {
   }
 
   migrate() {
+    if (this.#readOnly) throw coreError('CORE_DB_READ_ONLY', 'read-only Core database cannot migrate');
     if (this.#writesStarted || this.#transactionIdentity !== null) {
       throw coreError('CORE_MIGRATION_AFTER_WRITE_FORBIDDEN', 'Core migrations must finish before business writes begin');
     }
@@ -130,7 +158,7 @@ export class CoreDatabase {
 
   async close() {
     if (!this.#db) return;
-    await this.#writerController.close();
+    await this.#writerController?.close();
     const db = this.#db;
     this.#db = null;
     this.#writerController = null;

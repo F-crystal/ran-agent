@@ -526,10 +526,12 @@ def test_source_verify_is_read_only_without_a_candidate_ref_or_lock(
         with MODULE.release_lock(create=False):
             pass
     assert not MODULE.LOCK_PATH.exists()
+    monkeypatch.delenv("GIT_OPTIONAL_LOCKS", raising=False)
 
     @contextlib.contextmanager
     def existing_lock(*, create: bool = True):
         assert create is False
+        assert os.environ["GIT_OPTIONAL_LOCKS"] == "0"
         yield
 
     monkeypatch.setattr(MODULE, "release_lock", existing_lock)

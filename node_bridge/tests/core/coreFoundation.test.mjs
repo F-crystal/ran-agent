@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -32,6 +33,38 @@ test('database lifecycle verifies owner-only permissions and required pragmas', 
   }
   await core.close();
   assert.throws(() => core.reader, { code: 'CORE_DB_CLOSED' });
+});
+
+test('read-only database open preserves the existing inode and exposes no writer authority', async (t) => {
+  const { root, dbPath } = createTempCore(t, 'hermes-core-read-only-');
+  const missing = path.join(root, 'missing', 'core.sqlite3');
+  assert.throws(() => openCoreDatabase({ dbPath: missing, readOnly: true }), { code: 'CORE_DB_OPEN_FAILED' });
+  assert.equal(fs.existsSync(path.dirname(missing)), false);
+
+  let core = openCoreDatabase({ dbPath });
+  core.migrate();
+  await core.writer.write((tx) => tx.journal.append({
+    eventId: 'read-only-proof', eventType: 'test', originRef: 'fixture',
+    sourceKind: 'test', sourceRef: 'fixture', createdAt: '2026-08-12T00:00:00.000Z',
+  }));
+  await core.close();
+  fs.chmodSync(path.dirname(dbPath), 0o750);
+  fs.chmodSync(dbPath, 0o640);
+  const snapshot = (candidate) => {
+    if (!fs.existsSync(candidate)) return null;
+    const value = fs.statSync(candidate);
+    return { sha256: createHash('sha256').update(fs.readFileSync(candidate)).digest('hex'),
+      dev: value.dev, ino: value.ino, size: value.size, mode: value.mode,
+      uid: value.uid, gid: value.gid, mtimeMs: value.mtimeMs };
+  };
+  const files = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+  const before = files.map(snapshot);
+  core = openCoreDatabase({ dbPath, readOnly: true });
+  assert.equal(core.reader.journalEventCount(), 1);
+  assert.equal(core.writer, null);
+  assert.throws(() => core.migrate(), { code: 'CORE_DB_READ_ONLY' });
+  await core.close();
+  assert.deepEqual(files.map(snapshot), before);
 });
 
 test('production public API exposes no raw database or arbitrary SQL write surface', async (t) => {

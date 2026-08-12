@@ -30,15 +30,14 @@ case "$MODE" in
   *) fail usage ;;
 esac
 [[ "$CANDIDATE_INPUT" =~ ^[0-9a-f]{40}$ ]] || fail candidate_digest_invalid
+[[ "$MODE" != --verify ]] || export GIT_OPTIONAL_LOCKS=0
 
 REPO_ROOT="${RAN_AGENT_RELEASE_CONTROL_ROOT:-/opt/ran_agent}"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)" || fail server_root_unavailable
 ARTIFACT_ROOT="${RAN_AGENT_RELEASE_ARTIFACT_ROOT:-/opt/ran_agent-release}"
 [[ "$ARTIFACT_ROOT" == /* && "$ARTIFACT_ROOT" != "$REPO_ROOT" && "$ARTIFACT_ROOT" != "$REPO_ROOT"/* ]] || fail bootstrap_artifact_root_invalid
 cd "$REPO_ROOT"
-git diff --quiet || fail worktree_dirty
-git diff --cached --quiet || fail index_dirty
-[[ -z "$(git ls-files --others --exclude-standard)" ]] || fail worktree_untracked
+[[ -z "$(git status --porcelain)" ]] || fail worktree_dirty
 CANDIDATE="$(git rev-parse --verify "${CANDIDATE_INPUT}^{commit}" 2>/dev/null)" || fail candidate_object_missing
 [[ "$CANDIDATE" == "$CANDIDATE_INPUT" ]] || fail candidate_digest_mismatch
 

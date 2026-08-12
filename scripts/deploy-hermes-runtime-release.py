@@ -2136,6 +2136,7 @@ def source_apply(candidate: str) -> Path:
 
 def source_main(args: argparse.Namespace) -> int:
     if args.mode == "source-verify":
+        os.environ["GIT_OPTIONAL_LOCKS"] = "0"
         with release_lock(create=False):
             validate_source_candidate(args.candidate, require_persistent_ref=False)
             require_source_baseline()

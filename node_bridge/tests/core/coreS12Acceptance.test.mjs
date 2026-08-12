@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -58,7 +59,7 @@ test('acceptance subordinate refuses a forged phase without the durable phase ch
 });
 
 async function setup(t) {
-  const { dbPath } = createTempCore(t, 'hermes-core-s12-acceptance-');
+  const { root, dbPath } = createTempCore(t, 'hermes-core-s12-acceptance-');
   let current = new Date(AT);
   const core = openCoreDatabase({ dbPath, now: () => current });
   core.migrate();
@@ -86,7 +87,7 @@ async function setup(t) {
       });
     },
   });
-  return { core, dbPath, setNow(value) { current = new Date(value); } };
+  return { core, dbPath, root, setNow(value) { current = new Date(value); } };
 }
 
 function input(overrides = {}) {
@@ -98,7 +99,7 @@ function input(overrides = {}) {
 }
 
 test('S12 acceptance registers one Core schedule and reaches one durable Feishu receipt', async (t) => {
-  const { core, setNow } = await setup(t);
+  const { core, dbPath, root, setNow } = await setup(t);
   const registered = await registerS12Acceptance({ core, input: input() });
   assert.equal(registered.disposition, 'registered');
   assert.equal((await registerS12Acceptance({ core, input: input() })).disposition, 'already_registered');
@@ -127,7 +128,49 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
   await worker.runOnce();
   assert.equal(effects, 1);
   assert.equal(inspectS12Acceptance({ core, ...input() }).receiptId, terminal.receiptId);
+  const durableBefore = {
+    events: core.reader.journalEventCount(),
+    outbox: core.reader.presentationOutboxById(terminal.outboxId),
+    receipt: core.reader.presentationResultForOutbox(terminal.outboxId),
+  };
   await core.close();
+
+  const phases = ['P0_VERIFIED', 'P1_SOURCE_APPLIED', 'P2_CORE_PREPARED', 'P3_LEGACY_RECONCILED',
+    'P4_QUIESCED', 'P5_CORE_AUTHORITY_COMMITTED', 'P6_CORE_WORKER_ACTIVE', 'P7_CORE_WAKE_ACTIVE',
+    'P8_ACCEPTANCE_EFFECT_COMMITTED', 'P9_ACCEPTANCE_RECEIPT_TERMINAL', 'P10_ACCEPTED'];
+  const transactionDir = path.join(root, 's12-transactions', TRANSACTION);
+  fs.mkdirSync(transactionDir, { recursive: true, mode: 0o700 });
+  const journal = path.join(transactionDir, 'transaction.json');
+  fs.writeFileSync(journal, JSON.stringify({
+    schemaVersion: 1, status: 'ACCEPTED', phase: phases.at(-1), completedPhases: phases,
+    cutoverCommitted: true, transactionId: TRANSACTION, candidateSha: CANDIDATE,
+    ownerId: OWNER, authorizationRef: AUTH, coreDb: dbPath,
+  }), { mode: 0o600 });
+  const snapshot = (candidate) => {
+    if (!fs.existsSync(candidate)) return null;
+    const value = fs.statSync(candidate);
+    return { sha256: createHash('sha256').update(fs.readFileSync(candidate)).digest('hex'),
+      dev: value.dev, ino: value.ino, size: value.size, mode: value.mode,
+      uid: value.uid, gid: value.gid, mtimeMs: value.mtimeMs };
+  };
+  const files = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
+  const before = files.map(snapshot);
+  const script = path.resolve(new URL('../../../scripts/core-s12-acceptance.mjs', import.meta.url).pathname);
+  const inspected = spawnSync(process.execPath, [script,
+    '--mode', 'inspect', '--core-db', dbPath, '--transaction-id', TRANSACTION,
+    '--candidate-sha', CANDIDATE, '--owner-id', OWNER, '--authorization-ref', AUTH,
+    '--s12-transaction', journal,
+  ], { encoding: 'utf8', env: { ...process.env, RAN_AGENT_RELEASE_ARTIFACT_ROOT: fs.realpathSync(root) } });
+  assert.equal(inspected.status, 0, inspected.stderr);
+  const observed = JSON.parse(inspected.stdout);
+  assert.equal(observed.status, 'TERMINAL_RECEIPT');
+  assert.equal(observed.outboxId, terminal.outboxId);
+  assert.equal(observed.receiptId, terminal.receiptId);
+  assert.deepEqual(files.map(snapshot), before);
+  assert.equal(durableBefore.events > 0, true);
+  assert.equal(durableBefore.outbox.state, 'sent');
+  assert.equal(durableBefore.receipt.journal_event_id, terminal.receiptId);
+  assert.equal(effects, 1);
 });
 
 test('S12 acceptance rejects different cutover authority and preserves the first replay time', async (t) => {

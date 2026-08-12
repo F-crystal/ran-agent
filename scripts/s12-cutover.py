@@ -274,7 +274,8 @@ class ProductionOperations:
 
     def git(self, *args: str, check: bool = True) -> str:
         result = subprocess.run(["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), *args],
-                                check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                check=check, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
         return result.stdout.strip()
 
     def assert_candidate_binding(self) -> None:
@@ -294,7 +295,8 @@ class ProductionOperations:
                 raise S12Error(f"running {path} is not a regular candidate file")
             local = raw_local.resolve()
             expected = subprocess.run(["git", "-C", str(REPO), "show", f"{candidate}:{path}"],
-                                      check=True, stdout=subprocess.PIPE).stdout
+                                      check=True, stdout=subprocess.PIPE,
+                                      env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}).stdout
             if local.read_bytes() != expected:
                 raise S12Error(f"running {path} is not candidate-extracted")
 

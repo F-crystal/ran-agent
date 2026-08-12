@@ -95,8 +95,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> sealed-runtime scratch-home repair 9653d030 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
   -> S12-R3B immutable server gate/dry-run proof on 9653d030 (CLEAR)
   -> S12 orchestration / rollback-interlock candidate e6ce78aa (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
-  -> S12 authority-order remediation (LOCAL_VERIFIED, NOT_REVIEWED, archived by containing commit)
-  -> independent exact-SHA remediated S12 review (REQUIRED)
+  -> S12 authority-order remediation 91172d4c (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
+  -> final S12 read-only primitive remediation (LOCAL_VERIFIED, NOT_REVIEWED, archived by containing commit)
+  -> independent exact-SHA final S12 remediation review (REQUIRED)
   -> explicit owner production authorization
   -> canonical S12 transaction VERIFY, then separately authorized APPLY
 ```
@@ -281,12 +282,18 @@ S12-R0 fresh read-only production audit (COMPLETE)
   FIX_REQUIRED / ARCHIVED`: independent review found
   `S12-VERIFY-SOURCE-REF-MUTATION`,
   `S12-ACCEPTED-JOURNAL-OVERRIDES-SQLITE` and
-  `PRE-MARKER-COMPOSED-ROLLBACK-PROOF-MISSING`. The bounded successor routes
+  `PRE-MARKER-COMPOSED-ROLLBACK-PROOF-MISSING`. Successor
+  `91172d4c1925aa82a6d153671165b1c20473c4e7` routes
   VERIFY through candidate-extracted `source-verify` without creating refs or
   release metadata, reads and validates the SQLite marker before every terminal
   journal branch, and proves complete P0-P4 restoration through the real
-  orchestration rollback method. It is `LOCAL_VERIFIED / NOT_REVIEWED` and is
-  archived by the commit containing this ledger.
+  orchestration rollback method. Independent review accepted those repairs but
+  returned `FIX_REQUIRED`: VERIFY could still refresh `.git/index`, and accepted
+  replay opened Core through writable initialization. The bounded final repair
+  keeps Git observation under native no-optional-lock semantics and routes
+  acceptance inspection through the existing Core owner's true read-only open;
+  focused index/dirty-state, Core inode/sidecar and replay tests pass. It is
+  `LOCAL_VERIFIED / NOT_REVIEWED` and archived by the containing commit.
 - S12 remains `NOT STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` pending the
   successor's independent exact-SHA review and a later explicit production
   authorization. Production source remains `98fd8b3`, and R2 caused

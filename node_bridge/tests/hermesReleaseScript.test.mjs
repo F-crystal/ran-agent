@@ -4002,30 +4002,78 @@ test('unified source verify uses candidate-extracted authority without creating 
   const directory = mkdtempSync(join(tmpdir(), 'ran-agent-source-verify-'));
   const extracted = join(directory, 'bootstrap.sh');
   const sudoLog = join(directory, 'sudo.log');
+  const sudoEnvLog = join(directory, 'sudo-env.log');
   const sudo = join(directory, 'sudo');
   try {
     writeFileSync(extracted, fixture.runGit(['show', `${fixture.candidateSha}:scripts/bootstrap-hermes-release.sh`]));
     chmodSync(extracted, 0o700);
-    writeFileSync(sudo, '#!/bin/sh\nprintf "%s\\n" "$@" > "$SUDO_LOG"\nprintf \'{"status":"SOURCE_VERIFY_OK"}\\n\'\n');
+    writeFileSync(sudo, '#!/bin/sh\nprintf "%s\\n" "$@" > "$SUDO_LOG"\nprintf "%s\\n" "${GIT_OPTIONAL_LOCKS:-}" > "$SUDO_ENV_LOG"\nprintf \'{"status":"SOURCE_VERIFY_OK"}\\n\'\n');
     chmodSync(sudo, 0o700);
-    const before = fixture.runGit(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/ran-agent/source-candidates']);
+    const index = join(fixture.repo, '.git', 'index');
+    const indexSnapshot = () => {
+      const value = statSync(index);
+      return { sha256: sha256(readFileSync(index)), dev: value.dev, ino: value.ino,
+        size: value.size, mode: value.mode, mtimeMs: value.mtimeMs };
+    };
+    const readme = join(fixture.repo, 'README.md');
+    const readmeContents = readFileSync(readme);
+    const readmeStat = statSync(readme);
+    utimesSync(readme, readmeStat.atime, new Date(readmeStat.mtimeMs + 5000));
+    const indexBefore = indexSnapshot();
+    const refsBefore = fixture.runGit(['for-each-ref', '--format=%(refname) %(objectname)']);
     const output = execFileSync('bash', [extracted, '--verify', fixture.candidateSha], {
       cwd: fixture.repo,
       env: {
-        PATH: `${directory}:/usr/bin:/bin`, TMPDIR: directory, SUDO_LOG: sudoLog,
+        PATH: `${directory}:/usr/bin:/bin`, TMPDIR: directory,
+        SUDO_LOG: sudoLog, SUDO_ENV_LOG: sudoEnvLog,
         RAN_AGENT_RELEASE_UNIFIED_SOURCE: '1',
         RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
         RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(directory, 'release'),
       },
       encoding: 'utf8', stdio: 'pipe',
     });
-    const after = fixture.runGit(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/ran-agent/source-candidates']);
-    assert.equal(after, before);
+    const indexAfter = indexSnapshot();
+    const refsAfter = fixture.runGit(['for-each-ref', '--format=%(refname) %(objectname)']);
+    assert.deepEqual(indexAfter, indexBefore);
+    assert.equal(existsSync(`${index}.lock`), false);
+    assert.equal(refsAfter, refsBefore);
+    assert.deepEqual(readFileSync(readme), readmeContents);
     assert.match(readFileSync(sudoLog, 'utf8'), /--mode\nsource-verify\n$/);
+    assert.equal(readFileSync(sudoEnvLog, 'utf8'), '0\n');
     assert.match(output, /bootstrap-ok/);
     assert.equal(readdirSync(directory).some((name) => name.startsWith('ran-agent-release-bootstrap.')), false);
     assert.equal(fixture.runGit(['status', '--short']).trim(), '');
     assert.equal(fixture.runGit(['rev-parse', 'HEAD']).trim(), fixture.prior);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
+test('unified source verify still rejects dirty tracked content without refreshing the index', () => {
+  const fixture = makeBootstrapFixture();
+  const directory = mkdtempSync(join(tmpdir(), 'ran-agent-source-verify-dirty-'));
+  const extracted = join(directory, 'bootstrap.sh');
+  try {
+    writeFileSync(extracted, fixture.runGit(['show', `${fixture.candidateSha}:scripts/bootstrap-hermes-release.sh`]));
+    chmodSync(extracted, 0o700);
+    writeFileSync(join(fixture.repo, 'README.md'), 'dirty tracked content\n');
+    const index = join(fixture.repo, '.git', 'index');
+    const beforeStat = statSync(index);
+    const before = { sha256: sha256(readFileSync(index)), dev: beforeStat.dev, ino: beforeStat.ino,
+      size: beforeStat.size, mode: beforeStat.mode, mtimeMs: beforeStat.mtimeMs };
+    const result = spawnSync('bash', [extracted, '--verify', fixture.candidateSha], {
+      cwd: fixture.repo,
+      env: { PATH: '/usr/bin:/bin', TMPDIR: directory,
+        RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo },
+      encoding: 'utf8', stdio: 'pipe',
+    });
+    const afterStat = statSync(index);
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /failed:worktree_dirty/);
+    assert.equal(sha256(readFileSync(index)), before.sha256);
+    for (const field of ['dev', 'ino', 'size', 'mode', 'mtimeMs']) assert.equal(afterStat[field], before[field]);
+    assert.equal(existsSync(`${index}.lock`), false);
   } finally {
     rmSync(directory, { recursive: true, force: true });
     rmSync(fixture.repo, { recursive: true, force: true });

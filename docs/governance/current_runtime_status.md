@@ -534,13 +534,20 @@ S12 itself is `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK`. Candidate
 FIX_REQUIRED / ARCHIVED`. Independent review accepted its overall composition
 but found `S12-VERIFY-SOURCE-REF-MUTATION`,
 `S12-ACCEPTED-JOURNAL-OVERRIDES-SQLITE` and
-`PRE-MARKER-COMPOSED-ROLLBACK-PROOF-MISSING`. The bounded successor makes
+`PRE-MARKER-COMPOSED-ROLLBACK-PROOF-MISSING`. Successor
+`91172d4c1925aa82a6d153671165b1c20473c4e7` makes
 source VERIFY candidate-extracted and persistently read-only, gives the
 SQLite `core-cutover:v1` marker precedence over every accepted/rollback journal
 branch, validates accepted replay without restart or effect, and proves exact
 P0-P4 authority-vector restoration including source-apply-before-P1 recovery.
-It is `LOCAL_VERIFIED / NOT_REVIEWED` and is archived by the commit containing
-this record. Production is unchanged; neither S12 VERIFY nor APPLY has run.
+Independent review accepted those semantics but returned `FIX_REQUIRED` for two
+remaining read-only primitives: Git could refresh `.git/index` during VERIFY,
+and acceptance inspection used writable Core initialization. The final bounded
+repair uses no-optional-lock Git observation without weakening dirty detection
+and the existing Core DB owner's read-only open without mkdir, chmod, migration,
+writer or sidecar creation. Focused Node 4/4 plus Core 12/12 and Python 7/7
+evidence passes. It is `LOCAL_VERIFIED / NOT_REVIEWED` and is archived by the
+containing commit. Production is unchanged; neither S12 VERIFY nor APPLY ran.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

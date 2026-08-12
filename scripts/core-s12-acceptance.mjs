@@ -70,6 +70,7 @@ if (transaction.schemaVersion !== 1 || phaseIndex < 0
   throw new Error('S12 transaction journal does not authorize acceptance');
 }
 const core = openCoreDatabase({ dbPath: path.resolve(args['core-db']),
+  readOnly: args.mode === 'inspect',
   now: args['scheduled-at'] ? () => new Date(args['scheduled-at']) : undefined });
 try {
   const authority = {

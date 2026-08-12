@@ -363,9 +363,10 @@ def test_exact_terminal_replay_is_a_noop(tmp_path: Path) -> None:
     first = MODULE.run_apply(operations, state)
     journal_bytes = state.path.read_bytes()
     external_calls = operations.calls.count("acceptance_register")
+    replay_start = len(operations.calls)
     second = MODULE.run_apply(operations, state)
     assert first == second
-    assert operations.calls[-1] == "inspect_accepted"
+    assert operations.calls[replay_start:] == ["inspect_accepted"]
     assert operations.calls.count("acceptance_register") == external_calls
     assert state.path.read_bytes() == journal_bytes
 
@@ -553,6 +554,19 @@ def test_verify_plan_is_read_only_state_machine_surface() -> None:
         "P7_CORE_WAKE_ACTIVE", "P8_ACCEPTANCE_EFFECT_COMMITTED",
         "P9_ACCEPTANCE_RECEIPT_TERMINAL", "P10_ACCEPTED",
     )
+
+
+def test_s12_git_observation_disables_optional_locks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed = []
+    monkeypatch.setattr(MODULE.subprocess, "run", lambda command, **kwargs: (
+        observed.append((command, kwargs["env"]))
+        or SimpleNamespace(stdout="", stderr="", returncode=0)
+    ))
+    operations = MODULE.ProductionOperations(SimpleNamespace(), tmp_path)
+    assert operations.git("status", "--porcelain") == ""
+    assert observed[0][1]["GIT_OPTIONAL_LOCKS"] == "0"
 
 
 def test_s12_verify_preserves_the_complete_persistent_state_vector(
