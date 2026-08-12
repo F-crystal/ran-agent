@@ -7,6 +7,7 @@ import {
   evaluateExternalMcpSystemQueueEgress,
 } from '../externalMcp/systemQueue.mjs';
 import { parseExternalMcpTaskRef } from './coreExternalNotificationService.mjs';
+import { coreError } from './coreErrors.mjs';
 import { createPythonCoreMaintenanceHandler } from './coreMaintenanceHandler.mjs';
 import { createCoreReminderSyncHandler } from './coreReminderSyncHandler.mjs';
 import { createCoreWorkRunRuntime } from './coreWorkRunRuntime.mjs';
@@ -33,6 +34,16 @@ function promptFor(payloadRef) {
 function todoId(payloadRef) {
   const match = String(payloadRef || '').match(/^legacy-todo:(\d+)$/);
   return match ? Number(match[1]) : null;
+}
+
+function feishuTarget(view) {
+  const recipient = String(view?.target || '').trim();
+  if (view?.platform !== 'feishu' || !recipient) {
+    throw coreError('CORE_FEISHU_ROUTE_INVALID', 'Feishu delivery requires one typed recipient');
+  }
+  if (view.destinationKind === 'user') return { channel_type: 'dm', sender_id: recipient };
+  if (view.destinationKind === 'conversation') return { channel_type: 'group', conversation_id: recipient };
+  throw coreError('CORE_FEISHU_ROUTE_INVALID', 'Feishu delivery route kind is unsupported');
 }
 
 async function pythonJson(fetchImpl, baseUrl, route, body) {
@@ -82,7 +93,7 @@ export function createCoreRuntimeComposition({
           kind: activity.domain === 'game' ? 'game' : activity.domain === 'forum' ? 'forum' : 'external_mcp',
           globalUserId: task.ownerId,
           platform: task.platform,
-          conversationId: task.destinationRef,
+          conversationId: task.conversationId,
           senderId: task.ownerId,
           watchScope: activity.scope?.resourceId || activity.scope?.serverId,
           reason: activity.checkpoint?.summary || 'external MCP checkpoint updated',
@@ -111,8 +122,8 @@ export function createCoreRuntimeComposition({
         id: `core-scheduled-${digest(task.workRunId)}`,
         message_id: `core-scheduled-${digest(task.workRunId)}`,
         platform: task.platform,
-        channel_type: 'dm',
-        conversation_id: task.destinationRef,
+        channel_type: task.destinationKind === 'conversation' ? 'group' : 'dm',
+        conversation_id: task.conversationId,
         sender_id: task.ownerId,
         text: reminder
           ? `处理 owner 明确设置的到点提醒：${reminder.content}。提醒时间：${reminder.reminder_at}。仅在待办仍为 pending 时发送；否则保持静默。`
@@ -134,7 +145,7 @@ export function createCoreRuntimeComposition({
       };
     },
     send: async (view) => {
-      await sendFeishu({ target: { conversation_id: view.target }, text: view.text, env });
+      await sendFeishu({ target: feishuTarget(view), text: view.text, env });
       const evidenceRef = `feishu:core-scheduled:${digest(view.outboxId)}`;
       return {
         resultState: 'sent', evidenceRef,

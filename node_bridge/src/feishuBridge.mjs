@@ -486,6 +486,7 @@ function buildLarkCliSendTarget(target = {}, env = process.env, { idempotencySuf
   const receiveId = channelType === 'group'
     ? firstNonEmptyString(target.chat_id, target.conversation_id)
     : firstNonEmptyString(target.user_id, target.sender_id, target.open_id);
+  if (!receiveId) throw new Error('feishu recipient is required');
   const receiveFlag = channelType === 'group' ? '--chat-id' : '--user-id';
   const idempotencySource = firstNonEmptyString(
     target.idempotency_key,

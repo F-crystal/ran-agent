@@ -48,6 +48,7 @@ export function createPackageBScheduledDeliveryHandler({
       conversationId: context.conversation_id,
       payloadRef: context.payload_ref,
       platform: context.platform,
+      destinationKind: context.destination_kind,
       destinationRef: context.destination_ref,
       ownerId: identity.ownerId,
     }));
@@ -111,7 +112,7 @@ export function createPackageBScheduledDeliveryHandler({
         presentations: [{
           outboxId, operationScope: `presentation:${context.platform}`,
           operationKey: `scheduled:outbox:${stable}`, bindingId: context.presentation_binding_id,
-          target: context.destination_ref, destinationKind: 'conversation', kind: 'text',
+          target: context.destination_ref, destinationKind: context.destination_kind, kind: 'text',
           payloadRef: `presentation:text:scheduled:${stable}:1`,
           payloadHashToken: hashContent('presentation-text', replyText),
           routeRevision: Number(context.binding_revision), routeSourceInstanceId: context.source_instance_id,

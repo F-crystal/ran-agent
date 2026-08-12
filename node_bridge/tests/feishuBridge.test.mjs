@@ -198,6 +198,16 @@ test('sendFeishuReply sends group replies by chat id with explicit idempotency k
   assert.equal(calls[0].args.at(calls[0].args.indexOf('--idempotency-key') + 1), 'reply-once');
 });
 
+test('sendFeishuReply rejects an empty recipient before invoking lark-cli', async () => {
+  let calls = 0;
+  await assert.rejects(sendFeishuReply({
+    target: { channel_type: 'dm' },
+    text: 'must not send',
+    execFileImpl: async () => { calls += 1; },
+  }), /feishu recipient is required/);
+  assert.equal(calls, 0);
+});
+
 function createTempStickerCatalog(t, name, entry = {}) {
   const env = createIsolatedTestEnv(t, {}, name);
   const stateDir = env.RAN_AGENT_STATE_DIR;

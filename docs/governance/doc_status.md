@@ -202,10 +202,18 @@ production critical proof stopped before P0 on
 `S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP`: candidate-only
 subordinates still resolved from the older live checkout. The bounded successor
 derives one immutable scratch execution closure from the exact Git object, uses
-it for all S12 code/manifests, keeps live paths state-only, and is
-`LOCAL_VERIFIED / NOT_REVIEWED` plus archived by its containing commit.
+it for all S12 code/manifests and keeps live paths state-only. That successor is
+archived at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a`, independently reviewed
+`CLEAR`, and its bounded production candidate-closure proof passed. The next
+proof stopped on `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP`: Core
+discarded the bound Feishu route kind and could invoke a direct-message send
+with an empty user recipient. The bounded successor preserves the existing
+Package B `destinationKind`/`destinationRef` contract through scheduled
+delivery and maps it mechanically at the Feishu adapter; it is
+`LOCAL_VERIFIED / NOT_REVIEWED` and archived by its containing commit.
 Production is unchanged; S12 remains `NOT_STARTED`. The protected visible
-binding is a downstream owner input / `MISSING_PROOF`.
+binding is `NOT_AUTHORIZED / NOT_INSTALLED`, and canonical S12 VERIFY is
+`NOT_RUN`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

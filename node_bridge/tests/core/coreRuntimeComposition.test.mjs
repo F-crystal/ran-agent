@@ -12,7 +12,7 @@ const START = '2026-08-08T15:00:00.000Z';
 const DUE = '2026-08-08T15:01:00.000Z';
 const TOKEN = `hmac-sha256:v1:test:${'a'.repeat(64)}`;
 
-async function setup(t, payloadRef, externalFact = null) {
+async function setup(t, payloadRef, externalFact = null, route = {}) {
   const { dbPath } = createTempCore(t, 'hermes-core-runtime-composition-');
   let current = new Date(START);
   const core = openCoreDatabase({ dbPath, now: () => current });
@@ -26,8 +26,9 @@ async function setup(t, payloadRef, externalFact = null) {
     });
     tx.packageBPresentation.createOrReadBinding({
       operationKey: 'binding:create', bindingId: 'binding', conversationId: 'conversation', ownerId: 'owner',
-      sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu', destinationKind: 'conversation',
-      destinationRef: 'owner-dm', adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
+      sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu',
+      destinationKind: route.destinationKind || 'user', destinationRef: route.destinationRef || 'ou-owner',
+      adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
     });
     tx.journal.append({
       eventId: 'cause', eventType: 'schedule_requested', ownerId: 'owner', conversationId: 'conversation',
@@ -140,14 +141,14 @@ test('an admitted external checkpoint is decided by Hermes and sent through the 
 test('the S12 acceptance schedule uses the existing Core worker and exact acceptance instruction', async (t) => {
   const { core, now } = await setup(t, 's12-acceptance:fixture');
   const messages = [];
-  let sends = 0;
+  const sends = [];
   const runtime = createCoreRuntimeComposition({
     runtime: { core, hashContent: () => TOKEN },
     channelHub: async (message) => {
       messages.push(message);
       return { replyText: 'S12 Core cutover accepted.', provider: 'hermes', model: 'test' };
     },
-    sendFeishu: async () => { sends += 1; },
+    sendFeishu: async (input) => { sends.push(input); },
     now,
     env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
   });
@@ -156,8 +157,49 @@ test('the S12 acceptance schedule uses the existing Core worker and exact accept
   await runtime.stop();
   assert.equal(messages.length, 1);
   assert.equal(messages[0].text, 'S12 Core cutover acceptance. Reply exactly: S12 Core cutover accepted.');
-  assert.equal(sends, 1);
+  assert.equal(sends.length, 1);
+  assert.deepEqual(sends[0].target, { channel_type: 'dm', sender_id: 'ou-owner' });
+  runtime.start();
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  await runtime.stop();
+  assert.equal(sends.length, 1);
   await core.close();
+});
+
+test('daily digest and Feishu chat schedules use the same typed delivery target contract', async (t) => {
+  for (const fixture of [
+    { name: 'owner DM digest', payloadRef: 'system-task:ai-daily-digest', destinationKind: 'user',
+      destinationRef: 'ou-owner', target: { channel_type: 'dm', sender_id: 'ou-owner' } },
+    { name: 'group conversation', payloadRef: 'system-task:group-notice', destinationKind: 'conversation',
+      destinationRef: 'oc-group', target: { channel_type: 'group', conversation_id: 'oc-group' } },
+  ]) {
+    await t.test(fixture.name, async (st) => {
+      const { core, now } = await setup(st, fixture.payloadRef, null, fixture);
+      const messages = [];
+      const sends = [];
+      const runtime = createCoreRuntimeComposition({
+        runtime: { core, hashContent: () => TOKEN },
+        channelHub: async (message) => {
+          messages.push(message);
+          return { replyText: 'fixture delivery', provider: 'hermes', model: 'test' };
+        },
+        sendFeishu: async (input) => { sends.push(input); },
+        now,
+        env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
+      });
+      runtime.start();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await runtime.stop();
+      assert.equal(messages.length, 1);
+      assert.deepEqual(sends.map((item) => item.target), [fixture.target]);
+      assert.equal(messages[0].conversation_id, 'conversation');
+      assert.equal(messages[0].channel_type, fixture.destinationKind === 'conversation' ? 'group' : 'dm');
+      if (fixture.payloadRef === 'system-task:ai-daily-digest') {
+        assert.equal(messages[0].route_hint, 'scheduled_ai_daily_digest');
+      }
+      await core.close();
+    });
+  }
 });
 
 test('an external notification fails closed when revision or checkpoint digest no longer matches its fact', async (t) => {

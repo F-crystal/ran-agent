@@ -53,9 +53,12 @@ function recurrenceFor(item, watermark, timeZone) {
 
 function requireBinding(input) {
   const fields = ['conversationId', 'canonicalConversationKey', 'actorRef', 'platform',
-    'sourceInstanceId', 'platformConversationBinding', 'bindingId', 'destinationRef'];
+    'sourceInstanceId', 'platformConversationBinding', 'bindingId', 'destinationKind', 'destinationRef'];
   if (!input || fields.some((field) => typeof input[field] !== 'string' || !input[field].trim())) {
     throw coreError('CORE_SYSTEM_SCHEDULE_BINDING_REQUIRED', 'visible system schedules require one owner binding');
+  }
+  if (input.platform !== 'feishu' || !['user', 'conversation'].includes(input.destinationKind)) {
+    throw coreError('CORE_SYSTEM_SCHEDULE_ROUTE_INVALID', 'visible system schedule route is unsupported');
   }
   return input;
 }
@@ -89,7 +92,7 @@ export function seedCoreSystemSchedules(tx, {
       ownerId,
       sourceInstanceId: visible.sourceInstanceId,
       platform: visible.platform,
-      destinationKind: 'conversation',
+      destinationKind: visible.destinationKind,
       destinationRef: visible.destinationRef,
       adapterMetadata: { protocol: 'core-system-schedule', receiptMode: 'typed', routeVersion: '1' },
       createdAt: at,

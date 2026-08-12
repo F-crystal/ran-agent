@@ -44,7 +44,7 @@ test('cutover seeds every replacement schedule active with first due after the w
         conversationId: 'system-owner-conversation', canonicalConversationKey: 'system-owner-conversation',
         actorRef: 'owner:verified', platform: 'feishu', sourceInstanceId: 'node-channel-hub:feishu',
         platformConversationBinding: 'feishu:conversation:system-owner',
-        bindingId: 'system-owner-binding', destinationRef: 'conversation:system-owner',
+        bindingId: 'system-owner-binding', destinationKind: 'user', destinationRef: 'ou-owner-fixture',
       },
     }),
   });
@@ -56,6 +56,8 @@ test('cutover seeds every replacement schedule active with first due after the w
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE task_kind='external_poll'").get().count, 1);
   assert.equal(inspector.prepare("SELECT payload_ref FROM schedule_spec_revision WHERE task_kind='external_poll'").get().payload_ref, 'external-poll:external-mcp-runtime');
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE payload_ref='system-task:attention-flush'").get().count, 1);
+  assert.equal(inspector.prepare("SELECT source_kind FROM journal_event WHERE event_type='package_b_presentation_binding_created'").get().source_kind,
+    'package_b_presentation_binding_destination:user');
   assert.equal(inspector.prepare('SELECT count(*) AS count FROM wake_occurrence').get().count, 0);
   assert.equal(inspector.prepare('SELECT count(*) AS count FROM work_run').get().count, 0);
   inspector.close();

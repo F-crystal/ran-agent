@@ -27,8 +27,8 @@ async function setup(t, payloadRef = 'system-task:daily-digest') {
     tx.packageBTurn.createOrResolveConversation(identityInput);
     tx.packageBPresentation.createOrReadBinding({
       operationKey: 'binding:create', bindingId: 'binding', conversationId: 'conversation', ownerId: 'owner',
-      sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu', destinationKind: 'conversation',
-      destinationRef: 'owner-dm', adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
+      sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu', destinationKind: 'user',
+      destinationRef: 'ou-owner', adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
     });
     tx.journal.append({
       eventId: 'cause', eventType: 'schedule_requested', ownerId: 'owner', conversationId: 'conversation',
@@ -55,12 +55,14 @@ async function setup(t, payloadRef = 'system-task:daily-digest') {
 test('scheduled WorkRun consumer proves the typed system instruction to terminal receipt chain', async (t) => {
   const { core, dbPath, now } = await setup(t);
   let effects = 0;
+  const routes = [];
   const terminals = [];
   const scheduled = createPackageBScheduledDeliveryHandler({
     core, now, hashContent: () => TOKEN,
     decide: async ({ payloadRef }) => ({ replyText: `result for ${payloadRef}`, provider: 'hermes', model: 'test' }),
-    send: async () => {
+    send: async (view) => {
       effects += 1;
+      routes.push({ platform: view.platform, destinationKind: view.destinationKind, target: view.target });
       return { resultState: 'sent', evidenceRef: 'feishu:test:sent', evidenceHashToken: TOKEN };
     },
     afterTerminal: async (context, delivery) => {
@@ -76,6 +78,7 @@ test('scheduled WorkRun consumer proves the typed system instruction to terminal
   const [result] = await worker.runOnce();
   assert.equal(result.state, 'completed');
   assert.equal(effects, 1);
+  assert.deepEqual(routes, [{ platform: 'feishu', destinationKind: 'user', target: 'ou-owner' }]);
   assert.equal(terminals.length, 1);
   assert.equal(terminals[0].context.payload_ref, 'system-task:daily-digest');
   assert.equal(terminals[0].delivery.state, 'sent');

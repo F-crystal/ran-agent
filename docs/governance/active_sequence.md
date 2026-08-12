@@ -305,16 +305,19 @@ S12-R0 fresh read-only production audit (COMPLETE)
   the older live checkout. The bounded successor materializes the exact Git
   candidate once under private read-only `/tmp`, uses that closure for all S12
   code/manifests while keeping `/opt/ran_agent` state-only, and removes it
-  afterward. It is `LOCAL_VERIFIED / NOT_REVIEWED` and archived by the
-  containing commit.
+  afterward. It is archived at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a`,
+  independently reviewed `CLEAR`, and its production candidate-closure proof
+  passed.
 - S12 remains `NOT STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` pending the
-  successor's independent exact-SHA review and a later explicit production
-  authorization. The current blocker is
-  `S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP`; production proof made
-  only the allowed candidate fetch/source-candidate-ref validation metadata and
-  otherwise left production at `98fd8b3`. The protected visible-binding record
-  remains a downstream owner input / `MISSING_PROOF`, not this implementation
-  defect. R2 caused no production mutation. A separately authorized XHS
+  route-contract successor's independent exact-SHA review and later explicit
+  production authorization. The current blocker is
+  `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP`: the existing Package B
+  route kind was discarded before Feishu dispatch. The bounded repair carries
+  the existing `destinationKind`/`destinationRef` through scheduled delivery
+  and is `LOCAL_VERIFIED / NOT_REVIEWED`, archived by the containing commit.
+  The protected visible-binding record is `NOT_AUTHORIZED / NOT_INSTALLED` and
+  canonical S12 VERIFY is `NOT_RUN`. Production otherwise remains at `98fd8b3`;
+  R2 caused no production mutation. A separately authorized XHS
   maintenance transaction
   retired the account-backed route and activated the existing public-only
   sidecar; it is not R2 evidence or a Core/source change.

@@ -558,12 +558,18 @@ critical proof stopped before P0 with
 code/manifests still resolved from the older production checkout. The bounded
 successor establishes one scratch-only read-only execution closure from the
 exact Git candidate and uses it across P0-P10; `/opt/ran_agent` remains state,
-never fallback S12 control code. It is `LOCAL_VERIFIED / NOT_REVIEWED` and
-archived by the containing commit. The protected visible-binding record remains
-a downstream owner input / `MISSING_PROOF`.
-Production is unchanged; canonical S12 VERIFY stopped before P0 and APPLY did
-not run. Only candidate fetch/source-candidate-ref validation metadata changed.
-S12 is `NOT_STARTED`.
+never fallback S12 control code. It is archived at
+`6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a`, independently reviewed `CLEAR`,
+and its production candidate-closure proof passed. That proof then exposed
+`S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP`: the generic visible
+binding could not preserve direct-user versus chat recipient semantics through
+Core, so Feishu direct-message dispatch reached an empty user ID. The bounded
+successor keeps the existing Package B `destinationKind`/`destinationRef`
+contract through the durable scheduled effect, maps `user` and `conversation`
+without fallback, and rejects an empty recipient before CLI invocation. It is
+`LOCAL_VERIFIED / NOT_REVIEWED` and archived by the containing commit. The
+protected visible binding remains `NOT_AUTHORIZED / NOT_INSTALLED`; canonical
+S12 VERIFY is `NOT_RUN`. Production is unchanged and S12 is `NOT_STARTED`.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

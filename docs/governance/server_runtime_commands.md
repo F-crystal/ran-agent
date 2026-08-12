@@ -117,6 +117,14 @@ production baseline observed by R3-B, one whole-second cutover instant, and an
 owner-approved root-owned mode `0600` visible-binding record. Keep the same
 values for VERIFY and any later separately authorized APPLY:
 
+The record is an owner-approved snapshot of an existing canonical route, not a
+second identity database. For the Feishu owner home DM, derive
+`destinationKind: "user"` and `destinationRef` from the learned canonical
+home-DM sender route; a Feishu chat instead uses `destinationKind:
+"conversation"` with its canonical chat recipient. Present the platform,
+semantic route and binding digest for owner review while keeping the raw
+recipient private. Do not manually transcribe or invent a recipient.
+
 ```bash
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate

@@ -275,7 +275,8 @@ export class CoreDatabase {
       Math.max(1, Math.min(128, Number(limit) || 32))).map((row) => Object.freeze({ ...row })),
       scheduledWorkContext: (workRunId) => read(`SELECT run.work_run_id,run.exchange_id,
           exchange.conversation_id,revision.payload_ref,revision.presentation_binding_id,
-          binding.destination_ref,binding.source_instance_id,binding.platform,binding.revision AS binding_revision
+          binding.destination_ref,binding.source_instance_id,binding.platform,binding.revision AS binding_revision,
+          substr(binding_receipt.source_kind,length('package_b_presentation_binding_destination:')+1) AS destination_kind
         FROM work_run run
         JOIN exchange ON exchange.exchange_id=run.exchange_id
         JOIN wake_occurrence occurrence ON occurrence.wake_occurrence_id=run.wake_occurrence_id
@@ -284,6 +285,9 @@ export class CoreDatabase {
         JOIN presentation_binding binding
           ON binding.presentation_binding_id=revision.presentation_binding_id
           AND binding.conversation_id=exchange.conversation_id
+        JOIN journal_event binding_receipt
+          ON binding_receipt.event_type='package_b_presentation_binding_created'
+          AND binding_receipt.correlation_id=binding.presentation_binding_id
         WHERE run.work_run_id=? AND revision.task_kind='scheduled_instruction'`, workRunId),
       conversationIdentityById: (conversationId) => {
         const receipt = read(`SELECT * FROM journal_event

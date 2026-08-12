@@ -44,7 +44,7 @@ function setup(t) {
     conversationId: 'system-owner-conversation', canonicalConversationKey: 'system-owner-conversation',
     actorRef: 'owner:verified', platform: 'feishu', sourceInstanceId: 'node-channel-hub:feishu',
     platformConversationBinding: 'feishu:conversation:system-owner',
-    bindingId: 'system-owner-binding', destinationRef: 'conversation:system-owner',
+    bindingId: 'system-owner-binding', destinationKind: 'user', destinationRef: 'ou-owner-fixture',
   }));
   return { root, dbPath, snapshotPath, visibleBindingPath };
 }
@@ -99,12 +99,20 @@ test('exact cutover verification rejects an invalid visible binding before apply
   core.migrate();
   await core.close();
   fs.writeFileSync(fixture.visibleBindingPath, '{}');
-
-  await assert.rejects(executeCoreCutover({
+  const verify = () => executeCoreCutover({
     mode: 'verify', coreDbPath: fixture.dbPath, snapshotPath: fixture.snapshotPath,
     systemManifestPath: SYSTEM_MANIFEST, visibleBindingPath: fixture.visibleBindingPath,
     candidateSha: 'a'.repeat(40), committedAt: COMMITTED_AT,
-  }), { code: 'CORE_SYSTEM_SCHEDULE_BINDING_REQUIRED' });
+  });
+  await assert.rejects(verify(), { code: 'CORE_SYSTEM_SCHEDULE_BINDING_REQUIRED' });
+
+  fs.writeFileSync(fixture.visibleBindingPath, JSON.stringify({
+    conversationId: 'system-owner-conversation', canonicalConversationKey: 'system-owner-conversation',
+    actorRef: 'owner:verified', platform: 'feishu', sourceInstanceId: 'node-channel-hub:feishu',
+    platformConversationBinding: 'feishu:conversation:system-owner',
+    bindingId: 'system-owner-binding', destinationKind: 'ambiguous', destinationRef: 'recipient-fixture',
+  }));
+  await assert.rejects(verify(), { code: 'CORE_SYSTEM_SCHEDULE_ROUTE_INVALID' });
 });
 
 test('exact cutover verification rejects invalid candidate authority before apply', async (t) => {

@@ -81,7 +81,7 @@ async function setup(t) {
       tx.packageBPresentation.createOrReadBinding({
         operationKey: 'core-cutover:system-owner-binding', bindingId: BINDING,
         conversationId: CONVERSATION, ownerId: OWNER, sourceInstanceId: 'feishu:owner',
-        platform: 'feishu', destinationKind: 'conversation', destinationRef: 'oc_owner',
+        platform: 'feishu', destinationKind: 'user', destinationRef: 'ou_owner',
         adapterMetadata: { protocol: 'core-system-schedule', receiptMode: 'typed', routeVersion: '1' },
         createdAt: AT,
       });
@@ -109,11 +109,13 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
   const scheduling = createCoreSchedulingService({ core });
   await scheduling.wakeDue();
   let effects = 0;
+  const routes = [];
   const handler = createPackageBScheduledDeliveryHandler({
     core, hashContent: () => TOKEN, now: () => new Date(DUE),
     decide: async () => ({ replyText: 'S12 Core cutover acceptance', provider: 'fixture', model: 'fixture' }),
-    send: async () => {
+    send: async (view) => {
       effects += 1;
+      routes.push({ destinationKind: view.destinationKind, target: view.target });
       return { resultState: 'sent', evidenceRef: 'feishu:s12:accepted', evidenceHashToken: TOKEN };
     },
   });
@@ -125,6 +127,7 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
   assert.equal(terminal.status, 'TERMINAL_RECEIPT');
   assert.equal(terminal.outboxId.startsWith('outbox:scheduled:'), true);
   assert.ok(terminal.receiptId);
+  assert.deepEqual(routes, [{ destinationKind: 'user', target: 'ou_owner' }]);
   await worker.runOnce();
   assert.equal(effects, 1);
   assert.equal(inspectS12Acceptance({ core, ...input() }).receiptId, terminal.receiptId);
