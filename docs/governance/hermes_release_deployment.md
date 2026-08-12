@@ -220,16 +220,15 @@ the checkout revision being restored.
 | Fetch the reviewed source ref | `git fetch --no-tags origin '<reviewed-source-ref>'` | Replace the placeholder with the reviewed ref. Fetch succeeds; production HEAD and files remain unchanged. |
 | Bind the fetched object to the reviewed immutable SHA | `CANDIDATE="$(git rev-parse --verify FETCH_HEAD^{commit})"; test "$CANDIDATE" = '<reviewed-full-candidate-sha>'` | Replace the placeholder with the separately reviewed full SHA. Any mismatch stops bootstrap. |
 | Create a private extraction directory | `BOOTSTRAP_DIR="$(mktemp -d /tmp/ran-agent-bootstrap.XXXXXX)"; chmod 700 "$BOOTSTRAP_DIR"` | Record `BOOTSTRAP_DIR`; only `/tmp` changes. |
-| Extract the bootstrap and its candidate-owned manifest | `git show "${CANDIDATE}:scripts/bootstrap-hermes-release.sh" > "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh"; git show "${CANDIDATE}:docs/governance/hermes_release_bootstrap.v1.sha256" > "$BOOTSTRAP_DIR/manifest"` | Both files come from the exact reviewed candidate. |
-| Verify the bootstrap against that manifest | `EXPECTED="$(awk '$2 == "scripts/bootstrap-hermes-release.sh" { print $1 }' "$BOOTSTRAP_DIR/manifest")"; test "$(awk '$2 == "scripts/bootstrap-hermes-release.sh" { count += 1 } END { print count + 0 }' "$BOOTSTRAP_DIR/manifest")" -eq 1; printf '%s  %s\n' "$EXPECTED" "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh" > "$BOOTSTRAP_DIR/bootstrap-only.sha256"; sha256sum -c "$BOOTSTRAP_DIR/bootstrap-only.sha256"` | Expect `OK`. Stop on a missing, duplicate, malformed, or mismatched entry; do not execute the file. |
+| Extract the bootstrap from the reviewed candidate | `git show "${CANDIDATE}:scripts/bootstrap-hermes-release.sh" > "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh"` | The file comes from the exact reviewed Git commit. |
 | Make the temporary bootstrap owner-only | `chmod 700 "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh"` | Succeeds. |
 | Validate the staged framework without service interruption | `bash "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh" --dry-run "$CANDIDATE"` | Prints `bootstrap-ok candidate=…`; stop on failure. |
 | Apply through the common transaction (**service interruption**) | `bash "$BOOTSTRAP_DIR/bootstrap-hermes-release.sh" --apply "$CANDIDATE"` | Prints the ordinary transaction result and then `bootstrap-ok`. Retain its snapshot path; any failure auto-rolls back once snapshotting begins. |
 
-The bootstrap validates the exact SHA, rejects every dirty worktree, obtains
-only the seven files named by
-`docs/governance/hermes_release_bootstrap.v1.sha256` from that commit, and
-checks every source against that candidate-owned manifest.
+The bootstrap validates the exact SHA, rejects every dirty worktree, and
+obtains only its explicit bounded framework paths from that commit. The Git
+commit object is the sole byte authority; the apply controller compares every
+temporary framework file directly with the same candidate object before use.
 It invokes the same `deploy-hermes-release.sh` transaction as normal releases;
 there is no second persistent deployment mechanism.
 

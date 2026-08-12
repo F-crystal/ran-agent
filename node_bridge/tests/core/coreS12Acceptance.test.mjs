@@ -133,8 +133,6 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
     outbox: core.reader.presentationOutboxById(terminal.outboxId),
     receipt: core.reader.presentationResultForOutbox(terminal.outboxId),
   };
-  await core.close();
-
   const phases = ['P0_VERIFIED', 'P1_SOURCE_APPLIED', 'P2_CORE_PREPARED', 'P3_LEGACY_RECONCILED',
     'P4_QUIESCED', 'P5_CORE_AUTHORITY_COMMITTED', 'P6_CORE_WORKER_ACTIVE', 'P7_CORE_WAKE_ACTIVE',
     'P8_ACCEPTANCE_EFFECT_COMMITTED', 'P9_ACCEPTANCE_RECEIPT_TERMINAL', 'P10_ACCEPTED'];
@@ -154,19 +152,36 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
       uid: value.uid, gid: value.gid, mtimeMs: value.mtimeMs };
   };
   const files = [dbPath, `${dbPath}-wal`, `${dbPath}-shm`];
-  const before = files.map(snapshot);
   const script = path.resolve(new URL('../../../scripts/core-s12-acceptance.mjs', import.meta.url).pathname);
-  const inspected = spawnSync(process.execPath, [script,
+  const inspect = () => spawnSync(process.execPath, [script,
     '--mode', 'inspect', '--core-db', dbPath, '--transaction-id', TRANSACTION,
     '--candidate-sha', CANDIDATE, '--owner-id', OWNER, '--authorization-ref', AUTH,
     '--s12-transaction', journal,
   ], { encoding: 'utf8', env: { ...process.env, RAN_AGENT_RELEASE_ARTIFACT_ROOT: fs.realpathSync(root) } });
+  const liveBefore = files.map(snapshot);
+  const inspected = inspect();
   assert.equal(inspected.status, 0, inspected.stderr);
   const observed = JSON.parse(inspected.stdout);
   assert.equal(observed.status, 'TERMINAL_RECEIPT');
   assert.equal(observed.outboxId, terminal.outboxId);
   assert.equal(observed.receiptId, terminal.receiptId);
-  assert.deepEqual(files.map(snapshot), before);
+  const liveAfter = files.map(snapshot);
+  assert.deepEqual(liveAfter.slice(0, 2), liveBefore.slice(0, 2));
+  assert.ok(liveBefore[2]);
+  for (const field of ['dev', 'ino', 'mode', 'uid', 'gid']) {
+    assert.equal(liveAfter[2][field], liveBefore[2][field]);
+  }
+  assert.deepEqual({
+    events: core.reader.journalEventCount(),
+    outbox: core.reader.presentationOutboxById(terminal.outboxId),
+    receipt: core.reader.presentationResultForOutbox(terminal.outboxId),
+  }, durableBefore);
+  await core.close();
+
+  const noSidecarBefore = files.map(snapshot);
+  const closedInspection = inspect();
+  assert.equal(closedInspection.status, 0, closedInspection.stderr);
+  assert.deepEqual(files.map(snapshot), noSidecarBefore);
   assert.equal(durableBefore.events > 0, true);
   assert.equal(durableBefore.outbox.state, 'sent');
   assert.equal(durableBefore.receipt.journal_event_id, terminal.receiptId);

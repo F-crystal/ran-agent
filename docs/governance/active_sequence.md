@@ -96,8 +96,9 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> S12-R3B immutable server gate/dry-run proof on 9653d030 (CLEAR)
   -> S12 orchestration / rollback-interlock candidate e6ce78aa (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
   -> S12 authority-order remediation 91172d4c (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
-  -> final S12 read-only primitive remediation (LOCAL_VERIFIED, NOT_REVIEWED, archived by containing commit)
-  -> independent exact-SHA final S12 remediation review (REQUIRED)
+  -> final S12 read-only primitive remediation 959b8f0d (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
+  -> systemic byte-authority / SQLite-test remediation (LOCAL_VERIFIED, NOT_REVIEWED, archived by containing commit)
+  -> independent exact-SHA systemic remediation review (REQUIRED)
   -> explicit owner production authorization
   -> canonical S12 transaction VERIFY, then separately authorized APPLY
 ```
@@ -289,11 +290,19 @@ S12-R0 fresh read-only production audit (COMPLETE)
   journal branch, and proves complete P0-P4 restoration through the real
   orchestration rollback method. Independent review accepted those repairs but
   returned `FIX_REQUIRED`: VERIFY could still refresh `.git/index`, and accepted
-  replay opened Core through writable initialization. The bounded final repair
-  keeps Git observation under native no-optional-lock semantics and routes
-  acceptance inspection through the existing Core owner's true read-only open;
-  focused index/dirty-state, Core inode/sidecar and replay tests pass. It is
-  `LOCAL_VERIFIED / NOT_REVIEWED` and archived by the containing commit.
+  replay opened Core through writable initialization. Candidate
+  `959b8f0d4503448da3bb44205d40bddd7d32e43a` repaired both primitives, but its
+  independent review found `BOOTSTRAP-MANIFEST-DUPLICATE-AUTHORITY-DRIFT`: the
+  candidate-extracted controller bytes no longer matched a manually
+  synchronized bootstrap digest manifest, so canonical VERIFY stopped
+  fail-closed. The same review's live-WAL SHM-byte observation is
+  `NON_BLOCKING`: SQLite read marks are derived coordination state, not durable
+  product authority. The bounded successor removes the redundant manifest from
+  execution authority, retains the exact Git candidate as the sole byte
+  authority plus the explicit extraction allowlist, and tests live accepted
+  inspection against unchanged DB/WAL business authority while allowing
+  SQLite-managed SHM coordination. It is `LOCAL_VERIFIED / NOT_REVIEWED` and
+  archived by the containing commit.
 - S12 remains `NOT STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` pending the
   successor's independent exact-SHA review and a later explicit production
   authorization. Production source remains `98fd8b3`, and R2 caused

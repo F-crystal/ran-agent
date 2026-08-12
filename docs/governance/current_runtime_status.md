@@ -542,12 +542,20 @@ branch, validates accepted replay without restart or effect, and proves exact
 P0-P4 authority-vector restoration including source-apply-before-P1 recovery.
 Independent review accepted those semantics but returned `FIX_REQUIRED` for two
 remaining read-only primitives: Git could refresh `.git/index` during VERIFY,
-and acceptance inspection used writable Core initialization. The final bounded
-repair uses no-optional-lock Git observation without weakening dirty detection
-and the existing Core DB owner's read-only open without mkdir, chmod, migration,
-writer or sidecar creation. Focused Node 4/4 plus Core 12/12 and Python 7/7
-evidence passes. It is `LOCAL_VERIFIED / NOT_REVIEWED` and is archived by the
-containing commit. Production is unchanged; neither S12 VERIFY nor APPLY ran.
+and acceptance inspection used writable Core initialization. Candidate
+`959b8f0d4503448da3bb44205d40bddd7d32e43a` repaired those primitives and is
+`LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED / ARCHIVED`. Its exact-candidate
+review found one real blocker: the bootstrap's manually synchronized SHA256
+manifest still named older controller bytes, so canonical VERIFY correctly
+failed closed. The review also observed SQLite-managed live-WAL SHM read-mark
+changes; first-principles analysis classifies those derived coordination bytes
+as `NON_BLOCKING`, because DB/WAL business state, schema, receipt, permissions,
+writer/wake/service authority and effects remain unchanged. The bounded
+successor removes the duplicate manifest byte authority, keeps the exact Git
+candidate plus explicit extraction paths as the single authority model, and
+corrects the live-WAL regression without changing Core production code. It is
+`LOCAL_VERIFIED / NOT_REVIEWED` and archived by the containing commit.
+Production is unchanged; neither S12 VERIFY nor APPLY ran.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

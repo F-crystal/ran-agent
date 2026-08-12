@@ -191,10 +191,15 @@ archived at `91172d4c` and is `LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED`. Its
 canonical source-verify path is persistently read-only, SQLite is read before
 terminal journal interpretation, accepted replay is read-only, and one
 stateful composed matrix proves exact P0-P4 authority restoration; review found
-only residual Git index refresh and writable Core inspection. The final bounded
-successor disables optional Git locks, preserves dirty detection, and uses the
-existing Core DB owner's non-creating, non-migrating read-only open for inspect.
-It is `LOCAL_VERIFIED / NOT_REVIEWED` and archived by its containing commit.
+only residual Git index refresh and writable Core inspection. Candidate
+`959b8f0d` repaired those primitives and is `LOCAL_VERIFIED / REVIEWED /
+FIX_REQUIRED / ARCHIVED`; its review found a stale manually synchronized
+bootstrap digest, while the reported live-WAL SHM read-mark change is derived
+SQLite coordination rather than product mutation. The bounded successor makes
+the exact Git candidate the sole framework byte authority, keeps the explicit
+extraction scope, and tests durable DB/WAL/receipt stability without requiring
+SHM byte identity. It is `LOCAL_VERIFIED / NOT_REVIEWED` and archived by its
+containing commit.
 Production is unchanged and no S12 mode has run.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
@@ -237,7 +242,6 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/s12-r1b-web-routing.md` | Current R1B Web capability assembly task and acceptance boundary |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/hermes_release_deployment.md` | Immutable-SHA deployment and rollback contract |
-| `docs/governance/hermes_release_bootstrap.v1.sha256` | Bootstrap source-digest manifest |
 | `docs/governance/phase_status.md` | Historical phase closure status |
 | `docs/governance/constraints.md` | Runtime and implementation constraints |
 | `docs/governance/co-reading.md` | Co-reading storage, MCP, privacy and API contract |

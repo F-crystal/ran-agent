@@ -84,8 +84,9 @@ flowchart TD
     R3B --> OGAP["S12 orchestration + rollback interlock gap<br/>BLOCKING S12"]
     OGAP --> ORCH["S12 candidate e6ce78aa<br/>LOCAL_VERIFIED · REVIEWED/FIX_REQUIRED · ARCHIVED"]
     ORCH --> REM["Authority-order remediation 91172d4c<br/>LOCAL_VERIFIED · REVIEWED/FIX_REQUIRED · ARCHIVED"]
-    REM --> ROFIX["Final read-only primitives<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED BY COMMIT"]
-    ROFIX --> ORR["Independent exact-SHA final review<br/>REQUIRED"]
+    REM --> ROFIX["Final read-only primitives 959b8f0d<br/>LOCAL_VERIFIED · REVIEWED/FIX_REQUIRED · ARCHIVED"]
+    ROFIX --> SYSFIX["Systemic byte-authority + SQLite-test repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED BY COMMIT"]
+    SYSFIX --> ORR["Independent exact-SHA systemic review<br/>REQUIRED"]
     ORR --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -143,8 +144,12 @@ the first S12 candidate `e6ce78aa` returned `FIX_REQUIRED` for source-verify
 mutation, journal-before-SQLite authority, and missing composed P0-P4 rollback
 proof. Review of `91172d4c` accepted those repairs and found only Git index
 refresh during VERIFY plus writable Core initialization during accepted
-inspection. The current frontier is the bounded final read-only primitive
-repair and its exact-SHA review. Production and S12 remain unchanged/not started.
+inspection. Candidate `959b8f0d` repaired both but its exact review found a
+stale manually synchronized bootstrap digest that correctly stopped canonical
+VERIFY. The live-WAL SHM read-mark observation is derived SQLite coordination,
+not durable product mutation. The current frontier removes that duplicate byte
+authority and corrects only the invalid SHM test invariant. Production and S12
+remain unchanged/not started.
 
 | Second R3-B root failure | Observed boundary | Classification and repair |
 |---|---|---|
@@ -184,7 +189,8 @@ repair and its exact-SHA review. Production and S12 remain unchanged/not started
 | R3-B | `CLEAR` | `REVIEWED` | exact base `9653d030473b3e9870ddea9158c4a2f9570c243b` | scratch-home review clear | Complete immutable root/non-root gate and dry-run evidence is clear; production remained at `98fd8b3`. |
 | S12-ORCHESTRATION | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `e6ce78aaeb3c7117daac25ccbeb7b66b570cd0b1` | R3-B CLEAR; `S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP` | Overall transaction retained; review found VERIFY source-ref mutation, ACCEPTED-before-SQLite ordering and missing composed P0-P4 restoration proof. |
 | S12-AUTHORITY-ORDER | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `91172d4c1925aa82a6d153671165b1c20473c4e7` | S12-ORCHESTRATION review findings | SQLite precedence, P0-P4 restoration and rollback recovery were accepted; Git index refresh and writable Core inspection remained. |
-| S12-READ-ONLY-PRIMITIVES | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | final two `91172d4c` review findings | Native no-optional-lock Git status preserves index and dirty detection; acceptance inspect uses the existing Core owner's read-only, non-creating open. |
+| S12-READ-ONLY-PRIMITIVES | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `959b8f0d4503448da3bb44205d40bddd7d32e43a` | final two `91172d4c` review findings | Native no-optional-lock Git status and true Core read-only inspect were accepted; exact review found duplicate bootstrap digest authority. |
+| S12-SYSTEMIC-FINAL | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | `BOOTSTRAP-MANIFEST-DUPLICATE-AUTHORITY-DRIFT` | Exact Git candidate is the sole bootstrap byte authority; explicit paths bind extraction scope; live-WAL SHM is derived coordination while durable DB/WAL/receipt state remains unchanged. |
 | S12 | `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` | not applicable | not applicable | S12 successor review + explicit production authorization | Production source remains `98fd8b3`; neither S12 VERIFY nor APPLY occurred. |
 
 The previous implementation candidate is

@@ -11,16 +11,6 @@ fail() {
   exit 1
 }
 
-sha256_file() {
-  if command -v sha256sum >/dev/null 2>&1; then
-    sha256sum "$1" | awk '{ print $1 }'
-  elif command -v shasum >/dev/null 2>&1; then
-    shasum -a 256 "$1" | awk '{ print $1 }'
-  else
-    fail bootstrap_digest_unavailable
-  fi
-}
-
 MODE="${1:---refuse-mutation}"
 CANDIDATE_INPUT="${2:-}"
 ROLLBACK_SNAPSHOT=''
@@ -43,9 +33,6 @@ CANDIDATE="$(git rev-parse --verify "${CANDIDATE_INPUT}^{commit}" 2>/dev/null)" 
 
 TMP_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/ran-agent-release-bootstrap.XXXXXX")" || fail bootstrap_temp_unavailable
 trap 'rm -rf "$TMP_ROOT"' EXIT
-MANIFEST_PATH="docs/governance/hermes_release_bootstrap.v1.sha256"
-git show "$CANDIDATE:$MANIFEST_PATH" > "$TMP_ROOT/manifest" || fail bootstrap_manifest_missing
-
 required=(
   scripts/bootstrap-hermes-release.sh
   scripts/deploy-hermes-release.sh
@@ -57,18 +44,11 @@ required=(
   scripts/verify-runtime-service-identity.sh
 )
 for path in "${required[@]}"; do
-  expected="$(awk -v path="$path" '$2 == path { print $1 }' "$TMP_ROOT/manifest")"
-  [[ "$expected" =~ ^[0-9a-f]{64}$ ]] || fail bootstrap_manifest_invalid
-  [[ "$(awk -v path="$path" '$2 == path { count += 1 } END { print count + 0 }' "$TMP_ROOT/manifest")" == 1 ]] || fail bootstrap_manifest_invalid
   target="$TMP_ROOT/$path"
   mkdir -p "$(dirname "$target")"
   git show "$CANDIDATE:$path" > "$target" || fail bootstrap_source_missing
-  actual="$(sha256_file "$target")" || fail bootstrap_digest_unavailable
-  [[ "$actual" == "$expected" ]] || fail bootstrap_digest_mismatch
   chmod 700 "$target"
 done
-[[ "$(awk 'NF && $1 !~ /^[0-9a-f]{64}$/ { invalid=1 } END { print invalid + 0 }' "$TMP_ROOT/manifest")" == 0 ]] || fail bootstrap_manifest_invalid
-[[ "$(awk 'NF { count += 1 } END { print count + 0 }' "$TMP_ROOT/manifest")" == "${#required[@]}" ]] || fail bootstrap_manifest_invalid
 
 NODE_BIN_INPUT="${RAN_AGENT_NODE_BIN:-}"
 # The server bootstrap contract owns this legacy compatibility path.  The

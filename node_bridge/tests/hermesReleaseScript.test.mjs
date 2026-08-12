@@ -264,7 +264,7 @@ function makeSealedRuntimeFixture(runtimeRoot, name, {
   return { installRoot, hermes, python, app };
 }
 
-function makeBootstrapFixture({ corruptManifest = false } = {}) {
+function makeBootstrapFixture({ omitFrameworkFile = '' } = {}) {
   const repo = mkdtempSync(join(tmpdir(), 'ran-agent-bootstrap-'));
   const runGit = (args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: 'pipe' });
   runGit(['init']);
@@ -282,6 +282,7 @@ function makeBootstrapFixture({ corruptManifest = false } = {}) {
   mkdirSync(join(repo, 'scripts'), { recursive: true });
   mkdirSync(join(repo, 'docs', 'governance'), { recursive: true });
   for (const file of bootstrapFrameworkFiles) {
+    if (file === omitFrameworkFile) continue;
     copyFileSync(join(root, 'scripts', file), join(repo, 'scripts', file));
     chmodSync(join(repo, 'scripts', file), 0o755);
   }
@@ -294,11 +295,6 @@ function makeBootstrapFixture({ corruptManifest = false } = {}) {
   ].join('\n'));
   copyFileSync(join(root, 'scripts', 'hermes-release-candidate-preflight.mjs'), join(repo, 'scripts', 'hermes-release-candidate-preflight.mjs'));
   chmodSync(join(repo, 'scripts', 'hermes-release-candidate-preflight.mjs'), 0o755);
-  const manifest = bootstrapFrameworkFiles.map((file) => {
-    const contents = readFileSync(join(repo, 'scripts', file));
-    return `${corruptManifest ? '0'.repeat(64) : sha256(contents)}  scripts/${file}`;
-  }).join('\n');
-  writeFileSync(join(repo, 'docs', 'governance', 'hermes_release_bootstrap.v1.sha256'), `${manifest}\n`);
   runGit(['add', '.']);
   runGit(['commit', '-m', 'candidate framework']);
   const candidateSha = runGit(['rev-parse', 'HEAD']).trim();
@@ -4127,7 +4123,6 @@ test('apply authority accepts only the complete candidate-extracted bootstrap ro
   for (const file of bootstrapFrameworkFiles) {
     writeFileSync(join(scripts, file), fixture.runGit(['show', `${fixture.candidateSha}:scripts/${file}`]));
   }
-  writeFileSync(join(bootstrapRoot, 'manifest'), fixture.runGit(['show', `${fixture.candidateSha}:docs/governance/hermes_release_bootstrap.v1.sha256`]));
   const deploySource = readFileSync(join(scripts, 'deploy-hermes-release.sh'), 'utf8');
   writeFileSync(harness, deploySource.slice(0, deploySource.lastIndexOf('if [[ "$MODE" == --rollback ]]')));
   const verify = (authorityRoot) => execFileSync('bash', ['-c', [
@@ -4162,9 +4157,9 @@ test('apply authority accepts only the complete candidate-extracted bootstrap ro
   }
 });
 
-test('bootstrap fails closed for an invalid candidate, digest mismatch, and a dirty production checkout', () => {
+test('bootstrap fails closed for an invalid candidate, missing required source, and a dirty production checkout', () => {
   const invalid = makeBootstrapFixture();
-  const mismatch = makeBootstrapFixture({ corruptManifest: true });
+  const missing = makeBootstrapFixture({ omitFrameworkFile: 'verify-runtime-service-identity.sh' });
   const dirty = makeBootstrapFixture();
   const bootstrap = join(root, 'scripts', 'bootstrap-hermes-release.sh');
   const runBootstrap = (fixture, sha) => execFileSync('bash', [bootstrap, '--dry-run', sha], {
@@ -4180,12 +4175,12 @@ test('bootstrap fails closed for an invalid candidate, digest mismatch, and a di
   });
   try {
     assert.throws(() => runBootstrap(invalid, 'not-a-commit'), /Command failed/);
-    assert.throws(() => runBootstrap(mismatch, mismatch.candidateSha), /Command failed/);
+    assert.throws(() => runBootstrap(missing, missing.candidateSha), /Command failed/);
     writeFileSync(join(dirty.repo, 'README.md'), 'dirty\n');
     assert.throws(() => runBootstrap(dirty, dirty.candidateSha), /Command failed/);
     assert.equal(dirty.runGit(['rev-parse', 'HEAD']).trim(), dirty.prior);
   } finally {
-    for (const fixture of [invalid, mismatch, dirty]) rmSync(fixture.repo, { recursive: true, force: true });
+    for (const fixture of [invalid, missing, dirty]) rmSync(fixture.repo, { recursive: true, force: true });
   }
 });
 
@@ -4488,25 +4483,14 @@ esac
   }
 });
 
-test('bootstrap manifest pins the exact candidate framework sources', () => {
-  const manifest = readFileSync(join(root, 'docs', 'governance', 'hermes_release_bootstrap.v1.sha256'), 'utf8');
-  const entries = new Map(manifest.trim().split('\n').map((line) => {
-    const [digest, path] = line.split(/\s{2,}/);
-    return [path, digest];
-  }));
-
-  for (const path of [
-    'scripts/bootstrap-hermes-release.sh',
-    'scripts/deploy-hermes-release.sh',
-    'scripts/deploy-hermes-runtime-release.py',
-    'scripts/resolve-hermes-service-node.sh',
-    'scripts/prune-hermes-release-artifacts.sh',
-    'scripts/check-hermes-snapshot-capacity.py',
-    'scripts/ombre_o1_contract.py',
-  ]) {
-    assert.match(entries.get(path) || '', /^[0-9a-f]{64}$/);
-    assert.equal(entries.get(path), sha256(readFileSync(join(root, path))));
-  }
+test('bootstrap uses the candidate commit as its only framework byte authority', () => {
+  assert.equal(existsSync(join(root, 'docs', 'governance', 'hermes_release_bootstrap.v1.sha256')), false);
+  const bootstrap = readFileSync(join(root, 'scripts', 'bootstrap-hermes-release.sh'), 'utf8');
+  const deploy = readFileSync(join(root, 'scripts', 'deploy-hermes-release.sh'), 'utf8');
+  assert.doesNotMatch(bootstrap, /bootstrap_manifest|bootstrap_digest/);
+  assert.doesNotMatch(deploy, /hermes_release_bootstrap\.v1\.sha256/);
+  assert.match(bootstrap, /git show "\$CANDIDATE:\$path"/);
+  assert.match(deploy, /git -C "\$REPO_ROOT" show "\$CANDIDATE:\$path"/);
 });
 
 test('candidate owner preflight imports the immutable stage module, never a missing or incompatible old checkout module', () => {

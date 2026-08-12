@@ -570,12 +570,21 @@ require_apply_prerequisites() {
 
 require_candidate_bootstrap_authority() {
   local bootstrap_root="${RAN_AGENT_RELEASE_BOOTSTRAP_ROOT:-}"
+  local path
+  local -a expected=(
+    scripts/bootstrap-hermes-release.sh
+    scripts/deploy-hermes-release.sh
+    scripts/deploy-hermes-runtime-release.py
+    scripts/resolve-hermes-service-node.sh
+    scripts/prune-hermes-release-artifacts.sh
+    scripts/check-hermes-snapshot-capacity.py
+    scripts/ombre_o1_contract.py
+    scripts/verify-runtime-service-identity.sh
+  )
   [[ -n "$bootstrap_root" && "$bootstrap_root" == "$SCRIPT_ROOT" && "$bootstrap_root" != "$REPO_ROOT" &&
     "$bootstrap_root" == "${TMPDIR:-/tmp}"/ran-agent-release-bootstrap.* ]] || fail candidate_bootstrap_required
-  git -C "$REPO_ROOT" show "$CANDIDATE:docs/governance/hermes_release_bootstrap.v1.sha256" |
-    cmp -s - "$bootstrap_root/manifest" || fail candidate_bootstrap_required
   "$PYTHON_BIN" -I -c '
-import hashlib, os, stat, sys
+import os, stat, sys
 root = os.path.realpath(sys.argv[1])
 expected = set(sys.argv[2:])
 value = os.lstat(root)
@@ -589,29 +598,13 @@ for directory, names, files in os.walk(root, followlinks=False):
             raise SystemExit(1)
     for name in files:
         actual.add(os.path.relpath(os.path.join(directory, name), root))
-if actual != expected | {"manifest"}:
+if actual != expected:
     raise SystemExit(1)
-entries = {}
-for line in open(os.path.join(root, "manifest"), encoding="utf-8"):
-    digest, path = line.rstrip("\n").split("  ", 1)
-    if path in entries or len(digest) != 64:
-        raise SystemExit(1)
-    entries[path] = digest
-if set(entries) != expected:
-    raise SystemExit(1)
-for path, digest in entries.items():
-    target = os.path.join(root, path)
-    if hashlib.sha256(open(target, "rb").read()).hexdigest() != digest:
-        raise SystemExit(1)
-' "$bootstrap_root" \
-    scripts/bootstrap-hermes-release.sh \
-    scripts/deploy-hermes-release.sh \
-    scripts/deploy-hermes-runtime-release.py \
-    scripts/resolve-hermes-service-node.sh \
-    scripts/prune-hermes-release-artifacts.sh \
-    scripts/check-hermes-snapshot-capacity.py \
-    scripts/ombre_o1_contract.py \
-    scripts/verify-runtime-service-identity.sh || fail candidate_bootstrap_required
+' "$bootstrap_root" "${expected[@]}" || fail candidate_bootstrap_required
+  for path in "${expected[@]}"; do
+    git -C "$REPO_ROOT" show "$CANDIDATE:$path" |
+      cmp -s - "$bootstrap_root/$path" || fail candidate_bootstrap_required
+  done
 }
 
 prune_release_artifacts() {
