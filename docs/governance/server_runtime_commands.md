@@ -132,6 +132,7 @@ S12_CANDIDATE=<independently-reviewed-40-char-main-sha>
 S12_BASELINE=<fresh-r3b-production-baseline-sha>
 S12_COMMITTED_AT=<whole-second-UTC-instant>
 S12_BINDING=<owner-approved-root-owned-0600-visible-binding.json>
+S12_BINDING_SHA256=<owner-approved-sha256:64-lowercase-hex-digest>
 S12_CONTROLLER="$(mktemp /tmp/ran-agent-s12-controller.XXXXXX)"
 S12_BOOTSTRAP="$(mktemp /tmp/ran-agent-s12-bootstrap.XXXXXX)"
 git show "$S12_CANDIDATE:scripts/s12-cutover.py" > "$S12_CONTROLLER"
@@ -143,14 +144,21 @@ sudo "$S12_CONTROLLER" \
   --legacy-db /opt/ran_agent/data/personal_agent.db \
   --state-dir /opt/ran_agent/.ran_agent_state \
   --core-db /opt/ran_agent/.ran_agent_state/core/core-state.sqlite3 \
-  --visible-binding "$S12_BINDING" --committed-at "$S12_COMMITTED_AT"
+  --visible-binding "$S12_BINDING" \
+  --visible-binding-sha256 "$S12_BINDING_SHA256" \
+  --committed-at "$S12_COMMITTED_AT"
 ```
+
+The controller reads the protected binding once through a no-follow descriptor.
+VERIFY uses a temporary snapshot; APPLY publishes the same approved bytes once
+inside its existing transaction directory. After `core-cutover:v1` commits,
+Core's durable binding receipt—not the original pathname—owns acceptance routing.
 
 Only after the owner authorizes the exact VERIFY evidence, use the same command
 with `--mode apply`, `--owner-id <owner-id>` and
 `--authorization-ref <exact-authorization-ref>`. Repeating that exact APPLY
 resumes its durable transaction; changing candidate, owner, authorization,
-baseline, cutover instant, binding digest or Core DB fails closed. A committed
+baseline, cutover instant, expected binding digest or Core DB fails closed. A committed
 `core-cutover:v1` marker forces forward recovery even when the root journal is
 older. Remove only the two `/tmp` controller files after the governed
 transaction no longer needs them.

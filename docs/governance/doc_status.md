@@ -182,7 +182,7 @@ The exact bytes passed bounded TECserver root/ubuntu probe, resolver,
 Node-provider and Python-provider-route parity with sealed-runtime and
 production hashes/state unchanged. The repair was archived and independently
 reviewed at `9653d030473b3e9870ddea9158c4a2f9570c243b`; complete R3-B on that
-base is `CLEAR`. S12 remains `NOT_STARTED`. Its sole current blocker is
+base is `CLEAR`. S12 remains `NOT_STARTED`. Its next blocker was
 `S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP`. The first orchestration
 candidate `e6ce78aa` is `LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED / ARCHIVED`:
 VERIFY created a source candidate ref, an ACCEPTED journal bypassed SQLite, and
@@ -209,8 +209,15 @@ proof stopped on `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP`: Core
 discarded the bound Feishu route kind and could invoke a direct-message send
 with an empty user recipient. The bounded successor preserves the existing
 Package B `destinationKind`/`destinationRef` contract through scheduled
-delivery and maps it mechanically at the Feishu adapter; it is
-`LOCAL_VERIFIED / NOT_REVIEWED` and archived by its containing commit.
+delivery and maps it mechanically at the Feishu adapter. It is archived at
+`2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b`; terminal audit accepted that
+contract but returned `FIX_REQUIRED` for
+`S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP`. The custody successor requires
+an explicit owner-approved digest, captures the protected input once, pins it
+inside the existing S12 transaction, extends the existing Core marker with that
+digest and reads the committed route through the existing Package B binding
+receipt after P5. It is `LOCAL_VERIFIED / NOT_REVIEWED` and archived by its
+containing commit.
 Production is unchanged; S12 remains `NOT_STARTED`. The protected visible
 binding is `NOT_AUTHORIZED / NOT_INSTALLED`, and canonical S12 VERIFY is
 `NOT_RUN`.

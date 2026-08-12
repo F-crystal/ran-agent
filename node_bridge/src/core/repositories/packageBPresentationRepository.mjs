@@ -449,6 +449,13 @@ export function createPackageBPresentationRepositories({ get, all, run }) {
 
 export function createPackageBPresentationReader({ read, all }) {
   return frozen({
+    bindingsByOperation: (operationKey) => all(`SELECT binding.*,
+      receipt.owner_id AS receipt_owner_id,
+      substr(receipt.source_kind,length('package_b_presentation_binding_destination:')+1) AS destination_kind
+      FROM journal_event receipt JOIN presentation_binding binding
+        ON binding.presentation_binding_id=receipt.correlation_id
+      WHERE receipt.event_type=? AND receipt.origin_ref=?`,
+    `package_b_${BINDING_KIND}`, operationKey),
     binding: ({ identity, conversationId, bindingId }) => readVerifiedConversationIdentity(read, identity, conversationId)
       && read(`SELECT binding.*,
         substr(receipt.source_kind,length('package_b_presentation_binding_destination:')+1) AS destination_kind

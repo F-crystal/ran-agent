@@ -20,8 +20,8 @@ for (const required of ['mode', 'core-db', 'transaction-id', 'candidate-sha', 'o
   if (!args[required]) throw new Error(`--${required} is required`);
 }
 if (!['register', 'inspect'].includes(args.mode)) throw new Error('--mode must be register or inspect');
-if (args.mode === 'register' && (!args['conversation-id'] || !args['binding-id'] || !args['scheduled-at'])) {
-  throw new Error('--mode register requires --conversation-id, --binding-id and --scheduled-at');
+if (args.mode === 'register' && !args['scheduled-at']) {
+  throw new Error('--mode register requires --scheduled-at');
 }
 if (!args['s12-transaction'] && !args['s12-transaction-fd']) {
   throw new Error('--s12-transaction or --s12-transaction-fd is required');
@@ -66,6 +66,7 @@ if (transaction.schemaVersion !== 1 || phaseIndex < 0
   || !['IN_PROGRESS', 'FORWARD_RECOVERY', 'FORWARD_RECOVERY_REQUIRED', 'ACCEPTED'].includes(transaction.status)
   || transaction.transactionId !== args['transaction-id'] || transaction.candidateSha !== args['candidate-sha']
   || transaction.ownerId !== args['owner-id'] || transaction.authorizationRef !== args['authorization-ref']
+  || !/^sha256:[0-9a-f]{64}$/.test(transaction.visibleBindingSha256)
   || path.resolve(transaction.coreDb) !== path.resolve(args['core-db'])) {
   throw new Error('S12 transaction journal does not authorize acceptance');
 }
@@ -76,10 +77,10 @@ try {
   const authority = {
     transactionId: args['transaction-id'], candidateSha: args['candidate-sha'],
     ownerId: args['owner-id'], authorizationRef: args['authorization-ref'],
+    visibleBindingSha256: transaction.visibleBindingSha256, committedAt: transaction.committedAt,
   };
   const result = args.mode === 'register'
-    ? await registerS12Acceptance({ core, input: { ...authority,
-      conversationId: args['conversation-id'], bindingId: args['binding-id'], scheduledAt: args['scheduled-at'] } })
+    ? await registerS12Acceptance({ core, input: { ...authority, scheduledAt: args['scheduled-at'] } })
     : inspectS12Acceptance({ core, ...authority });
   process.stdout.write(`${JSON.stringify(result)}\n`);
 } finally {

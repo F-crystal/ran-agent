@@ -22,6 +22,7 @@ const CANDIDATE = 'a'.repeat(40);
 const TRANSACTION = 's12-fixture';
 const CONVERSATION = 'system-owner-conversation';
 const BINDING = 'system-owner-binding';
+const BINDING_DIGEST = `sha256:${'d'.repeat(64)}`;
 const TOKEN = `hmac-sha256:v1:test-key:${'a'.repeat(64)}`;
 
 test('acceptance subordinate refuses invocation without the S12 transaction journal', () => {
@@ -29,7 +30,7 @@ test('acceptance subordinate refuses invocation without the S12 transaction jour
   const result = spawnSync(process.execPath, [script,
     '--mode', 'register', '--core-db', '/missing/core.sqlite3', '--transaction-id', TRANSACTION,
     '--candidate-sha', CANDIDATE, '--owner-id', OWNER, '--authorization-ref', AUTH,
-    '--conversation-id', CONVERSATION, '--binding-id', BINDING, '--scheduled-at', DUE,
+    '--scheduled-at', DUE,
   ], { encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /--s12-transaction or --s12-transaction-fd is required/);
@@ -46,12 +47,13 @@ test('acceptance subordinate refuses a forged phase without the durable phase ch
     completedPhases: ['P7_CORE_WAKE_ACTIVE'], cutoverCommitted: true,
     transactionId: TRANSACTION, candidateSha: CANDIDATE, ownerId: OWNER,
     authorizationRef: AUTH, coreDb: path.join(root, 'core.sqlite3'),
+    visibleBindingSha256: BINDING_DIGEST, committedAt: AT,
   }), { mode: 0o600 });
   const script = path.resolve(new URL('../../../scripts/core-s12-acceptance.mjs', import.meta.url).pathname);
   const result = spawnSync(process.execPath, [script,
     '--mode', 'register', '--core-db', path.join(root, 'core.sqlite3'), '--transaction-id', TRANSACTION,
     '--candidate-sha', CANDIDATE, '--owner-id', OWNER, '--authorization-ref', AUTH,
-    '--conversation-id', CONVERSATION, '--binding-id', BINDING, '--scheduled-at', DUE,
+    '--scheduled-at', DUE,
     '--s12-transaction', journal,
   ], { encoding: 'utf8', env: { ...process.env, RAN_AGENT_RELEASE_ARTIFACT_ROOT: fs.realpathSync(root) } });
   assert.notEqual(result.status, 0);
@@ -70,6 +72,7 @@ async function setup(t) {
       watermark: AT, committedAt: AT,
       migrationSnapshotDigest: `sha256:${'b'.repeat(64)}`,
       scheduleManifestDigest: `sha256:${'c'.repeat(64)}`,
+      visibleBindingDigest: BINDING_DIGEST,
       ambiguousOutboxDisposition: 'terminal_no_resend', pendingOutboundDisposition: 'suppress',
     },
     apply: (tx) => {
@@ -93,7 +96,7 @@ async function setup(t) {
 function input(overrides = {}) {
   return {
     transactionId: TRANSACTION, candidateSha: CANDIDATE, ownerId: OWNER,
-    authorizationRef: AUTH, conversationId: CONVERSATION, bindingId: BINDING,
+    authorizationRef: AUTH, visibleBindingSha256: BINDING_DIGEST, committedAt: AT,
     scheduledAt: DUE, ...overrides,
   };
 }
@@ -146,6 +149,7 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
     schemaVersion: 1, status: 'ACCEPTED', phase: phases.at(-1), completedPhases: phases,
     cutoverCommitted: true, transactionId: TRANSACTION, candidateSha: CANDIDATE,
     ownerId: OWNER, authorizationRef: AUTH, coreDb: dbPath,
+    visibleBindingSha256: BINDING_DIGEST, committedAt: AT,
   }), { mode: 0o600 });
   const snapshot = (candidate) => {
     if (!fs.existsSync(candidate)) return null;
@@ -193,9 +197,15 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
 
 test('S12 acceptance rejects different cutover authority and preserves the first replay time', async (t) => {
   const { core } = await setup(t);
-  await assert.rejects(registerS12Acceptance({ core, input: input({ candidateSha: 'd'.repeat(40) }) }), {
-    code: 'S12_ACCEPTANCE_AUTHORITY_MISMATCH',
-  });
+  for (const conflict of [
+    { candidateSha: 'd'.repeat(40) },
+    { visibleBindingSha256: `sha256:${'e'.repeat(64)}` },
+    { committedAt: '2026-08-12T00:00:02.000Z' },
+  ]) {
+    await assert.rejects(registerS12Acceptance({ core, input: input(conflict) }), {
+      code: 'S12_ACCEPTANCE_AUTHORITY_MISMATCH',
+    });
+  }
   await registerS12Acceptance({ core, input: input() });
   const replay = await registerS12Acceptance({
     core, input: input({ scheduledAt: '2026-08-12T00:00:02.000Z' }),

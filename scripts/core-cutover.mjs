@@ -17,7 +17,7 @@ function argumentsByName(argv) {
 }
 
 const args = argumentsByName(process.argv.slice(2));
-for (const required of ['core-db', 'snapshot', 'system-manifest', 'visible-binding', 'candidate-sha', 'committed-at']) {
+for (const required of ['core-db', 'snapshot', 'system-manifest', 'visible-binding', 'visible-binding-sha256', 'candidate-sha', 'committed-at']) {
   if (!args[required]) throw new Error(`--${required} is required`);
 }
 const mode = args.mode || 'verify';
@@ -63,6 +63,8 @@ if (mode === 'apply') {
     ].join('\0')
     || transaction.cutoverCommitted !== false || transaction.candidateSha !== args['candidate-sha']
     || transaction.ownerId !== args['owner-id'] || transaction.authorizationRef !== args['authorization-ref']
+    || transaction.visibleBindingSha256 !== args['visible-binding-sha256']
+    || transaction.committedAt !== args['committed-at']
     || path.resolve(transaction.coreDb) !== path.resolve(args['core-db'])) {
     throw new Error('S12 transaction journal does not authorize Core cutover');
   }
@@ -73,6 +75,7 @@ const result = await executeCoreCutover({
   snapshotPath: path.resolve(args.snapshot),
   systemManifestPath: path.resolve(args['system-manifest']),
   visibleBindingPath: path.resolve(args['visible-binding']),
+  visibleBindingDigest: args['visible-binding-sha256'],
   candidateSha: args['candidate-sha'],
   committedAt: args['committed-at'],
   ownerId: args['owner-id'],

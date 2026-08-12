@@ -21,6 +21,7 @@ SPEC = importlib.util.spec_from_file_location("s12_cutover", SCRIPT)
 assert SPEC and SPEC.loader
 MODULE = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(MODULE)
+BINDING_DIGEST = f"sha256:{'d' * 64}"
 
 
 class FakeOperations:
@@ -78,7 +79,8 @@ def journal(tmp_path: Path):
     identity = {
         "transactionId": "s12-test", "candidateSha": "a" * 40,
         "ownerId": "owner", "authorizationRef": "auth",
-        "productionBaselineSha": "b" * 40, "committedAt": "2026-08-12T00:00:00Z",
+        "productionBaselineSha": "b" * 40, "committedAt": "2026-08-12T00:00:00.000Z",
+        "visibleBindingSha256": BINDING_DIGEST,
         "coreDb": str(tmp_path / "core.sqlite3"),
     }
     value = MODULE.Journal(tmp_path, identity)
@@ -97,6 +99,8 @@ def mark_accepted(value: MODULE.Journal) -> None:
 def write_core_marker(
     path: Path, *, owner: str = "owner", authorization: str = "auth",
     candidate: str = "a" * 40, semantics: str | None = None,
+    binding_digest: str = BINDING_DIGEST,
+    committed_at: str = "2026-08-12T00:00:00.000Z",
 ) -> None:
     payload = semantics or json.dumps({
         "candidateSha": candidate,
@@ -104,23 +108,25 @@ def write_core_marker(
         "pendingOutboundDisposition": "suppress",
         "migrationSnapshotDigest": "sha256:migration",
         "scheduleManifestDigest": "sha256:schedule",
+        "visibleBindingDigest": binding_digest,
         "watermark": "2026-08-12T00:00:00Z",
     })
     with sqlite3.connect(path) as database:
         database.execute(
             "CREATE TABLE journal_event (journal_event_id TEXT PRIMARY KEY,event_type TEXT,"
-            "owner_id TEXT,origin_ref TEXT,correlation_id TEXT,source_kind TEXT,source_ref TEXT)"
+            "owner_id TEXT,origin_ref TEXT,correlation_id TEXT,source_kind TEXT,source_ref TEXT,created_at TEXT)"
         )
         database.execute(
-            "INSERT INTO journal_event VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO journal_event VALUES(?,?,?,?,?,?,?,?)",
             ("core-cutover:v1", "core_cutover_committed_at", owner, authorization,
-             candidate, "core-cutover:v1", payload),
+             candidate, "core-cutover:v1", payload, committed_at),
         )
 
 
 def accepted_operations(core_db: Path) -> MODULE.ProductionOperations:
     return MODULE.ProductionOperations(SimpleNamespace(
         core_db=core_db, owner_id="owner", authorization_ref="auth", candidate="a" * 40,
+        visible_binding_sha256=BINDING_DIGEST, committed_at="2026-08-12T00:00:00.000Z",
     ), core_db.parent / "transaction", Path("/candidate"))
 
 
@@ -399,6 +405,8 @@ def test_accepted_replay_reads_and_validates_sqlite_before_returning(
         "ownerId": "owner", "authorizationRef": "auth", "candidateSha": "a" * 40,
         "migrationSnapshotDigest": "sha256:migration",
         "scheduleManifestDigest": "sha256:schedule",
+        "visibleBindingDigest": BINDING_DIGEST,
+        "committedAt": "2026-08-12T00:00:00.000Z",
         "watermark": "2026-08-12T00:00:00Z",
     }]
     assert state.path.read_bytes() == before
@@ -412,6 +420,8 @@ def test_accepted_replay_reads_and_validates_sqlite_before_returning(
         ("owner", {"owner": "other"}, False, "conflicts with S12 authority"),
         ("authorization", {"authorization": "other"}, False, "conflicts with S12 authority"),
         ("candidate", {"candidate": "c" * 40}, False, "conflicts with S12 authority"),
+        ("binding", {"binding_digest": f"sha256:{'e' * 64}"}, False, "semantics conflict"),
+        ("committed-at", {"committed_at": "2026-08-12T00:00:01.000Z"}, False, "semantics conflict"),
         ("semantics", {"semantics": "{}"}, False, "semantics conflict"),
         ("malformed-semantics", {"semantics": "{"}, False, "semantics are malformed"),
     ),
@@ -467,9 +477,9 @@ def test_read_only_accepted_inspection_requires_writer_clock_and_terminal_receip
         )
         database.execute("INSERT INTO presentation_outbox VALUES('outbox','sent',1)")
         database.execute(
-            "INSERT INTO journal_event VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO journal_event VALUES(?,?,?,?,?,?,?,?)",
             ("receipt", "package_b_presentation_result_recorded", "owner", "auth",
-             "outbox", "acceptance", "{}"),
+             "outbox", "acceptance", "{}", "2026-08-12T00:00:01.000Z"),
         )
     operations = accepted_operations(core_db)
     monkeypatch.setattr(
@@ -632,6 +642,7 @@ def test_p0_routes_candidate_code_against_old_or_conflicting_production_state(
                 core_db=tmp_path / "absent-core.sqlite3",
                 production_baseline="baseline", visible_binding=tmp_path / "binding.json",
                 candidate="a" * 40, committed_at="2026-08-12T00:00:00Z",
+                visible_binding_sha256=BINDING_DIGEST,
                 legacy_db=tmp_path / "legacy.sqlite3", state_dir=tmp_path / "state",
             ), transaction, candidate)
             self.commands: list[list[str]] = []
@@ -676,6 +687,8 @@ def test_p0_routes_candidate_code_against_old_or_conflicting_production_state(
         assert str(candidate / MODULE.MANAGED_WAKE_MANIFEST_PATH) in invoked
         assert str(candidate / MODULE.MIGRATION_MANIFEST_PATH) in invoked
         assert str(candidate / MODULE.SCHEDULE_MANIFEST_PATH) in invoked
+        assert str(operations.binding_path) in invoked
+        assert str(operations.args.visible_binding) not in invoked
         assert str(tampered) not in invoked
         assert all("--apply" not in command for command in operations.commands)
 
@@ -724,7 +737,8 @@ def test_s12_verify_preserves_the_complete_persistent_state_vector(
                                              production_baseline="baseline",
                                              visible_binding=tmp_path / "binding.json",
                                              candidate="a" * 40,
-                                             committed_at="2026-08-12T00:00:00Z"),
+                                             committed_at="2026-08-12T00:00:00Z",
+                                             visible_binding_sha256=BINDING_DIGEST),
                              transaction, tmp_path / "candidate")
             self.source_modes: list[str] = []
 
@@ -785,11 +799,113 @@ def test_worker_status_rejects_zero_or_duplicate_node_writers(monkeypatch: pytes
     assert operations.activate_worker_status()["workProducingWriters"] == 1
 
 
-def test_visible_binding_input_is_owner_only_regular_and_digest_bound(tmp_path: Path) -> None:
-    binding = tmp_path / "visible-binding.json"
-    binding.write_text('{"bindingId":"owner"}\n')
-    binding.chmod(0o600)
-    assert MODULE.protected_file_digest(binding).startswith("sha256:")
-    binding.chmod(0o644)
+def test_visible_binding_capture_and_transaction_snapshot_pin_exact_approved_bytes(tmp_path: Path) -> None:
+    def payload(destination: str) -> bytes:
+        return json.dumps({
+            "conversationId": "owner-conversation", "canonicalConversationKey": "owner-conversation",
+            "actorRef": "owner", "platform": "feishu", "sourceInstanceId": "feishu:owner",
+            "platformConversationBinding": "feishu:owner", "bindingId": "owner-binding",
+            "destinationKind": "user", "destinationRef": destination,
+        }, sort_keys=True).encode()
+
+    approved = payload("route-a")
+    expected = f"sha256:{hashlib.sha256(approved).hexdigest()}"
+    source = tmp_path / "visible-binding.json"
+    source.write_bytes(approved)
+    source.chmod(0o600)
+    captured, route = MODULE.capture_protected_binding(source, expected)
+    assert captured == approved and route["destinationRef"] == "route-a"
+
+    source.write_bytes(payload("route-b"))
+    snapshot_dir = tmp_path / "transaction"
+    snapshot_dir.mkdir(mode=0o700)
+    snapshot = snapshot_dir / "visible-binding.json"
+    MODULE.transaction_binding_snapshot(snapshot, expected, captured)
+    assert snapshot.read_bytes() == approved
+    assert stat.S_IMODE(snapshot.stat().st_mode) == 0o600
+    with pytest.raises(MODULE.S12Error, match="already exists"):
+        MODULE.transaction_binding_snapshot(snapshot, expected, captured)
+    snapshot.write_bytes(payload("route-b"))
+    with pytest.raises(MODULE.S12Error, match="differs from owner approval"):
+        MODULE.transaction_binding_snapshot(snapshot, expected)
+    with pytest.raises(MODULE.S12Error, match="differs from owner approval"):
+        MODULE.capture_protected_binding(source, expected)
+    source.chmod(0o644)
     with pytest.raises(MODULE.S12Error, match="identity/mode/link count"):
-        MODULE.protected_file_digest(binding)
+        MODULE.capture_protected_binding(source, f"sha256:{hashlib.sha256(source.read_bytes()).hexdigest()}")
+
+
+def test_p0_p2_and_p5_consume_only_the_pinned_binding_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    approved = json.dumps({
+        "conversationId": "owner-conversation", "canonicalConversationKey": "owner-conversation",
+        "actorRef": "owner", "platform": "feishu", "sourceInstanceId": "feishu:owner",
+        "platformConversationBinding": "feishu:owner", "bindingId": "owner-binding",
+        "destinationKind": "user", "destinationRef": "route-a",
+    }, sort_keys=True).encode()
+    expected = f"sha256:{hashlib.sha256(approved).hexdigest()}"
+    transaction = tmp_path / "transaction"
+    transaction.mkdir(mode=0o700)
+    source = tmp_path / "owner-input.json"
+    source.write_bytes(approved)
+    source.chmod(0o600)
+    captured, _ = MODULE.capture_protected_binding(source, expected)
+    snapshot = transaction / "visible-binding.json"
+    MODULE.transaction_binding_snapshot(snapshot, expected, captured)
+    source.write_bytes(approved.replace(b"route-a", b"route-b"))
+    for name in ("transaction.json", "quiesced-migration-snapshot.json"):
+        (transaction / name).write_text("{}")
+        (transaction / name).chmod(0o600)
+    core_db = tmp_path / "core.sqlite3"
+    core_db.touch()
+    args = SimpleNamespace(
+        core_db=core_db, visible_binding=source, visible_binding_sha256=expected,
+        candidate="a" * 40, committed_at="2026-08-12T00:00:00.000Z",
+        owner_id="owner", authorization_ref="auth",
+    )
+    operations = MODULE.ProductionOperations(args, transaction, tmp_path / "candidate", snapshot)
+    observed = []
+
+    def rehearse(_core_db: Path | None, output: Path):
+        output.write_text("{}")
+        output.chmod(0o600)
+        return {"status": "REHEARSED"}
+
+    def runtime_run(command, *, pass_fds=(), **_kwargs):
+        binding_fd = int(command[command.index("--visible-binding") + 1].rsplit("/", 1)[1])
+        observed.append(os.pread(binding_fd, len(approved), 0))
+        return {"status": "verified"}
+
+    monkeypatch.setattr(operations, "rehearse", rehearse)
+    monkeypatch.setattr(operations, "runtime_run", runtime_run)
+    operations.core_prepare()
+    operations.cutover()
+    assert observed == [approved, approved]
+    assert source.read_bytes() != approved
+
+
+def test_post_p5_acceptance_never_reopens_original_visible_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    transaction = tmp_path / "transaction"
+    transaction.mkdir(mode=0o700)
+    (transaction / "transaction.json").write_text("{}")
+    (transaction / "transaction.json").chmod(0o600)
+    args = SimpleNamespace(
+        core_db=tmp_path / "core.sqlite3", transaction_id="s12-test", candidate="a" * 40,
+        owner_id="owner", authorization_ref="auth", acceptance_timeout=1,
+        visible_binding=tmp_path / "removed-owner-input.json", state_dir=tmp_path / "state",
+    )
+    operations = MODULE.ProductionOperations(args, transaction, tmp_path / "candidate")
+    commands = []
+    monkeypatch.setattr(
+        operations, "runtime_run",
+        lambda command, **_kwargs: commands.append(command) or {"status": "ENQUEUED"},
+    )
+    monkeypatch.setattr(operations, "run", lambda _command, **_kwargs: {"status": "wake"})
+    monkeypatch.setattr(MODULE.time, "sleep", lambda _seconds: None)
+    assert operations.acceptance("register")["status"] == "ENQUEUED"
+    assert not args.visible_binding.exists()
+    assert "--conversation-id" not in commands[0]
+    assert "--binding-id" not in commands[0]

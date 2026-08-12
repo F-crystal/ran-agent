@@ -36,6 +36,7 @@ test('cutover seeds every replacement schedule active with first due after the w
       watermark: WATERMARK, committedAt: COMMITTED_AT,
       candidateSha: 'a'.repeat(40), migrationSnapshotDigest: `sha256:${'b'.repeat(64)}`,
       scheduleManifestDigest: `sha256:${'c'.repeat(64)}`,
+      visibleBindingDigest: `sha256:${'d'.repeat(64)}`,
       ambiguousOutboxDisposition: 'terminal_no_resend', pendingOutboundDisposition: 'suppress',
     },
     apply: (tx) => seedCoreSystemSchedules(tx, {

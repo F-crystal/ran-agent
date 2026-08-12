@@ -11,6 +11,7 @@ import io
 import json
 import os
 import pwd
+import re
 import shutil
 import socket
 import sqlite3
@@ -53,6 +54,12 @@ PHASES = (
     "P9_ACCEPTANCE_RECEIPT_TERMINAL",
     "P10_ACCEPTED",
 )
+SHA256 = re.compile(r"sha256:[0-9a-f]{64}")
+VISIBLE_BINDING_FIELDS = (
+    "conversationId", "canonicalConversationKey", "actorRef", "platform",
+    "sourceInstanceId", "platformConversationBinding", "bindingId",
+    "destinationKind", "destinationRef",
+)
 
 
 class S12Error(RuntimeError):
@@ -72,13 +79,64 @@ def transaction_id(candidate: str, owner: str, authorization_ref: str) -> str:
     return f"s12-{digest[:24]}"
 
 
-def protected_file_digest(path: Path) -> str:
-    if path.is_symlink() or not path.is_file():
-        raise S12Error("S12 protected input is not a regular file")
-    value = path.stat()
-    if (value.st_uid != os.geteuid() or value.st_nlink != 1 or stat.S_IMODE(value.st_mode) != 0o600):
-        raise S12Error("S12 protected input identity/mode/link count is invalid")
-    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+def capture_protected_binding(path: Path, expected_digest: str) -> tuple[bytes, dict[str, Any]]:
+    if not SHA256.fullmatch(expected_digest):
+        raise S12Error("visible binding SHA256 is invalid")
+    if not hasattr(os, "O_NOFOLLOW"):
+        raise S12Error("S12 protected input requires O_NOFOLLOW")
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | getattr(os, "O_NONBLOCK", 0))
+    try:
+        value = os.fstat(descriptor)
+        if (not stat.S_ISREG(value.st_mode) or value.st_uid != os.geteuid()
+                or value.st_nlink != 1 or stat.S_IMODE(value.st_mode) != 0o600):
+            raise S12Error("S12 protected input identity/mode/link count is invalid")
+        chunks = []
+        while chunk := os.read(descriptor, 64 * 1024):
+            chunks.append(chunk)
+    finally:
+        os.close(descriptor)
+    payload = b"".join(chunks)
+    actual_digest = f"sha256:{hashlib.sha256(payload).hexdigest()}"
+    if actual_digest != expected_digest:
+        raise S12Error("visible binding digest differs from owner approval")
+    try:
+        binding = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise S12Error("visible binding is not valid JSON") from exc
+    if (not isinstance(binding, dict)
+            or any(not isinstance(binding.get(field), str) or not binding[field].strip()
+                   for field in VISIBLE_BINDING_FIELDS)
+            or binding.get("platform") != "feishu"
+            or binding.get("destinationKind") not in {"user", "conversation"}):
+        raise S12Error("visible binding route structure is invalid")
+    return payload, binding
+
+
+def transaction_binding_snapshot(path: Path, expected_digest: str, payload: bytes | None = None) -> dict[str, Any]:
+    if path.exists() or path.is_symlink():
+        if payload is not None:
+            raise S12Error("visible binding transaction snapshot already exists")
+        return capture_protected_binding(path, expected_digest)[1]
+    if payload is None:
+        raise S12Error("visible binding transaction snapshot is missing")
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "wb") as output:
+            output.write(payload)
+            output.flush()
+            os.fsync(output.fileno())
+        os.link(temporary, path, follow_symlinks=False)
+        os.unlink(temporary)
+        directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(temporary)
+    return capture_protected_binding(path, expected_digest)[1]
 
 
 def atomic_json(path: Path, value: dict[str, Any]) -> None:
@@ -309,10 +367,12 @@ def candidate_execution_closure(candidate: str):
 
 
 class ProductionOperations:
-    def __init__(self, args: argparse.Namespace, transaction_dir: Path, candidate_code_root: Path):
+    def __init__(self, args: argparse.Namespace, transaction_dir: Path, candidate_code_root: Path,
+                 binding_path: Path | None = None):
         self.args = args
         self.transaction_dir = transaction_dir
         self.candidate_code_root = candidate_code_root
+        self.binding_path = binding_path or transaction_dir / "visible-binding.json"
         self.snapshot = transaction_dir / "migration-snapshot.json"
         self.final_snapshot = transaction_dir / "quiesced-migration-snapshot.json"
         self.allow_inactive_core_reuse = False
@@ -422,11 +482,14 @@ class ProductionOperations:
                 str(NODE_BIN), str(self.candidate_code_root / "scripts/core-cutover.mjs"), "--mode", "verify",
                 "--core-db", str(verify_core), "--snapshot", str(verify_snapshot),
                 "--system-manifest", str(self.candidate_code_root / SCHEDULE_MANIFEST_PATH),
-                "--visible-binding", str(self.args.visible_binding),
+                "--visible-binding", str(self.binding_path),
+                "--visible-binding-sha256", self.args.visible_binding_sha256,
                 "--candidate-sha", self.args.candidate, "--committed-at", self.args.committed_at,
             ])
         return {
             "status": "VERIFIED", "productionBaseline": self.args.production_baseline,
+            "visibleBindingSha256": self.args.visible_binding_sha256,
+            "destinationKind": cutover.get("destinationKind"),
             "migration": rehearsal, "coreCutover": cutover, "mutationPlan": list(PHASES[1:]),
         }
 
@@ -456,23 +519,26 @@ class ProductionOperations:
         return {"status": "SOURCE_APPLIED_RECOVERED", "snapshot": str(snapshot)}
 
     def core_prepare(self) -> dict[str, Any]:
-        if not self.args.core_db.exists():
-            return self.rehearse(self.args.core_db, self.snapshot)
-        rehearsal = self.rehearse(None, self.snapshot)
+        inactive_core_reused = self.args.core_db.exists()
+        if not inactive_core_reused:
+            rehearsal = self.rehearse(self.args.core_db, self.snapshot)
+        else:
+            rehearsal = self.rehearse(None, self.snapshot)
         snapshot_fd = os.open(self.snapshot, os.O_RDONLY | os.O_NOFOLLOW)
-        binding_fd = os.open(self.args.visible_binding, os.O_RDONLY | os.O_NOFOLLOW)
+        binding_fd = os.open(self.binding_path, os.O_RDONLY | os.O_NOFOLLOW)
         try:
             verified = self.runtime_run([
                 str(NODE_BIN), str(self.candidate_code_root / "scripts/core-cutover.mjs"), "--mode", "verify",
                 "--core-db", str(self.args.core_db), "--snapshot", f"/proc/self/fd/{snapshot_fd}",
                 "--system-manifest", str(self.candidate_code_root / SCHEDULE_MANIFEST_PATH),
                 "--visible-binding", f"/proc/self/fd/{binding_fd}",
+                "--visible-binding-sha256", self.args.visible_binding_sha256,
                 "--candidate-sha", self.args.candidate, "--committed-at", self.args.committed_at,
             ], pass_fds=(snapshot_fd, binding_fd))
         finally:
             os.close(binding_fd)
             os.close(snapshot_fd)
-        return {**rehearsal, "inactiveCoreReused": True, "coreVerification": verified}
+        return {**rehearsal, "inactiveCoreReused": inactive_core_reused, "coreVerification": verified}
 
     def legacy_reconcile(self) -> dict[str, Any]:
         snapshot = json.loads(self.snapshot.read_text(encoding="utf-8"))
@@ -523,13 +589,14 @@ class ProductionOperations:
     def cutover(self) -> dict[str, Any]:
         journal_fd = os.open(self.transaction_dir / "transaction.json", os.O_RDONLY | os.O_NOFOLLOW)
         snapshot_fd = os.open(self.final_snapshot, os.O_RDONLY | os.O_NOFOLLOW)
-        binding_fd = os.open(self.args.visible_binding, os.O_RDONLY | os.O_NOFOLLOW)
+        binding_fd = os.open(self.binding_path, os.O_RDONLY | os.O_NOFOLLOW)
         try:
             return self.runtime_run([
                 str(NODE_BIN), str(self.candidate_code_root / "scripts/core-cutover.mjs"), "--mode", "apply",
                 "--core-db", str(self.args.core_db), "--snapshot", f"/proc/self/fd/{snapshot_fd}",
                 "--system-manifest", str(self.candidate_code_root / SCHEDULE_MANIFEST_PATH),
                 "--visible-binding", f"/proc/self/fd/{binding_fd}",
+                "--visible-binding-sha256", self.args.visible_binding_sha256,
                 "--candidate-sha", self.args.candidate, "--committed-at", self.args.committed_at,
                 "--owner-id", self.args.owner_id, "--authorization-ref", self.args.authorization_ref,
                 "--s12-transaction-fd", str(journal_fd),
@@ -544,7 +611,7 @@ class ProductionOperations:
             return None
         try:
             with sqlite3.connect(f"file:{self.args.core_db}?mode=ro", uri=True) as database:
-                row = database.execute("SELECT owner_id,origin_ref,correlation_id,source_kind,event_type,source_ref "
+                row = database.execute("SELECT owner_id,origin_ref,correlation_id,source_kind,event_type,source_ref,created_at "
                                        "FROM journal_event WHERE journal_event_id='core-cutover:v1'").fetchone()
         except sqlite3.Error as exc:
             raise S12Error("Core marker database is unreadable") from exc
@@ -558,13 +625,16 @@ class ProductionOperations:
         except (TypeError, json.JSONDecodeError) as exc:
             raise S12Error("Core cutover marker semantics are malformed") from exc
         if (semantics.get("candidateSha") != self.args.candidate
+                or semantics.get("visibleBindingDigest") != self.args.visible_binding_sha256
                 or semantics.get("ambiguousOutboxDisposition") != "terminal_no_resend"
-                or semantics.get("pendingOutboundDisposition") != "suppress"):
+                or semantics.get("pendingOutboundDisposition") != "suppress"
+                or row[6] != self.args.committed_at):
             raise S12Error("Core cutover marker semantics conflict with S12 authority")
         return {"ownerId": row[0], "authorizationRef": row[1], "candidateSha": row[2],
                 "migrationSnapshotDigest": semantics.get("migrationSnapshotDigest"),
                 "scheduleManifestDigest": semantics.get("scheduleManifestDigest"),
-                "watermark": semantics.get("watermark")}
+                "visibleBindingDigest": semantics.get("visibleBindingDigest"),
+                "committedAt": row[6], "watermark": semantics.get("watermark")}
 
     @staticmethod
     def main_pid(unit: str) -> int:
@@ -615,7 +685,6 @@ class ProductionOperations:
         return {**result, "workProducingClocks": 1}
 
     def acceptance(self, mode: str) -> dict[str, Any]:
-        binding = json.loads(self.args.visible_binding.read_text(encoding="utf-8"))
         command = [
             str(NODE_BIN), str(self.candidate_code_root / "scripts/core-s12-acceptance.mjs"), "--mode", mode,
             "--core-db", str(self.args.core_db), "--transaction-id", self.args.transaction_id,
@@ -628,8 +697,7 @@ class ProductionOperations:
                 int(datetime.now(timezone.utc).timestamp()) + 1, timezone.utc
             ).isoformat().replace("+00:00", "Z")
             scheduled_timestamp = datetime.fromisoformat(scheduled.replace("Z", "+00:00")).timestamp()
-            command.extend(["--conversation-id", binding["conversationId"], "--binding-id", binding["bindingId"],
-                            "--scheduled-at", scheduled])
+            command.extend(["--scheduled-at", scheduled])
         journal_fd = os.open(self.transaction_dir / "transaction.json", os.O_RDONLY | os.O_NOFOLLOW)
         try:
             command.extend(["--s12-transaction-fd", str(journal_fd)])
@@ -850,9 +918,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--core-db", type=Path, required=True)
     parser.add_argument("--visible-binding", type=Path, required=True)
+    parser.add_argument("--visible-binding-sha256", required=True)
     parser.add_argument("--committed-at", required=True)
     parser.add_argument("--acceptance-timeout", type=int, default=180)
     args = parser.parse_args()
+    if not SHA256.fullmatch(args.visible_binding_sha256):
+        parser.error("--visible-binding-sha256 must be sha256:<64 lowercase hex>")
     if args.mode == "apply" and (not args.owner_id or not args.authorization_ref):
         parser.error("--mode apply requires --owner-id and --authorization-ref")
     return args
@@ -870,7 +941,6 @@ def main() -> int:
     validate_candidate_execution_inputs(args)
     owner = args.owner_id or "verify-only"
     authorization = args.authorization_ref or "verify-only"
-    visible_binding_digest = protected_file_digest(args.visible_binding)
     identity = {
         "transactionId": transaction_id(args.candidate, owner, authorization),
         "candidateSha": args.candidate,
@@ -878,14 +948,22 @@ def main() -> int:
         "authorizationRef": authorization,
         "productionBaselineSha": args.production_baseline,
         "committedAt": args.committed_at,
-        "visibleBindingSha256": visible_binding_digest,
+        "visibleBindingSha256": args.visible_binding_sha256,
         "coreDb": str(args.core_db.resolve()),
     }
     args.transaction_id = identity["transactionId"]
     if args.mode == "verify":
+        binding_bytes, _ = capture_protected_binding(
+            args.visible_binding, args.visible_binding_sha256,
+        )
         with candidate_execution_closure(args.candidate) as candidate_code_root:
             with tempfile.TemporaryDirectory(prefix="s12-verify-") as temporary:
-                result = ProductionOperations(args, Path(temporary), candidate_code_root).verify()
+                temporary_root = Path(temporary)
+                binding_path = temporary_root / "visible-binding.json"
+                transaction_binding_snapshot(binding_path, args.visible_binding_sha256, binding_bytes)
+                result = ProductionOperations(
+                    args, temporary_root, candidate_code_root, binding_path,
+                ).verify()
         print(json.dumps(result, sort_keys=True))
         return 0
     TRANSACTION_ROOT.mkdir(mode=0o700, exist_ok=True)
@@ -896,9 +974,16 @@ def main() -> int:
     with transaction_lock(LOCK_PATH):
         with candidate_execution_closure(args.candidate) as candidate_code_root:
             journal = Journal(TRANSACTION_ROOT, identity)
+            existing = journal.path.exists()
+            captured = None if existing else capture_protected_binding(
+                args.visible_binding, args.visible_binding_sha256,
+            )[0]
             journal.open()
+            binding_path = journal.directory / "visible-binding.json"
+            if not existing:
+                transaction_binding_snapshot(binding_path, args.visible_binding_sha256, captured)
             result = run_apply(ProductionOperations(
-                args, journal.directory, candidate_code_root,
+                args, journal.directory, candidate_code_root, binding_path,
             ), journal)
     print(json.dumps({"status": result["status"], "transaction": str(journal.path),
                       "phase": result["phase"]}, sort_keys=True))

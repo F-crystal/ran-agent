@@ -43,11 +43,14 @@ function semanticRecord(input) {
       'CORE_CUTOVER_SNAPSHOT_REQUIRED', 'migration snapshot digest is required'),
     scheduleManifestDigest: requireText(input.scheduleManifestDigest,
       'CORE_CUTOVER_MANIFEST_REQUIRED', 'schedule manifest digest is required'),
+    visibleBindingDigest: requireText(input.visibleBindingDigest,
+      'CORE_CUTOVER_BINDING_REQUIRED', 'visible binding digest is required'),
     ambiguousOutboxDisposition: input.ambiguousOutboxDisposition,
     pendingOutboundDisposition: input.pendingOutboundDisposition,
   });
   if (!SHA256.test(record.migrationSnapshotDigest)
     || !SHA256.test(record.scheduleManifestDigest)
+    || !SHA256.test(record.visibleBindingDigest)
     || record.ambiguousOutboxDisposition !== 'terminal_no_resend'
     || record.pendingOutboundDisposition !== 'suppress') {
     throw coreError('CORE_CUTOVER_SEMANTICS_INVALID', 'cutover source or no-resend semantics are invalid');

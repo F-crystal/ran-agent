@@ -71,13 +71,21 @@ function plan(input) {
   const snapshot = readJson(input.snapshotPath, 'migration snapshot');
   assertSnapshot(snapshot);
   const manifest = loadCoreSystemScheduleManifest(input.systemManifestPath);
-  const visibleBinding = readJson(input.visibleBindingPath, 'visible binding');
+  const visibleBindingBytes = fs.readFileSync(input.visibleBindingPath);
+  let visibleBinding;
+  try { visibleBinding = JSON.parse(visibleBindingBytes.toString('utf8')); } catch (error) {
+    throw coreError('CORE_CUTOVER_INPUT_INVALID', 'visible binding is not valid JSON', error);
+  }
+  const visibleBindingDigest = `sha256:${createHash('sha256').update(visibleBindingBytes).digest('hex')}`;
+  if (visibleBindingDigest !== input.visibleBindingDigest) {
+    throw coreError('CORE_CUTOVER_BINDING_DIGEST_MISMATCH', 'visible binding differs from approved S12 authority');
+  }
   validateCoreSystemScheduleBinding(manifest, visibleBinding);
   const database = businessRows(input.coreDbPath);
   if (!database.cutoverCommitted && Object.values(database.counts).some((count) => count !== 0)) {
     throw coreError('CORE_CUTOVER_CANDIDATE_NOT_EMPTY', 'pre-cutover Core candidate contains business rows');
   }
-  return Object.freeze({ snapshot, manifest, visibleBinding, database });
+  return Object.freeze({ snapshot, manifest, visibleBinding, visibleBindingDigest, database });
 }
 
 export async function executeCoreCutover(input = {}) {
@@ -92,6 +100,8 @@ export async function executeCoreCutover(input = {}) {
     systemSchedules: prepared.manifest.schedules.length,
     pendingOutboundSuppressed: prepared.snapshot.counts.pendingOutboundMessages,
     ambiguousNoResend: prepared.snapshot.counts.outboxAmbiguousTerminalNoResend,
+    visibleBindingSha256: prepared.visibleBindingDigest,
+    destinationKind: prepared.visibleBinding.destinationKind,
   });
   if (input.mode !== 'apply') return summary;
 
@@ -107,6 +117,7 @@ export async function executeCoreCutover(input = {}) {
         candidateSha: input.candidateSha,
         migrationSnapshotDigest: digest(input.snapshotPath),
         scheduleManifestDigest: digest(input.systemManifestPath),
+        visibleBindingDigest: prepared.visibleBindingDigest,
         ambiguousOutboxDisposition: 'terminal_no_resend',
         pendingOutboundDisposition: 'suppress',
       },

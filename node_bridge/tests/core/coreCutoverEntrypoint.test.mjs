@@ -8,12 +8,15 @@ import test from 'node:test';
 const ROOT = path.resolve(new URL('../../..', import.meta.url).pathname);
 const SCRIPT = path.join(ROOT, 'scripts/core-cutover.mjs');
 const CANDIDATE = 'a'.repeat(40);
+const BINDING_DIGEST = `sha256:${'d'.repeat(64)}`;
+const COMMITTED_AT = '2026-08-12T00:00:00.000Z';
 
 function command(extra = [], env = process.env) {
   return spawnSync(process.execPath, [SCRIPT,
     '--mode', 'apply', '--core-db', '/missing/core.sqlite3', '--snapshot', '/missing/snapshot.json',
     '--system-manifest', '/missing/system.json', '--visible-binding', '/missing/binding.json',
-    '--candidate-sha', CANDIDATE, '--committed-at', '2026-08-12T00:00:00.000Z',
+    '--visible-binding-sha256', BINDING_DIGEST,
+    '--candidate-sha', CANDIDATE, '--committed-at', COMMITTED_AT,
     '--owner-id', 'owner', '--authorization-ref', 'auth', ...extra,
   ], { encoding: 'utf8', env });
 }
@@ -34,6 +37,7 @@ test('Core cutover apply requires the exact durable P4 S12 authority chain', (t)
     schemaVersion: 1, status: 'IN_PROGRESS', phase: 'P3_LEGACY_RECONCILED',
     completedPhases: ['P0_VERIFIED', 'P1_SOURCE_APPLIED', 'P2_CORE_PREPARED', 'P3_LEGACY_RECONCILED'],
     cutoverCommitted: false, candidateSha: CANDIDATE, ownerId: 'owner', authorizationRef: 'auth',
+    visibleBindingSha256: BINDING_DIGEST, committedAt: COMMITTED_AT,
     coreDb: '/missing/core.sqlite3',
   })}\n`, { mode: 0o600 });
   const result = command(['--s12-transaction', journal], {
@@ -54,6 +58,7 @@ test('exact P4 journal authorizes only the existing atomic cutover subordinate',
     completedPhases: ['P0_VERIFIED', 'P1_SOURCE_APPLIED', 'P2_CORE_PREPARED',
       'P3_LEGACY_RECONCILED', 'P4_QUIESCED'],
     cutoverCommitted: false, candidateSha: CANDIDATE, ownerId: 'owner', authorizationRef: 'auth',
+    visibleBindingSha256: BINDING_DIGEST, committedAt: COMMITTED_AT,
     coreDb: '/missing/core.sqlite3',
   })}\n`, { mode: 0o600 });
   const result = command(['--s12-transaction', journal], {
@@ -62,4 +67,15 @@ test('exact P4 journal authorizes only the existing atomic cutover subordinate',
   assert.notEqual(result.status, 0);
   assert.doesNotMatch(result.stderr, /S12 transaction journal/);
   assert.match(result.stderr, /ENOENT|cutover input/i);
+
+  for (const mismatch of [
+    ['--visible-binding-sha256', `sha256:${'e'.repeat(64)}`],
+    ['--committed-at', '2026-08-12T00:00:01.000Z'],
+  ]) {
+    const rejected = command(['--s12-transaction', journal, ...mismatch], {
+      ...process.env, RAN_AGENT_RELEASE_ARTIFACT_ROOT: artifact,
+    });
+    assert.notEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /journal does not authorize Core cutover/);
+  }
 });

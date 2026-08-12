@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
@@ -12,6 +13,7 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 const SYSTEM_MANIFEST = path.join(REPO_ROOT, 'docs/governance/core_system_schedules.v1.json');
 const WATERMARK = '2026-08-08T15:00:00.000Z';
 const COMMITTED_AT = '2026-08-08T15:01:00.000Z';
+const digest = (filePath) => `sha256:${createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')}`;
 
 function setup(t) {
   const { root, dbPath } = createTempCore(t, 'hermes-core-cutover-command-');
@@ -57,11 +59,18 @@ test('exact cutover command verifies without writes then applies and replays one
   const input = {
     mode: 'verify', coreDbPath: fixture.dbPath, snapshotPath: fixture.snapshotPath,
     systemManifestPath: SYSTEM_MANIFEST, visibleBindingPath: fixture.visibleBindingPath,
+    visibleBindingDigest: digest(fixture.visibleBindingPath),
     candidateSha: 'a'.repeat(40), committedAt: COMMITTED_AT,
     ownerId: 'owner', authorizationRef: 'owner-approval:s12:test',
   };
   const verified = await executeCoreCutover(input);
   assert.equal(verified.status, 'verified');
+  const approvedBinding = fs.readFileSync(fixture.visibleBindingPath);
+  const replacement = JSON.parse(approvedBinding);
+  replacement.destinationRef = 'ou-owner-replacement';
+  fs.writeFileSync(fixture.visibleBindingPath, JSON.stringify(replacement));
+  await assert.rejects(executeCoreCutover(input), { code: 'CORE_CUTOVER_BINDING_DIGEST_MISMATCH' });
+  fs.writeFileSync(fixture.visibleBindingPath, approvedBinding);
   let inspector = openTestInspector(fixture.dbPath);
   assert.equal(inspector.prepare('SELECT count(*) AS count FROM journal_event').get().count, 0);
   inspector.close();
@@ -89,6 +98,7 @@ test('exact cutover command rejects unresolved rehearsal blockers', async (t) =>
   await assert.rejects(executeCoreCutover({
     mode: 'verify', coreDbPath: fixture.dbPath, snapshotPath: fixture.snapshotPath,
     systemManifestPath: SYSTEM_MANIFEST, visibleBindingPath: fixture.visibleBindingPath,
+    visibleBindingDigest: digest(fixture.visibleBindingPath),
     candidateSha: 'a'.repeat(40), committedAt: COMMITTED_AT,
   }), { code: 'CORE_CUTOVER_SNAPSHOT_BLOCKED' });
 });
@@ -102,6 +112,7 @@ test('exact cutover verification rejects an invalid visible binding before apply
   const verify = () => executeCoreCutover({
     mode: 'verify', coreDbPath: fixture.dbPath, snapshotPath: fixture.snapshotPath,
     systemManifestPath: SYSTEM_MANIFEST, visibleBindingPath: fixture.visibleBindingPath,
+    visibleBindingDigest: digest(fixture.visibleBindingPath),
     candidateSha: 'a'.repeat(40), committedAt: COMMITTED_AT,
   });
   await assert.rejects(verify(), { code: 'CORE_SYSTEM_SCHEDULE_BINDING_REQUIRED' });
@@ -124,11 +135,13 @@ test('exact cutover verification rejects invalid candidate authority before appl
   await assert.rejects(executeCoreCutover({
     mode: 'verify', coreDbPath: fixture.dbPath, snapshotPath: fixture.snapshotPath,
     systemManifestPath: SYSTEM_MANIFEST, visibleBindingPath: fixture.visibleBindingPath,
+    visibleBindingDigest: digest(fixture.visibleBindingPath),
     candidateSha: 'not-a-sha', committedAt: COMMITTED_AT,
   }), { code: 'CORE_CUTOVER_SEMANTICS_INVALID' });
   await assert.rejects(executeCoreCutover({
     mode: 'verify', coreDbPath: fixture.dbPath, snapshotPath: fixture.snapshotPath,
     systemManifestPath: SYSTEM_MANIFEST, visibleBindingPath: fixture.visibleBindingPath,
+    visibleBindingDigest: digest(fixture.visibleBindingPath),
     candidateSha: 'a'.repeat(40), committedAt: 'not-a-time',
   }), { code: 'CORE_CUTOVER_TIME_INVALID' });
 });

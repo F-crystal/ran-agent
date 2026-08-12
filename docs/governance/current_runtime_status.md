@@ -529,7 +529,8 @@ independent exact-SHA review at
 that base is `CLEAR`; its observed production source remained
 `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`.
 
-S12 itself is `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK`. Candidate
+S12 entered orchestration remediation as `NOT_STARTED /
+BLOCKED_BY_ORCHESTRATION_INTERLOCK`. Candidate
 `e6ce78aaeb3c7117daac25ccbeb7b66b570cd0b1` is `LOCAL_VERIFIED / REVIEWED /
 FIX_REQUIRED / ARCHIVED`. Independent review accepted its overall composition
 but found `S12-VERIFY-SOURCE-REF-MUTATION`,
@@ -567,9 +568,17 @@ Core, so Feishu direct-message dispatch reached an empty user ID. The bounded
 successor keeps the existing Package B `destinationKind`/`destinationRef`
 contract through the durable scheduled effect, maps `user` and `conversation`
 without fallback, and rejects an empty recipient before CLI invocation. It is
-`LOCAL_VERIFIED / NOT_REVIEWED` and archived by the containing commit. The
-protected visible binding remains `NOT_AUTHORIZED / NOT_INSTALLED`; canonical
-S12 VERIFY is `NOT_RUN`. Production is unchanged and S12 is `NOT_STARTED`.
+archived at `2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b`. Terminal audit accepted the
+route semantics but returned `FIX_REQUIRED` for the sole remaining blocker
+`S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP`: the controller derived expected
+authority from mutable path bytes, reopened that path across phases and again
+at P8. The bounded successor requires the owner-approved digest, captures the
+protected input once, pins it under the existing S12 transaction, binds its
+digest into the existing `core-cutover:v1`, and resolves post-P5 acceptance
+from the existing Package B binding receipt. It is `LOCAL_VERIFIED /
+NOT_REVIEWED` and archived by the containing commit. The production protected
+binding remains `NOT_AUTHORIZED / NOT_INSTALLED`; canonical S12 VERIFY is
+`NOT_RUN`. Production is unchanged and S12 is `NOT_STARTED`.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

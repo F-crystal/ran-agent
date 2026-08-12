@@ -16,6 +16,7 @@ const INPUT = Object.freeze({
   candidateSha: 'a'.repeat(40),
   migrationSnapshotDigest: `sha256:${'b'.repeat(64)}`,
   scheduleManifestDigest: `sha256:${'c'.repeat(64)}`,
+  visibleBindingDigest: `sha256:${'d'.repeat(64)}`,
   ambiguousOutboxDisposition: 'terminal_no_resend',
   pendingOutboundDisposition: 'suppress',
 });
@@ -43,6 +44,9 @@ test('cutover authority commits atomically, replays exactly, and rejects conflic
   assert.equal(core.reader.activity('imported-paused').state, 'paused');
   await assert.rejects(commitCoreCutover({
     core, input: { ...INPUT, watermark: '2026-08-08T15:00:01.000Z' }, apply,
+  }), { code: 'CORE_CUTOVER_CONFLICT' });
+  await assert.rejects(commitCoreCutover({
+    core, input: { ...INPUT, visibleBindingDigest: `sha256:${'e'.repeat(64)}` }, apply,
   }), { code: 'CORE_CUTOVER_CONFLICT' });
   assert.equal(applies, 1);
   await core.close();

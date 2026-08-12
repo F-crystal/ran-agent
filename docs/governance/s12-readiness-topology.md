@@ -87,8 +87,10 @@ flowchart TD
     REM --> ROFIX["Final read-only primitives 959b8f0d<br/>LOCAL_VERIFIED · REVIEWED/FIX_REQUIRED · ARCHIVED"]
     ROFIX --> SYSFIX["Systemic byte-authority repair e120f1c2<br/>LOCAL_VERIFIED · REVIEWED · production proof STOPPED"]
     SYSFIX --> CLOSURE["Candidate execution closure repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED BY COMMIT"]
-    CLOSURE --> ORR["Independent exact-SHA closure review<br/>REQUIRED"]
-    ORR --> OA["Explicit owner production authorization"]
+    CLOSURE --> ROUTE["Feishu route contract 2f822d9a<br/>REVIEWED · FIX_REQUIRED"]
+    ROUTE --> CUSTODY["Visible-binding custody repair<br/>LOCAL_VERIFIED · NOT_REVIEWED"]
+    CUSTODY --> ORR["Independent exact-SHA custody review<br/>REQUIRED"]
+    ORR --> OA["Explicit owner digest + production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
     OBS --> DA["Separate owner deletion authorization"]
@@ -193,8 +195,9 @@ remain unchanged/not started.
 | S12-READ-ONLY-PRIMITIVES | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `959b8f0d4503448da3bb44205d40bddd7d32e43a` | final two `91172d4c` review findings | Native no-optional-lock Git status and true Core read-only inspect were accepted; exact review found duplicate bootstrap digest authority. |
 | S12-SYSTEMIC-FINAL | `LOCAL_VERIFIED / production critical proof STOPPED` | `REVIEWED` | `ARCHIVED` at `e120f1c246135d566e58847684e14521ea15809d` | `BOOTSTRAP-MANIFEST-DUPLICATE-AUTHORITY-DRIFT` | Exact Git candidate is the sole bootstrap byte authority; production P0 exposed candidate-subordinate resolution through the older live checkout. |
 | S12-CANDIDATE-CLOSURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a` | `S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP` | One private read-only exact-Git closure owns S12 code/manifests across P0-P10; independent review and bounded production candidate-closure proof are clear. |
-| S12-FEISHU-ROUTE | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP` | Existing Package B target kind/ref now survives visible binding, scheduled outbox and mechanical Feishu user/chat mapping; empty recipients fail before CLI invocation. |
-| S12 | `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` | not applicable | not applicable | route-contract successor review + owner-approved protected visible binding + canonical VERIFY + explicit production authorization | Production source remains `98fd8b3`; the binding is not authorized/installed, and neither S12 VERIFY nor APPLY occurred. |
+| S12-FEISHU-ROUTE | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b` | `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP` | Route semantics are accepted; terminal audit found the remaining mutable-path approval/custody gap. |
+| S12-VISIBLE-BINDING-CUSTODY | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | `S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP` | Explicit owner digest, one no-follow capture, transaction-local snapshot, existing marker digest and existing Package B receipt preserve one route through P0-P10 without post-P5 pathname authority. |
+| S12 | `NOT_STARTED / BLOCKED_BY_CUSTODY_REVIEW` | not applicable | not applicable | custody successor review + owner-approved protected binding digest + canonical VERIFY + explicit production authorization | Production source remains `98fd8b3`; the binding is not authorized/installed, and neither S12 VERIFY nor APPLY occurred. |
 
 The previous implementation candidate is
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance
@@ -620,10 +623,10 @@ recovery is recorded independently and leaves
 - [x] Fresh production diff and migration reconciliation show no unexplained
   writer, schedule or outbox state.
 - [x] S12 remains `NOT_STARTED` after dry-run; the orchestration/interlock gap
-  blocks any production authorization until its successor passes independent
-  exact-SHA review.
-- [ ] After that review, request explicit owner production
-  authorization with the exact SHA and summarized mutation.
+  was repaired without starting production S12.
+- [ ] After custody successor review, request the explicit owner-approved
+  binding digest and production authorization with the exact SHA and summarized
+  mutation.
 
 The scratch-home lifecycle repair and the subsequent complete service-managed
 root/non-root v0.20 proof are closed on `9653d030`. This does not authorize or
@@ -651,7 +654,10 @@ ROLLED_BACK or stale pre-marker journal state. The controller materializes the
 exact Git candidate once into private read-only `/tmp`, uses it for every S12
 subordinate, manifest and relative Core import, and removes it afterward; the
 live checkout remains production state only. The root-owned mode `0600` visible
-binding remains a downstream owner input / `MISSING_PROOF`.
+binding and its explicit owner-approved SHA256 remain downstream owner inputs /
+`MISSING_PROOF`. The custody successor captures those bytes once and makes the
+existing Core marker/Package B receipt the post-P5 authority; the original
+pathname is not a recovery dependency.
 
 - [ ] Stop new ingress and drain/reconcile legacy effect/outbox state.
 - [ ] Execute the one authorized Core cutover transaction against the exact SHA.

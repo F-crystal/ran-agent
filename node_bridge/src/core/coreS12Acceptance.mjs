@@ -18,11 +18,32 @@ function wholeSecond(value) {
 function authority(core, input) {
   assertCoreCutoverCommitted(core);
   const marker = core.reader.journalEvent(CORE_CUTOVER_EVENT_ID);
+  let semantics;
+  try { semantics = JSON.parse(marker.source_ref); } catch { semantics = null; }
   if (marker.owner_id !== input.ownerId || marker.origin_ref !== input.authorizationRef
-    || marker.correlation_id !== input.candidateSha) {
+    || marker.correlation_id !== input.candidateSha || marker.created_at !== input.committedAt
+    || semantics?.visibleBindingDigest !== input.visibleBindingSha256) {
     throw coreError('S12_ACCEPTANCE_AUTHORITY_MISMATCH', 'S12 acceptance differs from Core cutover authority');
   }
   return marker;
+}
+
+function systemOwnerBinding(core, ownerId) {
+  const matches = core.reader.packageBPresentation.bindingsByOperation('core-cutover:system-owner-binding');
+  if (matches.length !== 1 || matches[0].receipt_owner_id !== ownerId || matches[0].state !== 'active'
+    || matches[0].platform !== 'feishu' || !['user', 'conversation'].includes(matches[0].destination_kind)
+    || typeof matches[0].destination_ref !== 'string' || !matches[0].destination_ref) {
+    throw coreError('S12_ACCEPTANCE_BINDING_INVALID', 'S12 acceptance requires the committed cutover owner binding');
+  }
+  const route = matches[0];
+  const identity = core.reader.conversationIdentityById(route.conversation_id);
+  const binding = identity && core.reader.packageBPresentation.binding({
+    identity, conversationId: route.conversation_id, bindingId: route.presentation_binding_id,
+  });
+  if (!identity || identity.ownerId !== ownerId || !binding) {
+    throw coreError('S12_ACCEPTANCE_BINDING_INVALID', 'S12 acceptance requires the committed cutover owner binding');
+  }
+  return Object.freeze({ identity, binding });
 }
 
 export async function registerS12Acceptance({ core, input } = {}) {
@@ -30,13 +51,9 @@ export async function registerS12Acceptance({ core, input } = {}) {
     throw coreError('S12_ACCEPTANCE_INPUT_INVALID', 'S12 acceptance input is invalid');
   }
   authority(core, input);
-  const identity = core.reader.conversationIdentityById(input.conversationId);
-  const binding = identity && core.reader.packageBPresentation.binding({
-    identity, conversationId: input.conversationId, bindingId: input.bindingId,
-  });
-  if (!identity || identity.ownerId !== input.ownerId || !binding || binding.state !== 'active') {
-    throw coreError('S12_ACCEPTANCE_BINDING_INVALID', 'S12 acceptance requires the cutover owner binding');
-  }
+  const { identity, binding } = systemOwnerBinding(core, input.ownerId);
+  const conversationId = identity.conversationId;
+  const bindingId = binding.presentation_binding_id;
   const stable = stableId(input.transactionId);
   const eventId = `s12-acceptance:${stable}`;
   const activityId = `s12-acceptance-activity:${stable}`;
@@ -55,7 +72,7 @@ export async function registerS12Acceptance({ core, input } = {}) {
     if (prior) {
       let recorded;
       try { recorded = JSON.parse(prior.source_ref); } catch { recorded = null; }
-      if (prior.owner_id !== input.ownerId || prior.conversation_id !== input.conversationId
+      if (prior.owner_id !== input.ownerId || prior.conversation_id !== conversationId
         || prior.origin_ref !== input.authorizationRef || prior.correlation_id !== input.transactionId
         || recorded?.schemaVersion !== 1 || recorded.transactionId !== input.transactionId
         || recorded.candidateSha !== input.candidateSha
@@ -65,14 +82,14 @@ export async function registerS12Acceptance({ core, input } = {}) {
       return { disposition: 'already_registered' };
     }
     tx.activities.create({
-      activityId, ownerId: input.ownerId, conversationId: input.conversationId,
+      activityId, ownerId: input.ownerId, conversationId,
       title: 'S12 Core cutover acceptance', goalRef: payloadRef, domain: 'personal',
       riskClass: 'reversible', autonomyLevel: 1, state: 'active', contractRevision: 0,
       resumePolicy: 'bounded_auto', reportPolicy: 'milestone', createdAt: scheduledAt,
     });
     tx.journal.append({
       eventId, eventType: 's12_acceptance_registered', ownerId: input.ownerId,
-      conversationId: input.conversationId, activityId, actorRef: input.ownerId,
+      conversationId, activityId, actorRef: input.ownerId,
       originRef: input.authorizationRef, sourceKind: 's12-acceptance:v1', sourceRef,
       revision: 1, causationId: CORE_CUTOVER_EVENT_ID,
       correlationId: input.transactionId, createdAt: scheduledAt,
@@ -82,8 +99,8 @@ export async function registerS12Acceptance({ core, input } = {}) {
       operationKey: `s12-acceptance:create:${stable}`,
       recurrence: { kind: 'one_shot', at: scheduledAt }, taskKind: 'scheduled_instruction',
       payloadRef, catchUpPolicy: 'latest', activityContractRevision: 0,
-      causationId: eventId, conversationId: input.conversationId,
-      presentationBindingId: input.bindingId, expectedBindingRevision: Number(binding.revision),
+      causationId: eventId, conversationId,
+      presentationBindingId: bindingId, expectedBindingRevision: Number(binding.revision),
     });
     return { disposition: 'registered' };
   });
@@ -93,8 +110,9 @@ export async function registerS12Acceptance({ core, input } = {}) {
   return Object.freeze({ ...result, eventId, scheduleSpecId, payloadRef });
 }
 
-export function inspectS12Acceptance({ core, transactionId, candidateSha, ownerId, authorizationRef } = {}) {
-  authority(core, { candidateSha, ownerId, authorizationRef });
+export function inspectS12Acceptance({ core, transactionId, candidateSha, ownerId, authorizationRef,
+  visibleBindingSha256, committedAt } = {}) {
+  authority(core, { candidateSha, ownerId, authorizationRef, visibleBindingSha256, committedAt });
   const stable = stableId(transactionId);
   const eventId = `s12-acceptance:${stable}`;
   const scheduleSpecId = `s12-acceptance-schedule:${stable}`;

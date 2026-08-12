@@ -40,6 +40,7 @@ test('cutover imports only paused candidates and records aggregate no-resend evi
       watermark: WATERMARK, committedAt: COMMITTED_AT, candidateSha: 'a'.repeat(40),
       migrationSnapshotDigest: `sha256:${'b'.repeat(64)}`,
       scheduleManifestDigest: `sha256:${'c'.repeat(64)}`,
+      visibleBindingDigest: `sha256:${'d'.repeat(64)}`,
       ambiguousOutboxDisposition: 'terminal_no_resend', pendingOutboundDisposition: 'suppress',
     },
     apply: (tx) => applyCoreScheduleCutover(tx, {
@@ -71,6 +72,7 @@ test('a reminder that is no longer future aborts the whole cutover', async (t) =
       watermark: WATERMARK, committedAt: COMMITTED_AT, candidateSha: 'a'.repeat(40),
       migrationSnapshotDigest: `sha256:${'b'.repeat(64)}`,
       scheduleManifestDigest: `sha256:${'c'.repeat(64)}`,
+      visibleBindingDigest: `sha256:${'d'.repeat(64)}`,
       ambiguousOutboxDisposition: 'terminal_no_resend', pendingOutboundDisposition: 'suppress',
     },
     apply: (tx) => applyCoreScheduleCutover(tx, { snapshot: stale, ownerId: 'owner', createdAt: COMMITTED_AT }),
