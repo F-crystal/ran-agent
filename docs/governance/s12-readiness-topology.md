@@ -196,8 +196,9 @@ remain unchanged/not started.
 | S12-SYSTEMIC-FINAL | `LOCAL_VERIFIED / production critical proof STOPPED` | `REVIEWED` | `ARCHIVED` at `e120f1c246135d566e58847684e14521ea15809d` | `BOOTSTRAP-MANIFEST-DUPLICATE-AUTHORITY-DRIFT` | Exact Git candidate is the sole bootstrap byte authority; production P0 exposed candidate-subordinate resolution through the older live checkout. |
 | S12-CANDIDATE-CLOSURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a` | `S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP` | One private read-only exact-Git closure owns S12 code/manifests across P0-P10; independent review and bounded production candidate-closure proof are clear. |
 | S12-FEISHU-ROUTE | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b` | `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP` | Route semantics are accepted; terminal audit found the remaining mutable-path approval/custody gap. |
-| S12-VISIBLE-BINDING-CUSTODY | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | `S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP` | Explicit owner digest, one no-follow capture, transaction-local snapshot, existing marker digest and existing Package B receipt preserve one route through P0-P10 without post-P5 pathname authority. |
-| S12 | `NOT_STARTED / BLOCKED_BY_CUSTODY_REVIEW` | not applicable | not applicable | custody successor review + owner-approved protected binding digest + canonical VERIFY + explicit production authorization | Production source remains `98fd8b3`; the binding is not authorized/installed, and neither S12 VERIFY nor APPLY occurred. |
+| S12-VISIBLE-BINDING-CUSTODY | `LOCAL_VERIFIED` | `REVIEWED / CLEAR` | `ARCHIVED` at `482e70083afb067f1e804cf1a8abd20e4ebf41ab` | `S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP` | Explicit owner digest, one no-follow capture, transaction-local snapshot, existing marker digest and existing Package B receipt preserve one route through P0-P10 without post-P5 pathname authority. |
+| S12-SAFE-DIRECTORY | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | `S12-BOOTSTRAP-GIT-SAFE-DIRECTORY-ENV-GAP` | Bootstrap scopes Git trust to the exact canonical governed checkout for one invocation and passes only that trust plus VERIFY optional-lock suppression through sudo; no persistent Git config or wildcard is introduced. |
+| S12 | `NOT_STARTED / BLOCKED_BY_SAFE_DIRECTORY_REVIEW` | not applicable | not applicable | safe-directory successor review + canonical VERIFY retry + explicit production authorization | Production remains unchanged; the approved protected binding remains byte-identical and canonical VERIFY stopped before source verification. |
 
 The previous implementation candidate is
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance
@@ -654,10 +655,14 @@ ROLLED_BACK or stale pre-marker journal state. The controller materializes the
 exact Git candidate once into private read-only `/tmp`, uses it for every S12
 subordinate, manifest and relative Core import, and removes it afterward; the
 live checkout remains production state only. The root-owned mode `0600` visible
-binding and its explicit owner-approved SHA256 remain downstream owner inputs /
-`MISSING_PROOF`. The custody successor captures those bytes once and makes the
-existing Core marker/Package B receipt the post-P5 authority; the original
-pathname is not a recovery dependency.
+binding and its owner-approved SHA256 are installed and remain byte-identical.
+The custody successor captures those bytes once and makes the existing Core
+marker/Package B receipt the post-P5 authority; the original pathname is not a
+recovery dependency. Canonical VERIFY on `482e700` stopped before source
+verification because root Git lacked exact-path invocation-scoped trust for the
+governed non-root-owned checkout. The bounded successor repairs only that
+bootstrap environment boundary; S12 remains not started pending
+verification-only review and a VERIFY retry.
 
 - [ ] Stop new ingress and drain/reconcile legacy effect/outbox state.
 - [ ] Execute the one authorized Core cutover transaction against the exact SHA.

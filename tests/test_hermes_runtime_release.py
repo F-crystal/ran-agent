@@ -509,6 +509,10 @@ def test_bootstrap_routes_unified_source_through_existing_candidate_controller()
     assert "source-dry-run" in bootstrap
     assert "source-apply" in bootstrap
     assert "source-rollback" in bootstrap
+    assert "GIT_CONFIG_KEY_0=safe.directory" in bootstrap
+    assert 'GIT_CONFIG_VALUE_0="$REPO_ROOT"' in bootstrap
+    assert 'sudo /usr/bin/env "${source_env[@]}"' in bootstrap
+    assert "safe.directory=*" not in bootstrap
 
 
 def test_source_verify_is_read_only_without_a_candidate_ref_or_lock(

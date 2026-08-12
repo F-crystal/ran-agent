@@ -24,10 +24,14 @@ esac
 
 REPO_ROOT="${RAN_AGENT_RELEASE_CONTROL_ROOT:-/opt/ran_agent}"
 REPO_ROOT="$(cd "$REPO_ROOT" && pwd -P)" || fail server_root_unavailable
+export GIT_CONFIG_COUNT=1
+export GIT_CONFIG_KEY_0=safe.directory
+export GIT_CONFIG_VALUE_0="$REPO_ROOT"
 ARTIFACT_ROOT="${RAN_AGENT_RELEASE_ARTIFACT_ROOT:-/opt/ran_agent-release}"
 [[ "$ARTIFACT_ROOT" == /* && "$ARTIFACT_ROOT" != "$REPO_ROOT" && "$ARTIFACT_ROOT" != "$REPO_ROOT"/* ]] || fail bootstrap_artifact_root_invalid
 cd "$REPO_ROOT"
-[[ -z "$(git status --porcelain)" ]] || fail worktree_dirty
+worktree_status="$(git status --porcelain)" || fail git_repository_unavailable
+[[ -z "$worktree_status" ]] || fail worktree_dirty
 CANDIDATE="$(git rev-parse --verify "${CANDIDATE_INPUT}^{commit}" 2>/dev/null)" || fail candidate_object_missing
 [[ "$CANDIDATE" == "$CANDIDATE_INPUT" ]] || fail candidate_digest_mismatch
 
@@ -77,7 +81,13 @@ if [[ "${RAN_AGENT_RELEASE_UNIFIED_SOURCE:-0}" == 1 ]]; then
   esac
   source_args=(--candidate "$CANDIDATE" --mode "$source_mode")
   [[ "$MODE" != --rollback ]] || source_args+=(--snapshot "$ROLLBACK_SNAPSHOT")
-  sudo "$TMP_ROOT/scripts/deploy-hermes-runtime-release.py" "${source_args[@]}"
+  source_env=(
+    "GIT_CONFIG_COUNT=$GIT_CONFIG_COUNT"
+    "GIT_CONFIG_KEY_0=$GIT_CONFIG_KEY_0"
+    "GIT_CONFIG_VALUE_0=$GIT_CONFIG_VALUE_0"
+  )
+  [[ "$MODE" != --verify ]] || source_env+=("GIT_OPTIONAL_LOCKS=0")
+  sudo /usr/bin/env "${source_env[@]}" "$TMP_ROOT/scripts/deploy-hermes-runtime-release.py" "${source_args[@]}"
   printf 'bootstrap-hermes-release: bootstrap-ok candidate=%s\n' "$CANDIDATE"
   exit 0
 fi

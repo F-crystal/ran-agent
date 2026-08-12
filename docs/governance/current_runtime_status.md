@@ -575,10 +575,20 @@ authority from mutable path bytes, reopened that path across phases and again
 at P8. The bounded successor requires the owner-approved digest, captures the
 protected input once, pins it under the existing S12 transaction, binds its
 digest into the existing `core-cutover:v1`, and resolves post-P5 acceptance
-from the existing Package B binding receipt. It is `LOCAL_VERIFIED /
-NOT_REVIEWED` and archived by the containing commit. The production protected
-binding remains `NOT_AUTHORIZED / NOT_INSTALLED`; canonical S12 VERIFY is
-`NOT_RUN`. Production is unchanged and S12 is `NOT_STARTED`.
+from the existing Package B binding receipt. That repair is independently clear
+at `482e70083afb067f1e804cf1a8abd20e4ebf41ab`; the owner-approved protected
+binding remains installed byte-identically at mode `0600` with digest
+`sha256:dde57df0d2fc34860a52e486aaccdb1aacccb83d3eedb3de40ccd5109959542f`.
+Canonical S12 VERIFY then stopped fail-closed before source verification on
+`S12-BOOTSTRAP-GIT-SAFE-DIRECTORY-ENV-GAP`: root Git correctly rejected the
+governed non-root-owned checkout because bootstrap had not supplied the exact
+repository as invocation-scoped `safe.directory`. The bounded successor adds
+only that ephemeral exact-path Git configuration and explicit narrow sudo
+propagation; no persistent Git config or wildcard trust is added. A private
+diagnostic trace briefly exposed the protected route, was deleted, and caused
+no external effect; it is an operational privacy incident, not a product
+route/custody defect. Production is unchanged and S12 is
+`NOT_STARTED / BLOCKED_BY_SAFE_DIRECTORY_REVIEW`.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

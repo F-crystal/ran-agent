@@ -4034,12 +4034,106 @@ test('unified source verify uses candidate-extracted authority without creating 
     assert.equal(existsSync(`${index}.lock`), false);
     assert.equal(refsAfter, refsBefore);
     assert.deepEqual(readFileSync(readme), readmeContents);
-    assert.match(readFileSync(sudoLog, 'utf8'), /--mode\nsource-verify\n$/);
+    const sudoArgs = readFileSync(sudoLog, 'utf8').trimEnd().split('\n');
+    assert.deepEqual(sudoArgs.slice(0, 5), [
+      '/usr/bin/env', 'GIT_CONFIG_COUNT=1', 'GIT_CONFIG_KEY_0=safe.directory',
+      `GIT_CONFIG_VALUE_0=${realpathSync(fixture.repo)}`, 'GIT_OPTIONAL_LOCKS=0',
+    ]);
+    assert.deepEqual(sudoArgs.slice(-2), ['--mode', 'source-verify']);
     assert.equal(readFileSync(sudoEnvLog, 'utf8'), '0\n');
     assert.match(output, /bootstrap-ok/);
     assert.equal(readdirSync(directory).some((name) => name.startsWith('ran-agent-release-bootstrap.')), false);
     assert.equal(fixture.runGit(['status', '--short']).trim(), '');
     assert.equal(fixture.runGit(['rev-parse', 'HEAD']).trim(), fixture.prior);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
+test('Linux root bootstrap scopes Git trust to the exact non-root-owned checkout', {
+  skip: !linuxRoot,
+}, () => {
+  const fixture = makeBootstrapFixture();
+  const directory = mkdtempSync('/tmp/ran-agent-source-safe-directory-');
+  const extracted = join(directory, 'bootstrap.sh');
+  const sudoLog = join(directory, 'sudo.log');
+  const sudo = join(directory, 'sudo');
+  const home = join(directory, 'home');
+  try {
+    writeFileSync(extracted, fixture.runGit(['show', `${fixture.candidateSha}:scripts/bootstrap-hermes-release.sh`]));
+    chmodSync(extracted, 0o700);
+    mkdirSync(home, { mode: 0o700 });
+    writeFileSync(sudo, '#!/bin/sh\nprintf "%s\\n" "$@" > "$SUDO_LOG"\nprintf \'{"status":"SOURCE_VERIFY_OK"}\\n\'\n');
+    chmodSync(sudo, 0o700);
+    execFileSync('chown', ['-R', `${fixtureRuntimeIdentity.uid}:${fixtureRuntimeIdentity.gid}`, fixture.repo]);
+
+    const configPaths = [join(fixture.repo, '.git', 'config'), join(home, '.gitconfig'), '/etc/gitconfig'];
+    const snapshotPath = (path) => {
+      if (!existsSync(path)) return null;
+      const value = statSync(path);
+      return { sha256: sha256(readFileSync(path)), dev: value.dev, ino: value.ino,
+        size: value.size, mode: value.mode, mtimeMs: value.mtimeMs };
+    };
+    const configsBefore = configPaths.map(snapshotPath);
+    const index = join(fixture.repo, '.git', 'index');
+    const indexBefore = snapshotPath(index);
+    const canonicalRepo = realpathSync(fixture.repo);
+    const exactGitEnv = {
+      PATH: '/usr/bin:/bin', HOME: home, GIT_OPTIONAL_LOCKS: '0',
+      GIT_CONFIG_COUNT: '1', GIT_CONFIG_KEY_0: 'safe.directory', GIT_CONFIG_VALUE_0: canonicalRepo,
+    };
+    const git = (args) => execFileSync('git', ['-C', fixture.repo, ...args], {
+      env: exactGitEnv, encoding: 'utf8', stdio: 'pipe',
+    });
+    const refsBefore = git(['for-each-ref', '--format=%(refname) %(objectname)']);
+    const noTrust = spawnSync('git', ['-C', fixture.repo, 'status', '--porcelain'], {
+      env: { PATH: '/usr/bin:/bin', HOME: home, GIT_OPTIONAL_LOCKS: '0' }, encoding: 'utf8', stdio: 'pipe',
+    });
+    assert.notEqual(noTrust.status, 0);
+    assert.match(noTrust.stderr, /dubious ownership|safe\.directory/);
+    const wrongTrust = spawnSync('git', ['-C', fixture.repo, 'status', '--porcelain'], {
+      env: { ...exactGitEnv, GIT_CONFIG_VALUE_0: directory }, encoding: 'utf8', stdio: 'pipe',
+    });
+    assert.notEqual(wrongTrust.status, 0);
+    assert.match(wrongTrust.stderr, /dubious ownership|safe\.directory/);
+
+    const output = execFileSync('bash', [extracted, '--verify', fixture.candidateSha], {
+      cwd: fixture.repo,
+      env: {
+        PATH: `${directory}:/usr/bin:/bin`, HOME: home, TMPDIR: directory, SUDO_LOG: sudoLog,
+        RAN_AGENT_RELEASE_UNIFIED_SOURCE: '1', RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(directory, 'release'),
+      },
+      encoding: 'utf8', stdio: 'pipe',
+    });
+    assert.match(output, /bootstrap-ok/);
+    const sudoArgs = readFileSync(sudoLog, 'utf8').trimEnd().split('\n');
+    assert.deepEqual(sudoArgs.slice(0, 5), [
+      '/usr/bin/env', 'GIT_CONFIG_COUNT=1', 'GIT_CONFIG_KEY_0=safe.directory',
+      `GIT_CONFIG_VALUE_0=${canonicalRepo}`, 'GIT_OPTIONAL_LOCKS=0',
+    ]);
+    assert.equal(sudoArgs.includes('GIT_CONFIG_VALUE_0=*'), false);
+    assert.equal(git(['for-each-ref', '--format=%(refname) %(objectname)']), refsBefore);
+    assert.deepEqual(snapshotPath(index), indexBefore);
+    assert.equal(existsSync(`${index}.lock`), false);
+    assert.deepEqual(configPaths.map(snapshotPath), configsBefore);
+
+    writeFileSync(join(fixture.repo, 'README.md'), 'dirty tracked content\n');
+    const dirty = spawnSync('bash', [extracted, '--verify', fixture.candidateSha], {
+      cwd: fixture.repo,
+      env: {
+        PATH: `${directory}:/usr/bin:/bin`, HOME: home, TMPDIR: directory, SUDO_LOG: sudoLog,
+        RAN_AGENT_RELEASE_UNIFIED_SOURCE: '1', RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(directory, 'release'),
+      },
+      encoding: 'utf8', stdio: 'pipe',
+    });
+    assert.notEqual(dirty.status, 0);
+    assert.match(dirty.stderr, /failed:worktree_dirty/);
+    assert.deepEqual(snapshotPath(index), indexBefore);
+    assert.equal(git(['for-each-ref', '--format=%(refname) %(objectname)']), refsBefore);
+    assert.deepEqual(configPaths.map(snapshotPath), configsBefore);
   } finally {
     rmSync(directory, { recursive: true, force: true });
     rmSync(fixture.repo, { recursive: true, force: true });

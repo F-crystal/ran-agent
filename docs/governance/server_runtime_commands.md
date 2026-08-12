@@ -125,6 +125,11 @@ home-DM sender route; a Feishu chat instead uses `destinationKind:
 semantic route and binding digest for owner review while keeping the raw
 recipient private. Do not manually transcribe or invent a recipient.
 
+Do not diagnose a protected binding or route with syscall/process tracing that
+prints arguments, environment values or file contents. Governed evidence may
+report only the semantic `destinationKind`, the approved binding digest and a
+privacy-safe route fingerprint; it must never report the raw `destinationRef`.
+
 ```bash
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate

@@ -216,11 +216,20 @@ contract but returned `FIX_REQUIRED` for
 an explicit owner-approved digest, captures the protected input once, pins it
 inside the existing S12 transaction, extends the existing Core marker with that
 digest and reads the committed route through the existing Package B binding
-receipt after P5. It is `LOCAL_VERIFIED / NOT_REVIEWED` and archived by its
-containing commit.
-Production is unchanged; S12 remains `NOT_STARTED`. The protected visible
-binding is `NOT_AUTHORIZED / NOT_INSTALLED`, and canonical S12 VERIFY is
-`NOT_RUN`.
+receipt after P5. That custody repair is independently clear at
+`482e70083afb067f1e804cf1a8abd20e4ebf41ab`. Its owner-approved protected
+binding remains installed byte-identically at mode `0600`, with digest
+`sha256:dde57df0d2fc34860a52e486aaccdb1aacccb83d3eedb3de40ccd5109959542f`.
+Canonical S12 VERIFY stopped fail-closed before source verification on
+`S12-BOOTSTRAP-GIT-SAFE-DIRECTORY-ENV-GAP`: bootstrap did not give root Git
+invocation-scoped trust for the exact governed non-root-owned checkout. The
+bounded successor supplies only that canonical path through ephemeral Git
+environment config and passes it narrowly through sudo; it is `LOCAL_VERIFIED /
+NOT_REVIEWED` and archived by its containing commit. A deleted private
+diagnostic trace exposed the protected route once but caused no external effect
+and is classified as an operational privacy incident, not a product defect.
+Production is unchanged; S12 remains
+`NOT_STARTED / BLOCKED_BY_SAFE_DIRECTORY_REVIEW`.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.
