@@ -1,6 +1,6 @@
 # S12 Readiness Topology And Acceptance Ledger
 
-Status: CURRENT (2026-08-11)
+Status: CURRENT (2026-08-12)
 
 This is the canonical execution and handoff checklist for the remaining path
 from the local S12 readiness work to S13 cleanup. `active_sequence.md` owns the
@@ -78,10 +78,13 @@ flowchart TD
     AFR --> ARFIX["Raw final-component repair e4a6d205<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
     ARFIX --> ARFR["Independent exact-SHA corrected review<br/>CLEAR"]
     ARFR --> R3B5["Sixth R3-B server proof<br/>FIX_REQUIRED · FAIL-CLOSED"]
-    R3B5 --> HFIX["Sealed-runtime scratch-home lifecycle repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVE PENDING"]
-    HFIX --> HFR["Independent exact-SHA scratch-home review<br/>REQUIRED"]
-    HFR --> R3B["R3-B immutable server gate + dry-run retry<br/>NOT STARTED"]
-    R3B --> OA["Explicit owner production authorization"]
+    R3B5 --> HFIX["Sealed-runtime scratch-home repair 9653d030<br/>LOCAL_VERIFIED · REVIEWED · ARCHIVED"]
+    HFIX --> HFR["Independent exact-SHA scratch-home review<br/>CLEAR"]
+    HFR --> R3B["R3-B immutable server gate + dry-run<br/>CLEAR on 9653d030"]
+    R3B --> OGAP["S12 orchestration + rollback interlock gap<br/>BLOCKING S12"]
+    OGAP --> ORCH["Canonical S12 transaction successor<br/>LOCAL_VERIFIED · NOT_REVIEWED · UNARCHIVED"]
+    ORCH --> ORR["Independent exact-SHA S12 review<br/>REQUIRED"]
+    ORR --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
     OBS --> DA["Separate owner deletion authorization"]
@@ -132,8 +135,10 @@ verification rejected it. That harness repair, the later archive-path repair
 and its raw-final successor all passed their bounded reviews. The sixth R3-B
 then passed the complete root surface but stopped fail-closed after 524/524
 non-root Node tests because `HOME=/nonexistent` exposed identity-dependent host
-state. The current frontier is the shared scratch-home lifecycle repair and its
-required independent exact-SHA review.
+state. The scratch-home repair was archived and independently reviewed at
+`9653d030`; complete R3-B on that exact base is `CLEAR`. The current frontier
+is the local S12 orchestration/rollback-interlock successor and its required
+independent exact-SHA review. Production and S12 remain unchanged/not started.
 
 | Second R3-B root failure | Observed boundary | Classification and repair |
 |---|---|---|
@@ -169,9 +174,10 @@ required independent exact-SHA review.
 | R3-B-PROJECTION-INJECTION | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by the commit containing this ledger | fourth R3-B stopped fail-closed | Test-only repair identifies and mutates the pointer's active manifest, verifies the before/after graph mode and marker, propagates the wrapped publisher status, and proves restart remains blocked. |
 | R3-B-ARCHIVE-PATH | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `28c4054989c1176a4d8988872c43363b09c74494` | fifth R3-B stopped fail-closed | Parent containment and final-symlink no-follow repair was accepted, but raw trailing separators/final `.` normalized before validation. |
 | R3-B-RAW-FINAL | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `e4a6d205afc4183cfda503aa6bb4977dac29fb25` | `RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS` on `28c40549` | Raw terminal validation precedes `Path`; safe parent normalization and accepted no-follow/no-replace boundaries remain intact. |
-| R3-B-SCRATCH-HOME | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVE_PENDING` for the transaction containing this ledger | sixth R3-B stopped fail-closed | Replace the fixed `/nonexistent` HOME sentinel with one caller-owned isolated scratch lifecycle shared by resolver and provider routes; bounded TECserver root/ubuntu parity is clear. |
-| R3-B | `NOT_STARTED` | `NOT_REVIEWED` | `UNARCHIVED` | scratch-home exact-SHA review required | Retry the complete immutable root/non-root gate only after the shared probe repair passes independent review. |
-| S12 | `NOT_STARTED` | not applicable | not applicable | R3 + explicit owner authorization | Production source remains `98fd8b3`; no Core cutover occurred. |
+| R3-B-SCRATCH-HOME | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `9653d030473b3e9870ddea9158c4a2f9570c243b` | sixth R3-B stopped fail-closed | Fixed sentinel removed; shared caller-owned scratch lifecycle passed root/ubuntu parity and independent exact-SHA review. |
+| R3-B | `CLEAR` | `REVIEWED` | exact base `9653d030473b3e9870ddea9158c4a2f9570c243b` | scratch-home review clear | Complete immutable root/non-root gate and dry-run evidence is clear; production remained at `98fd8b3`. |
+| S12-ORCHESTRATION | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `UNARCHIVED` until this transaction completes | R3-B CLEAR; `S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP` | One durable top-level controller owns source/Core/wake/acceptance phases; marker-aware source rollback blocks pre-Core restoration after authority transfer. |
+| S12 | `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` | not applicable | not applicable | S12 successor review + explicit production authorization | Production source remains `98fd8b3`; neither S12 VERIFY nor APPLY occurred. |
 
 The previous implementation candidate is
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance
@@ -588,21 +594,23 @@ recovery is recorded independently and leaves
   non-thinking route and enabled-thinking negative pass; `/nonexistent` and
   ambient HOME/XDG/TMP have zero influence; production hashes/state remain
   unchanged.
-- [ ] Independent exact-SHA review of the scratch-home lifecycle repair is
-  `CLEAR`.
-- [ ] Immutable gate succeeds from Git-less read-only copies under required
+- [x] Independent exact-SHA review of the scratch-home lifecycle repair is
+  `CLEAR` at `9653d030473b3e9870ddea9158c4a2f9570c243b`.
+- [x] Immutable gate succeeds from Git-less read-only copies under required
   root/non-root and isolated-environment seams.
-- [ ] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,
+- [x] Exact-SHA server dry-run proves capacity, identities, manifests, rollback,
   one managed clock projection and no production mutation.
-- [ ] Fresh production diff and migration reconciliation show no unexplained
+- [x] Fresh production diff and migration reconciliation show no unexplained
   writer, schedule or outbox state.
-- [ ] S12 remains `NOT_STARTED` after dry-run; request explicit owner production
+- [x] S12 remains `NOT_STARTED` after dry-run; the orchestration/interlock gap
+  blocks any production authorization until its successor passes independent
+  exact-SHA review.
+- [ ] After that review, request explicit owner production
   authorization with the exact SHA and summarized mutation.
 
-The scratch-home lifecycle repair does not claim a complete service-managed
-root/non-root v0.20 `--all` pass. It closes only the shared HOME-sentinel defect
-exposed by the sixth R3-B attempt; the next complete R3-B retry remains
-server-side and `NOT_STARTED`.
+The scratch-home lifecycle repair and the subsequent complete service-managed
+root/non-root v0.20 proof are closed on `9653d030`. This does not authorize or
+start S12.
 
 The former local Hermes/Python binding and wrong-group missing proofs are
 closed by the shared runtime probe and focused negative. Real Linux
@@ -612,7 +620,11 @@ it is not called by the immutable release gate or S12 execution authority.
 
 ### S12 — Core Cutover Gate
 
-This node is blocked until R3 and explicit owner production authorization.
+This node is blocked until the canonical S12 orchestration successor passes
+independent exact-SHA review and the owner separately authorizes production.
+The runbook exposes `scripts/s12-cutover.py` as the only S12 entrypoint;
+subordinate source, cutover, wake and acceptance commands are not operator
+steps.
 
 - [ ] Stop new ingress and drain/reconcile legacy effect/outbox state.
 - [ ] Execute the one authorized Core cutover transaction against the exact SHA.

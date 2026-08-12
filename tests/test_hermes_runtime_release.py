@@ -4,6 +4,7 @@ import importlib.util
 import io
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -23,6 +24,9 @@ SPEC.loader.exec_module(MODULE)
 @pytest.fixture(autouse=True)
 def _local_sealed_profile_parser(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(MODULE, "SOURCE_RUNTIME_PYTHON", Path(sys.executable).resolve())
+    monkeypatch.setattr(MODULE.pwd, "getpwnam", lambda _name: SimpleNamespace(
+        pw_uid=os.getuid(), pw_gid=os.getgid(),
+    ))
 
 
 def test_env_patch_changes_only_managed_keys_and_collapses_duplicates() -> None:
@@ -361,6 +365,110 @@ def test_converged_source_rollback_restores_prior_pointer(
     MODULE.source_rollback(snapshot, candidate)
 
     assert json.loads(pointer_path.read_text()) == prior
+
+
+def core_authority_db(path: Path, *, candidate: str | None = None, source_ref: str | None = None) -> None:
+    with sqlite3.connect(path) as database:
+        database.execute("""CREATE TABLE journal_event(
+            journal_event_id TEXT PRIMARY KEY,event_type TEXT,owner_id TEXT,actor_ref TEXT,origin_ref TEXT,
+            source_kind TEXT,source_ref TEXT,correlation_id TEXT
+        )""")
+        if candidate is not None:
+            semantics = {
+                "schemaVersion": 1, "candidateSha": candidate,
+                "migrationSnapshotDigest": f"sha256:{'c' * 64}",
+                "scheduleManifestDigest": f"sha256:{'d' * 64}",
+                "ambiguousOutboxDisposition": "terminal_no_resend",
+                "pendingOutboundDisposition": "suppress",
+            }
+            database.execute(
+                "INSERT INTO journal_event VALUES('core-cutover:v1','core_cutover_committed_at',"
+                "'owner','owner','owner-authorization','core-cutover:v1',?,?)",
+                (source_ref or json.dumps(semantics), candidate),
+            )
+    path.chmod(0o600)
+
+
+def test_source_rollback_without_core_marker_preserves_pre_s12_semantics(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "core.sqlite3"
+    core_authority_db(database)
+    monkeypatch.setattr(MODULE, "CORE_DB", database)
+    MODULE.assert_source_rollback_boundary({"priorHead": "a" * 40})
+
+
+def test_source_rollback_rejects_a_pre_core_snapshot_after_cutover(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "core.sqlite3"
+    core_authority_db(database, candidate="b" * 40)
+    monkeypatch.setattr(MODULE, "CORE_DB", database)
+    monkeypatch.setattr(MODULE, "REPO", tmp_path)
+    monkeypatch.setattr(MODULE, "run", lambda *_args, **_kwargs: subprocess.CompletedProcess([], 1, "", ""))
+    with pytest.raises(MODULE.ReleaseError, match="cross the committed Core authority boundary"):
+        MODULE.assert_source_rollback_boundary({"priorHead": "a" * 40})
+
+
+@pytest.mark.parametrize("restore_head", ["b" * 40, "c" * 40])
+def test_source_rollback_allows_the_cutover_candidate_or_descendant(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, restore_head: str
+) -> None:
+    database = tmp_path / "core.sqlite3"
+    core_authority_db(database, candidate="b" * 40)
+    monkeypatch.setattr(MODULE, "CORE_DB", database)
+    monkeypatch.setattr(MODULE, "REPO", tmp_path)
+    monkeypatch.setattr(MODULE, "run", lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "", ""))
+    MODULE.assert_source_rollback_boundary({"priorHead": restore_head})
+
+
+@pytest.mark.parametrize("kind", ["missing-journal", "malformed-marker"])
+def test_source_rollback_fails_closed_on_malformed_core_authority(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, kind: str
+) -> None:
+    database = tmp_path / "core.sqlite3"
+    if kind == "missing-journal":
+        sqlite3.connect(database).close()
+        database.chmod(0o600)
+    else:
+        core_authority_db(database, candidate="b" * 40, source_ref="not-json")
+    monkeypatch.setattr(MODULE, "CORE_DB", database)
+    with pytest.raises(MODULE.ReleaseError, match="Core (authority database lacks|cutover marker is malformed)"):
+        MODULE.assert_source_rollback_boundary({"priorHead": "b" * 40})
+
+
+def test_source_rollback_fails_closed_on_unsafe_core_database_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    database = tmp_path / "core.sqlite3"
+    core_authority_db(database, candidate="b" * 40)
+    database.chmod(0o644)
+    monkeypatch.setattr(MODULE, "CORE_DB", database)
+    with pytest.raises(MODULE.ReleaseError, match="identity/mode/link count"):
+        MODULE.assert_source_rollback_boundary({"priorHead": "b" * 40})
+
+
+def test_source_rollback_checks_core_boundary_before_restoring(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    candidate = "b" * 40
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "state.json").write_text(json.dumps({
+        "candidate": candidate, "phase": "accepted", "priorHead": "a" * 40,
+    }))
+    pointer = tmp_path / "current-source.json"
+    pointer.write_text(json.dumps({"candidate": candidate, "snapshot": str(snapshot)}))
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", tmp_path)
+    monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer)
+    monkeypatch.setattr(MODULE, "assert_source_rollback_boundary", lambda _state: (_ for _ in ()).throw(
+        MODULE.ReleaseError("boundary rejected")
+    ))
+    restored = []
+    monkeypatch.setattr(MODULE, "restore_source_snapshot", lambda *_args: restored.append(True))
+    with pytest.raises(MODULE.ReleaseError, match="boundary rejected"):
+        MODULE.source_rollback(snapshot, candidate)
+    assert restored == []
 
 
 def test_gateway_readiness_refreshes_credentials_after_main_pid_change(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -743,6 +851,9 @@ def test_candidate_controller_binding_rejects_a_floating_rollback_controller(
     source = SCRIPT.read_text(encoding="utf-8")
     assert source.index("validate_candidate_controller(REPO, args.candidate)") < source.index(
         'if args.mode == "rollback":'
+    )
+    assert source.index("validate_source_candidate(args.candidate") < source.index(
+        'if args.mode == "source-rollback":'
     )
 
 

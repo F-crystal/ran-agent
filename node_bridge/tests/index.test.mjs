@@ -44,6 +44,15 @@ test('main creates and recovers one shared durable outbox before wiring live cha
   assert.doesNotMatch(INDEX_SOURCE, /ombreCompatRuntime/);
 });
 
+test('S12 quiescence starts only the committed Core worker before reopening ingress', () => {
+  assert.match(INDEX_SOURCE, /RAN_AGENT_S12_INGRESS_QUIESCED === 'true'/);
+  assert.match(INDEX_SOURCE, /if \(s12IngressQuiesced\) \{[\s\S]*?coreWorkRuntime\.start\(\)[\s\S]*?await coreWorkRuntime\.stop\(\)[\s\S]*?return;/);
+  const quiesced = INDEX_SOURCE.indexOf('if (s12IngressQuiesced) {');
+  for (const ingress of ['buildAgent({', 'startFeishuBridge({', 'startDesktopProxyServer({', 'startWithRetry(agent']) {
+    assert.ok(INDEX_SOURCE.indexOf(ingress, quiesced) > quiesced, `${ingress} must remain after the quiesced return`);
+  }
+});
+
 test('main starts the v2 external MCP runtime instead of the legacy activity runner loop', () => {
   assert.match(INDEX_SOURCE, /createExternalMcpAutonomyRuntime\(\{\s*env: runtimeEnv,/);
   assert.match(INDEX_SOURCE, /transport: createExternalMcpRuntimeTransport\(\{ env: runtimeEnv \}\)/);

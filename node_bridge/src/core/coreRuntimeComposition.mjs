@@ -18,6 +18,9 @@ function digest(value) {
 }
 
 function promptFor(payloadRef) {
+  if (payloadRef.startsWith('s12-acceptance:')) {
+    return 'S12 Core cutover acceptance. Reply exactly: S12 Core cutover accepted.';
+  }
   if (payloadRef === 'system-task:ai-daily-digest') {
     return '生成今天的主动简报。只汇总当前可核验的日程、待办和重要事实；没有有用内容时保持静默。';
   }

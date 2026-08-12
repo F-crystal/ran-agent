@@ -801,10 +801,15 @@ async function startWithRetry(agent, weixinAccountConfig) {
 
 async function main() {
   await configureProxyIfPresent();
-  const weixinAccountConfig = await ensureWeixinAccountReady();
-  resetSyncBufferIfNeeded(weixinAccountConfig.accountId);
-  await verifyWeixinReachability();
-  const proactiveBot = await createProactiveBot(process.env);
+  const s12IngressQuiesced = process.env.RAN_AGENT_S12_INGRESS_QUIESCED === 'true';
+  const weixinAccountConfig = s12IngressQuiesced ? null : await ensureWeixinAccountReady();
+  if (weixinAccountConfig) {
+    resetSyncBufferIfNeeded(weixinAccountConfig.accountId);
+    await verifyWeixinReachability();
+  }
+  const proactiveBot = s12IngressQuiesced ? {
+    async sendMessage() { throw new Error('S12 quiescence forbids Weixin delivery'); },
+  } : await createProactiveBot(process.env);
   const runtimeEnv = {
     ...process.env,
     async sendStructuredMessage(payload) {
@@ -860,6 +865,18 @@ async function main() {
     attentionFlushHandler: coreExternalMcp?.attentionFlushHandler, externalMcpRuntime,
     env: runtimeEnv, logger: console,
   });
+  if (s12IngressQuiesced) {
+    if (!coreWorkRuntime) throw new Error('S12 quiescence requires committed Core worker authority');
+    coreWorkRuntime.start();
+    console.log('[node-bridge] S12 ingress quiesced; Core worker active');
+    await new Promise((resolve) => {
+      process.once('SIGTERM', resolve);
+      process.once('SIGINT', resolve);
+    });
+    await coreWorkRuntime.stop();
+    await coreRuntime.core.close();
+    return;
+  }
   const agent = buildAgent({
     logger: console,
     env: runtimeEnv,

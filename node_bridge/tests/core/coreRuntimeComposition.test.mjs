@@ -137,6 +137,29 @@ test('an admitted external checkpoint is decided by Hermes and sent through the 
   await core.close();
 });
 
+test('the S12 acceptance schedule uses the existing Core worker and exact acceptance instruction', async (t) => {
+  const { core, now } = await setup(t, 's12-acceptance:fixture');
+  const messages = [];
+  let sends = 0;
+  const runtime = createCoreRuntimeComposition({
+    runtime: { core, hashContent: () => TOKEN },
+    channelHub: async (message) => {
+      messages.push(message);
+      return { replyText: 'S12 Core cutover accepted.', provider: 'hermes', model: 'test' };
+    },
+    sendFeishu: async () => { sends += 1; },
+    now,
+    env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
+  });
+  runtime.start();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await runtime.stop();
+  assert.equal(messages.length, 1);
+  assert.equal(messages[0].text, 'S12 Core cutover acceptance. Reply exactly: S12 Core cutover accepted.');
+  assert.equal(sends, 1);
+  await core.close();
+});
+
 test('an external notification fails closed when revision or checkpoint digest no longer matches its fact', async (t) => {
   for (const [name, activity] of [
     ['newer revision', {

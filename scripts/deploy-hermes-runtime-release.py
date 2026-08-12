@@ -88,6 +88,7 @@ SOURCE_SNAPSHOT_ROOT = ARTIFACT_ROOT / "source-snapshots"
 SOURCE_POINTER = SOURCE_SNAPSHOT_ROOT / "current-source.json"
 SOURCE_ARTIFACT_ROOT = ARTIFACT_ROOT / "source-artifacts"
 SOURCE_STAGE_ROOT = ARTIFACT_ROOT / "source-stages"
+CORE_DB = REPO / ".ran_agent_state/core/core-state.sqlite3"
 SOURCE_REF_ROOT = "refs/ran-agent/source-candidates"
 SOURCE_HERMES_BIN = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes")
 SOURCE_RUNTIME_PYTHON = SOURCE_HERMES_BIN.parents[1] / "python/bin/python3.12"
@@ -2001,6 +2002,72 @@ def restore_source_snapshot(snapshot: Path, state: dict[str, Any]) -> None:
         raise ReleaseError("source rollback did not restore the production checkout")
 
 
+def assert_source_rollback_boundary(state: dict[str, Any]) -> None:
+    if not CORE_DB.exists():
+        if CORE_DB.is_symlink():
+            raise ReleaseError("Core authority database is invalid")
+        return
+    if CORE_DB.is_symlink() or not CORE_DB.is_file():
+        raise ReleaseError("Core authority database is invalid")
+    value = CORE_DB.stat()
+    runtime = pwd.getpwnam("ubuntu")
+    if (value.st_uid != runtime.pw_uid or value.st_gid != runtime.pw_gid
+            or stat.S_IMODE(value.st_mode) != 0o600 or value.st_nlink != 1):
+        raise ReleaseError("Core authority database identity/mode/link count is invalid")
+    try:
+        with sqlite3.connect(f"file:{CORE_DB}?mode=ro", uri=True) as database:
+            if database.execute("PRAGMA quick_check").fetchone() != ("ok",):
+                raise ReleaseError("Core authority database integrity check failed")
+            table = database.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='journal_event'"
+            ).fetchone()
+            if table is None:
+                raise ReleaseError("Core authority database lacks the cutover journal")
+            marker = database.execute(
+                "SELECT event_type,owner_id,actor_ref,origin_ref,source_kind,source_ref,correlation_id "
+                "FROM journal_event WHERE journal_event_id='core-cutover:v1'"
+            ).fetchone()
+    except (OSError, sqlite3.Error) as exc:
+        raise ReleaseError("Core authority database is unreadable") from exc
+    if marker is None:
+        return
+    event_type, owner_id, actor_ref, authorization_ref, source_kind, source_ref, cutover_candidate = marker
+    try:
+        semantics = json.loads(source_ref)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise ReleaseError("Core cutover marker is malformed") from exc
+    if (
+        event_type != "core_cutover_committed_at"
+        or not isinstance(owner_id, str)
+        or not owner_id
+        or actor_ref != owner_id
+        or source_kind != "core-cutover:v1"
+        or not isinstance(authorization_ref, str)
+        or not authorization_ref
+        or not isinstance(cutover_candidate, str)
+        or len(cutover_candidate) != 40
+        or any(character not in "0123456789abcdef" for character in cutover_candidate)
+        or not isinstance(semantics, dict)
+        or semantics.get("schemaVersion") != 1
+        or semantics.get("candidateSha") != cutover_candidate
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(semantics.get("migrationSnapshotDigest", "")))
+        or not re.fullmatch(r"sha256:[0-9a-f]{64}", str(semantics.get("scheduleManifestDigest", "")))
+        or semantics.get("ambiguousOutboxDisposition") != "terminal_no_resend"
+        or semantics.get("pendingOutboundDisposition") != "suppress"
+    ):
+        raise ReleaseError("Core cutover marker is malformed")
+    restore_head = state.get("priorHead")
+    if (not isinstance(restore_head, str) or len(restore_head) != 40
+            or any(character not in "0123456789abcdef" for character in restore_head)):
+        raise ReleaseError("source rollback snapshot authority is ambiguous")
+    relation = run([
+        "git", "-c", f"safe.directory={REPO}", "-C", str(REPO),
+        "merge-base", "--is-ancestor", cutover_candidate, restore_head,
+    ], check=False)
+    if relation.returncode != 0:
+        raise ReleaseError("source rollback would cross the committed Core authority boundary")
+
+
 def source_rollback(snapshot: Path, candidate: str) -> None:
     state_path = snapshot / "state.json"
     if snapshot.parent != SOURCE_SNAPSHOT_ROOT or not state_path.is_file() or state_path.is_symlink():
@@ -2010,6 +2077,7 @@ def source_rollback(snapshot: Path, candidate: str) -> None:
         raise ReleaseError("source rollback snapshot is not the accepted candidate")
     if not SOURCE_POINTER.is_file() or json.loads(SOURCE_POINTER.read_text(encoding="utf-8")).get("snapshot") != str(snapshot):
         raise ReleaseError("source rollback snapshot is not current")
+    assert_source_rollback_boundary(state)
     restore_source_snapshot(snapshot, state)
     update_phase(snapshot, state, "rolled-back")
     if state.get("priorPointer") is None:

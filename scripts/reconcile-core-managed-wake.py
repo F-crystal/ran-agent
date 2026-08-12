@@ -59,8 +59,12 @@ def inspect_job(jobs: list[dict[str, object]], desired: dict[str, object], *, ac
     return job
 
 
-def run_hermes(binary: Path, *args: str) -> None:
-    subprocess.run([str(binary), "cron", *args], check=True)
+def run_hermes(binary: Path, home: Path, *args: str) -> None:
+    subprocess.run([
+        "/usr/sbin/runuser", "-u", "ubuntu", "--", "/usr/bin/env", "-i",
+        "HOME=/home/ubuntu", f"HERMES_HOME={home}", "PATH=/usr/bin:/bin",
+        str(binary), "cron", *args,
+    ], check=True)
 
 
 def assert_cutover(core_db: Path) -> None:
@@ -73,18 +77,30 @@ def assert_cutover(core_db: Path) -> None:
         raise ReconcileError("Core cutover marker is absent")
 
 
+def assert_no_cutover(core_db: Path | None) -> None:
+    if core_db is None or not core_db.exists():
+        return
+    with sqlite3.connect(f"file:{core_db}?mode=ro", uri=True) as database:
+        row = database.execute(
+            "SELECT 1 FROM journal_event WHERE journal_event_id='core-cutover:v1'"
+        ).fetchone()
+    if row is not None:
+        raise ReconcileError("managed Core wake cannot be removed after cutover")
+
+
 def reconcile(args: argparse.Namespace) -> dict[str, object]:
     manifest = json.loads(args.manifest.read_text(encoding="utf-8"))
     desired = desired_job(manifest)
     jobs = load_jobs(args.hermes_home)
     if args.mode == "verify":
         job = inspect_job(jobs, desired, active=args.expect_active)
-        return {"status": "verified", "present": job is not None, "active": args.expect_active}
+        return {"status": "verified", "present": job is not None,
+                "active": job is not None and args.expect_active}
     if args.mode == "prepare":
         existing = inspect_job(jobs, desired, active=False) if jobs else None
         if existing is None:
             run_hermes(
-                args.hermes_bin,
+                args.hermes_bin, args.hermes_home,
                 "create", "2099-01-01T00:00", "--name", str(desired["name"]),
                 "--deliver", str(desired["deliver"]), "--script", str(desired["script"]),
                 "--no-agent", "--workdir", str(desired["workdir"]),
@@ -93,24 +109,38 @@ def reconcile(args: argparse.Namespace) -> dict[str, object]:
             if len(created) != 1 or created[0].get("name") != desired.get("name"):
                 raise ReconcileError("Hermes did not create exactly one managed wake job")
             job_id = str(created[0]["id"])
-            run_hermes(args.hermes_bin, "pause", job_id)
-            run_hermes(args.hermes_bin, "edit", job_id, "--schedule", str(desired["schedule"]))
+            run_hermes(args.hermes_bin, args.hermes_home, "pause", job_id)
+            run_hermes(args.hermes_bin, args.hermes_home, "edit", job_id, "--schedule", str(desired["schedule"]))
         job = inspect_job(load_jobs(args.hermes_home), desired, active=False)
         return {"status": "prepared", "jobId": str(job["id"]), "active": False}
+    if args.mode == "remove":
+        assert_no_cutover(args.core_db)
+        job = inspect_job(jobs, desired, active=False) if jobs else None
+        if job is not None:
+            run_hermes(args.hermes_bin, args.hermes_home, "remove", str(job["id"]))
+        if load_jobs(args.hermes_home):
+            raise ReconcileError("managed Core wake removal did not restore an empty cron store")
+        return {"status": "removed", "active": False}
     if args.core_db is None:
         raise ReconcileError("activation requires --core-db")
     assert_cutover(args.core_db)
+    try:
+        active = inspect_job(jobs, desired, active=True)
+    except ReconcileError:
+        active = None
+    if active is not None:
+        return {"status": "already_active", "jobId": str(active["id"]), "active": True}
     job = inspect_job(jobs, desired, active=False)
     if job is None:
         raise ReconcileError("managed wake job must be prepared before activation")
-    run_hermes(args.hermes_bin, "resume", str(job["id"]))
+    run_hermes(args.hermes_bin, args.hermes_home, "resume", str(job["id"]))
     active = inspect_job(load_jobs(args.hermes_home), desired, active=True)
     return {"status": "activated", "jobId": str(active["id"]), "active": True}
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=("verify", "prepare", "activate"), default="verify")
+    parser.add_argument("--mode", choices=("verify", "prepare", "activate", "remove"), default="verify")
     parser.add_argument("--manifest", type=Path, required=True)
     parser.add_argument("--hermes-home", type=Path, required=True)
     parser.add_argument("--hermes-bin", type=Path, required=True)

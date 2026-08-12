@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11, R1F and R2 LOCAL_VERIFIED; R3 sealed-runtime scratch-home repair LOCAL_VERIFIED (2026-08-11)
+Status: S4 PROD_VERIFIED; S5-S11/R2 LOCAL_VERIFIED; R3-B CLEAR at 9653d030; S12 NOT_STARTED (2026-08-12)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -518,15 +518,29 @@ legitimate ephemeral initialization state there; the probe instead verifies
 the same scratch inode, owner and mode after the CLI, recursively removes only
 that invocation's namespace on success or failure, and refuses success if
 cleanup fails. The sealed runtime no-write/import/origin/version checks remain
-unchanged. Exact unarchived implementation bytes passed bounded scratch-only
+unchanged. The exact implementation bytes passed bounded scratch-only
 TECserver validation under both root and `ubuntu`: the shared probe, staged
 resolver, Node provider route, Python non-thinking route and enabled-thinking
 negative all passed; ambient HOME/XDG/TMP and `/nonexistent` had zero influence;
 sealed-runtime content/metadata hashes, service PIDs/restarts, production HEAD,
-worktree and source pointer were unchanged. The repair is `LOCAL_VERIFIED /
-NOT_REVIEWED`; delivery is contingent on the archive transaction containing
-this status. Complete R3-B retry and S12 remain `NOT_STARTED` pending
-independent exact-SHA review.
+worktree and source pointer were unchanged. The repair was archived and passed
+independent exact-SHA review at
+`9653d030473b3e9870ddea9158c4a2f9570c243b`. The complete immutable R3-B run on
+that base is `CLEAR`; its observed production source remained
+`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`.
+
+S12 itself is `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK`. The current
+successor is a local-only repair for
+`S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP`: one root-owned durable
+transaction owns source apply/rollback, inactive Core preparation, quiescence,
+the existing atomic `core-cutover:v1`, worker/wake handoff and one deterministic
+Core/Feishu acceptance receipt. Pre-marker failure restores the accepted source
+snapshot; a committed SQLite marker overrides an older journal and makes
+recovery forward-only. The canonical source rollback authority now rejects any
+snapshot older than the committed Core candidate. Focused transaction,
+cutover, rollback, wake and exactly-once delivery evidence is local only. The
+successor is `LOCAL_VERIFIED / NOT_REVIEWED / UNARCHIVED` until this archive
+completes. Production is unchanged; neither S12 VERIFY nor APPLY has run.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-10)
+Status: CURRENT (2026-08-12)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -89,6 +89,51 @@ profile still fails closed unless the candidate contains a separately reviewed
 companion digest, allowed delta and existing live destinations. The Pro template
 is inert. The source transaction's existing profile/source snapshot owns
 rollback; the historical companion-overlay transaction is not a second writer.
+
+## Canonical S12 Transaction
+
+After R3-B is clear for the exact successor and an independent exact-SHA review
+accepts its S12 authority, `scripts/s12-cutover.py` is the only production S12
+entrypoint. Do not invoke source apply/rollback, `core-cutover.mjs`, managed-wake
+reconciliation, `core-wake.mjs`, or the acceptance subordinate as operator
+steps. VERIFY is read-only. APPLY additionally requires the owner's explicit
+identity and authorization reference; a VERIFY result does not authorize it.
+
+Configuration prerequisites are the project virtualenv, the exact archived
+candidate, its candidate-extracted S12 controller and bootstrap, the fresh
+production baseline observed by R3-B, one whole-second cutover instant, and an
+owner-approved root-owned mode `0600` visible-binding record. Keep the same
+values for VERIFY and any later separately authorized APPLY:
+
+```bash
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+S12_CANDIDATE=<independently-reviewed-40-char-main-sha>
+S12_BASELINE=<fresh-r3b-production-baseline-sha>
+S12_COMMITTED_AT=<whole-second-UTC-instant>
+S12_BINDING=<owner-approved-root-owned-0600-visible-binding.json>
+S12_CONTROLLER="$(mktemp /tmp/ran-agent-s12-controller.XXXXXX)"
+S12_BOOTSTRAP="$(mktemp /tmp/ran-agent-s12-bootstrap.XXXXXX)"
+git show "$S12_CANDIDATE:scripts/s12-cutover.py" > "$S12_CONTROLLER"
+git show "$S12_CANDIDATE:scripts/bootstrap-hermes-release.sh" > "$S12_BOOTSTRAP"
+chmod 700 "$S12_CONTROLLER" "$S12_BOOTSTRAP"
+sudo "$S12_CONTROLLER" \
+  --mode verify --candidate "$S12_CANDIDATE" \
+  --production-baseline "$S12_BASELINE" --bootstrap "$S12_BOOTSTRAP" \
+  --legacy-db /opt/ran_agent/data/personal_agent.db \
+  --state-dir /opt/ran_agent/.ran_agent_state \
+  --core-db /opt/ran_agent/.ran_agent_state/core/core-state.sqlite3 \
+  --visible-binding "$S12_BINDING" --committed-at "$S12_COMMITTED_AT"
+```
+
+Only after the owner authorizes the exact VERIFY evidence, use the same command
+with `--mode apply`, `--owner-id <owner-id>` and
+`--authorization-ref <exact-authorization-ref>`. Repeating that exact APPLY
+resumes its durable transaction; changing candidate, owner, authorization,
+baseline, cutover instant, binding digest or Core DB fails closed. A committed
+`core-cutover:v1` marker forces forward recovery even when the root journal is
+older. Remove only the two `/tmp` controller files after the governed
+transaction no longer needs them.
 
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy

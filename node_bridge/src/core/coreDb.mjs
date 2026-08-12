@@ -189,6 +189,12 @@ export class CoreDatabase {
         'SELECT * FROM projector_cursor WHERE projector_id=? AND target_scope=?', projectorId, targetScope,
       ),
       projectionOutbox: (outboxId) => read('SELECT * FROM projection_outbox WHERE projection_outbox_id=?', outboxId),
+      presentationOutboxById: (outboxId) => read(
+        'SELECT * FROM presentation_outbox WHERE presentation_outbox_id=?', outboxId,
+      ),
+      presentationResultForOutbox: (outboxId) => read(`SELECT * FROM journal_event
+        WHERE event_type='package_b_presentation_result_recorded' AND correlation_id=?
+        ORDER BY sequence_no DESC LIMIT 1`, outboxId),
       externalPollProjectionForFact: (eventId) => read(`SELECT * FROM projection_outbox
         WHERE projector_id='core-external-attention-v1' AND source_event_id=?`, eventId),
       pendingExternalPollProjections: (limit = 32) => all(`SELECT outbox.*,event.correlation_id AS work_run_id

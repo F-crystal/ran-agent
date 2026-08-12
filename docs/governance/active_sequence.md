@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-11)
+Status: CURRENT (2026-08-12)
 
 This is the canonical order for active project work. Historical P-numbered plans
 do not control current execution. Keep exactly one stage `IN_PROGRESS` when the
@@ -39,7 +39,7 @@ S0 facts/runtime selection
 | S9 | COMPLETE | S8 | Schema v2, ScheduleSpec, WakeOccurrence, WorkRun, `wake_due`, and the single managed tick. | Schema v1 remains frozen; v1 upgrades in place to v2. One-shot, interval and daily schedules, immutable revisions, duplicate/missed tick catch-up, DST, scheduled Exchange isolation and WorkRun lease/fence authority pass locally; the managed tick has no network or direct presentation path. |
 | S10 | COMPLETE | S9 | Inventory legacy scheduler, reminders, daily digest, external MCP/forum/RSS pollers and dispatchers; split polling facts from visible attention; build manifest/watermark; rehearse on a production copy. | The 19-row machine manifest gives every legacy component one disposition. A production SQLite/state copy at `2026-08-08T08:28:45.000Z` migrated 0→2 with zero business rows/effects; three historical reminders were suppressed, future reminders and watches were zero, 13 legacy external activities were staged paused, one pending outbound item was held for reconciliation, and 58 sent plus 65 ambiguous legacy outbox rows became receipt/no-resend evidence only. These counts are historical rehearsal evidence, not current cutover readiness, and must be freshly inspected and reconciled at the S12 gate. The local external-poll worker seam records one hash-bound Core fact after WorkRun authority and exposes no send operation. |
 | S11 | COMPLETE | S10 | Synthetic acceptance: duplicate/missed ticks, DST, crash, stale WorkRun fence, ambiguous outcomes, restart no-resend, and gaming/focus suppression with delayed coalescing. | One synthetic chain binds the WakeOccurrence to its exact generated Exchange, claimed WorkRun revision/fence/lease, typed system/internal instruction, provider epoch/attempt, final, presentation outbox, single injected effect and durable terminal receipt. A thrown post-dispatch `ETIMEDOUT` records durable `ambiguous` evidence and replay never calls the adapter; a post-commit restart claims the existing WorkRun without another occurrence; stale WorkRun authority rejects before final/effect; an equivalent delayed fingerprint remains one candidate across gaming→available while explicit owner bypasses remain intact. The focused set passes 29/29 and the full Core suite 151/151 locally. Production is unchanged. |
-| S12 | NOT STARTED | S11 + R3 + production authorization | Stop ingress, let legacy effect/outbox drain, execute the single Core Cutover Gate, enable one tick, disable legacy visible wake. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
+| S12 | NOT STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK | S11 + R3-B CLEAR + independently reviewed S12 controller + production authorization | Invoke the single candidate-bound S12 transaction; operators do not assemble subordinate source, Core, wake or acceptance commands. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
 | S13 | NOT STARTED | S12 + observation window + separate owner deletion authorization | After observation, remove the legacy scheduler, JSON outbox and compatibility writer. | No duplicate delivery; the legacy writer and legacy clock are truly gone. |
 
 ## S12 Readiness Topology
@@ -90,11 +90,14 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> R3-B projection negative-injection harness repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
   -> independent exact-SHA projection-injection repair review (CLEAR at 0d7c5ce2)
   -> fifth S12-R3B immutable server gate/dry-run proof (FIX_REQUIRED, STOPPED FAIL-CLOSED)
-  -> R3-B archive local-path authority repair (LOCAL_VERIFIED, NOT_REVIEWED, ARCHIVED by containing commit)
-  -> independent exact-SHA archive local-path repair review (REQUIRED)
-  -> S12-R3B immutable server gate/dry-run retry (NOT STARTED)
+  -> R3-B archive local-path authority repair 28c40549 (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
+  -> raw-final authority repair e4a6d205 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+  -> sealed-runtime scratch-home repair 9653d030 (LOCAL_VERIFIED, REVIEWED, ARCHIVED)
+  -> S12-R3B immutable server gate/dry-run proof on 9653d030 (CLEAR)
+  -> S12 orchestration / rollback-interlock successor (LOCAL_VERIFIED, NOT_REVIEWED, UNARCHIVED)
+  -> independent exact-SHA S12 successor review (REQUIRED)
   -> explicit owner production authorization
-  -> S12 Core Cutover Gate
+  -> canonical S12 transaction VERIFY, then separately authorized APPLY
 ```
 
 - Independent review found `R1A-ACK-ORDER` in the previous candidate
@@ -270,11 +273,17 @@ S12-R0 fresh read-only production audit (COMPLETE)
   closed unless recursive cleanup completes. Exact unarchived repair bytes
   passed bounded TECserver root/ubuntu probe, resolver, Node-provider and both
   Python-provider-route proofs with sealed-runtime hashes and production state
-  unchanged. The new repair is `LOCAL_VERIFIED / NOT_REVIEWED`; delivery is
-  contingent on the archive transaction containing this status. R3 remains
-  incomplete; independent exact-SHA review and another complete R3-B retry are
-  `NOT_STARTED`.
-- S12 remains `NOT STARTED`. Production source remains `98fd8b3`, and R2 caused
+  unchanged. The repair was archived and independently reviewed at
+  `9653d030473b3e9870ddea9158c4a2f9570c243b`; the subsequent complete R3-B is
+  `CLEAR` on that exact base. The current successor closes
+  `S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP` with one durable
+  candidate-bound transaction, SQLite-marker precedence, pre-marker source
+  restoration, post-marker forward-only recovery, one managed clock and one
+  Core-delivered acceptance identity. It is `LOCAL_VERIFIED / NOT_REVIEWED /
+  UNARCHIVED` until this archive completes.
+- S12 remains `NOT STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` pending the
+  successor's independent exact-SHA review and a later explicit production
+  authorization. Production source remains `98fd8b3`, and R2 caused
   no production mutation. A separately authorized XHS maintenance transaction
   retired the account-backed route and activated the existing public-only
   sidecar; it is not R2 evidence or a Core/source change.
