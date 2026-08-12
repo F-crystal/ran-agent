@@ -183,14 +183,15 @@ Node-provider and Python-provider-route parity with sealed-runtime and
 production hashes/state unchanged. The repair was archived and independently
 reviewed at `9653d030473b3e9870ddea9158c4a2f9570c243b`; complete R3-B on that
 base is `CLEAR`. S12 remains `NOT_STARTED`. Its sole current blocker is
-`S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP`. The local successor
-provides one candidate-bound durable transaction, reuses the existing atomic
-`core-cutover:v1` as the only authority transfer, restores pre-marker source
-authority on failure, enforces post-marker forward recovery in both the
-controller and canonical source rollback, and routes one deterministic
-acceptance through Core's durable Feishu delivery. It is `LOCAL_VERIFIED /
-NOT_REVIEWED / UNARCHIVED` until this archive completes; production is
-unchanged and no S12 mode has run.
+`S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP`. The first orchestration
+candidate `e6ce78aa` is `LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED / ARCHIVED`:
+VERIFY created a source candidate ref, an ACCEPTED journal bypassed SQLite, and
+the P0-P4 rollback proof mocked the composed rollback. The bounded successor is
+`LOCAL_VERIFIED / NOT_REVIEWED` and archived by its containing commit. Its
+canonical source-verify path is persistently read-only, SQLite is read before
+terminal journal interpretation, accepted replay is read-only, and one
+stateful composed matrix proves exact P0-P4 authority restoration. Production
+is unchanged and no S12 mode has run.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

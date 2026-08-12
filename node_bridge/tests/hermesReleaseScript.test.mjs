@@ -302,6 +302,7 @@ function makeBootstrapFixture({ corruptManifest = false } = {}) {
   runGit(['add', '.']);
   runGit(['commit', '-m', 'candidate framework']);
   const candidateSha = runGit(['rev-parse', 'HEAD']).trim();
+  runGit(['update-ref', 'refs/remotes/origin/main', candidateSha]);
   runGit(['checkout', '--detach', prior]);
   return { repo, prior, candidateSha, runGit };
 }
@@ -3992,6 +3993,41 @@ test('first-release bootstrap runs an extracted immutable framework while the pr
     assert.doesNotThrow(() => fixture.runGit(['diff', '--quiet']));
   } finally {
     rmSync(extracted, { force: true });
+    rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
+test('unified source verify uses candidate-extracted authority without creating a source ref', () => {
+  const fixture = makeBootstrapFixture();
+  const directory = mkdtempSync(join(tmpdir(), 'ran-agent-source-verify-'));
+  const extracted = join(directory, 'bootstrap.sh');
+  const sudoLog = join(directory, 'sudo.log');
+  const sudo = join(directory, 'sudo');
+  try {
+    writeFileSync(extracted, fixture.runGit(['show', `${fixture.candidateSha}:scripts/bootstrap-hermes-release.sh`]));
+    chmodSync(extracted, 0o700);
+    writeFileSync(sudo, '#!/bin/sh\nprintf "%s\\n" "$@" > "$SUDO_LOG"\nprintf \'{"status":"SOURCE_VERIFY_OK"}\\n\'\n');
+    chmodSync(sudo, 0o700);
+    const before = fixture.runGit(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/ran-agent/source-candidates']);
+    const output = execFileSync('bash', [extracted, '--verify', fixture.candidateSha], {
+      cwd: fixture.repo,
+      env: {
+        PATH: `${directory}:/usr/bin:/bin`, TMPDIR: directory, SUDO_LOG: sudoLog,
+        RAN_AGENT_RELEASE_UNIFIED_SOURCE: '1',
+        RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+        RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(directory, 'release'),
+      },
+      encoding: 'utf8', stdio: 'pipe',
+    });
+    const after = fixture.runGit(['for-each-ref', '--format=%(refname) %(objectname)', 'refs/ran-agent/source-candidates']);
+    assert.equal(after, before);
+    assert.match(readFileSync(sudoLog, 'utf8'), /--mode\nsource-verify\n$/);
+    assert.match(output, /bootstrap-ok/);
+    assert.equal(readdirSync(directory).some((name) => name.startsWith('ran-agent-release-bootstrap.')), false);
+    assert.equal(fixture.runGit(['status', '--short']).trim(), '');
+    assert.equal(fixture.runGit(['rev-parse', 'HEAD']).trim(), fixture.prior);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
     rmSync(fixture.repo, { recursive: true, force: true });
   }
 });

@@ -273,12 +273,19 @@ def set_enabled(unit: str, state: str) -> None:
         raise ReleaseError(f"unsupported service enabled state: {unit}={state}")
 
 
-def check_candidate(repo: Path, candidate: str, candidate_ref_root: str = CANDIDATE_REF_ROOT) -> None:
+def validate_candidate_object(repo: Path, candidate: str) -> None:
     if len(candidate) != 40 or any(character not in "0123456789abcdef" for character in candidate):
         raise ReleaseError("candidate must be an exact lowercase 40-character SHA")
     resolved = git(repo, "rev-parse", "--verify", f"{candidate}^{{commit}}").stdout.strip()
     if resolved != candidate:
         raise ReleaseError("candidate object mismatch")
+    if git(repo, "status", "--porcelain").stdout:
+        raise ReleaseError("production worktree is dirty")
+
+
+def validate_persistent_candidate_ref(
+    repo: Path, candidate: str, candidate_ref_root: str = CANDIDATE_REF_ROOT
+) -> None:
     candidate_ref = f"{candidate_ref_root}/{candidate}"
     try:
         referenced = git(repo, "rev-parse", "--verify", f"{candidate_ref}^{{commit}}").stdout.strip()
@@ -286,8 +293,11 @@ def check_candidate(repo: Path, candidate: str, candidate_ref_root: str = CANDID
         raise ReleaseError("persistent runtime candidate ref is absent") from exc
     if referenced != candidate:
         raise ReleaseError("persistent runtime candidate ref mismatch")
-    if git(repo, "status", "--porcelain").stdout:
-        raise ReleaseError("production worktree is dirty")
+
+
+def check_candidate(repo: Path, candidate: str, candidate_ref_root: str = CANDIDATE_REF_ROOT) -> None:
+    validate_candidate_object(repo, candidate)
+    validate_persistent_candidate_ref(repo, candidate, candidate_ref_root)
 
 
 def validate_candidate_controller(repo: Path, candidate: str) -> None:
@@ -305,8 +315,12 @@ def require_private_root(path: Path) -> None:
 
 
 @contextlib.contextmanager
-def release_lock():
-    flags = os.O_RDWR | os.O_CREAT | getattr(os, "O_NOFOLLOW", 0)
+def release_lock(*, create: bool = True):
+    if not create and not LOCK_PATH.exists() and not LOCK_PATH.is_symlink():
+        raise ReleaseError("read-only source verification requires the existing release lock")
+    flags = os.O_RDWR | getattr(os, "O_NOFOLLOW", 0)
+    if create:
+        flags |= os.O_CREAT
     descriptor = os.open(LOCK_PATH, flags, 0o600)
     try:
         value = os.fstat(descriptor)
@@ -1612,8 +1626,12 @@ def validate_source_advance_paths(
         raise ReleaseError("source advance contains state, data, archive, vault, migration, or env changes")
 
 
-def validate_source_candidate(candidate: str, *, allow_current: bool = False) -> None:
-    check_candidate(REPO, candidate, SOURCE_REF_ROOT)
+def validate_source_candidate(
+    candidate: str, *, allow_current: bool = False, require_persistent_ref: bool = True
+) -> None:
+    validate_candidate_object(REPO, candidate)
+    if require_persistent_ref:
+        validate_persistent_candidate_ref(REPO, candidate, SOURCE_REF_ROOT)
     pointer = current_source_pointer()
     if pointer is not None:
         prior = pointer["candidate"]
@@ -2117,6 +2135,14 @@ def source_apply(candidate: str) -> Path:
 
 
 def source_main(args: argparse.Namespace) -> int:
+    if args.mode == "source-verify":
+        with release_lock(create=False):
+            validate_source_candidate(args.candidate, require_persistent_ref=False)
+            require_source_baseline()
+            refuse_unfinished_source_transaction()
+        print(json.dumps({"status": "SOURCE_VERIFY_OK", "candidate": args.candidate,
+                          "freeBytes": shutil.disk_usage(REPO).free}, sort_keys=True))
+        return 0
     validate_source_candidate(args.candidate, allow_current=args.mode == "source-rollback")
     if args.mode == "source-rollback":
         if args.snapshot is None:
@@ -2141,7 +2167,7 @@ def main() -> int:
     parser.add_argument("--artifact", type=Path)
     parser.add_argument(
         "--mode",
-        choices=("dry-run", "apply", "rollback", "source-dry-run", "source-apply", "source-rollback"),
+        choices=("dry-run", "apply", "rollback", "source-verify", "source-dry-run", "source-apply", "source-rollback"),
         required=True,
     )
     parser.add_argument("--snapshot", type=Path)
@@ -2151,6 +2177,8 @@ def main() -> int:
     if ARTIFACT_ROOT.is_symlink() or not ARTIFACT_ROOT.is_dir():
         raise ReleaseError("authorized release artifact root is absent")
     require_private_root(ARTIFACT_ROOT)
+    if args.mode == "source-verify":
+        return source_main(args)
     with release_lock():
         if args.mode.startswith("source-"):
             return source_main(args)

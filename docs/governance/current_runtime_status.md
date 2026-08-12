@@ -529,18 +529,18 @@ independent exact-SHA review at
 that base is `CLEAR`; its observed production source remained
 `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`.
 
-S12 itself is `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK`. The current
-successor is a local-only repair for
-`S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP`: one root-owned durable
-transaction owns source apply/rollback, inactive Core preparation, quiescence,
-the existing atomic `core-cutover:v1`, worker/wake handoff and one deterministic
-Core/Feishu acceptance receipt. Pre-marker failure restores the accepted source
-snapshot; a committed SQLite marker overrides an older journal and makes
-recovery forward-only. The canonical source rollback authority now rejects any
-snapshot older than the committed Core candidate. Focused transaction,
-cutover, rollback, wake and exactly-once delivery evidence is local only. The
-successor is `LOCAL_VERIFIED / NOT_REVIEWED / UNARCHIVED` until this archive
-completes. Production is unchanged; neither S12 VERIFY nor APPLY has run.
+S12 itself is `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK`. Candidate
+`e6ce78aaeb3c7117daac25ccbeb7b66b570cd0b1` is `LOCAL_VERIFIED / REVIEWED /
+FIX_REQUIRED / ARCHIVED`. Independent review accepted its overall composition
+but found `S12-VERIFY-SOURCE-REF-MUTATION`,
+`S12-ACCEPTED-JOURNAL-OVERRIDES-SQLITE` and
+`PRE-MARKER-COMPOSED-ROLLBACK-PROOF-MISSING`. The bounded successor makes
+source VERIFY candidate-extracted and persistently read-only, gives the
+SQLite `core-cutover:v1` marker precedence over every accepted/rollback journal
+branch, validates accepted replay without restart or effect, and proves exact
+P0-P4 authority-vector restoration including source-apply-before-P1 recovery.
+It is `LOCAL_VERIFIED / NOT_REVIEWED` and is archived by the commit containing
+this record. Production is unchanged; neither S12 VERIFY nor APPLY has run.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

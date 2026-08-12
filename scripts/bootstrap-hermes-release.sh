@@ -25,7 +25,7 @@ MODE="${1:---refuse-mutation}"
 CANDIDATE_INPUT="${2:-}"
 ROLLBACK_SNAPSHOT=''
 case "$MODE" in
-  --dry-run|--apply) [[ $# -eq 2 ]] || fail usage ;;
+  --verify|--dry-run|--apply) [[ $# -eq 2 ]] || fail usage ;;
   --rollback) [[ $# -eq 3 ]] || fail usage; ROLLBACK_SNAPSHOT="$3" ;;
   *) fail usage ;;
 esac
@@ -81,14 +81,17 @@ fi
 if [[ "${RAN_AGENT_RELEASE_UNIFIED_SOURCE:-0}" == 1 ]]; then
   [[ "$(git rev-parse --verify refs/remotes/origin/main^{commit})" == "$CANDIDATE" ]] ||
     fail source_candidate_not_archived_main
-  source_ref="refs/ran-agent/source-candidates/$CANDIDATE"
-  existing_source_ref="$(git rev-parse --verify "$source_ref^{commit}" 2>/dev/null || true)"
-  [[ -z "$existing_source_ref" || "$existing_source_ref" == "$CANDIDATE" ]] ||
-    fail source_candidate_ref_moved
-  [[ -n "$existing_source_ref" ]] || git update-ref "$source_ref" "$CANDIDATE" 0000000000000000000000000000000000000000
-  [[ "$(git rev-parse --verify refs/ran-agent/source-candidates/$CANDIDATE^{commit})" == "$CANDIDATE" ]] ||
-    fail source_candidate_ref_invalid
+  if [[ "$MODE" != --verify ]]; then
+    source_ref="refs/ran-agent/source-candidates/$CANDIDATE"
+    existing_source_ref="$(git rev-parse --verify "$source_ref^{commit}" 2>/dev/null || true)"
+    [[ -z "$existing_source_ref" || "$existing_source_ref" == "$CANDIDATE" ]] ||
+      fail source_candidate_ref_moved
+    [[ -n "$existing_source_ref" ]] || git update-ref "$source_ref" "$CANDIDATE" 0000000000000000000000000000000000000000
+    [[ "$(git rev-parse --verify refs/ran-agent/source-candidates/$CANDIDATE^{commit})" == "$CANDIDATE" ]] ||
+      fail source_candidate_ref_invalid
+  fi
   case "$MODE" in
+    --verify) source_mode=source-verify ;;
     --dry-run) source_mode=source-dry-run ;;
     --apply) source_mode=source-apply ;;
     --rollback) source_mode=source-rollback ;;

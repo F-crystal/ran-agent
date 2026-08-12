@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
 import io
 import json
 import os
@@ -212,7 +213,8 @@ def test_governed_companion_migration_passes_source_dry_run_validation(
         "node_bridge/src/hermesGatewayClient.mjs": (root / "node_bridge/src/hermesGatewayClient.mjs").read_bytes(),
         "node_bridge/src/personalMemoryMcpServer.mjs": (root / "node_bridge/src/personalMemoryMcpServer.mjs").read_bytes(),
     }
-    monkeypatch.setattr(MODULE, "check_candidate", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "validate_candidate_object", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "validate_persistent_candidate_ref", lambda *_args: None)
     monkeypatch.setattr(MODULE, "current_source_pointer", lambda: {"candidate": prior})
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     monkeypatch.setattr(
@@ -503,9 +505,86 @@ def test_bootstrap_routes_unified_source_through_existing_candidate_controller()
     bootstrap = (Path(__file__).parents[1] / "scripts/bootstrap-hermes-release.sh").read_text()
     assert "scripts/deploy-hermes-runtime-release.py" in bootstrap
     assert "RAN_AGENT_RELEASE_UNIFIED_SOURCE" in bootstrap
+    assert "source-verify" in bootstrap
     assert "source-dry-run" in bootstrap
     assert "source-apply" in bootstrap
     assert "source-rollback" in bootstrap
+
+
+def test_source_verify_is_read_only_without_a_candidate_ref_or_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    candidate = "a" * 40
+    artifact = tmp_path / "release"
+    snapshots = artifact / "source-snapshots"
+    monkeypatch.setattr(MODULE, "REPO", tmp_path)
+    monkeypatch.setattr(MODULE, "LOCK_PATH", artifact / ".release-transaction.lock")
+    monkeypatch.setattr(MODULE, "SOURCE_POINTER", snapshots / "current-source.json")
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshots)
+    monkeypatch.setattr(MODULE, "SOURCE_ARTIFACT_ROOT", artifact / "source-artifacts")
+    with pytest.raises(MODULE.ReleaseError, match="requires the existing release lock"):
+        with MODULE.release_lock(create=False):
+            pass
+    assert not MODULE.LOCK_PATH.exists()
+
+    @contextlib.contextmanager
+    def existing_lock(*, create: bool = True):
+        assert create is False
+        yield
+
+    monkeypatch.setattr(MODULE, "release_lock", existing_lock)
+    validated = []
+    monkeypatch.setattr(
+        MODULE, "validate_source_candidate",
+        lambda value, **kwargs: validated.append((value, kwargs)),
+    )
+    monkeypatch.setattr(MODULE, "require_source_baseline", lambda: {"kind": "converged"})
+    monkeypatch.setattr(MODULE, "refuse_unfinished_source_transaction", lambda: None)
+    monkeypatch.setattr(MODULE.shutil, "disk_usage", lambda _path: SimpleNamespace(free=123))
+
+    assert MODULE.source_main(SimpleNamespace(
+        candidate=candidate, mode="source-verify", snapshot=None,
+    )) == 0
+    assert validated == [(candidate, {"require_persistent_ref": False})]
+    assert not MODULE.LOCK_PATH.exists()
+    assert json.loads(capsys.readouterr().out) == {
+        "candidate": candidate, "freeBytes": 123, "status": "SOURCE_VERIFY_OK",
+    }
+
+
+def test_source_verify_reuses_candidate_validation_without_persistent_ref_authority(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = "b" * 40
+    prior = "a" * 40
+    object_checks = []
+    monkeypatch.setattr(
+        MODULE, "validate_candidate_object", lambda repo, value: object_checks.append((repo, value)),
+    )
+    monkeypatch.setattr(
+        MODULE, "validate_persistent_candidate_ref",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("persistent ref was consulted")),
+    )
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: {"candidate": prior})
+    monkeypatch.setattr(
+        MODULE, "run", lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "", ""),
+    )
+
+    def fake_git(_repo: Path, *args: str, **_kwargs):
+        if args[:2] == ("diff", "--name-only"):
+            return subprocess.CompletedProcess(args, 0, "README.md\n", "")
+        if args == ("rev-parse", "--verify", "refs/remotes/origin/main"):
+            return subprocess.CompletedProcess(args, 0, candidate + "\n", "")
+        return subprocess.CompletedProcess(args, 0, "", "")
+
+    monkeypatch.setattr(MODULE, "git", fake_git)
+    monkeypatch.setattr(
+        MODULE, "candidate_blob",
+        lambda _repo, _candidate, path: SCRIPT.read_bytes() if path == MODULE.CONTROLLER_PATH else b"",
+    )
+    monkeypatch.setattr(MODULE, "validate_unified_source_shape", lambda _candidate: None)
+    MODULE.validate_source_candidate(candidate, require_persistent_ref=False)
+    assert object_checks == [(MODULE.REPO, candidate)]
 
 
 def test_unified_unit_uses_exact_runtime_and_one_port() -> None:

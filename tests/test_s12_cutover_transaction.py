@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import importlib.util
+import copy
+import hashlib
 import json
+import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,6 +26,7 @@ class FakeOperations:
         self.fail: str | None = None
         self.acceptance_waits = 0
         self.recovered_source: dict[str, object] | None = None
+        self.marker_calls = 0
 
     def _call(self, name: str, result: dict[str, object] | None = None):
         self.calls.append(name)
@@ -30,6 +35,7 @@ class FakeOperations:
         return result or {"status": name}
 
     def marker(self):
+        self.marker_calls += 1
         return {"candidateSha": "a" * 40} if self.committed else None
 
     def verify(self): return self._call("verify")
@@ -56,6 +62,8 @@ class FakeOperations:
         return self._call("acceptance_wait", {"status": "TERMINAL_RECEIPT", "receiptId": "receipt"})
 
     def final_verify(self): return self._call("final_verify", {"status": "ACCEPTED"})
+    def inspect_accepted(self, _marker):
+        return self._call("inspect_accepted", {"status": "ACCEPTED"})
 
     def rollback_pre_cutover(self, source_snapshot):
         self.calls.append(f"rollback:{source_snapshot}")
@@ -74,16 +82,189 @@ def journal(tmp_path: Path):
     return value
 
 
+def mark_accepted(value: MODULE.Journal) -> None:
+    value.state.update({
+        "phase": MODULE.PHASES[-1], "completedPhases": list(MODULE.PHASES),
+        "status": "ACCEPTED", "cutoverCommitted": True, "cutoverAttempted": True,
+    })
+    value.write()
+
+
+def write_core_marker(
+    path: Path, *, owner: str = "owner", authorization: str = "auth",
+    candidate: str = "a" * 40, semantics: str | None = None,
+) -> None:
+    payload = semantics or json.dumps({
+        "candidateSha": candidate,
+        "ambiguousOutboxDisposition": "terminal_no_resend",
+        "pendingOutboundDisposition": "suppress",
+        "migrationSnapshotDigest": "sha256:migration",
+        "scheduleManifestDigest": "sha256:schedule",
+        "watermark": "2026-08-12T00:00:00Z",
+    })
+    with sqlite3.connect(path) as database:
+        database.execute(
+            "CREATE TABLE journal_event (journal_event_id TEXT PRIMARY KEY,event_type TEXT,"
+            "owner_id TEXT,origin_ref TEXT,correlation_id TEXT,source_kind TEXT,source_ref TEXT)"
+        )
+        database.execute(
+            "INSERT INTO journal_event VALUES(?,?,?,?,?,?,?)",
+            ("core-cutover:v1", "core_cutover_committed_at", owner, authorization,
+             candidate, "core-cutover:v1", payload),
+        )
+
+
+def accepted_operations(core_db: Path) -> MODULE.ProductionOperations:
+    return MODULE.ProductionOperations(SimpleNamespace(
+        core_db=core_db, owner_id="owner", authorization_ref="auth", candidate="a" * 40,
+    ), core_db.parent / "transaction")
+
+
+def tree_digest(root: Path) -> str:
+    digest = hashlib.sha256()
+    for path in sorted(root.rglob("*")):
+        digest.update(str(path.relative_to(root)).encode())
+        if path.is_file() and not path.is_symlink():
+            digest.update(path.read_bytes())
+        else:
+            digest.update(str(path.lstat().st_mode).encode())
+    return digest.hexdigest()
+
+
+class ComposedRollbackOperations(MODULE.ProductionOperations):
+    """Stateful subordinate harness; rollback_pre_cutover stays production code."""
+
+    SOURCE_KEYS = {
+        "head", "sourcePointer", "sourceSnapshotPhase", "env", "profile", "dropin",
+        "services", "legacyClock", "writers", "clocks",
+    }
+
+    def __init__(self, transaction_dir: Path):
+        super().__init__(SimpleNamespace(), transaction_dir)
+        self.authority = {
+            "head": "baseline", "sourcePointer": "baseline", "sourceSnapshotPhase": "accepted",
+            "env": b"BASE_ENV\n", "profile": b"legacy\n", "dropin": b"legacy-dropin\n",
+            "services": {"node": "active", "python": "active"},
+            "legacyClock": True, "managedWake": "absent", "coreMarker": False,
+            "coreWriter": False, "effects": [], "adapterInvocations": 0, "results": [],
+            "writers": 1, "clocks": 1, "inactiveCore": "no-authority",
+        }
+        self.snapshots: dict[str, dict[str, object]] = {}
+        self.recovered_source: dict[str, object] | None = None
+
+    def vector(self) -> dict[str, object]:
+        return copy.deepcopy(self.authority)
+
+    def marker(self):
+        return {"candidateSha": "candidate"} if self.authority["coreMarker"] else None
+
+    def verify(self):
+        return {"status": "VERIFIED"}
+
+    def source(self, mode: str, snapshot: str | None = None):
+        if mode == "apply":
+            name = "/source/composed-snapshot"
+            self.snapshots[name] = {
+                key: copy.deepcopy(self.authority[key]) for key in self.SOURCE_KEYS
+            }
+            self.authority.update({
+                "head": "candidate", "sourcePointer": "candidate",
+                "sourceSnapshotPhase": "accepted", "env": b"CANDIDATE_ENV\n",
+                "profile": b"companion\n", "dropin": b"core-dropin\n",
+            })
+            return {"status": "SOURCE_APPLIED", "snapshot": name}
+        if mode == "rollback":
+            assert snapshot in self.snapshots
+            self.authority.update(copy.deepcopy(self.snapshots[snapshot]))
+            return {"status": "SOURCE_ROLLED_BACK", "snapshot": snapshot}
+        raise AssertionError(f"unexpected source mode: {mode}")
+
+    def source_apply(self):
+        return self.source("apply")
+
+    def recover_source_apply(self):
+        return self.recovered_source
+
+    def core_prepare(self):
+        self.authority["inactiveCore"] = "no-authority"
+        return {"status": "CORE_PREPARED"}
+
+    def legacy_reconcile(self):
+        return {"status": "LEGACY_RECONCILED"}
+
+    def wake(self, mode: str, **_kwargs):
+        if mode == "prepare":
+            self.authority["managedWake"] = "paused"
+        elif mode == "remove":
+            self.authority["managedWake"] = "absent"
+        else:
+            raise AssertionError(f"unexpected wake mode: {mode}")
+        return {"status": mode, "active": False}
+
+    def quiesce(self):
+        self.wake("prepare")
+        self.authority.update({
+            "env": b"QUIESCED_ENV\n", "services": {"node": "inactive", "python": "inactive"},
+            "legacyClock": False, "writers": 0, "clocks": 0,
+        })
+        return {"status": "QUIESCED"}
+
+    def cutover(self):
+        self.authority["coreMarker"] = True
+        return {"status": "COMMITTED"}
+
+    def activate_worker(self):
+        raise AssertionError("post-marker action is outside composed pre-marker proof")
+
+    def activate_wake(self):
+        raise AssertionError("post-marker action is outside composed pre-marker proof")
+
+    def acceptance(self, _mode: str):
+        raise AssertionError("acceptance is outside composed pre-marker proof")
+
+    def wait_acceptance(self):
+        raise AssertionError("acceptance is outside composed pre-marker proof")
+
+    def final_verify(self):
+        raise AssertionError("acceptance is outside composed pre-marker proof")
+
+
 @pytest.mark.parametrize("phase", MODULE.PHASES[:5])
-def test_each_pre_marker_failure_restores_source_authority(tmp_path: Path, phase: str) -> None:
-    operations = FakeOperations()
-    state = journal(tmp_path)
+def test_composed_pre_marker_failure_restores_complete_authority_vector(
+    tmp_path: Path, phase: str,
+) -> None:
+    operations = ComposedRollbackOperations(tmp_path / "transaction")
+    before = operations.vector()
+    state = journal(tmp_path / "journal")
     with pytest.raises(MODULE.S12Error, match="injected failure"):
         MODULE.run_apply(operations, state, fail_after=phase)
     assert state.state["status"] == "ROLLED_BACK"
-    expected_snapshot = None if phase == "P0_VERIFIED" else "/source/snapshot"
-    assert operations.calls[-1] == f"rollback:{expected_snapshot}"
-    assert operations.committed is False
+    assert operations.vector() == before
+    assert operations.rollback_pre_cutover.__func__ is MODULE.ProductionOperations.rollback_pre_cutover
+    assert operations.authority["coreMarker"] is False
+    assert operations.authority["managedWake"] == "absent"
+    assert operations.authority["effects"] == []
+    assert operations.authority["adapterInvocations"] == 0
+    assert operations.authority["results"] == []
+    assert operations.authority["writers"] == 1
+    assert operations.authority["clocks"] == 1
+
+
+def test_composed_source_apply_before_p1_recovery_still_restores_complete_authority(
+    tmp_path: Path,
+) -> None:
+    operations = ComposedRollbackOperations(tmp_path / "transaction")
+    before = operations.vector()
+    recovered = operations.source_apply()
+    operations.recovered_source = {
+        "status": "SOURCE_APPLIED_RECOVERED", "snapshot": recovered["snapshot"],
+    }
+    state = journal(tmp_path / "journal")
+    state.complete("P0_VERIFIED", lastReceipt={"status": "VERIFIED"})
+    with pytest.raises(MODULE.S12Error, match="injected failure"):
+        MODULE.run_apply(operations, state, fail_after="P2_CORE_PREPARED")
+    assert state.state["phaseReceipts"]["P1_SOURCE_APPLIED"]["status"] == "SOURCE_APPLIED_RECOVERED"
+    assert operations.vector() == before
 
 
 def test_failure_immediately_before_core_commit_rolls_back(tmp_path: Path) -> None:
@@ -94,19 +275,6 @@ def test_failure_immediately_before_core_commit_rolls_back(tmp_path: Path) -> No
         MODULE.run_apply(operations, state)
     assert state.state["status"] == "ROLLED_BACK"
     assert operations.calls[-1] == "rollback:/source/snapshot"
-
-
-def test_crash_after_source_commit_recovers_the_exact_snapshot_before_continuing(tmp_path: Path) -> None:
-    operations = FakeOperations()
-    state = journal(tmp_path)
-    state.complete("P0_VERIFIED", lastReceipt={"status": "VERIFIED"})
-    operations.recovered_source = {
-        "status": "SOURCE_APPLIED_RECOVERED", "snapshot": "/source/recovered",
-    }
-    MODULE.run_apply(operations, state)
-    assert state.state["phaseReceipts"]["P1_SOURCE_APPLIED"]["snapshot"] == "/source/recovered"
-    assert state.state["sourceSnapshot"] == "/source/recovered"
-    assert "source_apply" not in operations.calls
 
 
 def test_source_crash_recovery_binds_pointer_snapshot_and_prior_head(
@@ -193,10 +361,126 @@ def test_exact_terminal_replay_is_a_noop(tmp_path: Path) -> None:
     operations = FakeOperations()
     state = journal(tmp_path)
     first = MODULE.run_apply(operations, state)
-    calls = list(operations.calls)
+    journal_bytes = state.path.read_bytes()
+    external_calls = operations.calls.count("acceptance_register")
     second = MODULE.run_apply(operations, state)
     assert first == second
-    assert operations.calls == calls
+    assert operations.calls[-1] == "inspect_accepted"
+    assert operations.calls.count("acceptance_register") == external_calls
+    assert state.path.read_bytes() == journal_bytes
+
+
+def test_accepted_replay_reads_and_validates_sqlite_before_returning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    core_db = tmp_path / "core.sqlite3"
+    write_core_marker(core_db)
+    operations = accepted_operations(core_db)
+    inspected = []
+    marker_calls = []
+    real_marker = operations.marker
+    monkeypatch.setattr(
+        operations, "marker", lambda: marker_calls.append("marker") or real_marker(),
+    )
+    monkeypatch.setattr(operations, "inspect_accepted", lambda marker: inspected.append(marker))
+    state = journal(tmp_path / "journal")
+    mark_accepted(state)
+    before = state.path.read_bytes()
+
+    assert MODULE.run_apply(operations, state)["status"] == "ACCEPTED"
+    assert marker_calls == ["marker"]
+    assert inspected == [{
+        "ownerId": "owner", "authorizationRef": "auth", "candidateSha": "a" * 40,
+        "migrationSnapshotDigest": "sha256:migration",
+        "scheduleManifestDigest": "sha256:schedule",
+        "watermark": "2026-08-12T00:00:00Z",
+    }]
+    assert state.path.read_bytes() == before
+
+
+@pytest.mark.parametrize(
+    ("case", "marker_kwargs", "malformed_db", "message"),
+    (
+        ("missing", None, False, "lacks the Core authority marker"),
+        ("malformed-db", None, True, "database is unreadable"),
+        ("owner", {"owner": "other"}, False, "conflicts with S12 authority"),
+        ("authorization", {"authorization": "other"}, False, "conflicts with S12 authority"),
+        ("candidate", {"candidate": "c" * 40}, False, "conflicts with S12 authority"),
+        ("semantics", {"semantics": "{}"}, False, "semantics conflict"),
+        ("malformed-semantics", {"semantics": "{"}, False, "semantics are malformed"),
+    ),
+)
+def test_accepted_journal_never_overrides_missing_corrupt_or_conflicting_sqlite(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+    marker_kwargs: dict[str, str] | None, malformed_db: bool, message: str,
+) -> None:
+    core_db = tmp_path / f"{case}.sqlite3"
+    if malformed_db:
+        core_db.write_bytes(b"not sqlite")
+    elif marker_kwargs is not None:
+        write_core_marker(core_db, **marker_kwargs)
+    operations = accepted_operations(core_db)
+    inspected = []
+    marker_calls = []
+    real_marker = operations.marker
+    monkeypatch.setattr(
+        operations, "marker", lambda: marker_calls.append("marker") or real_marker(),
+    )
+    monkeypatch.setattr(operations, "inspect_accepted", lambda marker: inspected.append(marker))
+    state = journal(tmp_path / "journal")
+    mark_accepted(state)
+
+    with pytest.raises(MODULE.S12Error, match=message):
+        MODULE.run_apply(operations, state)
+    assert marker_calls == ["marker"]
+    assert inspected == []
+    assert state.state["status"] == "FORWARD_RECOVERY_REQUIRED"
+
+
+def test_stale_rolled_back_journal_cannot_override_a_committed_marker(tmp_path: Path) -> None:
+    operations = FakeOperations()
+    operations.committed = True
+    state = journal(tmp_path)
+    state.state["status"] = "ROLLED_BACK"
+    state.write()
+    with pytest.raises(MODULE.S12Error, match="overrides the stale rollback journal"):
+        MODULE.run_apply(operations, state)
+    assert operations.marker_calls == 1
+    assert state.state["status"] == "FORWARD_RECOVERY_REQUIRED"
+    assert "verify" not in operations.calls
+
+
+def test_read_only_accepted_inspection_requires_writer_clock_and_terminal_receipt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    core_db = tmp_path / "core.sqlite3"
+    write_core_marker(core_db)
+    with sqlite3.connect(core_db) as database:
+        database.execute(
+            "CREATE TABLE presentation_outbox (presentation_outbox_id TEXT,state TEXT,attempt_count INTEGER)"
+        )
+        database.execute("INSERT INTO presentation_outbox VALUES('outbox','sent',1)")
+        database.execute(
+            "INSERT INTO journal_event VALUES(?,?,?,?,?,?,?)",
+            ("receipt", "package_b_presentation_result_recorded", "owner", "auth",
+             "outbox", "acceptance", "{}"),
+        )
+    operations = accepted_operations(core_db)
+    monkeypatch.setattr(
+        operations, "acceptance",
+        lambda mode: {"status": "TERMINAL_RECEIPT", "outboxId": "outbox", "receiptId": "receipt"},
+    )
+    monkeypatch.setattr(operations, "wake", lambda mode, **_kwargs: {"active": True})
+    monkeypatch.setattr(
+        operations, "activate_worker_status",
+        lambda: {"workProducingWriters": 1, "nodePid": 11, "pythonPid": 12},
+    )
+    receipt = operations.inspect_accepted(operations.marker())
+    assert receipt["status"] == "ACCEPTED"
+    assert receipt["workProducingWriters"] == 1
+    assert receipt["workProducingClocks"] == 1
+    assert receipt["terminalReceipt"] == "receipt"
+    assert receipt["adapterInvocationBound"] == 1
 
 
 def test_rerun_after_pre_cutover_rollback_reuses_the_inactive_core_candidate(tmp_path: Path) -> None:
@@ -269,6 +553,72 @@ def test_verify_plan_is_read_only_state_machine_surface() -> None:
         "P7_CORE_WAKE_ACTIVE", "P8_ACCEPTANCE_EFFECT_COMMITTED",
         "P9_ACCEPTANCE_RECEIPT_TERMINAL", "P10_ACCEPTED",
     )
+
+
+def test_s12_verify_preserves_the_complete_persistent_state_vector(
+    tmp_path: Path,
+) -> None:
+    persistent = tmp_path / "persistent"
+    transaction = tmp_path / "ephemeral-verify"
+    scratch = tmp_path / "ephemeral-runtime"
+    for relative, payload in {
+        "git/HEAD": b"baseline\n",
+        "git/worktree-porcelain": b"",
+        "git/origin-main": b"candidate\n",
+        "git/source-candidate-refs": b"",
+        "release/current-source.json": b'{"candidate":"baseline"}\n',
+        "release/source-snapshots/inventory": b"accepted\n",
+        "release/s12-transactions/inventory": b"empty\n",
+        "core/production-db.sha256": b"absent\n",
+        "config/env": b"BASE_ENV\n",
+        "config/profile": b"legacy\n",
+        "services/state": b"node=active python=active\n",
+        "wake/state": b"absent\n",
+        "effects/count": b"0\n",
+    }.items():
+        path = persistent / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+
+    class ReadOnlyVerifyOperations(MODULE.ProductionOperations):
+        def __init__(self):
+            super().__init__(SimpleNamespace(core_db=tmp_path / "absent-core.sqlite3",
+                                             production_baseline="baseline",
+                                             visible_binding=tmp_path / "binding.json",
+                                             candidate="a" * 40,
+                                             committed_at="2026-08-12T00:00:00Z"), transaction)
+            self.source_modes: list[str] = []
+
+        def assert_candidate_binding(self): pass
+        def source(self, mode: str, snapshot: str | None = None):
+            self.source_modes.append(mode)
+            return {"status": "SOURCE_VERIFY_OK"}
+        def marker(self): return None
+        def wake(self, mode: str, **_kwargs): return {"active": False, "present": False}
+        @contextmanager
+        def runtime_scratch(self):
+            scratch.mkdir()
+            try:
+                yield scratch
+            finally:
+                for path in sorted(scratch.rglob("*"), reverse=True):
+                    path.unlink() if path.is_file() else path.rmdir()
+                scratch.rmdir()
+        def rehearse(self, core_db: Path | None, output: Path):
+            assert core_db is not None and core_db.parent == scratch
+            core_db.write_bytes(b"ephemeral sqlite")
+            MODULE.atomic_json(output, {"status": "REHEARSED"})
+            return {"status": "REHEARSED"}
+        def run(self, _command, **_kwargs): return {"status": "CUTOVER_VERIFY_OK"}
+
+    transaction.mkdir()
+    operations = ReadOnlyVerifyOperations()
+    before = tree_digest(persistent)
+    receipt = operations.verify()
+    assert receipt["status"] == "VERIFIED"
+    assert operations.source_modes == ["verify"]
+    assert tree_digest(persistent) == before
+    assert not scratch.exists()
 
 
 def test_core_handoff_env_is_replay_safe_and_quiescence_is_bounded() -> None:

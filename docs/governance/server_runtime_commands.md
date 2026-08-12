@@ -98,6 +98,14 @@ entrypoint. Do not invoke source apply/rollback, `core-cutover.mjs`, managed-wak
 reconciliation, `core-wake.mjs`, or the acceptance subordinate as operator
 steps. VERIFY is read-only. APPLY additionally requires the owner's explicit
 identity and authorization reference; a VERIFY result does not authorize it.
+VERIFY routes through the candidate-extracted bootstrap `--verify` and
+controller `source-verify` modes. It may use removable `/tmp` extraction and
+runtime scratch, but it does not create a source candidate ref, release lock,
+source pointer/snapshot, S12 journal, Core business state, wake or effect. It
+observes the existing release lock without creating one. A repeated accepted
+APPLY reads and validates `core-cutover:v1`, worker/writer, managed wake and the
+terminal acceptance receipt without restarting services or producing an
+effect.
 
 Configuration prerequisites are the project virtualenv, the exact archived
 candidate, its candidate-extracted S12 controller and bootstrap, the fresh

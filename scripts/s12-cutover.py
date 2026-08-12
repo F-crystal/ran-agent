@@ -336,7 +336,7 @@ class ProductionOperations:
 
     def verify(self) -> dict[str, Any]:
         self.assert_candidate_binding()
-        self.source("dry-run")
+        self.source("verify")
         if self.args.core_db.exists():
             marker = self.marker()
             if marker is None and not self.allow_inactive_core_reuse:
@@ -586,6 +586,26 @@ class ProductionOperations:
             time.sleep(2)
         raise S12Error(f"acceptance terminal receipt timed out: {last}")
 
+    def inspect_accepted(self, marker: dict[str, Any]) -> dict[str, Any]:
+        receipt = self.acceptance("inspect")
+        wake = self.wake("verify", expect_active=True)
+        worker = self.activate_worker_status()
+        with sqlite3.connect(f"file:{self.args.core_db}?mode=ro", uri=True) as database:
+            outbox = database.execute(
+                "SELECT state,attempt_count FROM presentation_outbox WHERE presentation_outbox_id=?",
+                (receipt.get("outboxId"),),
+            ).fetchall()
+            results = database.execute(
+                "SELECT count(*) FROM journal_event WHERE event_type='package_b_presentation_result_recorded' "
+                "AND correlation_id=?", (receipt.get("outboxId"),),
+            ).fetchone()[0]
+        if (receipt.get("status") != "TERMINAL_RECEIPT" or not wake.get("active")
+                or outbox != [("sent", 1)] or results != 1):
+            raise S12Error("final S12 reconciliation failed")
+        return {"status": "ACCEPTED", **worker, "workProducingClocks": 1,
+                "terminalReceipt": receipt["receiptId"], "adapterInvocationBound": 1,
+                "coreMarker": marker}
+
     def final_verify(self) -> dict[str, Any]:
         for path in ENV_FILES:
             value = path.stat()
@@ -613,23 +633,9 @@ class ProductionOperations:
         else:
             raise S12Error("Node ingress did not resume after acceptance")
         marker = self.marker()
-        receipt = self.acceptance("inspect")
-        wake = self.wake("verify", expect_active=True)
-        worker = self.activate_worker_status()
-        with sqlite3.connect(f"file:{self.args.core_db}?mode=ro", uri=True) as database:
-            outbox = database.execute(
-                "SELECT state,attempt_count FROM presentation_outbox WHERE presentation_outbox_id=?",
-                (receipt.get("outboxId"),),
-            ).fetchall()
-            results = database.execute(
-                "SELECT count(*) FROM journal_event WHERE event_type='package_b_presentation_result_recorded' "
-                "AND correlation_id=?", (receipt.get("outboxId"),),
-            ).fetchone()[0]
-        if (not marker or receipt.get("status") != "TERMINAL_RECEIPT" or not wake.get("active")
-                or outbox != [("sent", 1)] or results != 1):
-            raise S12Error("final S12 reconciliation failed")
-        return {"status": "ACCEPTED", **worker, "workProducingClocks": 1,
-                "terminalReceipt": receipt["receiptId"], "adapterInvocationBound": 1}
+        if marker is None:
+            raise S12Error("final S12 reconciliation lacks the Core authority marker")
+        return self.inspect_accepted(marker)
 
     def activate_worker_status(self) -> dict[str, Any]:
         node_pid = self.main_pid("ran-agent-node.service")
@@ -649,15 +655,40 @@ class ProductionOperations:
 
 def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | None = None) -> dict[str, Any]:
     state = journal.state
+    try:
+        marker = ops.marker()
+    except BaseException as exc:
+        if (state.get("cutoverAttempted") or state.get("cutoverCommitted")
+                or state.get("status") in {"ACCEPTED", "FORWARD_RECOVERY", "FORWARD_RECOVERY_REQUIRED"}):
+            state.update({"status": "FORWARD_RECOVERY_REQUIRED", "failure": type(exc).__name__})
+            journal.write()
+        raise
     if state.get("status") == "ACCEPTED":
+        if marker is None:
+            state.update({"status": "FORWARD_RECOVERY_REQUIRED", "failure": "CoreMarkerMissing"})
+            journal.write()
+            raise S12Error("accepted S12 journal lacks the Core authority marker")
+        ops.inspect_accepted(marker)
         return state
     if state.get("status") == "ROLLED_BACK":
+        if marker is not None:
+            state.update({"status": "FORWARD_RECOVERY_REQUIRED", "cutoverCommitted": True,
+                          "coreMarker": marker, "failure": "StaleRollbackJournal"})
+            journal.write()
+            raise S12Error("Core authority marker overrides the stale rollback journal")
         ops.allow_inactive_core_reuse = True
         journal.restart_after_rollback()
         state = journal.state
-    marker = ops.marker()
+    if marker is None and (state.get("cutoverCommitted")
+                           or "P5_CORE_AUTHORITY_COMMITTED" in state["completedPhases"]):
+        state.update({"status": "FORWARD_RECOVERY_REQUIRED", "failure": "CoreMarkerMissing"})
+        journal.write()
+        raise S12Error("journal claims Core authority without its SQLite marker")
     if marker and "P5_CORE_AUTHORITY_COMMITTED" not in state["completedPhases"]:
         if state["completedPhases"] != list(PHASES[:5]):
+            state.update({"status": "FORWARD_RECOVERY_REQUIRED", "cutoverCommitted": True,
+                          "coreMarker": marker, "failure": "StalePreCutoverJournal"})
+            journal.write()
             raise S12Error("Core marker exists without the durable pre-cutover phase chain")
         state["completedPhases"] = list(PHASES[:6])
         state["phaseReceipts"]["P5_CORE_AUTHORITY_COMMITTED"] = marker

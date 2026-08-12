@@ -82,8 +82,9 @@ flowchart TD
     HFIX --> HFR["Independent exact-SHA scratch-home review<br/>CLEAR"]
     HFR --> R3B["R3-B immutable server gate + dry-run<br/>CLEAR on 9653d030"]
     R3B --> OGAP["S12 orchestration + rollback interlock gap<br/>BLOCKING S12"]
-    OGAP --> ORCH["Canonical S12 transaction successor<br/>LOCAL_VERIFIED · NOT_REVIEWED · UNARCHIVED"]
-    ORCH --> ORR["Independent exact-SHA S12 review<br/>REQUIRED"]
+    OGAP --> ORCH["S12 candidate e6ce78aa<br/>LOCAL_VERIFIED · REVIEWED/FIX_REQUIRED · ARCHIVED"]
+    ORCH --> REM["Authority-order remediation<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED BY COMMIT"]
+    REM --> ORR["Independent exact-SHA remediation review<br/>REQUIRED"]
     ORR --> OA["Explicit owner production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
@@ -136,9 +137,11 @@ and its raw-final successor all passed their bounded reviews. The sixth R3-B
 then passed the complete root surface but stopped fail-closed after 524/524
 non-root Node tests because `HOME=/nonexistent` exposed identity-dependent host
 state. The scratch-home repair was archived and independently reviewed at
-`9653d030`; complete R3-B on that exact base is `CLEAR`. The current frontier
-is the local S12 orchestration/rollback-interlock successor and its required
-independent exact-SHA review. Production and S12 remain unchanged/not started.
+`9653d030`; complete R3-B on that exact base is `CLEAR`. Independent review of
+the first S12 candidate `e6ce78aa` returned `FIX_REQUIRED` for source-verify
+mutation, journal-before-SQLite authority, and missing composed P0-P4 rollback
+proof. The current frontier is the bounded authority-order remediation and its
+required exact-SHA review. Production and S12 remain unchanged/not started.
 
 | Second R3-B root failure | Observed boundary | Classification and repair |
 |---|---|---|
@@ -176,7 +179,8 @@ independent exact-SHA review. Production and S12 remain unchanged/not started.
 | R3-B-RAW-FINAL | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `e4a6d205afc4183cfda503aa6bb4977dac29fb25` | `RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS` on `28c40549` | Raw terminal validation precedes `Path`; safe parent normalization and accepted no-follow/no-replace boundaries remain intact. |
 | R3-B-SCRATCH-HOME | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `9653d030473b3e9870ddea9158c4a2f9570c243b` | sixth R3-B stopped fail-closed | Fixed sentinel removed; shared caller-owned scratch lifecycle passed root/ubuntu parity and independent exact-SHA review. |
 | R3-B | `CLEAR` | `REVIEWED` | exact base `9653d030473b3e9870ddea9158c4a2f9570c243b` | scratch-home review clear | Complete immutable root/non-root gate and dry-run evidence is clear; production remained at `98fd8b3`. |
-| S12-ORCHESTRATION | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `UNARCHIVED` until this transaction completes | R3-B CLEAR; `S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP` | One durable top-level controller owns source/Core/wake/acceptance phases; marker-aware source rollback blocks pre-Core restoration after authority transfer. |
+| S12-ORCHESTRATION | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `e6ce78aaeb3c7117daac25ccbeb7b66b570cd0b1` | R3-B CLEAR; `S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP` | Overall transaction retained; review found VERIFY source-ref mutation, ACCEPTED-before-SQLite ordering and missing composed P0-P4 restoration proof. |
+| S12-AUTHORITY-ORDER | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | S12-ORCHESTRATION review findings | Canonical source-verify is persistently read-only; SQLite precedes terminal journal handling; accepted replay is read-only; composed P0-P4 restoration and source-apply-before-P1 recovery pass. |
 | S12 | `NOT_STARTED / BLOCKED_BY_ORCHESTRATION_INTERLOCK` | not applicable | not applicable | S12 successor review + explicit production authorization | Production source remains `98fd8b3`; neither S12 VERIFY nor APPLY occurred. |
 
 The previous implementation candidate is
@@ -625,6 +629,12 @@ independent exact-SHA review and the owner separately authorizes production.
 The runbook exposes `scripts/s12-cutover.py` as the only S12 entrypoint;
 subordinate source, cutover, wake and acceptance commands are not operator
 steps.
+
+The remediation keeps that topology unchanged. VERIFY delegates to the
+candidate-extracted bootstrap/controller `source-verify` path and creates no
+persistent source ref, lock, pointer, snapshot, S12 journal, Core state, wake or
+effect. APPLY consults `core-cutover:v1` before interpreting ACCEPTED,
+ROLLED_BACK or stale pre-marker journal state.
 
 - [ ] Stop new ingress and drain/reconcile legacy effect/outbox state.
 - [ ] Execute the one authorized Core cutover transaction against the exact SHA.
