@@ -21,8 +21,8 @@ S0 facts/runtime selection
   -> S9 Package C scheduling
   -> S10 migration rehearsal
   -> S11 synthetic fault acceptance
-  -> S12 production cutover (owner authorization; waiting)
-  -> S13 observation and cleanup
+  -> S12 production cutover (COMPLETE / PROD_ACCEPTED at e298bab)
+  -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
 | Stage | Status | Depends | Scope | Exit condition |
@@ -39,16 +39,16 @@ S0 facts/runtime selection
 | S9 | COMPLETE | S8 | Schema v2, ScheduleSpec, WakeOccurrence, WorkRun, `wake_due`, and the single managed tick. | Schema v1 remains frozen; v1 upgrades in place to v2. One-shot, interval and daily schedules, immutable revisions, duplicate/missed tick catch-up, DST, scheduled Exchange isolation and WorkRun lease/fence authority pass locally; the managed tick has no network or direct presentation path. |
 | S10 | COMPLETE | S9 | Inventory legacy scheduler, reminders, daily digest, external MCP/forum/RSS pollers and dispatchers; split polling facts from visible attention; build manifest/watermark; rehearse on a production copy. | The 19-row machine manifest gives every legacy component one disposition. A production SQLite/state copy at `2026-08-08T08:28:45.000Z` migrated 0→2 with zero business rows/effects; three historical reminders were suppressed, future reminders and watches were zero, 13 legacy external activities were staged paused, one pending outbound item was held for reconciliation, and 58 sent plus 65 ambiguous legacy outbox rows became receipt/no-resend evidence only. These counts are historical rehearsal evidence, not current cutover readiness, and must be freshly inspected and reconciled at the S12 gate. The local external-poll worker seam records one hash-bound Core fact after WorkRun authority and exposes no send operation. |
 | S11 | COMPLETE | S10 | Synthetic acceptance: duplicate/missed ticks, DST, crash, stale WorkRun fence, ambiguous outcomes, restart no-resend, and gaming/focus suppression with delayed coalescing. | One synthetic chain binds the WakeOccurrence to its exact generated Exchange, claimed WorkRun revision/fence/lease, typed system/internal instruction, provider epoch/attempt, final, presentation outbox, single injected effect and durable terminal receipt. A thrown post-dispatch `ETIMEDOUT` records durable `ambiguous` evidence and replay never calls the adapter; a post-commit restart claims the existing WorkRun without another occurrence; stale WorkRun authority rejects before final/effect; an equivalent delayed fingerprint remains one candidate across gaming→available while explicit owner bypasses remain intact. The focused set passes 29/29 and the full Core suite 151/151 locally. Production is unchanged. |
-| S12 | NOT STARTED / LOCAL FREEZE | S11 + R3-B CLEAR + archived and independently reviewed successor + production authorization | Invoke the single candidate-bound S12 transaction; operators do not assemble subordinate source, Core, wake or acceptance commands. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
-| S13 | NOT STARTED | S12 + observation window + separate owner deletion authorization | After observation, remove the legacy scheduler, JSON outbox and compatibility writer. | No duplicate delivery; the legacy writer and legacy clock are truly gone. |
+| S12 | COMPLETE / PROD_ACCEPTED | S11 + R3-B CLEAR + exact successor `e298bab161bf0f4882bcef6e9cd701d546b63ff2` + production authorization | The candidate-bound transaction reached P10/ACCEPTED; source pointer and `core-cutover:v1` both bind e298. P9 is owner-accepted `TERMINAL_AMBIGUOUS_NO_RESEND`: one attempt, external effect unknown, no resend or duplicate. | Exactly one semantic writer, active managed wake, restored normal ingress and active Node/Python/Hermes were confirmed. |
+| S13 | NOT STARTED | S12 COMPLETE + observation exit evidence + separate explicit owner deletion authorization | Observe only; no cleanup is authorized. Exit evidence is stable e298 source/Core authority, one semantic writer, active managed wake, stable services/ingress, no second canary attempt or resend, no duplicate presentation result, and no unexpected legacy writer/clock production activity. | Observation criteria pass and the owner separately authorizes the exact deletion scope. |
 
 ## S12 Readiness Topology
 
 The detailed node topology, acceptance checklists, evidence ledger and reviewer
 handoff template are canonical in
-`docs/governance/s12-readiness-topology.md`. This summary records only the
-current ready frontier without starting S12 or authorizing a production
-mutation:
+`docs/governance/s12-readiness-topology.md`. This summary records the completed
+S12 path and the observation-only frontier; it does not start S13 or authorize
+cleanup:
 
 ```text
 S12-R0 fresh read-only production audit (COMPLETE)
@@ -103,9 +103,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> visible-binding approval/custody remediation 482e700 (LOCAL_VERIFIED, REVIEWED / CLEAR, ARCHIVED)
   -> production canonical VERIFY (STOPPED FAIL-CLOSED before source verification)
   -> source Git convergence excision 3302472 (ARCHIVED; production Git health CLEAR)
-  -> P2 protected direct-FD repair (LOCAL_VERIFIED, REVIEW REQUIRED, UNARCHIVED)
-  -> archive exact successor
-  -> fresh canonical S12 VERIFY, then newly authorized exact-SHA APPLY
+  -> P2 protected direct-FD successor e298bab (ARCHIVED)
+  -> canonical VERIFY and exact-SHA APPLY/recovery (PROD_ACCEPTED)
+  -> P10 ACCEPTED
+  -> observation exit evidence (S13 NOT STARTED; deletion not authorized)
 ```
 
 - Independent review found `R1A-ACK-ORDER` in the previous candidate
@@ -312,15 +313,18 @@ S12-R0 fresh read-only production audit (COMPLETE)
   afterward. It is archived at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a`,
   independently reviewed `CLEAR`, and its production candidate-closure proof
   passed.
-- S12 remains `NOT STARTED / LOCAL FREEZE`. Source convergence excision is
-  archived at `3302472676131f7046fa6e9bd4d5727e31ee28f3`; all 29 retired logical
-  source-candidate refs are gone and ubuntu Git health is clear. Canonical
-  VERIFY passed; APPLY completed P1, failed at P2 before Core authority or
-  external effect, and restored prior source. Root-owned protected inputs were
-  inherited by ubuntu but `/proc/self/fd` reopening failed with `EACCES`. The
-  bounded direct-FD repair is locally verified and unarchived. The next order is
-  archive a new successor, fresh canonical VERIFY, then new exact-SHA APPLY
-  authorization. A private
+- S12 is `COMPLETE / PROD_ACCEPTED` at
+  `e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Source pointer and
+  `core-cutover:v1` bind that SHA; P10 is ACCEPTED, one semantic writer and the
+  managed wake are active, normal ingress is restored, and Node/Python/Hermes
+  are active. P9 is truthfully terminalized as owner-accepted
+  `TERMINAL_AMBIGUOUS_NO_RESEND`: attempt count 1, external effect unknown,
+  resend forbidden and duplicate/resend count 0. Earlier failed attempts and
+  their recovery evidence remain historical facts. S13 is `NOT STARTED`; its
+  observation exit criteria are the stable e298 authorities/runtime plus no
+  second canary attempt/result and no unexpected legacy writer/clock production
+  activity. Cleanup additionally requires separate explicit owner deletion
+  authorization, which has not been granted. A private
   diagnostic trace briefly exposed the raw route, was deleted, and caused no
   effect; this is an operational privacy incident, not a product route/custody
   defect. R2 caused no production mutation. A separately authorized XHS

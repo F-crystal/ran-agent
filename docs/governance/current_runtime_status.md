@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11/R2 LOCAL_VERIFIED; R3-B CLEAR at 9653d030; S12 P2 direct-FD repair LOCAL_VERIFIED / NOT_REVIEWED (2026-08-13)
+Status: S12 COMPLETE / PROD_ACCEPTED at e298bab; S13 NOT STARTED (2026-08-13)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,12 +9,17 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_sha: 98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d
+repository_sha: e298bab161bf0f4882bcef6e9cd701d546b63ff2
+source_pointer: e298bab161bf0f4882bcef6e9cd701d546b63ff2
+core_authority: core-cutover:v1 committed at e298bab161bf0f4882bcef6e9cd701d546b63ff2
 companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
-runtime_stage: PROD_VERIFIED for the bounded channel, identity, memory, capability, topology and 2026-08-07 digest evidence
-services: Node, Python, unified Hermes and direct Ombre Brain active; no unexpected restart in the acceptance window
+runtime_stage: S12 COMPLETE / PROD_ACCEPTED; S13 NOT STARTED
+services: Node, Python, unified Hermes and direct Ombre Brain active; normal ingress restored
+core_runtime: exactly one semantic writer; managed wake active
+acceptance_canary: TERMINAL_AMBIGUOUS_NO_RESEND; one attempt; external effect unknown; no resend or duplicate
+owner_acceptance_ref: owner-s12-e298-terminal-ambiguous-acceptance-20260813
 identity: production processes run as ubuntu:ubuntu
 storage: 70% used; 18201784320 bytes available after S4 source activation
 ```
@@ -588,9 +593,15 @@ fetch and status are healthy while production remains clean at
 external effect and source rollback succeeded. The cause was ubuntu reopening
 root-owned inherited inputs through `/proc/self/fd`, which Linux rejected with
 `EACCES`; direct inherited-FD reads succeed. The local bounded repair passes
-focused tests and the exact Linux root-to-ubuntu P2 proof. Its next gate is one
-new archived successor, fresh canonical VERIFY and new exact-SHA APPLY
-authorization.
+focused tests and the exact Linux root-to-ubuntu P2 proof. That failure and
+rollback remain historical evidence. The direct-FD successor
+`e298bab161bf0f4882bcef6e9cd701d546b63ff2` later passed canonical VERIFY and
+completed the same S12 transaction through P10/ACCEPTED. Source pointer and
+`core-cutover:v1` bind e298; exactly one semantic writer and the managed wake
+are active, normal ingress is restored, and Node/Python/Hermes are active. P9
+is owner-accepted `TERMINAL_AMBIGUOUS_NO_RESEND`: one attempt, external effect
+unknown, resend forbidden and no duplicate presentation result, under
+`owner-s12-e298-terminal-ambiguous-acceptance-20260813`.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an
@@ -638,8 +649,8 @@ external-MCP WorkRun composition, owner-attention policy acceptance and the
 fresh R2 rehearsal. The current server `lark-cli` observed during artifact
 recovery is `1.0.66` while `1.0.85` is offered; no upgrade occurred. Ombre and
 external providers remain optional adapters behind stable Hermes-facing product
-surfaces and cannot replace Core or Node authority. S12 remains `NOT STARTED`;
-production source and services are unchanged. The canonical per-node dependency
+surfaces and cannot replace Core or Node authority. That readiness work did not
+itself start S12 or change production. The canonical per-node dependency
 and acceptance ledger is `docs/governance/s12-readiness-topology.md`; its
 verification/delivery split prevents local evidence from being mistaken for an
 archived or deployable candidate.
@@ -734,8 +745,8 @@ its bounded successor completed at
 advanced the clean production checkout and accepted source pointer through S4
 to runtime source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. GitHub `main`
 also contains the local-only S5 B.2 seam and S7 Package B.3 Node wiring;
-production remains on the accepted S4 source until a separately authorized
-cutover.
+production remained on the accepted S4 source until the separately authorized
+S12 cutover advanced it to e298.
 The source shape keeps one `ran-agent-companion` profile, one `8642` route, the
 supported Lite/Full capability union and a fixed 15000 ms memory boundary.
 The source still aligns four production-backed contracts:
@@ -756,8 +767,13 @@ closed.
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S11 are complete. S12 production cutover waits on explicit owner production
-authorization and stays NOT STARTED until it is granted. The S5-era root-worktree drafts
+`docs/governance/active_sequence.md`. S0-S12 are complete and S12 is
+`PROD_ACCEPTED` at e298. S13 remains `NOT STARTED`: observation must first show
+stable e298 source/Core authority, one semantic writer, active managed wake,
+stable services/normal ingress, no second canary attempt or resend, no
+duplicate presentation result, and no unexpected legacy writer/clock production activity. Cleanup
+also requires separate explicit owner deletion authorization; none is current.
+The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the
 three retained runtime semantics were re-implemented on current main, and the

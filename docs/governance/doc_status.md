@@ -12,9 +12,8 @@ acceptance checklists and review handoff live in
 
 ## Current State
 
-The clean production checkout and accepted source pointer are at S4 runtime
-source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; it remains an ancestor of
-GitHub `main`. Hermes v0.20 is
+The clean production checkout, accepted source pointer and `core-cutover:v1`
+authority are at `e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Hermes v0.20 is
 `PROD_VERIFIED` for the bounded evidence in `current_runtime_status.md`.
 Runtime rollback is closed, retired v0.13 payloads are deleted, `18002` and O2
 are absent, and the direct loopback Ombre service on `18001` remains active.
@@ -52,7 +51,7 @@ Schema v2, deterministic occurrences and the injected managed tick remain
 disconnected from production. S10 is locally verified with the governed
 19-component migration manifest, a zero-effect production-copy rehearsal and a
 Core-fact-only external-poll seam. S11 synthetic acceptance is locally verified
-after owner-audit remediation; S12 remains not started.
+after owner-audit remediation. S12 is now `COMPLETE / PROD_ACCEPTED`.
 Local S12-R1 readiness source now covers the cutover transaction/command,
 managed wake projection, WorkRun execution and terminal evidence, typed
 scheduled delivery, retained Python maintenance, and replay-safe Core reminder
@@ -70,8 +69,8 @@ archive was review-blocked and its bounded repair is accepted at
 `493c77aa90fe53bba8a10fd94dd03136ba51d4eb`. The recalibrated R1F archive
 `08e3eea81c336ac48f3e0b85a87b0b5c6d445307` passed exact-SHA review. Desktop
 presence and explicit DND are
-`POST_CUTOVER_OK`; Telegram is future channel work. This does not
-start S12 or authorize production. R1B is locally verified: the companion
+`POST_CUTOVER_OK`; Telegram is future channel work. That readiness work did not
+itself start S12 or authorize production. R1B is locally verified: the companion
 candidate has one generic Web surface (`mcp-search_hub`), the DLM-shaped handler
 check returned typed research evidence, and the affected Node/Python sets pass
 62/62 and 43/43. R1B.1 also locally closes the reproduced provider-origin
@@ -182,7 +181,7 @@ The exact bytes passed bounded TECserver root/ubuntu probe, resolver,
 Node-provider and Python-provider-route parity with sealed-runtime and
 production hashes/state unchanged. The repair was archived and independently
 reviewed at `9653d030473b3e9870ddea9158c4a2f9570c243b`; complete R3-B on that
-base is `CLEAR`. S12 remains `NOT_STARTED`. Its next blocker was
+base is `CLEAR`. Historical S12 remediation began with
 `S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP`. The first orchestration
 candidate `e6ce78aa` is `LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED / ARCHIVED`:
 VERIFY created a source candidate ref, an ACCEPTED journal bypassed SQLite, and
@@ -226,11 +225,16 @@ ubuntu Git health passed with production clean at `98fd8b38`. Canonical VERIFY
 passed; APPLY completed P1, failed at P2 before Core authority or external
 effect, and restored prior source. Linux evidence proved the P2 child could
 read inherited root-opened descriptors but `/proc/self/fd` reopening failed
-with `EACCES`. The local repair passes protected direct-FD focused and Linux
-proofs and remains unarchived/not reviewed. Next is a new archived successor,
-fresh canonical VERIFY and new exact-SHA APPLY authorization.
-Production source remains `98fd8b3`; R2 attributable production mutation is
-none. The separately authorized XHS public-only recovery is recorded apart
+with `EACCES`. The direct-FD repair was archived in successor
+`e298bab161bf0f4882bcef6e9cd701d546b63ff2`; canonical VERIFY passed and the
+production transaction reached P10/ACCEPTED. Source pointer and Core authority
+bind e298, exactly one semantic writer and the managed wake are active, normal
+ingress is restored, and Node/Python/Hermes are active. P9 is owner-accepted
+`TERMINAL_AMBIGUOUS_NO_RESEND`: attempt count 1, external effect unknown,
+resend forbidden and duplicate/resend count 0. S13 is `NOT STARTED`; it waits
+for evidence-based observation exit criteria and separate explicit owner
+deletion authorization. No S13 deletion is authorized. R2 attributable
+production mutation is none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.
 
 ## Lifecycle Stages

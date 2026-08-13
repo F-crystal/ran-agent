@@ -2,18 +2,19 @@
 
 Status: CURRENT (2026-08-13)
 
-This is the canonical execution and handoff checklist for the remaining path
-from the local S12 readiness work to S13 cleanup. `active_sequence.md` owns the
+This is the canonical execution and handoff checklist from S12 readiness through
+the S13 observation boundary. `active_sequence.md` owns the
 project-level S-stage pointer; this document owns the detailed R-node topology,
 acceptance criteria and evidence ledger. Chat summaries are not status
 authority.
 
-Current local handoff: source convergence excision is archived at `3302472`, all
-29 retired source-candidate refs are gone, and ubuntu Git health is clear.
-Canonical VERIFY passed; APPLY completed P1 then failed at P2 before Core or
-external effect and rolled source back. The protected-input `/proc/self/fd`
-reopen failed with Linux `EACCES`; the direct inherited-FD repair is locally
-verified, requires review and remains unarchived.
+Current handoff: S12 is `COMPLETE / PROD_ACCEPTED` at
+`e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Source pointer and
+`core-cutover:v1` bind e298; P10 is ACCEPTED, exactly one semantic writer and
+the managed wake are active, normal ingress is restored, and Node/Python/Hermes
+are active. P9 is owner-accepted `TERMINAL_AMBIGUOUS_NO_RESEND`: one attempt,
+external effect unknown, resend forbidden and no duplicate. S13 is not started
+and no deletion is authorized.
 
 ## Authority And Reading Order
 
@@ -97,14 +98,14 @@ flowchart TD
     CLOSURE --> ROUTE["Feishu route contract 2f822d9a<br/>REVIEWED · FIX_REQUIRED"]
     ROUTE --> CUSTODY["Visible-binding custody repair 482e700<br/>REVIEWED · CLEAR"]
     CUSTODY --> D03["Source Git convergence excision 3302472<br/>ARCHIVED · GIT HEALTH CLEAR"]
-    D03 --> P2FD["P2 protected direct-FD repair<br/>LOCAL_VERIFIED · REVIEW REQUIRED · UNARCHIVED"]
-    P2FD --> ARCHIVE["Archive exact successor"]
-    ARCHIVE --> VERIFY["Canonical exact-successor VERIFY"]
-    VERIFY --> OA["Explicit owner digest + production authorization"]
-    OA --> S12["S12 Core Cutover Gate"]
-    S12 --> OBS["Observation window"]
-    OBS --> DA["Separate owner deletion authorization"]
-    DA --> S13["S13 legacy cleanup"]
+    D03 --> P2FD["P2 protected direct-FD repair e298bab<br/>PROD_VERIFIED · REVIEWED"]
+    P2FD --> ARCHIVE["Archive e298bab<br/>COMPLETE"]
+    ARCHIVE --> VERIFY["Canonical e298 VERIFY<br/>PASS"]
+    VERIFY --> OA["Owner-authorized e298 APPLY/recovery"]
+    OA --> S12["S12 P10<br/>COMPLETE · PROD_ACCEPTED"]
+    S12 --> OBS["Observation exit evidence<br/>NO CLEANUP"]
+    OBS --> DA["Separate deletion authorization<br/>NOT GRANTED"]
+    DA --> S13["S13 legacy cleanup<br/>NOT STARTED"]
 ```
 
 Default execution is serial. The independent exact-SHA R1A repair review is
@@ -208,15 +209,15 @@ remain unchanged/not started.
 | S12-FEISHU-ROUTE | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b` | `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP` | Route semantics are accepted; terminal audit found the remaining mutable-path approval/custody gap. |
 | S12-VISIBLE-BINDING-CUSTODY | `LOCAL_VERIFIED` | `REVIEWED / CLEAR` | `ARCHIVED` at `482e70083afb067f1e804cf1a8abd20e4ebf41ab` | `S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP` | Explicit owner digest, one no-follow capture, transaction-local snapshot, existing marker digest and existing Package B receipt preserve one route through P0-P10 without post-P5 pathname authority. |
 | SOURCE-GIT-CONVERGENCE | `PROD_VERIFIED` | `REVIEWED / CLEAR` | `ARCHIVED` at `3302472676131f7046fa6e9bd4d5727e31ee28f3` | checkout/ref poisoning excision | All 29 retired logical source-candidate refs are absent; ubuntu Git health is clear and production remains `98fd8b38`. |
-| S12-P2-DIRECT-FD | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `UNARCHIVED` | P2 `CORE_CUTOVER_INPUT_INVALID` | Root opens protected inputs once; ubuntu consumes inherited descriptors directly. Parsing and digest share captured bytes; Linux exact-seam proof passes. |
-| S12 | `NOT_STARTED / LOCAL FREEZE` | not applicable | not applicable | new successor + fresh exact-successor VERIFY + new explicit production authorization | `3302472` VERIFY passed; APPLY completed P1, failed at P2 pre-Core/pre-effect, and source rollback succeeded. |
+| S12-P2-DIRECT-FD | `PROD_VERIFIED` | `REVIEWED` | `ARCHIVED` in `e298bab161bf0f4882bcef6e9cd701d546b63ff2` | P2 `CORE_CUTOVER_INPUT_INVALID` | Root opens protected inputs once; ubuntu consumes inherited descriptors directly. The exact Linux seam and production P2 passed. |
+| S12 | `COMPLETE / PROD_ACCEPTED` | owner-authorized exact e298 transaction | production P10/ACCEPTED | observation only; S13 remains not started | Source pointer/Core marker=e298; writer=1; wake active; ingress/services restored. P9 is terminal ambiguous/no-resend with one attempt, unknown external effect and zero duplicate/resend. |
 
 The previous implementation candidate is
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance
 HEAD `6def06aa45a6d4c64b9a4e78cda35dd38331678f`. The replacement candidate is
-`dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`. Production remains at
-`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; an archived local candidate is
-not a deployable or production-authorized SHA.
+`dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`. At that earlier handoff,
+production remained at `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; an
+archived local candidate was not a deployable or production-authorized SHA.
 
 ## Node Acceptance Checklists
 
@@ -634,10 +635,10 @@ recovery is recorded independently and leaves
   one managed clock projection and no production mutation.
 - [x] Fresh production diff and migration reconciliation show no unexplained
   writer, schedule or outbox state.
-- [x] S12 remains `NOT_STARTED` after dry-run; the orchestration/interlock gap
-  was repaired without starting production S12.
-- [ ] After local freeze, archive and exact-successor VERIFY, request explicit
-  production authorization with the exact SHA and summarized mutation.
+- [x] The dry-run preserved production while the orchestration/interlock gap
+  was repaired.
+- [x] Exact successor e298 passed VERIFY and the owner-authorized transaction
+  reached P10/ACCEPTED.
 
 The scratch-home lifecycle repair and the subsequent complete service-managed
 root/non-root v0.20 proof are closed on `9653d030`. This does not authorize or
@@ -651,9 +652,8 @@ it is not called by the immutable release gate or S12 execution authority.
 
 ### S12 — Core Cutover Gate
 
-This node remains not started until the local freeze is archived, the exact
-successor passes canonical VERIFY, and the owner separately authorizes
-production.
+This node is complete and production-accepted at
+`e298bab161bf0f4882bcef6e9cd701d546b63ff2`.
 The runbook exposes `scripts/s12-cutover.py` as the only S12 entrypoint;
 subordinate source, cutover, wake and acceptance commands are not operator
 steps.
@@ -668,30 +668,37 @@ durable prior-pointer publication or fsynced pointer absence commits rollback.
 The same closure supplies every S12 subordinate, manifest and relative Core
 import, then is removed; the live checkout remains production state only. The
 root-owned mode `0600` visible binding remains byte-identical, and the existing
-Core marker/Package B receipt owns the post-P5 route. Production remains
-unchanged until an authorized APPLY.
+Core marker/Package B receipt owns the post-P5 route. The historical transaction
+contract remains recorded here; it is not authority to rerun the accepted
+transaction.
 
-- [ ] Stop new ingress and drain/reconcile legacy effect/outbox state.
-- [ ] Execute the one authorized Core cutover transaction against the exact SHA.
-- [ ] Enable exactly one managed work-producing tick and disable legacy visible
+- [x] Stop new ingress and drain/reconcile legacy effect/outbox state.
+- [x] Execute the owner-authorized Core cutover transaction against exact e298.
+- [x] Enable exactly one managed work-producing tick and disable legacy visible
   wake.
-- [ ] Prove cutover Journal interlock, Core writer/schema health and
+- [x] Prove cutover Journal interlock, Core writer/schema health and
   watermark/hash/count reconciliation.
-- [ ] Send exactly one allowlisted synthetic Feishu message and record one
-  durable terminal receipt.
-- [ ] Record deployment and bounded immediate production verification; do not
+- [x] Record one acceptance attempt and its durable
+  `TERMINAL_AMBIGUOUS_NO_RESEND` receipt; delivery effect remains unknown and
+  resend is forbidden.
+- [x] Record deployment and bounded immediate production verification; do not
   start S13 cleanup.
 
 ### S13 — Observation And Cleanup
 
-- [ ] Observe at least the governed window with one restart and duplicate/missed
-  synthetic tick probe, zero duplicate delivery and no ambiguous auto-retry.
-- [ ] Reconcile managed schedules, WorkRuns, outbox receipts and legacy clocks.
+- [ ] Observe until source pointer and `core-cutover:v1` remain e298, the semantic
+  writer remains exactly one, managed wake remains active, services and normal
+  ingress remain stable, the P9 canary has no second attempt/resend or duplicate
+  presentation result, and no unexpected legacy writer/clock activity appears.
+- [ ] Reconcile managed schedules, WorkRuns, outbox receipts and legacy clocks
+  as observation only; do not begin cleanup.
 - [ ] Obtain separate owner authorization for deletion/retirement.
 - [ ] Remove only the named legacy scheduler, JSON outbox and compatibility
   writers after recovery requirements expire.
 - [ ] Update runtime truth, topology and cleanup record; remove obsolete
   worktrees/coordination state after archival integration.
+
+S13 is `NOT STARTED`; no S13 deletion is currently authorized.
 
 ## Reviewer Handoff Template
 

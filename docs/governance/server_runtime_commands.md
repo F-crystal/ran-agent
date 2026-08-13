@@ -95,6 +95,12 @@ rollback; the historical companion-overlay transaction is not a second writer.
 
 ## Canonical S12 Transaction
 
+S12 is complete and production-accepted at
+`e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Source pointer and
+`core-cutover:v1` bind that SHA; do not rerun VERIFY/APPLY or the acceptance
+canary. The command shape below is retained as transaction history, not current
+mutation authority.
+
 After R3-B is clear for the exact successor and an independent exact-SHA review
 accepts its S12 authority, `scripts/s12-cutover.py` is the only production S12
 entrypoint. Do not invoke source apply/rollback, `core-cutover.mjs`, managed-wake
@@ -104,10 +110,8 @@ identity and authorization reference; a VERIFY result does not authorize it.
 Candidate `1cb4077a0c1143b0ff7bdf312c025db110f2f0f0` and authorization
 `owner-s12-apply-20260813T1331+0800` are retired and cannot be reused. Its failed
 APPLY stopped before Core, caused no external effect, and production was
-reconciled to `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The next deployment
-order is: new successor, delete the exact two toxic refs under separate owner
-authorization, prove ubuntu Git healthy, run fresh canonical VERIFY, then use
-new exact-SHA APPLY authorization.
+reconciled to `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The later e298
+transaction superseded that failed attempt and reached P10/ACCEPTED.
 VERIFY invokes the candidate source controller directly in `source-verify`
 mode. It may use removable `/tmp` extraction and runtime scratch, but it does
 not create a source candidate ref, release lock, source pointer/snapshot, S12
@@ -181,9 +185,8 @@ governed transaction no longer needs it.
 The standalone `bootstrap-hermes-release.sh` source-release entrypoint remains
 supported by the separate source transaction runbook above; S12 does not route
 through it. Historical production source-candidate refs are retired globally
-toxic Git metadata, not S12 admission or retry prerequisites. The exact two
-production refs require a separate owner-authorized deletion; cleanup is not
-authorized here.
+toxic Git metadata, not S12 authority. The retired namespace was removed before
+the accepted transaction; no further ref cleanup is authorized here.
 
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy
