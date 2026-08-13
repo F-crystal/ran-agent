@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 
 import { handleIncomingMessage } from '../../src/channelHub.mjs';
+import { commitCoreCutover } from '../../src/core/coreCutover.mjs';
 import { openCoreDatabase } from '../../src/core/coreDb.mjs';
-import { createCoreContentHasher } from '../../src/core/packageB/packageBNodeDeliveryService.mjs';
+import { seedCoreSystemSchedules } from '../../src/core/coreSystemSchedules.mjs';
+import {
+  createCoreContentHasher,
+  deliverNodeTextThroughCore,
+} from '../../src/core/packageB/packageBNodeDeliveryService.mjs';
 import { readTimelineRecords } from '../../src/globalTimeline.mjs';
 import { getAccountBindingKey } from '../../src/identityMap.mjs';
 import { createIsolatedTestEnv } from '../helpers/isolatedState.mjs';
@@ -35,6 +41,93 @@ function identityEnv(t, message, { owner = true } = {}) {
 function quietLogger() {
   return { log() {}, warn() {}, error() {}, info() {} };
 }
+
+test('ChannelHub binding namespace coexists with the cutover system-owner binding and replays once', async (t) => {
+  const message = {
+    id: 'feishu-post-s12-binding', platform: 'feishu', conversation_id: 'feishu-owner-dm',
+    stable_conversation_key: 'feishu:dm:owner', text: '验证绑定命名空间',
+    created_at: Date.parse('2026-08-13T11:07:11.000Z'),
+  };
+  const ownerId = 'user:ran';
+  const actorRef = 'feishu:owner:verified';
+  const routeKey = createHash('sha256').update(`${message.platform}\u0000${message.conversation_id}`).digest('hex').slice(0, 32);
+  const conversationKey = createHash('sha256').update(`${ownerId}\u0000${message.stable_conversation_key}`).digest('hex').slice(0, 32);
+  const conversationId = `conversation:feishu:${conversationKey}`;
+  const oldGenericBindingId = `binding:${routeKey}`;
+  const { dbPath } = createTempCore(t, 'hermes-core-node-post-s12-binding-');
+  const core = openCoreDatabase({ dbPath });
+  core.migrate();
+  await commitCoreCutover({
+    core,
+    input: {
+      ownerId, authorizationRef: 'owner-approval:s12:test',
+      watermark: '2026-08-13T11:00:00.000Z', committedAt: '2026-08-13T11:01:00.000Z',
+      candidateSha: 'a'.repeat(40), migrationSnapshotDigest: `sha256:${'b'.repeat(64)}`,
+      scheduleManifestDigest: `sha256:${'c'.repeat(64)}`,
+      visibleBindingDigest: `sha256:${'d'.repeat(64)}`,
+      ambiguousOutboxDisposition: 'terminal_no_resend', pendingOutboundDisposition: 'suppress',
+    },
+    apply: (tx) => seedCoreSystemSchedules(tx, {
+      manifest: {
+        timeZone: 'Asia/Shanghai',
+        schedules: [{
+          id: 'visible-owner', source: 'test', title: 'Visible owner schedule',
+          taskKind: 'scheduled_instruction', visible: true, payloadRef: 'system-task:visible-owner',
+          recurrence: { kind: 'daily', time: '20:00:00' },
+        }],
+      },
+      ownerId, watermark: '2026-08-13T11:00:00.000Z', createdAt: '2026-08-13T11:01:00.000Z',
+      visibleBinding: {
+        conversationId, canonicalConversationKey: conversationId, actorRef,
+        platform: 'feishu', sourceInstanceId: 'node-channel-hub:feishu',
+        platformConversationBinding: `feishu:conversation:${routeKey}`,
+        bindingId: oldGenericBindingId, destinationKind: 'user', destinationRef: 'system-owner-destination',
+      },
+    }),
+  });
+  let inspector = openTestInspector(dbPath);
+  const systemBindingBefore = inspector.prepare('SELECT * FROM presentation_binding WHERE presentation_binding_id=?').get(oldGenericBindingId);
+  inspector.close();
+
+  let effects = 0;
+  const input = {
+    core, message, globalUserId: ownerId, actorContext: { owner: true, actorKey: actorRef },
+    response: { replyText: '命名空间修复完成。', provider: 'hermes', model: 'test' },
+    hashContent: createCoreContentHasher({ keyId: 'post-s12-test-key', key: 'post-s12-test-secret' }),
+  };
+  const first = await deliverNodeTextThroughCore({
+    ...input,
+    send: async () => {
+      effects += 1;
+      return { textStatus: 'sent', adapterReceiptRef: 'feishu:test:sent' };
+    },
+  });
+  assert.equal(first.exchange.bindingId, `binding:channel-hub:v1:${routeKey}`);
+  assert.notEqual(first.exchange.bindingId, oldGenericBindingId);
+  assert.equal(first.delivery.state, 'sent');
+  const replay = await deliverNodeTextThroughCore({
+    ...input,
+    send: async () => { throw new Error('terminal outbox must not resend'); },
+  });
+  assert.equal(replay.delivery.effectAttempted, false);
+  assert.equal(effects, 1);
+  await core.close();
+
+  inspector = openTestInspector(dbPath);
+  assert.deepEqual(
+    inspector.prepare('SELECT * FROM presentation_binding WHERE presentation_binding_id=?').get(oldGenericBindingId),
+    systemBindingBefore,
+  );
+  const bindings = inspector.prepare('SELECT presentation_binding_id,conversation_id,adapter_metadata_json FROM presentation_binding ORDER BY presentation_binding_id').all();
+  assert.equal(bindings.length, 2);
+  assert.ok(bindings.every((binding) => binding.conversation_id === conversationId));
+  assert.deepEqual(bindings.map((binding) => JSON.parse(binding.adapter_metadata_json).protocol).sort(),
+    ['channel-hub', 'core-system-schedule']);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM semantic_turn WHERE role='assistant'").get().count, 1);
+  assert.equal(inspector.prepare('SELECT count(*) AS count FROM presentation_outbox').get().count, 1);
+  assert.equal(inspector.prepare('SELECT state FROM presentation_outbox').get().state, 'sent');
+  inspector.close();
+});
 
 test('synthetic Feishu text crosses Node and Core once across concurrency, reopen, and replay', async (t) => {
   const message = {

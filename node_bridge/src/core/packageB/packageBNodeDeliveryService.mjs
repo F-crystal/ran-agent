@@ -74,7 +74,7 @@ function buildExchange({ message, response, globalUserId, actorContext, hashCont
   const providerAttemptId = `provider-attempt:${messageKey}:1`;
   const assistantTurnId = `turn:assistant:${messageKey}`;
   const assistantRevisionId = `revision:assistant:${messageKey}:1`;
-  const bindingId = `binding:${routeKey}`;
+  const bindingId = `binding:channel-hub:v1:${routeKey}`;
   const outboxId = `outbox:${messageKey}`;
   const destinationRef = `conversation:${routeKey}`;
   const createdAt = timestamp(message.created_at);
