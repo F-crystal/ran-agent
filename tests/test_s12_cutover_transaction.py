@@ -897,15 +897,17 @@ def test_p0_p2_and_p5_consume_only_the_pinned_binding_snapshot(
         return {"status": "REHEARSED"}
 
     def runtime_run(command, *, pass_fds=(), **_kwargs):
-        binding_fd = int(command[command.index("--visible-binding") + 1].rsplit("/", 1)[1])
-        observed.append(os.pread(binding_fd, len(approved), 0))
+        snapshot_fd = int(command[command.index("--snapshot-fd") + 1])
+        binding_fd = int(command[command.index("--visible-binding-fd") + 1])
+        assert {snapshot_fd, binding_fd}.issubset(pass_fds)
+        observed.append((os.pread(snapshot_fd, 2, 0), os.pread(binding_fd, len(approved), 0)))
         return {"status": "verified"}
 
     monkeypatch.setattr(operations, "rehearse", rehearse)
     monkeypatch.setattr(operations, "runtime_run", runtime_run)
     operations.core_prepare()
     operations.cutover()
-    assert observed == [approved, approved]
+    assert observed == [(b"{}", approved), (b"{}", approved)]
     assert source.read_bytes() != approved
 
 

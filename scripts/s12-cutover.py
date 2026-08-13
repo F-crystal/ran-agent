@@ -518,9 +518,9 @@ class ProductionOperations:
         try:
             verified = self.runtime_run([
                 str(NODE_BIN), str(self.candidate_code_root / "scripts/core-cutover.mjs"), "--mode", "verify",
-                "--core-db", str(self.args.core_db), "--snapshot", f"/proc/self/fd/{snapshot_fd}",
+                "--core-db", str(self.args.core_db), "--snapshot-fd", str(snapshot_fd),
                 "--system-manifest", str(self.candidate_code_root / SCHEDULE_MANIFEST_PATH),
-                "--visible-binding", f"/proc/self/fd/{binding_fd}",
+                "--visible-binding-fd", str(binding_fd),
                 "--visible-binding-sha256", self.args.visible_binding_sha256,
                 "--candidate-sha", self.args.candidate, "--committed-at", self.args.committed_at,
             ], pass_fds=(snapshot_fd, binding_fd))
@@ -582,9 +582,9 @@ class ProductionOperations:
         try:
             return self.runtime_run([
                 str(NODE_BIN), str(self.candidate_code_root / "scripts/core-cutover.mjs"), "--mode", "apply",
-                "--core-db", str(self.args.core_db), "--snapshot", f"/proc/self/fd/{snapshot_fd}",
+                "--core-db", str(self.args.core_db), "--snapshot-fd", str(snapshot_fd),
                 "--system-manifest", str(self.candidate_code_root / SCHEDULE_MANIFEST_PATH),
-                "--visible-binding", f"/proc/self/fd/{binding_fd}",
+                "--visible-binding-fd", str(binding_fd),
                 "--visible-binding-sha256", self.args.visible_binding_sha256,
                 "--candidate-sha", self.args.candidate, "--committed-at", self.args.committed_at,
                 "--owner-id", self.args.owner_id, "--authorization-ref", self.args.authorization_ref,

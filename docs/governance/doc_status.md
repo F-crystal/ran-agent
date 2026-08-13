@@ -220,20 +220,15 @@ receipt after P5. That custody repair is independently clear at
 `482e70083afb067f1e804cf1a8abd20e4ebf41ab`. Its owner-approved protected
 binding remains installed byte-identically at mode `0600`, with digest
 `sha256:dde57df0d2fc34860a52e486aaccdb1aacccb83d3eedb3de40ccd5109959542f`.
-The historical canonical S12 VERIFY stopped before source verification. Local
-D0-D3 remain independently reviewed `CLEAR`; the checkout-excision successor
-is `LOCAL_VERIFIED / NOT_REVIEWED / UNARCHIVED`, so no successor SHA exists yet.
-Current topology is one exact S12 candidate execution closure invoking the
-candidate source controller directly. The current-source pointer owns source
-commit/recovery truth, unchanged dependencies reuse live `node_modules`, and
-historical source-candidate refs are retired globally toxic metadata. Candidate
-`1cb4077a0c1143b0ff7bdf312c025db110f2f0f0` and authorization
-`owner-s12-apply-20260813T1331+0800` are retired and cannot be reused. Its failed
-APPLY was pre-Core with no external effect; production was reconciled to
-`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The next deployment order is: new
-successor, separately owner-authorized deletion of the exact two toxic refs,
-proof that ubuntu Git is healthy, fresh canonical VERIFY, then new exact-SHA
-APPLY authorization.
+Source convergence excision is archived at `3302472676131f7046fa6e9bd4d5727e31ee28f3`.
+All 29 logical refs in the retired source-candidate namespace were deleted and
+ubuntu Git health passed with production clean at `98fd8b38`. Canonical VERIFY
+passed; APPLY completed P1, failed at P2 before Core authority or external
+effect, and restored prior source. Linux evidence proved the P2 child could
+read inherited root-opened descriptors but `/proc/self/fd` reopening failed
+with `EACCES`. The local repair passes protected direct-FD focused and Linux
+proofs and remains unarchived/not reviewed. Next is a new archived successor,
+fresh canonical VERIFY and new exact-SHA APPLY authorization.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.

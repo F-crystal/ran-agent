@@ -22,8 +22,17 @@ function digest(filePath) {
 }
 
 function readJson(filePath, label) {
+  let bytes;
+  let value;
   try {
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    value = typeof filePath === 'number' ? fs.fstatSync(filePath) : fs.statSync(filePath);
+    bytes = fs.readFileSync(filePath);
+  } catch (error) {
+    throw coreError('CORE_CUTOVER_INPUT_UNREADABLE', `${label} is unreadable`, error);
+  }
+  if (!value.isFile()) throw coreError('CORE_CUTOVER_INPUT_MISSING', 'cutover input file is missing');
+  try {
+    return Object.freeze({ bytes, value: JSON.parse(bytes.toString('utf8')) });
   } catch (error) {
     throw coreError('CORE_CUTOVER_INPUT_INVALID', `${label} is not valid JSON`, error);
   }
@@ -63,19 +72,18 @@ function businessRows(dbPath) {
 
 function plan(input) {
   validateCoreCutoverInput(input);
-  for (const filePath of [input.coreDbPath, input.snapshotPath, input.systemManifestPath, input.visibleBindingPath]) {
+  for (const filePath of [input.coreDbPath, input.systemManifestPath]) {
     if (typeof filePath !== 'string' || !fs.statSync(filePath).isFile()) {
       throw coreError('CORE_CUTOVER_INPUT_MISSING', 'cutover input file is missing');
     }
   }
-  const snapshot = readJson(input.snapshotPath, 'migration snapshot');
+  const snapshotInput = readJson(input.snapshotPath, 'migration snapshot');
+  const snapshot = snapshotInput.value;
   assertSnapshot(snapshot);
   const manifest = loadCoreSystemScheduleManifest(input.systemManifestPath);
-  const visibleBindingBytes = fs.readFileSync(input.visibleBindingPath);
-  let visibleBinding;
-  try { visibleBinding = JSON.parse(visibleBindingBytes.toString('utf8')); } catch (error) {
-    throw coreError('CORE_CUTOVER_INPUT_INVALID', 'visible binding is not valid JSON', error);
-  }
+  const visibleBindingInput = readJson(input.visibleBindingPath, 'visible binding');
+  const visibleBinding = visibleBindingInput.value;
+  const visibleBindingBytes = visibleBindingInput.bytes;
   const visibleBindingDigest = `sha256:${createHash('sha256').update(visibleBindingBytes).digest('hex')}`;
   if (visibleBindingDigest !== input.visibleBindingDigest) {
     throw coreError('CORE_CUTOVER_BINDING_DIGEST_MISMATCH', 'visible binding differs from approved S12 authority');
@@ -85,7 +93,8 @@ function plan(input) {
   if (!database.cutoverCommitted && Object.values(database.counts).some((count) => count !== 0)) {
     throw coreError('CORE_CUTOVER_CANDIDATE_NOT_EMPTY', 'pre-cutover Core candidate contains business rows');
   }
-  return Object.freeze({ snapshot, manifest, visibleBinding, visibleBindingDigest, database });
+  const snapshotDigest = `sha256:${createHash('sha256').update(snapshotInput.bytes).digest('hex')}`;
+  return Object.freeze({ snapshot, snapshotDigest, manifest, visibleBinding, visibleBindingDigest, database });
 }
 
 export async function executeCoreCutover(input = {}) {
@@ -115,7 +124,7 @@ export async function executeCoreCutover(input = {}) {
         watermark: prepared.snapshot.watermark,
         committedAt: input.committedAt,
         candidateSha: input.candidateSha,
-        migrationSnapshotDigest: digest(input.snapshotPath),
+        migrationSnapshotDigest: prepared.snapshotDigest,
         scheduleManifestDigest: digest(input.systemManifestPath),
         visibleBindingDigest: prepared.visibleBindingDigest,
         ambiguousOutboxDisposition: 'terminal_no_resend',

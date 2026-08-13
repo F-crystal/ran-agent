@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S4 PROD_VERIFIED; S5-S11/R2 LOCAL_VERIFIED; R3-B CLEAR at 9653d030; source convergence excision LOCAL_VERIFIED / NOT_REVIEWED; S12 NOT_STARTED (2026-08-13)
+Status: S4 PROD_VERIFIED; S5-S11/R2 LOCAL_VERIFIED; R3-B CLEAR at 9653d030; S12 P2 direct-FD repair LOCAL_VERIFIED / NOT_REVIEWED (2026-08-13)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -579,20 +579,18 @@ from the existing Package B binding receipt. That repair is independently clear
 at `482e70083afb067f1e804cf1a8abd20e4ebf41ab`; the owner-approved protected
 binding remains installed byte-identically at mode `0600` with digest
 `sha256:dde57df0d2fc34860a52e486aaccdb1aacccb83d3eedb3de40ccd5109959542f`.
-Canonical S12 VERIFY then stopped fail-closed before source verification. The
-D0-D3 repair remains independently `CLEAR`; this local successor repair keeps
-those pointer, recovery, direct-controller and dependency-reuse semantics while
-replacing source checkout with exact tree/index restore plus separate HEAD
-projection. Candidate `1cb4077a0c1143b0ff7bdf312c025db110f2f0f0` and APPLY
-authorization `owner-s12-apply-20260813T1331+0800` are retired and cannot be
-reused. Its failed APPLY stopped before Core and produced no external effect;
-production was reconciled to
-`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. Historical production
-source-candidate refs are retired globally toxic Git metadata, not authority;
-the two exact refs still require separate owner-authorized deletion. No
-successor SHA exists yet. The next deployment order is: new successor, delete
-the exact two toxic refs, prove ubuntu Git healthy, run fresh canonical VERIFY,
-then use new exact-SHA APPLY authorization.
+Source convergence excision is archived at
+`3302472676131f7046fa6e9bd4d5727e31ee28f3`. Production cleanup removed all 29
+logical refs in the retired source-candidate namespace; ubuntu ref enumeration,
+fetch and status are healthy while production remains clean at
+`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. Canonical VERIFY passed for
+`3302472`; APPLY completed P1, then P2 failed before Core authority or any
+external effect and source rollback succeeded. The cause was ubuntu reopening
+root-owned inherited inputs through `/proc/self/fd`, which Linux rejected with
+`EACCES`; direct inherited-FD reads succeed. The local bounded repair passes
+focused tests and the exact Linux root-to-ubuntu P2 proof. Its next gate is one
+new archived successor, fresh canonical VERIFY and new exact-SHA APPLY
+authorization.
 
 A 2026-08-09 owner-visible incident adds two serial R1 blockers without
 changing production. For an ordinary DLM web-research task, Hermes attempted an

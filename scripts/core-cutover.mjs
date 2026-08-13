@@ -17,8 +17,20 @@ function argumentsByName(argv) {
 }
 
 const args = argumentsByName(process.argv.slice(2));
-for (const required of ['core-db', 'snapshot', 'system-manifest', 'visible-binding', 'visible-binding-sha256', 'candidate-sha', 'committed-at']) {
+for (const required of ['core-db', 'system-manifest', 'visible-binding-sha256', 'candidate-sha', 'committed-at']) {
   if (!args[required]) throw new Error(`--${required} is required`);
+}
+for (const [pathName, fdName] of [['snapshot', 'snapshot-fd'], ['visible-binding', 'visible-binding-fd']]) {
+  if (!args[pathName] && !args[fdName]) throw new Error(`--${pathName} or --${fdName} is required`);
+  if (args[fdName]) {
+    const descriptor = Number(args[fdName]);
+    if (!Number.isSafeInteger(descriptor) || descriptor < 3) throw new Error(`${pathName} FD is invalid`);
+    const value = fs.fstatSync(descriptor);
+    if (!value.isFile() || value.mode % 0o1000 !== 0o600 || value.nlink !== 1 || value.uid !== 0) {
+      throw new Error(`${pathName} FD identity/mode/link count is invalid`);
+    }
+    args[pathName] = descriptor;
+  }
 }
 const mode = args.mode || 'verify';
 if (!['verify', 'apply'].includes(mode)) throw new Error('--mode must be verify or apply');
@@ -72,9 +84,10 @@ if (mode === 'apply') {
 const result = await executeCoreCutover({
   mode,
   coreDbPath: path.resolve(args['core-db']),
-  snapshotPath: path.resolve(args.snapshot),
+  snapshotPath: typeof args.snapshot === 'number' ? args.snapshot : path.resolve(args.snapshot),
   systemManifestPath: path.resolve(args['system-manifest']),
-  visibleBindingPath: path.resolve(args['visible-binding']),
+  visibleBindingPath: typeof args['visible-binding'] === 'number'
+    ? args['visible-binding'] : path.resolve(args['visible-binding']),
   visibleBindingDigest: args['visible-binding-sha256'],
   candidateSha: args['candidate-sha'],
   committedAt: args['committed-at'],

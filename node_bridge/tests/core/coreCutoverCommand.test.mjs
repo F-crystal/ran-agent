@@ -63,6 +63,14 @@ test('exact cutover command verifies without writes then applies and replays one
     candidateSha: 'a'.repeat(40), committedAt: COMMITTED_AT,
     ownerId: 'owner', authorizationRef: 'owner-approval:s12:test',
   };
+  const snapshotFd = fs.openSync(fixture.snapshotPath, 'r');
+  const bindingFd = fs.openSync(fixture.visibleBindingPath, 'r');
+  const fdVerified = await executeCoreCutover({
+    ...input, snapshotPath: snapshotFd, visibleBindingPath: bindingFd,
+  });
+  fs.closeSync(bindingFd);
+  fs.closeSync(snapshotFd);
+  assert.equal(fdVerified.status, 'verified');
   const verified = await executeCoreCutover(input);
   assert.equal(verified.status, 'verified');
   const approvedBinding = fs.readFileSync(fixture.visibleBindingPath);
@@ -109,12 +117,16 @@ test('exact cutover verification rejects an invalid visible binding before apply
   core.migrate();
   await core.close();
   fs.writeFileSync(fixture.visibleBindingPath, '{}');
-  const verify = () => executeCoreCutover({
+  const expected = digest(fixture.visibleBindingPath);
+  const verify = (visibleBindingDigest = expected) => executeCoreCutover({
     mode: 'verify', coreDbPath: fixture.dbPath, snapshotPath: fixture.snapshotPath,
     systemManifestPath: SYSTEM_MANIFEST, visibleBindingPath: fixture.visibleBindingPath,
-    visibleBindingDigest: digest(fixture.visibleBindingPath),
+    visibleBindingDigest,
     candidateSha: 'a'.repeat(40), committedAt: COMMITTED_AT,
   });
+  fs.rmSync(fixture.visibleBindingPath);
+  await assert.rejects(verify(), { code: 'CORE_CUTOVER_INPUT_UNREADABLE' });
+  fs.writeFileSync(fixture.visibleBindingPath, '{}');
   await assert.rejects(verify(), { code: 'CORE_SYSTEM_SCHEDULE_BINDING_REQUIRED' });
 
   fs.writeFileSync(fixture.visibleBindingPath, JSON.stringify({
@@ -123,7 +135,7 @@ test('exact cutover verification rejects an invalid visible binding before apply
     platformConversationBinding: 'feishu:conversation:system-owner',
     bindingId: 'system-owner-binding', destinationKind: 'ambiguous', destinationRef: 'recipient-fixture',
   }));
-  await assert.rejects(verify(), { code: 'CORE_SYSTEM_SCHEDULE_ROUTE_INVALID' });
+  await assert.rejects(verify(digest(fixture.visibleBindingPath)), { code: 'CORE_SYSTEM_SCHEDULE_ROUTE_INVALID' });
 });
 
 test('exact cutover verification rejects invalid candidate authority before apply', async (t) => {
