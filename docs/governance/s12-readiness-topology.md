@@ -1,12 +1,19 @@
 # S12 Readiness Topology And Acceptance Ledger
 
-Status: CURRENT (2026-08-12)
+Status: CURRENT (2026-08-13)
 
 This is the canonical execution and handoff checklist for the remaining path
 from the local S12 readiness work to S13 cleanup. `active_sequence.md` owns the
 project-level S-stage pointer; this document owns the detailed R-node topology,
 acceptance criteria and evidence ledger. Chat summaries are not status
 authority.
+
+Current local handoff: S12 creates one exact candidate execution closure and
+invokes its source controller directly. Source-candidate refs are retired;
+the source controller alone owns recovery and the durable current-source
+pointer is the source commit. Unchanged dependency blobs reuse the existing
+`node_modules`. D0-D3 are reviewed `CLEAR` but remain unarchived, production is
+unchanged, and the successor SHA is pending archive.
 
 ## Authority And Reading Order
 
@@ -88,9 +95,12 @@ flowchart TD
     ROFIX --> SYSFIX["Systemic byte-authority repair e120f1c2<br/>LOCAL_VERIFIED · REVIEWED · production proof STOPPED"]
     SYSFIX --> CLOSURE["Candidate execution closure repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED BY COMMIT"]
     CLOSURE --> ROUTE["Feishu route contract 2f822d9a<br/>REVIEWED · FIX_REQUIRED"]
-    ROUTE --> CUSTODY["Visible-binding custody repair<br/>LOCAL_VERIFIED · NOT_REVIEWED"]
-    CUSTODY --> ORR["Independent exact-SHA custody review<br/>REQUIRED"]
-    ORR --> OA["Explicit owner digest + production authorization"]
+    ROUTE --> CUSTODY["Visible-binding custody repair 482e700<br/>REVIEWED · CLEAR"]
+    CUSTODY --> D03["D0-D3 source authority/direct seam/dependency diet<br/>REVIEWED · CLEAR · UNARCHIVED"]
+    D03 --> D4["D4 local freeze evidence"]
+    D4 --> ARCHIVE["Archive exact successor"]
+    ARCHIVE --> VERIFY["Canonical exact-successor VERIFY"]
+    VERIFY --> OA["Explicit owner digest + production authorization"]
     OA --> S12["S12 Core Cutover Gate"]
     S12 --> OBS["Observation window"]
     OBS --> DA["Separate owner deletion authorization"]
@@ -197,8 +207,8 @@ remain unchanged/not started.
 | S12-CANDIDATE-CLOSURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a` | `S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP` | One private read-only exact-Git closure owns S12 code/manifests across P0-P10; independent review and bounded production candidate-closure proof are clear. |
 | S12-FEISHU-ROUTE | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b` | `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP` | Route semantics are accepted; terminal audit found the remaining mutable-path approval/custody gap. |
 | S12-VISIBLE-BINDING-CUSTODY | `LOCAL_VERIFIED` | `REVIEWED / CLEAR` | `ARCHIVED` at `482e70083afb067f1e804cf1a8abd20e4ebf41ab` | `S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP` | Explicit owner digest, one no-follow capture, transaction-local snapshot, existing marker digest and existing Package B receipt preserve one route through P0-P10 without post-P5 pathname authority. |
-| S12-SAFE-DIRECTORY | `LOCAL_VERIFIED` | `NOT_REVIEWED` | `ARCHIVED` by containing commit | `S12-BOOTSTRAP-GIT-SAFE-DIRECTORY-ENV-GAP` | Bootstrap scopes Git trust to the exact canonical governed checkout for one invocation and passes only that trust plus VERIFY optional-lock suppression through sudo; no persistent Git config or wildcard is introduced. |
-| S12 | `NOT_STARTED / BLOCKED_BY_SAFE_DIRECTORY_REVIEW` | not applicable | not applicable | safe-directory successor review + canonical VERIFY retry + explicit production authorization | Production remains unchanged; the approved protected binding remains byte-identical and canonical VERIFY stopped before source verification. |
+| D0-D3 | `LOCAL_VERIFIED` | `REVIEWED / CLEAR` | `UNARCHIVED` | accepted D0-D3 repair sequence | Source refs retired, pointer/recovery authority consolidated, S12 direct source seam installed, and unchanged dependencies reuse live `node_modules`; production is unchanged. |
+| S12 | `NOT_STARTED / LOCAL FREEZE` | not applicable | not applicable | D4 freeze evidence + archive + exact-successor VERIFY + explicit production authorization | No successor SHA exists yet; APPLY is not ready. |
 
 The previous implementation candidate is
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance
@@ -625,9 +635,8 @@ recovery is recorded independently and leaves
   writer, schedule or outbox state.
 - [x] S12 remains `NOT_STARTED` after dry-run; the orchestration/interlock gap
   was repaired without starting production S12.
-- [ ] After custody successor review, request the explicit owner-approved
-  binding digest and production authorization with the exact SHA and summarized
-  mutation.
+- [ ] After local freeze, archive and exact-successor VERIFY, request explicit
+  production authorization with the exact SHA and summarized mutation.
 
 The scratch-home lifecycle repair and the subsequent complete service-managed
 root/non-root v0.20 proof are closed on `9653d030`. This does not authorize or
@@ -641,28 +650,25 @@ it is not called by the immutable release gate or S12 execution authority.
 
 ### S12 — Core Cutover Gate
 
-This node is blocked until the canonical S12 orchestration successor passes
-independent exact-SHA review and the owner separately authorizes production.
+This node remains not started until the local freeze is archived, the exact
+successor passes canonical VERIFY, and the owner separately authorizes
+production.
 The runbook exposes `scripts/s12-cutover.py` as the only S12 entrypoint;
 subordinate source, cutover, wake and acceptance commands are not operator
 steps.
 
-The remediation keeps that topology unchanged. VERIFY delegates to the
-candidate-extracted bootstrap/controller `source-verify` path and creates no
-persistent source ref, lock, pointer, snapshot, S12 journal, Core state, wake or
-effect. APPLY consults `core-cutover:v1` before interpreting ACCEPTED,
-ROLLED_BACK or stale pre-marker journal state. The controller materializes the
-exact Git candidate once into private read-only `/tmp`, uses it for every S12
-subordinate, manifest and relative Core import, and removes it afterward; the
-live checkout remains production state only. The root-owned mode `0600` visible
-binding and its owner-approved SHA256 are installed and remain byte-identical.
-The custody successor captures those bytes once and makes the existing Core
-marker/Package B receipt the post-P5 authority; the original pathname is not a
-recovery dependency. Canonical VERIFY on `482e700` stopped before source
-verification because root Git lacked exact-path invocation-scoped trust for the
-governed non-root-owned checkout. The bounded successor repairs only that
-bootstrap environment boundary; S12 remains not started pending
-verification-only review and a VERIFY retry.
+VERIFY creates one exact immutable candidate execution closure and invokes its
+candidate source controller directly under a bounded environment. It creates
+no persistent source ref, lock, pointer, snapshot, S12 journal, Core state, wake
+or effect. APPLY consults `core-cutover:v1` before interpreting ACCEPTED,
+ROLLED_BACK or stale pre-marker journal state. The source controller alone owns
+source recovery; durable `current-source.json` publication commits source and
+durable prior-pointer publication or fsynced pointer absence commits rollback.
+The same closure supplies every S12 subordinate, manifest and relative Core
+import, then is removed; the live checkout remains production state only. The
+root-owned mode `0600` visible binding remains byte-identical, and the existing
+Core marker/Package B receipt owns the post-P5 route. Production remains
+unchanged until an authorized APPLY.
 
 - [ ] Stop new ingress and drain/reconcile legacy effect/outbox state.
 - [ ] Execute the one authorized Core cutover transaction against the exact SHA.

@@ -9,6 +9,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -30,7 +31,6 @@ class FakeOperations:
         self.committed = False
         self.fail: str | None = None
         self.acceptance_waits = 0
-        self.recovered_source: dict[str, object] | None = None
         self.marker_calls = 0
 
     def _call(self, name: str, result: dict[str, object] | None = None):
@@ -44,10 +44,10 @@ class FakeOperations:
         return {"candidateSha": "a" * 40} if self.committed else None
 
     def verify(self): return self._call("verify")
-    def source_apply(self): return self._call("source_apply", {"snapshot": "/source/snapshot"})
-    def recover_source_apply(self):
-        self.calls.append("recover_source_apply")
-        return self.recovered_source
+    def source_apply(self):
+        return self._call("source_apply", {
+            "status": "SOURCE_APPLIED", "snapshot": "/source/snapshot",
+        })
     def core_prepare(self): return self._call("core_prepare")
     def legacy_reconcile(self): return self._call("legacy_reconcile")
     def quiesce(self): return self._call("quiesce")
@@ -72,6 +72,11 @@ class FakeOperations:
 
     def rollback_pre_cutover(self, source_snapshot):
         self.calls.append(f"rollback:{source_snapshot}")
+        if not source_snapshot:
+            raise MODULE.S12Error("missing source snapshot")
+        if self.fail == "rollback":
+            raise MODULE.S12Error("failed:rollback")
+        return {"status": "SOURCE_ROLLED_BACK", "snapshot": source_snapshot}
 
 
 
@@ -160,7 +165,6 @@ class ComposedRollbackOperations(MODULE.ProductionOperations):
             "writers": 1, "clocks": 1, "inactiveCore": "no-authority",
         }
         self.snapshots: dict[str, dict[str, object]] = {}
-        self.recovered_source: dict[str, object] | None = None
 
     def vector(self) -> dict[str, object]:
         return copy.deepcopy(self.authority)
@@ -174,6 +178,8 @@ class ComposedRollbackOperations(MODULE.ProductionOperations):
     def source(self, mode: str, snapshot: str | None = None):
         if mode == "apply":
             name = "/source/composed-snapshot"
+            if self.authority["sourcePointer"] == "candidate":
+                return {"status": "SOURCE_APPLIED", "snapshot": name}
             self.snapshots[name] = {
                 key: copy.deepcopy(self.authority[key]) for key in self.SOURCE_KEYS
             }
@@ -191,9 +197,6 @@ class ComposedRollbackOperations(MODULE.ProductionOperations):
 
     def source_apply(self):
         return self.source("apply")
-
-    def recover_source_apply(self):
-        return self.recovered_source
 
     def core_prepare(self):
         self.authority["inactiveCore"] = "no-authority"
@@ -239,7 +242,7 @@ class ComposedRollbackOperations(MODULE.ProductionOperations):
         raise AssertionError("acceptance is outside composed pre-marker proof")
 
 
-@pytest.mark.parametrize("phase", MODULE.PHASES[:5])
+@pytest.mark.parametrize("phase", MODULE.PHASES[1:5])
 def test_composed_pre_marker_failure_restores_complete_authority_vector(
     tmp_path: Path, phase: str,
 ) -> None:
@@ -260,21 +263,44 @@ def test_composed_pre_marker_failure_restores_complete_authority_vector(
     assert operations.authority["clocks"] == 1
 
 
-def test_composed_source_apply_before_p1_recovery_still_restores_complete_authority(
+def test_p1_retry_delegates_source_truth_to_idempotent_controller(
     tmp_path: Path,
 ) -> None:
     operations = ComposedRollbackOperations(tmp_path / "transaction")
     before = operations.vector()
-    recovered = operations.source_apply()
-    operations.recovered_source = {
-        "status": "SOURCE_APPLIED_RECOVERED", "snapshot": recovered["snapshot"],
-    }
+    operations.source_apply()
     state = journal(tmp_path / "journal")
     state.complete("P0_VERIFIED", lastReceipt={"status": "VERIFIED"})
     with pytest.raises(MODULE.S12Error, match="injected failure"):
         MODULE.run_apply(operations, state, fail_after="P2_CORE_PREPARED")
-    assert state.state["phaseReceipts"]["P1_SOURCE_APPLIED"]["status"] == "SOURCE_APPLIED_RECOVERED"
+    assert state.state["phaseReceipts"]["P1_SOURCE_APPLIED"]["status"] == "SOURCE_APPLIED"
     assert operations.vector() == before
+
+
+def test_p1_journal_failure_stops_without_rollback_and_retries_source_apply(
+    tmp_path: Path,
+) -> None:
+    operations = FakeOperations()
+    state = journal(tmp_path)
+    state.complete("P0_VERIFIED", lastReceipt={"status": "VERIFIED"})
+    write = state.write
+
+    def fail_p1_write():
+        if state.state["phase"] == "P1_SOURCE_APPLIED":
+            raise OSError("injected P1 journal failure")
+        write()
+
+    state.write = fail_p1_write
+    with pytest.raises(OSError, match="injected P1 journal failure"):
+        MODULE.run_apply(operations, state)
+    assert operations.calls == ["source_apply"]
+    assert json.loads(state.path.read_text())["completedPhases"] == ["P0_VERIFIED"]
+
+    restarted = MODULE.Journal(tmp_path, state.identity)
+    restarted.open()
+    assert MODULE.run_apply(operations, restarted)["status"] == "ACCEPTED"
+    assert operations.calls.count("source_apply") == 2
+    assert restarted.state["phaseReceipts"]["P1_SOURCE_APPLIED"]["status"] == "SOURCE_APPLIED"
 
 
 def test_failure_immediately_before_core_commit_rolls_back(tmp_path: Path) -> None:
@@ -288,35 +314,75 @@ def test_failure_immediately_before_core_commit_rolls_back(tmp_path: Path) -> No
     assert operations.calls[-1] == "rollback:/source/snapshot"
 
 
-def test_source_crash_recovery_binds_pointer_snapshot_and_prior_head(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    baseline = "b" * 40
-    candidate = "a" * 40
-    snapshots = tmp_path / "source-snapshots"
-    snapshot = snapshots / "source-accepted"
-    snapshot.mkdir(parents=True)
-    (snapshot / "state.json").write_text(json.dumps({
-        "candidate": candidate, "phase": "accepted", "priorHead": baseline,
-    }))
-    pointer = snapshots / "current-source.json"
-    pointer.write_text(json.dumps({
-        "schemaVersion": 1, "candidate": candidate, "snapshot": str(snapshot),
-    }))
-    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshots)
-    monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer)
-    operations = MODULE.ProductionOperations(SimpleNamespace(
-        candidate=candidate, production_baseline=baseline,
-    ), tmp_path / "transaction", tmp_path / "candidate")
-    monkeypatch.setattr(operations, "git", lambda *_args: candidate)
-    assert operations.recover_source_apply() == {
-        "status": "SOURCE_APPLIED_RECOVERED", "snapshot": str(snapshot),
-    }
-    (snapshot / "state.json").write_text(json.dumps({
-        "candidate": candidate, "phase": "accepted", "priorHead": "c" * 40,
-    }))
-    with pytest.raises(MODULE.S12Error, match="conflicts with transaction authority"):
-        operations.recover_source_apply()
+def test_failure_without_source_snapshot_never_claims_rollback(tmp_path: Path) -> None:
+    operations = FakeOperations()
+    operations.fail = "verify"
+    state = journal(tmp_path)
+
+    with pytest.raises(MODULE.S12Error, match="could not restore authority"):
+        MODULE.run_apply(operations, state)
+
+    assert state.state["status"] == "PRE_CUTOVER_RECONCILIATION_REQUIRED"
+    assert state.state["rollbackFailure"] == "S12Error"
+    assert operations.calls == ["verify", "rollback:None"]
+
+
+def test_safe_apply_failure_receipt_is_confirmed_by_idempotent_rollback(tmp_path: Path) -> None:
+    class SafelyRestored(FakeOperations):
+        def source_apply(self):
+            self.calls.append("source_apply")
+            return {"status": "SOURCE_ROLLED_BACK", "snapshot": "/source/snapshot"}
+
+    operations = SafelyRestored()
+    state = journal(tmp_path)
+
+    with pytest.raises(MODULE.S12Error, match="safely restored"):
+        MODULE.run_apply(operations, state)
+
+    assert state.state["status"] == "ROLLED_BACK"
+    assert operations.calls == ["verify", "source_apply", "rollback:/source/snapshot"]
+
+
+def test_restore_failure_stays_reconciliation_required(tmp_path: Path) -> None:
+    operations = FakeOperations()
+    operations.fail = "rollback"
+    state = journal(tmp_path)
+
+    with pytest.raises(MODULE.S12Error, match="could not restore authority"):
+        MODULE.run_apply(operations, state, fail_after="P2_CORE_PREPARED")
+
+    assert state.state["status"] == "PRE_CUTOVER_RECONCILIATION_REQUIRED"
+    assert state.state["rollbackFailure"] == "S12Error"
+
+
+def test_reconciliation_intent_is_durable_before_controller_rollback(tmp_path: Path) -> None:
+    state = journal(tmp_path)
+
+    class ObserveRollback(FakeOperations):
+        def rollback_pre_cutover(self, source_snapshot):
+            stored = json.loads(state.path.read_text())
+            assert stored["status"] == "PRE_CUTOVER_RECONCILIATION_REQUIRED"
+            return super().rollback_pre_cutover(source_snapshot)
+
+    operations = ObserveRollback()
+    with pytest.raises(MODULE.S12Error, match="injected failure"):
+        MODULE.run_apply(operations, state, fail_after="P2_CORE_PREPARED")
+    assert state.state["status"] == "ROLLED_BACK"
+
+
+def test_restart_from_pre_cutover_reconciliation_only_continues_rollback(tmp_path: Path) -> None:
+    operations = FakeOperations()
+    state = journal(tmp_path)
+    state.state.update({
+        "status": "PRE_CUTOVER_RECONCILIATION_REQUIRED",
+        "sourceSnapshot": "/source/snapshot",
+    })
+    state.write()
+
+    result = MODULE.run_apply(operations, state)
+
+    assert result["status"] == "ROLLED_BACK"
+    assert operations.calls == ["rollback:/source/snapshot"]
 
 
 @pytest.mark.parametrize("phase", MODULE.PHASES[5:10])
@@ -618,79 +684,38 @@ def test_candidate_execution_closure_is_exact_read_only_and_import_complete(
     assert not retained.exists()
 
 
-def test_p0_routes_candidate_code_against_old_or_conflicting_production_state(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(("mode", "snapshot"), (
+    ("verify", None), ("apply", None), ("rollback", "/source/snapshot"),
+))
+def test_source_entry_invokes_candidate_controller_directly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str, snapshot: str | None,
 ) -> None:
-    repository = SCRIPT.parents[1]
-    archived_candidate = subprocess.run(
-        ["git", "-C", str(repository), "rev-parse", "HEAD"], check=True,
-        text=True, stdout=subprocess.PIPE,
-    ).stdout.strip()
-    production = tmp_path / "old-production"
-    transaction = tmp_path / "verify"
-    scratch_root = tmp_path / "scratch"
-    production.mkdir()
-    transaction.mkdir()
-    tampered = production / "scripts/core-cutover.mjs"
-    tampered.parent.mkdir(parents=True)
-    tampered.write_text("candidate-b-live\n")
-    monkeypatch.setattr(MODULE, "PRODUCTION_STATE_ROOT", repository)
+    candidate = "a" * 40
+    closure = tmp_path / "candidate"
+    controller = closure / "scripts/deploy-hermes-runtime-release.py"
+    controller.parent.mkdir(parents=True)
+    controller.touch()
+    observed = []
+    monkeypatch.setattr(MODULE.subprocess, "run", lambda command, **kwargs: (
+        observed.append((command, kwargs))
+        or SimpleNamespace(
+            stdout=json.dumps({"status": f"SOURCE_{mode.upper()}", "snapshot": snapshot}),
+            stderr="", returncode=0,
+        )
+    ))
+    operations = MODULE.ProductionOperations(
+        SimpleNamespace(candidate=candidate), tmp_path / "transaction", closure,
+    )
 
-    class RoutingOperations(MODULE.ProductionOperations):
-        def __init__(self, candidate: Path):
-            super().__init__(SimpleNamespace(
-                core_db=tmp_path / "absent-core.sqlite3",
-                production_baseline="baseline", visible_binding=tmp_path / "binding.json",
-                candidate="a" * 40, committed_at="2026-08-12T00:00:00Z",
-                visible_binding_sha256=BINDING_DIGEST,
-                legacy_db=tmp_path / "legacy.sqlite3", state_dir=tmp_path / "state",
-            ), transaction, candidate)
-            self.commands: list[list[str]] = []
-            self.scratch_count = 0
+    operations.source(mode, snapshot)
 
-        def assert_candidate_binding(self): pass
-
-        @contextmanager
-        def runtime_scratch(self):
-            self.scratch_count += 1
-            scratch = scratch_root / str(self.scratch_count)
-            scratch.mkdir(parents=True)
-            try:
-                yield scratch
-            finally:
-                shutil.rmtree(scratch)
-
-        def run(self, command, **_kwargs):
-            self.commands.append(command)
-            if "reconcile-core-managed-wake.py" in command[1]:
-                return {"status": "verified", "active": False, "present": False}
-            return {"status": "SOURCE_VERIFY_OK" if command[0] == "bash" else "CUTOVER_VERIFY_OK"}
-
-        def runtime_run(self, command, **_kwargs):
-            self.commands.append(command)
-            output = Path(command[command.index("--output") + 1])
-            output.write_text('{"status":"REHEARSED","cutoverBlockers":[]}\n')
-            return {"status": "REHEARSED", "cutoverBlockers": []}
-
-    with MODULE.candidate_execution_closure(archived_candidate) as candidate:
-        monkeypatch.setattr(MODULE, "PRODUCTION_STATE_ROOT", production)
-        assert not (production / "scripts/rehearse-core-schedule-migration.mjs").exists()
-        assert not (production / "scripts/reconcile-core-managed-wake.py").exists()
-        operations = RoutingOperations(candidate)
-        receipt = operations.verify()
-        assert receipt["status"] == "VERIFIED"
-        invoked = "\n".join(" ".join(command) for command in operations.commands)
-        assert str(candidate / "scripts/bootstrap-hermes-release.sh") in invoked
-        assert str(candidate / "scripts/reconcile-core-managed-wake.py") in invoked
-        assert str(candidate / "scripts/rehearse-core-schedule-migration.mjs") in invoked
-        assert str(candidate / "scripts/core-cutover.mjs") in invoked
-        assert str(candidate / MODULE.MANAGED_WAKE_MANIFEST_PATH) in invoked
-        assert str(candidate / MODULE.MIGRATION_MANIFEST_PATH) in invoked
-        assert str(candidate / MODULE.SCHEDULE_MANIFEST_PATH) in invoked
-        assert str(operations.binding_path) in invoked
-        assert str(operations.args.visible_binding) not in invoked
-        assert str(tampered) not in invoked
-        assert all("--apply" not in command for command in operations.commands)
+    expected = [
+        sys.executable, str(controller), "--candidate", candidate, "--mode", f"source-{mode}",
+    ]
+    if snapshot:
+        expected.extend(("--snapshot", snapshot))
+    assert observed[0][0] == expected
+    assert observed[0][1]["env"] == {"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"}
 
 
 def test_s12_git_observation_disables_optional_locks(
@@ -716,7 +741,6 @@ def test_s12_verify_preserves_the_complete_persistent_state_vector(
         "git/HEAD": b"baseline\n",
         "git/worktree-porcelain": b"",
         "git/origin-main": b"candidate\n",
-        "git/source-candidate-refs": b"",
         "release/current-source.json": b'{"candidate":"baseline"}\n',
         "release/source-snapshots/inventory": b"accepted\n",
         "release/s12-transactions/inventory": b"empty\n",

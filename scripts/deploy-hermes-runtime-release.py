@@ -89,7 +89,6 @@ SOURCE_POINTER = SOURCE_SNAPSHOT_ROOT / "current-source.json"
 SOURCE_ARTIFACT_ROOT = ARTIFACT_ROOT / "source-artifacts"
 SOURCE_STAGE_ROOT = ARTIFACT_ROOT / "source-stages"
 CORE_DB = REPO / ".ran_agent_state/core/core-state.sqlite3"
-SOURCE_REF_ROOT = "refs/ran-agent/source-candidates"
 SOURCE_HERMES_BIN = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes")
 SOURCE_RUNTIME_PYTHON = SOURCE_HERMES_BIN.parents[1] / "python/bin/python3.12"
 SOURCE_NODE_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/node")
@@ -133,6 +132,10 @@ SOURCE_ADVANCE_FORBIDDEN_PREFIXES = (
 
 
 class ReleaseError(RuntimeError):
+    pass
+
+
+class SourceReconciliationRequired(ReleaseError):
     pass
 
 
@@ -1467,6 +1470,7 @@ def current_source_pointer() -> dict[str, Any] | None:
         or snapshot.is_symlink()
         or not snapshot.is_dir()
         or controller.parent != SOURCE_ARTIFACT_ROOT
+        or controller != SOURCE_ARTIFACT_ROOT / f"deploy-hermes-source-{candidate}.py"
         or controller.is_symlink()
         or not controller.is_file()
     ):
@@ -1478,8 +1482,8 @@ def current_source_pointer() -> dict[str, Any] | None:
         state = json.loads(state_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise ReleaseError("current source snapshot is invalid") from exc
-    if state.get("candidate") != candidate or state.get("phase") != "accepted":
-        raise ReleaseError("current source snapshot is not accepted")
+    if state.get("candidate") != candidate or state.get("controller") != str(controller):
+        raise ReleaseError("current source snapshot binding is invalid")
     return pointer
 
 
@@ -1626,12 +1630,8 @@ def validate_source_advance_paths(
         raise ReleaseError("source advance contains state, data, archive, vault, migration, or env changes")
 
 
-def validate_source_candidate(
-    candidate: str, *, allow_current: bool = False, require_persistent_ref: bool = True
-) -> None:
+def validate_source_candidate(candidate: str, *, allow_current: bool = False) -> None:
     validate_candidate_object(REPO, candidate)
-    if require_persistent_ref:
-        validate_persistent_candidate_ref(REPO, candidate, SOURCE_REF_ROOT)
     pointer = current_source_pointer()
     if pointer is not None:
         prior = pointer["candidate"]
@@ -1668,7 +1668,7 @@ def validate_source_candidate(
         raise ReleaseError("source convergence includes a state or data migration")
 
 
-def require_source_baseline() -> dict[str, Any]:
+def require_source_baseline(candidate: str | None = None, *, require_capacity: bool = True) -> dict[str, Any]:
     pointer = current_source_pointer()
     prior_head = pointer["candidate"] if pointer is not None else SOURCE_PRODUCTION_BASE
     if git(REPO, "rev-parse", "HEAD").stdout.strip() != prior_head:
@@ -1693,7 +1693,16 @@ def require_source_baseline() -> dict[str, Any]:
                 raise ReleaseError(f"accepted overlay drop-in changed: {path}")
         elif path.exists() or path.is_symlink():
             raise ReleaseError(f"retired overlay drop-in returned: {path}")
-    if shutil.disk_usage(REPO).free < 2 * 1024 * 1024 * 1024:
+    dependencies_changed = candidate is not None and any(
+        candidate_blob(REPO, prior_head, path) != candidate_blob(REPO, candidate, path)
+        for path in ("package.json", "package-lock.json")
+    )
+    live_modules = REPO / "node_modules"
+    if candidate is not None and not dependencies_changed and (
+        live_modules.is_symlink() or not live_modules.is_dir()
+    ):
+        raise ReleaseError("live node_modules is unavailable for dependency reuse")
+    if require_capacity and dependencies_changed and shutil.disk_usage(REPO).free < 2 * 1024 * 1024 * 1024:
         raise ReleaseError("less than 2 GiB free for source convergence")
     return {
         "kind": "converged" if pointer is not None else "initial",
@@ -1701,16 +1710,8 @@ def require_source_baseline() -> dict[str, Any]:
         "priorProfile": SOURCE_PROFILE if pointer is not None else "ran-assistant-lite",
         "priorPointer": pointer,
         "overlayState": overlay_state,
+        "dependenciesChanged": dependencies_changed,
     }
-
-
-def refuse_unfinished_source_transaction() -> None:
-    if not SOURCE_SNAPSHOT_ROOT.exists():
-        return
-    for state_path in SOURCE_SNAPSHOT_ROOT.glob("*/state.json"):
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        if state.get("phase") not in {"accepted", "rolled-back"}:
-            raise ReleaseError(f"unfinished source transaction requires rollback: {state_path.parent}")
 
 
 def source_snapshot_paths() -> tuple[Path, ...]:
@@ -1828,8 +1829,15 @@ def persist_source_authority(candidate: str) -> Path:
             raise ReleaseError("persisted source controller differs")
     else:
         atomic_write(destination, payload, mode=0o700, uid=0, gid=0)
-    git_as_checkout_owner("update-ref", f"{SOURCE_REF_ROOT}/{candidate}", candidate)
     return destination
+
+
+def publish_source_pointer(pointer: dict[str, Any] | None) -> None:
+    if pointer is None:
+        SOURCE_POINTER.unlink(missing_ok=True)
+        fsync_directory(SOURCE_POINTER.parent)
+    else:
+        write_json(SOURCE_POINTER, pointer)
 
 
 def stop_source_services() -> None:
@@ -1884,20 +1892,21 @@ def activate_source_profile(candidate: str) -> None:
         )
 
 
-def activate_source_candidate(candidate: str, stage: Path, snapshot: Path, *, install_profile: bool) -> None:
+def activate_source_candidate(candidate: str, stage: Path | None, snapshot: Path, *, install_profile: bool) -> None:
     git_as_checkout_owner("checkout", "--detach", candidate)
-    live_modules = REPO / "node_modules"
-    rollback_modules = snapshot / "node_modules.rollback"
-    if live_modules.is_symlink() or (live_modules.exists() and not live_modules.is_dir()):
-        raise ReleaseError("live node_modules has an invalid type")
-    if live_modules.exists():
-        shutil.move(live_modules, rollback_modules)
-    shutil.move(stage / "node_modules", live_modules)
-    account = pwd.getpwnam("ubuntu")
-    for root, directories, files in os.walk(live_modules):
-        os.chown(root, account.pw_uid, account.pw_gid)
-        for name in directories + files:
-            os.chown(Path(root, name), account.pw_uid, account.pw_gid)
+    if stage is not None:
+        live_modules = REPO / "node_modules"
+        rollback_modules = snapshot / "node_modules.rollback"
+        if live_modules.is_symlink() or (live_modules.exists() and not live_modules.is_dir()):
+            raise ReleaseError("live node_modules has an invalid type")
+        if live_modules.exists():
+            shutil.move(live_modules, rollback_modules)
+        shutil.move(stage / "node_modules", live_modules)
+        account = pwd.getpwnam("ubuntu")
+        for root, directories, files in os.walk(live_modules):
+            os.chown(root, account.pw_uid, account.pw_gid)
+            for name in directories + files:
+                os.chown(Path(root, name), account.pw_uid, account.pw_gid)
     for env_file in ENV_FILES:
         value = env_file.stat()
         atomic_write_existing(
@@ -1958,7 +1967,7 @@ def source_memory_probe() -> None:
         raise ReleaseError("personal-memory source status is not observable")
 
 
-def validate_source_acceptance(candidate: str) -> None:
+def validate_source_acceptance(candidate: str, *, external_probes: bool = True) -> None:
     if git(REPO, "rev-parse", "HEAD").stdout.strip() != candidate or git(REPO, "status", "--porcelain").stdout:
         raise ReleaseError("source checkout did not converge cleanly")
     if LITE_UNIT.read_bytes() != candidate_blob(REPO, candidate, UNIT_SOURCE_PATH):
@@ -1990,8 +1999,9 @@ def validate_source_acceptance(candidate: str) -> None:
     wait_port(8787)
     wait_port(8791)
     wait_for_gateway(8642, environment, SOURCE_PROFILE)
-    source_memory_probe()
-    source_real_provider_probe()
+    if external_probes:
+        source_memory_probe()
+        source_real_provider_probe()
 
 
 def restore_source_snapshot(snapshot: Path, state: dict[str, Any]) -> None:
@@ -2086,30 +2096,69 @@ def assert_source_rollback_boundary(state: dict[str, Any]) -> None:
         raise ReleaseError("source rollback would cross the committed Core authority boundary")
 
 
-def source_rollback(snapshot: Path, candidate: str) -> None:
+def source_rollback(snapshot: Path, candidate: str) -> dict[str, Any]:
     state_path = snapshot / "state.json"
     if snapshot.parent != SOURCE_SNAPSHOT_ROOT or not state_path.is_file() or state_path.is_symlink():
         raise ReleaseError("source rollback snapshot is invalid")
     state = json.loads(state_path.read_text(encoding="utf-8"))
-    if state.get("candidate") != candidate or state.get("phase") != "accepted":
-        raise ReleaseError("source rollback snapshot is not the accepted candidate")
-    if not SOURCE_POINTER.is_file() or json.loads(SOURCE_POINTER.read_text(encoding="utf-8")).get("snapshot") != str(snapshot):
-        raise ReleaseError("source rollback snapshot is not current")
+    if state.get("candidate") != candidate:
+        raise ReleaseError("source rollback snapshot candidate is invalid")
+    prior_pointer = state.get("priorPointer")
+    if prior_pointer is not None and not isinstance(prior_pointer, dict):
+        raise ReleaseError("source rollback prior pointer is invalid")
+    pointer = current_source_pointer()
+    if pointer == prior_pointer:
+        require_source_baseline(require_capacity=False)
+        return {"status": "SOURCE_ROLLED_BACK", "candidate": candidate, "snapshot": str(snapshot)}
+    if pointer is None or pointer.get("candidate") != candidate or pointer.get("snapshot") != str(snapshot):
+        raise SourceReconciliationRequired("source rollback pointer authority is neither candidate nor prior")
     assert_source_rollback_boundary(state)
     restore_source_snapshot(snapshot, state)
     update_phase(snapshot, state, "rolled-back")
-    if state.get("priorPointer") is None:
-        SOURCE_POINTER.unlink()
-    else:
-        write_json(SOURCE_POINTER, state["priorPointer"])
-    fsync_directory(SOURCE_SNAPSHOT_ROOT)
+    publish_source_pointer(prior_pointer)
+    return {"status": "SOURCE_ROLLED_BACK", "candidate": candidate, "snapshot": str(snapshot)}
 
 
-def source_apply(candidate: str) -> Path:
-    baseline = require_source_baseline()
-    refuse_unfinished_source_transaction()
+def source_apply(candidate: str) -> dict[str, Any]:
+    pointer = current_source_pointer()
+    if pointer is not None and pointer["candidate"] == candidate:
+        validate_source_acceptance(candidate, external_probes=False)
+        return {"status": "SOURCE_APPLIED", "candidate": candidate, "snapshot": pointer["snapshot"]}
+    snapshots: list[tuple[Path, dict[str, Any]]] = []
+    if SOURCE_SNAPSHOT_ROOT.exists():
+        for state_path in SOURCE_SNAPSHOT_ROOT.glob("*/state.json"):
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (state.get("candidate") == candidate and state.get("priorPointer") == pointer
+                    and state.get("phase") != "rolled-back"):
+                snapshots.append((state_path.parent, state))
+    if len(snapshots) > 1:
+        raise SourceReconciliationRequired("interrupted source snapshot evidence is ambiguous")
+    if snapshots:
+        interrupted_snapshot, interrupted_state = snapshots[0]
+        try:
+            restore_source_snapshot(interrupted_snapshot, interrupted_state)
+            update_phase(interrupted_snapshot, interrupted_state, "rolled-back")
+            if current_source_pointer() != pointer:
+                raise ReleaseError("prior source pointer changed during interrupted restore")
+            require_source_baseline(require_capacity=False)
+        except BaseException as restore_error:
+            raise SourceReconciliationRequired(
+                f"interrupted source restore failed:{type(restore_error).__name__}"
+            ) from restore_error
+    try:
+        baseline = require_source_baseline(candidate)
+    except ReleaseError as baseline_error:
+        live_head = git(REPO, "rev-parse", "HEAD").stdout.strip()
+        if live_head != candidate:
+            if pointer is not None and live_head == pointer["candidate"]:
+                raise
+            raise SourceReconciliationRequired("live source does not match candidate or prior pointer") from baseline_error
+        raise SourceReconciliationRequired("interrupted source snapshot evidence is absent") from baseline_error
     controller = persist_source_authority(candidate)
-    stage = stage_source_candidate(candidate)
+    stage = stage_source_candidate(candidate) if baseline["dependenciesChanged"] else None
     snapshot, state = create_source_snapshot(candidate, baseline)
     try:
         stop_source_services()
@@ -2123,42 +2172,72 @@ def source_apply(candidate: str) -> Path:
         validate_source_acceptance(candidate)
         state["controller"] = str(controller)
         update_phase(snapshot, state, "accepted")
-        write_json(SOURCE_POINTER, {"schemaVersion": 1, "candidate": candidate, "snapshot": str(snapshot), "controller": str(controller)})
-        return snapshot
-    except BaseException:
-        with contextlib.suppress(Exception):
+        receipt = {"status": "SOURCE_APPLIED", "candidate": candidate, "snapshot": str(snapshot)}
+        publish_source_pointer({
+            "schemaVersion": 1, "candidate": candidate,
+            "snapshot": str(snapshot), "controller": str(controller),
+        })
+        return receipt
+    except BaseException as apply_error:
+        try:
+            current = current_source_pointer()
+            if current is not None and current.get("candidate") == candidate and current.get("snapshot") == str(snapshot):
+                validate_source_acceptance(candidate, external_probes=False)
+                return {"status": "SOURCE_APPLIED", "candidate": candidate, "snapshot": str(snapshot)}
+            if current != baseline["priorPointer"]:
+                raise ReleaseError("source pointer changed during apply failure")
             restore_source_snapshot(snapshot, state)
             update_phase(snapshot, state, "rolled-back")
-        raise
+            if current_source_pointer() != baseline["priorPointer"]:
+                raise ReleaseError("prior source pointer changed during apply rollback")
+        except BaseException as rollback_error:
+            raise SourceReconciliationRequired(
+                f"source apply failed:{type(apply_error).__name__}; restore failed:{type(rollback_error).__name__}"
+            ) from rollback_error
+        return {
+            "status": "SOURCE_ROLLED_BACK", "candidate": candidate,
+            "snapshot": str(snapshot),
+        }
     finally:
-        shutil.rmtree(stage, ignore_errors=True)
+        if stage is not None:
+            shutil.rmtree(stage, ignore_errors=True)
 
 
 def source_main(args: argparse.Namespace) -> int:
     if args.mode == "source-verify":
         os.environ["GIT_OPTIONAL_LOCKS"] = "0"
         with release_lock(create=False):
-            validate_source_candidate(args.candidate, require_persistent_ref=False)
-            require_source_baseline()
-            refuse_unfinished_source_transaction()
+            validate_source_candidate(args.candidate)
+            require_source_baseline(args.candidate)
         print(json.dumps({"status": "SOURCE_VERIFY_OK", "candidate": args.candidate,
                           "freeBytes": shutil.disk_usage(REPO).free}, sort_keys=True))
         return 0
-    validate_source_candidate(args.candidate, allow_current=args.mode == "source-rollback")
+    validate_source_candidate(
+        args.candidate, allow_current=args.mode in {"source-apply", "source-rollback"},
+    )
     if args.mode == "source-rollback":
         if args.snapshot is None:
             raise ReleaseError("source rollback requires --snapshot")
-        source_rollback(args.snapshot.resolve(), args.candidate)
-        print(json.dumps({"status": "SOURCE_ROLLED_BACK", "candidate": args.candidate, "snapshot": str(args.snapshot.resolve())}, sort_keys=True))
+        try:
+            receipt = source_rollback(args.snapshot.resolve(), args.candidate)
+        except SourceReconciliationRequired as error:
+            print(json.dumps({"status": "SOURCE_RECONCILIATION_REQUIRED", "candidate": args.candidate,
+                              "failure": str(error)}, sort_keys=True))
+            return 1
+        print(json.dumps(receipt, sort_keys=True))
         return 0
-    require_source_baseline()
-    refuse_unfinished_source_transaction()
     if args.mode == "source-dry-run":
+        require_source_baseline(args.candidate)
         print(json.dumps({"status": "SOURCE_DRY_RUN_OK", "candidate": args.candidate, "freeBytes": shutil.disk_usage(REPO).free}, sort_keys=True))
         return 0
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-    snapshot = source_apply(args.candidate)
-    print(json.dumps({"status": "SOURCE_APPLIED", "candidate": args.candidate, "snapshot": str(snapshot)}, sort_keys=True))
+    try:
+        receipt = source_apply(args.candidate)
+    except SourceReconciliationRequired as error:
+        print(json.dumps({"status": "SOURCE_RECONCILIATION_REQUIRED", "candidate": args.candidate,
+                          "failure": str(error)}, sort_keys=True))
+        return 1
+    print(json.dumps(receipt, sort_keys=True))
     return 0
 
 

@@ -1,6 +1,6 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-12)
+Status: CURRENT (2026-08-13)
 
 This is the public server runbook for the real `/opt/ran_agent` runtime. It is
 an operator index, not a deployment journal. Prefer repo-managed scripts over
@@ -78,9 +78,12 @@ rm -f "$BOOTSTRAP"
 ```
 
 This source transaction preserves the accepted v0.20 runtime, personal data
-and direct Ombre service. It snapshots the prior source pointer, checkout
-dependencies, two env files and Hermes unit/profile; it does not copy databases
-or durable delivery state. A rollback restores the exact prior source pointer.
+and direct Ombre service. It snapshots the prior source pointer, two env files
+and Hermes unit/profile; it does not copy databases or durable delivery state.
+When `package.json` and `package-lock.json` Git blobs are unchanged it reuses
+the existing real `node_modules` directory in place without npm, staging,
+capacity gate, move or chown. Changed dependency blobs retain the existing
+staged npm/swap/rollback path. A rollback restores the exact prior source pointer.
 Post-S1 advances activate the canonical companion source
 `hermes/profile/config.companion.yaml`; legacy `config.yaml` is never an active
 companion source. An unchanged companion passes ordinary advances. Any changed
@@ -98,21 +101,23 @@ entrypoint. Do not invoke source apply/rollback, `core-cutover.mjs`, managed-wak
 reconciliation, `core-wake.mjs`, or the acceptance subordinate as operator
 steps. VERIFY is read-only. APPLY additionally requires the owner's explicit
 identity and authorization reference; a VERIFY result does not authorize it.
-VERIFY routes through the candidate-extracted bootstrap `--verify` and
-controller `source-verify` modes. It may use removable `/tmp` extraction and
-runtime scratch, but it does not create a source candidate ref, release lock,
-source pointer/snapshot, S12 journal, Core business state, wake or effect. It
+VERIFY invokes the candidate source controller directly in `source-verify`
+mode. It may use removable `/tmp` extraction and runtime scratch, but it does
+not create a source candidate ref, release lock, source pointer/snapshot, S12
+journal, Core business state, wake or effect. It
 observes the existing release lock without creating one. A repeated accepted
 APPLY reads and validates `core-cutover:v1`, worker/writer, managed wake and the
 terminal acceptance receipt without restarting services or producing an
-effect. The controller materializes the exact Git candidate once into a private
-read-only `/tmp` execution closure and uses that same closure for every S12
-subordinate, manifest and relative Core import through P0-P10. `/opt/ran_agent`
-remains the production state root, never fallback S12 control-code authority;
-the closure is removed when the invocation ends.
+effect. The controller materializes one exact immutable Git candidate execution
+closure, then invokes its `deploy-hermes-runtime-release.py` directly with the
+absolute Python interpreter and child environment limited to the bounded
+system `PATH`. It uses that same closure for every S12 subordinate, manifest
+and relative Core import through P0-P10. `/opt/ran_agent` remains the production
+state root, never fallback S12 control-code authority; the closure is removed
+when the invocation ends.
 
 Configuration prerequisites are the project virtualenv, the exact archived
-candidate, its candidate-extracted S12 controller and bootstrap, the fresh
+candidate, its candidate-extracted S12 controller, the fresh
 production baseline observed by R3-B, one whole-second cutover instant, and an
 owner-approved root-owned mode `0600` visible-binding record. Keep the same
 values for VERIFY and any later separately authorized APPLY:
@@ -139,13 +144,11 @@ S12_COMMITTED_AT=<whole-second-UTC-instant>
 S12_BINDING=<owner-approved-root-owned-0600-visible-binding.json>
 S12_BINDING_SHA256=<owner-approved-sha256:64-lowercase-hex-digest>
 S12_CONTROLLER="$(mktemp /tmp/ran-agent-s12-controller.XXXXXX)"
-S12_BOOTSTRAP="$(mktemp /tmp/ran-agent-s12-bootstrap.XXXXXX)"
 git show "$S12_CANDIDATE:scripts/s12-cutover.py" > "$S12_CONTROLLER"
-git show "$S12_CANDIDATE:scripts/bootstrap-hermes-release.sh" > "$S12_BOOTSTRAP"
-chmod 700 "$S12_CONTROLLER" "$S12_BOOTSTRAP"
+chmod 700 "$S12_CONTROLLER"
 sudo "$S12_CONTROLLER" \
   --mode verify --candidate "$S12_CANDIDATE" \
-  --production-baseline "$S12_BASELINE" --bootstrap "$S12_BOOTSTRAP" \
+  --production-baseline "$S12_BASELINE" \
   --legacy-db /opt/ran_agent/data/personal_agent.db \
   --state-dir /opt/ran_agent/.ran_agent_state \
   --core-db /opt/ran_agent/.ran_agent_state/core/core-state.sqlite3 \
@@ -165,8 +168,13 @@ with `--mode apply`, `--owner-id <owner-id>` and
 resumes its durable transaction; changing candidate, owner, authorization,
 baseline, cutover instant, expected binding digest or Core DB fails closed. A committed
 `core-cutover:v1` marker forces forward recovery even when the root journal is
-older. Remove only the two `/tmp` controller files after the governed
-transaction no longer needs them.
+older. Remove only the operator-extracted `/tmp` S12 controller after the
+governed transaction no longer needs it.
+
+The standalone `bootstrap-hermes-release.sh` source-release entrypoint remains
+supported by the separate source transaction runbook above; S12 does not route
+through it. Historical production source-candidate refs are inert residue, not
+S12 admission or retry prerequisites. Their cleanup is not authorized here.
 
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy

@@ -67,17 +67,19 @@ def test_source_env_patch_removes_split_and_retired_memory_keys() -> None:
     )
 
 
-def test_converged_source_pointer_is_bound_to_accepted_snapshot_and_controller(
+def test_current_source_pointer_is_the_sole_acceptance_authority(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     snapshot_root = tmp_path / "source-snapshots"
     artifact_root = tmp_path / "source-artifacts"
     snapshot = snapshot_root / "source-old"
-    controller = artifact_root / "controller.py"
+    controller = artifact_root / f"deploy-hermes-source-{'a' * 40}.py"
     snapshot.mkdir(parents=True)
     artifact_root.mkdir()
     candidate = "a" * 40
-    (snapshot / "state.json").write_text(json.dumps({"candidate": candidate, "phase": "accepted"}))
+    (snapshot / "state.json").write_text(json.dumps({
+        "candidate": candidate, "phase": "accepted", "controller": str(controller),
+    }))
     controller.write_text("controller")
     pointer_path = snapshot_root / "current-source.json"
     pointer = {
@@ -92,6 +94,8 @@ def test_converged_source_pointer_is_bound_to_accepted_snapshot_and_controller(
     monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer_path)
 
     assert MODULE.current_source_pointer() == pointer
+    pointer_path.unlink()
+    assert MODULE.current_source_pointer() is None
 
 
 def test_source_advance_rejects_private_or_migrating_paths() -> None:
@@ -214,7 +218,11 @@ def test_governed_companion_migration_passes_source_dry_run_validation(
         "node_bridge/src/personalMemoryMcpServer.mjs": (root / "node_bridge/src/personalMemoryMcpServer.mjs").read_bytes(),
     }
     monkeypatch.setattr(MODULE, "validate_candidate_object", lambda *_args: None)
-    monkeypatch.setattr(MODULE, "validate_persistent_candidate_ref", lambda *_args: None)
+    monkeypatch.setattr(
+        MODULE,
+        "validate_persistent_candidate_ref",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("persistent ref was consulted")),
+    )
     monkeypatch.setattr(MODULE, "current_source_pointer", lambda: {"candidate": prior})
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     monkeypatch.setattr(
@@ -231,8 +239,7 @@ def test_governed_companion_migration_passes_source_dry_run_validation(
         return subprocess.CompletedProcess(args, 0, "", "")
 
     monkeypatch.setattr(MODULE, "git", fake_git)
-    monkeypatch.setattr(MODULE, "require_source_baseline", lambda: {"kind": "converged"})
-    monkeypatch.setattr(MODULE, "refuse_unfinished_source_transaction", lambda: None)
+    monkeypatch.setattr(MODULE, "require_source_baseline", lambda _candidate: {"kind": "converged"})
     monkeypatch.setattr(
         MODULE.shutil,
         "disk_usage",
@@ -313,6 +320,10 @@ def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
     monkeypatch.setattr(MODULE, "SOURCE_PROFILE_DIR", profile_dir)
     monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshot_root)
     monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer)
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: {
+        "schemaVersion": 1, "candidate": candidate, "snapshot": str(snapshot),
+        "controller": str(tmp_path / "controller.py"),
+    })
     monkeypatch.setattr(MODULE, "SOURCE_OVERLAY_TRANSACTION", overlay)
     monkeypatch.setattr(MODULE, "SOURCE_HERMES_OVERLAY_DROPIN", tmp_path / "missing-hermes-dropin")
     monkeypatch.setattr(MODULE, "SOURCE_PYTHON_OVERLAY_DROPIN", tmp_path / "missing-python-dropin")
@@ -338,35 +349,327 @@ def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
     assert json.loads(pointer.read_text()) == prior_pointer
 
 
-def test_converged_source_rollback_restores_prior_pointer(
+def test_source_apply_retry_uses_committed_pointer_without_mutation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     candidate = "b" * 40
-    prior = {
-        "schemaVersion": 1,
-        "candidate": "a" * 40,
-        "snapshot": str(tmp_path / "prior"),
-        "controller": str(tmp_path / "prior-controller.py"),
+    snapshot = tmp_path / "source-accepted"
+    pointer = {
+        "schemaVersion": 1, "candidate": candidate, "snapshot": str(snapshot),
+        "controller": str(tmp_path / "controller.py"),
     }
-    snapshot = tmp_path / "source-new"
+    unit = tmp_path / "ran-agent-hermes.service"
+    unit.write_bytes(b"unit\n")
+    profile_targets = (tmp_path / "config.yaml", tmp_path / "profile.yaml")
+    for target in profile_targets:
+        target.write_bytes(b"profile\n")
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: pointer)
+    monkeypatch.setattr(MODULE, "REPO", tmp_path)
+    monkeypatch.setattr(MODULE, "LITE_UNIT", unit)
+    monkeypatch.setattr(MODULE, "SOURCE_HERMES_OVERLAY_DROPIN", tmp_path / "absent-hermes")
+    monkeypatch.setattr(MODULE, "SOURCE_PYTHON_OVERLAY_DROPIN", tmp_path / "absent-python")
+    monkeypatch.setattr(MODULE, "SOURCE_NODE_STEWARD_DROPIN", tmp_path / "absent-steward")
+    monkeypatch.setattr(MODULE, "SOURCE_LEGACY_PROFILE_DIR", tmp_path / "absent-legacy")
+    monkeypatch.setattr(
+        MODULE, "git", lambda _repo, *args, **_kwargs: subprocess.CompletedProcess(
+            args, 0, candidate + "\n" if args == ("rev-parse", "HEAD") else "", "",
+        ),
+    )
+    monkeypatch.setattr(
+        MODULE, "candidate_blob",
+        lambda _repo, _candidate, path: b"unit\n" if path == MODULE.UNIT_SOURCE_PATH else b"profile\n",
+    )
+    monkeypatch.setattr(MODULE, "validate_companion_profile", lambda _profile: None)
+    monkeypatch.setattr(MODULE, "source_profile_targets", lambda: profile_targets)
+    monkeypatch.setattr(MODULE, "service_state", lambda _unit: {"active": "active"})
+    monkeypatch.setattr(MODULE, "service_main_pid", lambda _unit: 123)
+    monkeypatch.setattr(MODULE, "process_environment_for_pid", lambda _pid: {"HERMES_PROFILE": MODULE.SOURCE_PROFILE})
+    monkeypatch.setattr(MODULE, "process_executable", lambda _pid: Path(
+        "/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/python/bin/python3.12"
+    ))
+    monkeypatch.setattr(MODULE, "process_environment", lambda _unit: {})
+    monkeypatch.setattr(MODULE, "validate_listener_topology", lambda _pid: None)
+    monkeypatch.setattr(MODULE, "port_open", lambda port: port == 18001)
+    monkeypatch.setattr(MODULE, "wait_port", lambda _port: None)
+    monkeypatch.setattr(MODULE, "wait_for_gateway", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(MODULE, "source_memory_probe", lambda: (_ for _ in ()).throw(OSError("memory down")))
+    monkeypatch.setattr(MODULE, "source_real_provider_probe", lambda: (_ for _ in ()).throw(OSError("provider down")))
+    monkeypatch.setattr(
+        MODULE, "stage_source_candidate",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("retry staged source")),
+    )
+
+    assert MODULE.source_apply(candidate) == {
+        "status": "SOURCE_APPLIED", "candidate": candidate, "snapshot": str(snapshot),
+    }
+
+
+def test_source_baseline_uses_dependency_blobs_for_reuse_admission(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    prior, candidate, repo = "a" * 40, "b" * 40, tmp_path / "repo"
+    (repo / "node_modules").mkdir(parents=True)
+    topology, binding, overlay = tmp_path / "topology", tmp_path / "binding", tmp_path / "overlay"
+    topology.write_text(json.dumps({
+        "candidate": "0b793e8fea85c409800ee7e0d615501816c99387", "topology": "unified-hermes-v0.20",
+    }))
+    binding.write_text('{"phase":"accepted","runtimeRollbackAuthorized":false}')
+    overlay.mkdir()
+    (overlay / "state.json").write_text(json.dumps({
+        "status": "accepted", "candidate": MODULE.SOURCE_OVERLAY_CANDIDATE,
+    }))
+    for name, value in (("REPO", repo), ("TOPOLOGY_MARKER", topology), ("SOURCE_BINDING", binding),
+                        ("SOURCE_OVERLAY_TRANSACTION", overlay)):
+        monkeypatch.setattr(MODULE, name, value)
+    monkeypatch.setattr(MODULE, "SOURCE_HERMES_OVERLAY_DROPIN", tmp_path / "retired-hermes")
+    monkeypatch.setattr(MODULE, "SOURCE_PYTHON_OVERLAY_DROPIN", tmp_path / "retired-python")
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", tmp_path / "snapshots")
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: {"candidate": prior})
+    monkeypatch.setattr(MODULE, "git", lambda _repo, *args, **_kwargs: subprocess.CompletedProcess(
+        args, 0, prior + "\n" if args == ("rev-parse", "HEAD") else "", "",
+    ))
+    monkeypatch.setattr(MODULE.shutil, "disk_usage", lambda _path: SimpleNamespace(free=1))
+
+    for changed_path in (None, "package.json", "package-lock.json"):
+        monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, commit, path:
+                            b"changed" if commit == candidate and path == changed_path else b"same")
+        if changed_path:
+            with pytest.raises(MODULE.ReleaseError, match="less than 2 GiB"):
+                MODULE.require_source_baseline(candidate)
+        else:
+            assert MODULE.require_source_baseline(candidate)["dependenciesChanged"] is False
+
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda *_args: b"same")
+    monkeypatch.setattr(
+        MODULE, "stage_source_candidate",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("invalid reuse fell back to npm")),
+    )
+    for invalid in ("missing", "file", "symlink"):
+        modules = repo / "node_modules"
+        if modules.exists() or modules.is_symlink():
+            modules.unlink() if not modules.is_dir() else modules.rmdir()
+        if invalid == "file":
+            modules.write_text("invalid")
+        elif invalid == "symlink":
+            modules.symlink_to(tmp_path / "missing")
+        with pytest.raises(MODULE.ReleaseError, match="node_modules is unavailable"):
+            MODULE.source_apply(candidate)
+
+
+def test_activate_source_candidate_reuses_or_swaps_modules_without_a_second_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo, snapshot, stage = tmp_path / "repo", tmp_path / "snapshot", tmp_path / "stage"
+    live_modules, staged_modules = repo / "node_modules", stage / "node_modules"
+    live_modules.mkdir(parents=True)
+    staged_modules.mkdir(parents=True)
+    (live_modules / "old").write_text("old")
+    (staged_modules / "new").write_text("new")
     snapshot.mkdir()
-    state = {
-        "candidate": candidate,
-        "phase": "accepted",
-        "priorPointer": prior,
+    monkeypatch.setattr(MODULE, "REPO", repo)
+    monkeypatch.setattr(MODULE, "ENV_FILES", ())
+    monkeypatch.setattr(MODULE, "git_as_checkout_owner", lambda *_args: None)
+    monkeypatch.setattr(
+        MODULE, "activate_source_profile",
+        lambda *_args: (_ for _ in ()).throw(RuntimeError("after modules")),
+    )
+    monkeypatch.setattr(MODULE.os, "chown", lambda *_args: (_ for _ in ()).throw(AssertionError("reuse chowned modules")))
+    inode = live_modules.stat().st_ino
+
+    with pytest.raises(RuntimeError, match="after modules"):
+        MODULE.activate_source_candidate("b" * 40, None, snapshot, install_profile=False)
+    assert live_modules.stat().st_ino == inode and not (snapshot / "node_modules.rollback").exists()
+
+    monkeypatch.setattr(MODULE.os, "chown", lambda *_args: None)
+    with pytest.raises(RuntimeError, match="after modules"):
+        MODULE.activate_source_candidate("b" * 40, stage, snapshot, install_profile=False)
+    assert (live_modules / "new").read_text() == "new"
+    assert (snapshot / "node_modules.rollback" / "old").read_text() == "old"
+
+
+def test_interrupted_precommit_apply_restores_prior_before_fresh_baseline(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    candidate = "b" * 40
+    snapshot_root = tmp_path / "snapshots"
+    interrupted = snapshot_root / "source-interrupted"
+    interrupted.mkdir(parents=True)
+    (interrupted / "state.json").write_text(json.dumps({
+        "candidate": candidate, "priorPointer": None, "phase": "accepted",
+    }))
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    fresh = snapshot_root / "source-fresh"
+    fresh.mkdir()
+    baseline = {"kind": "initial", "priorPointer": None, "dependenciesChanged": False}
+    calls = []
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshot_root)
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: None)
+
+    def require_baseline(_candidate=None, *, require_capacity=True):
+        calls.append(("baseline", require_capacity))
+        return baseline
+
+    monkeypatch.setattr(MODULE, "require_source_baseline", require_baseline)
+    monkeypatch.setattr(MODULE, "restore_source_snapshot", lambda path, _state: calls.append(("restore", path)))
+    monkeypatch.setattr(MODULE, "update_phase", lambda path, _state, phase: calls.append((phase, path)))
+    monkeypatch.setattr(MODULE, "persist_source_authority", lambda _candidate: tmp_path / "controller.py")
+    monkeypatch.setattr(
+        MODULE, "stage_source_candidate",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("reuse staged dependencies")),
+    )
+    monkeypatch.setattr(MODULE, "create_source_snapshot", lambda *_args: (fresh, {}))
+    monkeypatch.setattr(MODULE, "stop_source_services", lambda: calls.append(("mutate", fresh)))
+    monkeypatch.setattr(
+        MODULE, "activate_source_candidate",
+        lambda _candidate, selected_stage, *_args, **_kwargs: calls.append(("stage", selected_stage)),
+    )
+    monkeypatch.setattr(MODULE, "restore_source_services", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(MODULE, "validate_source_acceptance", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "publish_source_pointer", lambda _pointer: None)
+
+    assert MODULE.source_apply(candidate)["status"] == "SOURCE_APPLIED"
+    assert calls[:4] == [
+        ("restore", interrupted), ("rolled-back", interrupted),
+        ("baseline", False), ("baseline", True),
+    ]
+    assert ("mutate", fresh) in calls and ("stage", None) in calls
+
+
+def test_apply_restore_failure_reports_both_failures_as_reconciliation_required(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    candidate = "b" * 40
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    snapshot = tmp_path / "snapshots" / "fresh"
+    snapshot.mkdir(parents=True)
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: None)
+    monkeypatch.setattr(
+        MODULE, "require_source_baseline",
+        lambda _candidate: {"kind": "initial", "priorPointer": None, "dependenciesChanged": True},
+    )
+    monkeypatch.setattr(MODULE, "persist_source_authority", lambda _candidate: tmp_path / "controller.py")
+    monkeypatch.setattr(MODULE, "stage_source_candidate", lambda _candidate: stage)
+    monkeypatch.setattr(MODULE, "create_source_snapshot", lambda *_args: (snapshot, {}))
+    monkeypatch.setattr(MODULE, "stop_source_services", lambda: None)
+    monkeypatch.setattr(
+        MODULE, "activate_source_candidate",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("apply failed")),
+    )
+    monkeypatch.setattr(
+        MODULE, "restore_source_snapshot",
+        lambda *_args: (_ for _ in ()).throw(OSError("restore failed")),
+    )
+
+    with pytest.raises(
+        MODULE.SourceReconciliationRequired,
+        match="source apply failed:ValueError; restore failed:OSError",
+    ):
+        MODULE.source_apply(candidate)
+
+
+def test_apply_failure_returns_explicit_safe_rollback_receipt(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    candidate = "b" * 40
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    snapshot = tmp_path / "snapshots" / "fresh"
+    snapshot.mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: None)
+    monkeypatch.setattr(
+        MODULE, "require_source_baseline",
+        lambda _candidate: {"kind": "initial", "priorPointer": None, "dependenciesChanged": True},
+    )
+    monkeypatch.setattr(MODULE, "persist_source_authority", lambda _candidate: tmp_path / "controller.py")
+    monkeypatch.setattr(MODULE, "stage_source_candidate", lambda _candidate: calls.append("stage") or stage)
+    monkeypatch.setattr(MODULE, "create_source_snapshot", lambda *_args: (snapshot, {}))
+    monkeypatch.setattr(MODULE, "stop_source_services", lambda: None)
+    monkeypatch.setattr(
+        MODULE, "activate_source_candidate",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(ValueError("apply failed")),
+    )
+    monkeypatch.setattr(MODULE, "restore_source_snapshot", lambda *_args: calls.append("restore"))
+    monkeypatch.setattr(MODULE, "update_phase", lambda *_args: calls.append("rolled-back"))
+
+    assert MODULE.source_apply(candidate) == {
+        "status": "SOURCE_ROLLED_BACK", "candidate": candidate,
+        "snapshot": str(snapshot),
     }
-    (snapshot / "state.json").write_text(json.dumps(state))
-    pointer_path = tmp_path / "current-source.json"
-    pointer_path.write_text(json.dumps({"candidate": candidate, "snapshot": str(snapshot)}))
+    assert calls == ["stage", "restore", "rolled-back"]
+
+
+def test_candidate_pointer_overrides_rolled_back_snapshot_phase(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    candidate = "b" * 40
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "state.json").write_text(json.dumps({
+        "candidate": candidate, "phase": "rolled-back", "priorPointer": None,
+    }))
+    pointer = {"candidate": candidate, "snapshot": str(snapshot)}
+    calls = []
     monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", tmp_path)
-    monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer_path)
-    monkeypatch.setattr(MODULE, "restore_source_snapshot", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: pointer)
+    monkeypatch.setattr(MODULE, "assert_source_rollback_boundary", lambda _state: None)
+    monkeypatch.setattr(MODULE, "restore_source_snapshot", lambda *_args: calls.append("restore"))
     monkeypatch.setattr(MODULE, "update_phase", lambda *_args: None)
-    monkeypatch.setattr(MODULE, "fsync_directory", lambda *_args: None)
+    monkeypatch.setattr(MODULE, "publish_source_pointer", lambda value: calls.append(value))
 
-    MODULE.source_rollback(snapshot, candidate)
+    assert MODULE.source_rollback(snapshot, candidate)["status"] == "SOURCE_ROLLED_BACK"
+    assert calls == ["restore", None]
 
-    assert json.loads(pointer_path.read_text()) == prior
+
+def test_source_rollback_retry_uses_durable_prior_pointer_without_restore(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    candidate = "b" * 40
+    prior = {"candidate": "a" * 40}
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    (snapshot / "state.json").write_text(json.dumps({
+        "candidate": candidate, "priorPointer": prior,
+    }))
+    checked = []
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", tmp_path)
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: prior)
+    monkeypatch.setattr(
+        MODULE, "require_source_baseline",
+        lambda *, require_capacity=True: checked.append(require_capacity) or {},
+    )
+    monkeypatch.setattr(
+        MODULE, "source_memory_probe",
+        lambda: (_ for _ in ()).throw(AssertionError("rollback replay used memory liveness")),
+    )
+    monkeypatch.setattr(
+        MODULE, "source_real_provider_probe",
+        lambda: (_ for _ in ()).throw(AssertionError("rollback replay used provider liveness")),
+    )
+    monkeypatch.setattr(
+        MODULE, "restore_source_snapshot",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("retry restored source")),
+    )
+
+    assert MODULE.source_rollback(snapshot, candidate)["status"] == "SOURCE_ROLLED_BACK"
+    assert checked == [False]
+
+
+def test_source_pointer_absence_is_committed_by_parent_fsync(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    pointer = tmp_path / "current-source.json"
+    pointer.write_text("{}")
+    synced = []
+    monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer)
+    monkeypatch.setattr(MODULE, "fsync_directory", lambda path: synced.append(path))
+
+    MODULE.publish_source_pointer(None)
+
+    assert not pointer.exists()
+    assert synced == [tmp_path]
 
 
 def core_authority_db(path: Path, *, candidate: str | None = None, source_ref: str | None = None) -> None:
@@ -463,6 +766,10 @@ def test_source_rollback_checks_core_boundary_before_restoring(
     pointer.write_text(json.dumps({"candidate": candidate, "snapshot": str(snapshot)}))
     monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", tmp_path)
     monkeypatch.setattr(MODULE, "SOURCE_POINTER", pointer)
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: {
+        "schemaVersion": 1, "candidate": candidate, "snapshot": str(snapshot),
+        "controller": str(tmp_path / "controller.py"),
+    })
     monkeypatch.setattr(MODULE, "assert_source_rollback_boundary", lambda _state: (_ for _ in ()).throw(
         MODULE.ReleaseError("boundary rejected")
     ))
@@ -501,20 +808,6 @@ def test_gateway_readiness_refreshes_credentials_after_main_pid_change(monkeypat
     assert attempts == ["Bearer stale", "Bearer fresh"]
 
 
-def test_bootstrap_routes_unified_source_through_existing_candidate_controller() -> None:
-    bootstrap = (Path(__file__).parents[1] / "scripts/bootstrap-hermes-release.sh").read_text()
-    assert "scripts/deploy-hermes-runtime-release.py" in bootstrap
-    assert "RAN_AGENT_RELEASE_UNIFIED_SOURCE" in bootstrap
-    assert "source-verify" in bootstrap
-    assert "source-dry-run" in bootstrap
-    assert "source-apply" in bootstrap
-    assert "source-rollback" in bootstrap
-    assert "GIT_CONFIG_KEY_0=safe.directory" in bootstrap
-    assert 'GIT_CONFIG_VALUE_0="$REPO_ROOT"' in bootstrap
-    assert 'sudo /usr/bin/env "${source_env[@]}"' in bootstrap
-    assert "safe.directory=*" not in bootstrap
-
-
 def test_source_verify_is_read_only_without_a_candidate_ref_or_lock(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -544,14 +837,13 @@ def test_source_verify_is_read_only_without_a_candidate_ref_or_lock(
         MODULE, "validate_source_candidate",
         lambda value, **kwargs: validated.append((value, kwargs)),
     )
-    monkeypatch.setattr(MODULE, "require_source_baseline", lambda: {"kind": "converged"})
-    monkeypatch.setattr(MODULE, "refuse_unfinished_source_transaction", lambda: None)
+    monkeypatch.setattr(MODULE, "require_source_baseline", lambda _candidate: {"kind": "converged"})
     monkeypatch.setattr(MODULE.shutil, "disk_usage", lambda _path: SimpleNamespace(free=123))
 
     assert MODULE.source_main(SimpleNamespace(
         candidate=candidate, mode="source-verify", snapshot=None,
     )) == 0
-    assert validated == [(candidate, {"require_persistent_ref": False})]
+    assert validated == [(candidate, {})]
     assert not MODULE.LOCK_PATH.exists()
     assert json.loads(capsys.readouterr().out) == {
         "candidate": candidate, "freeBytes": 123, "status": "SOURCE_VERIFY_OK",
@@ -589,8 +881,83 @@ def test_source_verify_reuses_candidate_validation_without_persistent_ref_author
         lambda _repo, _candidate, path: SCRIPT.read_bytes() if path == MODULE.CONTROLLER_PATH else b"",
     )
     monkeypatch.setattr(MODULE, "validate_unified_source_shape", lambda _candidate: None)
-    MODULE.validate_source_candidate(candidate, require_persistent_ref=False)
-    assert object_checks == [(MODULE.REPO, candidate)]
+    MODULE.validate_source_candidate(candidate)
+    MODULE.validate_source_candidate(candidate, allow_current=True)
+    assert object_checks == [(MODULE.REPO, candidate), (MODULE.REPO, candidate)]
+
+
+def test_persist_source_authority_persists_only_the_controller_artifact(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    candidate = "b" * 40
+    artifact_root = tmp_path / "source-artifacts"
+    payload = SCRIPT.read_bytes()
+    writes = []
+    monkeypatch.setattr(MODULE, "SOURCE_ARTIFACT_ROOT", artifact_root)
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _value, _path: payload)
+    monkeypatch.setattr(
+        MODULE,
+        "atomic_write",
+        lambda path, data, **kwargs: writes.append((path, data, kwargs)),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "git_as_checkout_owner",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("source ref was re-asserted")),
+    )
+
+    destination = MODULE.persist_source_authority(candidate)
+
+    assert destination == artifact_root / f"deploy-hermes-source-{candidate}.py"
+    assert writes == [(destination, payload, {"mode": 0o700, "uid": 0, "gid": 0})]
+
+
+def test_source_rollback_admission_relies_on_snapshot_and_pointer_without_a_ref(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    candidate = "b" * 40
+    snapshot = tmp_path / "snapshots" / "source-new"
+    monkeypatch.setattr(MODULE, "validate_candidate_object", lambda *_args: None)
+    monkeypatch.setattr(
+        MODULE,
+        "validate_persistent_candidate_ref",
+        lambda *_args: (_ for _ in ()).throw(AssertionError("persistent ref was consulted")),
+    )
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: {"candidate": candidate})
+    monkeypatch.setattr(
+        MODULE, "run", lambda *_args, **_kwargs: subprocess.CompletedProcess([], 0, "", ""),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "git",
+        lambda _repo, *args, **_kwargs: subprocess.CompletedProcess(
+            args,
+            0,
+            candidate + "\n" if args == ("rev-parse", "--verify", "refs/remotes/origin/main") else "",
+            "",
+        ),
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "candidate_blob",
+        lambda _repo, _candidate, path: SCRIPT.read_bytes() if path == MODULE.CONTROLLER_PATH else b"",
+    )
+    monkeypatch.setattr(MODULE, "validate_unified_source_shape", lambda _candidate: None)
+    rolled_back = []
+    monkeypatch.setattr(
+        MODULE, "source_rollback",
+        lambda *args: (rolled_back.append(args) or {
+            "status": "SOURCE_ROLLED_BACK", "candidate": candidate,
+            "snapshot": str(snapshot.resolve()),
+        }),
+    )
+
+    assert MODULE.source_main(SimpleNamespace(
+        candidate=candidate, mode="source-rollback", snapshot=snapshot,
+    )) == 0
+
+    assert rolled_back == [(snapshot.resolve(), candidate)]
+    assert json.loads(capsys.readouterr().out)["status"] == "SOURCE_ROLLED_BACK"
 
 
 def test_unified_unit_uses_exact_runtime_and_one_port() -> None:

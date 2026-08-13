@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-12)
+Status: CURRENT (2026-08-13)
 
 This is the canonical order for active project work. Historical P-numbered plans
 do not control current execution. Keep exactly one stage `IN_PROGRESS` when the
@@ -39,7 +39,7 @@ S0 facts/runtime selection
 | S9 | COMPLETE | S8 | Schema v2, ScheduleSpec, WakeOccurrence, WorkRun, `wake_due`, and the single managed tick. | Schema v1 remains frozen; v1 upgrades in place to v2. One-shot, interval and daily schedules, immutable revisions, duplicate/missed tick catch-up, DST, scheduled Exchange isolation and WorkRun lease/fence authority pass locally; the managed tick has no network or direct presentation path. |
 | S10 | COMPLETE | S9 | Inventory legacy scheduler, reminders, daily digest, external MCP/forum/RSS pollers and dispatchers; split polling facts from visible attention; build manifest/watermark; rehearse on a production copy. | The 19-row machine manifest gives every legacy component one disposition. A production SQLite/state copy at `2026-08-08T08:28:45.000Z` migrated 0→2 with zero business rows/effects; three historical reminders were suppressed, future reminders and watches were zero, 13 legacy external activities were staged paused, one pending outbound item was held for reconciliation, and 58 sent plus 65 ambiguous legacy outbox rows became receipt/no-resend evidence only. These counts are historical rehearsal evidence, not current cutover readiness, and must be freshly inspected and reconciled at the S12 gate. The local external-poll worker seam records one hash-bound Core fact after WorkRun authority and exposes no send operation. |
 | S11 | COMPLETE | S10 | Synthetic acceptance: duplicate/missed ticks, DST, crash, stale WorkRun fence, ambiguous outcomes, restart no-resend, and gaming/focus suppression with delayed coalescing. | One synthetic chain binds the WakeOccurrence to its exact generated Exchange, claimed WorkRun revision/fence/lease, typed system/internal instruction, provider epoch/attempt, final, presentation outbox, single injected effect and durable terminal receipt. A thrown post-dispatch `ETIMEDOUT` records durable `ambiguous` evidence and replay never calls the adapter; a post-commit restart claims the existing WorkRun without another occurrence; stale WorkRun authority rejects before final/effect; an equivalent delayed fingerprint remains one candidate across gaming→available while explicit owner bypasses remain intact. The focused set passes 29/29 and the full Core suite 151/151 locally. Production is unchanged. |
-| S12 | NOT STARTED / BLOCKED_BY_SAFE_DIRECTORY_REVIEW | S11 + R3-B CLEAR + independently reviewed S12 controller + production authorization | Invoke the single candidate-bound S12 transaction; operators do not assemble subordinate source, Core, wake or acceptance commands. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
+| S12 | NOT STARTED / LOCAL FREEZE | S11 + R3-B CLEAR + archived and independently reviewed successor + production authorization | Invoke the single candidate-bound S12 transaction; operators do not assemble subordinate source, Core, wake or acceptance commands. | Core becomes the production authority; one synthetic Feishu message is sent exactly once. |
 | S13 | NOT STARTED | S12 + observation window + separate owner deletion authorization | After observation, remove the legacy scheduler, JSON outbox and compatibility writer. | No duplicate delivery; the legacy writer and legacy clock are truly gone. |
 
 ## S12 Readiness Topology
@@ -102,9 +102,10 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> Feishu route-contract remediation 2f822d9a (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
   -> visible-binding approval/custody remediation 482e700 (LOCAL_VERIFIED, REVIEWED / CLEAR, ARCHIVED)
   -> production canonical VERIFY (STOPPED FAIL-CLOSED before source verification)
-  -> bootstrap exact-path safe.directory repair (LOCAL_VERIFIED, NOT_REVIEWED, archived by containing commit)
-  -> independent verification-only exact-SHA review (REQUIRED)
-  -> canonical S12 transaction VERIFY retry, then separately authorized APPLY
+  -> D0-D3 source authority/direct seam/dependency diet (LOCAL_VERIFIED, REVIEWED / CLEAR, UNARCHIVED)
+  -> D4 local freeze evidence
+  -> archive exact successor
+  -> canonical S12 transaction VERIFY, then separately authorized APPLY
 ```
 
 - Independent review found `R1A-ACK-ORDER` in the previous candidate
@@ -311,27 +312,18 @@ S12-R0 fresh read-only production audit (COMPLETE)
   afterward. It is archived at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a`,
   independently reviewed `CLEAR`, and its production candidate-closure proof
   passed.
-- S12 remains `NOT STARTED / BLOCKED_BY_SAFE_DIRECTORY_REVIEW`. Route-contract
-  candidate `2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b` is archived and independently
-  reviewed `FIX_REQUIRED`; its route handoff is accepted, while terminal audit
-  found sole blocker `S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP`. The bounded
-  successor requires the owner-approved digest, captures the protected bytes
-  once, pins them in the existing transaction, binds them into
-  `core-cutover:v1`, and recovers acceptance from the existing Core Package B
-  binding receipt. That successor is archived and independently clear at
-  `482e70083afb067f1e804cf1a8abd20e4ebf41ab`. The owner-approved protected
-  binding remains installed byte-identically at mode `0600`; its digest is
-  `sha256:dde57df0d2fc34860a52e486aaccdb1aacccb83d3eedb3de40ccd5109959542f`.
-  Canonical S12 VERIFY on `482e700` stopped fail-closed before source
-  verification because root Git had no invocation-scoped `safe.directory` for
-  the governed non-root-owned checkout. The bounded successor exports only the
-  exact canonical repository path through Git's command-environment config and
-  passes it explicitly across the source-controller sudo boundary; it creates
-  no persistent Git authority and is `LOCAL_VERIFIED / NOT_REVIEWED`, archived
-  by its containing commit. A private diagnostic trace briefly exposed the raw
-  route, was deleted, and caused no effect; this is an operational privacy
-  incident, not a product route/custody defect. Production remains unchanged;
-  R2 caused no production mutation. A separately authorized XHS
+- S12 remains `NOT STARTED / LOCAL FREEZE`. D0-D3 are independently reviewed
+  `CLEAR` locally but remain unstaged, uncommitted and unarchived; no successor
+  SHA exists yet. They retire source-candidate refs from source authority,
+  centralize source recovery in the source controller with the durable current
+  pointer as commit, route S12 through one exact candidate execution closure
+  directly to that controller, and reuse unchanged `node_modules`. Production
+  remains at `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; D0-D3 have not changed it.
+  The next gate is local freeze evidence, then archive, then canonical VERIFY
+  against the exact successor. APPLY is not yet ready or authorized. A private
+  diagnostic trace briefly exposed the raw route, was deleted, and caused no
+  effect; this is an operational privacy incident, not a product route/custody
+  defect. R2 caused no production mutation. A separately authorized XHS
   maintenance transaction
   retired the account-backed route and activated the existing public-only
   sidecar; it is not R2 evidence or a Core/source change.

@@ -30,10 +30,7 @@ PRODUCTION_STATE_ROOT = Path("/opt/ran_agent")
 ARTIFACT_ROOT = Path("/opt/ran_agent-release")
 TRANSACTION_ROOT = ARTIFACT_ROOT / "s12-transactions"
 LOCK_PATH = ARTIFACT_ROOT / ".s12-cutover.lock"
-SOURCE_SNAPSHOT_ROOT = ARTIFACT_ROOT / "source-snapshots"
-SOURCE_POINTER = SOURCE_SNAPSHOT_ROOT / "current-source.json"
 CONTROLLER_PATH = "scripts/s12-cutover.py"
-BOOTSTRAP_PATH = "scripts/bootstrap-hermes-release.sh"
 NODE_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/node")
 HERMES_BIN = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes")
 HERMES_HOME = Path("/home/ubuntu/.hermes-ran-agent/lite")
@@ -304,16 +301,16 @@ def validate_candidate_execution_inputs(args: argparse.Namespace) -> None:
         raise S12Error("candidate object mismatch")
     if git_observe("rev-parse", "--verify", "refs/remotes/origin/main") != candidate:
         raise S12Error("candidate is not exact archived main")
-    for path, raw_local in ((CONTROLLER_PATH, Path(__file__)), (BOOTSTRAP_PATH, args.bootstrap)):
-        if raw_local.is_symlink() or not raw_local.is_file():
-            raise S12Error(f"running {path} is not a regular candidate file")
-        expected = subprocess.run([
-            "git", "-c", f"safe.directory={PRODUCTION_STATE_ROOT}",
-            "-C", str(PRODUCTION_STATE_ROOT), "show", f"{candidate}:{path}",
-        ], check=True, stdout=subprocess.PIPE,
-            env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}).stdout
-        if raw_local.resolve().read_bytes() != expected:
-            raise S12Error(f"running {path} is not candidate-extracted")
+    controller = Path(__file__)
+    if controller.is_symlink() or not controller.is_file():
+        raise S12Error(f"running {CONTROLLER_PATH} is not a regular candidate file")
+    expected = subprocess.run([
+        "git", "-c", f"safe.directory={PRODUCTION_STATE_ROOT}",
+        "-C", str(PRODUCTION_STATE_ROOT), "show", f"{candidate}:{CONTROLLER_PATH}",
+    ], check=True, stdout=subprocess.PIPE,
+        env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"}).stdout
+    if controller.resolve().read_bytes() != expected:
+        raise S12Error(f"running {CONTROLLER_PATH} is not candidate-extracted")
 
 
 @contextlib.contextmanager
@@ -428,16 +425,25 @@ class ProductionOperations:
             raise S12Error("production worktree is dirty")
 
     def source(self, mode: str, snapshot: str | None = None) -> dict[str, Any]:
-        command = ["bash", str(self.candidate_code_root / BOOTSTRAP_PATH), f"--{mode}", self.args.candidate]
+        command = [
+            sys.executable, str(self.candidate_code_root / "scripts/deploy-hermes-runtime-release.py"),
+            "--candidate", self.args.candidate, "--mode", f"source-{mode}",
+        ]
         if snapshot:
-            command.append(snapshot)
-        environment = {
-            "PATH": "/usr/sbin:/usr/bin:/sbin:/bin",
-            "RAN_AGENT_RELEASE_UNIFIED_SOURCE": "1",
-            "RAN_AGENT_RELEASE_CONTROL_ROOT": str(PRODUCTION_STATE_ROOT),
-            "RAN_AGENT_RELEASE_ARTIFACT_ROOT": str(ARTIFACT_ROOT),
-        }
-        return self.run(command, env=environment)
+            command.extend(("--snapshot", snapshot))
+        result = subprocess.run(
+            command, check=False, text=True, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin"},
+        )
+        try:
+            receipt = parse_json_output(result)
+        except S12Error:
+            if result.returncode:
+                raise S12Error("source controller failed without a receipt")
+            raise
+        if result.returncode and receipt.get("status") != "SOURCE_RECONCILIATION_REQUIRED":
+            raise S12Error("source controller returned a failed receipt")
+        return receipt
 
     def rehearse(self, core_db: Path | None, output: Path) -> dict[str, Any]:
         with self.runtime_scratch() as scratch:
@@ -495,28 +501,11 @@ class ProductionOperations:
 
     def source_apply(self) -> dict[str, Any]:
         receipt = self.source("apply")
-        if receipt.get("status") != "SOURCE_APPLIED" or not receipt.get("snapshot"):
-            raise S12Error("source apply returned no accepted snapshot")
+        if receipt.get("status") == "SOURCE_RECONCILIATION_REQUIRED":
+            raise S12Error("source apply requires controller reconciliation")
+        if receipt.get("status") not in {"SOURCE_APPLIED", "SOURCE_ROLLED_BACK"} or not receipt.get("snapshot"):
+            raise S12Error("source apply returned no authoritative receipt")
         return receipt
-
-    def recover_source_apply(self) -> dict[str, Any] | None:
-        head = self.git("rev-parse", "HEAD")
-        if head == self.args.production_baseline:
-            return None
-        if head != self.args.candidate or SOURCE_POINTER.is_symlink() or not SOURCE_POINTER.is_file():
-            raise S12Error("source authority changed without an accepted S12 source snapshot")
-        pointer = json.loads(SOURCE_POINTER.read_text(encoding="utf-8"))
-        snapshot = Path(str(pointer.get("snapshot", "")))
-        state_path = snapshot / "state.json"
-        if (pointer.get("schemaVersion") != 1 or pointer.get("candidate") != self.args.candidate
-                or snapshot.parent != SOURCE_SNAPSHOT_ROOT or snapshot.is_symlink() or not snapshot.is_dir()
-                or state_path.is_symlink() or not state_path.is_file()):
-            raise S12Error("accepted S12 source pointer is invalid")
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-        if (state.get("candidate") != self.args.candidate or state.get("phase") != "accepted"
-                or state.get("priorHead") != self.args.production_baseline):
-            raise S12Error("accepted S12 source snapshot conflicts with transaction authority")
-        return {"status": "SOURCE_APPLIED_RECOVERED", "snapshot": str(snapshot)}
 
     def core_prepare(self) -> dict[str, Any]:
         inactive_core_reused = self.args.core_db.exists()
@@ -789,10 +778,14 @@ class ProductionOperations:
             raise S12Error("Core requires exactly one work-producing writer")
         return {"nodePid": node_pid, "pythonPid": python_pid, "workProducingWriters": len(writers)}
 
-    def rollback_pre_cutover(self, source_snapshot: str | None) -> None:
+    def rollback_pre_cutover(self, source_snapshot: str | None) -> dict[str, Any]:
+        if not source_snapshot:
+            raise S12Error("pre-cutover rollback lacks a source snapshot")
+        receipt = self.source("rollback", source_snapshot)
+        if receipt.get("status") != "SOURCE_ROLLED_BACK" or receipt.get("snapshot") != source_snapshot:
+            raise S12Error("source rollback returned no authoritative receipt")
         self.wake("remove")
-        if source_snapshot:
-            self.source("rollback", source_snapshot)
+        return receipt
 
 def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | None = None) -> dict[str, Any]:
     state = journal.state
@@ -810,6 +803,17 @@ def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | 
             journal.write()
             raise S12Error("accepted S12 journal lacks the Core authority marker")
         ops.inspect_accepted(marker)
+        return state
+    if state.get("status") == "PRE_CUTOVER_RECONCILIATION_REQUIRED":
+        try:
+            receipt = ops.rollback_pre_cutover(state.get("sourceSnapshot"))
+        except BaseException as rollback_error:
+            state["rollbackFailure"] = type(rollback_error).__name__
+            journal.write()
+            raise S12Error("pre-cutover reconciliation still requires source rollback") from rollback_error
+        state.update({"status": "ROLLED_BACK", "rollbackReceipt": receipt})
+        state.pop("rollbackFailure", None)
+        journal.write()
         return state
     if state.get("status") == "ROLLED_BACK":
         if marker is not None:
@@ -836,11 +840,6 @@ def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | 
         state.update({"phase": PHASES[5], "cutoverCommitted": True,
                       "status": "FORWARD_RECOVERY", "coreMarker": marker})
         journal.write()
-    if state["completedPhases"] == ["P0_VERIFIED"]:
-        recovered_source = ops.recover_source_apply()
-        if recovered_source is not None:
-            state["sourceSnapshot"] = recovered_source["snapshot"]
-            journal.complete("P1_SOURCE_APPLIED", lastReceipt=recovered_source)
     actions = {
         "P0_VERIFIED": ops.verify,
         "P1_SOURCE_APPLIED": ops.source_apply,
@@ -854,6 +853,7 @@ def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | 
         "P9_ACCEPTANCE_RECEIPT_TERMINAL": ops.wait_acceptance,
         "P10_ACCEPTED": ops.final_verify,
     }
+    source_committed_unprojected = False
     try:
         for phase in PHASES:
             if phase in state["completedPhases"]:
@@ -864,6 +864,9 @@ def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | 
             result = actions[phase]()
             if phase == "P1_SOURCE_APPLIED":
                 state["sourceSnapshot"] = result["snapshot"]
+                if result["status"] == "SOURCE_ROLLED_BACK":
+                    raise S12Error("source apply failed but source was safely restored")
+                source_committed_unprojected = True
             if phase == "P5_CORE_AUTHORITY_COMMITTED":
                 if ops.marker() is None:
                     raise S12Error("Core cutover command returned without its authoritative marker")
@@ -874,6 +877,8 @@ def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | 
             if phase.startswith("P8_") or phase.startswith("P9_"):
                 state["acceptance"] = {**state["acceptance"], **result, "status": result.get("status", "ENQUEUED")}
             journal.complete(phase, lastReceipt=result)
+            if phase == "P1_SOURCE_APPLIED":
+                source_committed_unprojected = False
             if fail_after == phase:
                 raise S12Error(f"injected failure after {phase}")
         state["status"] = "ACCEPTED"
@@ -882,6 +887,8 @@ def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | 
     except SimulatedCrash:
         raise
     except BaseException as exc:
+        if source_committed_unprojected:
+            raise
         try:
             committed = ops.marker() is not None
         except BaseException:
@@ -894,13 +901,16 @@ def run_apply(ops: ProductionOperations, journal: Journal, *, fail_after: str | 
             state.update({"status": "FORWARD_RECOVERY_REQUIRED", "failure": type(exc).__name__})
             journal.write()
         else:
+            state.update({"status": "PRE_CUTOVER_RECONCILIATION_REQUIRED",
+                          "failure": type(exc).__name__})
+            journal.write()
             try:
-                ops.rollback_pre_cutover(state.get("sourceSnapshot"))
-                state.update({"status": "ROLLED_BACK", "failure": type(exc).__name__})
+                receipt = ops.rollback_pre_cutover(state.get("sourceSnapshot"))
+                state.update({"status": "ROLLED_BACK", "rollbackReceipt": receipt})
+                state.pop("rollbackFailure", None)
                 journal.write()
             except BaseException as rollback_error:
-                state.update({"status": "PRE_CUTOVER_RECONCILIATION_REQUIRED",
-                              "failure": type(exc).__name__, "rollbackFailure": type(rollback_error).__name__})
+                state["rollbackFailure"] = type(rollback_error).__name__
                 journal.write()
                 raise S12Error("pre-cutover failure could not restore authority") from rollback_error
         raise
@@ -913,7 +923,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--production-baseline", required=True)
     parser.add_argument("--owner-id")
     parser.add_argument("--authorization-ref")
-    parser.add_argument("--bootstrap", type=Path, required=True)
     parser.add_argument("--legacy-db", type=Path, required=True)
     parser.add_argument("--state-dir", type=Path, required=True)
     parser.add_argument("--core-db", type=Path, required=True)

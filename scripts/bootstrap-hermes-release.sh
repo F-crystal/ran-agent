@@ -64,15 +64,6 @@ fi
 if [[ "${RAN_AGENT_RELEASE_UNIFIED_SOURCE:-0}" == 1 ]]; then
   [[ "$(git rev-parse --verify refs/remotes/origin/main^{commit})" == "$CANDIDATE" ]] ||
     fail source_candidate_not_archived_main
-  if [[ "$MODE" != --verify ]]; then
-    source_ref="refs/ran-agent/source-candidates/$CANDIDATE"
-    existing_source_ref="$(git rev-parse --verify "$source_ref^{commit}" 2>/dev/null || true)"
-    [[ -z "$existing_source_ref" || "$existing_source_ref" == "$CANDIDATE" ]] ||
-      fail source_candidate_ref_moved
-    [[ -n "$existing_source_ref" ]] || git update-ref "$source_ref" "$CANDIDATE" 0000000000000000000000000000000000000000
-    [[ "$(git rev-parse --verify refs/ran-agent/source-candidates/$CANDIDATE^{commit})" == "$CANDIDATE" ]] ||
-      fail source_candidate_ref_invalid
-  fi
   case "$MODE" in
     --verify) source_mode=source-verify ;;
     --dry-run) source_mode=source-dry-run ;;

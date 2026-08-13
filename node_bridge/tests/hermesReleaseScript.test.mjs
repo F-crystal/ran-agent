@@ -4051,6 +4051,53 @@ test('unified source verify uses candidate-extracted authority without creating 
   }
 });
 
+test('unified source dry-run, apply, and rollback create no source-candidate ref', () => {
+  const fixture = makeBootstrapFixture();
+  const directory = mkdtempSync(join(tmpdir(), 'ran-agent-source-modes-'));
+  const extracted = join(directory, 'bootstrap.sh');
+  const sudoLog = join(directory, 'sudo.log');
+  const sudo = join(directory, 'sudo');
+  try {
+    writeFileSync(extracted, fixture.runGit(['show', `${fixture.candidateSha}:scripts/bootstrap-hermes-release.sh`]));
+    chmodSync(extracted, 0o700);
+    writeFileSync(sudo, '#!/bin/sh\nprintf "%s\\n" "$*" >> "$SUDO_LOG"\nprintf \'{"status":"OK"}\\n\'\n');
+    chmodSync(sudo, 0o700);
+    const modes = ['--dry-run', '--apply', '--rollback'];
+    for (const mode of modes) {
+      const refsBefore = fixture.runGit(['for-each-ref', '--format=%(refname) %(objectname)']);
+      const args = [extracted, mode, fixture.candidateSha];
+      if (mode === '--rollback') args.push(join(directory, 'snapshot'));
+      const output = execFileSync('bash', args, {
+        cwd: fixture.repo,
+        env: {
+          PATH: `${directory}:/usr/bin:/bin`, TMPDIR: directory, SUDO_LOG: sudoLog,
+          RAN_AGENT_RELEASE_UNIFIED_SOURCE: '1',
+          RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo,
+          RAN_AGENT_RELEASE_ARTIFACT_ROOT: join(directory, 'release'),
+        },
+        encoding: 'utf8', stdio: 'pipe',
+      });
+      assert.match(output, /bootstrap-ok/);
+      const refsAfter = fixture.runGit(['for-each-ref', '--format=%(refname) %(objectname)']);
+      assert.equal(refsAfter, refsBefore);
+      assert.equal(refsAfter.includes('source-candidates'), false);
+      assert.equal(fixture.runGit(['status', '--short']).trim(), '');
+      assert.equal(fixture.runGit(['rev-parse', 'HEAD']).trim(), fixture.prior);
+    }
+    const sudoCalls = readFileSync(sudoLog, 'utf8').trim().split('\n');
+    assert.equal(sudoCalls.length, modes.length);
+    for (const [index, mode] of modes.entries()) {
+      const sourceMode = `--mode source-${mode.slice(2)}`;
+      assert.ok(sudoCalls[index].includes(sourceMode),
+        `sudo call ${index} must invoke ${sourceMode}: ${sudoCalls[index]}`);
+    }
+    assert.equal(readdirSync(directory).some((name) => name.startsWith('ran-agent-release-bootstrap.')), false);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(fixture.repo, { recursive: true, force: true });
+  }
+});
+
 test('Linux root bootstrap scopes Git trust to the exact non-root-owned checkout', {
   skip: !linuxRoot,
 }, () => {
