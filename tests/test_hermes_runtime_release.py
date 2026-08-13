@@ -487,6 +487,105 @@ def test_activate_source_candidate_reuses_or_swaps_modules_without_a_second_path
     assert (snapshot / "node_modules.rollback" / "old").read_text() == "old"
 
 
+@pytest.mark.parametrize(("prior_form", "fail_head"), [("detached", False), ("branch", False), ("detached", True)])
+def test_source_git_convergence_and_head_failure_recovery(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prior_form: str, fail_head: bool
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    def git(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(["git", "-C", str(repo), *args], check=check, capture_output=True, text=True)
+    git("init", "-q")
+    git("config", "user.email", "source-test@example.com")
+    git("config", "user.name", "Source Test")
+    tracked = repo / "tracked.txt"
+    tracked.write_text("prior\n")
+    git("add", "tracked.txt")
+    git("commit", "-qm", "prior")
+    prior_head = git("rev-parse", "HEAD").stdout.strip()
+    prior_ref = git("symbolic-ref", "HEAD").stdout.strip()
+    tracked.write_text("candidate\n")
+    git("commit", "-qam", "candidate")
+    candidate = git("rev-parse", "HEAD").stdout.strip()
+    git("update-ref", prior_ref, prior_head)
+    git("restore", "--source", prior_head, "--staged", "--worktree", "--", ":/")
+    if prior_form == "detached":
+        git("update-ref", "--no-deref", "HEAD", prior_head)
+
+    (snapshot := tmp_path / "snapshot").mkdir()
+    (overlay := tmp_path / "overlay").mkdir()
+    (overlay / "state.json").write_text("{}")
+    prior_pointer = {"candidate": prior_head}
+    pointer = [prior_pointer]
+    state = {
+        "baselineKind": "converged", "priorHead": prior_head,
+        "priorRef": prior_ref if prior_form == "branch" else "", "priorPointer": prior_pointer,
+        "paths": [], "overlayStateSha256": MODULE.sha256_file(overlay / "state.json"),
+    }
+    for name, value in (
+        ("REPO", repo), ("SOURCE_SNAPSHOT_ROOT", tmp_path / "snapshots"),
+        ("SOURCE_OVERLAY_TRANSACTION", overlay), ("ENV_FILES", ()),
+        ("LITE_UNIT", tmp_path / "unit"),
+        ("SOURCE_HERMES_OVERLAY_DROPIN", tmp_path / "missing-hermes"),
+        ("SOURCE_PYTHON_OVERLAY_DROPIN", tmp_path / "missing-python"),
+        ("SOURCE_NODE_STEWARD_DROPIN", tmp_path / "missing-steward"),
+        ("SOURCE_LEGACY_PROFILE_DIR", tmp_path / "missing-profile"),
+    ):
+        monkeypatch.setattr(MODULE, name, value)
+    monkeypatch.setattr(MODULE, "current_source_pointer", lambda: pointer[0])
+    monkeypatch.setattr(MODULE, "publish_source_pointer", lambda value: pointer.__setitem__(0, value))
+    monkeypatch.setattr(MODULE, "require_source_baseline", lambda _candidate: {
+        "kind": "converged", "priorPointer": prior_pointer, "dependenciesChanged": False,
+    })
+    monkeypatch.setattr(MODULE, "persist_source_authority", lambda _candidate: tmp_path / "controller")
+    monkeypatch.setattr(MODULE, "create_source_snapshot", lambda *_args: (snapshot, state))
+    monkeypatch.setattr(MODULE, "stop_source_services", lambda: None)
+    monkeypatch.setattr(MODULE, "restore_source_services", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(MODULE, "activate_source_profile", lambda _candidate: None)
+    monkeypatch.setattr(MODULE, "validate_source_acceptance", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda *_args: b"unit\n")
+    monkeypatch.setattr(MODULE, "atomic_write", lambda path, data, **_kwargs: path.write_bytes(data))
+
+    def mutate(*args: str) -> None:
+        if fail_head and args == ("update-ref", "--no-deref", "HEAD", candidate):
+            assert tracked.read_text() == "candidate\n"
+            assert git("diff", "--cached", "--name-only").stdout == "tracked.txt\n"
+            assert git("rev-parse", "HEAD").stdout.strip() == prior_head
+            raise MODULE.ReleaseError("injected HEAD failure")
+        git(*args)
+
+    monkeypatch.setattr(MODULE, "git_as_checkout_owner", mutate)
+    receipt = MODULE.source_apply(candidate)
+    if fail_head:
+        assert receipt["status"] == "SOURCE_ROLLED_BACK" and pointer[0] == prior_pointer
+    else:
+        assert receipt["status"] == "SOURCE_APPLIED"
+        assert tracked.read_text() == "candidate\n"
+        assert git("symbolic-ref", "-q", "HEAD", check=False).returncode != 0
+        assert git("rev-parse", prior_ref).stdout.strip() == prior_head
+        MODULE.restore_source_snapshot(snapshot, state)
+    assert tracked.read_text() == "prior\n"
+    assert git("rev-parse", "HEAD").stdout.strip() == prior_head
+    symbolic = git("symbolic-ref", "-q", "HEAD", check=False)
+    assert (symbolic.stdout.strip() if symbolic.returncode == 0 else "") == state["priorRef"]
+    assert git("status", "--porcelain").stdout == ""
+
+
+def test_source_git_mutation_error_is_one_bounded_printable_line(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(MODULE, "REPO", tmp_path)
+    monkeypatch.setattr(MODULE.pwd, "getpwuid", lambda _uid: SimpleNamespace(pw_name="ubuntu"))
+    monkeypatch.setattr(MODULE, "run", lambda *_args, **_kwargs: (_ for _ in ()).throw(
+        subprocess.CalledProcessError(1, ["git"], stderr="\x00\nfatal: " + "x" * 300 + "\nprivate")
+    ))
+    with pytest.raises(MODULE.ReleaseError) as error:
+        MODULE.git_as_checkout_owner("restore")
+    detail = str(error.value).removeprefix("source Git mutation failed:")
+    assert len(detail) == 240 and detail.startswith("fatal: ") and "private" not in detail
+
+
 def test_interrupted_precommit_apply_restores_prior_before_fresh_baseline(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

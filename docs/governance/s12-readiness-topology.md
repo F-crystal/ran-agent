@@ -9,11 +9,12 @@ acceptance criteria and evidence ledger. Chat summaries are not status
 authority.
 
 Current local handoff: S12 creates one exact candidate execution closure and
-invokes its source controller directly. Source-candidate refs are retired;
-the source controller alone owns recovery and the durable current-source
-pointer is the source commit. Unchanged dependency blobs reuse the existing
-`node_modules`. D0-D3 are reviewed `CLEAR` but remain unarchived, production is
-unchanged, and the successor SHA is pending archive.
+invokes its source controller directly. Source-candidate refs are retired
+globally toxic Git metadata; the source controller alone owns recovery and the
+durable current-source pointer is the source commit. Unchanged dependency blobs
+reuse the existing `node_modules`. D0-D3 are reviewed `CLEAR`; the source Git
+convergence excision is locally verified, requires review and remains
+unarchived. Candidate `1cb4077a0c1143b0ff7bdf312c025db110f2f0f0` is retired.
 
 ## Authority And Reading Order
 
@@ -96,7 +97,7 @@ flowchart TD
     SYSFIX --> CLOSURE["Candidate execution closure repair<br/>LOCAL_VERIFIED · NOT_REVIEWED · ARCHIVED BY COMMIT"]
     CLOSURE --> ROUTE["Feishu route contract 2f822d9a<br/>REVIEWED · FIX_REQUIRED"]
     ROUTE --> CUSTODY["Visible-binding custody repair 482e700<br/>REVIEWED · CLEAR"]
-    CUSTODY --> D03["D0-D3 source authority/direct seam/dependency diet<br/>REVIEWED · CLEAR · UNARCHIVED"]
+    CUSTODY --> D03["D0-D3 + source Git convergence excision<br/>LOCAL_VERIFIED · REVIEW REQUIRED · UNARCHIVED"]
     D03 --> D4["D4 local freeze evidence"]
     D4 --> ARCHIVE["Archive exact successor"]
     ARCHIVE --> VERIFY["Canonical exact-successor VERIFY"]
@@ -207,8 +208,8 @@ remain unchanged/not started.
 | S12-CANDIDATE-CLOSURE | `LOCAL_VERIFIED` | `REVIEWED` | `ARCHIVED` at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a` | `S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP` | One private read-only exact-Git closure owns S12 code/manifests across P0-P10; independent review and bounded production candidate-closure proof are clear. |
 | S12-FEISHU-ROUTE | `LOCAL_VERIFIED` | `REVIEWED / FIX_REQUIRED` | `ARCHIVED` at `2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b` | `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP` | Route semantics are accepted; terminal audit found the remaining mutable-path approval/custody gap. |
 | S12-VISIBLE-BINDING-CUSTODY | `LOCAL_VERIFIED` | `REVIEWED / CLEAR` | `ARCHIVED` at `482e70083afb067f1e804cf1a8abd20e4ebf41ab` | `S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP` | Explicit owner digest, one no-follow capture, transaction-local snapshot, existing marker digest and existing Package B receipt preserve one route through P0-P10 without post-P5 pathname authority. |
-| D0-D3 | `LOCAL_VERIFIED` | `REVIEWED / CLEAR` | `UNARCHIVED` | accepted D0-D3 repair sequence | Source refs retired, pointer/recovery authority consolidated, S12 direct source seam installed, and unchanged dependencies reuse live `node_modules`; production is unchanged. |
-| S12 | `NOT_STARTED / LOCAL FREEZE` | not applicable | not applicable | D4 freeze evidence + archive + exact-successor VERIFY + explicit production authorization | No successor SHA exists yet; APPLY is not ready. |
+| D0-D3 | `LOCAL_VERIFIED` | `REVIEWED / CLEAR` for D0-D3; convergence excision review required | `UNARCHIVED` | accepted D0-D3 repair sequence | Pointer/recovery, direct source seam and dependency reuse are unchanged; source apply/rollback use tree/index restore plus separate HEAD projection. |
+| S12 | `NOT_STARTED / LOCAL FREEZE` | not applicable | not applicable | D4 freeze evidence + new successor + exact two-ref deletion + ubuntu Git health + fresh exact-successor VERIFY + new explicit production authorization | `1cb4077a0c1143b0ff7bdf312c025db110f2f0f0` and `owner-s12-apply-20260813T1331+0800` are retired and cannot be reused. Its failed APPLY stopped before Core with no external effect; production is reconciled to `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The exact two toxic production refs require separate owner-authorized deletion after the successor exists and before VERIFY. |
 
 The previous implementation candidate is
 `aabf9bc97ea3fcd95bf6d79798c56315543d0c37`; the repair starts from governance

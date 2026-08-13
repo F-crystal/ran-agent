@@ -102,7 +102,7 @@ S12-R0 fresh read-only production audit (COMPLETE)
   -> Feishu route-contract remediation 2f822d9a (LOCAL_VERIFIED, REVIEWED / FIX_REQUIRED, ARCHIVED)
   -> visible-binding approval/custody remediation 482e700 (LOCAL_VERIFIED, REVIEWED / CLEAR, ARCHIVED)
   -> production canonical VERIFY (STOPPED FAIL-CLOSED before source verification)
-  -> D0-D3 source authority/direct seam/dependency diet (LOCAL_VERIFIED, REVIEWED / CLEAR, UNARCHIVED)
+  -> D0-D3 plus source Git convergence excision (LOCAL_VERIFIED, REVIEW REQUIRED, UNARCHIVED)
   -> D4 local freeze evidence
   -> archive exact successor
   -> canonical S12 transaction VERIFY, then separately authorized APPLY
@@ -312,15 +312,20 @@ S12-R0 fresh read-only production audit (COMPLETE)
   afterward. It is archived at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a`,
   independently reviewed `CLEAR`, and its production candidate-closure proof
   passed.
-- S12 remains `NOT STARTED / LOCAL FREEZE`. D0-D3 are independently reviewed
-  `CLEAR` locally but remain unstaged, uncommitted and unarchived; no successor
-  SHA exists yet. They retire source-candidate refs from source authority,
-  centralize source recovery in the source controller with the durable current
-  pointer as commit, route S12 through one exact candidate execution closure
-  directly to that controller, and reuse unchanged `node_modules`. Production
-  remains at `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`; D0-D3 have not changed it.
-  The next gate is local freeze evidence, then archive, then canonical VERIFY
-  against the exact successor. APPLY is not yet ready or authorized. A private
+- S12 remains `NOT STARTED / LOCAL FREEZE`. D0-D3 remain independently reviewed
+  `CLEAR`; the checkout convergence excision is `LOCAL_VERIFIED`, requires
+  independent review, and is unarchived. D0-D3 still own pointer/recovery,
+  direct candidate execution and unchanged dependency reuse; source apply and
+  rollback now converge the tracked tree/index with `git restore` and project
+  HEAD separately. Candidate `1cb4077a0c1143b0ff7bdf312c025db110f2f0f0`
+  and authorization `owner-s12-apply-20260813T1331+0800` are retired and cannot
+  be reused. Its failed APPLY stopped before Core and caused no external effect;
+  production was reconciled to `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`.
+  Historical source-candidate refs are retired globally toxic Git metadata; the
+  exact production refs require a separate owner-authorized deletion. The next
+  deployment order is: new successor, delete those exact two refs, prove ubuntu
+  Git healthy, run fresh canonical VERIFY, then use new exact-SHA APPLY
+  authorization. A private
   diagnostic trace briefly exposed the raw route, was deleted, and caused no
   effect; this is an operational privacy incident, not a product route/custody
   defect. R2 caused no production mutation. A separately authorized XHS

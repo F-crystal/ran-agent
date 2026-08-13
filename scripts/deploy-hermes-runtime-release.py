@@ -1443,7 +1443,14 @@ def git_as_checkout_owner(*args: str) -> None:
     owner = pwd.getpwuid(REPO.stat().st_uid).pw_name
     if owner != "ubuntu":
         raise ReleaseError("production checkout owner changed")
-    run(["/usr/sbin/runuser", "-u", owner, "--", "git", "-C", str(REPO), *args])
+    try:
+        run(["/usr/sbin/runuser", "-u", owner, "--", "git", "-C", str(REPO), *args])
+    except subprocess.CalledProcessError as exc:
+        stderr = exc.stderr.decode(errors="replace") if isinstance(exc.stderr, bytes) else (exc.stderr or "")
+        lines = ("".join(character for character in line if character.isprintable()).strip()
+                 for line in stderr.splitlines())
+        line = next((line for line in lines if line), "git mutation failed")[:240]
+        raise ReleaseError(f"source Git mutation failed:{line}") from exc
 
 
 def source_candidate_paths(candidate: str) -> set[str]:
@@ -1893,7 +1900,8 @@ def activate_source_profile(candidate: str) -> None:
 
 
 def activate_source_candidate(candidate: str, stage: Path | None, snapshot: Path, *, install_profile: bool) -> None:
-    git_as_checkout_owner("checkout", "--detach", candidate)
+    git_as_checkout_owner("restore", "--source", candidate, "--staged", "--worktree", "--", ":/")
+    git_as_checkout_owner("update-ref", "--no-deref", "HEAD", candidate)
     if stage is not None:
         live_modules = REPO / "node_modules"
         rollback_modules = snapshot / "node_modules.rollback"
@@ -2007,6 +2015,11 @@ def validate_source_acceptance(candidate: str, *, external_probes: bool = True) 
 def restore_source_snapshot(snapshot: Path, state: dict[str, Any]) -> None:
     baseline_kind = state.get("baselineKind", "initial")
     stop_source_services()
+    git_as_checkout_owner("restore", "--source", state["priorHead"], "--staged", "--worktree", "--", ":/")
+    if state.get("priorRef", "").startswith("refs/heads/"):
+        git_as_checkout_owner("symbolic-ref", "HEAD", state["priorRef"])
+    else:
+        git_as_checkout_owner("update-ref", "--no-deref", "HEAD", state["priorHead"])
     for record in reversed(state["paths"]):
         restore_path(snapshot, record)
     live_modules = REPO / "node_modules"
@@ -2015,9 +2028,6 @@ def restore_source_snapshot(snapshot: Path, state: dict[str, Any]) -> None:
         if live_modules.exists():
             shutil.rmtree(live_modules)
         shutil.move(rollback_modules, live_modules)
-    git_as_checkout_owner("checkout", "--detach", state["priorHead"])
-    if baseline_kind == "initial" and state.get("priorRef", "").startswith("refs/heads/"):
-        git_as_checkout_owner("checkout", state["priorRef"].removeprefix("refs/heads/"))
     restore_source_services(state, expected_profile=state.get("priorProfile", "ran-assistant-lite"))
     if sha256_file(SOURCE_OVERLAY_TRANSACTION / "state.json") != state["overlayStateSha256"]:
         raise ReleaseError("accepted overlay record changed across source rollback")

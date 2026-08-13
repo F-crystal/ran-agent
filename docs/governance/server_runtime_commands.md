@@ -101,6 +101,13 @@ entrypoint. Do not invoke source apply/rollback, `core-cutover.mjs`, managed-wak
 reconciliation, `core-wake.mjs`, or the acceptance subordinate as operator
 steps. VERIFY is read-only. APPLY additionally requires the owner's explicit
 identity and authorization reference; a VERIFY result does not authorize it.
+Candidate `1cb4077a0c1143b0ff7bdf312c025db110f2f0f0` and authorization
+`owner-s12-apply-20260813T1331+0800` are retired and cannot be reused. Its failed
+APPLY stopped before Core, caused no external effect, and production was
+reconciled to `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The next deployment
+order is: new successor, delete the exact two toxic refs under separate owner
+authorization, prove ubuntu Git healthy, run fresh canonical VERIFY, then use
+new exact-SHA APPLY authorization.
 VERIFY invokes the candidate source controller directly in `source-verify`
 mode. It may use removable `/tmp` extraction and runtime scratch, but it does
 not create a source candidate ref, release lock, source pointer/snapshot, S12
@@ -173,8 +180,10 @@ governed transaction no longer needs it.
 
 The standalone `bootstrap-hermes-release.sh` source-release entrypoint remains
 supported by the separate source transaction runbook above; S12 does not route
-through it. Historical production source-candidate refs are inert residue, not
-S12 admission or retry prerequisites. Their cleanup is not authorized here.
+through it. Historical production source-candidate refs are retired globally
+toxic Git metadata, not S12 admission or retry prerequisites. The exact two
+production refs require a separate owner-authorized deletion; cleanup is not
+authorized here.
 
 A separate account audit
 (`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy

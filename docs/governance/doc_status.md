@@ -220,18 +220,20 @@ receipt after P5. That custody repair is independently clear at
 `482e70083afb067f1e804cf1a8abd20e4ebf41ab`. Its owner-approved protected
 binding remains installed byte-identically at mode `0600`, with digest
 `sha256:dde57df0d2fc34860a52e486aaccdb1aacccb83d3eedb3de40ccd5109959542f`.
-The historical canonical S12 VERIFY stopped before source verification on its
-bootstrap safe-directory gap. Local D0-D3 are now independently reviewed
-`CLEAR`, unstaged, uncommitted and unarchived; no successor SHA exists yet.
+The historical canonical S12 VERIFY stopped before source verification. Local
+D0-D3 remain independently reviewed `CLEAR`; the checkout-excision successor
+is `LOCAL_VERIFIED / NOT_REVIEWED / UNARCHIVED`, so no successor SHA exists yet.
 Current topology is one exact S12 candidate execution closure invoking the
 candidate source controller directly. The current-source pointer owns source
 commit/recovery truth, unchanged dependencies reuse live `node_modules`, and
-historical source-candidate refs are inert residue rather than admission or
-retry authority. A deleted private diagnostic trace exposed the protected route
-once but caused no external effect and is classified as an operational privacy
-incident, not a product defect. Production remains at `98fd8b3`; S12 APPLY has
-not occurred. The next gate is local freeze evidence, archive, then exact
-successor VERIFY.
+historical source-candidate refs are retired globally toxic metadata. Candidate
+`1cb4077a0c1143b0ff7bdf312c025db110f2f0f0` and authorization
+`owner-s12-apply-20260813T1331+0800` are retired and cannot be reused. Its failed
+APPLY was pre-Core with no external effect; production was reconciled to
+`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The next deployment order is: new
+successor, separately owner-authorized deletion of the exact two toxic refs,
+proof that ubuntu Git is healthy, fresh canonical VERIFY, then new exact-SHA
+APPLY authorization.
 Production source remains `98fd8b3`; R2 attributable production mutation is
 none. The separately authorized XHS public-only recovery is recorded apart
 from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.
