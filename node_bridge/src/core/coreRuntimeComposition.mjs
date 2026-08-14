@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 
-import { createTrustedBridgeInformationalReportTask } from '../hermesTaskScope.mjs';
+import {
+  createTrustedBridgeInformationalReportTask,
+  createTrustedBridgeTask,
+} from '../hermesTaskScope.mjs';
 import { sendFeishuReply } from '../feishuBridge.mjs';
 import {
   buildExternalMcpSyntheticTurn,
@@ -135,7 +138,7 @@ export function createCoreRuntimeComposition({
       };
       const message = task.payloadRef === 'system-task:ai-daily-digest'
         ? createTrustedBridgeInformationalReportTask(base, 'scheduled_ai_daily_digest')
-        : base;
+        : createTrustedBridgeTask(base, 'hermes_proactive_event');
       const response = await channelHub(message, { env, logger, replyBackend: env.replyBackend });
       return {
         replyText: response?.replyText,

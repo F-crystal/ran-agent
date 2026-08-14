@@ -18,7 +18,10 @@ import {
   handleScheduledAiDigestRequest,
   resolveStateDir,
 } from '../src/outboundServer.mjs';
-import { isTrustedInformationalReportTask } from '../src/hermesTaskScope.mjs';
+import {
+  isTrustedHermesTaskScopedMessage,
+  isTrustedInformationalReportTask,
+} from '../src/hermesTaskScope.mjs';
 import { runHermesLiteSoftReset } from '../src/hermesSessionMaintenance.mjs';
 import {
   addExternalMcpWatch,
@@ -541,6 +544,7 @@ test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic
   assert.equal(result.payload.notified, true);
   assert.equal(channelMessage.platform, 'feishu');
   assert.equal(channelMessage.route_hint, 'external_mcp_system_queue');
+  assert.equal(isTrustedHermesTaskScopedMessage(channelMessage), true);
   assert.match(channelMessage.text, /watched forum thread changed/);
   assert.match(channelMessage.text, new RegExp(`evidence_refs: ${evidence.evidence_ref}`));
   assert.match(channelMessage.text, /allowed_capability_tiers: T1,T2/);
@@ -965,6 +969,7 @@ test('handleProactiveEventRequest sends reminder events through Hermes egress', 
   });
 
   assert.equal(result.status, 200);
+  assert.equal(isTrustedHermesTaskScopedMessage(channelMessage), true);
   assert.equal(result.payload.ok, true);
   assert.equal(result.payload.status, 'sent');
   assert.equal(result.payload.notified, true);

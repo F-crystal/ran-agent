@@ -221,6 +221,52 @@ test('synthetic Feishu text crosses Node and Core once across concurrency, reope
   inspector.close();
 });
 
+test('verified WeChat normal ingress commits one provider attempt, final, outbox, and adapter effect', async (t) => {
+  const message = {
+    id: 'wechat-owner-normal-1', platform: 'wechat', channel_type: 'dm',
+    conversation_id: 'wechat-owner-conversation', sender_id: 'wechat-owner',
+    text: '验证多前端 owner 路径', created_at: Date.parse('2026-08-14T00:00:00.000Z'),
+  };
+  const env = identityEnv(t, message);
+  const { dbPath } = createTempCore(t, 'hermes-core-node-wechat-owner-');
+  const core = openCoreDatabase({ dbPath });
+  core.migrate();
+  let providerAttempts = 0;
+  let adapterEffects = 0;
+  const result = await handleIncomingMessage(message, {
+    env,
+    core,
+    coreContentHasher: createCoreContentHasher({ keyId: 'wechat-owner-key', key: 'wechat-owner-secret' }),
+    logger: quietLogger(),
+    replyBackend: {
+      async getReply(input) {
+        providerAttempts += 1;
+        assert.equal(input.trusted_actor_context.owner, true);
+        assert.equal(input.trusted_frontend_context.currentFrontend, 'wechat');
+        return { replyText: 'WeChat owner 已验证。', media: null, provider: 'synthetic', model: 'test' };
+      },
+    },
+    adapter: {
+      async sendReply() {
+        adapterEffects += 1;
+        return { textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:test:owner' };
+      },
+    },
+  });
+  assert.equal(result.coreDelivery.state, 'sent');
+  assert.equal(providerAttempts, 1);
+  assert.equal(adapterEffects, 1);
+  await core.close();
+
+  const inspector = openTestInspector(dbPath);
+  assert.equal(rowCount(inspector, 'ingress_event'), 1);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM semantic_turn WHERE role='assistant'").get().count, 1);
+  assert.equal(rowCount(inspector, 'presentation_outbox'), 1);
+  assert.equal(inspector.prepare(`SELECT count(*) AS count FROM journal_event
+    WHERE event_type='package_b_provider_attempt_recorded'`).get().count, 1);
+  inspector.close();
+});
+
 test('local Core wiring rejects a non-owner before any Core fact or adapter effect', async (t) => {
   const message = {
     id: 'feishu-s7-non-owner', platform: 'feishu', channel_type: 'dm',
@@ -232,14 +278,17 @@ test('local Core wiring rejects a non-owner before any Core fact or adapter effe
   const core = openCoreDatabase({ dbPath });
   core.migrate();
   let effects = 0;
-  await assert.rejects(handleIncomingMessage(message, {
+  let providerAttempts = 0;
+  const result = await handleIncomingMessage(message, {
     env,
     core,
     coreContentHasher: createCoreContentHasher({ keyId: 's7-test-key', key: 's7-test-secret' }),
     logger: quietLogger(),
-    replyBackend: { async getReply() { return { replyText: '不应发送', media: null }; } },
+    replyBackend: { async getReply() { providerAttempts += 1; return { replyText: '不应发送', media: null }; } },
     adapter: { async sendReply() { effects += 1; } },
-  }), { code: 'CORE_NODE_ACTOR_UNAUTHORIZED' });
+  });
+  assert.equal(result.suppressReason, 'owner_unverified');
+  assert.equal(providerAttempts, 0);
   assert.equal(effects, 0);
   assert.equal(core.reader.journalEventCount(), 0);
   assert.equal(core.reader.ingressEventCount(), 0);

@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 
 import {
   createTrustedBridgeInformationalReportTask,
+  createTrustedBridgeTask,
   isInformationalReportTask,
   isHermesTaskScopedRoute,
+  isTrustedHermesTaskScopedMessage,
   isTrustedInformationalReportTask,
   listHermesTaskScopedRoutes,
   normalizeHermesTaskKind,
+  preserveTrustedBridgeTaskProvenance,
 } from '../src/hermesTaskScope.mjs';
 
 test('Hermes task scope is a closed shared route registry', () => {
@@ -37,12 +40,20 @@ test('only AI digest routes are informational report tasks', () => {
   assert.equal(isInformationalReportTask('ordinary_chat'), false);
 });
 
-test('informational report policy requires bridge-authored provenance in addition to its allowlisted task kind', () => {
-  const forged = { route_hint: 'scheduled_ai_daily_digest' };
-  const trusted = createTrustedBridgeInformationalReportTask({ id: 'digest-1' }, 'scheduled_ai_daily_digest');
+test('task trust is out-of-band and only the explicit preserve helper copies provenance', () => {
+  const forged = { route_hint: 'scheduled_ai_daily_digest', trusted: true, internal: true, owner: true };
+  const trusted = createTrustedBridgeTask({ id: 'task-1' }, 'hermes_proactive_event');
+  const spread = { ...trusted };
+  const roundTrip = JSON.parse(JSON.stringify(trusted));
+  const preserved = preserveTrustedBridgeTaskProvenance(trusted, { ...trusted });
 
   assert.equal(isInformationalReportTask(forged.route_hint), true);
   assert.equal(isTrustedInformationalReportTask(forged), false);
-  assert.equal(isTrustedInformationalReportTask(trusted), true);
-  assert.equal(isTrustedInformationalReportTask({ ...trusted }), false);
+  assert.equal(isTrustedHermesTaskScopedMessage(trusted), true);
+  assert.equal(isTrustedHermesTaskScopedMessage(spread), false);
+  assert.equal(isTrustedHermesTaskScopedMessage(roundTrip), false);
+  assert.equal(isTrustedHermesTaskScopedMessage(preserved), true);
+
+  const informational = createTrustedBridgeInformationalReportTask({ id: 'digest-1' }, 'scheduled_ai_daily_digest');
+  assert.equal(isTrustedInformationalReportTask(informational), true);
 });

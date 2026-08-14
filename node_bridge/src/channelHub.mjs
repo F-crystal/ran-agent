@@ -5,6 +5,7 @@ import {
   getHermesSessionId,
   getHermesSessionKey,
   getStableConversationKey,
+  normalizePlatform,
   shortHash,
 } from './identityMap.mjs';
 import {
@@ -17,8 +18,7 @@ import {
 } from './globalTimeline.mjs';
 import {
   isHermesTaskScopedRoute,
-  isInformationalReportTask,
-  isTrustedInformationalReportTask,
+  isTrustedHermesTaskScopedMessage,
   preserveTrustedBridgeTaskProvenance,
 } from './hermesTaskScope.mjs';
 import { deliverNodeTextThroughCore } from './core/packageB/packageBNodeDeliveryService.mjs';
@@ -26,15 +26,26 @@ import { deliverNodeTextThroughCore } from './core/packageB/packageBNodeDelivery
 export async function handleIncomingMessage(normalizedMessage = {}, options = {}) {
   const env = options.env || process.env;
   const logger = options.logger || console;
-  const message = discardUntrustedInformationalRouteHint(
-    preserveTrustedBridgeTaskProvenance(normalizedMessage, normalizeIncomingMessage(normalizedMessage))
-  );
-  const taskScoped = isHermesTaskScopedRoute(message.route_hint);
+  let message;
+  try {
+    message = discardUntrustedTaskRouteHint(
+      preserveTrustedBridgeTaskProvenance(normalizedMessage, normalizeIncomingMessage(normalizedMessage))
+    );
+  } catch (error) {
+    if (error?.code !== 'PLATFORM_UNSUPPORTED') throw error;
+    logger.warn?.('[channel-hub] ingress_denied reason=platform_unsupported');
+    return suppressedIngress('platform_unsupported');
+  }
+  const taskScoped = isTrustedHermesTaskScopedMessage(message);
   const globalUserId = getGlobalUserId(message, { env });
   const trustedActorContext = deriveTrustedActorContext(message, {
     env,
     receivedAt: new Date(Number(message.created_at || Date.now())),
   });
+  if (!taskScoped && trustedActorContext.owner !== true) {
+    logger.warn?.(`[channel-hub] ingress_denied reason=owner_unverified actor_hash=${shortHash(trustedActorContext.actorKey)}`);
+    return suppressedIngress('owner_unverified');
+  }
   const timelineConfig = getGlobalTimelineConfig(env);
   const timelineNow = Number(message.created_at || Date.now());
   const localRecent = taskScoped ? [] : getLocalRecentHistory({
@@ -118,6 +129,11 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     stale_context: staleContext,
     continuity_note: continuityNote,
     trusted_actor_context: trustedActorContext,
+    trusted_frontend_context: {
+      currentFrontend: trustedActorContext.platform,
+      currentChannelType: trustedActorContext.channelType,
+      ownerVerified: trustedActorContext.owner,
+    },
   });
   const response = await backend.getReply(backendMessage, {
     fetchImpl: options.fetchImpl,
@@ -275,8 +291,8 @@ export function normalizeIncomingMessage(input = {}) {
   };
 }
 
-function discardUntrustedInformationalRouteHint(message = {}) {
-  if (isInformationalReportTask(message.route_hint) && !isTrustedInformationalReportTask(message)) {
+function discardUntrustedTaskRouteHint(message = {}) {
+  if (isHermesTaskScopedRoute(message.route_hint) && !isTrustedHermesTaskScopedMessage(message)) {
     return { ...message, route_hint: '' };
   }
   return message;
@@ -350,9 +366,14 @@ function buildReplyTarget(message) {
   };
 }
 
-function normalizePlatform(platform) {
-  const value = String(platform || '').trim().toLowerCase();
-  return ['wechat', 'feishu', 'desktop'].includes(value) ? value : 'wechat';
+function suppressedIngress(reason) {
+  return {
+    replyText: '',
+    followUpMessages: [],
+    media: null,
+    suppressSend: true,
+    suppressReason: reason,
+  };
 }
 
 function firstNonEmptyString(...values) {

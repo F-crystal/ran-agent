@@ -85,6 +85,8 @@ for (const testCase of cases) {
       backend.getReply({
         text: testCase.text,
         sender_id: `phase5-smoke-${testCase.name}`,
+        platform: 'desktop',
+        channel_type: 'desktop',
         route_hint: 'phase5-hermes-gateway-follow-up-smoke',
       }),
       timeoutMs,

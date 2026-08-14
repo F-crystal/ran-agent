@@ -4,6 +4,7 @@ import {
   normalizeProactiveEvent,
   parseHermesProactiveAction,
 } from '../proactiveEvents.mjs';
+import { createTrustedBridgeTask } from '../hermesTaskScope.mjs';
 
 const ROUTE_HINT = 'external_mcp_system_queue';
 const VALID_DELIVERABILITY = new Set(['silent_only', 'draft_allowed', 'notify_allowed']);
@@ -26,7 +27,7 @@ export function buildExternalMcpSyntheticTurn(input = {}) {
     conversation_id: input.conversationId || input.conversation_id,
     sender_id: input.senderId || input.sender_id,
   });
-  return {
+  return createTrustedBridgeTask({
     ...turn,
     id: sanitizeId(input.id || event?.event_id || `external-mcp-${Date.now()}`),
     message_id: sanitizeId(input.id || event?.event_id || `external-mcp-${Date.now()}`),
@@ -35,7 +36,7 @@ export function buildExternalMcpSyntheticTurn(input = {}) {
     conversation_id: sanitizeId(input.conversationId || input.conversation_id || turn.conversation_id || ''),
     sender_id: sanitizeId(input.senderId || input.sender_id || turn.sender_id || ''),
     route_hint: ROUTE_HINT,
-  };
+  }, ROUTE_HINT);
 }
 
 export function shouldSuppressSystemQueueReply({ routeHint = '', replyText = '' } = {}) {

@@ -30,7 +30,12 @@ import {
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { normalizeReplyEnvelope } from './replyEnvelope.mjs';
 import { getSemanticVerifierConfig, verifySemanticClaims } from './semanticClaimVerifier.mjs';
-import { isHermesTaskScopedRoute, isTrustedInformationalReportTask } from './hermesTaskScope.mjs';
+import {
+  isTrustedHermesTaskScopedMessage,
+  isTrustedInformationalReportTask,
+  preserveTrustedBridgeTaskProvenance,
+} from './hermesTaskScope.mjs';
+import { normalizePlatform } from './identityMap.mjs';
 import { createOperationLedger } from './operationLedger.mjs';
 import { digestActionScope } from './actionRequest.mjs';
 import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
@@ -95,10 +100,12 @@ export function createReplyBackend(options = {}) {
 
   return {
     async getReply(message, backendOptions = {}) {
+      const platform = normalizePlatform(message.platform || message.channel);
+      message = preserveTrustedBridgeTaskProvenance(message, { ...message, platform, channel: platform });
       const gatewayConfig = backendOptions.hermesConfig || getHermesGatewayConfig(env);
       const chatImpl = options.hermesImpl || options.chatImpl || sendChatToHermesGateway;
       const requestId = sanitizeRequestId(backendOptions.requestId || message.request_id || createRequestId());
-      const taskScoped = isHermesTaskScopedRoute(message.route_hint);
+      const taskScoped = isTrustedHermesTaskScopedMessage(message);
       const environmentPrivacyCommand = detectEnvironmentPrivacyCommand(message.text);
       if (environmentPrivacyCommand) {
         return {
@@ -145,12 +152,12 @@ export function createReplyBackend(options = {}) {
           source: pendingOutcome.source || 'bridge_pending_action',
         };
       }
-      const hermesInput = {
+      const hermesInput = preserveTrustedBridgeTaskProvenance(message, {
         text: message.text,
         sender_id: message.sender_id,
         conversation_id: message.conversation_id || message.conversationId || message.sender_id,
-        channel: message.platform || message.channel || 'wechat',
-        platform: message.platform || message.channel || 'wechat',
+        channel: message.platform,
+        platform: message.platform,
         channel_type: message.channel_type || '',
         global_user_id: message.global_user_id || '',
         stable_conversation_key: message.stable_conversation_key || '',
@@ -166,7 +173,8 @@ export function createReplyBackend(options = {}) {
         prior_messages: Array.isArray(message.prior_messages) ? message.prior_messages : [],
         image_urls: Array.isArray(message.image_urls) ? message.image_urls : [],
         media: normalizeMediaItems(message.media),
-      };
+        trusted_frontend_context: trustedFrontendContext(message.trusted_frontend_context, platform),
+      });
       const hermesOptions = {
         config: gatewayConfig,
         fetchImpl: backendOptions.fetchImpl,
@@ -310,7 +318,7 @@ export function createReplyBackend(options = {}) {
         let rawContractReplyText = response.reply_text;
         let contract = evaluateActionContract({
           requestId,
-          channel: message.platform || message.channel || 'wechat',
+          channel: message.platform,
           conversationId: message.conversation_id || message.conversationId || message.sender_id,
           profile: gatewayConfig.profile || response.profile || response.model || '',
           message,
@@ -349,7 +357,7 @@ export function createReplyBackend(options = {}) {
             responseText = repairedMediaMarker ? repairedMediaMarker.text : (repair.repairedReply || responseText);
             contract = evaluateActionContract({
               requestId,
-              channel: message.platform || message.channel || 'wechat',
+              channel: message.platform,
               conversationId: message.conversation_id || message.conversationId || message.sender_id,
               profile: gatewayConfig.profile || response.profile || response.model || '',
               message,
@@ -393,7 +401,7 @@ export function createReplyBackend(options = {}) {
         for (const followUpText of finalFollowUpMessages) {
           const followContract = evaluateActionContract({
             requestId,
-            channel: message.platform || message.channel || 'wechat',
+            channel: message.platform,
             conversationId: message.conversation_id || message.conversationId || message.sender_id,
             profile: gatewayConfig.profile || response.profile || response.model || '',
             message,
@@ -585,6 +593,18 @@ function trustedActorContext(value) {
     owner: value.owner === true,
     platform,
     conversationKey,
+  });
+}
+
+function trustedFrontendContext(value, expectedPlatform) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const currentFrontend = normalizePlatform(value.currentFrontend);
+  const currentChannelType = String(value.currentChannelType || '').trim().toLowerCase();
+  if (currentFrontend !== expectedPlatform || !['dm', 'group', 'desktop'].includes(currentChannelType)) return null;
+  return Object.freeze({
+    currentFrontend,
+    currentChannelType,
+    ownerVerified: value.ownerVerified === true,
   });
 }
 
@@ -1220,7 +1240,7 @@ async function ingestVisibleExchange({
   eventId = '',
 }) {
   const ingestPayload = {
-    channel: message.platform || message.channel || 'wechat',
+    channel: message.platform,
     sender_id: message.sender_id,
     conversation_id: message.conversation_id || message.conversationId || message.sender_id,
     global_user_id: message.global_user_id || '',
@@ -1257,7 +1277,7 @@ async function handlePendingActionBeforeHermes({
   env,
 }) {
   const mode = actionGateConfig.mode;
-  const channel = message.platform || message.channel || 'wechat';
+  const channel = message.platform;
   const conversationId = message.conversation_id || message.conversationId || message.sender_id;
   const logger = options.logger || console;
   const now = typeof options.nowImpl === 'function' ? options.nowImpl() : new Date();

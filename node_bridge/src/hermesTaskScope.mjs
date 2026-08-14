@@ -27,14 +27,20 @@ export function isInformationalReportTask(routeHint = '') {
   return INFORMATIONAL_REPORT_TASK_ROUTE_SET.has(normalizeHermesTaskKind(routeHint));
 }
 
+export function createTrustedBridgeTask(message = {}, routeHint = '') {
+  const kind = normalizeHermesTaskKind(routeHint);
+  if (!kind) throw new Error('trusted bridge task kind is invalid');
+  const task = Object.freeze({ ...message, route_hint: kind });
+  TRUSTED_BRIDGE_TASKS.set(task, kind);
+  return task;
+}
+
 export function createTrustedBridgeInformationalReportTask(message = {}, routeHint = '') {
   const kind = normalizeHermesTaskKind(routeHint);
   if (!INFORMATIONAL_REPORT_TASK_ROUTE_SET.has(kind)) {
     throw new Error('trusted informational report task kind is invalid');
   }
-  const task = Object.freeze({ ...message, route_hint: kind });
-  TRUSTED_BRIDGE_TASKS.set(task, kind);
-  return task;
+  return createTrustedBridgeTask(message, kind);
 }
 
 export function preserveTrustedBridgeTaskProvenance(source = {}, target = {}) {
@@ -47,7 +53,12 @@ export function preserveTrustedBridgeTaskProvenance(source = {}, target = {}) {
 
 export function isTrustedInformationalReportTask(message = {}) {
   const kind = normalizeHermesTaskKind(message?.route_hint);
-  return INFORMATIONAL_REPORT_TASK_ROUTE_SET.has(kind) && TRUSTED_BRIDGE_TASKS.get(message) === kind;
+  return INFORMATIONAL_REPORT_TASK_ROUTE_SET.has(kind) && isTrustedHermesTaskScopedMessage(message);
+}
+
+export function isTrustedHermesTaskScopedMessage(message = {}) {
+  const kind = normalizeHermesTaskKind(message?.route_hint);
+  return Boolean(kind && TRUSTED_BRIDGE_TASKS.get(message) === kind);
 }
 
 export function listHermesTaskScopedRoutes() {

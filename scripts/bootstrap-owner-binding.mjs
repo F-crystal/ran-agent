@@ -3,7 +3,7 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { bootstrapOwnerBinding, validateOwnerBindingPreflight } from '../node_bridge/src/identityMap.mjs';
+import { bootstrapOwnerBinding } from '../node_bridge/src/identityMap.mjs';
 
 function parseArgs(argv) {
   if (argv.length === 1 && argv[0] === '--help') return { help: true };
@@ -58,9 +58,6 @@ function main() {
   if (args.help) {
     printHelp();
     return;
-  }
-  if (validateOwnerBindingPreflight().ok) {
-    throw codedError('OWNER_BOOTSTRAP_ALREADY_PRESENT');
   }
   const result = bootstrapOwnerBinding({ trustedIdentity: readTrustedIdentity(args.identityFile) });
   process.stdout.write(`owner-bootstrap: ok bindings=${result.ownerBindingCount}\n`);

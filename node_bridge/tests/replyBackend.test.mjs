@@ -14,7 +14,11 @@ import { createOperationLedger } from '../src/operationLedger.mjs';
 import { createTrustedExecutorAdapters } from '../src/trustedExecutorAdapters.mjs';
 import { listStickers, saveStickersFromInbox } from '../src/stickerCatalog.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
-import { createTrustedBridgeInformationalReportTask, listHermesTaskScopedRoutes } from '../src/hermesTaskScope.mjs';
+import {
+  createTrustedBridgeInformationalReportTask,
+  createTrustedBridgeTask,
+  listHermesTaskScopedRoutes,
+} from '../src/hermesTaskScope.mjs';
 import { createFeishuMinutesDocumentExecutorAdapter } from '../src/feishuMinutesDocumentClient.mjs';
 
 function tempStateEnv(t, extra = {}) {
@@ -52,6 +56,20 @@ test('getReplyBackendConfig returns hermes config', () => {
   assert.equal(config.replyBackend, 'hermes');
   assert.equal(config.fallbackText, 'fallback');
   assert.equal(getReplyBackendConfig({}).replyBackend, 'hermes');
+});
+
+test('reply backend rejects missing or unsupported platform before Hermes', async () => {
+  let providerAttempts = 0;
+  const backend = createReplyBackend({
+    hermesImpl: async () => { providerAttempts += 1; throw new Error('Hermes reached'); },
+  });
+  for (const message of [{ text: 'missing' }, { text: 'unsupported', platform: 'telegram' }]) {
+    await assert.rejects(
+      backend.getReply(message),
+      (error) => error?.code === 'PLATFORM_UNSUPPORTED',
+    );
+  }
+  assert.equal(providerAttempts, 0);
 });
 
 test('manual AI daily digest uses a typed owner action and never enters media compatibility', async (t) => {
@@ -490,13 +508,13 @@ test('createReplyBackend suppresses silent external MCP synthetic turns', async 
     logger: { log() {}, warn() {} },
   });
 
-  const response = await backend.getReply({
+  const response = await backend.getReply(createTrustedBridgeTask({
     text: 'system wake',
     sender_id: 'conv-silent',
     conversation_id: 'conv-silent',
     channel: 'feishu',
     route_hint: 'external_mcp_system_queue',
-  });
+  }, 'external_mcp_system_queue'));
 
   assert.equal(response.replyText, '');
   assert.equal(response.suppressSend, true);
@@ -518,13 +536,13 @@ test('createReplyBackend suppresses remember external MCP synthetic turns withou
     logger: { log() {}, warn() {} },
   });
 
-  const response = await backend.getReply({
+  const response = await backend.getReply(createTrustedBridgeTask({
     text: 'system wake',
     sender_id: 'conv-remember',
     conversation_id: 'conv-remember',
     channel: 'feishu',
     route_hint: 'external_mcp_system_queue',
-  });
+  }, 'external_mcp_system_queue'));
 
   assert.equal(response.replyText, '');
   assert.equal(response.suppressSend, true);
@@ -1599,6 +1617,9 @@ test('createReplyBackend passes route_hint and media to Hermes', async () => {
     sender_id: 'conv-1',
     channel: 'wechat',
     route_hint: 'web_search',
+    trusted_frontend_context: {
+      currentFrontend: 'wechat', currentChannelType: 'dm', ownerVerified: true,
+    },
     message_batch: [{ index: 1, text: '你好' }, { index: 2, text: '再补一句' }],
     image_urls: ['https://example.com/cat.png'],
     media: [
@@ -1619,6 +1640,9 @@ test('createReplyBackend passes route_hint and media to Hermes', async () => {
   assert.equal(response.source, 'hermes');
   assert.equal(ingestPayload?.source, 'hermes');
   assert.equal(chatPayload?.route_hint, 'web_search');
+  assert.deepEqual(chatPayload?.trusted_frontend_context, {
+    currentFrontend: 'wechat', currentChannelType: 'dm', ownerVerified: true,
+  });
   assert.deepEqual(chatPayload?.message_batch, [{ index: 1, text: '你好' }, { index: 2, text: '再补一句' }]);
   assert.deepEqual(chatPayload?.media, [
     {
@@ -1992,13 +2016,13 @@ test('task-scoped Hermes turns never project into the ordinary backend', async (
       logger: { log() {}, warn() {} },
     });
 
-    const response = await backend.getReply({
+    const response = await backend.getReply(createTrustedBridgeTask({
       text: 'synthetic task',
       sender_id: 'synthetic-sender',
       conversation_id: 'synthetic-conversation',
       channel: 'feishu',
       route_hint: routeHint,
-    });
+    }, routeHint));
 
     assert.equal(typeof response.replyText, 'string', routeHint);
     assert.equal(ingestCount, 0, routeHint);

@@ -6,6 +6,7 @@ import { formatExternalMcpTaskRef } from '../../src/core/coreExternalNotificatio
 import { createCoreExternalPollService } from '../../src/core/coreExternalPoll.mjs';
 import { createCoreRuntimeComposition } from '../../src/core/coreRuntimeComposition.mjs';
 import { createCoreSchedulingService } from '../../src/core/coreScheduling.mjs';
+import { isTrustedHermesTaskScopedMessage } from '../../src/hermesTaskScope.mjs';
 import { createTempCore, openTestInspector } from './helpers/testCoreInspector.mjs';
 
 const START = '2026-08-08T15:00:00.000Z';
@@ -122,6 +123,7 @@ test('an admitted external checkpoint is decided by Hermes and sent through the 
   const work = inspect.prepare('SELECT state,failure_class FROM work_run').get();
   assert.equal(work.state, 'completed', JSON.stringify(work));
   assert.equal(messages[0].route_hint, 'external_mcp_system_queue');
+  assert.equal(isTrustedHermesTaskScopedMessage(messages[0]), true);
   assert.deepEqual(messages[0].proactive_event.evidence_refs, ['core-external-mcp:external-fact-1']);
   assert.equal(sends.length, 1);
   const scheduleCause = inspect.prepare(`SELECT event.causation_id AS fact_event_id
@@ -194,6 +196,7 @@ test('daily digest and Feishu chat schedules use the same typed delivery target 
       assert.deepEqual(sends.map((item) => item.target), [fixture.target]);
       assert.equal(messages[0].conversation_id, 'conversation');
       assert.equal(messages[0].channel_type, fixture.destinationKind === 'conversation' ? 'group' : 'dm');
+      assert.equal(isTrustedHermesTaskScopedMessage(messages[0]), true);
       if (fixture.payloadRef === 'system-task:ai-daily-digest') {
         assert.equal(messages[0].route_hint, 'scheduled_ai_daily_digest');
       }

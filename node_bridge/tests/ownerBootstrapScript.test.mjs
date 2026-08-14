@@ -26,7 +26,7 @@ test('owner bootstrap command accepts only an explicit protected identity file a
   const trustedIdentity = {
     platform: 'feishu',
     senderId: 'ou-private-owner-id',
-    globalUserId: 'user:private-owner',
+    globalUserId: 'user:ran',
     provenance: 'trusted_bridge_operator_export',
   };
   writeFileSync(trustedIdentityPath, JSON.stringify(trustedIdentity));
@@ -40,20 +40,32 @@ test('owner bootstrap command accepts only an explicit protected identity file a
   assert.equal(output.includes(trustedIdentity.globalUserId), false);
   assert.equal(getIdentityBinding({ platform: 'feishu', sender_id: trustedIdentity.senderId }, { env }).owner, true);
   const stored = readFileSync(identityMapPath, 'utf8');
+  const feishuKey = getAccountBindingKey({ platform: 'feishu', sender_id: trustedIdentity.senderId });
+  const feishuBinding = structuredClone(JSON.parse(stored).bindings[feishuKey]);
   assert.equal(stored.includes(trustedIdentity.senderId), false);
   assert.equal(existsSync(trustedIdentityPath), true);
 
-  const replacementIdentityPath = join(isolated.RAN_AGENT_STATE_DIR, 'replacement-owner.json');
-  writeFileSync(replacementIdentityPath, JSON.stringify({
-    ...trustedIdentity,
-    senderId: 'ou-replacement-owner-id',
+  const wechatIdentityPath = join(isolated.RAN_AGENT_STATE_DIR, 'wechat-owner.json');
+  writeFileSync(wechatIdentityPath, JSON.stringify({
+    platform: 'wechat', senderId: 'wx-private-owner-id', globalUserId: 'user:ran', provenance: 'trusted_bridge_operator_export',
   }));
-  chmodSync(replacementIdentityPath, 0o600);
+  chmodSync(wechatIdentityPath, 0o600);
+  assert.match(run(['--identity-file', wechatIdentityPath], env), /owner-bootstrap: ok bindings=2/);
+  assert.deepEqual(JSON.parse(readFileSync(identityMapPath, 'utf8')).bindings[feishuKey], feishuBinding);
+  const afterAddition = readFileSync(identityMapPath, 'utf8');
+  assert.match(run(['--identity-file', wechatIdentityPath], env), /owner-bootstrap: ok bindings=2/);
+  assert.equal(readFileSync(identityMapPath, 'utf8'), afterAddition);
+
+  const conflictingIdentityPath = join(isolated.RAN_AGENT_STATE_DIR, 'conflicting-owner.json');
+  writeFileSync(conflictingIdentityPath, JSON.stringify({
+    platform: 'wechat', senderId: 'wx-private-owner-id', globalUserId: 'user:other', provenance: 'trusted_bridge_operator_export',
+  }));
+  chmodSync(conflictingIdentityPath, 0o600);
   assert.throws(
-    () => run(['--identity-file', replacementIdentityPath], env),
+    () => run(['--identity-file', conflictingIdentityPath], env),
     /Command failed/,
   );
-  assert.equal(getIdentityBinding({ platform: 'feishu', sender_id: 'ou-replacement-owner-id' }, { env }).owner, false);
+  assert.equal(getIdentityBinding({ platform: 'wechat', sender_id: 'wx-private-owner-id' }, { env }).globalUserId, 'user:ran');
 });
 
 test('owner bootstrap command never derives an identity from fallback environment or missing input', (t) => {

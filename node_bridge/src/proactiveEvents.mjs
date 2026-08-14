@@ -1,3 +1,5 @@
+import { createTrustedBridgeTask } from './hermesTaskScope.mjs';
+
 const VALID_KINDS = new Set([
   'reminder',
   'forum_watch',
@@ -90,7 +92,7 @@ export function buildProactiveSyntheticTurn(event, target = {}) {
     'Return exactly one JSON object with action silent, remember, draft, or notify.',
     'For notify, include message, evidence_refs, and why_now. Do not send generic check-ins.',
   ].join('\n');
-  return {
+  return createTrustedBridgeTask({
     id,
     message_id: id,
     platform: event.channel || 'feishu',
@@ -103,7 +105,7 @@ export function buildProactiveSyntheticTurn(event, target = {}) {
     text,
     media: [],
     created_at: Date.parse(event.created_at) || Date.now(),
-  };
+  }, PROACTIVE_ROUTE_HINT);
 }
 
 export function evaluateProactiveAdmission(event, options = {}) {

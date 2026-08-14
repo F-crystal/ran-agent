@@ -6,6 +6,7 @@ import {
   evaluateExternalMcpSystemQueueEgress,
   shouldSuppressSystemQueueReply,
 } from '../src/externalMcp/systemQueue.mjs';
+import { isTrustedHermesTaskScopedMessage } from '../src/hermesTaskScope.mjs';
 
 test('system queue builds synthetic Hermes turns without outbound content ownership', () => {
   const turn = buildExternalMcpSyntheticTurn({
@@ -28,6 +29,7 @@ test('system queue builds synthetic Hermes turns without outbound content owners
   assert.equal(turn.conversation_id, 'oc-home');
   assert.equal(turn.sender_id, 'ou-home');
   assert.equal(turn.route_hint, 'external_mcp_system_queue');
+  assert.equal(isTrustedHermesTaskScopedMessage(turn), true);
   assert.match(turn.text, /watched forum thread changed/);
   assert.match(turn.text, /event_id: watch-1/);
   assert.match(turn.text, /evidence_refs: external_mcp_evidence:abc123/);

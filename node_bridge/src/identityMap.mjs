@@ -166,6 +166,25 @@ export function bootstrapOwnerBinding({ trustedIdentity, env = process.env, now 
     provenance,
     createdAt,
   };
+  const existingOwnerGlobalUserIds = new Set(Object.entries(state.bindings)
+    .filter(([existingKey, candidate]) => {
+      const expected = parseBindingKey(existingKey);
+      return expected && candidate?.owner === true && isValidVersionedBinding(candidate, expected);
+    })
+    .map(([, candidate]) => candidate.globalUserId));
+  if (existingOwnerGlobalUserIds.size > 1) {
+    throw ownerBindingError('OWNER_BOOTSTRAP_GLOBAL_USER_CONFLICT');
+  }
+  const existing = state.bindings[key];
+  if (existing) {
+    if (isSameOwnerBinding(existing, binding)) {
+      return validateOwnerBindingPreflight({ env, identityMap: state });
+    }
+    throw ownerBindingError('OWNER_BOOTSTRAP_BINDING_CONFLICT');
+  }
+  if (existingOwnerGlobalUserIds.size === 1 && !existingOwnerGlobalUserIds.has(globalUserId)) {
+    throw ownerBindingError('OWNER_BOOTSTRAP_GLOBAL_USER_CONFLICT');
+  }
   const next = {
     schemaVersion: 2,
     bindings: { ...state.bindings, [key]: binding },
@@ -187,9 +206,26 @@ function readIdentityMap(filePath) {
   });
 }
 
-function normalizePlatform(platform) {
+export function normalizePlatform(platform) {
   const value = String(platform || '').trim().toLowerCase();
-  return ['wechat', 'feishu', 'desktop'].includes(value) ? value : 'wechat';
+  if (['wechat', 'feishu', 'desktop'].includes(value)) return value;
+  const error = new Error('recognized platform is required');
+  error.code = 'PLATFORM_UNSUPPORTED';
+  throw error;
+}
+
+function isSameOwnerBinding(left, right) {
+  return left?.platform === right.platform
+    && left?.senderHash === right.senderHash
+    && left?.globalUserId === right.globalUserId
+    && left?.owner === true
+    && left?.provenance === right.provenance;
+}
+
+function ownerBindingError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
 }
 
 function normalizeChannelType(value, fallback) {

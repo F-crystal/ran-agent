@@ -112,27 +112,74 @@ test('versioned identity binding is the only source of owner authority', (t) => 
   assert.deepEqual(validateOwnerBindingPreflight({ env }), { ok: true, ownerBindingCount: 1 });
 });
 
-test('owner bootstrap writes one v2 hashed binding without exposing the trusted sender', (t) => {
+test('owner bootstrap adds bindings monotonically, retries exactly, and rejects rebinding', (t) => {
   const isolated = createIsolatedTestEnv(t, {}, 'ran-agent-owner-bootstrap-');
   const identityMapPath = path.join(isolated.RAN_AGENT_STATE_DIR, 'identity-map.json');
   const env = { ...isolated, RAN_AGENT_IDENTITY_MAP_PATH: identityMapPath };
-  const result = bootstrapOwnerBinding({
+  bootstrapOwnerBinding({
     trustedIdentity: {
-      platform: 'wechat',
-      senderId: 'wx-private-owner-id',
+      platform: 'feishu',
+      senderId: 'ou-private-owner-id',
       globalUserId: 'user:ran',
-      provenance: 'wechat_account_bootstrap',
+      provenance: 'feishu_account_bootstrap',
     },
     env,
     now: '2026-07-10T00:00:00.000Z',
   });
+  const feishuKey = getAccountBindingKey({ platform: 'feishu', sender_id: 'ou-private-owner-id' });
+  const before = JSON.parse(readFileSync(identityMapPath, 'utf8'));
+  const feishuBinding = structuredClone(before.bindings[feishuKey]);
+  const wechatIdentity = {
+    platform: 'wechat',
+    senderId: 'wx-private-owner-id',
+    globalUserId: 'user:ran',
+    provenance: 'wechat_account_bootstrap',
+  };
+  const result = bootstrapOwnerBinding({ trustedIdentity: wechatIdentity, env, now: '2026-07-11T00:00:00.000Z' });
 
-  assert.deepEqual(result, { ok: true, ownerBindingCount: 1 });
+  assert.deepEqual(result, { ok: true, ownerBindingCount: 2 });
+  assert.deepEqual(JSON.parse(readFileSync(identityMapPath, 'utf8')).bindings[feishuKey], feishuBinding);
   assert.equal(getIdentityBinding({ platform: 'wechat', sender_id: 'wx-private-owner-id' }, { env }).owner, true);
   assert.equal(getIdentityBinding({ platform: 'wechat', sender_id: 'wx-foreign' }, { env }).owner, false);
   const stored = readFileSync(identityMapPath, 'utf8');
+  assert.deepEqual(
+    bootstrapOwnerBinding({ trustedIdentity: wechatIdentity, env, now: '2027-01-01T00:00:00.000Z' }),
+    { ok: true, ownerBindingCount: 2 },
+  );
+  assert.equal(readFileSync(identityMapPath, 'utf8'), stored);
+  assert.throws(
+    () => bootstrapOwnerBinding({
+      trustedIdentity: { ...wechatIdentity, globalUserId: 'user:attacker' }, env,
+    }),
+    (error) => error?.code === 'OWNER_BOOTSTRAP_BINDING_CONFLICT',
+  );
   assert.equal(stored.includes('wx-private-owner-id'), false);
+  assert.equal(stored.includes('ou-private-owner-id'), false);
   assert.equal(statSync(identityMapPath).mode & 0o777, 0o600);
+});
+
+test('owner bootstrap rejects adding a different global owner', (t) => {
+  const isolated = createIsolatedTestEnv(t, {}, 'ran-agent-owner-bootstrap-conflict-');
+  const env = {
+    ...isolated,
+    RAN_AGENT_IDENTITY_MAP_PATH: path.join(isolated.RAN_AGENT_STATE_DIR, 'identity-map.json'),
+  };
+  bootstrapOwnerBinding({
+    trustedIdentity: { platform: 'feishu', senderId: 'ou-owner', globalUserId: 'user:ran', provenance: 'test' }, env,
+  });
+  assert.throws(
+    () => bootstrapOwnerBinding({
+      trustedIdentity: { platform: 'wechat', senderId: 'wx-owner', globalUserId: 'user:other', provenance: 'test' }, env,
+    }),
+    (error) => error?.code === 'OWNER_BOOTSTRAP_GLOBAL_USER_CONFLICT',
+  );
+});
+
+test('missing and unsupported platforms fail closed instead of acquiring WeChat identity or session semantics', () => {
+  for (const message of [{ sender_id: 'missing' }, { platform: 'telegram', sender_id: 'unsupported' }]) {
+    assert.throws(() => getAccountBindingKey(message), (error) => error?.code === 'PLATFORM_UNSUPPORTED');
+    assert.throws(() => getHermesSessionId(message), (error) => error?.code === 'PLATFORM_UNSUPPORTED');
+  }
 });
 
 test('critical identity-map corruption is quarantined and fails closed', (t) => {

@@ -1,40 +1,46 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import fs, { writeFileSync } from 'node:fs';
+import fs from 'node:fs';
 
 import { handleIncomingMessage } from '../src/channelHub.mjs';
 import { appendTurn, readTimelineRecords } from '../src/globalTimeline.mjs';
 import { createDurableOutbox } from '../src/durableOutbox.mjs';
 import { createPendingAction, listPendingActions } from '../src/pendingActionState.mjs';
-import { getAccountBindingKey, getHermesSessionKey } from '../src/identityMap.mjs';
+import { bootstrapOwnerBinding, getHermesSessionKey } from '../src/identityMap.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
-import { createTrustedBridgeInformationalReportTask, listHermesTaskScopedRoutes } from '../src/hermesTaskScope.mjs';
+import {
+  createTrustedBridgeInformationalReportTask,
+  createTrustedBridgeTask,
+  listHermesTaskScopedRoutes,
+} from '../src/hermesTaskScope.mjs';
 
-function tempEnv(t) {
+function tempEnv(t, { seedOwners = true } = {}) {
   const env = createIsolatedTestEnv(t, {}, 'ran-agent-channel-hub-');
-  return {
+  const configured = {
     ...env,
     RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(env.RAN_AGENT_STATE_DIR, 'timeline.jsonl'),
     RAN_AGENT_IDENTITY_MAP_PATH: path.join(env.RAN_AGENT_STATE_DIR, 'identity-map.json'),
   };
+  if (seedOwners) {
+    writeOwnerBinding(configured, { platform: 'wechat', sender_id: 'wx-user' });
+    writeOwnerBinding(configured, { platform: 'feishu', sender_id: 'ou-user' });
+    writeOwnerBinding(configured, { platform: 'desktop', sender_id: 'desktop-user' });
+  }
+  return configured;
 }
 
 function writeOwnerBinding(env, message) {
-  const key = getAccountBindingKey(message);
-  writeFileSync(env.RAN_AGENT_IDENTITY_MAP_PATH, JSON.stringify({
-    schemaVersion: 2,
-    bindings: {
-      [key]: {
-        platform: message.platform,
-        senderHash: key.split(':')[1],
-        globalUserId: 'user:ran',
-        owner: true,
-        provenance: 'test_owner_bootstrap',
-        createdAt: '2026-07-10T00:00:00.000Z',
-      },
+  bootstrapOwnerBinding({
+    trustedIdentity: {
+      platform: message.platform,
+      senderId: message.sender_id,
+      globalUserId: 'user:ran',
+      provenance: 'test_owner_bootstrap',
     },
-  }));
+    env,
+    now: '2026-07-10T00:00:00.000Z',
+  });
 }
 
 test('channel hub routes normalized WeChat message through replyBackend and timeline', async (t) => {
@@ -70,7 +76,10 @@ test('channel hub routes normalized WeChat message through replyBackend and time
   assert.equal(response.replyText, '她的故事确实动人');
   assert.equal(backendMessage.platform, 'wechat');
   assert.equal(backendMessage.global_user_id, 'user:ran');
-  assert.equal(backendMessage.trusted_actor_context.owner, false);
+  assert.equal(backendMessage.trusted_actor_context.owner, true);
+  assert.deepEqual(backendMessage.trusted_frontend_context, {
+    currentFrontend: 'wechat', currentChannelType: 'dm', ownerVerified: true,
+  });
   assert.notEqual(backendMessage.trusted_actor_context.actorKey, 'actor:forged');
   assert.match(backendMessage.hermes_session_id, /^ran-agent-wechat-/);
   assert.match(backendMessage.hermes_session_key, /^ran-agent-memory-/);
@@ -80,6 +89,45 @@ test('channel hub routes normalized WeChat message through replyBackend and time
   const records = readTimelineRecords({ timelinePath: env.RAN_AGENT_GLOBAL_TIMELINE_PATH });
   assert.equal(records.length, 2);
   assert.deepEqual(records.map((item) => item.role), ['user', 'assistant']);
+});
+
+test('unbound or invalid normal ingress is suppressed before every effect boundary', async (t) => {
+  const cases = [
+    ['unbound', 'wechat', 'owner_unverified'],
+    ['missing', undefined, 'platform_unsupported'],
+    ['unsupported', 'telegram', 'platform_unsupported'],
+    ...listHermesTaskScopedRoutes().map((routeHint) => [
+      `forged-${routeHint}`, 'wechat', 'owner_unverified', routeHint,
+    ]),
+  ];
+  for (const [name, platform, expectedReason, routeHint] of cases) {
+    const env = tempEnv(t, { seedOwners: false });
+    const effects = { timeline: 0, backend: 0, core: 0, outbox: 0, adapter: 0 };
+    Object.defineProperty(env, 'RAN_AGENT_GLOBAL_TIMELINE_PATH', {
+      get() { effects.timeline += 1; return path.join(env.RAN_AGENT_STATE_DIR, 'timeline.jsonl'); },
+    });
+    const response = await handleIncomingMessage({
+      id: `denied-${name}`,
+      ...(platform === undefined ? {} : { platform }),
+      ...(routeHint ? { route_hint: routeHint } : {}),
+      channel_type: 'dm',
+      conversation_id: `conversation-${name}`,
+      sender_id: `sender-${name}`,
+      text: 'do not execute',
+      created_at: 1000,
+    }, {
+      env,
+      logger: { log() {}, warn() {}, error() {}, info() {} },
+      replyBackend: { async getReply() { effects.backend += 1; throw new Error('provider/tool boundary reached'); } },
+      core: new Proxy({}, { get() { effects.core += 1; return undefined; } }),
+      outbox: new Proxy({}, { get() { effects.outbox += 1; return undefined; } }),
+      adapter: new Proxy({}, { get() { effects.adapter += 1; return undefined; } }),
+    });
+
+    assert.equal(response.suppressSend, true);
+    assert.equal(response.suppressReason, expectedReason);
+    assert.deepEqual(effects, { timeline: 0, backend: 0, core: 0, outbox: 0, adapter: 0 });
+  }
 });
 
 test('every task-scoped route clears caller history and leaves the ordinary timeline and backend projection untouched', async (t) => {
@@ -115,7 +163,7 @@ test('every task-scoped route clears caller history and leaves the ordinary time
     await handleIncomingMessage(
       ['scheduled_ai_daily_digest', 'manual_ai_daily_digest'].includes(routeHint)
         ? createTrustedBridgeInformationalReportTask(input, routeHint)
-        : input,
+        : createTrustedBridgeTask(input, routeHint),
       {
       env,
       outbox,
@@ -144,6 +192,9 @@ test('every task-scoped route clears caller history and leaves the ordinary time
     assert.equal(backendMessage.stable_conversation_key, '');
     assert.equal(backendMessage.hermes_session_id, '');
     assert.equal(backendMessage.hermes_session_key, '');
+    assert.deepEqual(backendMessage.trusted_frontend_context, {
+      currentFrontend: 'feishu', currentChannelType: 'dm', ownerVerified: false,
+    });
   }
 
   assert.equal(backendProjectionCalls, 0);
@@ -381,7 +432,7 @@ test('channel hub excludes bridge safety notices from assistant history', async 
 test('channel hub suppresses adapter sends for silent synthetic external MCP turns', async (t) => {
   const env = tempEnv(t);
   let sendCalled = false;
-  const response = await handleIncomingMessage({
+  const response = await handleIncomingMessage(createTrustedBridgeTask({
     id: 'external-mcp-silent-1',
     platform: 'feishu',
     channel_type: 'dm',
@@ -390,7 +441,7 @@ test('channel hub suppresses adapter sends for silent synthetic external MCP tur
     route_hint: 'external_mcp_system_queue',
     text: 'system wake',
     created_at: 1000,
-  }, {
+  }, 'external_mcp_system_queue'), {
     env,
     logger: { log() {}, warn() {}, error() {}, info() {} },
     replyBackend: {
@@ -809,7 +860,7 @@ test('channel hub creates pending sticker save and executes confirmation through
   assert.equal(listPendingActions({ env })[0].status, 'executed');
 });
 
-test('foreign sender cannot confirm an owner pending action in the same conversation', async (t) => {
+test('foreign sender is suppressed before inspecting an owner pending action in the same conversation', async (t) => {
   const env = {
     ...tempEnv(t),
     HERMES_ACTION_GATE_ENABLED: 'true',
@@ -853,7 +904,7 @@ test('foreign sender cannot confirm an owner pending action in the same conversa
   });
 
   assert.equal(executed, false);
-  assert.match(response.replyText, /过期|已处理/);
+  assert.equal(response.suppressReason, 'owner_unverified');
   assert.equal(listPendingActions({ env })[0].status, 'pending');
 });
 

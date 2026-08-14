@@ -25,7 +25,8 @@ export async function runHermesProviderBoundaryCanary(options = {}) {
   const result = await sendChatToHermesGateway({
     text: `O1 provider-boundary canary nonce=${nonce}. Return only the provider-issued canary receipt.`,
     sender_id: `ombre-o1-provider-canary-${mode}`,
-    channel: 'release-canary',
+    platform: 'desktop',
+    channel_type: 'desktop',
   }, {
     config: getHermesGatewayConfig(env),
     logger: options.logger || { log() {}, warn() {} },
