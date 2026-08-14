@@ -30,6 +30,36 @@ def _local_sealed_profile_parser(monkeypatch: pytest.MonkeyPatch) -> None:
     ))
 
 
+def wake_blobs(lite_home: Path, profile_dir: Path, payload: bytes = b"#!/bin/sh\nexit 0\n") -> dict[str, bytes]:
+    manifest = {
+        "schemaVersion": 1,
+        "status": "CURRENT",
+        "runtime": {
+            "provider": "hermes-cron",
+            "home": str(lite_home),
+            "profile": MODULE.SOURCE_PROFILE,
+            "scriptTimeoutSeconds": 30,
+        },
+        "job": {
+            "name": "ran-agent-core-wake",
+            "schedule": "every 1m",
+            "script": "core-wake.sh",
+            "scriptSource": MODULE.SOURCE_WAKE_SCRIPT_SOURCE,
+            "scriptTarget": str(profile_dir / "scripts/core-wake.sh"),
+            "workdir": "/opt/ran_agent",
+            "no_agent": True,
+            "deliver": "local",
+            "enabled": False,
+            "state": "paused",
+            "pauseReason": "awaiting-owner-s12-production-authorization",
+        },
+    }
+    return {
+        MODULE.SOURCE_MANAGED_WAKE_PATH: json.dumps(manifest).encode(),
+        MODULE.SOURCE_WAKE_SCRIPT_SOURCE: payload,
+    }
+
+
 def test_env_patch_changes_only_managed_keys_and_collapses_duplicates() -> None:
     original = b"# keep\nSECRET=private\nHERMES_PROFILE=old\nHERMES_PROFILE=older\nTAIL=value\n"
     patched = MODULE.patch_env_bytes(
@@ -273,8 +303,9 @@ def test_source_profile_activation_uses_companion_for_current_and_future_advance
     assert b"search_backend:" not in companion and b"extract_backend:" not in companion
 
 
+@pytest.mark.parametrize("prior_script", [False, True])
 def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, prior_script: bool,
 ) -> None:
     prior_head = "a" * 40
     candidate = "b" * 40
@@ -286,6 +317,10 @@ def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
     profile_config = profile_dir / "config.yaml"
     root_config.write_bytes(b"prior-root\n")
     profile_config.write_bytes(b"prior-profile\n")
+    script_target = profile_dir / "scripts/core-wake.sh"
+    if prior_script:
+        script_target.parent.mkdir()
+        script_target.write_bytes(b"prior-script\n")
     snapshot_root = tmp_path / "snapshots"
     snapshot = snapshot_root / "source-new"
     (snapshot / "files").mkdir(parents=True)
@@ -315,6 +350,8 @@ def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
     pointer.write_text(json.dumps({"candidate": candidate, "snapshot": str(snapshot)}))
     repo.mkdir()
     companion = (Path(__file__).parents[1] / MODULE.PROFILE_PATH).read_bytes()
+    blobs = wake_blobs(lite_home, profile_dir)
+    blobs[MODULE.PROFILE_PATH] = companion
     monkeypatch.setattr(MODULE, "REPO", repo)
     monkeypatch.setattr(MODULE, "LITE_HOME", lite_home)
     monkeypatch.setattr(MODULE, "SOURCE_PROFILE_DIR", profile_dir)
@@ -327,7 +364,7 @@ def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
     monkeypatch.setattr(MODULE, "SOURCE_OVERLAY_TRANSACTION", overlay)
     monkeypatch.setattr(MODULE, "SOURCE_HERMES_OVERLAY_DROPIN", tmp_path / "missing-hermes-dropin")
     monkeypatch.setattr(MODULE, "SOURCE_PYTHON_OVERLAY_DROPIN", tmp_path / "missing-python-dropin")
-    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, _path: companion)
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     monkeypatch.setattr(MODULE, "stop_source_services", lambda: None)
     monkeypatch.setattr(MODULE, "restore_source_services", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(MODULE, "restore_metadata", lambda *_args: None)
@@ -341,11 +378,16 @@ def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
     )
 
     MODULE.activate_source_profile(candidate)
+    MODULE.project_source_wake_script(candidate)
     assert root_config.read_bytes() == companion and profile_config.read_bytes() == companion
+    assert script_target.read_bytes() == blobs[MODULE.SOURCE_WAKE_SCRIPT_SOURCE]
+    assert not script_target.is_symlink() and script_target.stat().st_mode & 0o777 == 0o755
+    assert (script_target.stat().st_uid, script_target.stat().st_gid) == (os.getuid(), os.getgid())
     MODULE.source_rollback(snapshot, candidate)
 
     assert root_config.read_bytes() == b"prior-root\n"
     assert profile_config.read_bytes() == b"prior-profile\n"
+    assert (script_target.read_bytes() == b"prior-script\n") if prior_script else not script_target.exists()
     assert json.loads(pointer.read_text()) == prior_pointer
 
 
@@ -398,10 +440,17 @@ def test_source_apply_retry_uses_committed_pointer_without_mutation(
         MODULE, "stage_source_candidate",
         lambda *_args: (_ for _ in ()).throw(AssertionError("retry staged source")),
     )
+    validations = []
+    monkeypatch.setattr(MODULE, "require_source_wake_script", lambda value: validations.append(value))
+    monkeypatch.setattr(
+        MODULE, "project_source_wake_script",
+        lambda _value: (_ for _ in ()).throw(AssertionError("retry reprojected wake script")),
+    )
 
     assert MODULE.source_apply(candidate) == {
         "status": "SOURCE_APPLIED", "candidate": candidate, "snapshot": str(snapshot),
     }
+    assert validations == [candidate]
 
 
 def test_source_baseline_uses_dependency_blobs_for_reuse_admission(
@@ -523,6 +572,7 @@ def test_source_git_convergence_and_head_failure_recovery(
         "priorRef": prior_ref if prior_form == "branch" else "", "priorPointer": prior_pointer,
         "paths": [], "overlayStateSha256": MODULE.sha256_file(overlay / "state.json"),
     }
+    activation_order = []
     for name, value in (
         ("REPO", repo), ("SOURCE_SNAPSHOT_ROOT", tmp_path / "snapshots"),
         ("SOURCE_OVERLAY_TRANSACTION", overlay), ("ENV_FILES", ()),
@@ -541,8 +591,9 @@ def test_source_git_convergence_and_head_failure_recovery(
     monkeypatch.setattr(MODULE, "persist_source_authority", lambda _candidate: tmp_path / "controller")
     monkeypatch.setattr(MODULE, "create_source_snapshot", lambda *_args: (snapshot, state))
     monkeypatch.setattr(MODULE, "stop_source_services", lambda: None)
-    monkeypatch.setattr(MODULE, "restore_source_services", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(MODULE, "activate_source_profile", lambda _candidate: None)
+    monkeypatch.setattr(MODULE, "restore_source_services", lambda *_args, **_kwargs: activation_order.append("restart"))
+    monkeypatch.setattr(MODULE, "activate_source_profile", lambda _candidate: activation_order.append("profile"))
+    monkeypatch.setattr(MODULE, "project_source_wake_script", lambda _candidate: activation_order.append("wake"))
     monkeypatch.setattr(MODULE, "validate_source_acceptance", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(MODULE, "candidate_blob", lambda *_args: b"unit\n")
     monkeypatch.setattr(MODULE, "atomic_write", lambda path, data, **_kwargs: path.write_bytes(data))
@@ -561,6 +612,7 @@ def test_source_git_convergence_and_head_failure_recovery(
         assert receipt["status"] == "SOURCE_ROLLED_BACK" and pointer[0] == prior_pointer
     else:
         assert receipt["status"] == "SOURCE_APPLIED"
+        assert activation_order == ["profile", "wake", "restart"]
         assert tracked.read_text() == "candidate\n"
         assert git("symbolic-ref", "-q", "HEAD", check=False).returncode != 0
         assert git("rev-parse", prior_ref).stdout.strip() == prior_head

@@ -96,6 +96,7 @@ SOURCE_NPM_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/npm")
 SOURCE_PROFILE = "ran-agent-companion"
 SOURCE_PROFILE_DIR = LITE_HOME / f"profiles/{SOURCE_PROFILE}"
 SOURCE_LEGACY_PROFILE_DIR = LITE_HOME / "profiles/ran-assistant-lite"
+SOURCE_WAKE_SCRIPT_SOURCE = "hermes/profile/scripts/core-wake.sh"
 SOURCE_HERMES_OVERLAY_DROPIN = LITE_UNIT.with_suffix(".service.d") / "30-companion-overlay.conf"
 SOURCE_PYTHON_OVERLAY_DROPIN = Path("/etc/systemd/system/ran-agent-python.service.d/30-personal-memory-overlay.conf")
 SOURCE_NODE_STEWARD_DROPIN = Path("/etc/systemd/system/ran-agent-node.service.d/99-ombre-steward-identity.conf")
@@ -1734,6 +1735,54 @@ def source_snapshot_paths() -> tuple[Path, ...]:
     )
 
 
+def source_wake_script(candidate: str) -> tuple[bytes, Path]:
+    manifest = load_candidate_json(REPO, candidate, SOURCE_MANAGED_WAKE_PATH)
+    runtime = manifest.get("runtime")
+    job = manifest.get("job")
+    target = SOURCE_PROFILE_DIR / "scripts/core-wake.sh"
+    if (
+        manifest.get("schemaVersion") != 1 or manifest.get("status") != "CURRENT"
+        or not isinstance(runtime, dict) or not isinstance(job, dict)
+        or runtime.get("home") != str(LITE_HOME) or runtime.get("profile") != SOURCE_PROFILE
+        or job.get("script") != "core-wake.sh"
+        or job.get("scriptSource") != SOURCE_WAKE_SCRIPT_SOURCE
+        or job.get("scriptTarget") != str(target)
+    ):
+        raise ReleaseError("managed wake script contract is invalid")
+    return candidate_blob(REPO, candidate, SOURCE_WAKE_SCRIPT_SOURCE), target
+
+
+def project_source_wake_script(candidate: str) -> None:
+    payload, target = source_wake_script(candidate)
+    account = pwd.getpwnam("ubuntu")
+    parent = target.parent
+    if parent.is_symlink() or (parent.exists() and not parent.is_dir()):
+        raise ReleaseError("managed wake scripts directory is invalid")
+    if not parent.exists():
+        parent.mkdir(mode=0o700)
+        os.chown(parent, account.pw_uid, account.pw_gid)
+    require_real_directory_chain(SOURCE_PROFILE_DIR, parent)
+    if any(path.stat().st_uid != account.pw_uid or path.stat().st_gid != account.pw_gid
+           for path in (SOURCE_PROFILE_DIR, parent)):
+        raise ReleaseError("managed wake scripts directory identity is invalid")
+    if target.is_symlink():
+        raise ReleaseError("managed wake script target is a symlink")
+    atomic_write(target, payload, mode=0o755, uid=account.pw_uid, gid=account.pw_gid)
+
+
+def require_source_wake_script(candidate: str) -> None:
+    payload, target = source_wake_script(candidate)
+    if target.is_symlink() or not target.is_file():
+        raise ReleaseError("managed wake script target is absent")
+    value = target.stat()
+    account = pwd.getpwnam("ubuntu")
+    if (
+        value.st_uid != account.pw_uid or value.st_gid != account.pw_gid
+        or stat.S_IMODE(value.st_mode) != 0o755 or target.read_bytes() != payload
+    ):
+        raise ReleaseError("managed wake script target is invalid")
+
+
 def stage_source_candidate(candidate: str) -> Path:
     SOURCE_STAGE_ROOT.mkdir(parents=True, mode=0o700, exist_ok=True)
     os.chmod(SOURCE_STAGE_ROOT, 0o700)
@@ -1932,6 +1981,7 @@ def activate_source_candidate(candidate: str, stage: Path | None, snapshot: Path
             "--name", SOURCE_PROFILE, "--force", "-y",
         ])
     activate_source_profile(candidate)
+    project_source_wake_script(candidate)
     if SOURCE_LEGACY_PROFILE_DIR.exists():
         shutil.rmtree(SOURCE_LEGACY_PROFILE_DIR)
     atomic_write(LITE_UNIT, candidate_blob(REPO, candidate, UNIT_SOURCE_PATH), mode=0o644, uid=0, gid=0)
@@ -1990,6 +2040,7 @@ def validate_source_acceptance(candidate: str, *, external_probes: bool = True) 
         raise ReleaseError("live companion profile differs from candidate")
     if SOURCE_LEGACY_PROFILE_DIR.exists():
         raise ReleaseError("legacy Lite profile remains deployable")
+    require_source_wake_script(candidate)
     for unit in SOURCE_SERVICES[:3]:
         if service_state(unit)["active"] != "active":
             raise ReleaseError(f"source service is inactive: {unit}")
