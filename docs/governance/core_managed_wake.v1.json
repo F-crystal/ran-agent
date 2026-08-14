@@ -10,6 +10,7 @@
   "job": {
     "name": "ran-agent-core-wake",
     "schedule": "every 1m",
+    "repeat": "forever",
     "script": "core-wake.sh",
     "scriptTarget": "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-agent-companion/scripts/core-wake.sh",
     "scriptSource": "hermes/profile/scripts/core-wake.sh",

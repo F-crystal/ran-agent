@@ -43,6 +43,7 @@ def wake_blobs(lite_home: Path, profile_dir: Path, payload: bytes = b"#!/bin/sh\
         "job": {
             "name": "ran-agent-core-wake",
             "schedule": "every 1m",
+            "repeat": "forever",
             "script": "core-wake.sh",
             "scriptSource": MODULE.SOURCE_WAKE_SCRIPT_SOURCE,
             "scriptTarget": str(profile_dir / "scripts/core-wake.sh"),

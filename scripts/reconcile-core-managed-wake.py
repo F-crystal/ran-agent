@@ -30,6 +30,7 @@ def desired_contract(manifest: object) -> tuple[Path, str, dict[str, object]]:
     expected_job = {
         "name": "ran-agent-core-wake",
         "schedule": "every 1m",
+        "repeat": "forever",
         "script": "core-wake.sh",
         "scriptTarget": str(target),
         "scriptSource": WAKE_SCRIPT_SOURCE,
@@ -85,6 +86,22 @@ def load_jobs(home: Path) -> list[dict[str, object]]:
     return jobs
 
 
+def forever_repeat(job: dict[str, object]) -> bool:
+    """Stored pinned-runtime shape of the manifest's ``repeat: "forever"`` contract."""
+    repeat = job.get("repeat")
+    if not isinstance(repeat, dict):
+        return False
+    if "times" not in repeat or "completed" not in repeat:
+        return False
+    completed = repeat["completed"]
+    return (
+        repeat["times"] is None
+        and isinstance(completed, int)
+        and not isinstance(completed, bool)
+        and completed >= 0
+    )
+
+
 def inspect_job(jobs: list[dict[str, object]], desired: dict[str, object], *, active: bool) -> dict[str, object] | None:
     if not jobs:
         return None
@@ -98,6 +115,7 @@ def inspect_job(jobs: list[dict[str, object]], desired: dict[str, object], *, ac
     expected_enabled = active
     valid = (
         job.get("schedule_display") == desired.get("schedule")
+        and forever_repeat(job)
         and job.get("script") == desired.get("script")
         and job.get("workdir") == desired.get("workdir")
         and job.get("no_agent") is True
@@ -155,20 +173,29 @@ def reconcile(args: argparse.Namespace) -> dict[str, object]:
         return {"status": "verified", "present": job is not None,
                 "active": job is not None and args.expect_active}
     if args.mode == "prepare":
-        existing = inspect_job(jobs, desired, active=False) if jobs else None
-        if existing is None:
+        if not jobs:
             run_hermes(
                 args.hermes_bin, home, profile,
                 "create", "2099-01-01T00:00", "--name", str(desired["name"]),
                 "--deliver", str(desired["deliver"]), "--script", str(desired["script"]),
-                "--no-agent", "--workdir", str(desired["workdir"]),
+                "--no-agent", "--workdir", str(desired["workdir"]), "--repeat", "0",
             )
             created = load_jobs(store_home)
             if len(created) != 1 or created[0].get("name") != desired.get("name"):
                 raise ReconcileError("Hermes did not create exactly one managed wake job")
             job_id = str(created[0]["id"])
             run_hermes(args.hermes_bin, home, profile, "pause", job_id)
-            run_hermes(args.hermes_bin, home, profile, "edit", job_id, "--schedule", str(desired["schedule"]))
+            run_hermes(args.hermes_bin, home, profile, "edit", job_id,
+                       "--schedule", str(desired["schedule"]), "--repeat", "0")
+        else:
+            if len(jobs) != 1 or jobs[0].get("name") != desired.get("name"):
+                raise ReconcileError("Hermes cron must contain only the managed Core wake job")
+            job = jobs[0]
+            if job.get("state") != "paused" or job.get("enabled") is not False:
+                run_hermes(args.hermes_bin, home, profile, "pause", str(job["id"]))
+            if not (job.get("schedule_display") == desired.get("schedule") and forever_repeat(job)):
+                run_hermes(args.hermes_bin, home, profile, "edit", str(job["id"]),
+                           "--schedule", str(desired["schedule"]), "--repeat", "0")
         job = inspect_job(load_jobs(store_home), desired, active=False)
         return {"status": "prepared", "jobId": str(job["id"]), "active": False}
     if args.mode == "remove":
