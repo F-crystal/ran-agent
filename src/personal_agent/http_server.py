@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import secrets
+from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
@@ -337,6 +338,72 @@ class BackendHttpController:
             "result": {"delivery_status": "sent", "partial": partial},
         }
 
+    def handle_todo_action(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
+        """Create one canonical Todo and immediately register its Core reminder."""
+
+        try:
+            if set(payload) != {"operationId", "actionType", "scope"}:
+                raise ValueError("invalid request fields")
+            operation_id = str(payload["operationId"])
+            scope = payload["scope"]
+            if (
+                not re.fullmatch(r"op_[a-f0-9]{32}", operation_id)
+                or payload["actionType"] != "todo.create"
+                or not isinstance(scope, dict)
+                or set(scope) != {
+                    "title", "date", "startTime", "endTime", "reminderMinutes",
+                    "reminderAt", "timeZone", "content",
+                }
+            ):
+                raise ValueError("invalid todo action")
+            content = scope["content"]
+            reminder_at = scope["reminderAt"]
+            if (
+                not isinstance(content, str)
+                or not content
+                or len(content) > 300
+                or re.search(r"[\r\n\t\0]", content)
+                or not isinstance(reminder_at, str)
+                or not re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:00", reminder_at)
+                or datetime.strptime(reminder_at, "%Y-%m-%d %H:%M:%S").strftime("%Y-%m-%d %H:%M:%S")
+                != reminder_at
+                or scope["timeZone"] != self._config.scheduler_timezone
+                or not isinstance(scope["title"], str)
+                or not isinstance(scope["date"], str)
+                or not isinstance(scope["startTime"], str)
+                or not isinstance(scope["endTime"], str)
+                or isinstance(scope["reminderMinutes"], bool)
+                or not isinstance(scope["reminderMinutes"], int)
+            ):
+                raise ValueError("invalid todo scope")
+            todo_id = self._message_service._database.create_todo(
+                content=content,
+                reminder_at=reminder_at,
+                source="hermes",
+            )
+            registration = self._message_service.register_core_reminder(
+                todo_id=todo_id,
+                scheduled_for=reminder_at,
+            )
+            if registration.get("ok") is not True:
+                raise RuntimeError("Core registration unconfirmed")
+        except (TypeError, ValueError, KeyError):
+            return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid todo action"}
+        except Exception:
+            self._logger.exception("private todo action failed")
+            return HTTPStatus.BAD_GATEWAY, {"ok": False, "error": "todo reminder registration failed"}
+        return HTTPStatus.OK, {
+            "ok": True,
+            "authenticated": True,
+            "operationId": operation_id,
+            "effectId": f"todo:create:{todo_id}",
+            "result": {
+                "todoId": todo_id,
+                "reminderAt": reminder_at,
+                "coreRegistration": "registered",
+            },
+        }
+
     def _handle_todo_create(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         """Create a new todo from text."""
         text = str(payload.get("text", "")).strip()
@@ -649,6 +716,20 @@ class PersonalAgentHttpServer:
                         self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid daily digest request"})
                         return
                     status_code, response_payload = controller.handle_ai_daily_digest_action(payload)
+                    self._write_json(status_code, response_payload)
+                    return
+
+                if self.path == "/internal/todo/actions":
+                    denied = self._private_access_denial()
+                    if denied is not None:
+                        self._write_json(*denied)
+                        return
+                    try:
+                        payload = self._read_json_body()
+                    except ValueError:
+                        self._write_json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid todo action"})
+                        return
+                    status_code, response_payload = controller.handle_todo_action(payload)
                     self._write_json(status_code, response_payload)
                     return
 

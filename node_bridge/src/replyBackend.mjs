@@ -42,6 +42,7 @@ import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
 import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
 import { createPersonalLearningExecutorAdapter } from './personalLearningClient.mjs';
 import { createAiDailyDigestExecutorAdapter } from './aiDailyDigestClient.mjs';
+import { createTodoExecutorAdapter, normalizeTodoCreateScope } from './todoClient.mjs';
 import {
   createFeishuDocumentWriteExecutorAdapter,
   createFeishuMinutesDocumentExecutorAdapter,
@@ -71,6 +72,10 @@ export function createReplyBackend(options = {}) {
     ? [...options.trustedExecutorAdapterConfigs]
     : [];
   if (!options.trustedActionExecutors && String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '').trim()) {
+    configuredExecutorAdapters.push(createTodoExecutorAdapter({
+      env,
+      fetchImpl: options.fetchImpl || globalThis.fetch,
+    }));
     configuredExecutorAdapters.push(createPersonalLearningExecutorAdapter({
       env,
       fetchImpl: options.fetchImpl || globalThis.fetch,
@@ -216,6 +221,7 @@ export function createReplyBackend(options = {}) {
         operationLedger,
         trustedActionExecutors,
         coreDurableJobExecutor,
+        todoTimeZone: env.HERMES_ENVIRONMENT_TIMEZONE || 'Asia/Shanghai',
       });
       if (shouldReplanDocumentAction(replyEnvelope, actionExecution)) {
         try {
@@ -234,6 +240,7 @@ export function createReplyBackend(options = {}) {
             operationLedger,
             trustedActionExecutors,
             coreDurableJobExecutor,
+            todoTimeZone: env.HERMES_ENVIRONMENT_TIMEZONE || 'Asia/Shanghai',
           });
           replyEnvelope = Object.freeze({
             ...replyEnvelope,
@@ -273,6 +280,7 @@ export function createReplyBackend(options = {}) {
           ? '日报生成或发送失败，未确认送达。'
           : '';
       const feishuDocumentAcknowledgement = buildFeishuDocumentAcknowledgement(actionExecution.receiptSummaries);
+      const todoAcknowledgement = buildTodoAcknowledgement(actionExecution.receiptSummaries);
       const coreAcknowledgement = commitmentBlocked
         ? ''
         : bridgeOwnedCoreAcknowledgement(replyEnvelope.commitments, durableReceiptSummaries);
@@ -280,6 +288,8 @@ export function createReplyBackend(options = {}) {
         response = { ...response, reply_text: '这项后续工作尚未启动。', follow_up_messages: [] };
       } else if (learningPromotionDenied) {
         response = { ...response, reply_text: '保存结果尚未返回，未写入长期记忆。', follow_up_messages: [] };
+      } else if (todoAcknowledgement.text) {
+        response = { ...response, reply_text: todoAcknowledgement.text, follow_up_messages: [] };
       } else if (coreAcknowledgement) {
         response = { ...response, reply_text: coreAcknowledgement, follow_up_messages: [] };
       } else if (digestAcknowledgement) {
@@ -307,6 +317,8 @@ export function createReplyBackend(options = {}) {
         ? 'bridge_commitment_guard'
         : learningPromotionDenied
           ? 'bridge_learning_intent_guard'
+        : todoAcknowledgement.text
+          ? todoAcknowledgement.source
         : digestAcknowledgement
           ? 'bridge_ai_daily_digest'
         : feishuDocumentAcknowledgement.text
@@ -648,6 +660,7 @@ async function executeEnvelopeActionRequests({
   operationLedger,
   trustedActionExecutors,
   coreDurableJobExecutor,
+  todoTimeZone = 'Asia/Shanghai',
 }) {
   const receiptSummaries = [];
   const evidence = [];
@@ -674,7 +687,7 @@ async function executeEnvelopeActionRequests({
     }
     let groundedRequest;
     try {
-      groundedRequest = groundActionRequest(request, currentMessage);
+      groundedRequest = groundActionRequest(request, currentMessage, { todoTimeZone });
     } catch (error) {
       const needsReplan = error?.code === 'ACTION_NEEDS_REPLAN';
       receiptSummaries.push({
@@ -734,6 +747,9 @@ async function executeEnvelopeActionRequests({
         outcome: succeeded ? 'applied' : receipt.status,
         status: receipt.status,
         effectDigest: receipt.effectDigest,
+        ...(request.actionType === 'todo.create' && succeeded
+          ? { todo: normalizeTodoCreateScope(request.scope, { timeZone: todoTimeZone }) }
+          : {}),
         ...(request.actionType === 'document.write' && receipt.status === 'ambiguous'
           ? { errorCode: 'DOCUMENT_OUTCOME_AMBIGUOUS' }
           : request.actionType === 'document.write' && receipt.status === 'failed'
@@ -1004,6 +1020,19 @@ function buildFeishuDocumentAcknowledgement(receiptSummaries = []) {
   return { text: '文档写入执行失败，未确认已创建或修改。', source };
 }
 
+function buildTodoAcknowledgement(receiptSummaries = []) {
+  const receipt = receiptSummaries.find((item) => item?.actionType === 'todo.create');
+  if (!receipt) return { text: '', source: '' };
+  if (receipt.status !== 'succeeded' || !receipt.todo) {
+    return { text: '提醒创建失败，未确认已保存。', source: 'bridge_todo_create' };
+  }
+  const { title, date, startTime, endTime, reminderAt } = receipt.todo;
+  return {
+    text: `已创建待办“${title}”：${date} ${startTime}–${endTime}，将在 ${reminderAt.slice(0, 16)} 提醒。`,
+    source: 'bridge_todo_create',
+  };
+}
+
 function isActiveDurableReceipt(receipt, expected = {}) {
   if (!receipt || typeof receipt !== 'object') return false;
   if (String(receipt.status || '') !== 'active'
@@ -1012,8 +1041,24 @@ function isActiveDurableReceipt(receipt, expected = {}) {
   return Object.entries(expected).every(([field, value]) => value === undefined || receipt[field] === value);
 }
 
-function groundActionRequest(request, message = {}) {
+function groundActionRequest(request, message = {}, { todoTimeZone = 'Asia/Shanghai' } = {}) {
   const actionType = String(request.actionType || '');
+  if (actionType === 'todo.create') {
+    if (!/(?:提醒|待办|日程|安排|remind|schedule)/i.test(String(message.text || ''))) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    const scope = normalizeTodoCreateScope(request.scope, { timeZone: todoTimeZone });
+    return {
+      ...request,
+      scope: {
+        title: scope.title,
+        date: scope.date,
+        startTime: scope.startTime,
+        endTime: scope.endTime,
+        reminderMinutes: scope.reminderMinutes,
+      },
+    };
+  }
   if (actionType === 'feishu.minutes_to_doc') {
     const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
     const userText = String(message.text || '');

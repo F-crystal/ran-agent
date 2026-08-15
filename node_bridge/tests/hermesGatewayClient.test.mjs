@@ -469,6 +469,10 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.doesNotMatch(capturedBody.messages[0].content, /"actionRequests":\[\]/);
   assert.match(capturedBody.messages[0].content, /requestRef such as "feishu-minutes-doc-1"/);
   assert.match(capturedBody.messages[0].content, /exactly one document\.write actionRequest/);
+  assert.match(capturedBody.messages[0].content, /Owner reminder\/schedule\/Todo creation—not discussion/);
+  assert.match(capturedBody.messages[0].content, /reminderMinutes:integer/);
+  assert.match(capturedBody.messages[0].content, /Never emit id\/actor\/authorization\/receipt\/effect/);
+  assert.match(capturedBody.messages[0].content, /reminderTime\/reminderAt/);
   assert.match(capturedBody.messages[0].content, /Do not create or update the document with a tool/);
   assert.match(capturedBody.messages[0].content, /validates the identifier, content, and format/);
   assert.match(capturedBody.messages[0].content, /without <root> or <content> wrappers/);

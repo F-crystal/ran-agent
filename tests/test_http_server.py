@@ -464,6 +464,77 @@ class BackendHttpControllerTest(unittest.TestCase):
             scheduled_for=response_payload["parsed_time"],
         )
 
+    def test_private_todo_action_persists_canonical_time_and_registers_Core_once(self) -> None:
+        server = PersonalAgentHttpServer(self.config, self.service, self.logger)
+        secret = "owner-control-secret"
+        with patch.object(
+            self.service,
+            "register_core_reminder",
+            return_value={"ok": True, "disposition": "registered"},
+        ) as register:
+            status_code, response_payload = invoke_handler(
+                server,
+                method="POST",
+                path="/internal/todo/actions",
+                authorization=f"Bearer {secret}",
+                secret=secret,
+                body={
+                    "operationId": "op_" + "a" * 32,
+                    "actionType": "todo.create",
+                    "scope": {
+                        "title": "线下活动",
+                        "date": "2026-08-21",
+                        "startTime": "08:55",
+                        "endTime": "14:00",
+                        "reminderMinutes": 30,
+                        "reminderAt": "2026-08-21 08:25:00",
+                        "timeZone": "Asia/Shanghai",
+                        "content": "线下活动（2026-08-21 08:55–14:00）",
+                    },
+                },
+            )
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(response_payload["result"]["coreRegistration"], "registered")
+        self.assertEqual(response_payload["result"]["reminderAt"], "2026-08-21 08:25:00")
+        todos = self.database.get_pending_todos()
+        self.assertEqual(len(todos), 1)
+        self.assertEqual(todos[0]["reminder_at"], "2026-08-21 08:25:00")
+        self.assertEqual(todos[0]["content"], "线下活动（2026-08-21 08:55–14:00）")
+        register.assert_called_once_with(
+            todo_id=response_payload["result"]["todoId"],
+            scheduled_for="2026-08-21 08:25:00",
+        )
+
+    def test_private_todo_action_core_failure_is_not_reported_as_success(self) -> None:
+        with patch.object(
+            self.service,
+            "register_core_reminder",
+            side_effect=RuntimeError("Core unavailable"),
+        ) as register:
+            status_code, response_payload = self.controller.handle_todo_action(
+                {
+                    "operationId": "op_" + "b" * 32,
+                    "actionType": "todo.create",
+                    "scope": {
+                        "title": "线下活动",
+                        "date": "2026-08-21",
+                        "startTime": "08:55",
+                        "endTime": "14:00",
+                        "reminderMinutes": 30,
+                        "reminderAt": "2026-08-21 08:25:00",
+                        "timeZone": "Asia/Shanghai",
+                        "content": "线下活动（2026-08-21 08:55–14:00）",
+                    },
+                }
+            )
+
+        self.assertEqual(status_code, 502)
+        self.assertEqual(response_payload["ok"], False)
+        self.assertNotIn("effectId", response_payload)
+        self.assertEqual(len(self.database.get_pending_todos()), 1)
+        register.assert_called_once()
+
     def test_handle_tools_returns_not_found_for_unknown_route(self) -> None:
         status_code, response_payload = self.controller.handle_tools("/tools/unknown", {})
 

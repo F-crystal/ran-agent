@@ -91,6 +91,118 @@ test('manual AI daily digest uses a typed owner action and never enters media co
   assert.deepEqual(requests[0].scope, { mode: 'manual', date: 'current_local_date' });
 });
 
+test('todo.create releases a receipt-bound acknowledgement only after trusted creation', async (t) => {
+  const env = tempStateEnv(t, {
+    RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret',
+    PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787',
+  });
+  const requests = [];
+  const backend = createReplyBackend({
+    env,
+    fetchImpl: async (_url, init) => {
+      const request = JSON.parse(init.body);
+      requests.push(request);
+      return {
+        ok: true,
+        async json() {
+          return {
+            ok: true,
+            authenticated: true,
+            operationId: request.operationId,
+            effectId: 'todo:create:1',
+            result: { todoId: 1, reminderAt: request.scope.reminderAt, coreRegistration: 'registered' },
+          };
+        },
+      };
+    },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1,
+        message: '已经创建成功。',
+        actionRequests: [{
+          requestRef: 'todo-1',
+          actionType: 'todo.create',
+          scope: { title: '线下活动', date: '2026-08-21', startTime: '08:55', endTime: '14:00', reminderMinutes: 30 },
+        }],
+        activityRequest: null,
+        claims: [],
+        commitments: [],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '8月21日 08:55–14:00 有活动，提前30分钟提醒我',
+    sender_id: 'owner',
+    conversation_id: 'home',
+    platform: 'feishu',
+    trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].scope.reminderAt, '2026-08-21 08:25:00');
+  assert.equal(result.replyText, '已创建待办“线下活动”：2026-08-21 08:55–14:00，将在 2026-08-21 08:25 提醒。');
+  assert.equal(result.source, 'bridge_todo_create');
+});
+
+test('todo.create has no effect without owner context and never preserves model success prose', async (t) => {
+  const env = tempStateEnv(t, {
+    RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret',
+    PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787',
+  });
+  let calls = 0;
+  const backend = createReplyBackend({
+    env,
+    fetchImpl: async () => { calls += 1; throw new Error('must not execute'); },
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1,
+        message: '已经创建成功。',
+        actionRequests: [{ requestRef: 'todo-unauthorized', actionType: 'todo.create', scope: { title: '活动', date: '2026-08-21', startTime: '08:55', endTime: '14:00', reminderMinutes: 30 } }],
+        activityRequest: null, claims: [], commitments: [],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({ text: '请提前30分钟提醒活动', sender_id: 'guest', conversation_id: 'guest', platform: 'feishu' });
+
+  assert.equal(calls, 0);
+  assert.equal(result.replyText, '提醒创建失败，未确认已保存。');
+});
+
+test('todo.create backend failure cannot produce a success acknowledgement', async (t) => {
+  const env = tempStateEnv(t, {
+    RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret',
+    PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787',
+  });
+  const backend = createReplyBackend({
+    env,
+    fetchImpl: async () => ({ ok: false, async json() { return { ok: false, error: 'Core unavailable' }; } }),
+    hermesImpl: async () => ({
+      reply_envelope: {
+        schemaVersion: 1,
+        message: '已经创建成功。',
+        actionRequests: [{ requestRef: 'todo-failed', actionType: 'todo.create', scope: { title: '活动', date: '2026-08-21', startTime: '08:55', endTime: '14:00', reminderMinutes: 30 } }],
+        activityRequest: null, claims: [], commitments: [],
+      },
+    }),
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '请提前30分钟提醒活动', sender_id: 'owner', conversation_id: 'home', platform: 'feishu',
+    trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
+  });
+
+  assert.equal(result.replyText, '提醒创建失败，未确认已保存。');
+  assert.equal(result.source, 'bridge_todo_create');
+});
+
 test('informational AI digest drops prohibited envelope actions before execution and releases the report body', async (t) => {
   const env = tempStateEnv(t);
   const calls = { trustedExecutor: 0, coreJob: 0, activity: 0, activityRepair: 0 };

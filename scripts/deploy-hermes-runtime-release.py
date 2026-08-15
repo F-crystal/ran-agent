@@ -1574,7 +1574,6 @@ print(json.dumps({
 
 def validate_source_profile_migration(candidate: str, prior: str, profile_paths: set[str]) -> None:
     try:
-        migration = load_candidate_json(REPO, candidate, SOURCE_PROFILE_MIGRATION_PATH)
         managed_wake = load_candidate_json(REPO, candidate, SOURCE_MANAGED_WAKE_PATH)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         raise ReleaseError("source profile migration contract is missing or invalid") from exc
@@ -1588,6 +1587,12 @@ def validate_source_profile_migration(candidate: str, prior: str, profile_paths:
     ):
         raise ReleaseError("managed Core wake source contract is invalid")
     migrated_paths = profile_paths - {wake_source}
+    if not migrated_paths:
+        return
+    try:
+        migration = load_candidate_json(REPO, candidate, SOURCE_PROFILE_MIGRATION_PATH)
+    except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
+        raise ReleaseError("source profile migration contract is missing or invalid") from exc
     expected_delta = {PROFILE_PATH, SOURCE_PROFILE_TEMPLATE_PATH}
     active_profile = migration.get("activeProfile") if isinstance(migration.get("activeProfile"), dict) else {}
     rollback = migration.get("rollback") if isinstance(migration.get("rollback"), dict) else {}

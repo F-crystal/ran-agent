@@ -208,6 +208,41 @@ def test_source_profile_migration_rejects_an_unexpected_profile_path(
         )
 
 
+def test_source_advance_wake_script_only_passes_without_profile_migration(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    wake = (Path(__file__).parents[1] / MODULE.SOURCE_MANAGED_WAKE_PATH).read_bytes()
+
+    def candidate_blob(_repo: Path, _candidate: str, path: str) -> bytes:
+        if path == MODULE.SOURCE_PROFILE_MIGRATION_PATH:
+            pytest.fail("wake-only source advance consulted profile migration")
+        assert path == MODULE.SOURCE_MANAGED_WAKE_PATH
+        return wake
+
+    monkeypatch.setattr(MODULE, "candidate_blob", candidate_blob)
+    MODULE.validate_source_advance_paths(
+        ["hermes/profile/scripts/core-wake.sh"],
+        candidate="b" * 40,
+        prior="e0e4769e76e48fb5832e028e06300ecb691665f5",
+    )
+
+
+def test_source_advance_wake_script_only_rejects_a_malformed_wake_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blobs = _source_profile_blobs()
+    wake = json.loads(blobs[MODULE.SOURCE_MANAGED_WAKE_PATH])
+    wake["job"]["name"] = "unrelated-cron"
+    blobs[MODULE.SOURCE_MANAGED_WAKE_PATH] = json.dumps(wake).encode()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    with pytest.raises(MODULE.ReleaseError, match="managed Core wake source contract is invalid"):
+        MODULE.validate_source_advance_paths(
+            ["hermes/profile/scripts/core-wake.sh"],
+            candidate="b" * 40,
+            prior="e0e4769e76e48fb5832e028e06300ecb691665f5",
+        )
+
+
 def test_companion_profile_validation_uses_yaml_semantics() -> None:
     profile = (Path(__file__).parents[1] / MODULE.PROFILE_PATH).read_bytes()
     MODULE.validate_companion_profile(profile)
