@@ -274,7 +274,8 @@ export class CoreDatabase {
         ORDER BY run.ended_at,run.work_run_id LIMIT ?`, taskKind,
       Math.max(1, Math.min(128, Number(limit) || 32))).map((row) => Object.freeze({ ...row })),
       scheduledWorkContext: (workRunId) => read(`SELECT run.work_run_id,run.exchange_id,
-          exchange.conversation_id,revision.payload_ref,revision.presentation_binding_id,
+          exchange.conversation_id,occurrence.scheduled_for,revision.payload_ref,revision.recurrence_json,
+          revision.presentation_binding_id,
           binding.destination_ref,binding.source_instance_id,binding.platform,binding.revision AS binding_revision,
           substr(binding_receipt.source_kind,length('package_b_presentation_binding_destination:')+1) AS destination_kind
         FROM work_run run

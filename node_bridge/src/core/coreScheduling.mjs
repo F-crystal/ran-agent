@@ -88,6 +88,24 @@ function resolveDailyInstant(date, wallTime, timeZone) {
   throw coreError('CORE_SCHEDULE_DAILY_RESOLUTION_FAILED', 'daily wall time could not be resolved');
 }
 
+export function localDateForInstant(instant, timeZone) {
+  const parts = localParts(instant, timeZone);
+  return [parts.year, parts.month, parts.day]
+    .map((part, index) => String(part).padStart(index === 0 ? 4 : 2, '0')).join('-');
+}
+
+export function resolveLocalDateTime(date, time, timeZone) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(date || '')) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(time || ''))) {
+    throw coreError('CORE_SCHEDULE_LOCAL_TIME_INVALID', 'local date and time must use YYYY-MM-DD and HH:MM');
+  }
+  const [year, month, day] = date.split('-').map(Number);
+  const canonical = new Date(Date.UTC(year, month - 1, day));
+  if (canonical.toISOString().slice(0, 10) !== date) {
+    throw coreError('CORE_SCHEDULE_LOCAL_TIME_INVALID', 'local date is invalid');
+  }
+  return resolveDailyInstant({ year, month, day }, `${time}:00`, timeZone);
+}
+
 function normalizeRecurrence(recurrence) {
   if (!recurrence || typeof recurrence !== 'object') {
     throw coreError('CORE_SCHEDULE_RECURRENCE_INVALID', 'recurrence is required');

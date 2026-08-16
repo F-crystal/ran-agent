@@ -11,6 +11,9 @@ launcher_load_env_file "$NODE_BRIDGE_ENV_FILE"
 launcher_prepend_path "/home/ubuntu/.local/bin:/usr/local/bin:/usr/bin:/bin"
 
 LOCAL_TIMEZONE="${LOCAL_TIMEZONE:-Asia/Shanghai}"
+TIME_MCP_UVX_SPEC="mcp-server-time==2026.7.10"
+# The server still imports the 1.x McpError API; mcp 2 renamed it.
+TIME_MCP_SDK_SPEC="mcp>=1.23,<2"
 # TIME_MCP_PYTHON/MCP_SERVER_TIME_PYTHON can point at a preinstalled
 # mcp-server-time environment; --prewarm or TIME_MCP_PREWARM=1 warms only.
 PREWARM="${TIME_MCP_PREWARM:-}"
@@ -76,8 +79,8 @@ if ! UVX_BIN="$(launcher_resolve_command uvx)"; then
 fi
 
 if [ -n "$PREWARM" ]; then
-  "$UVX_BIN" mcp-server-time --help >/dev/null
+  "$UVX_BIN" --with "$TIME_MCP_SDK_SPEC" "$TIME_MCP_UVX_SPEC" --help >/dev/null
   exit 0
 fi
 
-exec "$UVX_BIN" mcp-server-time --local-timezone "$LOCAL_TIMEZONE"
+exec "$UVX_BIN" --with "$TIME_MCP_SDK_SPEC" "$TIME_MCP_UVX_SPEC" --local-timezone "$LOCAL_TIMEZONE"

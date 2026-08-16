@@ -15,7 +15,7 @@ const TOKEN = `hmac-sha256:v1:test:${'a'.repeat(64)}`;
 
 async function setup(t, payloadRef, externalFact = null, route = {}) {
   const { dbPath } = createTempCore(t, 'hermes-core-runtime-composition-');
-  let current = new Date(START);
+  let current = new Date(route.start || START);
   const core = openCoreDatabase({ dbPath, now: () => current });
   core.migrate();
   await core.writer.write((tx) => {
@@ -76,14 +76,15 @@ async function setup(t, payloadRef, externalFact = null, route = {}) {
   const scheduling = createCoreSchedulingService({ core });
   await scheduling.createSchedule({
     scheduleSpecId: 'schedule', scheduleSpecRevisionId: 'schedule-r1', activityId: 'activity',
-    operationKey: 'schedule:create', recurrence: { kind: 'one_shot', at: DUE },
+    operationKey: 'schedule:create', recurrence: route.recurrence || { kind: 'one_shot', at: DUE },
     taskKind: 'scheduled_instruction', payloadRef, catchUpPolicy: 'latest',
     activityContractRevision: 0, conversationId: 'conversation', presentationBindingId: 'binding',
     expectedBindingRevision: 0,
     causationId: externalFact ? `${externalFact.eventId}:notification` : 'cause',
   });
-  current = new Date(DUE);
+  current = new Date(route.due || DUE);
   await scheduling.wakeDue();
+  current = new Date(route.executionAt || route.due || DUE);
   return { core, dbPath, now: () => current };
 }
 
@@ -171,7 +172,10 @@ test('the S12 acceptance schedule uses the existing Core worker and exact accept
 test('daily digest and Feishu chat schedules use the same typed delivery target contract', async (t) => {
   for (const fixture of [
     { name: 'owner DM digest', payloadRef: 'system-task:ai-daily-digest', destinationKind: 'user',
-      destinationRef: 'ou-owner', target: { channel_type: 'dm', sender_id: 'ou-owner' } },
+      destinationRef: 'ou-owner', target: { channel_type: 'dm', sender_id: 'ou-owner' },
+      start: '2026-08-15T23:59:00.000Z', due: '2026-08-16T00:00:00.000Z',
+      executionAt: '2026-08-16T16:30:00.000Z',
+      recurrence: { kind: 'daily', time: '08:00:00', timeZone: 'Asia/Shanghai' } },
     { name: 'group conversation', payloadRef: 'system-task:group-notice', destinationKind: 'conversation',
       destinationRef: 'oc-group', target: { channel_type: 'group', conversation_id: 'oc-group' } },
   ]) {
@@ -179,15 +183,31 @@ test('daily digest and Feishu chat schedules use the same typed delivery target 
       const { core, now } = await setup(st, fixture.payloadRef, null, fixture);
       const messages = [];
       const sends = [];
+      const preparedDates = [];
+      if (fixture.payloadRef === 'system-task:ai-daily-digest') {
+        const occurrence = core.reader.wakeOccurrences('schedule')[0];
+        const revision = core.reader.scheduleSpecRevision(occurrence.schedule_spec_revision_id);
+        assert.equal(occurrence.scheduled_for, '2026-08-16T00:00:00.000Z');
+        assert.equal(JSON.parse(revision.recurrence_json).timeZone, 'Asia/Shanghai');
+        assert.equal(now().toISOString(), '2026-08-16T16:30:00.000Z'); // Aug 17 00:30 local.
+      }
       const runtime = createCoreRuntimeComposition({
         runtime: { core, hashContent: () => TOKEN },
         channelHub: async (message) => {
           messages.push(message);
           return { replyText: 'fixture delivery', provider: 'hermes', model: 'test' };
         },
+        fetchImpl: async (_url, init) => {
+          const request = JSON.parse(init.body);
+          preparedDates.push(request.date);
+          return { ok: true, async json() { return {
+            ok: true, authenticated: true, date: request.date,
+            prompt: `AIHOT date-specific report prompt for ${request.date}`, partial: false,
+          }; } };
+        },
         sendFeishu: async (input) => { sends.push(input); },
         now,
-        env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
+        env: { RAN_AGENT_CORE_WORK_POLL_MS: '250', RAN_AGENT_INTERNAL_CONTROL_SECRET: 'test-secret' },
       });
       runtime.start();
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -199,6 +219,12 @@ test('daily digest and Feishu chat schedules use the same typed delivery target 
       assert.equal(isTrustedHermesTaskScopedMessage(messages[0]), true);
       if (fixture.payloadRef === 'system-task:ai-daily-digest') {
         assert.equal(messages[0].route_hint, 'scheduled_ai_daily_digest');
+        assert.deepEqual(preparedDates, ['2026-08-16']);
+        assert.notEqual(preparedDates[0], '2026-08-17');
+        assert.equal(messages[0].text, 'AIHOT date-specific report prompt for 2026-08-16');
+        assert.doesNotMatch(messages[0].text, /日程、待办和重要事实/);
+      } else {
+        assert.deepEqual(preparedDates, []);
       }
       await core.close();
     });

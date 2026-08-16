@@ -180,14 +180,18 @@ class StartTimeMcpScriptTest(unittest.TestCase):
             result = self.run_script({"PATH": str(bin_dir), "LOCAL_TIMEZONE": "Asia/Shanghai"})
             logged_argv = log_path.read_text(encoding="utf-8").strip() if log_path.exists() else ""
             probes = probe_log.read_text(encoding="utf-8") if probe_log.exists() else ""
+            prewarm_result = self.run_script({"PATH": str(bin_dir), "TIME_MCP_PREWARM": "1"})
+            prewarm_argv = log_path.read_text(encoding="utf-8").strip()
 
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(
             logged_argv,
-            "mcp-server-time --local-timezone Asia/Shanghai",
+            "--with mcp>=1.23,<2 mcp-server-time==2026.7.10 --local-timezone Asia/Shanghai",
         )
         self.assertIn(f"probe={bin_dir / 'python3'}", probes)
         self.assertIn(f"probe={bin_dir / 'python'}", probes)
+        self.assertEqual(prewarm_result.returncode, 0, prewarm_result.stderr)
+        self.assertEqual(prewarm_argv, "--with mcp>=1.23,<2 mcp-server-time==2026.7.10 --help")
 
     def test_timeout_terminates_the_time_launcher_process_group(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

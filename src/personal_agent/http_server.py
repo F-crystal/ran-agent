@@ -13,8 +13,9 @@ from datetime import datetime
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from personal_agent.ai_daily_digest import build_digest_prompt, load_aihot_facts
+from personal_agent.ai_daily_digest import prepare_ai_daily_digest
 from personal_agent.config import AppConfig
 from personal_agent.durable_jobs import (
     DurableJobReceipt,
@@ -306,24 +307,27 @@ class BackendHttpController:
 
     def handle_ai_daily_digest_action(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
         try:
+            if set(payload) == {"mode", "date"} and payload["mode"] == "prepare":
+                local_date = _exact_local_date(payload["date"])
+                prepared = prepare_ai_daily_digest(local_date)
+                return HTTPStatus.OK, {"ok": True, "authenticated": True, **prepared}
             if set(payload) != {"operationId", "actionType", "scope"}:
                 raise ValueError("invalid request fields")
             operation_id = str(payload["operationId"])
             if not re.fullmatch(r"op_[a-f0-9]{32}", operation_id) or payload["actionType"] != "ai_daily_digest.send":
                 raise ValueError("invalid operation")
-            if payload["scope"] != {"mode": "manual", "date": "current_local_date"}:
+            scope = payload["scope"]
+            if not isinstance(scope, dict) or set(scope) != {"mode", "date"} or scope["mode"] != "manual":
                 raise ValueError("invalid digest scope")
-            partial = False
-            try:
-                facts = load_aihot_facts().strip()
-            except Exception:
-                facts = "事实材料暂时不可用。本期只报告来源获取失败，不补写或猜测新闻内容。"
-                partial = True
-            if not facts:
-                facts = "事实材料暂时不可用。本期只报告来源返回为空，不补写或猜测新闻内容。"
-                partial = True
+            requested_date = str(scope["date"])
+            local_date = (
+                datetime.now(ZoneInfo(self._config.scheduler_timezone)).strftime("%Y-%m-%d")
+                if requested_date in {"current_local_date", "today"}
+                else _exact_local_date(requested_date)
+            )
+            prepared = prepare_ai_daily_digest(local_date)
             bridge_result = self._message_service.send_ai_daily_digest(
-                build_digest_prompt(facts), mode="manual", operation_id=operation_id
+                str(prepared["prompt"]), mode="manual", operation_id=operation_id
             )
             if str(bridge_result.get("delivery_status") or "") != "sent" or not bridge_result.get("outbox_id"):
                 return HTTPStatus.BAD_GATEWAY, {"ok": False, "error": "digest delivery unconfirmed"}
@@ -335,7 +339,7 @@ class BackendHttpController:
         return HTTPStatus.OK, {
             "ok": True, "authenticated": True, "operationId": operation_id,
             "effectId": "ai-daily-digest:" + _short_private_digest(str(bridge_result["outbox_id"])),
-            "result": {"delivery_status": "sent", "partial": partial},
+            "result": {"delivery_status": "sent", "partial": bool(prepared["partial"]), "date": local_date},
         }
 
     def handle_todo_action(self, payload: dict[str, Any]) -> tuple[int, dict[str, Any]]:
@@ -481,7 +485,7 @@ class BackendHttpController:
                 logger=self._logger,
                 config=self._config,
             )
-            todos = todo_manager.list_todos(status="pending", limit=20)
+            todos = todo_manager.get_pending_todos(limit=20)
             return HTTPStatus.OK, {
                 "success": True,
                 "todos": [
@@ -935,6 +939,15 @@ def _is_loopback_client(value: str) -> bool:
 
 def _short_private_digest(value: str) -> str:
     return hashlib.sha256(str(value).encode("utf-8")).hexdigest()[:24]
+
+
+def _exact_local_date(value: Any) -> str:
+    text = str(value)
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+        raise ValueError("date must be YYYY-MM-DD")
+    if datetime.strptime(text, "%Y-%m-%d").strftime("%Y-%m-%d") != text:
+        raise ValueError("date is invalid")
+    return text
 
 
 def _trusted_ingest_event_id(body_value: Any, header_value: Any) -> str:

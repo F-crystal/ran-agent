@@ -1,16 +1,14 @@
 # Hermes Core Scheduling and Unified Runtime
 
-Status: CURRENT (2026-08-10)
+Status: CURRENT (2026-08-16)
 
-Lifecycle: Runtime Phase `PROD_VERIFIED` for the bounded channel, identity,
-memory, capability, topology and 2026-08-07 digest evidence in
-`docs/governance/current_runtime_status.md`; Core Packages C-E/S11
-`LOCAL_VERIFIED`.
+Lifecycle: unified Runtime and Core cutover are `PROD_ACCEPTED`; the post-S12
+capability-parity successor is `LOCAL_VERIFIED / REVIEWED / ARCHIVED` and still
+requires a separate production apply.
 
-This decision record amends the implementation direction of the archived v0.4 cutover
-contract. It does not modify frozen Schema v1 or authorize a production Core
-write path. Runtime deployment facts are recorded separately from the still
-unimplemented Core cutover.
+This decision record amends the implementation direction of the archived v0.4
+cutover contract. The Core cutover is complete; current deployment facts and
+post-cutover source advances are recorded in `current_runtime_status.md`.
 
 ## Decision
 
@@ -384,12 +382,13 @@ stopping old wake neither loses the next future run nor replays an old one.
 
 - Package A and frozen Schema v1 remain accepted.
 - Package B/B.1 final-turn and presentation transaction semantics remain
-  accepted. Package C adds a typed scheduled/system instruction and optional
+  accepted. Package C added a typed scheduled/system instruction and optional
   visible-final entry; it does not weaken or impersonate the existing user-turn
-  path. Current source is still inactive in production.
-- Package C locally implements Schema v2 ScheduleSpec/WakeOccurrence
+  path.
+- Package C implements Schema v2 ScheduleSpec/WakeOccurrence
   repositories, `wake_due`, WorkRun creation and lease/fence authority, plus an
-  injected managed-clock adapter. It is not composed into production.
+  injected managed-clock adapter. Production uses exactly one Core semantic
+  writer and one Companion managed wake, currently prepared/paused.
 - Package D builds the watermark/quiesce manifest and stages legacy candidates
   paused in a zero-business-write rehearsal. The actual cutover transaction
   later imports accepted candidates with suppression/reconciliation Journal
@@ -407,7 +406,8 @@ stopping old wake neither loses the next future run nor replays an old one.
   fingerprint remains one candidate across gaming/focus→available. “Stale
   fence” here is WorkRun authority; disabling legacy visible wake remains S12.
   The focused set passes 29/29 and the full Core suite 151/151 locally.
-  Production is unchanged.
+  These semantics were accepted at cutover; later source advances preserve the
+  same single-writer/single-wake topology.
 
 ## S12 local composition status
 

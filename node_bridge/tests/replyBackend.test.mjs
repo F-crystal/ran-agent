@@ -72,7 +72,7 @@ test('reply backend rejects missing or unsupported platform before Hermes', asyn
   assert.equal(providerAttempts, 0);
 });
 
-test('manual AI daily digest uses a typed owner action and never enters media compatibility', async (t) => {
+test('manual historical AI daily digest preserves the explicit date', async (t) => {
   const env = tempStateEnv(t, { RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret', PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787' });
   const requests = [];
   const backend = createReplyBackend({
@@ -81,14 +81,114 @@ test('manual AI daily digest uses a typed owner action and never enters media co
       requests.push(JSON.parse(init.body));
       return { ok: true, status: 200, async json() { return { ok: true, authenticated: true, operationId: requests[0].operationId, effectId: 'ai-daily-digest:outbox-1', result: { delivery_status: 'sent' } }; } };
     },
-    hermesImpl: async () => ({ reply_envelope: { schemaVersion: 1, message: '正在补发。', actionRequests: [{ requestRef: 'digest-1', actionType: 'ai_daily_digest.send', scope: { mode: 'manual', date: 'current_local_date' } }], activityRequest: null, claims: [], commitments: [] } }),
+    hermesImpl: async () => ({ reply_envelope: { schemaVersion: 1, message: '正在补发。', actionRequests: [{ requestRef: 'digest-1', actionType: 'ai_daily_digest.send', scope: { mode: 'manual', date: '2026-08-14' } }], activityRequest: null, claims: [], commitments: [] } }),
     ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
   });
-  const result = await backend.getReply({ text: '请重新发送今日日报', sender_id: 'owner', conversation_id: 'home', platform: 'feishu', trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' } });
-  assert.equal(result.replyText, '今日日报已补发。');
+  const result = await backend.getReply({ text: '请补发2026-08-14日报', sender_id: 'owner', conversation_id: 'home', platform: 'feishu', trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' } });
+  assert.equal(result.replyText, '2026-08-14 日报已补发。');
   assert.equal(requests.length, 1);
   assert.equal(requests[0].actionType, 'ai_daily_digest.send');
-  assert.deepEqual(requests[0].scope, { mode: 'manual', date: 'current_local_date' });
+  assert.deepEqual(requests[0].scope, { mode: 'manual', date: '2026-08-14' });
+});
+
+test('feishu.calendar.create acknowledges only after create, reminder patch, and readback', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ENVIRONMENT_TIMEZONE: 'Asia/Shanghai' });
+  const commands = [];
+  let todoCalls = 0;
+  const responses = [
+    { ok: true, identity: 'user', data: { event: { event_id: 'evt_calendar_1' } } },
+    { ok: true, identity: 'user', data: {} },
+    { ok: true, identity: 'user', data: { event: {
+      event_id: 'evt_calendar_1', summary: '剧本杀',
+      start_time: { timestamp: String(Date.parse('2026-08-22T00:55:00Z') / 1_000) },
+      end_time: { timestamp: String(Date.parse('2026-08-22T06:00:00Z') / 1_000) },
+      reminders: [{ minutes: 30 }],
+    } } },
+  ];
+  const backend = createReplyBackend({
+    env,
+    fetchImpl: async () => { todoCalls += 1; throw new Error('Todo must not execute'); },
+    execFileImpl: async (_command, args) => {
+      commands.push(args);
+      return { stdout: JSON.stringify(responses[commands.length - 1]) };
+    },
+    hermesImpl: async () => ({ reply_envelope: {
+      schemaVersion: 1, message: '已创建。',
+      actionRequests: [{ requestRef: 'calendar-1', actionType: 'feishu.calendar.create', scope: {
+        title: '剧本杀', date: '2026-08-22', startTime: '08:55', endTime: '14:00', reminderMinutes: 30,
+      } }],
+      activityRequest: null, claims: [], commitments: [],
+    } }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '8月22日 08:55–14:00 有活动，帮我建一个飞书日程，提前30分钟提醒',
+    sender_id: 'owner', conversation_id: 'home', platform: 'feishu',
+    trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
+  });
+
+  assert.equal(commands.length, 3);
+  assert.equal(todoCalls, 0);
+  assert.equal(result.replyText, '已写入飞书日历并校验：“剧本杀”，2026-08-22 08:55–14:00，提前 30 分钟提醒。');
+  assert.equal(result.source, 'bridge_feishu_calendar_create');
+});
+
+test('calendar patch failure cannot preserve model success prose', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ENVIRONMENT_TIMEZONE: 'Asia/Shanghai' });
+  let calls = 0;
+  const backend = createReplyBackend({
+    env,
+    execFileImpl: async () => {
+      calls += 1;
+      if (calls === 2) throw new Error('patch failed');
+      return { stdout: JSON.stringify({ ok: true, identity: 'user', data: { event: { event_id: 'evt_calendar_1' } } }) };
+    },
+    hermesImpl: async () => ({ reply_envelope: {
+      schemaVersion: 1, message: '日程创建成功。', actionRequests: [{
+        requestRef: 'calendar-failed', actionType: 'feishu.calendar.create',
+        scope: { title: '剧本杀', date: '2026-08-22', startTime: '08:55', endTime: '14:00', reminderMinutes: 30 },
+      }], activityRequest: null, claims: [], commitments: [],
+    } }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '帮我建一个飞书日程：8月22日 08:55–14:00 剧本杀',
+    sender_id: 'owner', conversation_id: 'home', platform: 'feishu',
+    trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
+  });
+
+  assert.equal(result.replyText, '飞书日程创建或校验失败，未确认已写入日历。');
+  assert.equal(result.source, 'bridge_feishu_calendar_create');
+});
+
+test('a timed calendar event cannot be downgraded to todo.create', async (t) => {
+  const env = tempStateEnv(t, {
+    RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret',
+    PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787',
+  });
+  let todoCalls = 0;
+  const backend = createReplyBackend({
+    env,
+    fetchImpl: async () => { todoCalls += 1; throw new Error('Todo must not execute'); },
+    hermesImpl: async () => ({ reply_envelope: {
+      schemaVersion: 1, message: '已创建待办。', actionRequests: [{
+        requestRef: 'wrong-route', actionType: 'todo.create',
+        scope: { title: '剧本杀', date: '2026-08-22', startTime: '08:55', endTime: '14:00', reminderMinutes: 30 },
+      }], activityRequest: null, claims: [], commitments: [],
+    } }),
+    ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
+  });
+
+  const result = await backend.getReply({
+    text: '我8月22日 08:55–14:00有剧本杀活动，提前30分钟提醒',
+    sender_id: 'owner', conversation_id: 'home', platform: 'feishu',
+    trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
+  });
+
+  assert.equal(todoCalls, 0);
+  assert.equal(result.replyText, '提醒创建失败，未确认已保存。');
 });
 
 test('todo.create releases a receipt-bound acknowledgement only after trusted creation', async (t) => {
@@ -134,7 +234,7 @@ test('todo.create releases a receipt-bound acknowledgement only after trusted cr
   });
 
   const result = await backend.getReply({
-    text: '8月21日 08:55–14:00 有活动，提前30分钟提醒我',
+    text: '8月21日 08:55提醒我准备出门，14:00前完成',
     sender_id: 'owner',
     conversation_id: 'home',
     platform: 'feishu',

@@ -44,6 +44,10 @@ import { createPersonalLearningExecutorAdapter } from './personalLearningClient.
 import { createAiDailyDigestExecutorAdapter } from './aiDailyDigestClient.mjs';
 import { createTodoExecutorAdapter, normalizeTodoCreateScope } from './todoClient.mjs';
 import {
+  createFeishuCalendarExecutorAdapter,
+  normalizeFeishuCalendarCreateScope,
+} from './feishuCalendarClient.mjs';
+import {
   createFeishuDocumentWriteExecutorAdapter,
   createFeishuMinutesDocumentExecutorAdapter,
 } from './feishuMinutesDocumentClient.mjs';
@@ -83,6 +87,10 @@ export function createReplyBackend(options = {}) {
     configuredExecutorAdapters.push(createAiDailyDigestExecutorAdapter({ env, fetchImpl: options.fetchImpl || globalThis.fetch }));
   }
   if (!options.trustedActionExecutors) {
+    configuredExecutorAdapters.push(createFeishuCalendarExecutorAdapter({
+      env,
+      execFileImpl: options.execFileImpl,
+    }));
     configuredExecutorAdapters.push(createFeishuMinutesDocumentExecutorAdapter({
       env,
       execFileImpl: options.execFileImpl,
@@ -274,12 +282,14 @@ export function createReplyBackend(options = {}) {
         ['memory.remember', 'memory.correct'].includes(receipt?.actionType)
         && receipt?.errorCode === 'ACTION_NOT_GROUNDED'
       ));
-      const digestAcknowledgement = actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send' && receipt?.status === 'succeeded')
-        ? '今日日报已补发。'
-        : actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send')
-          ? '日报生成或发送失败，未确认送达。'
-          : '';
+      const digestReceipt = actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send');
+      const digestAcknowledgement = digestReceipt?.status === 'succeeded'
+        ? /^\d{4}-\d{2}-\d{2}$/.test(digestReceipt.digestDate)
+          ? `${digestReceipt.digestDate} 日报已补发。`
+          : '今日日报已补发。'
+        : digestReceipt ? '日报生成或发送失败，未确认送达。' : '';
       const feishuDocumentAcknowledgement = buildFeishuDocumentAcknowledgement(actionExecution.receiptSummaries);
+      const feishuCalendarAcknowledgement = buildFeishuCalendarAcknowledgement(actionExecution.receiptSummaries);
       const todoAcknowledgement = buildTodoAcknowledgement(actionExecution.receiptSummaries);
       const coreAcknowledgement = commitmentBlocked
         ? ''
@@ -294,6 +304,8 @@ export function createReplyBackend(options = {}) {
         response = { ...response, reply_text: coreAcknowledgement, follow_up_messages: [] };
       } else if (digestAcknowledgement) {
         response = { ...response, reply_text: digestAcknowledgement, follow_up_messages: [] };
+      } else if (feishuCalendarAcknowledgement.text) {
+        response = { ...response, reply_text: feishuCalendarAcknowledgement.text, follow_up_messages: [] };
       } else if (feishuDocumentAcknowledgement.text) {
         response = { ...response, reply_text: feishuDocumentAcknowledgement.text, follow_up_messages: [] };
       }
@@ -321,6 +333,8 @@ export function createReplyBackend(options = {}) {
           ? todoAcknowledgement.source
         : digestAcknowledgement
           ? 'bridge_ai_daily_digest'
+        : feishuCalendarAcknowledgement.text
+          ? feishuCalendarAcknowledgement.source
         : feishuDocumentAcknowledgement.text
           ? feishuDocumentAcknowledgement.source
         : coreAcknowledgement
@@ -750,6 +764,12 @@ async function executeEnvelopeActionRequests({
         ...(request.actionType === 'todo.create' && succeeded
           ? { todo: normalizeTodoCreateScope(request.scope, { timeZone: todoTimeZone }) }
           : {}),
+        ...(request.actionType === 'feishu.calendar.create' && succeeded
+          ? { calendar: normalizeFeishuCalendarCreateScope(request.scope, { timeZone: todoTimeZone }) }
+          : {}),
+        ...(request.actionType === 'ai_daily_digest.send' && succeeded
+          ? { digestDate: String(request.scope?.date || '') }
+          : {}),
         ...(request.actionType === 'document.write' && receipt.status === 'ambiguous'
           ? { errorCode: 'DOCUMENT_OUTCOME_AMBIGUOUS' }
           : request.actionType === 'document.write' && receipt.status === 'failed'
@@ -1033,6 +1053,19 @@ function buildTodoAcknowledgement(receiptSummaries = []) {
   };
 }
 
+function buildFeishuCalendarAcknowledgement(receiptSummaries = []) {
+  const receipt = receiptSummaries.find((item) => item?.actionType === 'feishu.calendar.create');
+  if (!receipt) return { text: '', source: '' };
+  if (receipt.status !== 'succeeded' || !receipt.calendar) {
+    return { text: '飞书日程创建或校验失败，未确认已写入日历。', source: 'bridge_feishu_calendar_create' };
+  }
+  const { title, date, startTime, endTime, reminderMinutes } = receipt.calendar;
+  return {
+    text: `已写入飞书日历并校验：“${title}”，${date} ${startTime}–${endTime}，提前 ${reminderMinutes} 分钟提醒。`,
+    source: 'bridge_feishu_calendar_create',
+  };
+}
+
 function isActiveDurableReceipt(receipt, expected = {}) {
   if (!receipt || typeof receipt !== 'object') return false;
   if (String(receipt.status || '') !== 'active'
@@ -1044,7 +1077,9 @@ function isActiveDurableReceipt(receipt, expected = {}) {
 function groundActionRequest(request, message = {}, { todoTimeZone = 'Asia/Shanghai' } = {}) {
   const actionType = String(request.actionType || '');
   if (actionType === 'todo.create') {
-    if (!/(?:提醒|待办|日程|安排|remind|schedule)/i.test(String(message.text || ''))) {
+    const userText = String(message.text || '');
+    if (!/(?:提醒|待办|remind|todo)/i.test(userText)
+      || (hasCalendarCreateIntent(userText) && !/(?:待办|todo)/i.test(userText))) {
       throw actionExecutionError('ACTION_NOT_GROUNDED');
     }
     const scope = normalizeTodoCreateScope(request.scope, { timeZone: todoTimeZone });
@@ -1056,6 +1091,20 @@ function groundActionRequest(request, message = {}, { todoTimeZone = 'Asia/Shang
         startTime: scope.startTime,
         endTime: scope.endTime,
         reminderMinutes: scope.reminderMinutes,
+      },
+    };
+  }
+  if (actionType === 'feishu.calendar.create') {
+    const userText = String(message.text || '');
+    if (!hasCalendarCreateIntent(userText)) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    const scope = normalizeFeishuCalendarCreateScope(request.scope, { timeZone: todoTimeZone });
+    return {
+      ...request,
+      scope: {
+        title: scope.title, date: scope.date, startTime: scope.startTime,
+        endTime: scope.endTime, reminderMinutes: scope.reminderMinutes,
       },
     };
   }
@@ -1094,8 +1143,11 @@ function groundActionRequest(request, message = {}, { todoTimeZone = 'Asia/Shang
     const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
     const userText = String(message.text || '');
     if (!/(日报|简报|摘要)/.test(userText) || !/(发|补发|重发|重新|再)/.test(userText) || scope.mode !== 'manual') throw actionExecutionError('ACTION_NOT_GROUNDED');
-    if (!['current_local_date', 'today'].includes(String(scope.date || 'current_local_date'))) throw actionExecutionError('ACTION_NOT_GROUNDED');
-    return { ...request, scope: { mode: 'manual', date: 'current_local_date' } };
+    const requestedDate = String(scope.date || 'current_local_date');
+    if (!['current_local_date', 'today'].includes(requestedDate) && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
+      throw actionExecutionError('ACTION_NOT_GROUNDED');
+    }
+    return { ...request, scope: { mode: 'manual', date: requestedDate } };
   }
   if (!actionType.startsWith('memory.')) return request;
   const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope)
@@ -1154,6 +1206,10 @@ function groundActionRequest(request, message = {}, { todoTimeZone = 'Asia/Shang
     };
   }
   throw actionExecutionError('ACTION_NOT_GROUNDED');
+}
+
+function hasCalendarCreateIntent(value) {
+  return /(?:加到|加入|写进).*(?:日程|日历)|(?:建|创建|新建).*(?:日程|日历)|(?:我|本人).*(?:有.{0,20}(?:活动|安排)|要参加)|\d{1,2}(?::|点)\d{0,2}.{0,60}(?:活动|安排)/i.test(String(value || ''));
 }
 
 function groundDocumentWriteRequest(request, message = {}) {

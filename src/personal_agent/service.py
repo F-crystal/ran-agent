@@ -1095,11 +1095,11 @@ class PersonalAgentService:
             "bridge_result": bridge_result,
         }
 
-    def send_ai_daily_digest(self, facts: str, *, mode: str = "scheduled", operation_id: str = "") -> dict[str, object]:
-        """Send one scheduled AI daily digest trigger through Node bridge."""
+    def send_ai_daily_digest(self, prompt: str, *, mode: str = "scheduled", operation_id: str = "") -> dict[str, object]:
+        """Send one prepared AI daily digest prompt through Node bridge."""
 
-        self._logger.info("sending scheduled AI daily digest facts_chars=%s", len(facts))
-        return self._outbound_client.send_ai_daily_digest(facts, mode=mode, operation_id=operation_id)
+        self._logger.info("sending prepared AI daily digest prompt_chars=%s", len(prompt))
+        return self._outbound_client.send_ai_daily_digest(prompt, mode=mode, operation_id=operation_id)
 
     def _get_local_now(self) -> datetime:
         """Return the local clock for prompt and session-state building."""

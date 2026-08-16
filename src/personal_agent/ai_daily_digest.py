@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import urllib.error
 import urllib.request
 from datetime import datetime
@@ -24,8 +25,8 @@ AIHOT_FETCH_ERRORS = (OSError, urllib.error.URLError, ValueError, json.JSONDecod
 
 
 class DigestOutboundClient(Protocol):
-    def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
-        """Send one scheduled digest trigger."""
+    def send_ai_daily_digest(self, prompt: str) -> dict[str, object]:
+        """Send one prepared digest prompt."""
         ...
 
 
@@ -43,18 +44,28 @@ def _load_digest_template() -> str:
     return AI_DAILY_DIGEST_TEMPLATE_PATH.read_text(encoding="utf-8")
 
 
-def load_aihot_facts(urlopen: Callable[..., object] | None = None) -> str:
+def load_aihot_facts(
+    local_date: str | None = None,
+    urlopen: Callable[..., object] | None = None,
+) -> str:
     """Fetch a compact facts package from AIHOT public endpoints."""
 
     opener = urlopen or urllib.request.urlopen
     last_error: Exception | None = None
     try:
-        daily = _fetch_json("https://aihot.virxact.com/api/public/daily", opener)
+        daily_url = "https://aihot.virxact.com/api/public/daily"
+        if local_date is not None:
+            _validate_local_date(local_date)
+            daily_url = f"{daily_url}/{local_date}"
+        daily = _fetch_json(daily_url, opener)
         rendered = _render_daily(daily)
         if rendered:
             return rendered
     except AIHOT_FETCH_ERRORS as error:
         last_error = error
+
+    if local_date is not None:
+        raise RuntimeError(f"AIHOT facts unavailable for {local_date}") from last_error
 
     try:
         items = _fetch_json("https://aihot.virxact.com/api/public/items?mode=selected&take=30", opener)
@@ -66,6 +77,30 @@ def load_aihot_facts(urlopen: Callable[..., object] | None = None) -> str:
         last_error = error
 
     raise RuntimeError("AIHOT facts unavailable") from last_error
+
+
+def prepare_ai_daily_digest(
+    local_date: str,
+    *,
+    facts_loader: Callable[[], str] | None = None,
+) -> dict[str, object]:
+    """Prepare one date-bound Hermes prompt without delivering it."""
+
+    _validate_local_date(local_date)
+    partial = False
+    try:
+        facts = (facts_loader or (lambda: load_aihot_facts(local_date)))().strip()
+    except Exception:
+        facts = "事实材料暂时不可用。本期只报告来源获取失败，不补写或猜测新闻内容。"
+        partial = True
+    if not facts:
+        facts = "事实材料暂时不可用。本期只报告来源返回为空，不补写或猜测新闻内容。"
+        partial = True
+    return {
+        "date": local_date,
+        "prompt": build_digest_prompt(facts),
+        "partial": partial,
+    }
 
 
 def run_ai_daily_digest(
@@ -90,19 +125,11 @@ def run_ai_daily_digest(
         logger.info("AI daily digest skipped because already sent date=%s", local_date)
         return {"sent": False, "reason": "already_sent", "date": local_date}
 
-    partial = False
-    try:
-        facts = facts_loader().strip()
-    except Exception as error:
-        logger.warning("AI daily digest facts unavailable error=%s", error)
-        facts = "事实材料暂时不可用。本期只报告来源获取失败，不补写或猜测新闻内容。"
-        partial = True
-    if not facts:
-        logger.warning("AI daily digest facts unavailable error=empty_facts")
-        facts = "事实材料暂时不可用。本期只报告来源返回为空，不补写或猜测新闻内容。"
-        partial = True
-    prompt = build_digest_prompt(facts)
-    bridge_result = outbound_client.send_ai_daily_digest(prompt)
+    prepared = prepare_ai_daily_digest(local_date, facts_loader=facts_loader)
+    partial = bool(prepared["partial"])
+    if partial:
+        logger.warning("AI daily digest facts unavailable date=%s", local_date)
+    bridge_result = outbound_client.send_ai_daily_digest(str(prepared["prompt"]))
     if bridge_result.get("skipped") is True:
         logger.warning("AI daily digest skipped by Node bridge reason=%s", bridge_result.get("reason"))
         return {"sent": False, "reason": str(bridge_result.get("reason") or "bridge_skipped"), "date": local_date}
@@ -140,6 +167,13 @@ def run_ai_daily_digest(
         "partial": partial,
         "bridge_result": bridge_result,
     }
+
+
+def _validate_local_date(value: str) -> None:
+    if not isinstance(value, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+        raise ValueError("local date must be YYYY-MM-DD")
+    if datetime.strptime(value, "%Y-%m-%d").strftime("%Y-%m-%d") != value:
+        raise ValueError("local date is invalid")
 
 
 def _fetch_json(url: str, opener: Callable[..., object]) -> dict[str, object]:

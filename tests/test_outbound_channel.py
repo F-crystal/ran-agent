@@ -39,11 +39,15 @@ class NodeBridgeOutboundClientTest(TestCase):
             ),
             patch("personal_agent.outbound_channel.urllib.request.urlopen", return_value=_Response()) as urlopen,
         ):
-            result = self.client.send_ai_daily_digest("verified facts", mode="manual", operation_id="op_" + "a" * 32)
+            result = self.client.send_ai_daily_digest("prepared prompt", mode="manual", operation_id="op_" + "a" * 32)
 
         self.assertEqual(result["delivery_status"], "sent")
         request = urlopen.call_args.args[0]
         self.assertEqual(request.get_header("Authorization"), "Bearer private-control-secret")
+        self.assertEqual(
+            json.loads(request.data),
+            {"prompt": "prepared prompt", "mode": "manual", "operation_id": "op_" + "a" * 32},
+        )
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 1260)
 
     def test_proactive_event_waits_for_hermes_and_feishu_completion(self) -> None:
@@ -62,7 +66,7 @@ class NodeBridgeOutboundClientTest(TestCase):
     def test_daily_digest_fails_closed_without_the_private_control_secret(self) -> None:
         with patch.dict(os.environ, {}, clear=True), patch("personal_agent.outbound_channel.urllib.request.urlopen") as urlopen:
             with self.assertRaisesRegex(RuntimeError, "internal control secret"):
-                self.client.send_ai_daily_digest("verified facts")
+                self.client.send_ai_daily_digest("prepared prompt")
 
         urlopen.assert_not_called()
 

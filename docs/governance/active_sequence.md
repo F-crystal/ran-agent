@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-13)
+Status: CURRENT (2026-08-16)
 
 This is the canonical order for active project work. Historical P-numbered plans
 do not control current execution. Keep exactly one stage `IN_PROGRESS` when the
@@ -22,8 +22,16 @@ S0 facts/runtime selection
   -> S10 migration rehearsal
   -> S11 synthetic fault acceptance
   -> S12 production cutover (COMPLETE / PROD_ACCEPTED at e298bab)
+  -> post-S12 capability parity restoration (LOCAL_VERIFIED / REVIEWED / ARCHIVED; production apply pending)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
+
+The post-S12 repair restores AI digest, Feishu Calendar, and Todo reminder
+capability parity inside the single Companion/Core topology. Production source
+is still `9df626f`, Core authority remains `e298bab`, and managed wake is
+prepared/paused; S13 has not started. Archive completion does not authorize
+deployment, wake activation, historical digest delivery, calendar creation, or
+cleanup.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|
@@ -40,7 +48,7 @@ S0 facts/runtime selection
 | S10 | COMPLETE | S9 | Inventory legacy scheduler, reminders, daily digest, external MCP/forum/RSS pollers and dispatchers; split polling facts from visible attention; build manifest/watermark; rehearse on a production copy. | The 19-row machine manifest gives every legacy component one disposition. A production SQLite/state copy at `2026-08-08T08:28:45.000Z` migrated 0→2 with zero business rows/effects; three historical reminders were suppressed, future reminders and watches were zero, 13 legacy external activities were staged paused, one pending outbound item was held for reconciliation, and 58 sent plus 65 ambiguous legacy outbox rows became receipt/no-resend evidence only. These counts are historical rehearsal evidence, not current cutover readiness, and must be freshly inspected and reconciled at the S12 gate. The local external-poll worker seam records one hash-bound Core fact after WorkRun authority and exposes no send operation. |
 | S11 | COMPLETE | S10 | Synthetic acceptance: duplicate/missed ticks, DST, crash, stale WorkRun fence, ambiguous outcomes, restart no-resend, and gaming/focus suppression with delayed coalescing. | One synthetic chain binds the WakeOccurrence to its exact generated Exchange, claimed WorkRun revision/fence/lease, typed system/internal instruction, provider epoch/attempt, final, presentation outbox, single injected effect and durable terminal receipt. A thrown post-dispatch `ETIMEDOUT` records durable `ambiguous` evidence and replay never calls the adapter; a post-commit restart claims the existing WorkRun without another occurrence; stale WorkRun authority rejects before final/effect; an equivalent delayed fingerprint remains one candidate across gaming→available while explicit owner bypasses remain intact. The focused set passes 29/29 and the full Core suite 151/151 locally. Production is unchanged. |
 | S12 | COMPLETE / PROD_ACCEPTED | S11 + R3-B CLEAR + exact successor `e298bab161bf0f4882bcef6e9cd701d546b63ff2` + production authorization | The candidate-bound transaction reached P10/ACCEPTED; source pointer and `core-cutover:v1` both bind e298. P9 is owner-accepted `TERMINAL_AMBIGUOUS_NO_RESEND`: one attempt, external effect unknown, no resend or duplicate. | Exactly one semantic writer, active managed wake, restored normal ingress and active Node/Python/Hermes were confirmed. |
-| S13 | NOT STARTED | S12 COMPLETE + observation exit evidence + separate explicit owner deletion authorization | Observe only; no cleanup is authorized. Exit evidence is stable e298 source/Core authority, one semantic writer, active managed wake, stable services/ingress, no second canary attempt or resend, no duplicate presentation result, and no unexpected legacy writer/clock production activity. | Observation criteria pass and the owner separately authorizes the exact deletion scope. |
+| S13 | NOT STARTED | S12 COMPLETE + post-S12 repair deployment/observation exit evidence + separate explicit owner deletion authorization | Observe only; no cleanup is authorized. Exit evidence must use the then-current production source, stable e298 Core authority, one semantic writer, the owner-approved managed-wake disposition, stable services/ingress, no second canary attempt or resend, no duplicate presentation result, and no unexpected legacy writer/clock production activity. | Observation criteria pass and the owner separately authorizes the exact deletion scope. |
 
 ## S12 Readiness Topology
 

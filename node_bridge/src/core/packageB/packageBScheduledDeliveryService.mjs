@@ -46,6 +46,8 @@ export function createPackageBScheduledDeliveryHandler({
     const decision = await decide(Object.freeze({
       workRunId: work.work_run_id,
       conversationId: context.conversation_id,
+      scheduledFor: context.scheduled_for,
+      recurrence: JSON.parse(context.recurrence_json),
       payloadRef: context.payload_ref,
       platform: context.platform,
       destinationKind: context.destination_kind,

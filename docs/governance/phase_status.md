@@ -1,6 +1,6 @@
 # Phase Status
 
-Status: CURRENT (2026-05-28)
+Status: CURRENT (2026-08-16)
 
 This file tracks closed phase boundaries. Detailed design and deployment notes
 belong in code, tests, or local archive records, not here.
@@ -25,8 +25,8 @@ belong in code, tests, or local archive records, not here.
 
 ## Current Runtime Closure
 
-- Hermes lite/full deploy and drift repair is owned by
-  `scripts/apply-hermes-runtime-split.sh`.
+- Unified Companion source deploy and drift repair are owned by the candidate
+  `scripts/bootstrap-hermes-release.sh` plus the canonical source controller.
 - Runtime diagnosis is owned by `scripts/diagnose-lite-full.sh` plus
   specialized diagnostic scripts for Search Hub, continuity, multi-frontend,
   tools, and media/XHS.
@@ -38,9 +38,12 @@ belong in code, tests, or local archive records, not here.
   `content_read`; only content evidence allows "read" claims.
 - Node root env and `node_bridge/.env.local` both receive the XHS fallback
   marker path during apply.
-- Scheduled AI daily digest and explicit user-created reminders are allowlisted
-  outbound paths only; reminders use ProactiveEvent egress and neither path
-  reopens old proactive/life-loop check-ins.
+- Scheduled AI daily digest, explicit internal Todo reminders, and verified
+  Feishu Calendar creation are distinct trusted paths. Digest preparation is
+  Python-owned under Core due-date authority; `todo.create` reuses the existing
+  Todo/Core registration path; `feishu.calendar.create` uses the existing
+  user-scoped lark-cli workflow. None reopens old proactive/life-loop check-ins
+  or creates a second scheduler.
 
 ## Historical Notes
 

@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-13)
+Status: CURRENT (2026-08-16)
 
 This file is the public documentation index and conflict rule. Current runtime
 facts live in `docs/governance/current_runtime_status.md`; historical deployment
@@ -12,12 +12,23 @@ acceptance checklists and review handoff live in
 
 ## Current State
 
-The clean production checkout, accepted source pointer and `core-cutover:v1`
-authority are at `e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Hermes v0.20 is
+The clean production checkout and accepted source pointer are at
+`9df626fc30a733bd76dccb42849a527fce9565b3`; `core-cutover:v1` remains at
+`e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Hermes v0.20 is
 `PROD_VERIFIED` for the bounded evidence in `current_runtime_status.md`.
 Runtime rollback is closed, retired v0.13 payloads are deleted, `18002` and O2
 are absent, and the direct loopback Ombre service on `18001` remains active.
 The earlier companion overlay is rollback-only evidence.
+
+The archived post-S12 capability-parity successor is reviewed but not yet
+deployed. It restores the existing Python AI-digest preparation semantics under
+Core due-date authority, an explicit historical-date path, verified Feishu
+Calendar creation, the semantic split between Calendar and internal Todo
+reminders, and the existing pending-Todo list owner. Python owns the digest
+template; Node owns only trusted orchestration and the single existing delivery
+path. The successor does not add another runtime, scheduler, wake, store, or
+action registry. Production remains on `9df626f` until a separately authorized
+source apply.
 
 S2 adds one production-verified typed action for an existing
 Feishu Minutes transcript: `feishu.minutes_to_doc`. It uses the authenticated

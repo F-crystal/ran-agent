@@ -464,6 +464,20 @@ class BackendHttpControllerTest(unittest.TestCase):
             scheduled_for=response_payload["parsed_time"],
         )
 
+    def test_todo_list_uses_pending_todo_owner(self) -> None:
+        todo_id = self.database.create_todo("待处理事项", "2026-08-22 08:25:00")
+
+        status_code, payload = self.controller.handle_tools("/tools/todo/list", {})
+
+        self.assertEqual(status_code, 200)
+        self.assertEqual(payload["todos"], [{
+            "id": todo_id,
+            "content": "待处理事项",
+            "reminder_at": "2026-08-22 08:25:00",
+            "last_reminded_at": None,
+            "status": "pending",
+        }])
+
     def test_private_todo_action_persists_canonical_time_and_registers_Core_once(self) -> None:
         server = PersonalAgentHttpServer(self.config, self.service, self.logger)
         secret = "owner-control-secret"
@@ -891,7 +905,10 @@ class BackendHttpControllerTest(unittest.TestCase):
 
         operation_id = "op_" + "a" * 32
         with (
-            patch("personal_agent.http_server.load_aihot_facts", return_value="一条已验证事实"),
+            patch(
+                "personal_agent.http_server.prepare_ai_daily_digest",
+                return_value={"date": "2026-08-14", "prompt": "日报模板\n一条已验证事实", "partial": False},
+            ),
             patch.object(
                 self.service,
                 "send_ai_daily_digest",
@@ -902,7 +919,7 @@ class BackendHttpControllerTest(unittest.TestCase):
                 {
                     "operationId": operation_id,
                     "actionType": "ai_daily_digest.send",
-                    "scope": {"mode": "manual", "date": "current_local_date"},
+                    "scope": {"mode": "manual", "date": "2026-08-14"},
                 }
             )
 
@@ -910,23 +927,46 @@ class BackendHttpControllerTest(unittest.TestCase):
         self.assertTrue(payload["ok"])
         self.assertTrue(payload["authenticated"])
         self.assertEqual(payload["operationId"], operation_id)
-        self.assertEqual(payload["result"], {"delivery_status": "sent", "partial": False})
+        self.assertEqual(payload["result"], {"delivery_status": "sent", "partial": False, "date": "2026-08-14"})
         self.assertTrue(payload["effectId"].startswith("ai-daily-digest:"))
         sent_prompt = send_digest.call_args.args[0]
         self.assertIn("一条已验证事实", sent_prompt)
         self.assertEqual(send_digest.call_args.kwargs, {"mode": "manual", "operation_id": operation_id})
 
+    def test_ai_daily_digest_prepare_returns_prompt_without_delivery(self) -> None:
+        with (
+            patch(
+                "personal_agent.http_server.prepare_ai_daily_digest",
+                return_value={"date": "2026-08-16", "prompt": "date-bound AIHOT prompt", "partial": False},
+            ) as prepare,
+            patch.object(self.service, "send_ai_daily_digest") as send_digest,
+        ):
+            status, payload = self.controller.handle_ai_daily_digest_action(
+                {"mode": "prepare", "date": "2026-08-16"}
+            )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(payload, {
+            "ok": True, "authenticated": True, "date": "2026-08-16",
+            "prompt": "date-bound AIHOT prompt", "partial": False,
+        })
+        prepare.assert_called_once_with("2026-08-16")
+        send_digest.assert_not_called()
+
     def test_ai_daily_digest_action_never_confirms_an_uncommitted_delivery(self) -> None:
         operation_id = "op_" + "c" * 32
         with (
-            patch("personal_agent.http_server.load_aihot_facts", return_value="一条事实"),
+            patch(
+                "personal_agent.http_server.prepare_ai_daily_digest",
+                return_value={"date": "2026-08-14", "prompt": "一条事实", "partial": False},
+            ),
             patch.object(self.service, "send_ai_daily_digest", return_value={"delivery_status": "ambiguous"}),
         ):
             status, payload = self.controller.handle_ai_daily_digest_action(
                 {
                     "operationId": operation_id,
                     "actionType": "ai_daily_digest.send",
-                    "scope": {"mode": "manual", "date": "current_local_date"},
+                    "scope": {"mode": "manual", "date": "2026-08-14"},
                 }
             )
 

@@ -2,7 +2,7 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-07)
+Status: CURRENT (2026-08-16)
 
 Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash. See `docs/governance/current_runtime_status.md` for the exact source SHA, evidence, and rollback boundary.
 
@@ -73,7 +73,9 @@ known limitations.
 
 **Minutes transcript to cloud document.** The owner can name one existing Feishu Minutes transcript and destination folder. Hermes reads the existing transcript and declares `feishu.minutes_to_doc`; Node creates the document as the authorized user and confirms completion only after readback. This narrow path performs no ASR and does not search for or generate PPT files.
 
-**Daily AI digest.** Optionally enable `AI_DAILY_DIGEST_ENABLED=true`; the Python scheduler fetches AIHOT facts at 08:00, sends a synthetic Feishu DM turn through `ChannelHub -> Hermes`, lets Hermes write the report-style digest from `src/personal_agent/prompts/ai_daily_digest_report.md`, and delivers it through the existing Feishu reply path. This does not re-enable old proactive check-ins, reminders, or life-loop outbound messages.
+**Daily AI digest.** A daily Core ScheduleSpec and the single managed wake create a WorkRun bound to the local due date. Python fetches date-specific AIHOT facts and exclusively prepares the complete prompt from `src/personal_agent/prompts/ai_daily_digest_report.md`; Node only hands that prompt to Hermes and the existing Package B Feishu delivery path. Explicit historical dates reuse the same preparation and delivery authorities without replaying old cron occurrences.
+
+**Personal reminders and Feishu Calendar stay distinct.** “Remind me” uses `todo.create`: Node deterministically derives the reminder instant from structured event facts, and Python reuses the existing one-Todo-to-Core-registration path. “Add to my schedule/Feishu Calendar” uses `feishu.calendar.create`: the trusted Node adapter creates the event as the user, sets its reminder, and verifies it by readback. It does not masquerade as a Todo or restore a second scheduler.
 
 **Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. The unified profile retains the old Full Playwright fallback; OpenCLI browser-backed mode remains disabled. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.
 

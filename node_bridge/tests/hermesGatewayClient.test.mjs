@@ -469,9 +469,9 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.doesNotMatch(capturedBody.messages[0].content, /"actionRequests":\[\]/);
   assert.match(capturedBody.messages[0].content, /requestRef such as "feishu-minutes-doc-1"/);
   assert.match(capturedBody.messages[0].content, /exactly one document\.write actionRequest/);
-  assert.match(capturedBody.messages[0].content, /Owner reminder\/schedule\/Todo creation—not discussion/);
+  assert.match(capturedBody.messages[0].content, /提醒\/记得提醒=>todo\.create/);
   assert.match(capturedBody.messages[0].content, /reminderMinutes:integer/);
-  assert.match(capturedBody.messages[0].content, /Never emit id\/actor\/authorization\/receipt\/effect/);
+  assert.match(capturedBody.messages[0].content, /No id\/actor\/authorization\/receipt\/effect/);
   assert.match(capturedBody.messages[0].content, /reminderTime\/reminderAt/);
   assert.match(capturedBody.messages[0].content, /Do not create or update the document with a tool/);
   assert.match(capturedBody.messages[0].content, /validates the identifier, content, and format/);
@@ -2409,6 +2409,11 @@ test('system instruction contains canonical URL evidence rule', async () => {
   const body = JSON.parse(capturedBody);
   const sysMsg = body.messages.find((m) => m.role === 'system');
   assert.ok(sysMsg.content.includes('Canonical URL resolution does NOT equal content read'), 'system instruction should contain evidence rule');
+  assert.ok(sysMsg.content.includes('todo.create'));
+  assert.ok(sysMsg.content.includes('feishu.calendar.create'));
+  assert.ok(sysMsg.content.includes('feishu.calendar.create (wins unless Todo also asked)'));
+  assert.ok(sysMsg.content.includes('schedule.create'));
+  assert.ok(sysMsg.content.includes('Preserve historical digest date'));
   assert.ok(sysMsg.content.length < 6000, `system instruction plus canonical identity projection should be under 6000 chars, got ${sysMsg.content.length}`);
 });
 
@@ -2764,7 +2769,7 @@ test('context injection resume mode keeps session and uses short recovery budget
   const serialized = JSON.stringify(capturedBody.messages);
   assert.doesNotMatch(serialized, /resume-local user 1/);
   assert.match(serialized, /resume-local user 3/);
-  assert.doesNotMatch(serialized, /daily_digest|continuity digest|open_threads/);
+  assert.doesNotMatch(serialized, /daily_digest_context|continuity digest|open_threads/);
   const telemetry = parseContextComponentsLog(logs);
   assert.equal(telemetry.context_mode, 'resume');
   assert.equal(telemetry.context_decision_reason, 'explicit_resume');

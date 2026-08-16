@@ -6,7 +6,6 @@ import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 
 import { handleIncomingMessage } from './channelHub.mjs';
 import { createTrustedBridgeInformationalReportTask } from './hermesTaskScope.mjs';
@@ -45,11 +44,6 @@ import {
 } from './runtimeState.mjs';
 export { resolveStateDir } from './runtimeState.mjs';
 
-const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const AI_DAILY_DIGEST_TEMPLATE_PATH = path.join(
-  PROJECT_ROOT,
-  'src/personal_agent/prompts/ai_daily_digest_report.md'
-);
 const HERMES_LITE_SOFT_RESET_CONTROL_ROUTE = '/control/hermes-lite-soft-reset';
 const AI_DAILY_DIGEST_CONTROL_ROUTE = '/scheduled/ai-daily-digest';
 const CORE_REMINDER_REGISTER_ROUTE = '/internal/core/reminders/register';
@@ -302,11 +296,11 @@ export async function handleScheduledAiDigestRequest({
     };
   }
 
-  const facts = String(payload.facts || '').trim();
-  if (!facts) {
+  const prompt = typeof payload.prompt === 'string' ? payload.prompt.trim() : '';
+  if (!prompt) {
     return {
       status: 400,
-      payload: { error: "field 'facts' must be a non-empty string" },
+      payload: { error: "field 'prompt' must be a non-empty string" },
     };
   }
 
@@ -331,7 +325,7 @@ export async function handleScheduledAiDigestRequest({
     channel_type: 'dm',
     conversation_id: target.conversation_id,
     sender_id: target.sender_id,
-    text: buildScheduledAiDigestPrompt(facts),
+    text: prompt,
     media: [],
     created_at: runtimeNow.getTime(),
   }, mode === 'manual' ? 'manual_ai_daily_digest' : 'scheduled_ai_daily_digest');
@@ -708,18 +702,6 @@ export async function handleExternalMcpSystemQueueRequest({
       reply_length: String(response?.replyText || '').length,
     },
   };
-}
-
-function buildScheduledAiDigestPrompt(facts) {
-  if (String(facts || '').includes('[AIHOT/Search Hub 事实材料]')) {
-    return String(facts || '').trim();
-  }
-  const template = fs.readFileSync(AI_DAILY_DIGEST_TEMPLATE_PATH, 'utf-8');
-  const factsText = String(facts || '').trim();
-  if (template.includes('{facts}')) {
-    return template.replace('{facts}', factsText).trim();
-  }
-  return [template.trim(), '', '[AIHOT/Search Hub 事实材料]', factsText].join('\n').trim();
 }
 
 function evaluateDirectProactiveEventScope(event) {

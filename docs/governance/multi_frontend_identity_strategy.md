@@ -1,6 +1,6 @@
 # Multi-Frontend Identity Strategy
 
-Status: CURRENT (2026-07-01)
+Status: CURRENT (2026-08-16)
 
 Multi-frontend is not multi-agent. WeChat, Feishu/Lark, and desktop
 OpenAI-compatible clients all enter the same ran-agent mainline:
@@ -10,11 +10,11 @@ frontend adapter
   -> ChannelHub
   -> replyBackend
   -> hermesGatewayClient
-  -> Hermes lite/full gateways
+  -> one Hermes Companion gateway
 ```
 
-Direct access to Hermes 8642/8643 is debug-only and bypasses the unified
-timeline/memory entry.
+Direct access to the Companion gateway on 8642 is debug-only and bypasses the
+unified timeline/memory entry. The retired Full gateway on 8643 is absent.
 
 ## Identity Model
 
@@ -71,10 +71,11 @@ default and sends replies with idempotency keys. Desktop proxy exposes an
 OpenAI-compatible local endpoint for desktop clients, but it still routes
 through `ChannelHub`.
 
-For scheduled AI daily digest delivery, Node bridge records the latest Feishu DM
-target from normal incoming private-message events and reuses that target for a
-synthetic scheduled turn. The scheduled turn still enters `ChannelHub`, so
-Hermes session and timeline semantics match normal Feishu chat.
+For scheduled AI daily digest delivery, the persisted Core occurrence and
+recurrence timezone select the report date. Python prepares the complete
+date-specific AIHOT/template prompt, and the existing Package B binding owns the
+Feishu destination and delivery. The manual historical-date action reuses the
+same Python preparation and existing delivery authority.
 
 External MCP system queue delivery follows the same identity rule:
 `/external-mcp/system-queue` uses the learned Feishu DM target and creates a

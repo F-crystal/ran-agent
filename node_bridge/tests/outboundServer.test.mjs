@@ -225,9 +225,6 @@ test('handleOutboundRequest rejects retired text-only proactive messages', async
 });
 
 test('handleScheduledAiDigestRequest routes digest through existing Feishu DM flow', async (t) => {
-  const templatePath = path.join(PROJECT_ROOT, 'src/personal_agent/prompts/ai_daily_digest_report.md');
-  assert.equal(fs.existsSync(templatePath), true);
-
   const env = tempEnv(t, {
     FEISHU_LARK_CLI_BIN: 'lark-cli',
     FEISHU_LARK_CLI_IDENTITY: 'bot',
@@ -245,10 +242,11 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   let channelMessage = null;
   const calls = [];
   let clockTick = 0;
+  const preparedPrompt = 'Python-owned complete report prompt\n今日 AI 事实材料';
   const result = await handleScheduledAiDigestRequest({
     logger: { info() {}, warn() {}, error() {}, log() {} },
     env,
-    bodyText: JSON.stringify({ facts: '今日 AI 事实材料' }),
+    bodyText: JSON.stringify({ prompt: preparedPrompt }),
     channelHub: async (message) => {
       channelMessage = message;
       return { replyText: '给陛下呈上今日 AI 日报' };
@@ -270,13 +268,7 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   assert.equal(channelMessage.sender_id, 'ou-home');
   assert.equal(channelMessage.route_hint, 'scheduled_ai_daily_digest');
   assert.equal(isTrustedInformationalReportTask(channelMessage), true);
-  assert.match(channelMessage.text, /今日 AI 事实材料/);
-  assert.match(channelMessage.text, /标题、来源、正文/);
-  assert.match(channelMessage.text, /50-200/);
-  assert.match(channelMessage.text, /报道式自然段/);
-  assert.match(channelMessage.text, /不要使用“看点\/意义\/适合\/今日信号”/);
-  assert.doesNotMatch(channelMessage.text, /\{facts\}/);
-  assert.doesNotMatch(channelMessage.text, /发生了什么 \+ 为什么值得看/);
+  assert.equal(channelMessage.text, preparedPrompt);
   assert.equal(calls[0].bin, 'lark-cli');
   assert.equal(calls[0].args.includes('--user-id'), true);
   assert.equal(calls[0].args.includes('ou-home'), true);
@@ -306,7 +298,7 @@ test('manual AI digest uses its operation scope to send one digest body exactly 
   const input = {
     logger: { info() {}, warn() {}, error() {}, log() {} },
     env,
-    bodyText: JSON.stringify({ facts: '仅用于手动补发的已验证事实', mode: 'manual', operation_id: operationId }),
+    bodyText: JSON.stringify({ prompt: 'Python 已准备的手动历史日报提示词', mode: 'manual', operation_id: operationId }),
     channelHub: async (message) => {
       taskGenerations += 1;
       assert.equal(message.route_hint, 'manual_ai_daily_digest');
@@ -349,7 +341,7 @@ test('scheduled AI digest control route is loopback and bearer authenticated bef
     url: '/scheduled/ai-daily-digest',
     headers: { authorization: 'Bearer digest-control-secret' },
     remoteAddress: '127.0.0.1',
-    bodyText: JSON.stringify({ facts: '已验证的日报事实' }),
+    bodyText: JSON.stringify({ prompt: 'Python 已准备的日报提示词' }),
     channelHub: async (message) => {
       channelMessage = message;
       return { replyText: '日报正文' };

@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED at e298bab; S13 NOT STARTED (2026-08-13)
+Status: S12 COMPLETE / PROD_ACCEPTED; POST-S12 CAPABILITY PARITY REVIEWED; S13 NOT STARTED (2026-08-16)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,15 +9,15 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_sha: e298bab161bf0f4882bcef6e9cd701d546b63ff2
-source_pointer: e298bab161bf0f4882bcef6e9cd701d546b63ff2
+repository_sha: 9df626fc30a733bd76dccb42849a527fce9565b3
+source_pointer: 9df626fc30a733bd76dccb42849a527fce9565b3
 core_authority: core-cutover:v1 committed at e298bab161bf0f4882bcef6e9cd701d546b63ff2
 companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
 runtime_stage: S12 COMPLETE / PROD_ACCEPTED; S13 NOT STARTED
 services: Node, Python, unified Hermes and direct Ombre Brain active; normal ingress restored
-core_runtime: exactly one semantic writer; managed wake active
+core_runtime: exactly one semantic writer; managed wake prepared and paused after accepted natural execution
 acceptance_canary: TERMINAL_AMBIGUOUS_NO_RESEND; one attempt; external effect unknown; no resend or duplicate
 owner_acceptance_ref: owner-s12-e298-terminal-ambiguous-acceptance-20260813
 identity: production processes run as ubuntu:ubuntu
@@ -39,6 +39,16 @@ registration. No replacement dependency was installed.
 Hermes-native `cronjob`, `delegate_task` and `execute_code` remain disabled.
 Scheduled outbound is limited to explicit reminders, the opt-in AI digest and
 governed `external_mcp_gateway` notifications.
+
+Production source `9df626f` adds the trusted `todo.create` reminder contract and
+keeps the unified Companion source/wake release path. The post-S12 capability
+parity successor is locally reviewed and archived but requires a separate
+production apply: it makes Python the sole date-specific AIHOT/template/prompt
+owner, binds scheduled reports to the persisted occurrence due date and
+timezone, restores explicit historical-date preparation, restores verified
+`feishu.calendar.create`, keeps Todo and Calendar semantics distinct, and fixes
+`/tools/todo/list` to call the existing pending-Todo owner. It adds no runtime,
+scheduler, wake, action registry, or delivery authority.
 
 ## Memory
 
@@ -115,9 +125,11 @@ desktop-only `local_archive/debug/ombre-p3-root-wip-20260808.patch` with SHA-256
 The other three paths (`docs/governance/agent-capability-governance.md`,
 `scripts/agent_governance_guard.py`, and
 `scripts/install_agent_capability_governance.py`) were governance-hook work
-handed to the dedicated hook-fix task; they are not represented as recoverable
-S5 runtime drafts. The three still-missing runtime semantics were re-implemented
-on current main:
+handed to the dedicated hook-fix task. That task retired the repo hook guard and
+installer, and constrained the remaining project watcher to an explicit-root,
+read-only audit. This host governance work is not represented as recoverable S5
+runtime drafts and changes no production state. The three still-missing runtime
+semantics were re-implemented on current main:
 Python outbound caller deadlines for proactive events now outlive the Node
 Hermes plus Feishu deadlines by the same margin as the digest path; task-scoped
 synthetic Hermes turns never project into the ordinary backend ingest; and an
@@ -746,7 +758,8 @@ advanced the clean production checkout and accepted source pointer through S4
 to runtime source `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. GitHub `main`
 also contains the local-only S5 B.2 seam and S7 Package B.3 Node wiring;
 production remained on the accepted S4 source until the separately authorized
-S12 cutover advanced it to e298.
+S12 cutover advanced it to e298; later unified-source transactions advanced the
+runtime source to `9df626f` while preserving the e298 Core authority.
 The source shape keeps one `ran-agent-companion` profile, one `8642` route, the
 supported Lite/Full capability union and a fixed 15000 ms memory boundary.
 The source still aligns four production-backed contracts:
@@ -768,11 +781,11 @@ closed.
 
 The canonical execution order and stage exit conditions live in
 `docs/governance/active_sequence.md`. S0-S12 are complete and S12 is
-`PROD_ACCEPTED` at e298. S13 remains `NOT STARTED`: observation must first show
-stable e298 source/Core authority, one semantic writer, active managed wake,
-stable services/normal ingress, no second canary attempt or resend, no
-duplicate presentation result, and no unexpected legacy writer/clock production activity. Cleanup
-also requires separate explicit owner deletion authorization; none is current.
+`PROD_ACCEPTED`; production source is `9df626f` and Core authority remains
+e298. The reviewed capability-parity successor must be deployed separately,
+then its runtime behavior and the owner-approved managed-wake disposition must
+be observed before S13 can start. Cleanup also requires separate explicit owner
+deletion authorization; none is current.
 The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the

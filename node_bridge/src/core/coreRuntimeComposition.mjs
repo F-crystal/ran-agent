@@ -13,6 +13,7 @@ import { parseExternalMcpTaskRef } from './coreExternalNotificationService.mjs';
 import { coreError } from './coreErrors.mjs';
 import { createPythonCoreMaintenanceHandler } from './coreMaintenanceHandler.mjs';
 import { createCoreReminderSyncHandler } from './coreReminderSyncHandler.mjs';
+import { localDateForInstant } from './coreScheduling.mjs';
 import { createCoreWorkRunRuntime } from './coreWorkRunRuntime.mjs';
 import { createCoreWorkRunWorker } from './coreWorkRunWorker.mjs';
 import { createPackageBScheduledDeliveryHandler } from './packageB/packageBScheduledDeliveryService.mjs';
@@ -24,9 +25,6 @@ function digest(value) {
 function promptFor(payloadRef) {
   if (payloadRef.startsWith('s12-acceptance:')) {
     return 'S12 Core cutover acceptance. Reply exactly: S12 Core cutover accepted.';
-  }
-  if (payloadRef === 'system-task:ai-daily-digest') {
-    return '生成今天的主动简报。只汇总当前可核验的日程、待办和重要事实；没有有用内容时保持静默。';
   }
   if (payloadRef.startsWith('legacy-todo:')) {
     return `处理 owner 明确设置的提醒 ${payloadRef}。核对当前待办后，仅在提醒仍有效且到期时发送。`;
@@ -49,11 +47,14 @@ function feishuTarget(view) {
   throw coreError('CORE_FEISHU_ROUTE_INVALID', 'Feishu delivery route kind is unsupported');
 }
 
-async function pythonJson(fetchImpl, baseUrl, route, body) {
+async function pythonJson(fetchImpl, baseUrl, route, body, secret = '') {
   const response = await fetchImpl(`${baseUrl}${route}`, {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', headers: {
+      'content-type': 'application/json',
+      ...(secret ? { authorization: `Bearer ${secret}` } : {}),
+    }, body: JSON.stringify(body),
   });
-  if (!response?.ok) throw new Error(`Python todo request failed: ${route}`);
+  if (!response?.ok) throw new Error(`Python request failed: ${route}`);
   return response.json();
 }
 
@@ -121,6 +122,27 @@ export function createCoreRuntimeComposition({
       if (reminder && reminder.status !== 'pending') {
         return { suppressSend: true, provider: 'core', model: 'reminder-state-check' };
       }
+      let instruction = reminder
+        ? `处理 owner 明确设置的到点提醒：${reminder.content}。提醒时间：${reminder.reminder_at}。仅在待办仍为 pending 时发送；否则保持静默。`
+        : task.payloadRef === 'system-task:ai-daily-digest' ? '' : promptFor(task.payloadRef);
+      if (task.payloadRef === 'system-task:ai-daily-digest') {
+        if (task.recurrence?.kind !== 'daily' || typeof task.recurrence.timeZone !== 'string') {
+          throw coreError('CORE_DAILY_DIGEST_RECURRENCE_INVALID', 'daily digest requires its persisted daily timezone');
+        }
+        const localDate = localDateForInstant(task.scheduledFor, task.recurrence.timeZone);
+        const secret = String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '');
+        if (!secret || /\s/.test(secret)) {
+          throw coreError('CORE_DAILY_DIGEST_PREPARE_CONFIG', 'daily digest preparation requires private Python authority');
+        }
+        const prepared = await pythonJson(fetchImpl, pythonBaseUrl, '/internal/ai-daily-digest', {
+          mode: 'prepare', date: localDate,
+        }, secret);
+        if (prepared?.ok !== true || prepared?.authenticated !== true || prepared.date !== localDate
+          || typeof prepared.prompt !== 'string' || !prepared.prompt.trim()) {
+          throw coreError('CORE_DAILY_DIGEST_PREPARE_INVALID', 'Python daily digest preparation was invalid');
+        }
+        instruction = prepared.prompt;
+      }
       const base = {
         id: `core-scheduled-${digest(task.workRunId)}`,
         message_id: `core-scheduled-${digest(task.workRunId)}`,
@@ -128,9 +150,7 @@ export function createCoreRuntimeComposition({
         channel_type: task.destinationKind === 'conversation' ? 'group' : 'dm',
         conversation_id: task.conversationId,
         sender_id: task.ownerId,
-        text: reminder
-          ? `处理 owner 明确设置的到点提醒：${reminder.content}。提醒时间：${reminder.reminder_at}。仅在待办仍为 pending 时发送；否则保持静默。`
-          : promptFor(task.payloadRef),
+        text: instruction,
         media: [],
         created_at: now().getTime(),
         route_hint: task.payloadRef === 'system-task:ai-daily-digest'

@@ -15,6 +15,7 @@ from personal_agent.ai_daily_digest import (
     AI_DAILY_DIGEST_SENT_PREFIX,
     build_digest_prompt,
     load_aihot_facts,
+    prepare_ai_daily_digest,
     run_ai_daily_digest,
 )
 from personal_agent.config import AppConfig
@@ -173,6 +174,26 @@ class AiDailyDigestTest(unittest.TestCase):
         self.assertEqual(len(calls), 3)
         self.assertIn("Model news", facts)
         self.assertIn("Short summary", facts)
+
+    def test_historical_digest_preparation_uses_exact_daily_endpoint_without_delivery(self) -> None:
+        calls: list[str] = []
+
+        def urlopen(request, timeout=20):
+            calls.append(request.full_url)
+            return StubHttpResponse(
+                '{"date":"2026-08-14","sections":[{"label":"模型",'
+                '"items":[{"title":"Historical fact","source":"AIHOT"}]}]}'
+            )
+
+        prepared = prepare_ai_daily_digest(
+            "2026-08-14",
+            facts_loader=lambda: load_aihot_facts("2026-08-14", urlopen=urlopen),
+        )
+
+        self.assertEqual(calls, ["https://aihot.virxact.com/api/public/daily/2026-08-14"])
+        self.assertEqual(prepared["date"], "2026-08-14")
+        self.assertIn("Historical fact", str(prepared["prompt"]))
+        self.assertFalse(prepared["partial"])
 
 
 if __name__ == "__main__":
