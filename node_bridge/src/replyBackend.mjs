@@ -240,14 +240,17 @@ export function createReplyBackend(options = {}) {
           replyEnvelope = Object.freeze({ ...replyEnvelope, actionRequests: Object.freeze([]) });
         }
       }
-      if (response?.envelope_error_code === 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID'
-        && hasFeishuMinutesToDocIntent(message.text)) {
+      if (hasFeishuMinutesToDocIntent(message.text)
+        && replyEnvelope.actionRequests.length === 0
+        && replyEnvelope.activityRequest === null
+        && replyEnvelope.commitments.length === 0
+        && replyEnvelope.claims.length === 0) {
         try {
           const replanned = await chatImpl({
             ...hermesInput,
             continuity_note: [
               hermesInput.continuity_note,
-              'NODE_ACTION_REPLAN: The previous Feishu Minutes reply envelope failed strict validation. Reuse the transcript and content already gathered; do not call tools again. Return exactly one actionRequest with only requestRef, actionType "feishu.minutes_to_doc", and scope. Scope must contain only minuteTitle, folderTitle, documentTitle, and a single-line rootless text-only contentXml under 1800 characters. Never add id, actor, authorization, receipt, effect, or private fields; the bridge creates and verifies the document.',
+              'NODE_ACTION_REPLAN: The previous Feishu Minutes reply provided no valid executable action request. Reuse the transcript and content already gathered; do not call tools again. Return exactly one actionRequest with only requestRef, actionType "feishu.minutes_to_doc", and scope. Scope must contain only minuteTitle, folderTitle, documentTitle, and a single-line rootless text-only contentXml under 1800 characters. Never add id, actor, authorization, receipt, effect, or private fields; the bridge creates and verifies the document.',
             ].filter(Boolean).join('\n'),
           }, hermesOptions);
           const replannedRequest = extractMinutesReplanRequest(replanned);

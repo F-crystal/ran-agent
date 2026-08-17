@@ -48,11 +48,15 @@ evidence.
    also lacked the exact-date egress gate already present on the legacy/manual
    digest route, so it could dispatch either leaked protocol or a dateless
    body.
-5. Minutes document action could not recover from an invalid private envelope.
+5. Minutes document action could not recover when Hermes supplied no executable
+   public action.
    On 2026-08-17 Hermes read `前辈对话3` and produced a bounded single-line
    DocxXML body, but added model-owned `id` beside the allowed action fields.
    The trust boundary correctly rejected `ACTION_REQUEST_UNKNOWN_FIELD` before
    lark-cli; unlike Calendar, the Minutes path had no one-shot strict replan.
+   After the first repair deployed, Hermes instead returned a valid envelope
+   with `actionRequests=[]` and unverified “request submitted” prose. Node still
+   executed nothing; the same missing-action class also needed the strict replan.
 
 ## Topology
 
@@ -80,7 +84,7 @@ F1 Core reminder binding resolution repair
   -> F6REV proportional adversarial review
   -> F6ARCH archive + governance reconciliation
   -> F6DEPLOY production apply (owner-signed)
-  -> F7a Minutes envelope-invalid one-shot strict replan
+  -> F7a Minutes missing-action one-shot strict replan
   -> F7V affected-boundary verification + adversarial review
   -> F7ARCH archive + governance reconciliation
   -> F7DEPLOY production apply (owner-authorized repair)
@@ -321,11 +325,12 @@ complete; only the next real 08:00 observation remains.
   are active, retired Full remains inactive/disabled, managed wake verifies
   active, and the three focused F6 production regressions pass 3/3. The
   governed read-only final check passed under label `f6-production-deploy`.
-- [x] **F7a** — On an envelope-invalid owner request grounded in both Minutes
-  and cloud-document intent, ask Hermes once to reuse the gathered transcript
+- [x] **F7a** — When an owner request grounded in both Minutes and cloud-document
+  intent has no executable action (invalid envelope or empty action list), ask
+  Hermes once to reuse the gathered transcript
   and return only the legal `feishu.minutes_to_doc` fields. Do not strip `id`,
   relax the schema or call tools during replan.
-- [x] **F7V** — The valid replan creates and readbacks exactly one document;
+- [x] **F7V** — An actionless reply replans into one readback-verified document;
   a replan that repeats `id` reaches no lark-cli call. Full replyBackend is
   78/78 and the Calendar/Hermes sibling boundaries are 112/112.
 - [ ] **F7ARCH** — Archive the reviewed repair and reconcile current status.

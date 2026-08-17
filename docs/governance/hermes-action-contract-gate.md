@@ -22,7 +22,8 @@ DocxXML. Node grounds both titles in the current owner request, uniquely resolve
 the existing resources under the authenticated user, creates the document in
 that folder, and accepts success only after document readback. Ambiguous lookup
 or unknown write state fails without automatic retry. If the first private
-Minutes envelope is invalid, Node may request exactly one strict Hermes replan
+Minutes reply has no executable action because its envelope is invalid or its
+action list is empty, Node may request exactly one strict Hermes replan
 only when the current owner turn names both Minutes and a cloud document. The
 replan reuses gathered content, calls no tool, accepts only the exact public
 Minutes fields, and still fails closed before lark-cli if a model-owned field

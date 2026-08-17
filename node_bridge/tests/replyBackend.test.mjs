@@ -1151,7 +1151,7 @@ test('existing Feishu Minutes transcript becomes one read-back cloud document', 
   ]);
 });
 
-test('an envelope-invalid Minutes reply receives one strict replan and creates one verified document', async (t) => {
+test('an actionless Minutes reply receives one strict replan and creates one verified document', async (t) => {
   const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
   const contentXml = '<title>前辈对话3</title><heading1>摘要</heading1><p>整理内容</p>';
   const calls = [];
@@ -1173,10 +1173,14 @@ test('an envelope-invalid Minutes reply receives one strict replan and creates o
     hermesImpl: async (input) => {
       inputs.push(input);
       attempt += 1;
-      if (attempt === 1) return {
-        reply_text: '回复格式校验失败，请稍后重试。',
-        envelope_error_code: 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID',
-      };
+      if (attempt === 1) return { reply_envelope: {
+        schemaVersion: 1,
+        message: '飞书云文档写入请求已提交，静候落地。',
+        actionRequests: [],
+        activityRequest: null,
+        claims: [],
+        commitments: [],
+      } };
       return { reply_envelope: {
         schemaVersion: 1,
         message: '正在整理。',

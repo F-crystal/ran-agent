@@ -105,11 +105,13 @@ transcript was organized into one document directly in the uniquely matched
 `中海油` folder and passed document readback and folder-parent verification.
 The action path adds no ASR or PPT dependency.
 
-On 2026-08-17 a new owner Minutes request was rejected before lark-cli because
-Hermes added model-owned `id` to an otherwise valid `feishu.minutes_to_doc`
-request. The locally verified repair adds one strict Hermes replan that reuses
-the already gathered transcript and preserves the existing fail-closed schema,
-unique resource lookup and readback boundary. It is not yet deployed.
+On 2026-08-17 a new owner Minutes request first failed before lark-cli because
+Hermes added model-owned `id`, then after the initial repair returned an empty
+action list with unverified submission prose. Neither attempt created a bridge
+operation; a read-only exact-title check found no target document. The current
+local repair requests one strict Hermes replan whenever the grounded Minutes
+turn has no executable action, while preserving the fail-closed schema, unique
+resource lookup and readback boundary. It is not yet deployed.
 
 S3 deployed source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A
 privacy-preserving production probe selected an existing active
