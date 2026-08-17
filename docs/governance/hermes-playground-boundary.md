@@ -238,3 +238,9 @@ text route or accept vague "moderate initiative" policy.
   also required the sealed Hermes CLI/Python pair. Direct verification now
   reuses the existing service-bound runtime resolver and exports that pair;
   staged deployment keeps its existing resolver path.
+- The next direct gate passed the complete Node and real-provider boundary, then
+  found five Python fixtures coupled to ambient production state: four omitted
+  temporary Core/snapshot paths and one assumed the gate source contained
+  `.git`. Those fixtures now bind temporary state explicitly; the S12 closure
+  proof builds its own Git repository. The five tests pass from a Git-less,
+  read-only source copy under an empty environment.

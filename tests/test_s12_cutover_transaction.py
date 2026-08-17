@@ -638,9 +638,24 @@ def test_verify_plan_is_read_only_state_machine_surface() -> None:
 
 
 def test_candidate_execution_closure_is_exact_read_only_and_import_complete(
-    monkeypatch: pytest.MonkeyPatch,
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
 ) -> None:
-    repository = SCRIPT.parents[1]
+    source = SCRIPT.parents[1]
+    repository = tmp_path / "candidate-repository"
+    shutil.copytree(source, repository, ignore=shutil.ignore_patterns(
+        ".git", ".env", ".env.*", ".ran_agent_state", ".openclaw_state",
+        "data", "logs", "debug", "state", "local_archive", "vault", ".venv",
+        "node_modules", "__pycache__", ".pytest_cache", ".npm",
+    ))
+    for path in (repository, *repository.rglob("*")):
+        if not path.is_symlink():
+            path.chmod(stat.S_IMODE(path.stat().st_mode) | stat.S_IWUSR)
+    subprocess.run(["git", "-C", str(repository), "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(repository), "add", "-A"], check=True)
+    subprocess.run([
+        "git", "-C", str(repository), "-c", "user.name=fixture",
+        "-c", "user.email=fixture@invalid", "commit", "-qm", "fixture",
+    ], check=True)
     candidate = subprocess.run(
         ["git", "-C", str(repository), "rev-parse", "HEAD"], check=True,
         text=True, stdout=subprocess.PIPE,

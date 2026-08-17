@@ -388,6 +388,7 @@ def test_source_profile_and_pointer_rollback_restore_exact_prior_authority(
     blobs = wake_blobs(lite_home, profile_dir)
     blobs[MODULE.PROFILE_PATH] = companion
     monkeypatch.setattr(MODULE, "REPO", repo)
+    monkeypatch.setattr(MODULE, "CORE_DB", tmp_path / "missing-core.sqlite3")
     monkeypatch.setattr(MODULE, "LITE_HOME", lite_home)
     monkeypatch.setattr(MODULE, "SOURCE_PROFILE_DIR", profile_dir)
     monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshot_root)
@@ -730,6 +731,7 @@ def test_apply_restore_failure_reports_both_failures_as_reconciliation_required(
     stage.mkdir()
     snapshot = tmp_path / "snapshots" / "fresh"
     snapshot.mkdir(parents=True)
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshot.parent)
     monkeypatch.setattr(MODULE, "current_source_pointer", lambda: None)
     monkeypatch.setattr(
         MODULE, "require_source_baseline",
@@ -764,6 +766,7 @@ def test_apply_failure_returns_explicit_safe_rollback_receipt(
     snapshot = tmp_path / "snapshots" / "fresh"
     snapshot.mkdir(parents=True)
     calls = []
+    monkeypatch.setattr(MODULE, "SOURCE_SNAPSHOT_ROOT", snapshot.parent)
     monkeypatch.setattr(MODULE, "current_source_pointer", lambda: None)
     monkeypatch.setattr(
         MODULE, "require_source_baseline",
