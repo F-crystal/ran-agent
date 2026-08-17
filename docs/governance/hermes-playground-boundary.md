@@ -1,6 +1,6 @@
 # Hermes Playground Boundary
 
-Status: CURRENT (2026-08-17); H0-H5 LOCAL_VERIFIED / FINAL LOCAL_VERIFIED
+Status: CURRENT (2026-08-17); H0-H5 PROD_VERIFIED
 
 ## Owner Decision
 
@@ -49,10 +49,10 @@ required, not optional.
 
 ## Verified Current Facts
 
-- The local reply-envelope valve now keeps only
+- The deployed reply-envelope valve keeps only
   `memory.remember/correct/forget`; work actions are removed before any trusted
   adapter or Core job client runs. Node no longer replans work from user prose.
-- The local companion profile no longer exposes terminal, file, session search
+- The deployed companion profile no longer exposes terminal, file, session search
   or direct Playwright. Search Hub retains its internal fallback.
 - External MCP admission, registry, policy, grants, sessions, evidence,
   cancellation and pending confirmation remain intact. The canonical active
@@ -61,29 +61,24 @@ required, not optional.
   sources are not padded with deployment-irrelevant edits.
 - `personal_memory` is query-only. Durable writes already use backend extraction
   and typed personal-learning candidates.
-- Ombre recall is active on loopback `18001`. The local candidate composes the
+- Ombre is active on loopback `18001`. Production composes the
   accepted S8 projector with the live Core runtime. A verified successful
   personal-learning receipt creates the hash-bound Core source and projects it;
   correction replaces the prior subject scope and forget erases it. The
-  existing confirmed relationship-summary path remains `grow`. Production is
-  unchanged.
-- The local candidate now surfaces at most one companion candidate per life-loop
+  existing confirmed relationship-summary path remains `grow`.
+- Production surfaces at most one companion candidate per life-loop
   scan, and only from an active confirmed personal-learning record. Python
   submits a structured event without composing visible text. Node consumes
   `/checkin on|off`, the bounded cadence range, quiet hours, daily limit,
   evidence and dedupe before Hermes; generic check-ins remain rejected and the
-  existing Feishu receipt commits only after send success. Production is
-  unchanged.
-- Python `/chat` is 410, but the backend still constructs the retired frontend
-  agent/runtime/tool/reviewer graph in production. The local H5 candidate stops
-  that construction: the backend runtime creates no chat model or frontend
+  existing Feishu receipt commits only after send success.
+- Python `/chat` is 410 and the backend no longer constructs the retired frontend
+  agent/runtime/tool/reviewer graph. The backend runtime creates no chat model or frontend
   orchestrator, and creates a tool model only when optional memory LLM
   extraction is explicitly enabled. `/chat` remains 410.
-- The Core daily digest remains active in production. The owner assigned daily
-  reports to Codex, so F6OBS is superseded and the exact digest activity must be
-  stopped in a separately authorized production transaction. Locally, the
-  replacement schedule manifest no longer seeds it, deploy defaults are off,
-  and an old occurrence is suppressed before Python, Hermes or Feishu.
+- The ran-agent daily digest is stopped. Daily reports belong to Codex; the
+  replacement schedule manifest does not seed the digest, deploy defaults are
+  off, and an old occurrence is suppressed before Python, Hermes or Feishu.
 - Empty provider content and the upstream `No reply` sentinel now fail as
   infrastructure errors. An ordinary conversation rotates once through the
   existing soft-reset seam and retries once; neither failed attempt enters
@@ -124,11 +119,11 @@ dead. Codex and deterministic service-owned paths remain separate.
 | Stage | Status | Scope | Exit evidence |
 |---|---|---|---|
 | H0 decision and governance | COMPLETE | This contract and canonical topology reflect the owner's corrected boundary. | No default-off MCP, optional Ombre/proactive, Hermes slash-command or Hermes daily-report requirement remains. |
-| H1 playground boundary | LOCAL_VERIFIED | Remove Hermes work action instructions/exposure and broad shell/file/session/browser tools; make the governed external MCP gateway source-default available; retire ran-agent daily digest locally. | Work effects stop before executors, profiles expose only playground tools, the external gateway diagnostic passes, and reminder/companionship clocks remain enabled. |
-| H2 conversation reliability | LOCAL_VERIFIED | Treat known upstream empty/no-reply sentinels as provider failure, keep them out of history, and reuse the existing soft-reset/retry seam. | Gateway tests prove one rotated retry can resume, repeated failure stays infrastructure-only, and sentinel text never enters history. |
-| H3 live Ombre continuity | LOCAL_VERIFIED | Compose the accepted S8 projector for confirmed learning and relationship-summary events; add emotional-continuity recall acceptance. | The focused Node set proves verified-receipt hold, correction/forget scope replacement, existing relationship-summary grow, idempotency, lost-response recovery, erase/rebuild and subsequent read-only emotional recall. Production apply remains separately authorized. |
-| H4 bounded proactive companionship | LOCAL_VERIFIED | Give companion opportunities a minimal stable producer and route only context-grounded candidates through ProactiveEvent. Define explicit cadence, quiet window, dedupe and stop state. | Focused checks prove daily/rate limit, quiet/silence, user stop, no generic greeting, no direct send, one receipt, and memory-grounded content. |
-| H5 zombie-runtime excision | LOCAL_VERIFIED | Remove the retired Python frontend chat/runtime/tool/reviewer graph after H4 owns the required opportunity slice. | Python `/chat` stays 410, H4 behavior is unchanged, runtime construction omits chat/Qwen/frontend/reviewer objects, and the affected Python set passes. |
+| H1 playground boundary | PROD_VERIFIED | Remove Hermes work action instructions/exposure and broad shell/file/session/browser tools; make the governed external MCP gateway source-default available; retire ran-agent daily digest. | Work effects stop before executors, profiles expose only playground tools, the external gateway diagnostic passes, and reminder/companionship clocks remain enabled. |
+| H2 conversation reliability | PROD_VERIFIED | Treat known upstream empty/no-reply sentinels as provider failure, keep them out of history, and reuse the existing soft-reset/retry seam. | Gateway tests prove one rotated retry can resume, repeated failure stays infrastructure-only, and sentinel text never enters history. |
+| H3 live Ombre continuity | PROD_VERIFIED | Compose the accepted S8 projector for confirmed learning and relationship-summary events; add emotional-continuity recall acceptance. | The focused Node set proves verified-receipt hold, correction/forget scope replacement, existing relationship-summary grow, idempotency, lost-response recovery, erase/rebuild and subsequent read-only emotional recall. |
+| H4 bounded proactive companionship | PROD_VERIFIED | Give companion opportunities a minimal stable producer and route only context-grounded candidates through ProactiveEvent. Define explicit cadence, quiet window, dedupe and stop state. | Focused checks prove daily/rate limit, quiet/silence, user stop, no generic greeting, no direct send, one receipt, and memory-grounded content. |
+| H5 zombie-runtime excision | PROD_VERIFIED | Remove the retired Python frontend chat/runtime/tool/reviewer graph after H4 owns the required opportunity slice. | Python `/chat` stays 410, H4 behavior is unchanged, runtime construction omits chat/Qwen/frontend/reviewer objects, and the affected Python set passes. |
 
 ## Ombre Acceptance Contract
 
@@ -164,8 +159,8 @@ text route or accept vague "moderate initiative" policy.
 ## Handoff
 
 - Canonical order: H0 -> H1 -> H2 -> H3 -> H4 -> H5.
-- H0-H5 and final local verification are complete; no production apply, restart
-  or database mutation has occurred.
+- H0-H5 are archived, deployed and production verified. The release retained
+  one unified Hermes gateway and the existing Core/Ombre authorities.
 - H3 reuses the S8 projector instead of adding a writer. The production-shaped
   personal-learning path is `verified action receipt -> hash-bound Core event ->
   Ombre hold`; relationship-summary events retain the accepted `grow` mapping.
@@ -214,11 +209,10 @@ text route or accept vague "moderate initiative" policy.
 - Ponytail excision removed five unreachable Hermes work executors and their
   obsolete dedicated suites. The release diff is net-negative; no replacement
   abstraction, compatibility layer or second runtime was added.
-- The local digest retirement has three layers: no replacement manifest row,
-  deploy default off, and a runtime guard for a residual old occurrence.
-  Production still requires an exact separately authorized stop transaction.
-- F6OBS is superseded by the decision to stop ran-agent daily reports; production
-  still runs the digest until an authorized stop transaction completes.
+- Digest retirement has three layers: no replacement manifest row, deploy
+  default off, and a runtime guard for a residual old occurrence. The
+  production activity is stopped.
+- F6OBS is superseded by the decision to move ran-agent daily reports to Codex.
 - The transformation and Package B locks are closed. Release ownership is
   recorded by `.agents/task-locks/hermes-playground-release-20260817.md`.
 - The first immutable production dry-run stopped before mutation because the

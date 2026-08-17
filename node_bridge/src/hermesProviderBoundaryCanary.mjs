@@ -23,7 +23,12 @@ export async function runHermesProviderBoundaryCanary(options = {}) {
   const projection = loadPublishedProjection(pointer, identity.version);
   const expected = `OMBRE_PROVIDER_CANARY_OK:${nonce}:${identity.version}:${projection.projection_revision}`;
   const result = await sendChatToHermesGateway({
-    text: `O1 provider-boundary canary nonce=${nonce}. Return only the provider-issued canary receipt.`,
+    text: [
+      `O1 provider-boundary canary nonce=${nonce}.`,
+      'Read identity_version and projection_revision from the system-priority context.',
+      'Return exactly OMBRE_PROVIDER_CANARY_OK:<nonce>:<identity_version>:<projection_revision>',
+      'using their actual values and no other text.',
+    ].join(' '),
     sender_id: `ombre-o1-provider-canary-${mode}`,
     platform: 'desktop',
     channel_type: 'desktop',

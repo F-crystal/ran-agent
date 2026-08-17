@@ -276,10 +276,8 @@ the account without separate authorization.
 - Lite/Full drift repair is release-internal only. Do not invoke
   `apply-hermes-runtime-split.sh` standalone; use the exact candidate
   transaction above.
-- Diagnose lite/full convergence:
-  `bash scripts/diagnose-lite-full.sh`
-- Prove the final Hermes v0.13 provider HTTP body without network access:
-  `RAN_AGENT_CAPABILITY_MODE=<lite|full> HERMES_SERVICE_UNIT=<unit> HERMES_HOME=<home> bash scripts/diagnose-hermes-provider-boundary.sh`
+- Run the blocking unified-runtime acceptance:
+  `bash scripts/verify-hermes-release.sh --release`
 - Diagnose proactive events:
   `bash scripts/diagnose-proactive-events.sh`
 - Diagnose external MCP gateway:
@@ -612,13 +610,10 @@ local runtime data, not portable documentation.
 
 ```bash
 cd /opt/ran_agent
-bash scripts/diagnose-lite-full.sh
 bash scripts/diagnose-external-mcp-gateway.sh
 bash scripts/diagnose-search-hub.sh
-bash scripts/diagnose-ombre-memory.sh
 bash scripts/diagnose-hermes-continuity.sh
 bash scripts/diagnose-multi-frontend.sh
-bash scripts/diagnose-ai-daily-digest.sh
 bash scripts/diagnose-hermes-tools.sh
 bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-public-sidecar --smoke-social-tools
 ```

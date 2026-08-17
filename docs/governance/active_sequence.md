@@ -27,11 +27,11 @@ S0 facts/runtime selection
   -> post-S12 F6 delivery guards (PROD_APPLIED; F6OBS SUPERSEDED by owner decision to retire ran-agent daily reports)
   -> post-S12 Minutes strict replan (PROD_VERIFIED; one readback-proven document; 2026-08-17)
   -> H0 Hermes playground boundary decision (COMPLETE; owner reordered ahead of S13 on 2026-08-17)
-  -> H1 Hermes playground boundary transformation (LOCAL_VERIFIED)
-  -> H2 conversation reliability (LOCAL_VERIFIED)
-  -> H3 live Ombre continuity (LOCAL_VERIFIED)
-  -> H4 bounded proactive companionship (LOCAL_VERIFIED)
-  -> H5 zombie-runtime excision (LOCAL_VERIFIED)
+  -> H1 Hermes playground boundary transformation (PROD_VERIFIED)
+  -> H2 conversation reliability (PROD_VERIFIED)
+  -> H3 live Ombre continuity (PROD_VERIFIED)
+  -> H4 bounded proactive companionship (PROD_VERIFIED)
+  -> H5 zombie-runtime excision (PROD_VERIFIED)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
@@ -47,9 +47,9 @@ waiting for another ran-agent digest. The Minutes strict replan is isolated from
 DM context, exact public metadata is normalized without accepting unknown
 fields, and production contains exactly one readback-proven `前辈对话3` document
 in the unique `中海油` folder. The owner explicitly reordered H0-H5 ahead of
-S13; H0-H5 and final affected-suite verification are locally complete. Production still runs the
-digest until a separately authorized stop transaction completes. S13 has not
-started, and cleanup still lacks deletion authorization.
+S13; H0-H5 are archived, deployed and production verified. The digest is
+stopped and daily reports belong to Codex. S13 has not started, and cleanup
+still lacks deletion authorization.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

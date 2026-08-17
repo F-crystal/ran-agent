@@ -45,7 +45,7 @@ blocking_acceptance() {
 
 specialized_diagnostics() {
   local script
-  for script in diagnose-lite-full.sh diagnose-external-mcp-gateway.sh diagnose-ombre-memory.sh; do
+  for script in diagnose-external-mcp-gateway.sh; do
     if bash "$CONTROL_ROOT/scripts/$script" >/dev/null 2>&1; then
       printf 'verify-hermes-release: specialized-ok name=%s\n' "$script"
     else

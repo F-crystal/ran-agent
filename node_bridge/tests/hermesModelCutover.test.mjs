@@ -117,15 +117,14 @@ test('manual rollback changes Lite and Full together to Flash and keeps non-thin
   }
 });
 
-test('O1 provider canary and final HTTP body proof are both blocking acceptance', () => {
+test('unified provider canary is blocking acceptance and uses the active profile', () => {
   const accept = readProjectFile('scripts/accept-hermes-release.sh');
-  const diagnose = readProjectFile('scripts/diagnose-hermes-provider-boundary.sh');
+  const canary = readProjectFile('node_bridge/src/hermesProviderBoundaryCanary.mjs');
+  assert.match(accept, /release_provider_boundary_canary lite ran-agent-hermes\.service 8642 ran-agent-companion/);
+  assert.doesNotMatch(accept, /release_provider_boundary_canary lite ran-agent-hermes\.service 8642 ran-assistant-lite/);
   assert.match(accept, /hermesProviderBoundaryCanary\.mjs/);
-  assert.match(accept, /diagnose-hermes-provider-boundary\.sh/);
-  assert.match(accept, /lite_provider_http_body_proof_failed/);
-  assert.match(accept, /full_provider_http_body_proof_failed/);
-  assert.match(diagnose, /\$\{HERMES_BIN%\/\*\}\/python/);
-  assert.doesNotMatch(diagnose, /\$project\/venv\/bin\/python/);
+  assert.match(canary, /Read identity_version and projection_revision from the system-priority context/);
+  assert.match(canary, /reply !== expected/);
 });
 
 test('model rollback is an input to the existing O1 release transaction', () => {

@@ -17,13 +17,14 @@ complete and `core-cutover:v1`
 remains at `e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Runtime rollback is
 closed, retired v0.13 payloads are deleted, `18002` and O2 are absent, and the
 direct loopback Ombre service on `18001` remains active. The post-S12
-capability-parity and product-effect repairs are live: AI digest, verified
-Feishu Calendar creation, replay-safe Todo registration and the managed wake
-are restored, F6a/F6b delivery guards are deployed, and the Minutes strict
-replan is production verified. The owner superseded F6OBS by assigning daily
-reports to Codex and explicitly reordered the Hermes transformation ahead of
-S13. H0-H5 are final `LOCAL_VERIFIED`; production still runs the digest
-pending the authorized Hermes release transaction. The Package B
+capability-parity and product-effect repairs are live: verified Feishu Calendar
+creation, replay-safe Todo registration and managed wake are restored, F6a/F6b
+delivery guards are deployed, and the Minutes strict replan is production
+verified. The owner superseded F6OBS by assigning daily reports to Codex and
+explicitly reordered the Hermes transformation ahead of S13. H0-H5 are
+`PROD_VERIFIED`: the digest is stopped, external MCP is default-available behind
+its existing gates, Ombre projection and bounded companionship are composed,
+and the retired Python chat graph is absent. The Package B
 presentation-binding namespace repair is already contained in current `main`;
 no separate Package B work remains. S13 is `NOT STARTED` and its
 deletion scope is not authorized. The H0-H5 contract lives in

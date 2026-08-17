@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED; F6 PROD_APPLIED; H0-H5 FINAL LOCAL_VERIFIED; S13 NOT STARTED (2026-08-17)
+Status: S12 COMPLETE / PROD_ACCEPTED; F6 PROD_APPLIED; H0-H5 PROD_VERIFIED; S13 NOT STARTED (2026-08-17)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,8 +9,8 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_state: post-S12 product-effect repair applied 2026-08-17
-source_pointer: current archived F6 production source
+repository_state: Hermes playground H0-H5 applied 2026-08-17
+source_pointer: current archived production source
 core_authority: core-cutover:v1 committed at e298bab161bf0f4882bcef6e9cd701d546b63ff2
 companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
@@ -29,18 +29,17 @@ WeChat, Feishu/Lark and the optional Desktop proxy share
 sessions are channel/conversation scoped; non-referential requests do not
 inherit another channel's last turn. Python `/chat` is retired and returns 410.
 
-The unified companion keeps the former Lite/Full capability union on one
-runtime. Search, terminal/file/session tools, Playwright, media, co-reading and
-the supported MCP registrations remain available. The accepted companion
-overlay removes `obsidian_memory` from the active Hermes mount namespace and
-routes bounded Vault recall through `personal_memory`; the host-visible profile
-files remain on the old source checkout and still contain that retired
-registration. No replacement dependency was installed.
-Hermes-native `cronjob`, `delegate_task` and `execute_code` remain disabled.
-Scheduled outbound is limited to explicit reminders, the opt-in AI digest and
-governed `external_mcp_gateway` notifications.
+The unified companion keeps conversation, emotional companionship, media,
+co-reading, search and admitted external MCP play on one runtime. Broad
+terminal/file/session tools, direct Playwright and work-effect actions are not
+Hermes-visible. `personal_memory` provides bounded query-only recall;
+`obsidian_memory`, Hermes-native `cronjob`, `delegate_task` and `execute_code`
+remain disabled. No replacement dependency or second runtime was installed.
+Scheduled outbound is limited to explicit reminders, bounded proactive
+companionship and governed `external_mcp_gateway` notifications. The ran-agent
+daily digest is stopped; Codex owns daily reports.
 
-The local H1-H3 candidate narrows the future Hermes profile to conversation,
+The deployed H1-H3 source narrows Hermes to conversation,
 companionship and play: terminal/file/session/direct Playwright are absent,
 work `actionRequests` stop before executors, and the external MCP gateway is
 source-default available behind its existing policy gates. Empty/`No reply`
@@ -48,8 +47,7 @@ provider output rotates once through the existing soft-reset seam and never
 enters conversation history. Verified successful personal-learning receipts
 now create hash-bound Core sources and reuse the S8 projector for Ombre
 hold/correct/forget continuity; the existing relationship-summary mapping
-remains `grow`. These statements are local candidate facts, not a production
-deployment claim. H4 additionally gives the Core-managed life-loop scan one
+remains `grow`. H4 gives the Core-managed life-loop scan one
 confirmed-memory companion candidate, then routes it through the existing
 structured ProactiveEvent, Hermes decision, Node cadence/quiet/stop/dedupe
 gates and post-send receipt. The retired direct proactive-text flag stays off.
@@ -65,9 +63,9 @@ and managed-wake activation completed. The first catch-up digest then exposed
 malformed private-envelope leakage and a missing Core wake exact-date gate.
 The bounded F6 repair was deployed through the unified source transaction on
 2026-08-17; its production boundary checks pass. The owner subsequently
-assigned daily reports to Codex and superseded the next real-08:00 observation.
-Production still runs the digest until a separately authorized stop transaction
-completes. The source makes Python the sole date-specific AIHOT/template/prompt
+assigned daily reports to Codex; the H1 production transaction stopped the
+digest and disabled replacement seeding. The source makes Python the sole
+historical-date-specific AIHOT/template/prompt
 owner, binds scheduled reports to the persisted occurrence due date and
 timezone, restores explicit historical-date preparation, restores verified
 `feishu.calendar.create`, keeps Todo and Calendar semantics distinct, and fixes
@@ -90,11 +88,11 @@ changing the direct `18001` read path.
 
 Ombre is a derived relationship/context source, not the authority for Core
 facts or deployment truth. Core and governed runtime documents remain the
-authorities. S8 adds one local-only rebuildable projector for confirmed,
-payload-hash-bound Core/personal-learning events. H3 composes it in the local
-candidate after a verified successful personal-learning receipt and preserves
-its confirmed relationship-summary `grow` path; production still has no Ombre
-mutation path.
+authorities. S8 added one rebuildable projector for confirmed,
+payload-hash-bound Core/personal-learning events. H3 composes it in production
+after a verified successful personal-learning receipt and preserves its
+confirmed relationship-summary `grow` path. Hermes and public recall remain
+query-only; only the stable backend invokes the projector.
 
 The converged source deploys main's strict query-only
 `personalMemoryMcpServer`, explicit `source_status`, Vault retrieval, Python
@@ -166,8 +164,8 @@ production-backed contracts:
 - canonical `memory_bge_vector_index.*` paths;
 - Ombre endpoint absence classified as transport failure;
 - unified Hermes and co-reading defaults on `8642`;
-- no production-composed or model-facing Ombre mutation; inactive O2 seams are
-  absent.
+- no model-facing Ombre mutation; the stable backend owns the production
+  projector and inactive O2 seams are absent.
 
 Legacy split-profile release inputs remain excluded from the companion
 distribution. The source mode is the only authorized seam through the unified
@@ -181,10 +179,10 @@ The canonical execution order and stage exit conditions live in
 `docs/governance/active_sequence.md`. S0-S12 are complete and S12 is
 `PROD_ACCEPTED`; Core authority remains e298. Product-effect recovery,
 managed-wake activation and F6 production apply are complete. F6OBS is
-superseded by the owner decision to move daily reports to Codex. H0-H5 and
-their final affected-suite verification are locally complete; production apply
-and the production digest stop remain separate mutations. S13 remains not
-started. Cleanup also requires
+superseded by the owner decision to move daily reports to Codex. H0-H5 are
+archived, deployed and production verified, including the daily-digest stop,
+external-MCP default availability, Ombre projection, bounded companionship and
+zombie-runtime removal. S13 remains not started. Cleanup also requires
 separate explicit owner deletion authorization; none is current.
 The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop

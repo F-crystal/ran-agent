@@ -3960,7 +3960,8 @@ test('unified verification makes release acceptance blocking and keeps optional 
   assert.match(verify, /accept-hermes-release\.sh" --apply/);
   assert.match(verify, /RAN_AGENT_PROACTIVE_DIAG_STRICT_ENV=1/);
   assert.match(verify, /diagnose-proactive-events\.sh/);
-  assert.match(verify, /diagnose-lite-full\.sh diagnose-external-mcp-gateway\.sh diagnose-ombre-memory\.sh/);
+  assert.match(verify, /for script in diagnose-external-mcp-gateway\.sh/);
+  assert.doesNotMatch(verify, /for script in .*diagnose-lite-full\.sh|for script in .*diagnose-ombre-memory\.sh/);
   assert.match(verify, /specialized-warning/);
   assert.match(verify, />\/dev\/null 2>&1/);
 });

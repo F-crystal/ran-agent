@@ -313,7 +313,7 @@ release_provider_boundary_canary() {
 }
 
 release_provider_boundary_canaries() {
-  release_provider_boundary_canary lite ran-agent-hermes.service 8642 ran-assistant-lite
+  release_provider_boundary_canary lite ran-agent-hermes.service 8642 ran-agent-companion
 }
 
 if [[ "$MODE" == "--dry-run" ]]; then
