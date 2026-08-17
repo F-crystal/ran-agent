@@ -31,6 +31,7 @@ import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMe
 import { normalizeReplyEnvelope } from './replyEnvelope.mjs';
 import { getSemanticVerifierConfig, verifySemanticClaims } from './semanticClaimVerifier.mjs';
 import {
+  createTrustedBridgeTask,
   isTrustedHermesTaskScopedMessage,
   isTrustedInformationalReportTask,
   preserveTrustedBridgeTaskProvenance,
@@ -246,13 +247,15 @@ export function createReplyBackend(options = {}) {
         && replyEnvelope.commitments.length === 0
         && replyEnvelope.claims.length === 0) {
         try {
-          const replanned = await chatImpl({
+          const replanInstruction = 'NODE_ACTION_REPLAN: The previous Feishu Minutes reply provided no valid executable action request. Read the existing transcript again if needed, but do not create a document with a tool. Return exactly one actionRequest with only requestRef, actionType "feishu.minutes_to_doc", and scope. Scope must contain only minuteTitle, folderTitle, documentTitle, and a single-line rootless text-only contentXml under 1800 characters. Never add id, actor, authorization, receipt, effect, or private fields; the bridge creates and verifies the document.';
+          const replanned = await chatImpl(createTrustedBridgeTask({
             ...hermesInput,
-            continuity_note: [
-              hermesInput.continuity_note,
-              'NODE_ACTION_REPLAN: The previous Feishu Minutes reply provided no valid executable action request. Reuse the transcript and content already gathered; do not call tools again. Return exactly one actionRequest with only requestRef, actionType "feishu.minutes_to_doc", and scope. Scope must contain only minuteTitle, folderTitle, documentTitle, and a single-line rootless text-only contentXml under 1800 characters. Never add id, actor, authorization, receipt, effect, or private fields; the bridge creates and verifies the document.',
-            ].filter(Boolean).join('\n'),
-          }, hermesOptions);
+            id: `${message.id || requestId}:minutes-action-replan`,
+            message_id: `${message.id || requestId}:minutes-action-replan`,
+            text: [hermesInput.text, replanInstruction].filter(Boolean).join('\n'),
+            route_hint: 'action_gate_repair',
+            continuity_note: '',
+          }, 'action_gate_repair'), hermesOptions);
           const replannedRequest = extractMinutesReplanRequest(replanned);
           replyEnvelope = Object.freeze({
             ...replyEnvelope,

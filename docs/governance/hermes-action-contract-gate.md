@@ -25,9 +25,11 @@ or unknown write state fails without automatic retry. If the first private
 Minutes reply has no executable action because its envelope is invalid or its
 action list is empty, Node may request exactly one strict Hermes replan
 only when the current owner turn names both Minutes and a cloud document. The
-replan reuses gathered content, calls no tool, accepts only the exact public
-Minutes fields, and still fails closed before lark-cli if a model-owned field
-such as `id` remains. For the one exact Minutes action shape containing only
+replan accepts only the exact public Minutes fields and still fails closed
+before lark-cli if a model-owned field such as `id` remains. It runs in the
+trusted `action_gate_repair` task session and may reread the named transcript,
+but never writes through a tool.
+For the one exact Minutes action shape containing only
 `actionType` and the four required scope fields, the bridge may bind the fixed
 public correlation label when `requestRef` alone is absent and deterministically
 bind the body `<title>` to `documentTitle`; it does not apply this normalization

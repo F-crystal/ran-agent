@@ -17,6 +17,7 @@ import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 import {
   createTrustedBridgeInformationalReportTask,
   createTrustedBridgeTask,
+  isTrustedHermesTaskScopedMessage,
   listHermesTaskScopedRoutes,
 } from '../src/hermesTaskScope.mjs';
 import { createFeishuMinutesDocumentExecutorAdapter } from '../src/feishuMinutesDocumentClient.mjs';
@@ -1211,7 +1212,11 @@ test('an actionless Minutes reply receives one strict replan and creates one ver
 
   assert.equal(response.replyText, '已整理成云文档并放入目标文件夹。');
   assert.equal(attempt, 2);
-  assert.match(inputs[1].continuity_note, /Never add id/);
+  assert.equal(inputs[1].route_hint, 'action_gate_repair');
+  assert.equal(isTrustedHermesTaskScopedMessage(inputs[1]), true);
+  assert.equal(inputs[1].continuity_note, '');
+  assert.match(inputs[1].text, /Never add id/);
+  assert.match(inputs[1].text, /前辈对话3/);
   assert.deepEqual(calls.map((args) => args.slice(0, 2)), [
     ['minutes', '+search'],
     ['drive', '+search'],

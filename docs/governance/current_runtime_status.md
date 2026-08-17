@@ -115,7 +115,9 @@ resource lookup and readback boundary. The final local repair also binds a
 missing public requestRef only for the exact unambiguous Minutes action shape;
 the same narrow normalization binds the body title to `documentTitle` after
 live zero-effect rejections exposed missing model title metadata. Other
-invalid actions remain rejected. It is not yet deployed.
+invalid actions remain rejected. A missing-action replan uses the existing
+trusted `action_gate_repair` task session so long ordinary DM context cannot
+corrupt its structured reply. It is not yet deployed.
 
 S3 deployed source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A
 privacy-preserving production probe selected an existing active

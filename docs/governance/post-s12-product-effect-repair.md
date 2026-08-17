@@ -66,6 +66,10 @@ evidence.
    the model body omitted the required `<title>`. The same exact-shape
    canonicalization now binds only that public title metadata at the front;
    the remaining body and fail-closed executor boundary stay unchanged.
+   A later actionless long-session response also showed the replan could inherit
+   polluted ordinary DM context. Minutes replan now uses the existing trusted
+   `action_gate_repair` task session and may reread the transcript without
+   gaining any direct document-write authority.
 
 ## Topology
 
