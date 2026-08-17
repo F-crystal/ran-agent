@@ -232,3 +232,9 @@ text route or accept vague "moderate initiative" policy.
   from the restored initial-runtime `AGENTS.md`. The active system instruction
   and companion-profile boundary had already passed. The stale wording
   assertion was removed instead of changing an inactive deployment surface.
+- The successor acceptance then proved the live Node and Hermes 0.20 runtimes
+  healthy but exposed an incomplete direct-verification entry point:
+  `verify-hermes-release.sh` forwarded Node/Python while the non-staged gate
+  also required the sealed Hermes CLI/Python pair. Direct verification now
+  reuses the existing service-bound runtime resolver and exports that pair;
+  staged deployment keeps its existing resolver path.

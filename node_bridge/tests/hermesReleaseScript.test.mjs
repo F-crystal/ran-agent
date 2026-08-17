@@ -3957,6 +3957,9 @@ test('unified verification makes release acceptance blocking and keeps optional 
   const verify = readFileSync(join(root, 'scripts', 'verify-hermes-release.sh'), 'utf8');
 
   assert.match(verify, /--release\|--specialized\|--all/);
+  assert.match(verify, /resolve-hermes-gate-runtime\.mjs/);
+  assert.match(verify, /export RAN_AGENT_HERMES_TEST_BIN RAN_AGENT_HERMES_TEST_PYTHON_BIN/);
+  assert.ok(verify.indexOf('resolve_direct_runtime') < verify.indexOf('accept-hermes-release.sh'));
   assert.match(verify, /accept-hermes-release\.sh" --apply/);
   assert.match(verify, /RAN_AGENT_PROACTIVE_DIAG_STRICT_ENV=1/);
   assert.match(verify, /diagnose-proactive-events\.sh/);
