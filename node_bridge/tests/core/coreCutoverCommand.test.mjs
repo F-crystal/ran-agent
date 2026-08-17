@@ -89,7 +89,7 @@ test('exact cutover command verifies without writes then applies and replays one
   assert.equal((await executeCoreCutover({ ...input, mode: 'apply' })).disposition, 'already_applied');
   inspector = openTestInspector(fixture.dbPath);
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM journal_event WHERE journal_event_id='core-cutover:v1'").get().count, 1);
-  assert.equal(inspector.prepare('SELECT count(*) AS count FROM schedule_spec').get().count, 13);
+  assert.equal(inspector.prepare('SELECT count(*) AS count FROM schedule_spec').get().count, 12);
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM activity WHERE state='paused'").get().count, 1);
   inspector.close();
 });

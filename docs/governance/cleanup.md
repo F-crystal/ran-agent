@@ -2,6 +2,24 @@
 
 Status: CURRENT (2026-08-17)
 
+## Deleted (2026-08-17, Hermes Work-Executor Excision)
+
+The Hermes playground valve permits only typed personal-memory learning
+actions. Repository-wide caller review therefore removed the unreachable
+Hermes-side work executors rather than retaining a second hidden work runtime:
+
+- `node_bridge/src/aiDailyDigestClient.mjs`
+- `node_bridge/src/todoClient.mjs`
+- `node_bridge/src/feishuCalendarClient.mjs`
+- `node_bridge/src/feishuMinutesDocumentClient.mjs`
+- `node_bridge/src/coreDurableJobExecutor.mjs`
+- their five dedicated test files, including the Calendar replan and document
+  write suites
+
+The shared action valve, owner binding, receipt verification and memory action
+executor remain. Codex-owned work and deterministic service-owned scheduling
+do not depend on these deleted Hermes adapters.
+
 ## Deleted (2026-08-17, Owner-Authorized Aggressive Cleanup)
 
 Python dead code:
@@ -59,9 +77,9 @@ Kept deliberately (evidence overrode the deletion recommendation):
 - `scripts/provision-fastembed-model.py` — `vector_memory_index.py` uses
   `local_files_only=True`; this script is the only offline model provisioning
   path for fresh deploys
-- `node_bridge/src/core/ombreProjectionService.mjs` + test — dead in code
-  today, but it is the owner-authorized S8 projector that H1/T4c plans to
-  compose (`docs/governance/hermes-playground-boundary.md`)
+- `node_bridge/src/core/ombreProjectionService.mjs` + test — retained and now
+  composed in the local H3 candidate for verified personal-learning receipts;
+  production apply remains separately authorized
 - `node_bridge/src/ombreRecallMcpServer.mjs` + `ombreRecallPolicy.mjs` (retired
   18002 recall service) — deletion deferred: the release acceptance chain still
   probes its toolset (`accept-hermes-release.sh`,

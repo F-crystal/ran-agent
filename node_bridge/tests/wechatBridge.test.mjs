@@ -12,7 +12,11 @@ import {
   summarizeWeChatRequestShape,
 } from '../src/wechatBridge.mjs';
 import { createDurableOutbox } from '../src/durableOutbox.mjs';
-import { createIsolatedTestEnv, registerTestCleanup } from './helpers/isolatedState.mjs';
+import { createIsolatedTestEnv, createOwnerBoundTestEnv, registerTestCleanup } from './helpers/isolatedState.mjs';
+
+function ownerEnv(t, senderId, overrides = {}, prefix = 'wechat-owner-') {
+  return createOwnerBoundTestEnv(t, { platform: 'wechat', senderId, overrides, prefix });
+}
 
 function pngBytes() {
   return Buffer.from([
@@ -145,7 +149,7 @@ test('handleWeChatTextMessage copies Weixin SDK temp inbound media into trusted 
   registerTestCleanup(t, () => fs.rmSync(sourceDir, { recursive: true, force: true }));
   const sourcePath = path.join(sourceDir, '1781414034446-9e518805.bin');
   fs.writeFileSync(sourcePath, pngBytes());
-  const isolatedEnv = createIsolatedTestEnv(t, {}, 'wechat-inbound-');
+  const isolatedEnv = ownerEnv(t, 'wx-user-sdk-media', {}, 'wechat-inbound-');
   const stateDir = isolatedEnv.RAN_AGENT_STATE_DIR;
   let receivedPayload = null;
 
@@ -200,13 +204,14 @@ test('summarizeWeChatRequestShape reports nested candidate paths without content
   assert.deepEqual(summary.fieldPresence.filePathPaths, ['request.media.filePath']);
 });
 
-test('handleWeChatTextMessage returns python reply text', async () => {
+test('handleWeChatTextMessage returns python reply text', async (t) => {
   const reply = await handleWeChatTextMessage(
     {
       text: '晚上早点睡',
       conversationId: 'wx-user-2',
     },
     {
+      env: ownerEnv(t, 'wx-user-2'),
       fallbackText: 'fallback text',
       logger: {
         info() {},
@@ -224,13 +229,14 @@ test('handleWeChatTextMessage returns python reply text', async () => {
   assert.equal(reply, '收到。这是本地占位回复：晚上早点睡');
 });
 
-test('handleWeChatTextMessage can return structured reply metadata', async () => {
+test('handleWeChatTextMessage can return structured reply metadata', async (t) => {
   const result = await handleWeChatTextMessage(
     {
       text: '分两条发给我',
       conversationId: 'wx-user-structured',
     },
     {
+      env: ownerEnv(t, 'wx-user-structured'),
       returnResult: true,
       logger: {
         info() {},
@@ -289,7 +295,7 @@ test('handleWeChatTextMessage injects the shared runtime outbox into the channel
 });
 
 test('WeChat SDK response delivery is durably recorded as ambiguous without a send bypass', async (t) => {
-  const env = createIsolatedTestEnv(t, {}, 'wechat-outbox-');
+  const env = ownerEnv(t, 'wx-durable', {}, 'wechat-outbox-');
   const outbox = createDurableOutbox({ env });
   const result = await handleWeChatTextMessage({ text: 'hello', conversationId: 'wx-durable' }, {
     env: { ...env, durableOutbox: outbox },
@@ -310,7 +316,7 @@ test('WeChat SDK response delivery is durably recorded as ambiguous without a se
 });
 
 test('a valid WeChat inbound fallback is recorded by the outbox instead of escaping through a direct send', async (t) => {
-  const env = createIsolatedTestEnv(t, {}, 'wechat-fallback-outbox-');
+  const env = ownerEnv(t, 'wx-fallback', {}, 'wechat-fallback-outbox-');
   const outbox = createDurableOutbox({ env });
   const reply = await handleWeChatTextMessage({ text: 'hello', conversationId: 'wx-fallback' }, {
     env: { ...env, durableOutbox: outbox },
@@ -327,9 +333,10 @@ test('a valid WeChat inbound fallback is recorded by the outbox instead of escap
   assert.equal(outbox.list()[0].timelineProjection, 'pending');
 });
 
-test('a valid WeChat fallback refuses delivery when the runtime outbox is absent', async () => {
+test('a valid WeChat fallback refuses delivery when the runtime outbox is absent', async (t) => {
   let backendCalled = false;
   const reply = await handleWeChatTextMessage({ text: 'hello', conversationId: 'wx-no-outbox' }, {
+    env: ownerEnv(t, 'wx-no-outbox'),
     buffer: createInboundMessageBuffer(),
     fallbackText: '桥接失败，请稍后再试。',
     logger: { info() {}, warn() {}, error() {}, log() {} },
@@ -380,13 +387,15 @@ test('handleWeChatTextMessage holds image-only message in buffer', async () => {
   buffer.clear();
 });
 
-test('handleWeChatTextMessage merges held image with subsequent text-ref', async () => {
+test('handleWeChatTextMessage merges held image with subsequent text-ref', async (t) => {
   const buffer = createInboundMessageBuffer({ pendingMediaTtlMs: 600000 });
+  const env = ownerEnv(t, 'wx-user-merge');
   let receivedPayload;
 
   // First: image-only (held)
   const holdReply = await handleWeChatTextMessage(
     {
+      env,
       text: '',
       media: {
         filePath: '/tmp/from-media.png',
@@ -396,6 +405,7 @@ test('handleWeChatTextMessage merges held image with subsequent text-ref', async
       conversationId: 'wx-user-merge',
     },
     {
+      env,
       buffer,
       logger: { info() {}, warn() {}, error() {}, log() {} },
       backend: {
@@ -415,6 +425,7 @@ test('handleWeChatTextMessage merges held image with subsequent text-ref', async
       conversationId: 'wx-user-merge',
     },
     {
+      env,
       buffer,
       logger: { info() {}, warn() {}, error() {}, log() {} },
       backend: {
@@ -470,7 +481,7 @@ test('handleWeChatTextMessage holds audio-only message in buffer', async () => {
 });
 
 test('handleWeChatTextMessage returns a durably recorded fallback when python call fails', async (t) => {
-  const env = createIsolatedTestEnv(t, {}, 'wechat-python-fallback-');
+  const env = ownerEnv(t, 'wx-user-3', {}, 'wechat-python-fallback-');
   const outbox = createDurableOutbox({ env });
   const reply = await handleWeChatTextMessage(
     {

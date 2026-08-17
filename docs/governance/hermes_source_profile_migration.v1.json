@@ -5,7 +5,7 @@
   "activeProfile": {
     "name": "ran-agent-companion",
     "canonicalSource": "hermes/profile/config.companion.yaml",
-    "sourceSha256": "403a90dcec431dbff70f952becb92fdd99056d62863de5c9a4b358080f02c0b7",
+    "sourceSha256": "437a95d99e33b81b09f76073d70c77159d6e69130a837762a0e7199a37ffa1a6",
     "destinations": [
       "/home/ubuntu/.hermes-ran-agent/lite/config.yaml",
       "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-agent-companion/config.yaml"

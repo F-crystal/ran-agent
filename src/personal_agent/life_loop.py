@@ -12,6 +12,7 @@ from personal_agent.config import AppConfig
 from personal_agent.db import Database
 from personal_agent.knowledge_agent import KnowledgeAgent
 from personal_agent.memory_specialist import MemorySpecialist
+from personal_agent.personal_learning import PersonalLearningStore
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,10 @@ class LifeLoop:
         del now_utc
         opportunities: list[LifeOpportunity] = []
 
+        companion_opportunity = self._build_companion_opportunity(local_now=local_now)
+        if companion_opportunity is not None:
+            opportunities.append(companion_opportunity)
+
         reflection_opportunity = self._build_reflection_opportunity(local_now=local_now)
         if reflection_opportunity is not None:
             opportunities.append(reflection_opportunity)
@@ -103,6 +108,39 @@ class LifeLoop:
         return LifeLoopRunResult(
             opportunities=tuple(opportunities),
             generated_at=local_now.strftime("%Y-%m-%d %H:%M:%S"),
+        )
+
+    def _build_companion_opportunity(self, *, local_now: datetime) -> LifeOpportunity | None:
+        """Surface one confirmed-memory candidate; Node owns all visible-delivery policy."""
+
+        if not self._config.proactive_events_enabled:
+            return None
+        records = [
+            item
+            for item in PersonalLearningStore(
+                database=self._database,
+                config=self._config,
+            ).list_active(limit=20)
+            if item.kind in {"relationship", "preference", "routine", "correction"}
+        ]
+        if not records:
+            return None
+        record = records[0]
+        evidence_ref = f"personal-learning:{record.learning_id}"
+        return self._new_opportunity(
+            kind="companion",
+            consumer="hermes_proactive_event",
+            attention_hint="worth_a_look",
+            reason="confirmed personal context may support timely companionship",
+            context={"subject_key": record.subject_key, "statement": record.statement},
+            signals={"user_interrupt_risk": "low", "memory_grounded": True},
+            payload={
+                "learning_id": record.learning_id,
+                "statement": record.statement,
+                "evidence_ref": evidence_ref,
+            },
+            created_at=local_now,
+            ttl_minutes=max(20, self._config.proactive_check_interval_minutes),
         )
 
     def _build_reflection_opportunity(self, *, local_now: datetime) -> LifeOpportunity | None:

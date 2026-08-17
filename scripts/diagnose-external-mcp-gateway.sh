@@ -24,11 +24,12 @@ resolve_node_bin() {
 
 NODE_EXE="$(resolve_node_bin)"
 
-echo "[external-mcp] checking profile fallback-disabled flags"
-for profile in hermes/profile/config.yaml hermes/profile/config.lite.yaml; do
+echo "[external-mcp] checking source-default gateway flags"
+for profile in hermes/profile/config.yaml hermes/profile/config.companion.yaml hermes/profile/config.lite.yaml; do
   grep -q 'mcp-external_mcp_gateway' "$profile"
-  grep -q 'EXTERNAL_MCP_GATEWAY_ENABLED: "false"' "$profile"
-  grep -q 'EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "false"' "$profile"
+  grep -q 'EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE: "true"' "$profile"
+  grep -q 'EXTERNAL_MCP_GATEWAY_ENABLED: "true"' "$profile"
+  grep -q 'EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "true"' "$profile"
   grep -q 'scripts/start_external_mcp_gateway.sh' "$profile"
   echo "[external-mcp] ok profile=$profile"
 done
@@ -38,7 +39,7 @@ bash scripts/start_external_mcp_gateway.sh initialize >/tmp/ran-agent-external-m
 grep -q 'ran-agent-external-mcp-gateway' /tmp/ran-agent-external-mcp-initialize.json
 rm -f /tmp/ran-agent-external-mcp-initialize.json
 
-echo "[external-mcp] checking launcher keeps tool calls disabled despite stale env enables"
+echo "[external-mcp] checking launcher still requires the allow-env gate"
 EXTERNAL_MCP_GATEWAY_SKIP_ENV_FILES=true \
 EXTERNAL_MCP_GATEWAY_ENABLED=true \
 EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true \
@@ -112,7 +113,7 @@ async function callTool(name, args = {}, options = {}) {
   return await handleExternalMcpGatewayMcpRequest({
     method: 'tools/call',
     params: { name, arguments: args },
-  }, { env, registry, ...options });
+  }, { env, registry, diagnosticMode: true, ...options });
 }
 
 const opened = await callTool('mcp_open_session', {
@@ -200,6 +201,7 @@ const ambiguous = await handleExternalMcpGatewayMcpRequest({
   },
 }, {
   env,
+  diagnosticMode: true,
   registry: [{
     id: 'ambiguous-games',
     title: 'Ambiguous Games',
@@ -236,4 +238,4 @@ echo "[external-mcp] running acceptance tests"
   node_bridge/tests/channelHub.test.mjs \
   node_bridge/tests/outboundServer.test.mjs
 
-echo "[external-mcp] ok: source profiles fall back disabled; deploy env can explicitly enable gateway/system queue"
+echo "[external-mcp] ok: source profiles expose the governed gateway; launcher and runtime gates remain enforced"

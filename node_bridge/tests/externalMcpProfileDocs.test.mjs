@@ -9,16 +9,21 @@ function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(PROJECT_ROOT, relativePath), 'utf8');
 }
 
-test('Hermes profiles register the stable external MCP gateway with source fallback disabled', () => {
-  for (const profilePath of ['hermes/profile/config.yaml']) {
+test('Hermes profiles expose the governed external MCP gateway by default', () => {
+  for (const profilePath of [
+    'hermes/profile/config.yaml',
+    'hermes/profile/config.companion.yaml',
+    'hermes/profile/config.lite.yaml',
+  ]) {
     const text = readProjectFile(profilePath);
     const expectedGatewayProfile = profilePath.includes('lite') ? 'lite' : 'full';
     assert.match(text, /mcp-external_mcp_gateway/);
     assert.match(text, /^\s+external_mcp_gateway:\n/m);
     assert.match(text, /scripts\/start_external_mcp_gateway\.sh/);
     assert.match(text, new RegExp(`EXTERNAL_MCP_GATEWAY_PROFILE:\\s+"${expectedGatewayProfile}"`));
-    assert.match(text, /EXTERNAL_MCP_GATEWAY_ENABLED:\s+"false"/);
-    assert.match(text, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED:\s+"false"/);
+    assert.match(text, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE:\s+"true"/);
+    assert.match(text, /EXTERNAL_MCP_GATEWAY_ENABLED:\s+"true"/);
+    assert.match(text, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED:\s+"true"/);
   }
 });
 
@@ -37,7 +42,8 @@ test('external MCP governance docs preserve mainlines and proactive safety bound
 
   assert.match(runtimeStatus, /external_mcp_gateway/);
   assert.match(runtimeStatus, /governed `external_mcp_gateway` notifications/);
-  assert.match(hermesProfile, /不得开启旧 proactive|不要主动发 check-in/);
+  assert.match(hermesProfile, /companionship\/reminder `ProactiveEvent`/);
+  assert.match(hermesProfile, /日报由 Codex 负责/);
 });
 
 test('apply script deploy-enables external MCP gates through managed env files', () => {

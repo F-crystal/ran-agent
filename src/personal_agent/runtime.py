@@ -43,11 +43,9 @@ def build_runtime() -> AgentRuntime:
     config = load_config()
     logger = configure_logging(config)
     database = Database(config, logger)
-    model_client = build_chat_model_client(config, logger)
     message_service = PersonalAgentService(
         database=database,
-        model_client=model_client,
-        tool_model_client=build_tool_model_client(config, logger),
+        tool_model_client=build_tool_model_client(config, logger) if config.memory_llm_enabled else None,
         logger=logger,
         config=config,
         system_prompt=config.agent_system_prompt,
@@ -57,38 +55,6 @@ def build_runtime() -> AgentRuntime:
         logger=logger,
         database=database,
         message_service=message_service,
-    )
-
-
-def build_chat_model_client(config: AppConfig, logger: logging.Logger):
-    """Build the backend chat client for local Python capabilities."""
-
-    if not config.backend_qwen_enabled:
-        logger.info(
-            "using hermes gateway chat model client model=%s timeout_seconds=%s",
-            config.hermes_model,
-            config.hermes_timeout_seconds,
-        )
-        return HermesChatCompletionsModelClient(
-            base_url=config.hermes_base_url,
-            api_key_env_var=config.hermes_api_key_env_var,
-            model=config.hermes_model,
-            timeout_seconds=config.hermes_timeout_seconds,
-            logger=logger,
-        )
-
-    logger.info(
-        "using qwen chat model client model=%s base_url=%s timeout_seconds=%s",
-        config.qwen_chat_model,
-        config.qwen_base_url,
-        config.qwen_timeout_seconds,
-    )
-    return QwenResponsesModelClient(
-        api_key_env_var=config.qwen_api_key_env_var,
-        model=config.qwen_chat_model,
-        base_url=config.qwen_base_url,
-        timeout_seconds=config.qwen_timeout_seconds,
-        logger=logger,
     )
 
 

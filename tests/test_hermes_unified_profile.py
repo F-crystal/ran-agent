@@ -14,14 +14,14 @@ def test_companion_profile_is_the_capability_union_behind_one_memory_facade() ->
     cli = config["platform_toolsets"]["cli"]
     api = config["platform_toolsets"]["api_server"]
     expected_tools = {
-        "terminal", "file", "skills", "memory", "session_search", "safe",
+        "skills", "memory", "safe",
         "mcp-time", "mcp-social_reader", "mcp-media_reader", "mcp-search_hub",
         "mcp-co_reading", "mcp-sticker_catalog", "mcp-media_generation",
-        "mcp-personal_memory", "mcp-playwright", "mcp-external_mcp_gateway",
+        "mcp-personal_memory", "mcp-external_mcp_gateway",
     }
     expected_mcp = {
         "time", "social_reader", "media_reader", "media_generation", "co_reading",
-        "sticker_catalog", "search_hub", "personal_memory", "playwright",
+        "sticker_catalog", "search_hub", "personal_memory",
         "external_mcp_gateway", "tavily",
     }
 
@@ -40,7 +40,8 @@ def test_companion_profile_is_the_capability_union_behind_one_memory_facade() ->
     assert search["SEARCH_HUB_PROFILE_MODE"] == "full"
     assert search["SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK"] == "true" and search["SEARCH_HUB_PUBLIC_ONLY_DEFAULT"] == "false"
     assert external["EXTERNAL_MCP_GATEWAY_PROFILE"] == "full"
-    assert external["EXTERNAL_MCP_GATEWAY_ENABLED"] == "false" and external["EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED"] == "false"
+    assert external["EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE"] == "true"
+    assert external["EXTERNAL_MCP_GATEWAY_ENABLED"] == "true" and external["EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED"] == "true"
     assert config["security"]["allow_lazy_installs"] is False
     assert config["security"]["tirith_enabled"] is False
     assert config["agent"]["reasoning_effort"] == "none"

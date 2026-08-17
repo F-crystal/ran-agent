@@ -24,10 +24,15 @@ S0 facts/runtime selection
   -> S12 production cutover (COMPLETE / PROD_ACCEPTED at e298bab)
   -> post-S12 capability parity restoration (LOCAL_VERIFIED / REVIEWED / ARCHIVED; code paths live in production per 2026-08-15/16 evidence)
   -> post-S12 product-effect defect repair (PROD_APPLIED / RECOVERY_COMPLETE)
-  -> post-S12 F6 delivery guards (PROD_APPLIED; next 08:00 observation pending; plan: docs/governance/post-s12-product-effect-repair.md)
+  -> post-S12 F6 delivery guards (PROD_APPLIED; F6OBS SUPERSEDED by owner decision to retire ran-agent daily reports)
   -> post-S12 Minutes strict replan (PROD_VERIFIED; one readback-proven document; 2026-08-17)
+  -> H0 Hermes playground boundary decision (COMPLETE; owner reordered ahead of S13 on 2026-08-17)
+  -> H1 Hermes playground boundary transformation (LOCAL_VERIFIED)
+  -> H2 conversation reliability (LOCAL_VERIFIED)
+  -> H3 live Ombre continuity (LOCAL_VERIFIED)
+  -> H4 bounded proactive companionship (LOCAL_VERIFIED)
+  -> H5 zombie-runtime excision (LOCAL_VERIFIED)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
-  -> H1 Hermes playground boundary transformation (PLANNED; plan: docs/governance/hermes-playground-boundary.md; starts after S13 or by explicit owner reorder)
 ```
 
 The post-S12 repair restores AI digest, Feishu Calendar, and Todo reminder
@@ -36,12 +41,14 @@ remains `e298bab`; the repaired post-S12 source is applied, the three recovery
 effects are verified, and managed wake is active. Its first catch-up digest
 exposed F6: malformed private-envelope text could escape when JSON contained
 literal newlines, and the Core wake path lacked the exact-date egress gate.
-F6a/F6b are deployed and their production boundary checks pass; the next real
-08:00 observation remains ahead. The owner inserted the Minutes document task
-before that time-gated observation. Its strict replan is isolated from ordinary
+F6a/F6b are deployed and their production boundary checks pass. The owner later
+assigned daily reports to Codex and superseded the real-08:00 F6OBS rather than
+waiting for another ran-agent digest. The Minutes strict replan is isolated from ordinary
 DM context, exact public metadata is normalized without accepting unknown
 fields, and production contains exactly one readback-proven `前辈对话3` document
-in the unique `中海油` folder. F6OBS is again the ready frontier. S13 has not
+in the unique `中海油` folder. The owner explicitly reordered H0-H5 ahead of
+S13; H0-H5 and final affected-suite verification are locally complete. Production still runs the
+digest until a separately authorized stop transaction completes. S13 has not
 started, and cleanup still lacks deletion authorization.
 
 | Stage | Status | Depends | Scope | Exit condition |

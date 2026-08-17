@@ -1504,8 +1504,8 @@ def validate_unified_source_shape(candidate: str) -> None:
     memory = candidate_blob(REPO, candidate, "node_bridge/src/personalMemoryMcpServer.mjs").decode()
     if "obsidian_memory" in profile or "ombre_memory" in profile or "18002" in profile:
         raise ReleaseError("candidate profile exposes a retired memory surface")
-    if "mcp-personal_memory" not in profile or "mcp-playwright" not in profile or "mcp-media_generation" not in profile:
-        raise ReleaseError("candidate profile lost the supported capability union")
+    if "mcp-personal_memory" not in profile or "mcp-media_generation" not in profile or "mcp-external_mcp_gateway" not in profile:
+        raise ReleaseError("candidate profile lost the playground capability union")
     if "BindReadOnlyPaths=" in unit or "8643" in unit or f"HERMES_PROFILE={SOURCE_PROFILE}" not in unit:
         raise ReleaseError("candidate unit is not the single companion topology")
     if "HERMES_FULL_API_BASE_URL" in gateway or "HERMES_LITE_API_BASE_URL" in gateway or "http://127.0.0.1:8643" in gateway:
@@ -1563,12 +1563,12 @@ print(json.dumps({
         or len(cli) != len(set(cli))
         or api != cli
         or "mcp-search_hub" not in cli
-        or "mcp-playwright" not in cli
+        or any(item in cli for item in ("terminal", "file", "session_search", "mcp-playwright"))
         or "web" in cli
         or semantic.get("top_level_web") is not False
         or not isinstance(servers, list)
         or "search_hub" not in servers
-        or "playwright" not in servers
+        or "playwright" in servers
     ):
         raise ReleaseError("candidate companion profile violates the R1B assembly invariant")
 

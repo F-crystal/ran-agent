@@ -20,6 +20,7 @@ import {
 import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
+  getCheckinRange,
 } from '../src/runtimeState.mjs';
 import { createDurableOutbox } from '../src/durableOutbox.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
@@ -177,8 +178,21 @@ test('redactProxyUrlForLog removes credentials and query parameters', () => {
 
 test('parseCheckinCommand validates command shape', () => {
   assert.deepEqual(parseCheckinCommand('/checkin 20 90'), { minMinutes: 20, maxMinutes: 90 });
+  assert.deepEqual(parseCheckinCommand('/checkin off'), { enabled: false });
+  assert.deepEqual(parseCheckinCommand('/checkin on'), { enabled: true });
+  assert.match(parseCheckinCommand('/checkin 5 10').error, /不能短于 20 分钟/);
   assert.match(parseCheckinCommand('/checkin a 90').error, /参数必须是数字/);
   assert.equal(parseCheckinCommand('hello'), null);
+});
+
+test('checkin off persists the stop state before any chat provider call', async (t) => {
+  const env = createIsolatedTestEnv(t, {
+    handleWeChatTextMessage: async () => { throw new Error('provider must not run'); },
+  }, 'checkin-stop-');
+  const agent = buildAgent({ env, logger: { log() {}, warn() {}, info() {} } });
+  const response = await agent.chat({ text: '/checkin off', conversationId: 'owner' });
+  assert.equal(response.text, '主动陪伴已停止。');
+  assert.equal(getCheckinRange(env).enabled, false);
 });
 
 test('mergeRequests combines fragmented user text into one request', () => {

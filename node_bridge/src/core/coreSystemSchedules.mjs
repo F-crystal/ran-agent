@@ -63,8 +63,8 @@ function requireBinding(input) {
   return input;
 }
 
-export function validateCoreSystemScheduleBinding(manifest, input) {
-  return manifest.schedules.some((item) => item.visible) ? requireBinding(input) : null;
+export function validateCoreSystemScheduleBinding(manifest, input, { required = false } = {}) {
+  return required || manifest.schedules.some((item) => item.visible) ? requireBinding(input) : null;
 }
 
 export function seedCoreSystemSchedules(tx, {

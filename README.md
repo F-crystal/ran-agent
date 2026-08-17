@@ -12,7 +12,7 @@ Status: CURRENT (2026-08-16)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。生产统一 profile 使用 DeepSeek V4 Flash，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；V4 Pro 只保留为显式 opt-in。`search_hub`、`media_reader`、`social_reader`、`sticker_catalog`、`personal_memory` 等 MCP 工具负责联网事实、媒体、社交内容、表情包目录、Vault 和个人记忆。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
+Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。Hermes 的当前源码边界是聊天、情绪陪伴和游玩；日历、待办、妙记/文档、日报、代码与部署交给 Codex。生产统一 profile 使用 DeepSeek V4 Flash，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；V4 Pro 只保留为显式 opt-in。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
 
 OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产前台和当前候选都使用 Hermes + DeepSeek V4 Flash non-thinking，Pro 仅显式启用。
 
@@ -38,7 +38,7 @@ Python backend
 
 MCP services
   -> search_hub / media_reader / social_reader / sticker_catalog / co_reading / media_generation
-  -> personal_memory / time / playwright
+  -> personal_memory / time / external_mcp_gateway
 ```
 
 ### 统一 Hermes Gateway
@@ -47,9 +47,9 @@ MCP services
 
 | Gateway | 端口 | Profile | 用途 |
 |---------|------|---------|------|
-| unified | `8642` | `ran-agent-companion` | 聊天、记忆、命令、Playwright、媒体与全部既有 MCP |
+| unified | `8642` | `ran-agent-companion` | 聊天、陪伴、记忆、媒体、搜索与受治理的外部 MCP 游玩 |
 
-旧 Full 服务已停用；terminal/file/session search/Playwright 等能力并入统一 profile，而不是随 `8643` 一起删除。
+旧 Full 服务已停用。当前源码 profile 不再向 Hermes 暴露 terminal、file、session search 或直接 Playwright；Search Hub 可在内部使用其既有受控 fallback。
 Desktop Proxy 默认关闭；启用时仅应绑定 localhost 或受控私网，并配置
 `DESKTOP_PROXY_API_KEY`。
 
@@ -69,11 +69,9 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 
 **飞书和桌面入口。** 飞书桥接通过 `lark-cli event consume im.message.receive_v1 --as bot` 消费消息，并通过 `im +messages-send` 回复；桌面客户端通过 ran-agent 的 OpenAI-compatible Proxy 接入，避免绕过 ChannelHub、统一身份/Timeline，以及 action/evidence gates。
 
-**妙记整理成云文档。** Owner 可以指定一份已存在的飞书妙记文字稿和目标文件夹；Hermes 读取现成文字稿并声明 `feishu.minutes_to_doc`，Node 以已授权 user 身份创建文档，回读成功后才确认完成。该窄链路不做 ASR，也不查找或生成 PPT。
+**工作效果边界。** 日历、待办、提醒、妙记/云文档、日报、代码和部署不再是 Hermes 模型可见动作；这些请求交给 Codex 的受治理原生工具。Node 只校验 Hermes 仍允许提出的个人记忆动作，不从用户自然语言推断或重规划工作权限。
 
-**每日 AI 日报。** Core 的每日 ScheduleSpec 和唯一 managed wake 产生带本地到期日的 WorkRun；Python 按该日期拉取 AIHOT 事实并独占 `src/personal_agent/prompts/ai_daily_digest_report.md` 的完整提示词准备，Node 只负责把提示词交给 Hermes 和现有 Package B 飞书投递。显式历史日期走同一准备与投递权威，不伪造旧 cron occurrence。
-
-**个人提醒与飞书日历分流。** “提醒我”使用 `todo.create`：Node 从结构化日期、开始时间和提前分钟数确定提醒时刻，Python 复用一个 Todo 到 Core reminder registration 的现有链路。“加到日程/飞书日历”使用独立的 `feishu.calendar.create`：受信 Node adapter 以 user 身份创建日程、设置提醒并回读验证，不会冒充 Todo，也不会恢复第二个 scheduler。
+**主动陪伴。** Core-managed life-loop 只从已确认个人学习产生结构化候选；Node 应用 `/checkin on|off`、20–N 分钟频率、静默时段、日限额、证据与去重，Hermes 再选择 `silent|notify`。Python 不直接生成或发送问候，泛泛问候会被 egress 拒绝。
 
 **联网搜索入口。** `search_hub` 是 Hermes 前台统一搜索入口，负责最新信息、新闻、普通网页事实、学术检索和平台搜索路由。统一 profile 保留旧 Full 的 Playwright fallback；OpenCLI browser-backed 默认关闭。不要让 Hermes 日常搜索直接面对 Tavily/OpenCLI/Playwright。
 
@@ -107,9 +105,8 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 | `mimo_power` | RETIRED：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles | historical |
 | `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | unified |
 | `personal_memory` | 个人记忆、Ombre 与受控 Vault 召回；backend 健康检查 | unified |
-| `external_mcp_gateway` | 受治理的动态 External MCP broker | governed / source profiles disabled-by-default |
+| `external_mcp_gateway` | 受治理的动态 External MCP broker；源码 profile 默认可用，调用仍受 registry/grant/budget/confirmation 约束 | unified / governed |
 | `media_generation` | 图片和语音生成 | unified |
-| `playwright` | 浏览器自动化和动态页面调试 | unified |
 | `tavily` | 可选底层 provider，仅供 Search Hub 兼容使用 | 内部/兼容 |
 
 DeepSeek V4 在本项目中按文本模型使用。原始图片、音频、视频和社交平台内容必须先交给 MCP 工具，Hermes 只接收结构化文本结果。

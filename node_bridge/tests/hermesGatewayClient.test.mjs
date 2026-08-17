@@ -146,7 +146,7 @@ test('companion receives canonical identity and validated published memory pre-t
   assert.match(prompt, /你是 Hermes Companion/);
   assert.match(prompt, /你是冉的长期个人助理/);
   assert.match(prompt, /Hermes 是 ran-agent 的前台对话 shell/);
-  assert.match(prompt, /feishu\.minutes_to_doc/);
+  assert.match(prompt, /外部 MCP 游乐场/);
   assert.match(prompt, /published_memory_status: loaded/);
   assert.match(prompt, new RegExp(snapshot.projection_revision.replace(':', '\\:')));
   assert.match(prompt, /activity_revision: 17/);
@@ -467,19 +467,10 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
   assert.equal(capturedBody.stream, false);
   assert.match(capturedBody.messages[0].content, /Hermes/);
   assert.doesNotMatch(capturedBody.messages[0].content, /"actionRequests":\[\]/);
-  assert.match(capturedBody.messages[0].content, /requestRef such as "feishu-minutes-doc-1"/);
-  assert.match(capturedBody.messages[0].content, /exactly one document\.write actionRequest/);
-  assert.match(capturedBody.messages[0].content, /提醒\/记得提醒=>todo\.create/);
-  assert.match(capturedBody.messages[0].content, /reminderMinutes:integer/);
-  assert.match(capturedBody.messages[0].content, /No id\/actor\/authorization\/receipt\/effect/);
-  assert.match(capturedBody.messages[0].content, /reminderTime\/reminderAt/);
-  assert.match(capturedBody.messages[0].content, /Do not create or update the document with a tool/);
+  assert.match(capturedBody.messages[0].content, /belong to Codex/);
+  assert.match(capturedBody.messages[0].content, /Never emit those actionRequests/);
+  assert.doesNotMatch(capturedBody.messages[0].content, /todo\.create|feishu\.calendar\.create|document\.write|feishu\.minutes_to_doc/);
   assert.match(capturedBody.messages[0].content, /validates the identifier, content, and format/);
-  assert.match(capturedBody.messages[0].content, /without <root> or <content> wrappers/);
-  assert.ok(
-    capturedBody.messages[0].content.indexOf('exact keys schemaVersion')
-      < capturedBody.messages[0].content.indexOf('For an owner request to organize an existing Feishu Minutes'),
-  );
   assert.match(capturedBody.messages[0].content, /schemaVersion MUST be the JSON number 1/);
   assert.match(capturedBody.messages[1].content, /时间/);
   assert.match(capturedBody.messages[1].content, /你好\n补一句/);
@@ -489,6 +480,87 @@ test('sendChatToHermesGateway calls OpenAI-compatible Hermes API server', async 
     { requestRef: 'save-1', actionType: 'memory.remember', scope: {} },
   ]);
   assert.deepEqual(response.claims, [{ type: 'memory_saved', requestRef: 'save-1' }]);
+});
+
+test('provider no-reply sentinel rotates once, resumes, and never enters history', async (t) => {
+  const env = {
+    ...tempGatewayEnv(t, 'hermes-no-reply-recover-'),
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    HERMES_CONTEXT_CACHE_STRATEGY: 'cache_first',
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  };
+  let calls = 0;
+  const response = await sendChatToHermesGateway(
+    { text: '问题是什么', sender_id: 'owner', conversation_id: 'no-reply-recover', channel: 'wechat' },
+    {
+      env,
+      fetchImpl: async () => {
+        calls += 1;
+        return makeJsonResponse({ choices: [{ message: { content: calls === 1
+          ? '⚠️ No reply: the model returned empty content after retries and any fallback providers. Try `continue`.'
+          : '已经恢复正常。' } }] });
+      },
+      logger: { log() {}, warn() {} },
+    },
+  );
+
+  assert.equal(calls, 2);
+  assert.equal(response.reply_text, '已经恢复正常。');
+  const records = readProviderVisibleHistoryRecords(env.RAN_AGENT_STATE_DIR);
+  assert.equal(records.length, 1);
+  assert.doesNotMatch(JSON.stringify(records), /No reply|empty content|fallback providers/i);
+});
+
+test('persistent provider no-reply sentinel fails closed without history', async (t) => {
+  const env = {
+    ...tempGatewayEnv(t, 'hermes-no-reply-fail-'),
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    HERMES_CONTEXT_CACHE_STRATEGY: 'cache_first',
+    HERMES_LITE_SOFT_RESET_ENABLED: 'true',
+    HERMES_LITE_SOFT_RESET_DRY_RUN: 'false',
+  };
+  let calls = 0;
+  await assert.rejects(
+    sendChatToHermesGateway(
+      { text: '问题是什么', sender_id: 'owner', conversation_id: 'no-reply-fail', channel: 'wechat' },
+      {
+        env,
+        fetchImpl: async () => {
+          calls += 1;
+          return makeJsonResponse({ choices: [{ message: { content: '' } }] });
+        },
+        logger: { log() {}, warn() {} },
+      },
+    ),
+    (error) => error?.code === 'HERMES_PROVIDER_NO_REPLY',
+  );
+  assert.equal(calls, 2);
+  assert.equal(readProviderVisibleHistoryFiles(env.RAN_AGENT_STATE_DIR).length, 0);
+});
+
+test('provider no-reply sentinel inside a valid reply envelope also fails closed', async (t) => {
+  const env = {
+    ...tempGatewayEnv(t, 'hermes-envelope-no-reply-'),
+    HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+    HERMES_API_KEY: 'token',
+    HERMES_REPLY_MODE: 'api',
+    HERMES_LITE_SOFT_RESET_ENABLED: 'false',
+  };
+  const content = JSON.stringify({
+    schemaVersion: 1,
+    message: 'No reply: the model returned empty content after retries and any fallback providers.',
+    actionRequests: [], activityRequest: null, claims: [], commitments: [],
+  });
+  await assert.rejects(sendChatToHermesGateway(
+    { text: '问题是什么', sender_id: 'owner', conversation_id: 'envelope-no-reply', channel: 'wechat' },
+    { env, fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content } }] }) },
+  ), (error) => error?.code === 'HERMES_PROVIDER_NO_REPLY');
+  assert.equal(readProviderVisibleHistoryFiles(env.RAN_AGENT_STATE_DIR).length, 0);
 });
 
 test('parses the private reply envelope from real OpenAI-compatible message content', async () => {
@@ -2458,11 +2530,9 @@ test('system instruction contains canonical URL evidence rule', async () => {
   const body = JSON.parse(capturedBody);
   const sysMsg = body.messages.find((m) => m.role === 'system');
   assert.ok(sysMsg.content.includes('Canonical URL resolution does NOT equal content read'), 'system instruction should contain evidence rule');
-  assert.ok(sysMsg.content.includes('todo.create'));
-  assert.ok(sysMsg.content.includes('feishu.calendar.create'));
-  assert.ok(sysMsg.content.includes('feishu.calendar.create (wins unless Todo also asked)'));
-  assert.ok(sysMsg.content.includes('schedule.create'));
-  assert.ok(sysMsg.content.includes('Preserve historical digest date'));
+  assert.ok(sysMsg.content.includes('belong to Codex'));
+  assert.ok(!sysMsg.content.includes('todo.create'));
+  assert.ok(!sysMsg.content.includes('feishu.calendar.create'));
   assert.ok(sysMsg.content.length < 6000, `system instruction plus canonical identity projection should be under 6000 chars, got ${sysMsg.content.length}`);
 });
 

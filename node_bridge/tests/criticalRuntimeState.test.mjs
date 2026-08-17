@@ -41,6 +41,26 @@ test('proactive reservation corruption fails closed instead of losing sent dedup
   assertQuarantined(target);
 });
 
+test('proactive reservation outlives the configured Hermes and Feishu deadline', (t) => {
+  const env = createIsolatedTestEnv(t, {
+    HERMES_REPLY_TIMEOUT_SECONDS: '1200',
+    FEISHU_SEND_TIMEOUT_SECONDS: '30',
+  }, 'critical-proactive-timeout-');
+  const event = {
+    event_id: 'companion-long-reply', dedupe_key: 'personal-learning:learn-a',
+    kind: 'companion', global_user_id: 'owner',
+  };
+  const first = reserveProactiveEventDelivery(event, {
+    env, now: new Date('2026-07-01T02:00:00.000Z'),
+  });
+  const overlapping = reserveProactiveEventDelivery(event, {
+    env, now: new Date('2026-07-01T02:11:00.000Z'),
+  });
+  assert.equal(first.allowed, true);
+  assert.equal(overlapping.allowed, false);
+  assert.equal(overlapping.reason, 'event_dedupe_active');
+});
+
 test('lite maintenance pointer corruption fails closed instead of resetting session truth', (t) => {
   const env = createIsolatedTestEnv(t, {}, 'critical-maintenance-');
   const stateFile = path.join(env.RAN_AGENT_STATE_DIR, 'hermes', 'session_maintenance.json');

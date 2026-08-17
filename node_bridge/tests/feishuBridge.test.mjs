@@ -17,7 +17,7 @@ import {
 import { handleIncomingMessage } from '../src/channelHub.mjs';
 import { createDurableOutbox } from '../src/durableOutbox.mjs';
 import { readTimelineRecords } from '../src/globalTimeline.mjs';
-import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
+import { createIsolatedTestEnv, createOwnerBoundTestEnv } from './helpers/isolatedState.mjs';
 import { getFeishuHomeDmTarget } from '../src/runtimeState.mjs';
 
 test('parseFeishuEvent parses lark-cli NDJSON event line', () => {
@@ -426,7 +426,12 @@ test('handleFeishuEventLine injects the shared outbox and returns a typed receip
 });
 
 test('Feishu text entry commits timeline and backend ingest only after its real CLI send succeeds', async (t) => {
-  const isolated = createIsolatedTestEnv(t, { FEISHU_LARK_CLI_BIN: 'lark-cli' }, 'feishu-outbox-live-');
+  const isolated = createOwnerBoundTestEnv(t, {
+    platform: 'feishu',
+    senderId: 'ou-outbox-live',
+    overrides: { FEISHU_LARK_CLI_BIN: 'lark-cli' },
+    prefix: 'feishu-outbox-live-',
+  });
   const env = { ...isolated, RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(isolated.RAN_AGENT_STATE_DIR, 'timeline.jsonl') };
   const outbox = createDurableOutbox({ env });
   const ingested = [];
@@ -464,7 +469,12 @@ test('Feishu text entry commits timeline and backend ingest only after its real 
 });
 
 test('Feishu text entry leaves delivery ambiguous and projects nothing when the CLI send faults', async (t) => {
-  const isolated = createIsolatedTestEnv(t, { FEISHU_LARK_CLI_BIN: 'lark-cli' }, 'feishu-outbox-fault-');
+  const isolated = createOwnerBoundTestEnv(t, {
+    platform: 'feishu',
+    senderId: 'ou-outbox-fault',
+    overrides: { FEISHU_LARK_CLI_BIN: 'lark-cli' },
+    prefix: 'feishu-outbox-fault-',
+  });
   const env = { ...isolated, RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(isolated.RAN_AGENT_STATE_DIR, 'timeline.jsonl') };
   const outbox = createDurableOutbox({ env });
   let ingested = false;

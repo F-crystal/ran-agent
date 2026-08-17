@@ -13,11 +13,26 @@ import {
   handleExternalMcpSystemQueueRequest,
   handleHermesLiteSoftResetControlRequest,
   handleOutboundRequest,
+  handleProactiveEventControlRequest,
   handleProactiveEventRequest,
   handleScheduledAiDigestControlRequest,
   handleScheduledAiDigestRequest,
   resolveStateDir,
 } from '../src/outboundServer.mjs';
+
+test('proactive event control route requires loopback and the internal secret', async () => {
+  const base = {
+    env: { RAN_AGENT_INTERNAL_CONTROL_SECRET: 'private-control-secret' },
+    method: 'POST', url: '/proactive/event', bodyText: '{}',
+  };
+  assert.equal((await handleProactiveEventControlRequest({
+    ...base, remoteAddress: '10.0.0.4',
+    headers: { authorization: 'Bearer private-control-secret' },
+  })).status, 403);
+  assert.equal((await handleProactiveEventControlRequest({
+    ...base, remoteAddress: '127.0.0.1', headers: {},
+  })).status, 401);
+});
 import {
   isTrustedHermesTaskScopedMessage,
   isTrustedInformationalReportTask,
@@ -33,6 +48,7 @@ import {
   appendPendingOutboundMessage,
   drainPendingOutboundMessages,
   setFeishuHomeDmTarget,
+  setCheckinRange,
   setProactiveDispatchState,
 } from '../src/runtimeState.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
@@ -1045,6 +1061,102 @@ test('handleProactiveEventRequest sends reminder events through Hermes egress', 
   assert.equal(duplicate.payload.dropped, true);
   assert.equal(duplicate.payload.reason, 'event_already_sent');
   assert.equal(secondChannelCalled, false);
+});
+
+test('memory-grounded companion events obey stop, quiet hours, cadence, daily limit, and egress', async (t) => {
+  const env = tempEnv(t, {
+    HERMES_ENVIRONMENT_TIMEZONE: 'Asia/Shanghai',
+    PERSONAL_AGENT_PROACTIVE_DAILY_LIMIT: '1',
+    PERSONAL_AGENT_PROACTIVE_SILENT_START_HOUR: '0',
+    PERSONAL_AGENT_PROACTIVE_SILENT_END_HOUR: '9',
+    FEISHU_LARK_CLI_BIN: 'lark-cli',
+    FEISHU_LARK_CLI_IDENTITY: 'bot',
+  }, 'companion-event-');
+  setFeishuHomeDmTarget({
+    platform: 'feishu', channel_type: 'dm', conversation_id: 'oc-home', sender_id: 'ou-home',
+  }, env);
+  const event = (learningId) => ({
+    event_id: `companion-20260701-${learningId}`,
+    kind: 'companion',
+    channel: 'feishu',
+    watch_scope: `personal-learning:${learningId}`,
+    reason: '和重要的人还有一件没聊完的心事',
+    evidence_refs: [`personal-learning:${learningId}`],
+    dedupe_key: `personal-learning:${learningId}`,
+    created_at: '2026-07-01T09:00:00+08:00',
+    expires_at: '2026-07-01T23:00:00+08:00',
+    deliverability: 'notify_allowed',
+    allowed_capability_tiers: ['T1'],
+    quiet_policy: 'respect',
+    budget_class: 'curiosity',
+  });
+  const request = (body, now, reply = '那件没聊完的心事，今天想继续说一点吗？') => handleProactiveEventRequest({
+    env,
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    nowImpl: () => new Date(now),
+    bodyText: JSON.stringify(body),
+    channelHub: async (message, options) => {
+      const text = JSON.stringify({
+        action: 'notify', message: reply,
+        evidence_refs: [message.proactive_event.evidence_refs[0]],
+        why_now: 'confirmed relationship context remains unresolved',
+      });
+      await options.adapter.sendReply({
+        target: { channel_type: 'dm', conversation_id: 'oc-home', sender_id: 'ou-home' },
+        text, message,
+      });
+      return { replyText: text };
+    },
+    execFileImpl: async () => ({ stdout: '{"ok":true}' }),
+  });
+
+  setCheckinRange({ minMinutes: 20, maxMinutes: 20, enabled: false }, env);
+  assert.equal((await request(event('learn-a'), '2026-07-01T10:00:00+08:00')).payload.reason, 'companion_stopped');
+
+  setCheckinRange({ minMinutes: 20, maxMinutes: 20, enabled: true }, env);
+  assert.equal((await request(event('learn-a'), '2026-07-01T08:00:00+08:00')).payload.reason, 'companion_quiet_hours');
+
+  const sent = await request(event('learn-a'), '2026-07-01T10:00:00+08:00');
+  assert.equal(sent.payload.status, 'sent');
+  assert.equal(sent.payload.notified, true);
+  assert.equal((await request(event('learn-b'), '2026-07-01T10:05:00+08:00')).payload.reason, 'companion_cooldown');
+  assert.equal((await request(event('learn-b'), '2026-07-01T10:21:00+08:00')).payload.reason, 'companion_daily_limit_reached');
+});
+
+test('companion egress suppresses generic greetings even with valid memory evidence', async (t) => {
+  const env = tempEnv(t, {
+    HERMES_ENVIRONMENT_TIMEZONE: 'Asia/Shanghai',
+    FEISHU_LARK_CLI_BIN: 'lark-cli',
+  }, 'companion-generic-');
+  setFeishuHomeDmTarget({
+    platform: 'feishu', channel_type: 'dm', conversation_id: 'oc-home', sender_id: 'ou-home',
+  }, env);
+  setCheckinRange({ minMinutes: 20, maxMinutes: 20, enabled: true }, env);
+  let sends = 0;
+  const result = await handleProactiveEventRequest({
+    env,
+    nowImpl: () => new Date('2026-07-01T10:00:00+08:00'),
+    bodyText: JSON.stringify({
+      event_id: 'companion-generic', kind: 'companion', channel: 'feishu',
+      watch_scope: 'personal-learning:learn-a', reason: '用户喜欢喝咖啡',
+      evidence_refs: ['personal-learning:learn-a'], dedupe_key: 'personal-learning:learn-a',
+      created_at: '2026-07-01T09:00:00+08:00', expires_at: '2026-07-01T23:00:00+08:00',
+      deliverability: 'notify_allowed', allowed_capability_tiers: ['T1'],
+      quiet_policy: 'respect', budget_class: 'curiosity',
+    }),
+    channelHub: async (message, options) => {
+      const text = JSON.stringify({
+        action: 'notify', message: '我想起你了。',
+        evidence_refs: ['personal-learning:learn-a'], why_now: 'memory surfaced',
+      });
+      await options.adapter.sendReply({ target: {}, text, message });
+      return { replyText: text };
+    },
+    execFileImpl: async () => { sends += 1; return { stdout: '{"ok":true}' }; },
+  });
+  assert.equal(result.payload.status, 'suppressed');
+  assert.equal(result.payload.reason, 'generic_proactive_message');
+  assert.equal(sends, 0);
 });
 
 test('handleProactiveEventRequest drops reminder events when reminder delivery is disabled', async (t) => {

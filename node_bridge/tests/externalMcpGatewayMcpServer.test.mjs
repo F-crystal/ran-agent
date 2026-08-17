@@ -88,7 +88,7 @@ test('external MCP gateway exposes one stable tool surface', () => {
   assert.deepEqual(probeToolSchema?.properties?.activityKind?.enum, ['game', 'forum', 'browser', 'api', 'embodied', 'other']);
 });
 
-test('external MCP gateway initialize works while source profile calls stay disabled by default', async () => {
+test('external MCP gateway initialize is transport-safe even when a runtime gate is disabled', async () => {
   const init = await handleExternalMcpGatewayMcpRequest({ method: 'initialize', params: {} }, { env: {} });
   const tools = await handleExternalMcpGatewayMcpRequest({ method: 'tools/list', params: {} }, { env: {} });
   const denied = await callTool('mcp_list_enabled', {}, { env: {} });

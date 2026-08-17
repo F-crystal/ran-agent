@@ -25,11 +25,16 @@ import { bindCoreChannelHub, openCommittedCoreRuntime } from './core/coreRuntime
 import { createCoreRuntimeComposition } from './core/coreRuntimeComposition.mjs';
 import { createCoreExternalMcpHandler } from './core/coreExternalMcpHandler.mjs';
 import { createCoreExternalNotificationService } from './core/coreExternalNotificationService.mjs';
+import {
+  createOfficialOmbreToolCaller,
+  createOmbreProjectionService,
+} from './core/ombreProjectionService.mjs';
 import { createAttentionValve } from './attentionValve.mjs';
 import { handleWeChatTextMessage, summarizeWeChatRequestShape } from './wechatBridge.mjs';
 import { extractLegacyWechatMediaMarker, extractRanMediaMarker } from './replyMediaMarkers.mjs';
 import { resolveStickerAsset } from './stickerCatalog.mjs';
 import {
+  getCheckinRange,
   resolveStateDir,
   setCheckinRange,
 } from './runtimeState.mjs';
@@ -71,16 +76,19 @@ export function parseCheckinCommand(text) {
     return null;
   }
   const parts = raw.split(/\s+/).filter(Boolean);
+  if (parts.length === 2 && ['on', 'off'].includes(parts[1].toLowerCase())) {
+    return { enabled: parts[1].toLowerCase() === 'on' };
+  }
   if (parts.length !== 3) {
-    return { error: '用法：/checkin <最小分钟> <最大分钟>，例如 /checkin 20 90' };
+    return { error: '用法：/checkin on|off，或 /checkin <最小分钟> <最大分钟>' };
   }
   const minMinutes = Number(parts[1]);
   const maxMinutes = Number(parts[2]);
   if (!Number.isFinite(minMinutes) || !Number.isFinite(maxMinutes)) {
     return { error: '参数必须是数字分钟，例如 /checkin 20 90' };
   }
-  if (minMinutes <= 0 || maxMinutes <= 0) {
-    return { error: '分钟必须大于 0。' };
+  if (minMinutes < 20 || maxMinutes < 20) {
+    return { error: '主动陪伴间隔不能短于 20 分钟。' };
   }
   if (maxMinutes < minMinutes) {
     return { error: '最大分钟必须大于或等于最小分钟。' };
@@ -584,7 +592,15 @@ export function buildAgent({ logger, env, channelHub = handleIncomingMessage }) 
         if (checkinCommand.error) {
           return { text: checkinCommand.error };
         }
-        const saved = setCheckinRange(checkinCommand, env);
+        const saved = setCheckinRange(
+          checkinCommand.enabled === undefined
+            ? checkinCommand
+            : { ...getCheckinRange(env), enabled: checkinCommand.enabled },
+          env,
+        );
+        if (checkinCommand.enabled !== undefined) {
+          return { text: saved.enabled ? '主动陪伴已开启。' : '主动陪伴已停止。' };
+        }
         return {
           text: `已更新随机轮询范围：最小 ${saved.minMinutes} 分钟，最大 ${saved.maxMinutes} 分钟。`,
         };
@@ -855,10 +871,19 @@ async function main() {
       notificationService: createCoreExternalNotificationService({ core: coreRuntime.core }),
     });
   }
+  const ombreProjection = coreRuntime ? createOmbreProjectionService({
+    core: coreRuntime.core,
+    hashContent: coreRuntime.hashContent,
+    callTool: createOfficialOmbreToolCaller({
+      url: runtimeEnv.OMBRE_BRAIN_MCP_URL || runtimeEnv.PERSONAL_AGENT_OMBRE_MCP_URL || 'http://127.0.0.1:18001/mcp',
+      timeoutMs: Number(runtimeEnv.PERSONAL_AGENT_OMBRE_TIMEOUT_MS || 10_000),
+    }),
+  }) : null;
   runtimeEnv.replyBackend = createReplyBackend({
     env: runtimeEnv,
     logger: console,
     activityFacade: externalMcpRuntime.facade,
+    personalLearningProjector: ombreProjection?.projectPersonalLearningReceipt,
   });
   const coreWorkRuntime = createCoreRuntimeComposition({
     runtime: coreRuntime, channelHub, externalPollHandler: coreExternalMcp?.handler,

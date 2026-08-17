@@ -21,8 +21,10 @@ test('cutover seeds every replacement schedule active with first due after the w
   const core = openCoreDatabase({ dbPath, now: () => new Date(COMMITTED_AT) });
   core.migrate();
   const manifest = loadCoreSystemScheduleManifest(MANIFEST_PATH);
-  assert.equal(manifest.schedules.length, 13);
+  assert.equal(manifest.schedules.length, 12);
+  assert.equal(manifest.schedules.some((item) => item.id === 'ai-daily-digest'), false);
   assert.equal(new Set(manifest.schedules.map((item) => item.source)).has('python.scheduler.brain_loop'), false);
+  assert.equal(manifest.schedules.find((item) => item.id === 'life-loop').recurrence.everySeconds, 1200);
   assert.deepEqual(manifest.schedules.filter((item) => item.id === 'attention-flush'), [{
     id: 'attention-flush', source: 'node.attention_valve.flush', title: 'Attention backlog flush',
     taskKind: 'system_maintenance', visible: false,
@@ -53,12 +55,11 @@ test('cutover seeds every replacement schedule active with first due after the w
   const schedules = inspector.prepare('SELECT * FROM schedule_spec ORDER BY schedule_spec_id').all();
   assert.equal(schedules.length, manifest.schedules.length);
   assert.ok(schedules.every((row) => row.state === 'enabled' && Date.parse(row.next_due_at) > Date.parse(WATERMARK)));
-  assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE task_kind='scheduled_instruction'").get().count, 1);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE task_kind='scheduled_instruction'").get().count, 0);
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE task_kind='external_poll'").get().count, 1);
   assert.equal(inspector.prepare("SELECT payload_ref FROM schedule_spec_revision WHERE task_kind='external_poll'").get().payload_ref, 'external-poll:external-mcp-runtime');
   assert.equal(inspector.prepare("SELECT count(*) AS count FROM schedule_spec_revision WHERE payload_ref='system-task:attention-flush'").get().count, 1);
-  assert.equal(inspector.prepare("SELECT source_kind FROM journal_event WHERE event_type='package_b_presentation_binding_created'").get().source_kind,
-    'package_b_presentation_binding_destination:user');
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='package_b_presentation_binding_created'").get().count, 0);
   assert.equal(inspector.prepare('SELECT count(*) AS count FROM wake_occurrence').get().count, 0);
   assert.equal(inspector.prepare('SELECT count(*) AS count FROM work_run').get().count, 0);
   inspector.close();

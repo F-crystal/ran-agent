@@ -8,8 +8,9 @@ import json
 import logging
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from time import perf_counter
+from zoneinfo import ZoneInfo
 
 from personal_agent.config import AppConfig
 from personal_agent.context_budget import trim_context
@@ -136,8 +137,8 @@ class PersonalAgentService:
     def __init__(
         self,
         database: Database,
-        model_client: ModelClient,
         logger: logging.Logger,
+        model_client: ModelClient | None = None,
         config: AppConfig | None = None,
         system_prompt: str = "",
         tool_model_client: ModelClient | None = None,
@@ -148,6 +149,7 @@ class PersonalAgentService:
         self._database = database
         self._model_client = model_client
         self._tool_model_client = tool_model_client or model_client
+        self._deferred_inline = isinstance(model_client, PlaceholderModelClient)
         self._logger = logger
         self._system_prompt_override = system_prompt
         self._memory_extractor = memory_extractor or (
@@ -156,7 +158,7 @@ class PersonalAgentService:
                 logger=logger,
                 config=self._config,
             )
-            if self._config.memory_llm_enabled
+            if self._config.memory_llm_enabled and self._tool_model_client is not None
             else DisabledMemoryExtractor()
         )
         self._memory_specialist = MemorySpecialist(
@@ -183,7 +185,7 @@ class PersonalAgentService:
             database=database,
             context_window=getattr(self._config, "context_window", 120000),
         )
-        self._conversation_agent = _ConversationAgentFacade(service=self)
+        self._conversation_agent = _ConversationAgentFacade(service=self) if model_client is not None else None
         self._orchestrator_agent = OrchestratorAgent(
             database=database,
             model_client=model_client,
@@ -195,7 +197,7 @@ class PersonalAgentService:
             reflection_specialist=self._reflection_specialist,
             knowledge_agent=self._knowledge_agent,
             exploration_specialist=self._exploration_specialist,
-        )
+        ) if model_client is not None else None
         self._outbound_client = NodeBridgeOutboundClient(self._config)
         self._post_reply_executor = concurrent.futures.ThreadPoolExecutor(
             max_workers=2,
@@ -238,6 +240,8 @@ class PersonalAgentService:
     def handle_incoming_message(self, message: IncomingMessage) -> OutgoingMessage:
         """Handle one backend turn locally without the retired frontend path."""
 
+        if self._orchestrator_agent is None or self._conversation_agent is None or self._model_client is None:
+            raise RuntimeError("/chat frontend path is retired; use Hermes Gateway")
         local_now = self._get_local_now()
         route_decision = self._orchestrator_agent._decide_request_route(
             text=message.text,
@@ -449,7 +453,7 @@ class PersonalAgentService:
                 background_opportunities,
                 now_local=local_now,
             )
-            if background_opportunities
+            if background_opportunities and self._orchestrator_agent is not None
             else None
         )
         judgments = tuple(
@@ -471,15 +475,46 @@ class PersonalAgentService:
     def run_life_loop_state(self, *, now_local: datetime | None = None) -> dict[str, object]:
         """Run one life-loop pass and return state payload."""
 
+        local_now = now_local or datetime.now()
         result = LifeLoop(
             config=self._config,
             database=self._database,
             logger=self._logger,
             memory_specialist=self._memory_specialist,
-        ).run(now_local=now_local)
+        ).run(now_local=local_now)
+        proactive_results: list[dict[str, object]] = []
+        for opportunity in result.opportunities:
+            if opportunity.kind != "companion":
+                continue
+            learning_id = str(opportunity.payload.get("learning_id") or "").strip()
+            statement = str(opportunity.payload.get("statement") or "").strip()
+            evidence_ref = str(opportunity.payload.get("evidence_ref") or "").strip()
+            if not learning_id or not statement or evidence_ref != f"personal-learning:{learning_id}":
+                continue
+            zone = ZoneInfo(self._config.scheduler_timezone)
+            aware_local = local_now.replace(tzinfo=zone) if local_now.tzinfo is None else local_now.astimezone(zone)
+            created_at = aware_local.astimezone(timezone.utc)
+            proactive_results.append(self.send_proactive_event({
+                "event_id": f"companion-{aware_local:%Y%m%d}-{learning_id}",
+                "kind": "companion",
+                "channel": "feishu",
+                "watch_scope": evidence_ref,
+                "reason": statement,
+                "evidence_refs": [evidence_ref],
+                "dedupe_key": evidence_ref,
+                "created_at": created_at.isoformat(),
+                "expires_at": (
+                    created_at + timedelta(minutes=max(20, self._config.proactive_check_interval_minutes))
+                ).isoformat(),
+                "deliverability": "notify_allowed",
+                "allowed_capability_tiers": ["T1"],
+                "quiet_policy": "respect",
+                "budget_class": "curiosity",
+            }))
         return {
             "generated_at": result.generated_at,
             "opportunities": [item.to_dict() for item in result.opportunities],
+            "proactive_results": proactive_results,
         }
 
     def run_night_cycle_state(self) -> dict[str, object]:
@@ -921,7 +956,7 @@ class PersonalAgentService:
     ) -> None:
         if not user_text.strip():
             return
-        if isinstance(self._model_client, PlaceholderModelClient):
+        if self._deferred_inline:
             self._run_deferred_memory_pipeline(channel, sender_id, user_text, evidence_seed)
             return
         self._post_reply_executor.submit(

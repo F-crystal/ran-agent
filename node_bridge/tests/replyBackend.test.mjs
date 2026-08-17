@@ -20,7 +20,6 @@ import {
   isTrustedHermesTaskScopedMessage,
   listHermesTaskScopedRoutes,
 } from '../src/hermesTaskScope.mjs';
-import { createFeishuMinutesDocumentExecutorAdapter } from '../src/feishuMinutesDocumentClient.mjs';
 
 function tempStateEnv(t, extra = {}) {
   return createIsolatedTestEnv(t, {
@@ -73,7 +72,7 @@ test('reply backend rejects missing or unsupported platform before Hermes', asyn
   assert.equal(providerAttempts, 0);
 });
 
-test('manual historical AI daily digest preserves the explicit date', async (t) => {
+test('Hermes cannot send a manual historical AI daily digest', async (t) => {
   const env = tempStateEnv(t, { RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret', PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787' });
   const requests = [];
   const backend = createReplyBackend({
@@ -86,13 +85,12 @@ test('manual historical AI daily digest preserves the explicit date', async (t) 
     ingestImpl: async () => ({ ok: true }), logger: { log() {}, warn() {} },
   });
   const result = await backend.getReply({ text: '请补发2026-08-14日报', sender_id: 'owner', conversation_id: 'home', platform: 'feishu', trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' } });
-  assert.equal(result.replyText, '2026-08-14 日报已补发。');
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].actionType, 'ai_daily_digest.send');
-  assert.deepEqual(requests[0].scope, { mode: 'manual', date: '2026-08-14' });
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
+  assert.equal(requests.length, 0);
 });
 
-test('feishu.calendar.create acknowledges only after create, reminder patch, and readback', async (t) => {
+test('Hermes cannot create a Feishu calendar event', async (t) => {
   const env = tempStateEnv(t, { HERMES_ENVIRONMENT_TIMEZONE: 'Asia/Shanghai' });
   const commands = [];
   let todoCalls = 0;
@@ -129,13 +127,13 @@ test('feishu.calendar.create acknowledges only after create, reminder patch, and
     trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
   });
 
-  assert.equal(commands.length, 3);
+  assert.equal(commands.length, 0);
   assert.equal(todoCalls, 0);
-  assert.equal(result.replyText, '已写入飞书日历并校验：“剧本杀”，2026-08-22 08:55–14:00，提前 30 分钟提醒。');
-  assert.equal(result.source, 'bridge_feishu_calendar_create');
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
-test('calendar patch failure cannot preserve model success prose', async (t) => {
+test('Hermes calendar claims are blocked before the calendar adapter', async (t) => {
   const env = tempStateEnv(t, { HERMES_ENVIRONMENT_TIMEZONE: 'Asia/Shanghai' });
   let calls = 0;
   const backend = createReplyBackend({
@@ -160,11 +158,12 @@ test('calendar patch failure cannot preserve model success prose', async (t) => 
     trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
   });
 
-  assert.equal(result.replyText, '飞书日程创建或校验失败，未确认已写入日历。');
-  assert.equal(result.source, 'bridge_feishu_calendar_create');
+  assert.equal(calls, 0);
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
-test('a timed calendar event cannot be downgraded to todo.create', async (t) => {
+test('Hermes cannot downgrade a timed calendar event into a Todo effect', async (t) => {
   const env = tempStateEnv(t, {
     RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret',
     PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787',
@@ -189,10 +188,11 @@ test('a timed calendar event cannot be downgraded to todo.create', async (t) => 
   });
 
   assert.equal(todoCalls, 0);
-  assert.equal(result.replyText, '提醒创建失败，未确认已保存。');
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
-test('todo.create releases a receipt-bound acknowledgement only after trusted creation', async (t) => {
+test('Hermes cannot create a Todo', async (t) => {
   const env = tempStateEnv(t, {
     RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret',
     PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787',
@@ -242,13 +242,12 @@ test('todo.create releases a receipt-bound acknowledgement only after trusted cr
     trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
   });
 
-  assert.equal(requests.length, 1);
-  assert.equal(requests[0].scope.reminderAt, '2026-08-21 08:25:00');
-  assert.equal(result.replyText, '已创建待办“线下活动”：2026-08-21 08:55–14:00，将在 2026-08-21 08:25 提醒。');
-  assert.equal(result.source, 'bridge_todo_create');
+  assert.equal(requests.length, 0);
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
-test('todo.create has no effect without owner context and never preserves model success prose', async (t) => {
+test('Hermes Todo effects stay blocked regardless of actor context', async (t) => {
   const env = tempStateEnv(t, {
     RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret',
     PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787',
@@ -272,10 +271,11 @@ test('todo.create has no effect without owner context and never preserves model 
   const result = await backend.getReply({ text: '请提前30分钟提醒活动', sender_id: 'guest', conversation_id: 'guest', platform: 'feishu' });
 
   assert.equal(calls, 0);
-  assert.equal(result.replyText, '提醒创建失败，未确认已保存。');
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
-test('todo.create backend failure cannot produce a success acknowledgement', async (t) => {
+test('Hermes Todo claims are blocked before the Todo backend', async (t) => {
   const env = tempStateEnv(t, {
     RAN_AGENT_INTERNAL_CONTROL_SECRET: 'internal-secret',
     PYTHON_BACKEND_BASE_URL: 'http://127.0.0.1:8787',
@@ -300,11 +300,11 @@ test('todo.create backend failure cannot produce a success acknowledgement', asy
     trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
   });
 
-  assert.equal(result.replyText, '提醒创建失败，未确认已保存。');
-  assert.equal(result.source, 'bridge_todo_create');
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
-test('informational AI digest drops prohibited envelope actions before execution and releases the report body', async (t) => {
+test('retired informational AI digest cannot release work actions or report prose', async (t) => {
   const env = tempStateEnv(t);
   const calls = { trustedExecutor: 0, coreJob: 0, activity: 0, activityRepair: 0 };
   const logs = [];
@@ -353,7 +353,8 @@ test('informational AI digest drops prohibited envelope actions before execution
     trusted_actor_context: { actorKey: 'actor:owner', owner: true, platform: 'feishu', conversationKey: 'feishu:home' },
   }, 'scheduled_ai_daily_digest'), { semanticVerifierConfig: { enabled: true, timeoutMs: 100, maxRewriteChars: 600 } });
 
-  assert.equal(result.replyText, '某公司宣布生成式 AI 平台已完成新一轮升级。');
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
   assert.deepEqual(calls, { trustedExecutor: 0, coreJob: 0, activity: 0, activityRepair: 0 });
   assert.deepEqual(listPendingActions({ env }), []);
   assert.equal(semanticInputs.length, 1);
@@ -362,7 +363,7 @@ test('informational AI digest drops prohibited envelope actions before execution
   const telemetry = JSON.parse(telemetryLine.replace('[hermes-informational-report] ', ''));
   assert.equal(telemetry.route_hint, 'scheduled_ai_daily_digest');
   assert.equal(telemetry.action_claim_detection_skipped, true);
-  assert.deepEqual(telemetry.prohibited_action_fields_dropped, ['actionRequests', 'activityRequest', 'commitments']);
+  assert.deepEqual(telemetry.prohibited_action_fields_dropped, ['activityRequest', 'commitments']);
   assert.equal(telemetry.informational_report_body_released, true);
 });
 
@@ -615,7 +616,7 @@ test('createReplyBackend does not repair a future external commitment without a 
   assert.equal(result.replyText, '这项后续工作尚未启动。');
 });
 
-test('createReplyBackend runs only an allowlisted Core durable request before releasing its matching commitment', async () => {
+test('Hermes cannot create a Core durable job', async () => {
   const calls = [];
   const backend = createReplyBackend({
     coreDurableJobExecutor: {
@@ -647,10 +648,9 @@ test('createReplyBackend runs only an allowlisted Core durable request before re
     trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
   });
 
-  assert.equal(calls.length, 1);
-  assert.equal(calls[0].request.actionType, 'core.reflection');
-  assert.equal(result.replyText, '已安排聊天复盘。');
-  assert.equal(result.source, 'bridge_core_job_ack');
+  assert.equal(calls.length, 0);
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
 test('createReplyBackend does not release a commitment for a forged or cross-reference durable receipt', async () => {
@@ -679,7 +679,7 @@ test('createReplyBackend does not release a commitment for a forged or cross-ref
   assert.equal(result.source, 'bridge_commitment_guard');
 });
 
-test('createReplyBackend never promises a Core job after its private client fails', async () => {
+test('Hermes Core-job claims are blocked before the private client', async () => {
   let calls = 0;
   const backend = createReplyBackend({
     coreDurableJobExecutor: {
@@ -701,9 +701,9 @@ test('createReplyBackend never promises a Core job after its private client fail
     trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
   });
 
-  assert.equal(calls, 1);
-  assert.equal(result.replyText, '这项后续工作尚未启动。');
-  assert.equal(result.source, 'bridge_commitment_guard');
+  assert.equal(calls, 0);
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
 test('createReplyBackend suppresses silent external MCP synthetic turns', async () => {
@@ -1027,6 +1027,7 @@ test('createReplyBackend issues and verifies a real receipt before preserving a 
   const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
   const ledger = createOperationLedger({ env });
   let executedOperationId = '';
+  const projections = [];
   const executors = createTrustedExecutorAdapters({
     ledger,
     adapters: [{
@@ -1055,6 +1056,7 @@ test('createReplyBackend issues and verifies a real receipt before preserving a 
     env,
     operationLedger: ledger,
     trustedActionExecutors: executors,
+    personalLearningProjector: async (input) => { projections.push(input); return { status: 'completed' }; },
     hermesImpl: async () => ({
       reply_text: '已经替你保存好了。',
       action_requests: [{
@@ -1084,9 +1086,12 @@ test('createReplyBackend issues and verifies a real receipt before preserving a 
   assert.equal(response.replyText, '已经替你保存好了。');
   assert.match(executedOperationId, /^op_/);
   assert.equal(ledger.getOperation(executedOperationId).state, 'completed');
+  assert.equal(projections.length, 1);
+  assert.equal(projections[0].request.actionType, 'memory.remember');
+  assert.equal(projections[0].receipt.status, 'succeeded');
 });
 
-test('existing Feishu Minutes transcript becomes one read-back cloud document', async (t) => {
+test('Hermes cannot turn an existing Feishu Minutes transcript into a cloud document', async (t) => {
   const env = tempStateEnv(t, {
     HERMES_ACTION_GATE_MODE: 'enforce',
     FEISHU_LARK_CLI_IDENTITY: 'user',
@@ -1141,18 +1146,12 @@ test('existing Feishu Minutes transcript becomes one read-back cloud document', 
     },
   });
 
-  assert.equal(response.replyText, '已整理成云文档并放入目标文件夹。');
-  assert.equal(response.source, 'bridge_feishu_minutes_document');
-  assert.deepEqual(calls.map((args) => args.slice(0, 2)), [
-    ['minutes', '+search'],
-    ['drive', '+search'],
-    ['docs', '+create'],
-    ['docs', '+fetch'],
-    ['drive', 'files'],
-  ]);
+  assert.equal(response.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(response.source, 'bridge_playground_action_guard');
+  assert.deepEqual(calls, []);
 });
 
-test('an actionless Minutes reply receives one strict replan and creates one verified document', async (t) => {
+test('an actionless Minutes reply is not replanned by Node', async (t) => {
   const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
   const contentXml = '<title>前辈对话3</title><heading1>摘要</heading1><p>整理内容</p>';
   const calls = [];
@@ -1210,23 +1209,13 @@ test('an actionless Minutes reply receives one strict replan and creates one ver
     },
   });
 
-  assert.equal(response.replyText, '已整理成云文档并放入目标文件夹。');
-  assert.equal(attempt, 2);
-  assert.equal(inputs[1].route_hint, 'action_gate_repair');
-  assert.equal(isTrustedHermesTaskScopedMessage(inputs[1]), true);
-  assert.equal(inputs[1].continuity_note, '');
-  assert.match(inputs[1].text, /Never add id/);
-  assert.match(inputs[1].text, /前辈对话3/);
-  assert.deepEqual(calls.map((args) => args.slice(0, 2)), [
-    ['minutes', '+search'],
-    ['drive', '+search'],
-    ['docs', '+create'],
-    ['docs', '+fetch'],
-    ['drive', 'files'],
-  ]);
+  assert.equal(response.replyText, '飞书云文档写入请求已提交，静候落地。');
+  assert.equal(attempt, 1);
+  assert.equal(inputs.length, 1);
+  assert.deepEqual(calls, []);
 });
 
-test('a Minutes replan that repeats a private id fails closed before lark-cli', async (t) => {
+test('an invalid Minutes envelope is not replanned by Node', async (t) => {
   const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
   let attempt = 0;
   let calls = 0;
@@ -1272,25 +1261,7 @@ test('a Minutes replan that repeats a private id fails closed before lark-cli', 
   });
 
   assert.equal(response.replyText, '回复格式校验失败，请稍后重试。');
-  assert.equal(attempt, 2);
-  assert.equal(calls, 0);
-});
-
-test('Feishu Minutes document action rejects non-DocxXML wrappers before lark-cli', async () => {
-  let calls = 0;
-  const adapter = createFeishuMinutesDocumentExecutorAdapter({
-    execFileImpl: async () => { calls += 1; },
-  });
-  await assert.rejects(adapter.execute({ operation: {
-    operationId: 'op_minutes_invalid',
-    actionType: 'feishu.minutes_to_doc',
-    scope: {
-      minuteTitle: '个人成长',
-      folderTitle: '中海油',
-      documentTitle: '个人成长｜录音整理',
-      contentXml: '<root><title>个人成长｜录音整理</title><content><p>整理摘要</p></content></root>',
-    },
-  } }), { code: 'FEISHU_MINUTES_DOCUMENT_CONTENT_INVALID' });
+  assert.equal(attempt, 1);
   assert.equal(calls, 0);
 });
 
@@ -1422,7 +1393,7 @@ test('createReplyBackend rejects a memory identifier whose prefix contradicts th
   assert.equal(response.replyText, '保存结果尚未返回，未写入长期记忆。');
 });
 
-test('createReplyBackend replaces model future-work prose with a bridge-owned Core job acknowledgement', async () => {
+test('createReplyBackend rejects model future-work actions instead of acknowledging them', async () => {
   const backend = createReplyBackend({
     coreDurableJobExecutor: {
       supports: (actionType) => actionType === 'core.reflection',
@@ -1449,8 +1420,8 @@ test('createReplyBackend replaces model future-work prose with a bridge-owned Co
     trusted_actor_context: { actorKey: 'actor:owner:0001', owner: true, platform: 'wechat', conversationKey: 'wechat:dm:owner' },
   });
 
-  assert.equal(result.replyText, '已安排聊天复盘。');
-  assert.equal(result.source, 'bridge_core_job_ack');
+  assert.equal(result.replyText, '这类办事操作已交给 Codex；Hermes 未执行。');
+  assert.equal(result.source, 'bridge_playground_action_guard');
 });
 
 test('createReplyBackend lets Hermes handle high risk text when no pending executor exists', async (t) => {

@@ -14,7 +14,7 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 
 ## Current Role
 
-- Hermes is the frontend conversation shell for ran-agent.
+- Hermes is the chat, emotional-companionship, and play shell; Codex owns work effects.
 - The unified production profile uses `deepseek-v4-flash`; the provider policy adds `thinking.type=disabled` to
   the final HTTP body. Pro is explicit opt-in only.
 - DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must be processed by MCP tools first.
@@ -27,7 +27,7 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 
 | File or Directory | Purpose |
 |-------------------|---------|
-| `profile/config.yaml` | The single installable `ran-agent-companion` profile, preserving the supported Lite/Full capability union |
+| `profile/config.yaml` | The single installable `ran-agent-companion` profile, exposing only chat/companionship/play capabilities |
 | `profile/distribution.yaml` | Profile metadata and required environment variables |
 | `profile/AGENTS.md` | Hermes runtime constraints |
 | `profile/IDENTITY.md`, `profile/SOUL.md` | Persona and long-term expression baseline |
@@ -88,7 +88,7 @@ Production runs one Hermes v0.20 gateway:
 
 | Service | Port | Profile | Hermes home | Purpose |
 |---------|------|---------|-------------|---------|
-| `ran-agent-hermes.service` | `8642` | `ran-agent-companion` | `/home/ubuntu/.hermes-ran-agent/lite` | Supported Lite/Full capability union |
+| `ran-agent-hermes.service` | `8642` | `ran-agent-companion` | `/home/ubuntu/.hermes-ran-agent/lite` | Chat, companionship, memory, media, search, and External MCP play |
 
 Node bridge consumes only these frontend variables:
 
@@ -97,9 +97,10 @@ HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
 HERMES_PROFILE=ran-agent-companion
 ```
 
-Terminal, file, session search, Playwright, media generation, and existing MCPs
-are available through the unified profile. `ran-agent-hermes-full.service` is
-inactive/disabled, not a fallback.
+Terminal, file, session search, and direct Playwright are absent from the
+current source profile. Media generation, search, and governed MCPs remain in
+the unified profile. `ran-agent-hermes-full.service` is inactive/disabled, not
+a fallback.
 
 Follow the runtime runbook for production deployment, profile refresh, and
 rollback. Routine diagnostics may use:
@@ -136,8 +137,8 @@ ran-agent uses repo-owned MCP services:
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares |
 | `mimo_power` | Retired: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles |
 | `personal_memory` | Unified Python memory entry combining local memory, read-only Ombre, and bounded Vault recall |
+| `external_mcp_gateway` | Governed External MCP broker exposed by default; registry, grants, budgets, and confirmation remain enforced |
 | `media_generation` | Image and speech generation in the unified profile |
-| `playwright` | Browser automation in the unified profile |
 | `tavily` | Optional lower-level web search provider for Search Hub compatibility |
 
 Fresh web facts, news, academic lookup, and normal URL reads should use `search_hub` first. Social-platform links must use `social_reader`; do not use generic web extraction as a replacement for Xiaohongshu, Bilibili, or similar platform resolvers.

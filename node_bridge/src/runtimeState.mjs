@@ -111,22 +111,24 @@ function normalizeIsoTimestamp(raw) {
 export function getCheckinRange(env = process.env) {
   const filePath = resolveRuntimePath(CHECKIN_RANGE_FILE, env);
   const payload = readJsonFile(filePath, {});
-  const minMinutes = normalizePositiveInt(payload.minMinutes, 20);
-  const maxMinutes = normalizePositiveInt(payload.maxMinutes, 90);
+  const minMinutes = Math.max(20, normalizePositiveInt(payload.minMinutes, 20));
+  const maxMinutes = Math.max(20, normalizePositiveInt(payload.maxMinutes, 90));
+  const enabled = payload.enabled !== false;
   if (maxMinutes < minMinutes) {
-    return { minMinutes: maxMinutes, maxMinutes: minMinutes };
+    return { minMinutes: maxMinutes, maxMinutes: minMinutes, enabled };
   }
-  return { minMinutes, maxMinutes };
+  return { minMinutes, maxMinutes, enabled };
 }
 
-export function setCheckinRange({ minMinutes, maxMinutes }, env = process.env) {
-  const normalizedMin = normalizePositiveInt(minMinutes, 20);
-  const normalizedMax = normalizePositiveInt(maxMinutes, 90);
+export function setCheckinRange({ minMinutes, maxMinutes, enabled = true }, env = process.env) {
+  const normalizedMin = Math.max(20, normalizePositiveInt(minMinutes, 20));
+  const normalizedMax = Math.max(20, normalizePositiveInt(maxMinutes, 90));
   const finalMin = Math.min(normalizedMin, normalizedMax);
   const finalMax = Math.max(normalizedMin, normalizedMax);
   const payload = {
     minMinutes: finalMin,
     maxMinutes: finalMax,
+    enabled: enabled !== false,
     updatedAt: new Date().toISOString(),
   };
   writeJsonFile(resolveRuntimePath(CHECKIN_RANGE_FILE, env), payload);

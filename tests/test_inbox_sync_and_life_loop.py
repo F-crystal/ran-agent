@@ -235,6 +235,41 @@ class InboxSyncAndLifeLoopTest(unittest.TestCase):
         self.assertEqual(outbound.sent, [])
         self.assertEqual(batch.judgments[0].reason, "legacy_companion_proactive_retired")
 
+    def test_life_loop_submits_only_a_memory_grounded_companion_event(self) -> None:
+        config = dataclasses.replace(self.config, proactive_events_enabled=True)
+        service = PersonalAgentService(
+            database=self.database,
+            model_client=PlaceholderModelClient(),
+            logger=self.logger,
+            config=config,
+        )
+        learning = service.observe_personal_learning(
+            kind="relationship",
+            subject_key="person:friend",
+            statement="我们上次还有一件没聊完的心事。",
+            source="explicit_user",
+            evidence_digests=["a" * 64],
+            confidence=1.0,
+        )
+        outbound = StubOutboundClient()
+        service._outbound_client = outbound  # type: ignore[attr-defined]
+
+        result = service.run_life_loop_state(now_local=datetime(2026, 4, 13, 11, 10, 0))
+
+        companion = next(item for item in result["opportunities"] if item["kind"] == "companion")
+        self.assertEqual(companion["payload"]["learning_id"], learning["learning_id"])
+        self.assertEqual(len(outbound.events), 1)
+        event = outbound.events[0]
+        evidence_ref = f"personal-learning:{learning['learning_id']}"
+        self.assertEqual(event["kind"], "companion")
+        self.assertEqual(event["watch_scope"], evidence_ref)
+        self.assertEqual(event["evidence_refs"], [evidence_ref])
+        self.assertEqual(event["dedupe_key"], evidence_ref)
+        self.assertEqual(event["reason"], "我们上次还有一件没聊完的心事。")
+        self.assertNotIn("message", event)
+        self.assertTrue(result["proactive_results"][0]["success"])
+        self.assertEqual(result["proactive_results"][0]["bridge_result"]["status"], "sent")
+
     def test_reminder_check_job_sends_persisted_due_reminder_after_restart(self) -> None:
         reminder_config = dataclasses.replace(
             self.config,

@@ -215,7 +215,6 @@ class AppConfig:
     backend_model_max_tokens: int = 0
     backend_qwen_enabled: bool = False
     qwen_api_key_env_var: str = "DASHSCOPE_API_KEY"
-    qwen_chat_model: str = "qwen3.5-plus"
     qwen_tools_model: str = "qwen3.5-plus"
     qwen_base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1/responses"
     qwen_timeout_seconds: int = 300
@@ -434,7 +433,6 @@ def load_config(base_dir: Path | None = None) -> AppConfig:
             "PERSONAL_AGENT_QWEN_API_KEY_ENV",
             "DASHSCOPE_API_KEY",
         ).strip(),
-        qwen_chat_model=os.getenv("PERSONAL_AGENT_QWEN_CHAT_MODEL", "qwen3.5-plus").strip(),
         qwen_tools_model=os.getenv("PERSONAL_AGENT_QWEN_TOOLS_MODEL", "qwen3.5-plus").strip(),
         qwen_base_url=os.getenv(
             "PERSONAL_AGENT_QWEN_BASE_URL",

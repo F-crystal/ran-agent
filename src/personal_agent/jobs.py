@@ -12,7 +12,6 @@ from personal_agent.config import AppConfig
 from personal_agent.db import Database
 from personal_agent.durable_jobs import DurableJobDispatcher, DurableJobOutcome, DurableJobRecord
 from personal_agent.knowledge_agent import KnowledgeAgent
-from personal_agent.life_loop import LifeLoop, serialize_opportunities
 from personal_agent.night_cycle import NightCycle
 from personal_agent.reflection_specialist import ReflectionSpecialist
 from personal_agent.service import PersonalAgentService
@@ -80,30 +79,20 @@ def life_loop_job(
     """Run one lightweight life-loop pass and record surfaced opportunities and judgments."""
 
     logger.info("life loop job started")
-    result = LifeLoop(config=config, database=database, logger=logger).run()
-    if not result.opportunities:
+    result = message_service.run_life_loop_state()
+    opportunities = result["opportunities"]
+    if not opportunities:
         logger.info("life loop job finished with no opportunities")
         return
 
     timeline_event_id = database.record_timeline_event(
         source="scheduler",
         event_type="life_loop_opportunities",
-        content=serialize_opportunities(result.opportunities),
+        content=json.dumps(opportunities, ensure_ascii=False),
         tags="system,life-loop,opportunities",
         importance=1,
     )
-    judgment_batch = message_service.evaluate_life_opportunities(result.opportunities)
-    decision_summary = [
-        {
-            "opportunity_id": judgment.opportunity_id,
-            "kind": judgment.kind,
-            "action": judgment.action,
-            "reason": judgment.reason,
-            "uses_local_context": judgment.uses_local_context,
-            "suggested_text": judgment.suggested_text,
-        }
-        for judgment in judgment_batch.judgments
-    ]
+    decision_summary = result["proactive_results"]
     decision_event_id = database.record_timeline_event(
         source="scheduler",
         event_type="life_loop_judgments",
@@ -115,8 +104,8 @@ def life_loop_job(
         "life loop opportunities recorded timeline_event_id=%s decision_event_id=%s count=%s proactive_sent=%s",
         timeline_event_id,
         decision_event_id,
-        len(result.opportunities),
-        len(judgment_batch.outbound_messages),
+        len(opportunities),
+        sum(1 for item in decision_summary if item.get("success") is True),
     )
 
 

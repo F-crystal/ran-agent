@@ -1077,7 +1077,7 @@ test('all B.1 reader and write namespaces remain typed and transaction-bound', a
     packageBAssembly: ['activePartSetDigest', 'byId', 'deferredAssociations', 'dueBefore', 'dueWork', 'openRecent', 'operationReceipt', 'partByIngress', 'parts', 'referenceTarget', 'sealReceipt'],
     packageBFinal: ['byOperation'],
     packageBIngress: ['assemblyIntentByIngress', 'assemblyIntentByOperation', 'assemblyProcessingByIngress', 'byId', 'byOperation', 'byTrustedNativeScope', 'pendingAssemblyWork'],
-    packageBPresentation: ['binding', 'bindingReceipt', 'byAssistantTurn', 'claimReceipt', 'dispatchStarted', 'enqueueReceipt', 'outbox', 'resultReceipt'],
+    packageBPresentation: ['binding', 'bindingReceipt', 'bindingsByOperation', 'byAssistantTurn', 'claimReceipt', 'dispatchStarted', 'enqueueReceipt', 'outbox', 'resultReceipt'],
     packageBProvider: ['attemptReceipt', 'attempts', 'epoch', 'epochReceipt', 'rebuildMetadata', 'transitionReceipt'],
     packageBTurn: ['conversationByCanonicalKey', 'conversationIdentity', 'exchange', 'foregroundExchangeReceipt', 'identityReceipt', 'presentationBinding', 'turn', 'turnRevisions', 'userReceipt', 'userRevisionReceipt'],
   });

@@ -293,7 +293,7 @@ test('apply script writes Hermes context optimization defaults to Node env', () 
   assert.match(script, /internal_control_secret="\$\(openssl rand -hex 32\)"/);
   assert.match(script, /"RAN_AGENT_INTERNAL_CONTROL_SECRET=\$internal_control_secret"/);
   assert.match(script, /NODE_BRIDGE_QUICK_ACK_TEXT_DEFAULT="\$\{RAN_AGENT_DEPLOY_NODE_BRIDGE_QUICK_ACK_TEXT:-收到，正在处理。\}"/);
-  assert.match(script, /AI_DAILY_DIGEST_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_ENABLED:-true\}"/);
+  assert.match(script, /AI_DAILY_DIGEST_ENABLED_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_ENABLED:-false\}"/);
   assert.match(script, /AI_DAILY_DIGEST_HOUR_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_HOUR:-8\}"/);
   assert.match(script, /AI_DAILY_DIGEST_MINUTE_DEFAULT="\$\{RAN_AGENT_DEPLOY_AI_DAILY_DIGEST_MINUTE:-0\}"/);
   assert.match(script, /HERMES_PROACTIVE_NOTIFY_MAX_CHARS_DEFAULT="\$\{RAN_AGENT_DEPLOY_HERMES_PROACTIVE_NOTIFY_MAX_CHARS:-1600\}"/);

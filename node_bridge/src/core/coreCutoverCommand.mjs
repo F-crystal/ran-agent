@@ -88,7 +88,7 @@ function plan(input) {
   if (visibleBindingDigest !== input.visibleBindingDigest) {
     throw coreError('CORE_CUTOVER_BINDING_DIGEST_MISMATCH', 'visible binding differs from approved S12 authority');
   }
-  validateCoreSystemScheduleBinding(manifest, visibleBinding);
+  validateCoreSystemScheduleBinding(manifest, visibleBinding, { required: true });
   const database = businessRows(input.coreDbPath);
   if (!database.cutoverCommitted && Object.values(database.counts).some((count) => count !== 0)) {
     throw coreError('CORE_CUTOVER_CANDIDATE_NOT_EMPTY', 'pre-cutover Core candidate contains business rows');

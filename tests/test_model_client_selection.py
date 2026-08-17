@@ -16,7 +16,7 @@ from personal_agent.interfaces.model import (
     HermesChatCompletionsModelClient,
     QwenResponsesModelClient,
 )
-from personal_agent.runtime import build_chat_model_client, build_tool_model_client
+from personal_agent.runtime import build_tool_model_client
 
 
 def build_test_logger() -> logging.Logger:
@@ -35,20 +35,6 @@ class ModelClientSelectionTest(unittest.TestCase):
 
     def setUp(self) -> None:
         self.logger = build_test_logger()
-
-    def test_build_chat_model_client_returns_hermes_client_by_default(self) -> None:
-        config = AppConfig(
-            base_dir=Path("."),
-            data_dir=Path("./data"),
-            logs_dir=Path("./logs"),
-            vault_dir=Path("./vault"),
-            database_path=Path("./data/personal_agent.db"),
-            log_file_path=Path("./logs/personal_agent.log"),
-        )
-
-        client = build_chat_model_client(config, self.logger)
-
-        self.assertIsInstance(client, HermesChatCompletionsModelClient)
 
     def test_build_tool_model_client_returns_hermes_client_by_default(self) -> None:
         config = AppConfig(
@@ -81,21 +67,6 @@ class ModelClientSelectionTest(unittest.TestCase):
         self.assertTrue(response.is_error)
         self.assertEqual(response.provider, "hermes")
         self.assertIn("未设置 Hermes API key", response.text)
-
-    def test_build_chat_model_client_returns_qwen_client_when_enabled(self) -> None:
-        config = AppConfig(
-            base_dir=Path("."),
-            data_dir=Path("./data"),
-            logs_dir=Path("./logs"),
-            vault_dir=Path("./vault"),
-            database_path=Path("./data/personal_agent.db"),
-            log_file_path=Path("./logs/personal_agent.log"),
-            backend_qwen_enabled=True,
-        )
-
-        client = build_chat_model_client(config, self.logger)
-
-        self.assertIsInstance(client, QwenResponsesModelClient)
 
     def test_build_tool_model_client_returns_qwen_client_when_enabled(self) -> None:
         config = AppConfig(

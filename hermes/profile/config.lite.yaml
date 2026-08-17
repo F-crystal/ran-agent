@@ -136,8 +136,9 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_external_mcp_gateway.sh
     env:
       EXTERNAL_MCP_GATEWAY_PROFILE: "lite"
-      EXTERNAL_MCP_GATEWAY_ENABLED: "false"
-      EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "false"
+      EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE: "true"
+      EXTERNAL_MCP_GATEWAY_ENABLED: "true"
+      EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "true"
     timeout: 120
     connect_timeout: 60
 

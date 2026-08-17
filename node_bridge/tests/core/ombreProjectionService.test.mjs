@@ -167,6 +167,46 @@ test('projection scope is erasable and rebuilds from the unchanged Core event', 
   assert.equal(core.reader.journalEvent('learning-event-1').event_type, 'personal_learning_confirmed');
 });
 
+test('verified personal learning grows Ombre, correction replaces it, and forget erases it', async (t) => {
+  const { dbPath } = createTempCore(t, 'ombre-live-learning-');
+  const core = openCoreDatabase({ dbPath });
+  core.migrate();
+  t.after(() => core.close());
+  const ombre = fakeOmbre();
+  const service = createOmbreProjectionService({ core, callTool: ombre.callTool, hashContent, now: () => new Date(AT) });
+  const remember = {
+    requestRef: 'remember-1', actionType: 'memory.remember',
+    scope: { kind: 'relationship', subject_key: 'person:friend', statement: '我们上次还有一件没聊完的心事。' },
+  };
+  const remembered = await service.projectPersonalLearningReceipt({
+    request: remember, receipt: { actionType: remember.actionType, status: 'succeeded' },
+  });
+  const replay = await service.projectPersonalLearningReceipt({
+    request: remember, receipt: { actionType: remember.actionType, status: 'succeeded' },
+  });
+  assert.equal(remembered.status, 'completed');
+  assert.equal(replay.disposition, 'already_committed');
+  assert.equal(ombre.mutationCalls, 1);
+
+  const correction = {
+    requestRef: 'correct-1', actionType: 'memory.correct',
+    scope: { kind: 'relationship', subject_key: 'person:friend', statement: '那件心事已经聊开了，现在只需要轻轻陪着。' },
+  };
+  assert.equal((await service.projectPersonalLearningReceipt({
+    request: correction, receipt: { actionType: correction.actionType, status: 'succeeded' },
+  })).status, 'completed');
+  assert.equal(ombre.mutationCalls, 2);
+  assert.equal(ombre.activeBuckets().length, 1);
+  assert.match(ombre.activeBuckets()[0].content, /已经聊开了/);
+
+  const forgotten = await service.projectPersonalLearningReceipt({
+    request: { requestRef: 'forget-1', actionType: 'memory.forget', scope: { subject_key: 'person:friend' } },
+    receipt: { actionType: 'memory.forget', status: 'succeeded' },
+  });
+  assert.equal(forgotten.erased, 1);
+  assert.equal(ombre.activeBuckets().length, 0);
+});
+
 test('unconfirmed sources and mismatched content references never reach Ombre', async (t) => {
   const core = await setup(t);
   const ombre = fakeOmbre();

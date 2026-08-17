@@ -248,5 +248,59 @@ export function createOmbreProjectionService({ core, callTool, hashContent, now 
     return Object.freeze({ erased: bucketIds.length, bucketIds: Object.freeze(bucketIds) });
   }
 
-  return Object.freeze({ projectConfirmedEvent, eraseScope });
+  async function projectPersonalLearningReceipt({ request, receipt } = {}) {
+    const actionType = String(request?.actionType || '');
+    if (!['memory.remember', 'memory.correct', 'memory.forget'].includes(actionType)
+      || receipt?.status !== 'succeeded' || receipt?.actionType !== actionType) {
+      throw coreError('CORE_OMBRE_LEARNING_RECEIPT_INVALID', 'A verified personal-learning receipt is required');
+    }
+    const subjectKey = requireText(request?.scope?.subject_key,
+      'CORE_OMBRE_LEARNING_RECEIPT_INVALID', 'Personal-learning subject is required', 160);
+    const targetScope = `personal-learning:${digest(subjectKey, 32)}`;
+    if (actionType === 'memory.forget') return eraseScope(targetScope);
+
+    const content = requireText(request?.scope?.statement,
+      'CORE_OMBRE_LEARNING_RECEIPT_INVALID', 'Personal-learning statement is required');
+    const kind = requireText(request?.scope?.kind,
+      'CORE_OMBRE_LEARNING_RECEIPT_INVALID', 'Personal-learning kind is required', 64);
+    const eventSeed = `${actionType}\0${subjectKey}\0${content}`;
+    const sourceEventId = `personal-learning-confirmed:${digest(eventSeed, 32)}`;
+    const sourceRef = `personal-learning:${digest(eventSeed, 32)}`;
+    const payloadId = `${sourceEventId}:payload`;
+    const createdAt = currentDate(now).toISOString();
+    await core.writer.write((tx) => {
+      if (tx.journal.event(sourceEventId)) return;
+      tx.journal.append({
+        eventId: sourceEventId,
+        eventType: 'personal_learning_confirmed',
+        originRef: 'bridge:verified-personal-learning-receipt',
+        sourceKind: 'personal_learning',
+        sourceRef,
+        revision: 0,
+        createdAt,
+      });
+      tx.journal.appendPayload({
+        payloadId,
+        eventId: sourceEventId,
+        storageKind: 'external_ref',
+        payloadRef: sourceRef,
+        contentHashToken: hashContent('ombre-projection', content),
+        sensitivity: 'sensitive',
+        retentionClass: 'owner_directed',
+        createdAt,
+      });
+    });
+    const marker = `ran-agent-event-${digest(`${targetScope}\0${sourceEventId}\0${0}`, 32)}`;
+    if (actionType === 'memory.correct'
+      && (await findProjection(callTool, marker, { tag: marker })).length === 0) {
+      await eraseScope(targetScope);
+    }
+    return projectConfirmedEvent({
+      sourceEventId,
+      targetScope,
+      payload: { sourceRef, payloadId, content, tags: [kind] },
+    });
+  }
+
+  return Object.freeze({ projectConfirmedEvent, projectPersonalLearningReceipt, eraseScope });
 }

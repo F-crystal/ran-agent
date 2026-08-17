@@ -169,6 +169,29 @@ test('the S12 acceptance schedule uses the existing Core worker and exact accept
   await core.close();
 });
 
+test('a retired daily digest is suppressed before Python, Hermes, or Feishu', async (t) => {
+  const route = {
+    destinationKind: 'user', destinationRef: 'ou-owner',
+    start: '2026-08-15T23:59:00.000Z', due: '2026-08-16T00:00:00.000Z',
+    recurrence: { kind: 'daily', time: '08:00:00', timeZone: 'Asia/Shanghai' },
+  };
+  const { core, now } = await setup(t, 'system-task:ai-daily-digest', null, route);
+  let effects = 0;
+  const runtime = createCoreRuntimeComposition({
+    runtime: { core, hashContent: () => TOKEN },
+    channelHub: async () => { effects += 1; throw new Error('Hermes must not run'); },
+    fetchImpl: async () => { effects += 1; throw new Error('Python must not run'); },
+    sendFeishu: async () => { effects += 1; throw new Error('Feishu must not run'); },
+    now,
+    env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
+  });
+  runtime.start();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await runtime.stop();
+  assert.equal(effects, 0);
+  await core.close();
+});
+
 test('daily digest and Feishu chat schedules use the same typed delivery target contract', async (t) => {
   for (const fixture of [
     { name: 'owner DM digest', payloadRef: 'system-task:ai-daily-digest', destinationKind: 'user',
@@ -208,7 +231,11 @@ test('daily digest and Feishu chat schedules use the same typed delivery target 
         },
         sendFeishu: async (input) => { sends.push(input); },
         now,
-        env: { RAN_AGENT_CORE_WORK_POLL_MS: '250', RAN_AGENT_INTERNAL_CONTROL_SECRET: 'test-secret' },
+        env: {
+          RAN_AGENT_CORE_WORK_POLL_MS: '250',
+          RAN_AGENT_INTERNAL_CONTROL_SECRET: 'test-secret',
+          AI_DAILY_DIGEST_ENABLED: 'true',
+        },
       });
       runtime.start();
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -252,7 +279,11 @@ test('managed wake daily digest fails closed when the reply omits its scheduled 
     },
     sendFeishu: async () => { sends += 1; },
     now,
-    env: { RAN_AGENT_CORE_WORK_POLL_MS: '250', RAN_AGENT_INTERNAL_CONTROL_SECRET: 'test-secret' },
+    env: {
+      RAN_AGENT_CORE_WORK_POLL_MS: '250',
+      RAN_AGENT_INTERNAL_CONTROL_SECRET: 'test-secret',
+      AI_DAILY_DIGEST_ENABLED: 'true',
+    },
   });
   runtime.start();
   await new Promise((resolve) => setTimeout(resolve, 50));

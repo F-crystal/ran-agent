@@ -116,6 +116,10 @@ export function createCoreRuntimeComposition({
           model: response?.model || response?.profile || 'unspecified',
         };
       }
+      if (task.payloadRef === 'system-task:ai-daily-digest'
+        && String(env.AI_DAILY_DIGEST_ENABLED || 'false').toLowerCase() !== 'true') {
+        return { suppressSend: true, provider: 'core', model: 'daily-digest-disabled' };
+      }
       const reminderId = todoId(task.payloadRef);
       const reminder = reminderId === null ? null
         : (await pythonJson(fetchImpl, pythonBaseUrl, '/tools/todo/get', { todo_id: reminderId })).todo;

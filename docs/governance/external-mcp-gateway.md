@@ -1,6 +1,6 @@
 # External MCP Gateway
 
-Status: CURRENT (2026-08-10)
+Status: CURRENT (2026-08-17)
 
 This document owns the current external MCP gateway and system-queue contract.
 The design history lives under `docs/superpowers/`; this file records the
@@ -21,12 +21,16 @@ do not dynamically wire unknown MCPs directly into Hermes profiles.
 
 ## Enablement
 
-Source profiles keep fallback-disabled flags:
+Source profiles make the governed gateway available by default:
 
-- `EXTERNAL_MCP_GATEWAY_ENABLED=false`
-- `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=false`
+- `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`
+- `EXTERNAL_MCP_GATEWAY_ENABLED=true`
+- `EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED=true`
 
-Standard server deploy explicitly enables the governed runtime path with:
+The launcher still requires the allow-env gate, so an ambient enable flag alone
+cannot bypass the profile decision. Default availability exposes only admitted,
+policy-checked calls; it does not grant background autonomy to every registered
+server. Standard server deploy preserves:
 
 - `EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE=true`
 - `EXTERNAL_MCP_GATEWAY_ENABLED=true`

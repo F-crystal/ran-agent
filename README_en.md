@@ -12,7 +12,7 @@ Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash. See `do
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
 [![Python](https://img.shields.io/badge/python-%E2%89%A53.10-blue)](requirements.txt)
 
-Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The unified production profile uses DeepSeek V4 Flash and adds `thinking: {"type":"disabled"}` to the final provider HTTP body; V4 Pro is explicit opt-in only. MCP tools such as `search_hub`, `media_reader`, `social_reader`, `sticker_catalog`, and `personal_memory` provide fresh facts, media, social content, sticker lookup, Vault recall, and personal memory. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
+Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The current source boundary makes Hermes the chat, emotional-companionship, and play shell; Calendar, Todo, Minutes/documents, daily reports, code, and deployment belong to Codex. The unified production profile uses DeepSeek V4 Flash and adds `thinking: {"type":"disabled"}` to the final provider HTTP body; V4 Pro is explicit opt-in only. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
 
 OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Production and the current candidate both use Hermes + DeepSeek V4 Flash non-thinking; Pro requires an explicit opt-in.
 
@@ -38,7 +38,7 @@ Python backend
 
 MCP services
   -> search_hub / media_reader / social_reader / sticker_catalog / co_reading / media_generation
-  -> personal_memory / time / playwright
+  -> personal_memory / time / external_mcp_gateway
 ```
 
 ### Unified Hermes Gateway
@@ -47,9 +47,9 @@ Production uses one Hermes v0.20 gateway. The current source candidate keeps one
 
 | Gateway | Port | Profile | Purpose |
 |---------|------|---------|---------|
-| unified | `8642` | `ran-agent-companion` | Chat, memory, terminal, Playwright, media, and existing MCPs |
+| unified | `8642` | `ran-agent-companion` | Chat, companionship, memory, media, search, and governed External MCP play |
 
-The retired Full service is disabled. Terminal/file/session-search/Playwright capabilities moved into the unified profile rather than disappearing with `8643`.
+The retired Full service is disabled. The current source profile no longer exposes terminal, file, session search, or direct Playwright to Hermes; Search Hub may retain its existing governed internal fallback.
 Desktop Proxy is disabled by default. When enabled, bind it only to localhost or
 a controlled private network and configure `DESKTOP_PROXY_API_KEY`.
 
@@ -71,11 +71,9 @@ known limitations.
 
 **Feishu and desktop entries.** Feishu bridge consumes messages with `lark-cli event consume im.message.receive_v1 --as bot` and replies through `im +messages-send`; desktop clients connect to ran-agent's OpenAI-compatible proxy so they do not bypass ChannelHub, unified identity/Timeline, or action/evidence gates.
 
-**Minutes transcript to cloud document.** The owner can name one existing Feishu Minutes transcript and destination folder. Hermes reads the existing transcript and declares `feishu.minutes_to_doc`; Node creates the document as the authorized user and confirms completion only after readback. This narrow path performs no ASR and does not search for or generate PPT files.
+**Work-effect boundary.** Calendar, Todo, reminders, Minutes/cloud documents, daily reports, code, and deployment are no longer Hermes-visible actions. Those requests use Codex's governed native tools. Node validates only the remaining personal-memory action contracts and never infers or replans work authority from user prose.
 
-**Daily AI digest.** A daily Core ScheduleSpec and the single managed wake create a WorkRun bound to the local due date. Python fetches date-specific AIHOT facts and exclusively prepares the complete prompt from `src/personal_agent/prompts/ai_daily_digest_report.md`; Node only hands that prompt to Hermes and the existing Package B Feishu delivery path. Explicit historical dates reuse the same preparation and delivery authorities without replaying old cron occurrences.
-
-**Personal reminders and Feishu Calendar stay distinct.** “Remind me” uses `todo.create`: Node deterministically derives the reminder instant from structured event facts, and Python reuses the existing one-Todo-to-Core-registration path. “Add to my schedule/Feishu Calendar” uses `feishu.calendar.create`: the trusted Node adapter creates the event as the user, sets its reminder, and verifies it by readback. It does not masquerade as a Todo or restore a second scheduler.
+**Proactive companionship.** The Core-managed life loop creates a structured candidate only from confirmed personal learning. Node applies `/checkin on|off`, a 20–N minute cadence, quiet hours, daily limits, evidence, and dedupe before Hermes chooses `silent|notify`. Python neither writes nor directly sends greeting text, and generic check-ins are rejected at egress.
 
 **Online search entry.** `search_hub` is the unified Hermes frontend entry for fresh facts, news, normal web facts, academic lookup, and platform-search routing. The unified profile retains the old Full Playwright fallback; OpenCLI browser-backed mode remains disabled. Do not let daily Hermes searches call Tavily, OpenCLI, or Playwright directly.
 
@@ -108,9 +106,8 @@ mean automatic whole-Vault search.
 | `mimo_power` | RETIRED: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles | historical |
 | `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | unified |
 | `personal_memory` | Personal memory, Ombre, and bounded Vault recall; backend health check | unified |
-| `external_mcp_gateway` | Governed dynamic External MCP broker | governed / source profiles disabled-by-default |
+| `external_mcp_gateway` | Governed dynamic External MCP broker; source profiles expose it by default while registry/grant/budget/confirmation controls remain enforced | unified / governed |
 | `media_generation` | Image and speech generation | unified |
-| `playwright` | Browser automation and dynamic-page debugging | unified |
 | `tavily` | Optional lower-level provider, used only for Search Hub compatibility | internal/compat |
 
 DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must go through MCP tools first. Hermes receives structured text results.

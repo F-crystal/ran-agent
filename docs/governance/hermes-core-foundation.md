@@ -1,14 +1,21 @@
 # Hermes Core Foundation
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-17)
 
-This document records the public source-level status of Hermes Core Package A,
-the owner-accepted Package B transactions, locally verified Package C
-scheduling, and the Package D migration seam. It is not a deployment record and does not change the production
-runtime described by
-`docs/governance/current_runtime_status.md`.
+This document records the public source-level contract of Hermes Core Packages
+A-E. All five packages completed their staged acceptance and were composed by
+the S12 production cutover. Exact live state and later repairs remain governed
+by `docs/governance/current_runtime_status.md`.
 
 ## Status Boundary
+
+| Package | Current status | Production disposition |
+|---|---|---|
+| A | COMPLETE | Frozen Schema v1 foundation accepted and retained. |
+| B | COMPLETE | Typed final/presentation transactions and Node delivery path are live; the presentation binding uses the dedicated `binding:channel-hub:v1` namespace and its repository reader is part of current `main`. |
+| C | COMPLETE | Schema v2 scheduling, managed wake and WorkRun authority are live. |
+| D | COMPLETE | Legacy migration, quiescence, suppression and reconciliation completed at S12 cutover. |
+| E | COMPLETE | Fault, no-resend and attention acceptance completed before cutover and remains the production invariant. |
 
 - Package A Core Foundation is implemented in local repository source under
   `node_bridge/src/core/`, with tests under `node_bridge/tests/core/`.
@@ -34,27 +41,25 @@ runtime described by
   The existing typed reader can discover cold-start recovery work without an
   identity seed while retaining verified Conversation scope, canonical scoped
   pagination, and fail-closed corruption handling.
-- Package B.2 adds one local orchestration seam in
+- Package B.2 added the orchestration seam in
   `node_bridge/src/core/packageB/packageBDeliveryService.mjs`. It composes the
   existing final transaction, outbox claim and dispatch-start boundary, one
   injected adapter effect, and the typed result receipt. Reopen/replay returns
   the terminal result without invoking the effect again.
-- Package B.3 provides an explicitly injected local ChannelHub-to-Core path;
-  production ChannelHub, replyBackend and provider history remain on the
-  legacy runtime path.
-- Legacy Timeline, durable outbox, Python ingest/memory writers, and other
-  legacy writers remain active in the current runtime.
-- No Core write path has been deployed or enabled in production. Package B.2
-  is local-only, and the one-time production cutover is not authorized.
+- Package B.3 connected ChannelHub to the Core path. S12 then established one
+  production semantic writer and accepted the managed wake and presentation
+  boundary. Later presentation-binding repair removed namespace ambiguity
+  without creating another writer or effect path.
+- Compatibility state may remain where current runtime governance names it,
+  but it is not a second Core semantic authority.
 
 ## Scheduling And Runtime Target
 
-`docs/governance/hermes-core-scheduling-and-unified-runtime.md` is the current
-Package C scheduling contract and eventual single-clock cutover plan. Schema
-v2 and the injected local managed tick are implemented and locally verified;
-one deploy-owned clock projection and the production cutover remain future
-work. The MVP does not prebuild a second timer fallback. Production remains
-governed by `docs/governance/current_runtime_status.md`.
+`docs/governance/hermes-core-scheduling-and-unified-runtime.md` is the Package
+C-E contract and accepted cutover design. Schema v2, the deploy-owned managed
+wake and the single production semantic writer are live. The MVP retains no
+second timer fallback. Production remains governed by
+`docs/governance/current_runtime_status.md`.
 
 ## Frozen Schema v1
 

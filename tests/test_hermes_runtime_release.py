@@ -247,17 +247,15 @@ def test_companion_profile_validation_uses_yaml_semantics() -> None:
     profile = (Path(__file__).parents[1] / MODULE.PROFILE_PATH).read_bytes()
     MODULE.validate_companion_profile(profile)
     for malicious in (
-        profile.replace(b"    - mcp-playwright\n", b"    - mcp-playwright\n    - \"web\"\n", 1),
+        profile.replace(b"    - mcp-search_hub\n", b"    - mcp-search_hub\n    - \"web\"\n", 1),
         b"""
 platform_toolsets:
   cli: &tools
     - mcp-search_hub
-    - mcp-playwright
     - web
   api_server: *tools
 mcp_servers:
   search_hub: {}
-  playwright: {}
 """,
         profile + b"\n\"web\": {}\n",
     ):
@@ -334,7 +332,7 @@ def test_source_profile_activation_uses_companion_for_current_and_future_advance
     MODULE.activate_source_profile("b" * 40)
 
     assert all(target.read_bytes() == companion for target in targets)
-    assert b"mcp-search_hub" in companion and b"mcp-playwright" in companion
+    assert b"mcp-search_hub" in companion and b"mcp-playwright" not in companion
     assert b"\n    - web\n" not in companion
     assert b"search_backend:" not in companion and b"extract_backend:" not in companion
 

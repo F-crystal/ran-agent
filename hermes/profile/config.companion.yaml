@@ -57,11 +57,8 @@ disabled_tools:
 
 platform_toolsets:
   cli: &companion_toolsets
-    - terminal
-    - file
     - skills
     - memory
-    - session_search
     - safe
     - mcp-time
     - mcp-social_reader
@@ -71,7 +68,6 @@ platform_toolsets:
     - mcp-sticker_catalog
     - mcp-media_generation
     - mcp-personal_memory
-    - mcp-playwright
     - mcp-external_mcp_gateway
   api_server: *companion_toolsets
 
@@ -150,14 +146,6 @@ mcp_servers:
     timeout: 120
     connect_timeout: 60
 
-  playwright:
-    command: bash
-    args:
-      - -lc
-      - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_playwright_mcp.sh
-    timeout: 180
-    connect_timeout: 90
-
   external_mcp_gateway:
     command: bash
     args:
@@ -165,8 +153,9 @@ mcp_servers:
       - cd "$RAN_AGENT_REPO_ROOT" && exec bash scripts/start_external_mcp_gateway.sh
     env:
       EXTERNAL_MCP_GATEWAY_PROFILE: "full"
-      EXTERNAL_MCP_GATEWAY_ENABLED: "false"
-      EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "false"
+      EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE: "true"
+      EXTERNAL_MCP_GATEWAY_ENABLED: "true"
+      EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED: "true"
     timeout: 120
     connect_timeout: 60
 

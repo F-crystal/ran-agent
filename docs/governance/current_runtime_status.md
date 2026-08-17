@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED; PRODUCT-EFFECT RECOVERY COMPLETE; F6 PROD_APPLIED; MINUTES REPLAN LOCAL_VERIFIED; S13 NOT STARTED (2026-08-17)
+Status: S12 COMPLETE / PROD_ACCEPTED; F6 PROD_APPLIED; H0-H5 FINAL LOCAL_VERIFIED; S13 NOT STARTED (2026-08-17)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -40,6 +40,23 @@ Hermes-native `cronjob`, `delegate_task` and `execute_code` remain disabled.
 Scheduled outbound is limited to explicit reminders, the opt-in AI digest and
 governed `external_mcp_gateway` notifications.
 
+The local H1-H3 candidate narrows the future Hermes profile to conversation,
+companionship and play: terminal/file/session/direct Playwright are absent,
+work `actionRequests` stop before executors, and the external MCP gateway is
+source-default available behind its existing policy gates. Empty/`No reply`
+provider output rotates once through the existing soft-reset seam and never
+enters conversation history. Verified successful personal-learning receipts
+now create hash-bound Core sources and reuse the S8 projector for Ombre
+hold/correct/forget continuity; the existing relationship-summary mapping
+remains `grow`. These statements are local candidate facts, not a production
+deployment claim. H4 additionally gives the Core-managed life-loop scan one
+confirmed-memory companion candidate, then routes it through the existing
+structured ProactiveEvent, Hermes decision, Node cadence/quiet/stop/dedupe
+gates and post-send receipt. The retired direct proactive-text flag stays off.
+H5 stops the Python runtime from constructing a chat model or the retired
+frontend orchestrator/reviewer graph. The tool-model client is now constructed
+only for explicitly enabled backend memory-LLM extraction; `/chat` remains 410.
+
 The current production source keeps the trusted `todo.create` reminder
 contract and unified Companion source/wake release path. The post-S12
 product-effect repair was applied on 2026-08-17; the two dated digest
@@ -47,8 +64,10 @@ backfills, verified Calendar creation, replay-safe Todo schedule registration
 and managed-wake activation completed. The first catch-up digest then exposed
 malformed private-envelope leakage and a missing Core wake exact-date gate.
 The bounded F6 repair was deployed through the unified source transaction on
-2026-08-17; its production boundary checks pass and the next real 08:00 digest
-observation remains. The source makes Python the sole date-specific AIHOT/template/prompt
+2026-08-17; its production boundary checks pass. The owner subsequently
+assigned daily reports to Codex and superseded the next real-08:00 observation.
+Production still runs the digest until a separately authorized stop transaction
+completes. The source makes Python the sole date-specific AIHOT/template/prompt
 owner, binds scheduled reports to the persisted occurrence due date and
 timezone, restores explicit historical-date preparation, restores verified
 `feishu.calendar.create`, keeps Todo and Calendar semantics distinct, and fixes
@@ -72,8 +91,10 @@ changing the direct `18001` read path.
 Ombre is a derived relationship/context source, not the authority for Core
 facts or deployment truth. Core and governed runtime documents remain the
 authorities. S8 adds one local-only rebuildable projector for confirmed,
-payload-hash-bound Core/personal-learning events; production still has no
-Ombre mutation path.
+payload-hash-bound Core/personal-learning events. H3 composes it in the local
+candidate after a verified successful personal-learning receipt and preserves
+its confirmed relationship-summary `grow` path; production still has no Ombre
+mutation path.
 
 The converged source deploys main's strict query-only
 `personalMemoryMcpServer`, explicit `source_status`, Vault retrieval, Python
@@ -158,12 +179,13 @@ release mode continues to fail closed.
 
 The canonical execution order and stage exit conditions live in
 `docs/governance/active_sequence.md`. S0-S12 are complete and S12 is
-`PROD_ACCEPTED`; Core authority remains e298. Product-effect recovery and
-managed-wake activation and F6 production apply are complete. F6OBS is the
-ready frontier: observe one real 08:00 digest with a plain dated body and no
-visible private protocol. S13 remains not
-started. Cleanup also requires separate explicit owner deletion authorization;
-none is current.
+`PROD_ACCEPTED`; Core authority remains e298. Product-effect recovery,
+managed-wake activation and F6 production apply are complete. F6OBS is
+superseded by the owner decision to move daily reports to Codex. H0-H5 and
+their final affected-suite verification are locally complete; production apply
+and the production digest stop remain separate mutations. S13 remains not
+started. Cleanup also requires
+separate explicit owner deletion authorization; none is current.
 The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the
@@ -175,13 +197,12 @@ The remote branch set is intentionally `main` only. Historical candidate
 branches are neither production nor rollback authority; recoverable local S4
 convergence artifacts remain ignored under `local_archive/`.
 
-Package A and B.1 Core primitives exist in source; S5 verifies the local B.2
-final/outbox/effect/receipt loop, S7 completes local B.3 Node wiring, S8
-completes the local governed Ombre projection seam, S9 completes local Package
-C scheduling, S10 completes the migration inventory/rehearsal and external
-poll fact seam; S11 completes synthetic fault/attention acceptance, including
-the still-unwired `attentionValve.mjs`. None is composed into the
-production Node write path.
+Packages A-E are complete. S5/S7 established the B.2/B.3 delivery path, S8
+accepted the rebuildable Ombre projection seam, S9 completed Package C, S10
+completed Package D, and S11 completed Package E fault/no-resend/attention
+acceptance. S12 composed them into the production single-writer/single-wake
+topology. The later Package B presentation-binding namespace repair is already
+contained in current `main`; it does not create another writer or effect path.
 Ombre Gate 5 is retired with O2 and the historical
 name is retained only as retired evidence; the single future Core production
 gate is uniformly named the Core Cutover Gate (S12). O2 is a retired

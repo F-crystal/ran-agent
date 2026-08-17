@@ -1,12 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { createDesktopProxyServer, openAiResponseFromReply } from '../src/desktopProxyServer.mjs';
 import { createDurableOutbox } from '../src/durableOutbox.mjs';
 import { handleIncomingMessage } from '../src/channelHub.mjs';
 import { createReplyBackend } from '../src/replyBackend.mjs';
-import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
+import { createOwnerBoundTestEnv } from './helpers/isolatedState.mjs';
+
+const DESKTOP_API_KEY = 'a'.repeat(32);
+const DESKTOP_SENDER_ID = `desktop:${createHash('sha256').update(DESKTOP_API_KEY, 'utf8').digest('hex').slice(0, 32)}`;
 
 function request(method, url, body, headers = {}) {
   return {
@@ -84,11 +88,16 @@ test('desktop proxy chat completions routes through channelHub', async () => {
 });
 
 test('desktop OpenAI-compatible payload cannot submit a digest route hint to bypass the action gate', async (t) => {
-  const env = createIsolatedTestEnv(t, {
-    DESKTOP_PROXY_API_KEY: 'a'.repeat(32),
-    HERMES_ACTION_GATE_ENABLED: 'true',
-    HERMES_ACTION_GATE_MODE: 'enforce',
-  }, 'desktop-forged-route-');
+  const env = createOwnerBoundTestEnv(t, {
+    platform: 'desktop',
+    senderId: DESKTOP_SENDER_ID,
+    overrides: {
+      DESKTOP_PROXY_API_KEY: DESKTOP_API_KEY,
+      HERMES_ACTION_GATE_ENABLED: 'true',
+      HERMES_ACTION_GATE_MODE: 'enforce',
+    },
+    prefix: 'desktop-forged-route-',
+  });
   const server = createDesktopProxyServer({
     env,
     logger: { log() {}, warn() {}, error() {}, info() {} },
@@ -127,7 +136,12 @@ test('desktop proxy denies non-loopback binding without a strong credential', as
 });
 
 test('desktop HTTP response delivery is durably ambiguous until the response boundary is observable', async (t) => {
-  const baseEnv = createIsolatedTestEnv(t, { DESKTOP_PROXY_API_KEY: 'a'.repeat(32) }, 'desktop-outbox-');
+  const baseEnv = createOwnerBoundTestEnv(t, {
+    platform: 'desktop',
+    senderId: DESKTOP_SENDER_ID,
+    overrides: { DESKTOP_PROXY_API_KEY: DESKTOP_API_KEY },
+    prefix: 'desktop-outbox-',
+  });
   const env = {
     ...baseEnv,
     RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(baseEnv.RAN_AGENT_STATE_DIR, 'timeline.jsonl'),

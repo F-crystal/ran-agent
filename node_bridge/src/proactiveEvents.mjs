@@ -1,4 +1,5 @@
 import { createTrustedBridgeTask } from './hermesTaskScope.mjs';
+import { getCheckinRange, getProactiveDispatchState } from './runtimeState.mjs';
 
 const VALID_KINDS = new Set([
   'reminder',
@@ -8,6 +9,7 @@ const VALID_KINDS = new Set([
   'curiosity',
   'maintenance',
   'external_mcp',
+  'companion',
 ]);
 const VALID_CHANNELS = new Set(['feishu', 'wechat', 'desktop']);
 const VALID_DELIVERABILITY = new Set(['silent_only', 'draft_allowed', 'notify_allowed']);
@@ -113,6 +115,17 @@ export function evaluateProactiveAdmission(event, options = {}) {
     return { accepted: false, reason: 'proactive_events_disabled' };
   }
   const now = normalizeDate(options.now || new Date()) || new Date();
+  if (event.kind === 'companion') {
+    const policy = getCheckinRange(options.env || process.env);
+    if (!policy.enabled) return { accepted: false, reason: 'companion_stopped' };
+    if (isQuietHour(now, options.env || process.env)) {
+      return { accepted: false, reason: 'companion_quiet_hours' };
+    }
+    const nextAllowedAt = normalizeDate(getProactiveDispatchState(options.env || process.env).nextAllowedAt);
+    if (nextAllowedAt && nextAllowedAt.getTime() > now.getTime()) {
+      return { accepted: false, reason: 'companion_cooldown' };
+    }
+  }
   const expiresAt = normalizeDate(event.expires_at);
   if (expiresAt && expiresAt.getTime() < now.getTime()) {
     return { accepted: false, reason: 'event_expired' };
@@ -254,7 +267,28 @@ function normalizeDate(value) {
 }
 
 function requiresEvidence(event) {
-  return ['forum_watch', 'game_activity', 'external_mcp'].includes(event.kind);
+  return ['forum_watch', 'game_activity', 'external_mcp', 'companion'].includes(event.kind);
+}
+
+function isQuietHour(now, env) {
+  const start = boundedHour(env.PERSONAL_AGENT_PROACTIVE_SILENT_START_HOUR, 0);
+  const end = boundedHour(env.PERSONAL_AGENT_PROACTIVE_SILENT_END_HOUR, 9);
+  if (start === end) return false;
+  let hour;
+  try {
+    hour = Number(new Intl.DateTimeFormat('en-GB', {
+      timeZone: String(env.HERMES_ENVIRONMENT_TIMEZONE || 'Asia/Shanghai'),
+      hour: '2-digit', hourCycle: 'h23',
+    }).format(now));
+  } catch {
+    return true;
+  }
+  return start < end ? hour >= start && hour < end : hour >= start || hour < end;
+}
+
+function boundedHour(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isInteger(parsed) && parsed >= 0 && parsed <= 23 ? parsed : fallback;
 }
 
 function hasTrustedEvidence(event, action) {

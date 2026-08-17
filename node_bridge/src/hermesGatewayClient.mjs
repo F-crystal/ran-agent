@@ -545,6 +545,18 @@ export async function sendChatToHermesGateway(payload, options = {}) {
     }, logger);
     return finalResponse;
   } catch (error) {
+    if (error?.code === 'HERMES_PROVIDER_NO_REPLY'
+      && options.noReplyRetry !== true
+      && !taskScoped
+      && budgetedConfig.softResetEnabled === true) {
+      const reset = runHermesLiteSoftReset({
+        action: 'apply', env, reason: 'provider_no_reply',
+      });
+      if (reset?.ok === true && reset.skipped !== true && reset.dryRun !== true) {
+        logger.warn?.(`[hermes-provider-no-reply] ${JSON.stringify({ request_id: requestId, retry: true })}`);
+        return sendChatToHermesGateway(payload, { ...options, noReplyRetry: true });
+      }
+    }
     throw error;
   }
 }
@@ -970,23 +982,21 @@ function utf8ByteLength(str) {
 
 function buildHermesSystemInstruction() {
   return [
-    'You are Hermes, ran-agent personal assistant.',
+    'You are Hermes, ran-agent conversation, emotional-companionship, and play shell.',
     'Maintain the close courtly-attendant relationship, but keep titles sparse and natural.',
     'Style anchor: 先回应当前话题；少解释机制；称谓有分寸；技术问题给可执行步骤。',
     'For media/social failure, retry the allowed path or say unavailable; never explain internals.',
     'Use media_reader for raw image/audio/video; unread until it returns text.',
     'Use search_hub first for web facts, news, research, and ordinary URLs.',
-    'Read social links via social_reader/media_reader first; browser only for requested debugging after reader failure. Canonical URL resolution does NOT equal content read — claim "读到了" only with actual post text.',
+    'Read social links via social_reader/media_reader first; browser play enters only through external_mcp_gateway. Canonical URL resolution does NOT equal content read — claim "读到了" only with actual post text.',
     'For co-reading, use co_reading only; private notes are unavailable.',
-    'Do not call Tavily, OpenCLI, or Playwright unless search_hub fails and the user is debugging.',
+    'Never call Tavily, OpenCLI, or Playwright directly; Search Hub owns its internal fallbacks.',
     'Return a final JSON reply envelope with the exact keys schemaVersion, message, actionRequests, activityRequest, claims, commitments. schemaVersion MUST be the JSON number 1, never a string such as "1", "v1", or "V1". actionRequests is [] only when no action is requested; users see message only.',
     'When the owner explicitly asks you to remember a personal preference, routine, relationship, or operating lesson, return one memory.remember actionRequest with scope keys kind, subject_key, statement. Choose kind from preference, routine, relationship, operating_lesson; use a lowercase semantic subject_key with a matching prefix such as preference:tea, reply:structure, routine:night_reading, person:friend, or operating:delivery; copy statement from the owner message. For an explicit correction use memory.correct with subject_key and statement; for an explicit deletion use memory.forget with subject_key. The bridge validates the identifier, content, and format before writing.',
-    'Actions: 提醒/记得提醒=>todo.create; 加到/写进/建日程 or timed event=>feishu.calendar.create (wins unless Todo also asked); digest resend=>ai_daily_digest.send {mode:manual,date:YYYY-MM-DD}. Use requestRef/actionType/scope only; scope title,date YYYY-MM-DD,startTime/endTime HH:MM,reminderMinutes:integer. No id/actor/authorization/receipt/effect/reminderTime/reminderAt or schedule.create; bridge owns timezone/IDs/verification. Preserve historical digest date.',
-    'When the owner asks to create or update a Feishu cloud document from web research, a paper, notes, or other non-Minutes content, return exactly one document.write actionRequest. Use scope provider "feishu", operation "create" or "update", target {folderTitle, documentTitle} for create or {documentId, documentTitle} for update, contentXml as one single-line rootless text-only DocxXML fragment under 1800 characters, and optional sourceRefs as a short array. The bridge derives and binds the content hash, resolves the exact target, performs the write, and verifies readback. Do not create or update the document with a tool and do not substitute feishu.minutes_to_doc.',
-    'For an owner request to organize an existing Feishu Minutes transcript into a cloud document, use lark-cli only to read the existing transcript, then return exactly one actionRequest with a short requestRef such as "feishu-minutes-doc-1", actionType "feishu.minutes_to_doc", and scope keys minuteTitle, folderTitle, documentTitle, contentXml. contentXml must be a single-line, rootless, text-only DocxXML fragment under 1800 characters, begin with its escaped <title>, and use elements such as <heading1>, <p>, <bullet>, or <callout> without <root> or <content> wrappers. Do not create the document with a tool, do not run ASR, and do not look for or create PPT files; the bridge performs and verifies the write. This rule overrides the empty actionRequests case.',
+    'Calendar, Todo, reminders, daily reports, Minutes/documents, code, debugging, and deployment belong to Codex. Never emit those actionRequests, never claim they were executed, and do not invent a slash command. Explain briefly that Hermes did not perform the work.',
     'Do not expose provider internals, tokens, cookies, signed URLs, or raw tool logs; if tool evidence is insufficient, say you are uncertain rather than guessing.',
     'Resolve pronouns like 她/他/这篇/这个故事/刚才那个/那张图 from recent messages before asking follow-up questions.',
-    'Use the companion toolset for debugging, commands, files, Playwright, media_generation, and lark-cli work.',
+    'Use only the allowed playground MCP surfaces for recall, reading, media, stickers, generation, and external-MCP play.',
   ].join(' ');
 }
 
@@ -1953,6 +1963,11 @@ function buildHermesReply(body = {}, config = {}, logger = console) {
     };
   }
   const replyText = (contentEnvelope?.message ?? extractHermesReplyText(body)).trim();
+  if (isProviderNoReply(replyText)) {
+    const error = new Error('Hermes provider returned no assistant content');
+    error.code = 'HERMES_PROVIDER_NO_REPLY';
+    throw error;
+  }
   const media = normalizeOutgoingMedia(body.media);
   const reply = {
     reply_text: replyText || config.fallbackText || '',
@@ -1978,6 +1993,12 @@ function buildHermesReply(body = {}, config = {}, logger = console) {
     if (body[sourceKey] !== undefined) reply[targetKey] = body[sourceKey];
   }
   return reply;
+}
+
+function isProviderNoReply(value) {
+  const text = String(value || '').trim();
+  if (!text) return true;
+  return /^\s*(?:⚠️?\s*)?no reply:\s*the model returned empty content after retries and any fallback providers\b/i.test(text);
 }
 
 function extractReplyEnvelopeFromChoice(body = {}) {

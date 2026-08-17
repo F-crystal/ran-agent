@@ -28,7 +28,14 @@ export function createPythonCoreMaintenanceHandler({
     const request = requestFor(work.payload_ref);
     if (!request) throw coreError('CORE_MAINTENANCE_TASK_UNSUPPORTED', 'system maintenance task has no owner');
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const requestTimeoutMs = work.payload_ref === 'system-task:life-loop'
+      ? Math.max(timeoutMs, (
+        positiveSeconds(env.HERMES_REPLY_TIMEOUT_SECONDS, 180)
+        + positiveSeconds(env.FEISHU_SEND_TIMEOUT_SECONDS, 30)
+        + 30
+      ) * 1000)
+      : timeoutMs;
+    const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
     let response;
     try {
       response = await fetchImpl(`${baseUrl}${request[0]}`, {
@@ -48,4 +55,9 @@ export function createPythonCoreMaintenanceHandler({
   };
   handler.canHandle = (work) => requestFor(work?.payload_ref) !== null;
   return handler;
+}
+
+function positiveSeconds(value, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
 }

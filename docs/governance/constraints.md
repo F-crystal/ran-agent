@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-17)
 
 ## Split Of Responsibility
 
@@ -24,14 +24,15 @@ Status: CURRENT (2026-08-16)
   not change service identity, direct Ombre recall, rollback, or retention
   ownership.
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
-- Scheduled digest mainline: `Core occurrence due date -> Python AIHOT/template preparation -> Hermes -> Package B Feishu delivery`
-- External MCP candidate mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional ProactiveEvent synthetic Hermes turn`; source profiles fall back disabled, while standard server deploy enables the gateway, proactive event, and system queue env gates.
+- Daily reports are owned by Codex. The former Core/Python/Hermes digest path is
+  retired in local source and remains a production stop transaction, not a
+  Hermes mainline.
+- External MCP candidate mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional ProactiveEvent synthetic Hermes turn`; source profiles expose the gateway by default, while admission, allow-env, proactive event and system-queue gates remain enforced.
 - Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
 - OpenClaw, Kimi, GLM, and MiMo Power are retired. Hermes (DeepSeek V4) is the sole frontend.
 - Life-loop and reflection remain backend/support layers. They are not an
   open-ended proactive outbound mainline. Explicit reminders may notify only as
-  structured ProactiveEvents; the allowlisted AI daily digest keeps its separate
-  scheduled Feishu/Hermes path.
+  structured ProactiveEvents; Hermes does not generate daily reports.
 - External MCP proactive is not a reopened life-loop. It may only be considered
   for explicit watchlist/关注 scopes, trusted external MCP evidence-log refs,
   rate budget, and a synthetic Hermes turn from `/external-mcp/system-queue`.
@@ -46,8 +47,8 @@ Status: CURRENT (2026-08-16)
 - Specialists are skillized and on-demand only.
 - Do not keep all specialist blocks in default turn context.
 - Memory, reflection, knowledge-state, life-loop, night-cycle, ombre-memory remain support layers.
-- The scheduled AI daily digest is an explicit allowlist path and must not be
-  generalized into open-ended proactive check-ins.
+- Daily reports are not a Hermes capability and must not be recreated as
+  proactive check-ins.
 - `external_mcp_gateway` is a broker, not a replacement for `social_reader`,
   `media_reader`, `search_hub`, `sticker_catalog`, or `co_reading`. Untrusted
   external MCP descriptions, schemas, and results must be normalized and

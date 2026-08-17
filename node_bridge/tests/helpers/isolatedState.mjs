@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+import { bootstrapOwnerBinding } from '../../src/identityMap.mjs';
+
 export function createIsolatedTestEnv(t, overrides = {}, prefix = 'ran-agent-test-', stateDirectory = 'state') {
   if (!t || typeof t !== 'object') {
     throw new TypeError('createIsolatedTestEnv requires a node:test context');
@@ -21,6 +23,21 @@ export function createIsolatedTestEnv(t, overrides = {}, prefix = 'ran-agent-tes
     RAN_AGENT_GLOBAL_TIMELINE_PATH: path.join(stateDir, 'global-timeline.jsonl'),
     RAN_AGENT_TIMELINE_ARCHIVE_DIR: path.join(stateDir, 'timeline_archive'),
   };
+}
+
+export function createOwnerBoundTestEnv(t, { platform, senderId, overrides = {}, prefix } = {}) {
+  const env = createIsolatedTestEnv(t, overrides, prefix);
+  bootstrapOwnerBinding({
+    trustedIdentity: {
+      platform,
+      senderId,
+      globalUserId: 'user:ran',
+      provenance: `${platform}_test_bootstrap`,
+    },
+    env,
+    now: '2026-08-17T00:00:00.000Z',
+  });
+  return env;
 }
 
 // Node 22.13+ has no TestContext.after. The process-exit fallback keeps the

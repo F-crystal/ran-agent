@@ -38,20 +38,8 @@ import {
 } from './hermesTaskScope.mjs';
 import { normalizePlatform } from './identityMap.mjs';
 import { createOperationLedger } from './operationLedger.mjs';
-import { digestActionScope } from './actionRequest.mjs';
-import { createCoreDurableJobExecutor } from './coreDurableJobExecutor.mjs';
 import { createTrustedExecutorAdapters } from './trustedExecutorAdapters.mjs';
 import { createPersonalLearningExecutorAdapter } from './personalLearningClient.mjs';
-import { createAiDailyDigestExecutorAdapter } from './aiDailyDigestClient.mjs';
-import { createTodoExecutorAdapter, normalizeTodoCreateScope } from './todoClient.mjs';
-import {
-  createFeishuCalendarExecutorAdapter,
-  normalizeFeishuCalendarCreateScope,
-} from './feishuCalendarClient.mjs';
-import {
-  createFeishuDocumentWriteExecutorAdapter,
-  createFeishuMinutesDocumentExecutorAdapter,
-} from './feishuMinutesDocumentClient.mjs';
 import {
   deleteStickers,
   resolveStickerAsset,
@@ -61,6 +49,11 @@ import {
 
 const pendingActionRuntimePayloads = new Map();
 const DEFAULT_PENDING_EXECUTOR_ACTIONS = new Set(['sticker_save', 'sticker_delete', 'sticker_update']);
+const HERMES_PLAYGROUND_ACTION_TYPES = new Set([
+  'memory.remember',
+  'memory.correct',
+  'memory.forget',
+]);
 
 export function getReplyBackendConfig(env = process.env) {
   return {
@@ -77,38 +70,14 @@ export function createReplyBackend(options = {}) {
     ? [...options.trustedExecutorAdapterConfigs]
     : [];
   if (!options.trustedActionExecutors && String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '').trim()) {
-    configuredExecutorAdapters.push(createTodoExecutorAdapter({
-      env,
-      fetchImpl: options.fetchImpl || globalThis.fetch,
-    }));
     configuredExecutorAdapters.push(createPersonalLearningExecutorAdapter({
       env,
       fetchImpl: options.fetchImpl || globalThis.fetch,
-    }));
-    configuredExecutorAdapters.push(createAiDailyDigestExecutorAdapter({ env, fetchImpl: options.fetchImpl || globalThis.fetch }));
-  }
-  if (!options.trustedActionExecutors) {
-    configuredExecutorAdapters.push(createFeishuCalendarExecutorAdapter({
-      env,
-      execFileImpl: options.execFileImpl,
-    }));
-    configuredExecutorAdapters.push(createFeishuMinutesDocumentExecutorAdapter({
-      env,
-      execFileImpl: options.execFileImpl,
-    }));
-    configuredExecutorAdapters.push(createFeishuDocumentWriteExecutorAdapter({
-      env,
-      execFileImpl: options.execFileImpl,
     }));
   }
   const trustedActionExecutors = options.trustedActionExecutors || createTrustedExecutorAdapters({
     ledger: operationLedger,
     adapters: configuredExecutorAdapters,
-  });
-  const coreDurableJobExecutor = options.coreDurableJobExecutor || createCoreDurableJobExecutor({
-    env,
-    fetchImpl: options.fetchImpl || globalThis.fetch,
-    createJob: options.createDurableJobImpl,
   });
   const activityFacade = options.activityFacade || null;
 
@@ -220,52 +189,8 @@ export function createReplyBackend(options = {}) {
         };
         excludeFromHistory = true;
       }
-      if (response?.envelope_error_code === 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID'
-        && hasCalendarCreateIntent(message.text)
-        && !/(?:待办|todo)/i.test(String(message.text || ''))) {
-        try {
-          const replanned = await chatImpl({
-            ...hermesInput,
-            continuity_note: [
-              hermesInput.continuity_note,
-              'NODE_ACTION_REPLAN: The previous reply envelope failed strict validation. Return exactly one feishu.calendar.create actionRequest whose scope contains only title, date (YYYY-MM-DD), startTime/endTime (HH:MM) and reminderMinutes (integer). Never use schedule.create; never add id, actor, authorization, receipt, effect, reminderTime or reminderAt fields; the bridge owns timezone, IDs and verification. Do not call tools.',
-            ].filter(Boolean).join('\n'),
-          }, hermesOptions);
-          const replannedRequest = extractCalendarReplanRequest(replanned);
-          replyEnvelope = Object.freeze({
-            ...replyEnvelope,
-            actionRequests: Object.freeze([replannedRequest]),
-          });
-        } catch (error) {
-          loggerFor(options).warn?.(`calendar action replan rejected code=${String(error?.code || 'ACTION_REPLAN_FAILED')}`);
-          replyEnvelope = Object.freeze({ ...replyEnvelope, actionRequests: Object.freeze([]) });
-        }
-      }
-      if (hasFeishuMinutesToDocIntent(message.text)
-        && replyEnvelope.actionRequests.length === 0
-        && replyEnvelope.activityRequest === null
-        && replyEnvelope.commitments.length === 0
-        && replyEnvelope.claims.length === 0) {
-        try {
-          const replanInstruction = 'NODE_ACTION_REPLAN: The previous Feishu Minutes reply provided no valid executable action request. Read the existing transcript again if needed, but do not create a document with a tool. Return exactly one actionRequest with only requestRef, actionType "feishu.minutes_to_doc", and scope. Scope must contain only minuteTitle, folderTitle, documentTitle, and a single-line rootless text-only contentXml under 1800 characters. Never add id, actor, authorization, receipt, effect, or private fields; the bridge creates and verifies the document.';
-          const replanned = await chatImpl(createTrustedBridgeTask({
-            ...hermesInput,
-            id: `${message.id || requestId}:minutes-action-replan`,
-            message_id: `${message.id || requestId}:minutes-action-replan`,
-            text: [hermesInput.text, replanInstruction].filter(Boolean).join('\n'),
-            route_hint: 'action_gate_repair',
-            continuity_note: '',
-          }, 'action_gate_repair'), hermesOptions);
-          const replannedRequest = extractMinutesReplanRequest(replanned);
-          replyEnvelope = Object.freeze({
-            ...replyEnvelope,
-            actionRequests: Object.freeze([replannedRequest]),
-          });
-        } catch (error) {
-          loggerFor(options).warn?.(`Minutes action replan rejected code=${String(error?.code || 'ACTION_REPLAN_FAILED')}`);
-          replyEnvelope = Object.freeze({ ...replyEnvelope, actionRequests: Object.freeze([]) });
-        }
-      }
+      const playgroundPolicy = restrictHermesPlaygroundEnvelope(replyEnvelope);
+      replyEnvelope = playgroundPolicy.envelope;
       const informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
       replyEnvelope = informationalReportPolicy.envelope;
 
@@ -275,38 +200,9 @@ export function createReplyBackend(options = {}) {
         currentMessage: message,
         operationLedger,
         trustedActionExecutors,
-        coreDurableJobExecutor,
-        todoTimeZone: env.HERMES_ENVIRONMENT_TIMEZONE || 'Asia/Shanghai',
+        personalLearningProjector: options.personalLearningProjector,
+        logger: options.logger || console,
       });
-      if (shouldReplanDocumentAction(replyEnvelope, actionExecution)) {
-        try {
-          const replanned = await chatImpl({
-            ...hermesInput,
-            continuity_note: [
-              hermesInput.continuity_note,
-              'NODE_ACTION_REPLAN: The previous Feishu action type described a Minutes recipe, but the owner requested a non-Minutes document. Reuse the gathered content and return one document.write actionRequest using the documented Feishu schema. Do not repeat research or call tools.',
-            ].filter(Boolean).join('\n'),
-          }, hermesOptions);
-          const replannedRequest = extractDocumentReplanRequest(replanned);
-          actionExecution = await executeEnvelopeActionRequests({
-            actionRequests: [replannedRequest],
-            actorContext: trustedActorContext(message.trusted_actor_context),
-            currentMessage: message,
-            operationLedger,
-            trustedActionExecutors,
-            coreDurableJobExecutor,
-            todoTimeZone: env.HERMES_ENVIRONMENT_TIMEZONE || 'Asia/Shanghai',
-          });
-          replyEnvelope = Object.freeze({
-            ...replyEnvelope,
-            actionRequests: Object.freeze([replannedRequest]),
-          });
-        } catch (error) {
-          loggerFor(options).warn?.(`document action replan rejected code=${String(error?.code || 'ACTION_REPLAN_FAILED')}`);
-          actionExecution = rejectedDocumentReplanExecution(replyEnvelope.actionRequests[0]);
-          replyEnvelope = Object.freeze({ ...replyEnvelope, actionRequests: Object.freeze([]) });
-        }
-      }
       let activityExecution = await executeEnvelopeActivityRequest({
         activityRequest: replyEnvelope.activityRequest,
         actorContext: trustedActorContext(message.trusted_actor_context),
@@ -329,32 +225,19 @@ export function createReplyBackend(options = {}) {
         ['memory.remember', 'memory.correct'].includes(receipt?.actionType)
         && receipt?.errorCode === 'ACTION_NOT_GROUNDED'
       ));
-      const digestReceipt = actionExecution.receiptSummaries.find((receipt) => receipt?.actionType === 'ai_daily_digest.send');
-      const digestAcknowledgement = digestReceipt?.status === 'succeeded'
-        ? /^\d{4}-\d{2}-\d{2}$/.test(digestReceipt.digestDate)
-          ? `${digestReceipt.digestDate} 日报已补发。`
-          : '今日日报已补发。'
-        : digestReceipt ? '日报生成或发送失败，未确认送达。' : '';
-      const feishuDocumentAcknowledgement = buildFeishuDocumentAcknowledgement(actionExecution.receiptSummaries);
-      const feishuCalendarAcknowledgement = buildFeishuCalendarAcknowledgement(actionExecution.receiptSummaries);
-      const todoAcknowledgement = buildTodoAcknowledgement(actionExecution.receiptSummaries);
-      const coreAcknowledgement = commitmentBlocked
-        ? ''
-        : bridgeOwnedCoreAcknowledgement(replyEnvelope.commitments, durableReceiptSummaries);
-      if (commitmentBlocked) {
+      if (playgroundPolicy.blockedActionTypes.length > 0) {
+        loggerFor(options).warn?.(`[hermes-playground-action-blocked] ${JSON.stringify({
+          action_types: playgroundPolicy.blockedActionTypes,
+        })}`);
+        response = {
+          ...response,
+          reply_text: '这类办事操作已交给 Codex；Hermes 未执行。',
+          follow_up_messages: [],
+        };
+      } else if (commitmentBlocked) {
         response = { ...response, reply_text: '这项后续工作尚未启动。', follow_up_messages: [] };
       } else if (learningPromotionDenied) {
         response = { ...response, reply_text: '保存结果尚未返回，未写入长期记忆。', follow_up_messages: [] };
-      } else if (todoAcknowledgement.text) {
-        response = { ...response, reply_text: todoAcknowledgement.text, follow_up_messages: [] };
-      } else if (coreAcknowledgement) {
-        response = { ...response, reply_text: coreAcknowledgement, follow_up_messages: [] };
-      } else if (digestAcknowledgement) {
-        response = { ...response, reply_text: digestAcknowledgement, follow_up_messages: [] };
-      } else if (feishuCalendarAcknowledgement.text) {
-        response = { ...response, reply_text: feishuCalendarAcknowledgement.text, follow_up_messages: [] };
-      } else if (feishuDocumentAcknowledgement.text) {
-        response = { ...response, reply_text: feishuDocumentAcknowledgement.text, follow_up_messages: [] };
       }
 
       const logger = options.logger || console;
@@ -372,20 +255,12 @@ export function createReplyBackend(options = {}) {
 
       let finalReplyText = responseText;
       let finalResponseMedia = responseMedia;
-      let responseSource = commitmentBlocked
-        ? 'bridge_commitment_guard'
+      let responseSource = playgroundPolicy.blockedActionTypes.length > 0
+        ? 'bridge_playground_action_guard'
+        : commitmentBlocked
+          ? 'bridge_commitment_guard'
         : learningPromotionDenied
           ? 'bridge_learning_intent_guard'
-        : todoAcknowledgement.text
-          ? todoAcknowledgement.source
-        : digestAcknowledgement
-          ? 'bridge_ai_daily_digest'
-        : feishuCalendarAcknowledgement.text
-          ? feishuCalendarAcknowledgement.source
-        : feishuDocumentAcknowledgement.text
-          ? feishuDocumentAcknowledgement.source
-        : coreAcknowledgement
-          ? 'bridge_core_job_ack'
           : 'hermes';
       if (actionGateConfig.enabled) {
         let rawContractReplyText = response.reply_text;
@@ -681,60 +556,14 @@ function trustedFrontendContext(value, expectedPlatform) {
   });
 }
 
-function shouldReplanDocumentAction(envelope, actionExecution) {
-  return envelope?.actionRequests?.length === 1
-    && !envelope.activityRequest
-    && envelope.commitments?.length === 0
-    && actionExecution?.receiptSummaries?.length === 1
-    && actionExecution.receiptSummaries[0]?.outcome === 'needs_replan';
-}
-
-function extractDocumentReplanRequest(candidate) {
-  const envelope = normalizeReplyEnvelope(candidate);
-  if (envelope.actionRequests.length !== 1
-    || envelope.actionRequests[0]?.actionType !== 'document.write'
-    || envelope.activityRequest !== null
-    || envelope.commitments.length !== 0
-    || envelope.claims.length !== 0) {
-    throw actionExecutionError('DOCUMENT_REPLAN_INVALID');
-  }
-  return envelope.actionRequests[0];
-}
-
-function extractCalendarReplanRequest(candidate) {
-  const envelope = normalizeReplyEnvelope(candidate);
-  if (envelope.actionRequests.length !== 1
-    || envelope.actionRequests[0]?.actionType !== 'feishu.calendar.create'
-    || envelope.activityRequest !== null
-    || envelope.commitments.length !== 0
-    || envelope.claims.length !== 0) {
-    throw actionExecutionError('CALENDAR_REPLAN_INVALID');
-  }
-  return envelope.actionRequests[0];
-}
-
-function extractMinutesReplanRequest(candidate) {
-  const envelope = normalizeReplyEnvelope(candidate);
-  if (envelope.actionRequests.length !== 1
-    || envelope.actionRequests[0]?.actionType !== 'feishu.minutes_to_doc'
-    || envelope.activityRequest !== null
-    || envelope.commitments.length !== 0
-    || envelope.claims.length !== 0) {
-    throw actionExecutionError('MINUTES_REPLAN_INVALID');
-  }
-  return envelope.actionRequests[0];
-}
-
-function rejectedDocumentReplanExecution(originalRequest) {
+function restrictHermesPlaygroundEnvelope(envelope) {
+  const allowed = envelope.actionRequests.filter((request) => HERMES_PLAYGROUND_ACTION_TYPES.has(request.actionType));
+  const blockedActionTypes = [...new Set(envelope.actionRequests
+    .filter((request) => !HERMES_PLAYGROUND_ACTION_TYPES.has(request.actionType))
+    .map((request) => request.actionType))];
   return Object.freeze({
-    receiptSummaries: Object.freeze([Object.freeze({
-      requestRef: String(originalRequest?.requestRef || 'document-replan'),
-      actionType: 'document.write',
-      outcome: 'denied',
-      status: 'failed',
-      errorCode: 'ACTION_NOT_GROUNDED',
-    })]),
-    evidence: Object.freeze([]),
+    blockedActionTypes: Object.freeze(blockedActionTypes),
+    envelope: Object.freeze({ ...envelope, actionRequests: Object.freeze(allowed) }),
   });
 }
 
@@ -744,22 +573,12 @@ async function executeEnvelopeActionRequests({
   currentMessage,
   operationLedger,
   trustedActionExecutors,
-  coreDurableJobExecutor,
-  todoTimeZone = 'Asia/Shanghai',
+  personalLearningProjector,
+  logger = console,
 }) {
   const receiptSummaries = [];
   const evidence = [];
   for (const request of actionRequests) {
-    if (coreDurableJobExecutor?.supports?.(request.actionType)) {
-      const result = await executeCoreDurableJobRequest({
-        request,
-        actorContext,
-        currentMessage,
-        coreDurableJobExecutor,
-      });
-      receiptSummaries.push(result.receiptSummary);
-      continue;
-    }
     if (!actorContext?.owner) {
       receiptSummaries.push({
         requestRef: request.requestRef,
@@ -772,7 +591,7 @@ async function executeEnvelopeActionRequests({
     }
     let groundedRequest;
     try {
-      groundedRequest = groundActionRequest(request, currentMessage, { todoTimeZone });
+      groundedRequest = groundActionRequest(request, currentMessage);
     } catch (error) {
       const needsReplan = error?.code === 'ACTION_NEEDS_REPLAN';
       receiptSummaries.push({
@@ -795,24 +614,6 @@ async function executeEnvelopeActionRequests({
       continue;
     }
     try {
-      if (groundedRequest.actionType === 'document.write' && typeof operationLedger.findByCausation === 'function') {
-        const prior = operationLedger.findByCausation({ request: groundedRequest, actorContext });
-        if (prior) {
-          if (prior.scopeDigest !== digestActionScope(groundedRequest.scope)) {
-            receiptSummaries.push({
-              requestRef: request.requestRef,
-              actionType: request.actionType,
-              outcome: 'denied',
-              status: 'failed',
-              errorCode: 'DOCUMENT_REPLAY_CONFLICT',
-              replayed: true,
-            });
-            continue;
-          }
-          receiptSummaries.push(replayedDocumentWriteSummary(request, prior));
-          continue;
-        }
-      }
       const operation = operationLedger.mint({ request: groundedRequest, actorContext });
       const receipt = await trustedActionExecutors.execute(operation);
       const verified = trustedActionExecutors.verifyReceipt(receipt, {
@@ -826,29 +627,27 @@ async function executeEnvelopeActionRequests({
       });
       if (verified.ok !== true) throw actionExecutionError('RECEIPT_VERIFICATION_FAILED');
       const succeeded = receipt.status === 'succeeded';
+      if (succeeded
+        && ['memory.remember', 'memory.correct', 'memory.forget'].includes(groundedRequest.actionType)
+        && typeof personalLearningProjector === 'function') {
+        try {
+          const projection = await personalLearningProjector({ request: groundedRequest, receipt });
+          if (projection?.status === 'failed') {
+            logger.warn?.('[ombre-projection] status=failed retryable=true');
+          }
+        } catch (error) {
+          logger.warn?.(`[ombre-projection] status=failed code=${String(error?.code || 'CORE_OMBRE_PROJECT_FAILED')}`);
+        }
+      }
       receiptSummaries.push({
         requestRef: request.requestRef,
         actionType: request.actionType,
         outcome: succeeded ? 'applied' : receipt.status,
         status: receipt.status,
         effectDigest: receipt.effectDigest,
-        ...(request.actionType === 'todo.create' && succeeded
-          ? { todo: normalizeTodoCreateScope(request.scope, { timeZone: todoTimeZone }) }
-          : {}),
-        ...(request.actionType === 'feishu.calendar.create' && succeeded
-          ? { calendar: normalizeFeishuCalendarCreateScope(request.scope, { timeZone: todoTimeZone }) }
-          : {}),
-        ...(request.actionType === 'ai_daily_digest.send' && succeeded
-          ? { digestDate: String(request.scope?.date || '') }
-          : {}),
-        ...(request.actionType === 'document.write' && receipt.status === 'ambiguous'
-          ? { errorCode: 'DOCUMENT_OUTCOME_AMBIGUOUS' }
-          : request.actionType === 'document.write' && receipt.status === 'failed'
-            ? { errorCode: 'DOCUMENT_READBACK_FAILED' }
-            : {}),
       });
       evidence.push(trustActionReceiptEvidence({
-        type: actionEvidenceType(request.actionType),
+        type: 'save_result',
         ok: succeeded,
         status: succeeded ? 'success' : 'failure',
         action_id: receipt.operationId,
@@ -868,92 +667,6 @@ async function executeEnvelopeActionRequests({
     receiptSummaries: Object.freeze(receiptSummaries.map((item) => Object.freeze(item))),
     evidence: Object.freeze(evidence),
   });
-}
-
-function replayedDocumentWriteSummary(request, operation) {
-  if (operation.state === 'completed') {
-    const status = String(operation.status || 'ambiguous');
-    return {
-      requestRef: request.requestRef,
-      actionType: request.actionType,
-      outcome: status === 'succeeded' ? 'applied' : status,
-      status,
-      effectDigest: String(operation.effectDigest || ''),
-      replayed: true,
-      ...(status === 'ambiguous'
-        ? { errorCode: 'DOCUMENT_OUTCOME_AMBIGUOUS' }
-        : status === 'failed'
-          ? { errorCode: 'DOCUMENT_READBACK_FAILED' }
-          : {}),
-    };
-  }
-  if (operation.state === 'rejected') {
-    return {
-      requestRef: request.requestRef,
-      actionType: request.actionType,
-      outcome: 'failed',
-      status: 'failed',
-      errorCode: 'DOCUMENT_EXECUTION_FAILED',
-      replayed: true,
-    };
-  }
-  return {
-    requestRef: request.requestRef,
-    actionType: request.actionType,
-    outcome: 'ambiguous',
-    status: 'ambiguous',
-    errorCode: 'DOCUMENT_OUTCOME_AMBIGUOUS',
-    replayed: true,
-  };
-}
-
-async function executeCoreDurableJobRequest({ request, actorContext, currentMessage, coreDurableJobExecutor }) {
-  if (!actorContext?.owner) {
-    return {
-      receiptSummary: {
-        requestRef: request.requestRef,
-        actionType: request.actionType,
-        outcome: 'denied',
-        status: 'failed',
-        errorCode: 'ACTOR_NOT_AUTHORIZED',
-      },
-    };
-  }
-  try {
-    const result = await coreDurableJobExecutor.execute({ request, actorContext, currentMessage });
-    const receipt = result?.receipt;
-    if (result?.ok !== true || !isActiveDurableReceipt(receipt, { requestRef: request.requestRef, actionType: request.actionType, actorKey: actorContext.actorKey })) {
-      return {
-        receiptSummary: {
-          requestRef: request.requestRef,
-          actionType: request.actionType,
-          outcome: 'failed',
-          status: 'failed',
-          errorCode: sanitizeExecutionCode(result?.reason || 'CORE_JOB_RECEIPT_INVALID'),
-        },
-      };
-    }
-    return {
-      receiptSummary: {
-        requestRef: request.requestRef,
-        actionType: request.actionType,
-        outcome: 'applied',
-        status: 'active',
-        effectDigest: receipt.goalDigest,
-        durableActive: true,
-      },
-    };
-  } catch {
-    return {
-      receiptSummary: {
-        requestRef: request.requestRef,
-        actionType: request.actionType,
-        outcome: 'failed',
-        status: 'failed',
-        errorCode: 'CORE_JOB_CREATE_FAILED',
-      },
-    };
-  }
 }
 
 async function executeEnvelopeActivityRequest({ activityRequest, actorContext, activityFacade, currentMessage = {} }) {
@@ -1056,87 +769,6 @@ function commitmentsHaveMatchingActiveReceipts(commitments, receiptSummaries) {
   });
 }
 
-function bridgeOwnedCoreAcknowledgement(commitments, receiptSummaries) {
-  const acknowledgements = {
-    'core.memory-maintenance': '已安排记忆维护。',
-    'core.reflection': '已安排聊天复盘。',
-    'core.night-cycle': '已安排夜间整理。',
-  };
-  for (const commitment of commitments) {
-    const requestRef = String(commitment?.requestRef || '').trim();
-    const receipt = receiptSummaries.find((item) => (
-      item?.requestRef === requestRef
-      && item?.durableActive === true
-      && item?.outcome === 'applied'
-      && item?.status === 'active'
-      && Object.hasOwn(acknowledgements, item?.actionType)
-    ));
-    if (receipt) return acknowledgements[receipt.actionType];
-  }
-  return '';
-}
-
-function buildFeishuDocumentAcknowledgement(receiptSummaries = []) {
-  const receipt = receiptSummaries.find((item) => ['document.write', 'feishu.minutes_to_doc'].includes(item?.actionType));
-  if (!receipt) return { text: '', source: '' };
-  const source = receipt.actionType === 'document.write'
-    ? 'bridge_feishu_document_write'
-    : 'bridge_feishu_minutes_document';
-  if (receipt.status === 'succeeded') {
-    return {
-      text: receipt.actionType === 'document.write'
-        ? '云文档已写入并通过回读确认。'
-        : '已整理成云文档并放入目标文件夹。',
-      source,
-    };
-  }
-  if (receipt.outcome === 'needs_replan') {
-    return { text: '文档请求的执行类型仍未匹配，尚未执行。', source };
-  }
-  if (receipt.status === 'ambiguous' || receipt.errorCode === 'DOCUMENT_OUTCOME_AMBIGUOUS') {
-    return { text: '文档写入结果不确定；为避免重复创建，不会自动重试。', source };
-  }
-  if (receipt.errorCode === 'DOCUMENT_READBACK_FAILED') {
-    return { text: '文档操作已执行，但回读校验失败，暂不确认内容完成。', source };
-  }
-  if (receipt.errorCode === 'FEISHU_FOLDER_MATCH_AMBIGUOUS') {
-    return { text: '目标文件夹未能唯一匹配，未执行文档写入。', source };
-  }
-  if (['ACTION_NOT_GROUNDED', 'ACTOR_NOT_AUTHORIZED'].includes(receipt.errorCode)) {
-    return { text: '文档写入在执行前被拒绝，未创建或修改文档。', source };
-  }
-  if (receipt.errorCode === 'DOCUMENT_REPLAY_CONFLICT') {
-    return { text: '同一请求的文档内容发生变化，未再次写入。', source };
-  }
-  return { text: '文档写入执行失败，未确认已创建或修改。', source };
-}
-
-function buildTodoAcknowledgement(receiptSummaries = []) {
-  const receipt = receiptSummaries.find((item) => item?.actionType === 'todo.create');
-  if (!receipt) return { text: '', source: '' };
-  if (receipt.status !== 'succeeded' || !receipt.todo) {
-    return { text: '提醒创建失败，未确认已保存。', source: 'bridge_todo_create' };
-  }
-  const { title, date, startTime, endTime, reminderAt } = receipt.todo;
-  return {
-    text: `已创建待办“${title}”：${date} ${startTime}–${endTime}，将在 ${reminderAt.slice(0, 16)} 提醒。`,
-    source: 'bridge_todo_create',
-  };
-}
-
-function buildFeishuCalendarAcknowledgement(receiptSummaries = []) {
-  const receipt = receiptSummaries.find((item) => item?.actionType === 'feishu.calendar.create');
-  if (!receipt) return { text: '', source: '' };
-  if (receipt.status !== 'succeeded' || !receipt.calendar) {
-    return { text: '飞书日程创建或校验失败，未确认已写入日历。', source: 'bridge_feishu_calendar_create' };
-  }
-  const { title, date, startTime, endTime, reminderMinutes } = receipt.calendar;
-  return {
-    text: `已写入飞书日历并校验：“${title}”，${date} ${startTime}–${endTime}，提前 ${reminderMinutes} 分钟提醒。`,
-    source: 'bridge_feishu_calendar_create',
-  };
-}
-
 function isActiveDurableReceipt(receipt, expected = {}) {
   if (!receipt || typeof receipt !== 'object') return false;
   if (String(receipt.status || '') !== 'active'
@@ -1145,82 +777,8 @@ function isActiveDurableReceipt(receipt, expected = {}) {
   return Object.entries(expected).every(([field, value]) => value === undefined || receipt[field] === value);
 }
 
-function groundActionRequest(request, message = {}, { todoTimeZone = 'Asia/Shanghai' } = {}) {
+function groundActionRequest(request, message = {}) {
   const actionType = String(request.actionType || '');
-  if (actionType === 'todo.create') {
-    const userText = String(message.text || '');
-    if (!/(?:提醒|待办|remind|todo)/i.test(userText)
-      || (hasCalendarCreateIntent(userText) && !/(?:待办|todo)/i.test(userText))) {
-      throw actionExecutionError('ACTION_NOT_GROUNDED');
-    }
-    const scope = normalizeTodoCreateScope(request.scope, { timeZone: todoTimeZone });
-    return {
-      ...request,
-      scope: {
-        title: scope.title,
-        date: scope.date,
-        startTime: scope.startTime,
-        endTime: scope.endTime,
-        reminderMinutes: scope.reminderMinutes,
-      },
-    };
-  }
-  if (actionType === 'feishu.calendar.create') {
-    const userText = String(message.text || '');
-    if (!hasCalendarCreateIntent(userText)) {
-      throw actionExecutionError('ACTION_NOT_GROUNDED');
-    }
-    const scope = normalizeFeishuCalendarCreateScope(request.scope, { timeZone: todoTimeZone });
-    return {
-      ...request,
-      scope: {
-        title: scope.title, date: scope.date, startTime: scope.startTime,
-        endTime: scope.endTime, reminderMinutes: scope.reminderMinutes,
-      },
-    };
-  }
-  if (actionType === 'feishu.minutes_to_doc') {
-    const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
-    const userText = String(message.text || '');
-    const minuteTitle = String(scope.minuteTitle || '').trim();
-    const folderTitle = String(scope.folderTitle || '').trim();
-    if (!/(?:妙记|录音稿|文字稿|录音转文字)/.test(userText)) {
-      if (/(?:飞书|云文档|文档)/.test(userText)
-        && /(?:网页|博客|论文|文章|资料|笔记|总结|整理)/.test(userText)) {
-        throw actionExecutionError('ACTION_NEEDS_REPLAN');
-      }
-      throw actionExecutionError('ACTION_NOT_GROUNDED');
-    }
-    if (!/(?:云文档|文档)/.test(userText)
-      || !minuteTitle || !folderTitle
-      || !normalizeGroundingText(userText).includes(normalizeGroundingText(minuteTitle))
-      || !normalizeGroundingText(userText).includes(normalizeGroundingText(folderTitle))) {
-      throw actionExecutionError('ACTION_NOT_GROUNDED');
-    }
-    return {
-      ...request,
-      scope: {
-        minuteTitle,
-        folderTitle,
-        documentTitle: String(scope.documentTitle || '').trim(),
-        contentXml: String(scope.contentXml || '').trim(),
-      },
-    };
-  }
-  if (actionType === 'document.write') {
-    return groundDocumentWriteRequest(request, message);
-  }
-  if (actionType === 'ai_daily_digest.send') {
-    const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
-    const userText = String(message.text || '');
-    if (!/(日报|简报|摘要)/.test(userText) || !/(发|补发|重发|重新|再)/.test(userText) || scope.mode !== 'manual') throw actionExecutionError('ACTION_NOT_GROUNDED');
-    const requestedDate = String(scope.date || 'current_local_date');
-    if (!['current_local_date', 'today'].includes(requestedDate) && !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) {
-      throw actionExecutionError('ACTION_NOT_GROUNDED');
-    }
-    return { ...request, scope: { mode: 'manual', date: requestedDate } };
-  }
-  if (!actionType.startsWith('memory.')) return request;
   const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope)
     ? request.scope
     : {};
@@ -1264,94 +822,7 @@ function groundActionRequest(request, message = {}, { todoTimeZone = 'Asia/Shang
       scope: { subject_key: normalizeMemorySubjectKey(scope.subject_key, 'correction') },
     };
   }
-  if (actionType === 'memory.query') {
-    if (!/(?:记得|记住了什么|你.*(?:记忆|了解)|remember)/i.test(userText)) {
-      throw actionExecutionError('ACTION_NOT_GROUNDED');
-    }
-    return {
-      ...request,
-      scope: {
-        subject_prefix: String(scope.subject_prefix || scope.subjectPrefix || '').trim(),
-        limit: Math.max(1, Math.min(20, Number.parseInt(String(scope.limit || 5), 10) || 5)),
-      },
-    };
-  }
   throw actionExecutionError('ACTION_NOT_GROUNDED');
-}
-
-function hasCalendarCreateIntent(value) {
-  return /(?:加到|加入|写进).*(?:日程|日历)|(?:建|创建|新建).*(?:日程|日历)|(?:我|本人).*(?:有.{0,20}(?:活动|安排)|要参加)|\d{1,2}(?::|点)\d{0,2}.{0,60}(?:活动|安排)/i.test(String(value || ''));
-}
-
-function hasFeishuMinutesToDocIntent(value) {
-  const text = String(value || '');
-  return /(?:妙记|录音稿|文字稿|录音转文字)/.test(text)
-    && /(?:云文档|文档)/.test(text);
-}
-
-function groundDocumentWriteRequest(request, message = {}) {
-  const scope = request.scope && typeof request.scope === 'object' && !Array.isArray(request.scope) ? request.scope : {};
-  const target = scope.target && typeof scope.target === 'object' && !Array.isArray(scope.target) ? scope.target : {};
-  const userText = String(message.text || '');
-  const operation = String(scope.operation || '');
-  const provider = String(scope.provider || '');
-  const documentTitle = String(target.documentTitle || '').trim();
-  const contentXml = String(scope.contentXml || '').trim();
-  const sourceMessageId = String(message.id || message.message_id || message.request_id || '').trim();
-  if (provider !== 'feishu'
-    || !['create', 'update'].includes(operation)
-    || !/(?:飞书|云文档|文档)/.test(userText)
-    || !documentTitle
-    || !sourceMessageId) {
-    throw actionExecutionError('ACTION_NOT_GROUNDED');
-  }
-  const groundedTarget = operation === 'create'
-    ? { folderTitle: String(target.folderTitle || '').trim(), documentTitle }
-    : { documentId: String(target.documentId || '').trim(), documentTitle };
-  const exactTarget = operation === 'create' ? groundedTarget.folderTitle : groundedTarget.documentId;
-  if (!exactTarget
-    || !normalizeGroundingText(userText).includes(normalizeGroundingText(exactTarget))) {
-    throw actionExecutionError('ACTION_NOT_GROUNDED');
-  }
-  validateDocumentContent(contentXml, documentTitle);
-  const sourceRefs = normalizeDocumentSourceRefs(scope.sourceRefs);
-  const hash = `sha256:${createHash('sha256').update(contentXml, 'utf8').digest('hex')}`;
-  const contentRef = `inline:${hash}`;
-  const causationRef = `source:sha256:${createHash('sha256').update(sourceMessageId, 'utf8').digest('hex')}`;
-  return {
-    ...request,
-    payloadRef: contentRef,
-    scope: {
-      provider,
-      operation,
-      target: groundedTarget,
-      content: { format: 'docx_xml', ref: contentRef, hash, body: contentXml },
-      causationRef,
-      ...(sourceRefs.length ? { sourceRefs } : {}),
-    },
-  };
-}
-
-function normalizeDocumentSourceRefs(value) {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > 16) throw actionExecutionError('ACTION_NOT_GROUNDED');
-  return value.map((item) => {
-    const ref = String(item || '').trim();
-    if (!ref || ref.length > 240 || /[\r\n\t\0]/.test(ref)) throw actionExecutionError('ACTION_NOT_GROUNDED');
-    return ref;
-  });
-}
-
-function validateDocumentContent(contentXml, documentTitle) {
-  if (contentXml.length < 40
-    || contentXml.length > 2_000
-    || Buffer.byteLength(contentXml, 'utf8') > 7_000
-    || contentXml.includes('\0')
-    || /<\/?(?:root|content)\b|<(?:img|source|whiteboard|sheet|task|chat_card)\b/i.test(contentXml)) {
-    throw actionExecutionError('ACTION_NOT_GROUNDED');
-  }
-  const escapedTitle = documentTitle.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-  if (!contentXml.includes(`<title>${escapedTitle}</title>`)) throw actionExecutionError('ACTION_NOT_GROUNDED');
 }
 
 function normalizeMemorySubjectKey(value, kind) {
@@ -1381,12 +852,6 @@ function hasExplicitMemoryIntent(userText, actionType) {
 
 function normalizeGroundingText(value) {
   return String(value || '').toLowerCase().replace(/[\s，。！？、；：,.!?;:'"“”‘’（）()\[\]{}]/g, '');
-}
-
-function actionEvidenceType(actionType) {
-  return /(?:^|[._:-])(?:send|post|submit|publish|reply)(?:$|[._:-])/i.test(String(actionType || ''))
-    ? 'outbound_result'
-    : 'save_result';
 }
 
 function sanitizeExecutionCode(value) {

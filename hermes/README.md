@@ -14,7 +14,7 @@ O1/O2 与 unified-identity 提交仅保留为历史证据。S4 已从生产源�
 
 ## 当前定位
 
-- Hermes 是 ran-agent 的前台对话 shell。
+- Hermes 是 ran-agent 的聊天、情绪陪伴和游玩 shell；工作效果由 Codex 负责。
 - 当前统一生产 profile 使用 `deepseek-v4-flash`，provider policy
   在最终 HTTP body 显式加入 `thinking.type=disabled`；Pro 仅显式 opt-in。
 - DeepSeek V4 在本项目中按文本模型使用，原始图片、音频、视频和社交平台内容必须先由 MCP 工具处理。
@@ -27,7 +27,7 @@ O1/O2 与 unified-identity 提交仅保留为历史证据。S4 已从生产源�
 
 | 文件或目录 | 作用 |
 |------------|------|
-| `profile/config.yaml` | `ran-agent-companion` 唯一安装 profile，保留旧 Lite/Full 支持能力的并集 |
+| `profile/config.yaml` | `ran-agent-companion` 唯一安装 profile，仅暴露聊天/陪伴/游玩所需能力 |
 | `profile/distribution.yaml` | profile 元数据和所需环境变量说明 |
 | `profile/AGENTS.md` | Hermes 运行时约束 |
 | `profile/IDENTITY.md`, `profile/SOUL.md` | 人格和长期表达基线 |
@@ -88,7 +88,7 @@ hermes -p ran-agent-companion mcp list
 
 | 服务 | 端口 | Profile | Hermes home | 用途 |
 |------|------|---------|-------------|------|
-| `ran-agent-hermes.service` | `8642` | `ran-agent-companion` | `/home/ubuntu/.hermes-ran-agent/lite` | 旧 Lite/Full 支持能力并集 |
+| `ran-agent-hermes.service` | `8642` | `ran-agent-companion` | `/home/ubuntu/.hermes-ran-agent/lite` | 聊天、陪伴、记忆、媒体、搜索与外部 MCP 游玩 |
 
 Node bridge 只消费以下前台变量：
 
@@ -97,8 +97,9 @@ HERMES_API_BASE_URL=http://127.0.0.1:8642/v1
 HERMES_PROFILE=ran-agent-companion
 ```
 
-terminal、file、session search、Playwright、媒体生成和既有 MCP 均由统一
-profile 提供；`ran-agent-hermes-full.service` inactive/disabled，不是 fallback。
+terminal、file、session search 和直接 Playwright 不再由当前源码 profile
+暴露；媒体生成、搜索和受治理 MCP 仍由统一 profile 提供。
+`ran-agent-hermes-full.service` inactive/disabled，不是 fallback。
 
 生产部署、profile 刷新与回滚按运行手册执行；诊断可运行：
 
@@ -134,8 +135,8 @@ ran-agent 使用仓库内 MCP 服务：
 | `social_reader` | B 站、小红书、微信公众号、音乐分享 |
 | `mimo_power` | 已退役：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles |
 | `personal_memory` | Python backend 的统一个人记忆入口，内部组合本地 memory、只读 Ombre 与受控 Vault 召回 |
+| `external_mcp_gateway` | 默认可用的受治理外部 MCP broker；registry、grant、budget 与 confirmation 仍强制执行 |
 | `media_generation` | 图片和语音生成，统一 profile 可用 |
-| `playwright` | 浏览器自动化，统一 profile 可用 |
 | `tavily` | 可选底层网页搜索 provider，仅供 Search Hub 兼容使用 |
 
 最新网页事实、新闻、学术检索和普通 URL 读取优先走 `search_hub`。社交平台链接必须走 `social_reader`；不要用普通网页抽取工具替代小红书、B 站等平台解析器。

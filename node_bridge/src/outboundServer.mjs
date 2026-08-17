@@ -47,6 +47,7 @@ export { resolveStateDir } from './runtimeState.mjs';
 const HERMES_LITE_SOFT_RESET_CONTROL_ROUTE = '/control/hermes-lite-soft-reset';
 const AI_DAILY_DIGEST_CONTROL_ROUTE = '/scheduled/ai-daily-digest';
 const CORE_REMINDER_REGISTER_ROUTE = '/internal/core/reminders/register';
+const PROACTIVE_EVENT_CONTROL_ROUTE = '/proactive/event';
 
 function normalizeAccountId(raw) {
   return String(raw).trim().toLowerCase().replace(/[@.]/g, '-');
@@ -521,6 +522,21 @@ export async function handleProactiveEventRequest({
   };
 }
 
+export async function handleProactiveEventControlRequest({
+  env = process.env,
+  method,
+  url,
+  headers = {},
+  remoteAddress = '',
+  ...options
+} = {}) {
+  const denial = internalControlAccessDenial({
+    env, method, url, headers, remoteAddress, route: PROACTIVE_EVENT_CONTROL_ROUTE,
+  });
+  if (denial) return denial;
+  return handleProactiveEventRequest({ env, ...options });
+}
+
 export async function handleExternalMcpSystemQueueRequest({
   logger = console,
   env = process.env,
@@ -721,6 +737,13 @@ function evaluateDirectProactiveEventScope(event) {
   if (event.kind === 'reminder') {
     return { accepted: true, reason: 'accepted' };
   }
+  if (event.kind === 'companion'
+    && event.watch_scope.startsWith('personal-learning:')
+    && event.dedupe_key === event.watch_scope
+    && event.evidence_refs.includes(event.watch_scope)
+    && event.deliverability === 'notify_allowed') {
+    return { accepted: true, reason: 'accepted' };
+  }
   return {
     accepted: false,
     reason: 'proactive_event_kind_requires_dedicated_pipeline',
@@ -800,8 +823,11 @@ export function createOutboundServer({ bot, logger = console, env = process.env,
           coreRuntime, env, method: request.method, url: request.url,
           headers: request.headers, remoteAddress: request.socket.remoteAddress, bodyText: rawBody,
         });
-      } else if (request.method === 'POST' && request.url === '/proactive/event') {
-        result = await handleProactiveEventRequest({ logger, env, bodyText: rawBody });
+      } else if (request.method === 'POST' && request.url === PROACTIVE_EVENT_CONTROL_ROUTE) {
+        result = await handleProactiveEventControlRequest({
+          logger, env, method: request.method, url: request.url,
+          headers: request.headers, remoteAddress: request.socket.remoteAddress, bodyText: rawBody,
+        });
       } else if (request.method === 'POST' && request.url === '/external-mcp/system-queue') {
         result = await handleExternalMcpSystemQueueRequest({ logger, env, bodyText: rawBody });
       } else if (String(request.url || '').startsWith('/environment/sensorlogger/')) {

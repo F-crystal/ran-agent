@@ -53,10 +53,13 @@ class NodeBridgeOutboundClient:
     def send_proactive_event(self, event: dict[str, object]) -> dict[str, object]:
         """Submit one structured proactive event to the local Node bridge."""
 
+        secret = os.getenv("RAN_AGENT_INTERNAL_CONTROL_SECRET", "").strip()
+        if not secret:
+            raise RuntimeError("node bridge internal control secret is unavailable")
         request = urllib.request.Request(
             url=f"{self._config.node_bridge_outbound_base_url}/proactive/event",
             data=json.dumps(event, ensure_ascii=False).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
+            headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"},
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=_outbound_request_timeout_seconds()) as response:

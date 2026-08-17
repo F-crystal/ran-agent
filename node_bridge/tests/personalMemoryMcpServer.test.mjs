@@ -149,6 +149,29 @@ test('surface_relevant_context reuses bounded backend memory recall endpoint', a
   assert.equal(result.structuredContent.knowledge_hits[0].path, 'wiki/pindou.md');
 });
 
+test('emotional continuity recall preserves unresolved relationship context from Ombre', async () => {
+  const result = await handlePersonalMemoryMcpRequest({
+    method: 'tools/call',
+    params: {
+      name: 'surface_relevant_context',
+      arguments: { query: '她最近怎么样了', response_mode: 'casual_chat' },
+    },
+  }, {
+    env: { PYTHON_BACKEND_BASE_URL: 'http://backend.test' },
+    fetchImpl: async () => jsonResponse({
+      should_inject: true,
+      rendered_context: '【你对用户的了解】\n- 你们上次还有一件没聊完的心事；不要假装已经解决。',
+      used_sources: ['ombre_long_memory'],
+      source_status: { local_memory: 'empty', ombre: 'hit' },
+      long_term_memories: [{ content: '和重要的人还有一件没聊完的心事' }],
+    }),
+  });
+
+  assert.equal(result.structuredContent.source_status.ombre, 'hit');
+  assert.match(result.structuredContent.rendered_context, /没聊完的心事/);
+  assert.deepEqual(result.structuredContent.used_sources, ['ombre_long_memory']);
+});
+
 test('recall_personal_memory returns structured error on backend failure', async () => {
   const result = await handlePersonalMemoryMcpRequest(
     {
