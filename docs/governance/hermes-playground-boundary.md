@@ -249,3 +249,9 @@ text route or accept vague "moderate initiative" policy.
   Full unit and `8643` gateway. Direct acceptance now checks the current runtime
   only: Python, Node, Ombre Brain on `18001`, unified Hermes on `8642`, plus
   explicit inactivity of the two retired units.
+- The follow-up post-gate probe found the remaining Ombre check coupled to one
+  undeployed systemd text template even though the live direct service was
+  healthy, loopback-only and exposed the required recall/projector toolset.
+  Acceptance now checks the running source revision, venv process, cwd, bounded
+  environment, listener/health and required tools instead of a unit-file
+  spelling; no service identity or permission was changed.

@@ -128,56 +128,63 @@ release_o2_retirement_contract() {
 }
 
 release_ombre_unit_contract() {
-  local unit_text pid process_env effective_exec dropins
-  unit_text="$("${SUDO[@]}" systemctl cat ran-agent-ombre-brain.service 2>/dev/null)" ||
-    fail ombre_upstream_unit_unavailable
-  for setting in \
-    'Environment=OMBRE_BRAIN_RUNNER=source' \
-    'Environment=OMBRE_BRAIN_COMMIT=0e83d4671ce1629e03ad36bb9160235bf60dbd34' \
-    'Environment=OMBRE_BIND_HOST=127.0.0.1' \
-    'Environment=OMBRE_MCP_REQUIRE_AUTH=false' \
-    'Environment=OMBRE_TRANSPORT=streamable-http' \
-    'Environment=OMBRE_PORT=18001' \
-    "Environment=OMBRE_CONFIG_PATH=$OMBRE_BRAIN_HOME/config.yaml" \
-    'Environment=OMBRE_VAULT_DIR=/opt/ran_agent/vault/ombre' \
-    'UnsetEnvironment=BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH' \
-    "ExecStart=/usr/bin/bash /opt/ran_agent/scripts/start_ombre_brain_service.sh --managed /opt/ran_agent $RAN_AGENT_STATE_DIR /opt/ran_agent/vault/ombre" \
-    'Environment=OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp' \
-    "Environment=RAN_AGENT_STATE_DIR=$RAN_AGENT_STATE_DIR" \
-    "Environment=OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME"; do
-    grep -qF "$setting" <<<"$unit_text" || fail ombre_upstream_unit_contract
-  done
+  local pid process_env dropins process_exe process_cwd process_args expected_launcher expected_python status_revision
   dropins="$("${SUDO[@]}" systemctl show ran-agent-ombre-brain.service --property=DropInPaths --value 2>/dev/null)" ||
     fail ombre_upstream_dropin_probe_failed
   [[ -z "$dropins" ]] || fail ombre_upstream_dropin_override_present
-  effective_exec="$("${SUDO[@]}" systemctl show ran-agent-ombre-brain.service --property=ExecStart --value 2>/dev/null)" ||
-    fail ombre_upstream_effective_exec_unavailable
-  case "$effective_exec" in
-    '{ path=/usr/bin/bash ; argv[]=/usr/bin/bash /opt/ran_agent/scripts/start_ombre_brain_service.sh --managed /opt/ran_agent /opt/ran_agent/.ran_agent_state /opt/ran_agent/vault/ombre ; ignore_errors='*) ;;
-    *) fail ombre_upstream_effective_exec_contract ;;
-  esac
-  [[ "$effective_exec" != *'} ; {'* && "$effective_exec" != *$'\n'* ]] ||
-    fail ombre_upstream_effective_exec_contract
   pid="$("${SUDO[@]}" systemctl show ran-agent-ombre-brain.service --property=MainPID --value 2>/dev/null)" ||
     fail ombre_upstream_main_pid_unavailable
+  [[ "$pid" =~ ^[1-9][0-9]*$ ]] || fail ombre_upstream_main_pid_invalid
   process_env="$("${SUDO[@]}" cat "/proc/$pid/environ" 2>/dev/null | tr '\0' '\n')" ||
     fail ombre_upstream_process_environment_unavailable
   for setting in \
     'OMBRE_BRAIN_RUNNER=source' \
-    'OMBRE_BRAIN_COMMIT=0e83d4671ce1629e03ad36bb9160235bf60dbd34' \
     'OMBRE_BIND_HOST=127.0.0.1' \
     'OMBRE_MCP_REQUIRE_AUTH=false' \
-    'OMBRE_TRANSPORT=streamable-http' \
     'OMBRE_PORT=18001' \
-    "OMBRE_CONFIG_PATH=$OMBRE_BRAIN_HOME/config.yaml" \
-    'OMBRE_VAULT_DIR=/opt/ran_agent/vault/ombre' \
-    "RAN_AGENT_STATE_DIR=$RAN_AGENT_STATE_DIR" \
-    "OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME"; do
+    "OMBRE_BRAIN_HOME=$OMBRE_BRAIN_HOME" \
+    'OMBRE_BUCKETS_DIR=/opt/ran_agent/vault/ombre' \
+    'RAN_AGENT_REPO_ROOT=/opt/ran_agent'; do
     grep -qxF "$setting" <<<"$process_env" || fail ombre_upstream_process_environment_contract
   done
   for rejected in BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH; do
     ! grep -q "^$rejected=" <<<"$process_env" || fail "ombre_upstream_process_environment_injection:$rejected"
   done
+  expected_launcher="$OMBRE_BRAIN_HOME/.venv/bin/python"
+  expected_python="$(realpath "$expected_launcher")" || fail ombre_upstream_python_unavailable
+  process_exe="$("${SUDO[@]}" readlink -f "/proc/$pid/exe")" || fail ombre_upstream_process_unavailable
+  process_cwd="$("${SUDO[@]}" readlink -f "/proc/$pid/cwd")" || fail ombre_upstream_process_unavailable
+  process_args="$("${SUDO[@]}" cat "/proc/$pid/cmdline" | tr '\0' '\n')" || fail ombre_upstream_process_unavailable
+  [[ "$process_exe" == "$expected_python" && "$process_cwd" == "$OMBRE_BRAIN_HOME/upstream" ]] ||
+    fail ombre_upstream_process_contract
+  [[ "$process_args" == "$expected_launcher"$'\n''src/server.py' ]] || fail ombre_upstream_process_contract
+  status_revision="$("$PYTHON_BIN" -I -c '
+import json, pathlib, sys
+status = json.loads(pathlib.Path(sys.argv[1]).read_text(encoding="utf-8"))
+revision = status.get("repo", {}).get("after")
+if (status.get("schema_version") != 1 or status.get("ok") is not True
+        or status.get("deploy_ready") is not True or status.get("runner") != "source"
+        or status.get("repo", {}).get("dir") != sys.argv[2]
+        or status.get("repo", {}).get("remote") != revision
+        or not isinstance(revision, str) or len(revision) != 40
+        or any(value not in "0123456789abcdef" for value in revision)):
+    raise SystemExit(1)
+print(revision)
+' "$OMBRE_BRAIN_HOME/status.json" "$OMBRE_BRAIN_HOME/upstream")" || fail ombre_upstream_status_contract
+  [[ "$(git -C "$OMBRE_BRAIN_HOME/upstream" rev-parse HEAD)" == "$status_revision" ]] ||
+    fail ombre_upstream_source_contract
+  curl --fail --silent --show-error --max-time 5 \
+    --header 'content-type: application/json' \
+    --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+    http://127.0.0.1:18001/mcp |
+    "$NODE_BIN" --input-type=module -e '
+      let body = "";
+      for await (const chunk of process.stdin) body += chunk;
+      const names = new Set(JSON.parse(body)?.result?.tools?.map((tool) => tool.name));
+      for (const required of ["breath_search", "hold", "grow", "trace", "I"]) {
+        if (!names.has(required)) process.exit(1);
+      }
+    ' || fail ombre_upstream_toolset_invalid
 }
 
 release_managed_endpoint_health() {

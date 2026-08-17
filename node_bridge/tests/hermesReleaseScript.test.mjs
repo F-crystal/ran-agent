@@ -2217,6 +2217,9 @@ test('release scripts make an immutable staged candidate the only apply authorit
   assert.doesNotMatch(accept, /release_ombre_recall_acceptance|ombre_recall_search/);
   assert.doesNotMatch(accept, /wait_for_gateway full|release_provider_boundary_canary full/);
   assert.match(accept, /retired_service_active/);
+  assert.match(accept, /ombre_upstream_process_contract/);
+  assert.match(accept, /\["breath_search", "hold", "grow", "trace", "I"\]/);
+  assert.doesNotMatch(accept, /ExecStart=\/usr\/bin\/bash \/opt\/ran_agent\/scripts\/start_ombre_brain_service\.sh/);
 });
 
 test('candidate staging fails closed on missing release assets and remains readable but immutable to ran-agent', () => {
