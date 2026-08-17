@@ -111,7 +111,9 @@ action list with unverified submission prose. Neither attempt created a bridge
 operation; a read-only exact-title check found no target document. The current
 local repair requests one strict Hermes replan whenever the grounded Minutes
 turn has no executable action, while preserving the fail-closed schema, unique
-resource lookup and readback boundary. It is not yet deployed.
+resource lookup and readback boundary. The final local repair also binds a
+missing public requestRef only for the exact unambiguous Minutes action shape;
+other invalid actions remain rejected. It is not yet deployed.
 
 S3 deployed source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A
 privacy-preserving production probe selected an existing active

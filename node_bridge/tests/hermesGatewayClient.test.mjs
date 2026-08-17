@@ -554,6 +554,39 @@ test('canonicalizes an unambiguous v1 private envelope without exposing protocol
   assert.doesNotMatch(response.reply_text, /schemaVersion|actionRequests|commitments/);
 });
 
+test('binds a missing public requestRef only for an otherwise exact Minutes action', async () => {
+  const action = {
+    actionType: 'feishu.minutes_to_doc',
+    scope: {
+      minuteTitle: '前辈对话3', folderTitle: '中海油', documentTitle: '前辈对话3',
+      contentXml: '<title>前辈对话3</title><p>整理内容</p>',
+    },
+  };
+  const content = JSON.stringify({
+    schemaVersion: 1,
+    message: '正在整理。',
+    actionRequests: [action],
+    activityRequest: null,
+    claims: [],
+    commitments: [],
+  });
+  const response = await sendChatToHermesGateway(
+    { text: '整理妙记', sender_id: 'owner', conversation_id: 'minutes-conversation', channel: 'feishu' },
+    {
+      config: getHermesGatewayConfig({
+        HERMES_API_BASE_URL: 'http://127.0.0.1:8642/v1',
+        HERMES_API_KEY: 'token',
+        HERMES_REPLY_MODE: 'api',
+        RAN_AGENT_CONTEXT_SIZE_LOG: '0',
+      }),
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content } }] }),
+      logger: { log() {}, warn() {} },
+    },
+  );
+
+  assert.deepEqual(response.action_requests, [{ requestRef: 'feishu-minutes-doc-1', ...action }]);
+});
+
 test('parses a trailing private reply envelope without exposing duplicate JSON', async () => {
   const message = '给陛下呈上今日 AI 日报｜2026-08-06\n\n🔥 头条\n\n今日摘要';
   const envelope = {
@@ -626,6 +659,14 @@ test('fails closed for malformed private protocol but keeps ordinary requested J
       schemaVersion: 999,
       message: '正文',
       actionRequests: [],
+      activityRequest: null,
+      claims: [],
+      commitments: [],
+    }),
+    JSON.stringify({
+      schemaVersion: 1,
+      message: '正文',
+      actionRequests: [{ actionType: 'memory.remember', scope: {} }],
       activityRequest: null,
       claims: [],
       commitments: [],

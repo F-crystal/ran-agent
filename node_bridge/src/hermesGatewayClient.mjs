@@ -1997,9 +1997,10 @@ function extractReplyEnvelopeFromChoice(body = {}) {
       continue;
     }
     const privateShape = looksLikePrivateReplyEnvelope(parsed);
-    const canonical = privateShape && ['1', 'v1'].includes(String(parsed.schemaVersion).toLowerCase())
+    let canonical = privateShape && ['1', 'v1'].includes(String(parsed.schemaVersion).toLowerCase())
       ? { ...parsed, schemaVersion: 1 }
       : parsed;
+    canonical = bindUnambiguousMinutesRequestRef(canonical);
     let normalized;
     try {
       normalized = normalizeReplyEnvelope({ reply_envelope: canonical });
@@ -2025,6 +2026,24 @@ function looksLikePrivateReplyEnvelope(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value)
     && Object.hasOwn(value, 'schemaVersion')
     && Object.hasOwn(value, 'message'));
+}
+
+function bindUnambiguousMinutesRequestRef(value) {
+  const action = Array.isArray(value?.actionRequests) && value.actionRequests.length === 1
+    ? value.actionRequests[0]
+    : null;
+  const scope = action?.scope;
+  if (!action || typeof action !== 'object' || Array.isArray(action)
+    || action.actionType !== 'feishu.minutes_to_doc'
+    || Object.keys(action).sort().join(',') !== 'actionType,scope'
+    || !scope || typeof scope !== 'object' || Array.isArray(scope)
+    || Object.keys(scope).sort().join(',') !== 'contentXml,documentTitle,folderTitle,minuteTitle') {
+    return value;
+  }
+  return {
+    ...value,
+    actionRequests: [{ requestRef: 'feishu-minutes-doc-1', ...action }],
+  };
 }
 
 function looksLikeRawPrivateReplyEnvelope(value) {

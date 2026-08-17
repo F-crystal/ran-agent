@@ -57,6 +57,11 @@ evidence.
    After the first repair deployed, Hermes instead returned a valid envelope
    with `actionRequests=[]` and unverified “request submitted” prose. Node still
    executed nothing; the same missing-action class also needed the strict replan.
+   A later live probe showed the long-transcript model can also omit only the
+   public `requestRef` while producing the exact Minutes action/scope and a
+   bounded 1752-character body. The bridge can safely bind that correlation
+   label only for this unambiguous exact shape; all unknown/private fields and
+   every other missing-ref action remain rejected.
 
 ## Topology
 
@@ -330,6 +335,10 @@ complete; only the next real 08:00 observation remains.
   Hermes once to reuse the gathered transcript
   and return only the legal `feishu.minutes_to_doc` fields. Do not strip `id`,
   relax the schema or call tools during replan.
+- [x] **F7b** — Bind the fixed public `feishu-minutes-doc-1` requestRef only
+  when the model returns exactly one `feishu.minutes_to_doc` action with only
+  `actionType`/`scope` and the exact four scope keys. This does not normalize
+  `id`, other missing fields, other action types or invalid content.
 - [x] **F7V** — An actionless reply replans into one readback-verified document;
   a replan that repeats `id` reaches no lark-cli call. Full replyBackend is
   78/78 and the Calendar/Hermes sibling boundaries are 112/112.

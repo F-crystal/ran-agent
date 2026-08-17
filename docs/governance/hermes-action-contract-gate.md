@@ -27,7 +27,10 @@ action list is empty, Node may request exactly one strict Hermes replan
 only when the current owner turn names both Minutes and a cloud document. The
 replan reuses gathered content, calls no tool, accepts only the exact public
 Minutes fields, and still fails closed before lark-cli if a model-owned field
-such as `id` remains.
+such as `id` remains. For the one exact Minutes action shape containing only
+`actionType` and the four required scope fields, the bridge may bind the fixed
+public correlation label when `requestRef` alone is absent; it does not apply
+this normalization to any other action or unknown field.
 
 ## Delivery Boundary
 
