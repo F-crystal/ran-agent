@@ -3952,6 +3952,7 @@ test('main and release-candidate entry points resolve remote refs to immutable c
 
 test('unified verification makes release acceptance blocking and keeps optional diagnostics non-blocking', () => {
   const verify = readFileSync(join(root, 'scripts', 'verify-hermes-release.sh'), 'utf8');
+  const proactive = readFileSync(join(root, 'scripts', 'diagnose-proactive-events.sh'), 'utf8');
 
   assert.match(verify, /--release\|--specialized\|--all/);
   assert.match(verify, /resolve-hermes-gate-runtime\.mjs/);
@@ -3960,6 +3961,8 @@ test('unified verification makes release acceptance blocking and keeps optional 
   assert.match(verify, /accept-hermes-release\.sh" --apply/);
   assert.match(verify, /RAN_AGENT_PROACTIVE_DIAG_STRICT_ENV=1/);
   assert.match(verify, /diagnose-proactive-events\.sh/);
+  assert.match(proactive, /systemctl is-active --quiet ran-agent-hermes\.service/);
+  assert.match(proactive, /! systemctl is-active --quiet ran-agent-hermes-full\.service/);
   assert.match(verify, /for script in diagnose-external-mcp-gateway\.sh/);
   assert.doesNotMatch(verify, /for script in .*diagnose-lite-full\.sh|for script in .*diagnose-ombre-memory\.sh/);
   assert.match(verify, /specialized-warning/);

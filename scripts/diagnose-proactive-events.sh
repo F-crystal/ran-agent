@@ -185,7 +185,7 @@ if command -v systemctl >/dev/null 2>&1; then
   systemctl is-active --quiet ran-agent-python.service
   systemctl is-active --quiet ran-agent-node.service
   systemctl is-active --quiet ran-agent-hermes.service
-  systemctl is-active --quiet ran-agent-hermes-full.service
+  ! systemctl is-active --quiet ran-agent-hermes-full.service
   if [[ "$STRICT_ENV_CHECK" == "1" ]]; then
     echo "[proactive-events] checking running service env"
     for service in ran-agent-python.service ran-agent-node.service; do
