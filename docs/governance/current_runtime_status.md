@@ -105,20 +105,16 @@ transcript was organized into one document directly in the uniquely matched
 `中海油` folder and passed document readback and folder-parent verification.
 The action path adds no ASR or PPT dependency.
 
-On 2026-08-17 a new owner Minutes request first failed before lark-cli because
-Hermes added model-owned `id`, then after the initial repair returned an empty
-action list with unverified submission prose. Neither attempt created a bridge
-operation; a read-only exact-title check found no target document. The current
-local repair requests one strict Hermes replan whenever the grounded Minutes
-turn has no executable action, while preserving the fail-closed schema, unique
-resource lookup and readback boundary. The final local repair also binds a
-missing public requestRef only for the exact unambiguous Minutes action shape;
-the same narrow normalization binds the body title to `documentTitle` after
-live zero-effect rejections exposed missing model title metadata, and removes
-only complete outer `root`/`content` wrappers before execution. Other invalid
-actions remain rejected. A missing-action replan uses the existing
-trusted `action_gate_repair` task session so long ordinary DM context cannot
-corrupt its structured reply. It is not yet deployed.
+On 2026-08-17 the owner Minutes request exposed four model-boundary failures:
+model-owned `id`, an empty action list, omitted public request/title metadata,
+and complete `root`/`content` wrappers. All rejected attempts stopped before
+the lark-cli write. The deployed repair keeps unknown fields fail-closed,
+isolates the one strict replan in the trusted `action_gate_repair` task session,
+and normalizes only the exact public Minutes shape. Production then created one
+`前辈对话3` document in the unique `中海油` folder. The operation receipt passed
+content and parent-folder readback, the exact-title directory count is one, and
+the governed final check `f7-minutes-production-success-final` passed. No ASR,
+PPT path or direct document-creation bypass was added.
 
 S3 deployed source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A
 privacy-preserving production probe selected an existing active

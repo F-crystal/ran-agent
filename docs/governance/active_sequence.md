@@ -25,7 +25,7 @@ S0 facts/runtime selection
   -> post-S12 capability parity restoration (LOCAL_VERIFIED / REVIEWED / ARCHIVED; code paths live in production per 2026-08-15/16 evidence)
   -> post-S12 product-effect defect repair (PROD_APPLIED / RECOVERY_COMPLETE)
   -> post-S12 F6 delivery guards (PROD_APPLIED; next 08:00 observation pending; plan: docs/governance/post-s12-product-effect-repair.md)
-  -> post-S12 Minutes strict replan (LOCAL_VERIFIED; archive/deploy/action pending; owner-prioritized 2026-08-17)
+  -> post-S12 Minutes strict replan (PROD_VERIFIED; one readback-proven document; 2026-08-17)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
@@ -37,10 +37,11 @@ exposed F6: malformed private-envelope text could escape when JSON contained
 literal newlines, and the Core wake path lacked the exact-date egress gate.
 F6a/F6b are deployed and their production boundary checks pass; the next real
 08:00 observation remains ahead. The owner inserted the Minutes document task
-before that time-gated observation: its invalid model-owned `id` was rejected
-before lark-cli, and the strict one-shot replan is locally verified. Archive,
-deploy and one readback-proven action are next. S13 has not started, and cleanup
-still lacks deletion authorization.
+before that time-gated observation. Its strict replan is isolated from ordinary
+DM context, exact public metadata is normalized without accepting unknown
+fields, and production contains exactly one readback-proven `前辈对话3` document
+in the unique `中海油` folder. F6OBS is again the ready frontier. S13 has not
+started, and cleanup still lacks deletion authorization.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

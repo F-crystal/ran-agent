@@ -343,30 +343,33 @@ complete; only the next real 08:00 observation remains.
   governed read-only final check passed under label `f6-production-deploy`.
 - [x] **F7a** — When an owner request grounded in both Minutes and cloud-document
   intent has no executable action (invalid envelope or empty action list), ask
-  Hermes once to reuse the gathered transcript
-  and return only the legal `feishu.minutes_to_doc` fields. Do not strip `id`,
-  relax the schema or call tools during replan.
+  Hermes once in the trusted `action_gate_repair` task session and return only
+  the legal `feishu.minutes_to_doc` fields. It may reread the transcript but
+  cannot write the document through a tool. Do not strip `id` or relax schema.
 - [x] **F7b** — Bind the fixed public `feishu-minutes-doc-1` requestRef only
   when the model returns exactly one `feishu.minutes_to_doc` action with only
   the exact public fields and four scope keys, and bind the body title to
-  `documentTitle`. This does not normalize `id`, other missing fields, other
-  action types or invalid content.
+  `documentTitle` after removing at most two complete outer `root`/`content`
+  wrappers. This does not normalize `id`, other missing fields, other action
+  types or internal forbidden content.
 - [x] **F7V** — An actionless reply replans into one readback-verified document;
-  a replan that repeats `id` reaches no lark-cli call. Full replyBackend is
-  78/78 and the Calendar/Hermes sibling boundaries are 112/112.
-- [ ] **F7ARCH** — Archive the reviewed repair and reconcile current status.
-- [ ] **F7DEPLOY** — Apply the exact archived source through the unified source
-  dry-run/apply transaction.
-- [ ] **F7RUN** — Issue the owner-authorized `前辈对话3` request exactly once;
-  accept success only after content readback and unique `中海油` parent proof.
+  a replan that repeats `id` reaches no lark-cli call. The combined
+  replyBackend/Calendar/Hermes boundary passes 191/191.
+- [x] **F7ARCH** — Archived the reviewed repair and reconciled current status.
+- [x] **F7DEPLOY** — Applied the exact archived source through the unified source
+  dry-run/apply transaction; four core services and three focused production
+  regressions passed.
+- [x] **F7RUN** — Hermes created exactly one `前辈对话3` document. Three prior
+  action attempts were rejected before write; the sole applied operation passed
+  content readback and unique `中海油` parent proof.
 - [ ] **F6OBS** — Observe the first real 08:00 digest after F6DEPLOY; require a
   plain dated body, one terminal receipt and no visible private protocol.
 
 ## Reconciliation Items
 
 - Production runs the archived F6 source with managed wake active.
-- The F7 Minutes strict-replan repair is locally verified but not yet archived,
-  deployed or exercised against Feishu.
+- The F7 Minutes strict-replan repair is archived, deployed and production
+  verified with one document and one successful operation receipt.
 - `active_sequence.md`, `current_runtime_status.md` and `doc_status.md`
   describe F6OBS as the ready frontier.
 

@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-17)
 
 ## Why Not Prompt Only
 
