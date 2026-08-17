@@ -89,6 +89,7 @@ SOURCE_POINTER = SOURCE_SNAPSHOT_ROOT / "current-source.json"
 SOURCE_ARTIFACT_ROOT = ARTIFACT_ROOT / "source-artifacts"
 SOURCE_STAGE_ROOT = ARTIFACT_ROOT / "source-stages"
 CORE_DB = REPO / ".ran_agent_state/core/core-state.sqlite3"
+SOURCE_PROJECTION = REPO / ".ran_agent_state/hermes/published-memory-context.json"
 SOURCE_HERMES_BIN = Path("/opt/ran-agent-runtimes/hermes-v0.20.0-3049a082c0d1/bin/hermes")
 SOURCE_RUNTIME_PYTHON = SOURCE_HERMES_BIN.parents[1] / "python/bin/python3.12"
 SOURCE_NODE_BIN = Path("/opt/nodejs/node-v22.22.2-linux-x64/bin/node")
@@ -1923,6 +1924,7 @@ def wait_port(port: int, timeout: float = 60.0) -> None:
 
 def restore_source_services(state: dict[str, Any], *, expected_profile: str) -> None:
     run(["systemctl", "daemon-reload"])
+    publish_source_projection()
     for unit in SOURCE_SERVICES[:3]:
         prior = state["services"][unit]
         if prior["active"] == "active":
@@ -1940,6 +1942,29 @@ def restore_source_services(state: dict[str, Any], *, expected_profile: str) -> 
         run(["systemctl", "start", timer])
     else:
         run(["systemctl", "stop", timer], check=False)
+
+
+def publish_source_projection() -> None:
+    account = pwd.getpwnam("ubuntu")
+    group = grp.getgrnam("ubuntu")
+    for path, expected_mode, directory in (
+        (SOURCE_PROJECTION.parent, 0o700, True),
+        (CORE_DB, 0o600, False),
+    ):
+        value = path.stat(follow_symlinks=False)
+        valid_type = stat.S_ISDIR(value.st_mode) if directory else stat.S_ISREG(value.st_mode)
+        if (not valid_type or value.st_uid != account.pw_uid or value.st_gid != group.gr_gid
+                or stat.S_IMODE(value.st_mode) != expected_mode):
+            raise ReleaseError(f"projection runtime boundary is invalid: {path}")
+    command = [
+        "/usr/sbin/runuser", "-u", "ubuntu", "--", "/usr/bin/env", "HOME=/home/ubuntu",
+        str(SOURCE_NODE_BIN), str(REPO / "node_bridge/src/hermesIdentityProjection.mjs"),
+    ]
+    run([*command, str(CORE_DB), str(SOURCE_PROJECTION), str(REPO)])
+    run([
+        *command, "verify-runtime", str(SOURCE_PROJECTION), str(REPO),
+        str(account.pw_uid), str(group.gr_gid),
+    ])
 
 
 def activate_source_profile(candidate: str) -> None:

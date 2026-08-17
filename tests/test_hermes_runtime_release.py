@@ -100,6 +100,37 @@ def test_source_env_patch_removes_split_and_retired_memory_keys() -> None:
     )
 
 
+def test_source_projection_reuses_publisher_and_requires_existing_runtime_boundary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    projection = repo / ".ran_agent_state/hermes/published-memory-context.json"
+    core_db = repo / ".ran_agent_state/core/core-state.sqlite3"
+    projection.parent.mkdir(parents=True, mode=0o700)
+    core_db.parent.mkdir(parents=True)
+    core_db.write_bytes(b"sqlite")
+    projection.parent.chmod(0o700)
+    core_db.chmod(0o600)
+    identity = SimpleNamespace(pw_uid=os.getuid())
+    group = SimpleNamespace(gr_gid=os.getgid())
+    calls: list[list[str]] = []
+    monkeypatch.setattr(MODULE, "REPO", repo)
+    monkeypatch.setattr(MODULE, "CORE_DB", core_db)
+    monkeypatch.setattr(MODULE, "SOURCE_PROJECTION", projection)
+    monkeypatch.setattr(MODULE.pwd, "getpwnam", lambda _name: identity)
+    monkeypatch.setattr(MODULE.grp, "getgrnam", lambda _name: group)
+    monkeypatch.setattr(MODULE, "run", lambda command, **_kwargs: calls.append(command))
+
+    MODULE.publish_source_projection()
+    assert len(calls) == 2
+    assert calls[0][-3:] == [str(core_db), str(projection), str(repo)]
+    assert calls[1][-5:] == ["verify-runtime", str(projection), str(repo), str(os.getuid()), str(os.getgid())]
+
+    projection.parent.chmod(0o775)
+    with pytest.raises(MODULE.ReleaseError, match="projection runtime boundary is invalid"):
+        MODULE.publish_source_projection()
+
+
 def test_current_source_pointer_is_the_sole_acceptance_authority(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
