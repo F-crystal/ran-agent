@@ -2043,7 +2043,12 @@ function canonicalizeUnambiguousMinutesAction(value) {
   }
   const escapedTitle = String(scope.documentTitle || '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-  const bodyXml = String(scope.contentXml || '').replace(/<title>[^<]*<\/title>/i, '');
+  let bodyXml = String(scope.contentXml || '').trim().replace(/<title>[^<]*<\/title>/i, '');
+  for (let depth = 0; depth < 2; depth += 1) {
+    const wrapper = bodyXml.match(/^<(root|content)>([\s\S]*)<\/\1>$/i);
+    if (!wrapper) break;
+    bodyXml = wrapper[2].trim();
+  }
   const contentXml = `<title>${escapedTitle}</title>${bodyXml}`;
   return {
     ...value,

@@ -559,7 +559,7 @@ test('canonicalizes only public metadata for an otherwise exact Minutes action',
     actionType: 'feishu.minutes_to_doc',
     scope: {
       minuteTitle: '前辈对话3', folderTitle: '中海油', documentTitle: '前辈对话3',
-      contentXml: '<p>整理内容</p>',
+      contentXml: '<root><content><p>整理内容</p></content></root>',
     },
   };
   const content = JSON.stringify({

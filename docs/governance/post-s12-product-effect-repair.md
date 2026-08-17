@@ -70,6 +70,9 @@ evidence.
    polluted ordinary DM context. Minutes replan now uses the existing trusted
    `action_gate_repair` task session and may reread the transcript without
    gaining any direct document-write authority.
+   That isolated response used complete `root`/`content` wrappers. The exact
+   Minutes normalizer now removes only those outer wrappers before binding the
+   title; internal forbidden tags still fail closed.
 
 ## Topology
 

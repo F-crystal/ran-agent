@@ -114,8 +114,9 @@ turn has no executable action, while preserving the fail-closed schema, unique
 resource lookup and readback boundary. The final local repair also binds a
 missing public requestRef only for the exact unambiguous Minutes action shape;
 the same narrow normalization binds the body title to `documentTitle` after
-live zero-effect rejections exposed missing model title metadata. Other
-invalid actions remain rejected. A missing-action replan uses the existing
+live zero-effect rejections exposed missing model title metadata, and removes
+only complete outer `root`/`content` wrappers before execution. Other invalid
+actions remain rejected. A missing-action replan uses the existing
 trusted `action_gate_repair` task session so long ordinary DM context cannot
 corrupt its structured reply. It is not yet deployed.
 

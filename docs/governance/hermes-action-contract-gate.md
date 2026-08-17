@@ -32,8 +32,9 @@ but never writes through a tool.
 For the one exact Minutes action shape containing only
 `actionType` and the four required scope fields, the bridge may bind the fixed
 public correlation label when `requestRef` alone is absent and deterministically
-bind the body `<title>` to `documentTitle`; it does not apply this normalization
-to any other action or unknown field.
+bind the body `<title>` to `documentTitle`; complete outer `root`/`content`
+wrappers are removed before that title is added. It does not apply this
+normalization to any other action or unknown field.
 
 ## Delivery Boundary
 
