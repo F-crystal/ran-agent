@@ -429,7 +429,7 @@ function prepareSourceIdentityFixture(fixture) {
   chmodSync(join(fixture.bin, 'id'), 0o755);
 }
 
-function makeAcceptanceReadinessFixture({ liteEnv = 'HERMES_API_KEY=lite-key', fullEnv = 'HERMES_API_KEY=full-key' } = {}) {
+function makeAcceptanceReadinessFixture({ liteEnv = 'HERMES_API_KEY=lite-key' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'ran-agent-accept-readiness-'));
   const repo = join(dir, 'repo');
   const scripts = join(repo, 'scripts');
@@ -452,8 +452,7 @@ function makeAcceptanceReadinessFixture({ liteEnv = 'HERMES_API_KEY=lite-key', f
   assert.ok(footer > 0, 'acceptance readiness fixture requires the acceptance footer');
   writeFileSync(join(scripts, 'accept-hermes-release.sh'), accept.slice(0, footer));
   writeFileSync(join(envDir, '111'), Buffer.from(`${liteEnv}\0`));
-  writeFileSync(join(envDir, '222'), Buffer.from(`${fullEnv}\0`));
-  for (const [unit, pid] of [['ran-agent-hermes.service', '111'], ['ran-agent-hermes-full.service', '222']]) {
+  for (const [unit, pid] of [['ran-agent-hermes.service', '111']]) {
     writeFileSync(join(state, `${unit}.active`), 'active\n');
     writeFileSync(join(state, `${unit}.pid`), `${pid}\n`);
   }
@@ -469,12 +468,12 @@ function makeAcceptanceReadinessFixture({ liteEnv = 'HERMES_API_KEY=lite-key', f
   writeFileSync(join(bin, 'curl'), [
     '#!/bin/sh', 'set -eu', 'printf "%s\\n" "$*" >> "$MOCK_TRACE/curl"', 'header=""; target=""',
     'while [ "$#" -gt 0 ]; do case "$1" in --header) header=${2#@}; shift 2;; *) target=$1; shift;; esac; done',
-    'case "$target" in *:8642/*) name=lite; expected=${MOCK_EXPECTED_LITE_KEY:-};; *:8643/*) name=full; expected=${MOCK_EXPECTED_FULL_KEY:-};; *) exit 2;; esac',
+    'case "$target" in *:8642/*) name=lite; expected=${MOCK_EXPECTED_LITE_KEY:-};; *) exit 2;; esac',
     'if [ -n "$expected" ] && ! grep -Fqx "Authorization: Bearer $expected" "$header"; then printf 401; exit 0; fi',
     'if [ "${MOCK_BLOCK_CURL:-0}" = 1 ]; then /bin/sleep 30; exit 28; fi',
     'count_file="$MOCK_STATE/$name.count"; count=$(cat "$count_file" 2>/dev/null || printf 0); count=$((count + 1)); printf "%s\\n" "$count" > "$count_file"',
     'if [ "${MOCK_DROP_LITE_AFTER_CURL:-0}" = 1 ] && [ "$name" = lite ]; then printf inactive > "$MOCK_STATE/ran-agent-hermes.service.active"; fi',
-    'if [ "$name" = lite ]; then sequence=${MOCK_lite_SEQUENCE:-200}; else sequence=${MOCK_full_SEQUENCE:-200}; fi; value=$(printf "%s" "$sequence" | cut -d, -f"$count"); [ -n "$value" ] || value=$(printf "%s" "$sequence" | awk -F, "{print \\$NF}")',
+    'sequence=${MOCK_lite_SEQUENCE:-200}; value=$(printf "%s" "$sequence" | cut -d, -f"$count"); [ -n "$value" ] || value=$(printf "%s" "$sequence" | awk -F, "{print \\$NF}")',
     'case "$value" in refused) exit 7;; timeout) exit 28;; *) printf "%s" "$value";; esac', '',
   ].join('\n'));
   for (const file of ['sudo', 'systemctl', 'cat', 'curl']) chmodSync(join(bin, file), 0o755);
@@ -2215,10 +2214,9 @@ test('release scripts make an immutable staged candidate the only apply authorit
   assert.doesNotMatch(deploy, /bash "\$REPO_ROOT\/scripts\/accept-hermes-release\.sh" --apply/);
   assert.match(accept, /RAN_AGENT_RELEASE_SOURCE_ROOT/);
   assert.match(accept, /release_post_start_health/);
-  assert.match(accept, /release_ombre_recall_acceptance/);
-  assert.match(accept, /ombre_recall_search/);
-  assert.match(accept, /ombre_runtime_semantic_contract/);
-  assert.match(accept, /ombre_o1_contract\.py/);
+  assert.doesNotMatch(accept, /release_ombre_recall_acceptance|ombre_recall_search/);
+  assert.doesNotMatch(accept, /wait_for_gateway full|release_provider_boundary_canary full/);
+  assert.match(accept, /retired_service_active/);
 });
 
 test('candidate staging fails closed on missing release assets and remains readable but immutable to ran-agent', () => {
@@ -2722,19 +2720,16 @@ test('preserve mode changes only O1 identity and model policy without removing u
   assert.match(deploy, /for unit in "\$\{ALL_RUNTIME_UNITS\[@\]\}"; do/);
 });
 
-test('acceptance waits for independently delayed authenticated lite and full gateways without leaking the key', () => {
+test('acceptance waits for the authenticated unified gateway without leaking the key', () => {
   const fixture = makeAcceptanceReadinessFixture({
     liteEnv: 'HERMES_API_KEY=preferred-lite\0API_SERVER_KEY=wrong-lite',
-    fullEnv: 'API_SERVER_KEY=fallback-full',
   });
   const secret = 'preferred-lite';
   try {
     const started = Date.now();
     assert.doesNotThrow(() => runAcceptanceReadiness(fixture, {
       MOCK_EXPECTED_LITE_KEY: secret,
-      MOCK_EXPECTED_FULL_KEY: 'fallback-full',
       MOCK_lite_SEQUENCE: 'refused,200',
-      MOCK_full_SEQUENCE: 'refused,200',
       RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '12',
     }));
     assert.ok(Date.now() - started < 15_000, 'delayed readiness success must remain bounded');
@@ -2748,15 +2743,14 @@ test('acceptance waits for independently delayed authenticated lite and full gat
 
 test('acceptance readiness fails closed for authentication, missing keys, service exit, and bounded timeout', () => {
   const cases = [
-    { name: 'authentication', env: 'HERMES_API_KEY=secret-auth', extra: { MOCK_EXPECTED_LITE_KEY: 'different', MOCK_EXPECTED_FULL_KEY: 'full-key' }, expected: 'lite_bridge_authentication_failed' },
-    { name: 'forbidden', env: 'HERMES_API_KEY=secret-forbidden', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-forbidden', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_lite_SEQUENCE: '403' }, expected: 'lite_bridge_authentication_failed' },
-    { name: 'missing-key', env: 'UNRELATED=value', extra: { MOCK_EXPECTED_FULL_KEY: 'full-key' }, expected: 'lite_bridge_auth_key_missing' },
+    { name: 'authentication', env: 'HERMES_API_KEY=secret-auth', extra: { MOCK_EXPECTED_LITE_KEY: 'different' }, expected: 'lite_bridge_authentication_failed' },
+    { name: 'forbidden', env: 'HERMES_API_KEY=secret-forbidden', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-forbidden', MOCK_lite_SEQUENCE: '403' }, expected: 'lite_bridge_authentication_failed' },
+    { name: 'missing-key', env: 'UNRELATED=value', extra: {}, expected: 'lite_bridge_auth_key_missing' },
     {
       name: 'service-exit',
       env: 'HERMES_API_KEY=secret-exit',
       extra: {
         MOCK_EXPECTED_LITE_KEY: 'secret-exit',
-        MOCK_EXPECTED_FULL_KEY: 'full-key',
         MOCK_DROP_LITE_AFTER_CURL: '1',
         MOCK_lite_SEQUENCE: 'refused',
         RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '12',
@@ -2764,10 +2758,10 @@ test('acceptance readiness fails closed for authentication, missing keys, servic
       expected: 'lite_bridge_service_inactive',
       maxMs: 15_000,
     },
-    { name: 'timeout', env: 'HERMES_API_KEY=secret-timeout', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-timeout', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_lite_SEQUENCE: '503', RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '1' }, expected: 'lite_bridge_ready_timeout' },
+    { name: 'timeout', env: 'HERMES_API_KEY=secret-timeout', extra: { MOCK_EXPECTED_LITE_KEY: 'secret-timeout', MOCK_lite_SEQUENCE: '503', RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '1' }, expected: 'lite_bridge_ready_timeout' },
   ];
   for (const item of cases) {
-    const fixture = makeAcceptanceReadinessFixture({ liteEnv: item.env, fullEnv: 'HERMES_API_KEY=full-key' });
+    const fixture = makeAcceptanceReadinessFixture({ liteEnv: item.env });
     try {
       const started = Date.now();
       assert.throws(() => runAcceptanceReadiness(fixture, item.extra), new RegExp(item.expected));
@@ -2795,7 +2789,7 @@ test('acceptance removes an in-flight authenticated header when terminated', asy
       PATH: `${fixture.bin}:/usr/bin:/bin`, RAN_AGENT_NODE_BIN: nodeBin,
       RAN_AGENT_RELEASE_CONTROL_ROOT: fixture.repo, TMPDIR: join(fixture.dir, 'tmp'),
       MOCK_STATE: fixture.state, MOCK_ENV: fixture.envDir, MOCK_TRACE: fixture.trace,
-      MOCK_EXPECTED_LITE_KEY: 'lite-key', MOCK_EXPECTED_FULL_KEY: 'full-key', MOCK_BLOCK_CURL: '1',
+      MOCK_EXPECTED_LITE_KEY: 'lite-key', MOCK_BLOCK_CURL: '1',
       RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS: '4', RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS: '1',
     }, stdio: 'ignore',
   });

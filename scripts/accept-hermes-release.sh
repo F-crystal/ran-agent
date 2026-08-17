@@ -36,7 +36,6 @@ OMBRE_BRAIN_HOME="${OMBRE_BRAIN_HOME:-$RAN_AGENT_STATE_DIR/ombre-brain}"
   fail ombre_home_state_dir_mismatch
 RELEASE_SNAPSHOT_DIR="${RAN_AGENT_RELEASE_SNAPSHOT_DIR:-}"
 HERMES_LITE_BRIDGE_SMOKE_URL="${RAN_AGENT_RELEASE_LITE_BRIDGE_SMOKE_URL:-http://127.0.0.1:8642/v1/models}"
-HERMES_FULL_BRIDGE_SMOKE_URL="${RAN_AGENT_RELEASE_FULL_BRIDGE_SMOKE_URL:-http://127.0.0.1:8643/v1/models}"
 GATEWAY_READY_TIMEOUT_SECONDS="${RAN_AGENT_RELEASE_GATEWAY_READY_TIMEOUT_SECONDS:-120}"
 GATEWAY_READY_INTERVAL_SECONDS="${RAN_AGENT_RELEASE_GATEWAY_READY_INTERVAL_SECONDS:-2}"
 GATEWAY_HEADER_FILE=''
@@ -99,18 +98,17 @@ release_broker_read_only_smoke() {
 }
 
 release_post_start_health() {
-  for unit in ran-agent-python.service ran-agent-node.service ran-agent-ombre-brain.service ran-agent-ombre-recall.service ran-agent-hermes.service ran-agent-hermes-full.service; do
+  for unit in ran-agent-python.service ran-agent-node.service ran-agent-ombre-brain.service ran-agent-hermes.service; do
     "${SUDO[@]}" systemctl is-active --quiet "$unit" || fail "service_inactive:$unit"
+  done
+  for unit in ran-agent-ombre-recall.service ran-agent-hermes-full.service; do
+    ! "${SUDO[@]}" systemctl is-active --quiet "$unit" || fail "retired_service_active:$unit"
   done
   release_o2_retirement_contract
   release_managed_endpoint_health \
     ran-agent-ombre-brain.service 18001 \
     "${OMBRE_BRAIN_HEALTH_URL:-http://127.0.0.1:18001/health}" \
     ombre_upstream
-  release_managed_endpoint_health \
-    ran-agent-ombre-recall.service 18002 \
-    "${OMBRE_RECALL_HEALTH_URL:-http://127.0.0.1:18002/health}" \
-    ombre_recall
   release_ombre_unit_contract
 }
 
@@ -195,29 +193,6 @@ release_managed_endpoint_health() {
     fail "${label}_health_failed"
 }
 
-release_ombre_recall_acceptance() {
-  local configs=(
-    "${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/config.yaml" \
-    "${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/profiles/ran-assistant/config.yaml" \
-    "${HERMES_LITE_HOME:-${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/lite}/config.yaml" \
-    "${HERMES_LITE_HOME:-${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/lite}/profiles/ran-assistant-lite/config.yaml"
-  )
-  OMBRE_RECALL_MCP_URL="${OMBRE_RECALL_MCP_URL:-http://127.0.0.1:18002/mcp}" \
-    "${SUDO[@]}" "$PYTHON_BIN" "$SOURCE_ROOT/scripts/ombre_o1_contract.py" \
-      validate-config "${configs[@]}" >/dev/null ||
-    fail ombre_runtime_semantic_contract
-  curl --fail --silent --show-error --max-time 5 \
-    --header 'content-type: application/json' \
-    --data '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
-    "${OMBRE_RECALL_MCP_URL:-http://127.0.0.1:18002/mcp}" |
-    "$NODE_BIN" --input-type=module -e '
-      let body = "";
-      for await (const chunk of process.stdin) body += chunk;
-      const names = JSON.parse(body)?.result?.tools?.map((tool) => tool.name);
-      if (JSON.stringify(names) !== JSON.stringify(["ombre_recall_search", "ombre_recall_read"])) process.exit(1);
-    ' || fail ombre_recall_toolset_invalid
-}
-
 release_projection_acceptance() {
   RAN_AGENT_RELEASE_SOURCE_ROOT="$SOURCE_ROOT" \
   RAN_AGENT_PROJECTION_POINTER="${RAN_AGENT_PROJECTION_POINTER:-/opt/ran_agent/.ran_agent_state/hermes/published-memory-context.json}" \
@@ -294,7 +269,6 @@ release_bridge_synthetic_paths() {
   require_bounded_integer "$GATEWAY_READY_TIMEOUT_SECONDS" 1 600 gateway_ready_timeout_invalid
   require_bounded_integer "$GATEWAY_READY_INTERVAL_SECONDS" 1 30 gateway_ready_interval_invalid
   wait_for_gateway lite ran-agent-hermes.service "$HERMES_LITE_BRIDGE_SMOKE_URL"
-  wait_for_gateway full ran-agent-hermes-full.service "$HERMES_FULL_BRIDGE_SMOKE_URL"
 }
 
 release_provider_boundary_canary() {
@@ -333,21 +307,6 @@ release_provider_boundary_canary() {
 
 release_provider_boundary_canaries() {
   release_provider_boundary_canary lite ran-agent-hermes.service 8642 ran-assistant-lite
-  release_provider_boundary_canary full ran-agent-hermes-full.service 8643 ran-assistant
-  RAN_AGENT_CAPABILITY_MODE=lite \
-  HERMES_SERVICE_UNIT=ran-agent-hermes.service \
-  HERMES_HOME="${HERMES_LITE_HOME:-${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}/lite}" \
-  RAN_AGENT_EXPECTED_HERMES_MODEL="$EXPECTED_MODEL" \
-  RAN_AGENT_REPO_ROOT="$SOURCE_ROOT" \
-    bash "$SOURCE_ROOT/scripts/diagnose-hermes-provider-boundary.sh" >/dev/null ||
-    fail lite_provider_http_body_proof_failed
-  RAN_AGENT_CAPABILITY_MODE=full \
-  HERMES_SERVICE_UNIT=ran-agent-hermes-full.service \
-  HERMES_HOME="${HERMES_HOME:-/home/ubuntu/.hermes-ran-agent}" \
-  RAN_AGENT_EXPECTED_HERMES_MODEL="$EXPECTED_MODEL" \
-  RAN_AGENT_REPO_ROOT="$SOURCE_ROOT" \
-    bash "$SOURCE_ROOT/scripts/diagnose-hermes-provider-boundary.sh" >/dev/null ||
-    fail full_provider_http_body_proof_failed
 }
 
 if [[ "$MODE" == "--dry-run" ]]; then
@@ -374,7 +333,6 @@ fi
 release_semantic_verifier_preflight
 foreign_owner_binding_denied
 release_post_start_health
-release_ombre_recall_acceptance
 release_projection_acceptance
 release_bridge_synthetic_paths
 release_provider_boundary_canaries

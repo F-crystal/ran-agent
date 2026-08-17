@@ -244,3 +244,8 @@ text route or accept vague "moderate initiative" policy.
   `.git`. Those fixtures now bind temporary state explicitly; the S12 closure
   proof builds its own Git repository. The five tests pass from a Git-less,
   read-only source copy under an empty environment.
+- With every code test green, post-start acceptance exposed one final stale
+  topology block: it still required the retired `18002` Recall adapter, retired
+  Full unit and `8643` gateway. Direct acceptance now checks the current runtime
+  only: Python, Node, Ombre Brain on `18001`, unified Hermes on `8642`, plus
+  explicit inactivity of the two retired units.
