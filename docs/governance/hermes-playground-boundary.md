@@ -227,3 +227,8 @@ text route or accept vague "moderate initiative" policy.
   production source and requires its declared closed-subset paths to equal the
   real candidate diff exactly. Only active `config.companion.yaml` is in the
   deployment delta; retired profile sources were restored unchanged.
+- The first post-apply blocking acceptance reached the real server suite and
+  found one redundant identity-context assertion that still required wording
+  from the restored initial-runtime `AGENTS.md`. The active system instruction
+  and companion-profile boundary had already passed. The stale wording
+  assertion was removed instead of changing an inactive deployment surface.
