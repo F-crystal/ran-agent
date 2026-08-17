@@ -147,14 +147,17 @@ def _source_profile_blobs() -> dict[str, bytes]:
     }
 
 
+def _source_profile_prior() -> str:
+    return json.loads(_source_profile_blobs()[MODULE.SOURCE_PROFILE_MIGRATION_PATH])["priorAcceptedSource"]
+
+
 def test_source_profile_migration_requires_and_accepts_only_the_exact_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    prior = "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d"
+    prior = _source_profile_prior()
     candidate = "b" * 40
     changed = [
         MODULE.PROFILE_PATH,
-        MODULE.SOURCE_PROFILE_TEMPLATE_PATH,
         "hermes/profile/scripts/core-wake.sh",
     ]
     with pytest.raises(MODULE.ReleaseError, match="missing or invalid"):
@@ -174,7 +177,7 @@ def test_source_profile_migration_requires_and_accepts_only_the_exact_contract(
 def test_source_profile_migration_rejects_wrong_authority(
     monkeypatch: pytest.MonkeyPatch, mutation: str
 ) -> None:
-    prior = "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d"
+    prior = _source_profile_prior()
     blobs = _source_profile_blobs()
     contract = json.loads(blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
     if mutation == "prior":
@@ -185,7 +188,7 @@ def test_source_profile_migration_rejects_wrong_authority(
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     with pytest.raises(MODULE.ReleaseError, match="does not match"):
         MODULE.validate_source_advance_paths(
-            [MODULE.PROFILE_PATH, MODULE.SOURCE_PROFILE_TEMPLATE_PATH],
+            [MODULE.PROFILE_PATH],
             candidate="b" * 40,
             prior=prior,
         )
@@ -200,11 +203,10 @@ def test_source_profile_migration_rejects_an_unexpected_profile_path(
         MODULE.validate_source_advance_paths(
             [
                 MODULE.PROFILE_PATH,
-                MODULE.SOURCE_PROFILE_TEMPLATE_PATH,
                 "hermes/profile/unexpected.yaml",
             ],
             candidate="b" * 40,
-            prior="98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
+            prior=_source_profile_prior(),
         )
 
 
@@ -267,11 +269,10 @@ def test_governed_companion_migration_passes_source_dry_run_validation(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     root = Path(__file__).parents[1]
-    prior = "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d"
+    prior = _source_profile_prior()
     candidate = "b" * 40
     changed = [
         MODULE.PROFILE_PATH,
-        MODULE.SOURCE_PROFILE_TEMPLATE_PATH,
         "hermes/profile/scripts/core-wake.sh",
     ]
     blobs = {

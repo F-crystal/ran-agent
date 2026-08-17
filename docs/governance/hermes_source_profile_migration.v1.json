@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "status": "RELEASE_CANDIDATE_READY_FOR_SOURCE_PROFILE_MIGRATION",
-  "priorAcceptedSource": "98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d",
+  "priorAcceptedSource": "fd8bd354aff569390d1edde1423dc57dd3a24461",
   "activeProfile": {
     "name": "ran-agent-companion",
     "canonicalSource": "hermes/profile/config.companion.yaml",
@@ -12,8 +12,7 @@
     ]
   },
   "allowedProfileDeltaPaths": [
-    "hermes/profile/config.companion.yaml",
-    "hermes/profile/config.pro.template.yaml"
+    "hermes/profile/config.companion.yaml"
   ],
   "inertSources": [
     "hermes/profile/config.pro.template.yaml"

@@ -9,30 +9,24 @@ function readProjectFile(relativePath) {
   return fs.readFileSync(path.join(PROJECT_ROOT, relativePath), 'utf8');
 }
 
-test('Hermes profiles expose the governed external MCP gateway by default', () => {
-  for (const profilePath of [
-    'hermes/profile/config.yaml',
-    'hermes/profile/config.companion.yaml',
-    'hermes/profile/config.lite.yaml',
-  ]) {
-    const text = readProjectFile(profilePath);
-    const expectedGatewayProfile = profilePath.includes('lite') ? 'lite' : 'full';
-    assert.match(text, /mcp-external_mcp_gateway/);
-    assert.match(text, /^\s+external_mcp_gateway:\n/m);
-    assert.match(text, /scripts\/start_external_mcp_gateway\.sh/);
-    assert.match(text, new RegExp(`EXTERNAL_MCP_GATEWAY_PROFILE:\\s+"${expectedGatewayProfile}"`));
-    assert.match(text, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE:\s+"true"/);
-    assert.match(text, /EXTERNAL_MCP_GATEWAY_ENABLED:\s+"true"/);
-    assert.match(text, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED:\s+"true"/);
-  }
+test('the active Hermes companion profile exposes the governed external MCP gateway by default', () => {
+  const text = readProjectFile('hermes/profile/config.companion.yaml');
+  assert.match(text, /mcp-external_mcp_gateway/);
+  assert.match(text, /^\s+external_mcp_gateway:\n/m);
+  assert.match(text, /scripts\/start_external_mcp_gateway\.sh/);
+  assert.match(text, /EXTERNAL_MCP_GATEWAY_PROFILE:\s+"full"/);
+  assert.match(text, /EXTERNAL_MCP_GATEWAY_ALLOW_ENV_ENABLE:\s+"true"/);
+  assert.match(text, /EXTERNAL_MCP_GATEWAY_ENABLED:\s+"true"/);
+  assert.match(text, /EXTERNAL_MCP_SYSTEM_QUEUE_ENABLED:\s+"true"/);
 });
 
 test('external MCP governance docs preserve mainlines and proactive safety boundaries', () => {
-  const hermesProfile = readProjectFile('hermes/profile/AGENTS.md');
+  const playgroundBoundary = readProjectFile('docs/governance/hermes-playground-boundary.md');
+  const externalMcp = readProjectFile('docs/governance/external-mcp-gateway.md');
   const runtimeStatus = readProjectFile('docs/governance/current_runtime_status.md');
   const constraints = readProjectFile('docs/governance/constraints.md');
 
-  for (const text of [hermesProfile, constraints]) {
+  for (const text of [externalMcp, constraints]) {
     assert.match(text, /external_mcp_gateway/);
     assert.match(text, /synthetic Hermes turn|synthetic Feishu turn|合成/);
     assert.match(text, /watchlist|watch list|关注/);
@@ -42,8 +36,8 @@ test('external MCP governance docs preserve mainlines and proactive safety bound
 
   assert.match(runtimeStatus, /external_mcp_gateway/);
   assert.match(runtimeStatus, /governed `external_mcp_gateway` notifications/);
-  assert.match(hermesProfile, /companionship\/reminder `ProactiveEvent`/);
-  assert.match(hermesProfile, /日报由 Codex 负责/);
+  assert.match(playgroundBoundary, /companionship.*ProactiveEvent|ProactiveEvent.*companionship/is);
+  assert.match(playgroundBoundary, /daily reports.*Codex|Codex.*daily reports/is);
 });
 
 test('apply script deploy-enables external MCP gates through managed env files', () => {

@@ -27,9 +27,9 @@ O1/O2 与 unified-identity 提交仅保留为历史证据。S4 已从生产源�
 
 | 文件或目录 | 作用 |
 |------------|------|
-| `profile/config.yaml` | `ran-agent-companion` 唯一安装 profile，仅暴露聊天/陪伴/游玩所需能力 |
+| `profile/config.companion.yaml` | 当前 `ran-agent-companion` 活动源码 profile，仅暴露聊天/陪伴/游玩所需能力 |
 | `profile/distribution.yaml` | profile 元数据和所需环境变量说明 |
-| `profile/AGENTS.md` | Hermes 运行时约束 |
+| `profile/AGENTS.md` | 初始密封 Runtime 的 profile 约束参考；源码前进的产品边界见 `docs/governance/hermes-playground-boundary.md` |
 | `profile/IDENTITY.md`, `profile/SOUL.md` | 人格和长期表达基线 |
 | `profile/HERMES_*.md` | 迁移后的 Hermes 预算参考文件，仓库参考用 |
 | `profile/skills/` | Hermes 内部按需技能 |
@@ -113,7 +113,7 @@ bash scripts/diagnose-lite-full.sh
 
 ## MCP 工具边界
 
-`profile/config.yaml` 禁用 Hermes 内置媒体工具：
+`profile/config.companion.yaml` 禁用 Hermes 内置媒体工具：
 
 ```yaml
 disabled_tools:

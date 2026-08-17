@@ -27,9 +27,9 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 
 | File or Directory | Purpose |
 |-------------------|---------|
-| `profile/config.yaml` | The single installable `ran-agent-companion` profile, exposing only chat/companionship/play capabilities |
+| `profile/config.companion.yaml` | Current active source profile for `ran-agent-companion`, exposing only chat/companionship/play capabilities |
 | `profile/distribution.yaml` | Profile metadata and required environment variables |
-| `profile/AGENTS.md` | Hermes runtime constraints |
+| `profile/AGENTS.md` | Initial sealed-runtime profile reference; source-advance product boundaries live in `docs/governance/hermes-playground-boundary.md` |
 | `profile/IDENTITY.md`, `profile/SOUL.md` | Persona and long-term expression baseline |
 | `profile/HERMES_*.md` | Migrated Hermes budget reference files, repo reference only |
 | `profile/skills/` | Hermes-local on-demand skills |
@@ -115,7 +115,7 @@ Do not hand-edit systemd/env as the normal path. See `docs/governance/server_run
 
 ## MCP Tool Boundary
 
-`profile/config.yaml` disables Hermes built-in media tools:
+`profile/config.companion.yaml` disables Hermes built-in media tools:
 
 ```yaml
 disabled_tools:

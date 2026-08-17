@@ -55,9 +55,10 @@ required, not optional.
 - The local companion profile no longer exposes terminal, file, session search
   or direct Playwright. Search Hub retains its internal fallback.
 - External MCP admission, registry, policy, grants, sessions, evidence,
-  cancellation and pending confirmation remain intact. All source profiles now
-  expose the governed gateway by default while the launcher's allow-env gate
-  still rejects ambient enable flags.
+  cancellation and pending confirmation remain intact. The canonical active
+  companion profile exposes the governed gateway by default while the
+  launcher's allow-env gate still rejects ambient enable flags. Retired profile
+  sources are not padded with deployment-irrelevant edits.
 - `personal_memory` is query-only. Durable writes already use backend extraction
   and typed personal-learning candidates.
 - Ombre recall is active on loopback `18001`. The local candidate composes the
@@ -220,3 +221,9 @@ text route or accept vague "moderate initiative" policy.
   still runs the digest until an authorized stop transaction completes.
 - The transformation and Package B locks are closed. Release ownership is
   recorded by `.agents/task-locks/hermes-playground-release-20260817.md`.
+- The first immutable production dry-run stopped before mutation because the
+  profile migration contract still named the S4 source and required a fixed
+  historical two-file delta. The repaired contract binds the actual accepted
+  production source and requires its declared closed-subset paths to equal the
+  real candidate diff exactly. Only active `config.companion.yaml` is in the
+  deployment delta; retired profile sources were restored unchanged.

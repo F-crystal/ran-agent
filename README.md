@@ -105,7 +105,7 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 | `mimo_power` | RETIRED：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles | historical |
 | `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | unified |
 | `personal_memory` | 个人记忆、Ombre 与受控 Vault 召回；backend 健康检查 | unified |
-| `external_mcp_gateway` | 受治理的动态 External MCP broker；源码 profile 默认可用，调用仍受 registry/grant/budget/confirmation 约束 | unified / governed |
+| `external_mcp_gateway` | 受治理的动态 External MCP broker；活动 companion profile 默认可用，调用仍受 registry/grant/budget/confirmation 约束 | unified / governed |
 | `media_generation` | 图片和语音生成 | unified |
 | `tavily` | 可选底层 provider，仅供 Search Hub 兼容使用 | 内部/兼容 |
 

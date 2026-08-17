@@ -1593,9 +1593,11 @@ def validate_source_profile_migration(candidate: str, prior: str, profile_paths:
         migration = load_candidate_json(REPO, candidate, SOURCE_PROFILE_MIGRATION_PATH)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         raise ReleaseError("source profile migration contract is missing or invalid") from exc
-    expected_delta = {PROFILE_PATH, SOURCE_PROFILE_TEMPLATE_PATH}
+    permitted_delta = {PROFILE_PATH, SOURCE_PROFILE_TEMPLATE_PATH}
     active_profile = migration.get("activeProfile") if isinstance(migration.get("activeProfile"), dict) else {}
     rollback = migration.get("rollback") if isinstance(migration.get("rollback"), dict) else {}
+    allowed_delta = migration.get("allowedProfileDeltaPaths")
+    allowed_delta_set = set(allowed_delta) if isinstance(allowed_delta, list) else set()
     profile = candidate_blob(REPO, candidate, PROFILE_PATH)
     if (
         set(migration) != {
@@ -1605,8 +1607,10 @@ def validate_source_profile_migration(candidate: str, prior: str, profile_paths:
         or migration.get("schemaVersion") != 1
         or migration.get("status") != SOURCE_PROFILE_MIGRATION_STATUS
         or migration.get("priorAcceptedSource") != prior
-        or migration.get("allowedProfileDeltaPaths") != sorted(expected_delta)
-        or migrated_paths != expected_delta
+        or allowed_delta != sorted(allowed_delta_set)
+        or PROFILE_PATH not in allowed_delta_set
+        or not allowed_delta_set.issubset(permitted_delta)
+        or migrated_paths != allowed_delta_set
         or migration.get("inertSources") != [SOURCE_PROFILE_TEMPLATE_PATH]
         or migration.get("additionalRuntimeAuthority") is not False
         or active_profile != {

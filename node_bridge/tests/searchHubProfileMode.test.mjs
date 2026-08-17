@@ -49,7 +49,7 @@ test('source Hermes configs register search_hub in lite and full profiles', () =
   }
   assert.doesNotMatch(platformToolsets(lite), /mcp-playwright\s*$/m);
   assert.doesNotMatch(platformToolsets(lite), /mcp-media_generation\s*$/m);
-  assert.doesNotMatch(platformToolsets(full), /mcp-playwright/);
+  assert.match(platformToolsets(full), /mcp-playwright/);
   assert.match(full, /SEARCH_HUB_ENABLE_PLAYWRIGHT_FALLBACK:\s+"true"/);
   assert.match(platformToolsets(full), /mcp-media_generation/);
 });

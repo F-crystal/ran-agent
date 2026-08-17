@@ -106,7 +106,7 @@ mean automatic whole-Vault search.
 | `mimo_power` | RETIRED: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles | historical |
 | `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | unified |
 | `personal_memory` | Personal memory, Ombre, and bounded Vault recall; backend health check | unified |
-| `external_mcp_gateway` | Governed dynamic External MCP broker; source profiles expose it by default while registry/grant/budget/confirmation controls remain enforced | unified / governed |
+| `external_mcp_gateway` | Governed dynamic External MCP broker; the active companion profile exposes it by default while registry/grant/budget/confirmation controls remain enforced | unified / governed |
 | `media_generation` | Image and speech generation | unified |
 | `tavily` | Optional lower-level provider, used only for Search Hub compatibility | internal/compat |
 

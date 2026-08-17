@@ -54,7 +54,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `hermes/README.md` / `hermes/README_en.md` | Hermes profile distribution overview |
 | `AGENTS.md` | Repo-root operating rules |
 | `CLAUDE.md` | Claude shim pointing to canonical `AGENTS.md` |
-| `hermes/profile/AGENTS.md` | Hermes profile runtime constraints |
+| `hermes/profile/AGENTS.md` | Initial sealed-runtime profile reference; current source-advance product boundary is `hermes-playground-boundary.md` |
 | `hermes/profile/config.companion.yaml` | Deployed unified companion source profile |
 | `docs/governance/doc_status.md` | Documentation index and conflict rule |
 | `docs/governance/active_sequence.md` | Canonical S-stage order, current stage and exit conditions |
