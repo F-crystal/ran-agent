@@ -34,7 +34,8 @@ template; Node owns only trusted orchestration and the single existing delivery
 path. The successor does not add another runtime, scheduler, wake, store, or
 action registry. The bounded post-S12 product-effect defect repair (plan:
 `docs/governance/post-s12-product-effect-repair.md`) records the completed
-recovery and the current F6 frontier.
+recovery, F6 observation frontier and the locally verified Minutes strict-replan
+repair awaiting archive/deploy/action.
 
 S2 adds one production-verified typed action for an existing
 Feishu Minutes transcript: `feishu.minutes_to_doc`. It uses the authenticated

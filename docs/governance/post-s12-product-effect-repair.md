@@ -48,6 +48,11 @@ evidence.
    also lacked the exact-date egress gate already present on the legacy/manual
    digest route, so it could dispatch either leaked protocol or a dateless
    body.
+5. Minutes document action could not recover from an invalid private envelope.
+   On 2026-08-17 Hermes read `前辈对话3` and produced a bounded single-line
+   DocxXML body, but added model-owned `id` beside the allowed action fields.
+   The trust boundary correctly rejected `ACTION_REQUEST_UNKNOWN_FIELD` before
+   lark-cli; unlike Calendar, the Minutes path had no one-shot strict replan.
 
 ## Topology
 
@@ -75,6 +80,11 @@ F1 Core reminder binding resolution repair
   -> F6REV proportional adversarial review
   -> F6ARCH archive + governance reconciliation
   -> F6DEPLOY production apply (owner-signed)
+  -> F7a Minutes envelope-invalid one-shot strict replan
+  -> F7V affected-boundary verification + adversarial review
+  -> F7ARCH archive + governance reconciliation
+  -> F7DEPLOY production apply (owner-authorized repair)
+  -> F7RUN one deterministic Minutes-to-document request + readback
   -> F6OBS next real 08:00 digest observation
   -> S13 observation frontier (unchanged; deletion not authorized)
 ```
@@ -311,12 +321,26 @@ complete; only the next real 08:00 observation remains.
   are active, retired Full remains inactive/disabled, managed wake verifies
   active, and the three focused F6 production regressions pass 3/3. The
   governed read-only final check passed under label `f6-production-deploy`.
+- [x] **F7a** — On an envelope-invalid owner request grounded in both Minutes
+  and cloud-document intent, ask Hermes once to reuse the gathered transcript
+  and return only the legal `feishu.minutes_to_doc` fields. Do not strip `id`,
+  relax the schema or call tools during replan.
+- [x] **F7V** — The valid replan creates and readbacks exactly one document;
+  a replan that repeats `id` reaches no lark-cli call. Full replyBackend is
+  78/78 and the Calendar/Hermes sibling boundaries are 112/112.
+- [ ] **F7ARCH** — Archive the reviewed repair and reconcile current status.
+- [ ] **F7DEPLOY** — Apply the exact archived source through the unified source
+  dry-run/apply transaction.
+- [ ] **F7RUN** — Issue the owner-authorized `前辈对话3` request exactly once;
+  accept success only after content readback and unique `中海油` parent proof.
 - [ ] **F6OBS** — Observe the first real 08:00 digest after F6DEPLOY; require a
   plain dated body, one terminal receipt and no visible private protocol.
 
 ## Reconciliation Items
 
 - Production runs the archived F6 source with managed wake active.
+- The F7 Minutes strict-replan repair is locally verified but not yet archived,
+  deployed or exercised against Feishu.
 - `active_sequence.md`, `current_runtime_status.md` and `doc_status.md`
   describe F6OBS as the ready frontier.
 

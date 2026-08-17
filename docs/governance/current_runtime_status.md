@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED; PRODUCT-EFFECT RECOVERY COMPLETE; F6 PROD_APPLIED; S13 NOT STARTED (2026-08-17)
+Status: S12 COMPLETE / PROD_ACCEPTED; PRODUCT-EFFECT RECOVERY COMPLETE; F6 PROD_APPLIED; MINUTES REPLAN LOCAL_VERIFIED; S13 NOT STARTED (2026-08-17)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -104,6 +104,12 @@ executor to avoid creating a duplicate. Before deployment, the same existing
 transcript was organized into one document directly in the uniquely matched
 `中海油` folder and passed document readback and folder-parent verification.
 The action path adds no ASR or PPT dependency.
+
+On 2026-08-17 a new owner Minutes request was rejected before lark-cli because
+Hermes added model-owned `id` to an otherwise valid `feishu.minutes_to_doc`
+request. The locally verified repair adds one strict Hermes replan that reuses
+the already gathered transcript and preserves the existing fail-closed schema,
+unique resource lookup and readback boundary. It is not yet deployed.
 
 S3 deployed source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A
 privacy-preserving production probe selected an existing active

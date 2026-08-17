@@ -240,6 +240,26 @@ export function createReplyBackend(options = {}) {
           replyEnvelope = Object.freeze({ ...replyEnvelope, actionRequests: Object.freeze([]) });
         }
       }
+      if (response?.envelope_error_code === 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID'
+        && hasFeishuMinutesToDocIntent(message.text)) {
+        try {
+          const replanned = await chatImpl({
+            ...hermesInput,
+            continuity_note: [
+              hermesInput.continuity_note,
+              'NODE_ACTION_REPLAN: The previous Feishu Minutes reply envelope failed strict validation. Reuse the transcript and content already gathered; do not call tools again. Return exactly one actionRequest with only requestRef, actionType "feishu.minutes_to_doc", and scope. Scope must contain only minuteTitle, folderTitle, documentTitle, and a single-line rootless text-only contentXml under 1800 characters. Never add id, actor, authorization, receipt, effect, or private fields; the bridge creates and verifies the document.',
+            ].filter(Boolean).join('\n'),
+          }, hermesOptions);
+          const replannedRequest = extractMinutesReplanRequest(replanned);
+          replyEnvelope = Object.freeze({
+            ...replyEnvelope,
+            actionRequests: Object.freeze([replannedRequest]),
+          });
+        } catch (error) {
+          loggerFor(options).warn?.(`Minutes action replan rejected code=${String(error?.code || 'ACTION_REPLAN_FAILED')}`);
+          replyEnvelope = Object.freeze({ ...replyEnvelope, actionRequests: Object.freeze([]) });
+        }
+      }
       const informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
       replyEnvelope = informationalReportPolicy.envelope;
 
@@ -683,6 +703,18 @@ function extractCalendarReplanRequest(candidate) {
     || envelope.commitments.length !== 0
     || envelope.claims.length !== 0) {
     throw actionExecutionError('CALENDAR_REPLAN_INVALID');
+  }
+  return envelope.actionRequests[0];
+}
+
+function extractMinutesReplanRequest(candidate) {
+  const envelope = normalizeReplyEnvelope(candidate);
+  if (envelope.actionRequests.length !== 1
+    || envelope.actionRequests[0]?.actionType !== 'feishu.minutes_to_doc'
+    || envelope.activityRequest !== null
+    || envelope.commitments.length !== 0
+    || envelope.claims.length !== 0) {
+    throw actionExecutionError('MINUTES_REPLAN_INVALID');
   }
   return envelope.actionRequests[0];
 }
@@ -1243,6 +1275,12 @@ function groundActionRequest(request, message = {}, { todoTimeZone = 'Asia/Shang
 
 function hasCalendarCreateIntent(value) {
   return /(?:加到|加入|写进).*(?:日程|日历)|(?:建|创建|新建).*(?:日程|日历)|(?:我|本人).*(?:有.{0,20}(?:活动|安排)|要参加)|\d{1,2}(?::|点)\d{0,2}.{0,60}(?:活动|安排)/i.test(String(value || ''));
+}
+
+function hasFeishuMinutesToDocIntent(value) {
+  const text = String(value || '');
+  return /(?:妙记|录音稿|文字稿|录音转文字)/.test(text)
+    && /(?:云文档|文档)/.test(text);
 }
 
 function groundDocumentWriteRequest(request, message = {}) {

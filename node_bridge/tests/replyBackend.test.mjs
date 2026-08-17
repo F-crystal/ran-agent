@@ -1151,6 +1151,122 @@ test('existing Feishu Minutes transcript becomes one read-back cloud document', 
   ]);
 });
 
+test('an envelope-invalid Minutes reply receives one strict replan and creates one verified document', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
+  const contentXml = '<title>前辈对话3</title><heading1>摘要</heading1><p>整理内容</p>';
+  const calls = [];
+  const execFileImpl = async (_command, args) => {
+    calls.push(args);
+    const identity = { ok: true, identity: 'user' };
+    if (args[0] === 'minutes') return { stdout: JSON.stringify({ ...identity, data: { items: [{ token: 'minute3' }] } }) };
+    if (args[0] === 'drive' && args[1] === '+search') return { stdout: JSON.stringify({ ...identity, data: { results: [{ title: '中海油', result_meta: { token: 'folder1' } }] } }) };
+    if (args[0] === 'drive' && args[1] === 'files') return { stdout: JSON.stringify({ ...identity, data: { files: [{ token: 'doc3', type: 'docx', parent_token: 'folder1' }], has_more: false } }) };
+    if (args[1] === '+create') return { stdout: JSON.stringify({ ...identity, data: { document: { document_id: 'doc3' } } }) };
+    if (args[1] === '+fetch') return { stdout: JSON.stringify({ ...identity, data: { document: { document_id: 'doc3', content: contentXml } } }) };
+    throw new Error('unexpected lark-cli call');
+  };
+  let attempt = 0;
+  const inputs = [];
+  const backend = createReplyBackend({
+    env,
+    execFileImpl,
+    hermesImpl: async (input) => {
+      inputs.push(input);
+      attempt += 1;
+      if (attempt === 1) return {
+        reply_text: '回复格式校验失败，请稍后重试。',
+        envelope_error_code: 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID',
+      };
+      return { reply_envelope: {
+        schemaVersion: 1,
+        message: '正在整理。',
+        actionRequests: [{
+          requestRef: 'minutes-doc-3',
+          actionType: 'feishu.minutes_to_doc',
+          scope: { minuteTitle: '前辈对话3', folderTitle: '中海油', documentTitle: '前辈对话3', contentXml },
+        }],
+        activityRequest: null,
+        claims: [],
+        commitments: [],
+      } };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    id: 'owner-minutes-replan-3',
+    text: '把妙记“前辈对话3”整理成云文档，放到飞书的“中海油”文件夹下',
+    sender_id: 'owner',
+    conversation_id: 'owner-conversation',
+    channel: 'feishu',
+    trusted_actor_context: {
+      actorKey: 'actor:feishu:owner:0001', owner: true, platform: 'feishu', conversationKey: 'feishu:dm:conversation',
+    },
+  });
+
+  assert.equal(response.replyText, '已整理成云文档并放入目标文件夹。');
+  assert.equal(attempt, 2);
+  assert.match(inputs[1].continuity_note, /Never add id/);
+  assert.deepEqual(calls.map((args) => args.slice(0, 2)), [
+    ['minutes', '+search'],
+    ['drive', '+search'],
+    ['docs', '+create'],
+    ['docs', '+fetch'],
+    ['drive', 'files'],
+  ]);
+});
+
+test('a Minutes replan that repeats a private id fails closed before lark-cli', async (t) => {
+  const env = tempStateEnv(t, { HERMES_ACTION_GATE_MODE: 'enforce' });
+  let attempt = 0;
+  let calls = 0;
+  const backend = createReplyBackend({
+    env,
+    execFileImpl: async () => { calls += 1; },
+    hermesImpl: async () => {
+      attempt += 1;
+      if (attempt === 1) return {
+        reply_text: '回复格式校验失败，请稍后重试。',
+        envelope_error_code: 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID',
+      };
+      return { reply_envelope: {
+        schemaVersion: 1,
+        message: '正在整理。',
+        actionRequests: [{
+          id: 'model-owned-id',
+          requestRef: 'minutes-doc-3',
+          actionType: 'feishu.minutes_to_doc',
+          scope: {
+            minuteTitle: '前辈对话3', folderTitle: '中海油', documentTitle: '前辈对话3',
+            contentXml: '<title>前辈对话3</title><p>整理内容</p>',
+          },
+        }],
+        activityRequest: null,
+        claims: [],
+        commitments: [],
+      } };
+    },
+    ingestImpl: async () => ({ ok: true }),
+    logger: { log() {}, warn() {} },
+  });
+
+  const response = await backend.getReply({
+    id: 'owner-minutes-replan-private-id',
+    text: '把妙记“前辈对话3”整理成云文档，放到飞书的“中海油”文件夹下',
+    sender_id: 'owner',
+    conversation_id: 'owner-conversation',
+    channel: 'feishu',
+    trusted_actor_context: {
+      actorKey: 'actor:feishu:owner:0001', owner: true, platform: 'feishu', conversationKey: 'feishu:dm:conversation',
+    },
+  });
+
+  assert.equal(response.replyText, '回复格式校验失败，请稍后重试。');
+  assert.equal(attempt, 2);
+  assert.equal(calls, 0);
+});
+
 test('Feishu Minutes document action rejects non-DocxXML wrappers before lark-cli', async () => {
   let calls = 0;
   const adapter = createFeishuMinutesDocumentExecutorAdapter({
