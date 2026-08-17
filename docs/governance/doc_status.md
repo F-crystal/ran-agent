@@ -13,247 +13,20 @@ acceptance checklists and review handoff live in
 ## Current State
 
 The repaired post-S12 source is applied in production; `core-cutover:v1`
-remains at `e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Hermes v0.20 is
-`PROD_VERIFIED` for the bounded evidence in `current_runtime_status.md`.
-Runtime rollback is closed, retired v0.13 payloads are deleted, `18002` and O2
-are absent, and the direct loopback Ombre service on `18001` remains active.
-The earlier companion overlay is rollback-only evidence.
-
-The archived post-S12 capability-parity and product-effect repair code paths
-are live in production. The dated digest backfills, verified Calendar event,
-Todo schedule registration and managed-wake activation completed on
-2026-08-17. The first catch-up digest exposed F6 malformed-envelope leakage
-and a missing Core wake date gate; their bounded repair is verified, reviewed,
-archived and deployed. The next real 08:00 observation remains. The source
-restores
-the existing Python AI-digest preparation semantics under
-Core due-date authority, an explicit historical-date path, verified Feishu
-Calendar creation, the semantic split between Calendar and internal Todo
-reminders, and the existing pending-Todo list owner. Python owns the digest
-template; Node owns only trusted orchestration and the single existing delivery
-path. The successor does not add another runtime, scheduler, wake, store, or
-action registry. The bounded post-S12 product-effect defect repair (plan:
-`docs/governance/post-s12-product-effect-repair.md`) records the completed
-recovery, F6 observation frontier and the production-verified Minutes
-strict-replan repair.
-
-S2 adds one production-verified typed action for an existing
-Feishu Minutes transcript: `feishu.minutes_to_doc`. It uses the authenticated
-user to resolve one transcript and one destination folder, creates one cloud
-document, and requires readback before a success receipt. It does not add ASR,
-PPT handling, polling or a general workflow framework. Its source controller
-also extends the existing S1 transaction to exact archived `main` descendants
-while retaining the prior source pointer as rollback authority. Production
-accepted a normalized action canary without replaying the executor against the
-already-created document.
-
-S3 is production verified for its bounded value chain. Hermes proposes the
-identifier and content, Node validates their class and format, and Python owns
-persistence and recall. An existing active fact produced
-`personal_learning=hit` through `personal_memory`, while the independent
-read-only Ombre outcome remained observable. S4 is complete: production no
-longer contains the inactive O2 implementation or its dedicated
-Steward/token/model/gate seams, direct Ombre on `18001` remains active, and old
-worktrees/branches were closed after recoverable snapshots. S5 is locally
-verified: one B.2 typed transaction/outbox/effect/receipt loop replays after
-reopen without a duplicate effect and remains disconnected from production.
-S6 then converged the root worktree, triaged its 33 status entries, reimplemented
-the three retained runtime semantics on current `main`, and synchronized the
-S6-S13 topology. S7 Node-to-Core local wiring is locally verified through its
-typed adapter receipt and does not change production. S8 is locally verified:
-the owner-authorized internal projector binds content to confirmed Core payload
-hashes, recovers lost Ombre responses without duplicate growth, and supports
-scope erasure/rebuild while the public recall surface remains read-only. It is
-not composed into production. S9 Package C scheduling is locally verified:
-Schema v2, deterministic occurrences and the injected managed tick remain
-disconnected from production. S10 is locally verified with the governed
-19-component migration manifest, a zero-effect production-copy rehearsal and a
-Core-fact-only external-poll seam. S11 synthetic acceptance is locally verified
-after owner-audit remediation. S12 is now `COMPLETE / PROD_ACCEPTED`.
-Local S12-R1 readiness source now covers the cutover transaction/command,
-managed wake projection, WorkRun execution and terminal evidence, typed
-scheduled delivery, retained Python maintenance, and replay-safe Core reminder
-registration plus projection acknowledgement. It is not a deployable candidate:
-the external-MCP WorkRun composition now passes its serial R1E
-authority/replay/no-direct-send acceptance locally. R1F removes desktop
-presence from the S12 authority path: ordinary timely proactive content is
-eligible by default, ambient content remains silent, and the existing single
-Core-owned attention-flush schedule retains durable delayed/coalesced handling.
-The ordered R1 frontier repaired the
-observed web-tool route, locally verified the smallest effect-oriented Feishu
-document write/replan seam, and completed the bounded dependency compatibility
-decision. R1D-L1 has closed the exact update-command defect; the first R1E
-archive was review-blocked and its bounded repair is accepted at
-`493c77aa90fe53bba8a10fd94dd03136ba51d4eb`. The recalibrated R1F archive
-`08e3eea81c336ac48f3e0b85a87b0b5c6d445307` passed exact-SHA review. Desktop
-presence and explicit DND are
-`POST_CUTOVER_OK`; Telegram is future channel work. That readiness work did not
-itself start S12 or authorize production. R1B is locally verified: the companion
-candidate has one generic Web surface (`mcp-search_hub`), the DLM-shaped handler
-check returned typed research evidence, and the affected Node/Python sets pass
-62/62 and 43/43. R1B.1 also locally closes the reproduced provider-origin
-`schemaVersion: "v1"` raw-envelope leak; its affected set passes 259/259. The
-project-local Python entrypoint is also fixed at ignored `.venv`, while
-production still requires an explicit absolute runtime. The previous candidate
-`aabf9bc97ea3fcd95bf6d79798c56315543d0c37` is blocked by `R1A-ACK-ORDER`;
-its repair is archived at `dfb8b41df86a65136f3fa5c2cd181fc1f2045ba1`.
-The independent exact-SHA R1A repair review is clear; R1A, R1B and R1B.1 are
-`REVIEWED`. Independent review blocked the first R1C archive
-`e4161721d253c160558aeaf22b7fda77e1a331b4` on repair-authority escape and
-title-only provider readback. The commit containing this update archives only
-the bounded repair after `75/75` focused R1C/reply checks and `125/125` shared
-envelope/receipt/ledger checks. The repaired archive
-`02b8f6491f4ca3013f847decdc59974a90bebdca` passed independent exact-SHA review;
-R1C is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. R1D has recorded explicit
-decisions for all four dependency surfaces without upgrading any dependency:
-the CLI versions are compatible, Ombre and Agent Reach are `POST_CUTOVER_OK`,
-and External MCP remains bridge-owned. R1D-L1 adds the exact update command
-required by both CLI versions; its focused set passes `6/6` and both versioned
-fake-token dry-runs accept the repaired argv without writing externally. The
-repair is archived at `af25198654e048cc70e7e94a4c9974f2070428e0` and passed
-its narrow exact-SHA review. R1D-L1 is `LOCAL_VERIFIED`, `REVIEWED` and
-`ARCHIVED`, and R1D dependency compatibility is closed. External MCP itself is
-compatible. Independent review blocked R1E archive `c8e5a882` on
-`R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. The bounded repair
-atomically reserves each fact projection, recovers it without provider replay,
-and requires exact fact/revision/checkpoint identity before presentation. Fresh
-repair evidence passes `18/18` focused and `52/52` shared affected. The repaired
-archive passed exact-SHA rereview and R1E is `LOCAL_VERIFIED`, `REVIEWED` and
-`ARCHIVED`. R1F is `LOCAL_VERIFIED`, `REVIEWED` and `ARCHIVED`. Fresh R2-A
-production audit and R2-B isolated copy rehearsal are clear; the runtime
-actually rehearsed was `08e3eea8`, while the commit containing this update is
-its governance/evidence-only archive. R2 is `LOCAL_VERIFIED`, `REVIEWED` and
-`ARCHIVED`. R3-A was clear except server proofs, but follow-up inspection found
-`R3-GATE-HERMES-TOPOLOGY-STALE` in frozen candidate `08ea6b0c`. Independent
-review found first repair `d70a08fc` still blocked by an unproven persistent
-Full condition and a stale v0.13 Python probe. Repair 2 proves the exact governed
-Full condition block without using Full as runtime authority and updates the
-provider probe to exact v0.20 plus explicit import-capable runtime Python. It is
-`LOCAL_VERIFIED / REVIEWED / ARCHIVED` at `d6adb106`; follow-up delivery inspection
-found `R3-R1B-PROFILE-DELIVERY-GAP`; its bounded repair passed independent
-review at `790546a3`. The first R3-B attempt then passed exact candidate YAML
-semantics and source dry-run but stopped fail-closed on stale one-line CLI and
-flat-runtime import assumptions. The class-level sealed-runtime contract repair
-is `LOCAL_VERIFIED / NOT_REVIEWED / ARCHIVED` at `d845e994`, but was superseded
-before independent review after confirming
-`R3-GATE-SEALED-PROBE-BYTECODE-WRITE-RISK`: direct sealed-Python validation used
-`-I` without a bytecode no-write guard. The bounded successor requires explicit
-`-B` at every current gate/test probe, makes the shared probe reject callers
-that omit it before importing runtime modules, and proves a writable synthetic
-runtime tree remains unchanged. The combined repair passed independent review
-at `250a39fc`. The second R3-B proof passed baseline, source dry-run and the real
-sealed-runtime resolver, then stopped fail-closed in six root-run Node
-self-tests. Exact reproduction classified all six as fixture drift, not gate
-authority defects; their bounded repair passed independent review at
-`76c72988`. The third R3-B retry passed baseline and source dry-run, then root
-immutable `--all` stopped on the single Ombre preserve-runtime-shape fixture
-(655 total, 653 pass, one fail, one declared skip); non-root did not run and the
-Python provider proof was not reached. Exact Linux/root reproduction under
-`umask 077` classified inaccessible root-created synthetic parents as
-`R3-B-PRESERVE-OMBRE-FIXTURE-PATH-ACCESS-DRIFT`, not a gate-authority defect.
-The bounded test-only permission-model repair passes the exact root test, the
-Linux/root file at 84 pass/zero fail/one declared skip and the local file at 81
-pass/zero fail/four declared platform skips. It passed independent exact-SHA
-review at `7019c805342084797c1e1bd201001d80ef1dd4ee`. The fourth R3-B retry
-again passed baseline and source dry-run; root `--all` reached 655 total / 653
-pass / one fail / one declared skip. The Ombre permission case passed, and the
-sole failure moved to the projection-mode negative assertion (`Missing expected
-exception`). Non-root did not run, Python provider proof was not reached and
-production remained unchanged. Root instrumentation proved the active manifest
-changed from `0600` to `0644` and production verification correctly failed with
-`projection_runtime_mode_invalid`; the defect was a negative harness that
-discarded the wrapped status and did not prove its target or mutation. The
-bounded test-only repair makes that injection self-proving and preserves the
-restart boundary. Its Linux/root named test is `1/1`, full release file is 85
-total / 84 pass / zero fail / one governed skip, direct projection file is
-`39/39`, and local release file is 85 total / 81 pass / zero fail / four
-governed platform skips. That repair entered reviewed candidate `0d7c5ce2`.
-The fifth R3-B passed baseline, source dry-run and all three root provider
-proofs, then root `--all` stopped fail-closed at Node 1177 total / 1176 pass /
-zero fail / one governed skip and Python 462 pass / one fail plus nine passing
-subtests. Non-root did not run and production remained unchanged. The sole
-blocker, `R3-B-ARCHIVE-LOCAL-PATH-SYMLINK-RESOLUTION-BYPASS`, resolved final
-lock/archive leaves before their no-follow boundary. The first bounded repair
-archived at `28c4054989c1176a4d8988872c43363b09c74494` canonicalizes only
-parents, validates containment before parent creation, preserves ordinary final
-leaves, and reuses the hard-link no-replace publisher for recovery. Independent
-review accepted those boundaries but returned `FIX_REQUIRED` for
-`RAW-FINAL-COMPONENT-NORMALIZATION-BYPASS`: `Path(path)` normalized trailing
-separators and final `.` before raw final-entry validation. The bounded
-successor validates the raw final entry first, retains safe parent
-normalization, and passes the complete archive transaction file 39/39, focused
-recovery path tests 3/3, and the Git-less Linux/root probe under EUID 0 with
-`umask 077`. Independent review cleared that raw-final repair at
-`e4a6d205afc4183cfda503aa6bb4977dac29fb25`. The sixth R3-B then passed
-baseline, source dry-run and root immutable `--all`: Node 1177 total / 1176
-pass / zero fail / one governed skip, Python 472 pass plus nine passing
-subtests, all three root provider proofs and Linux/root portability. Non-root
-passed 524/524 Node tests before stopping fail-closed at the shared sealed
-runtime probe. Its fixed `HOME=/nonexistent` sentinel was root-readable but not
-traversable by the governed `ubuntu` identity because the host contained a
-root-owned mode `0700` `/nonexistent/.hermes`; production remained unchanged.
-The shared repair uses a unique caller-owned mode `0700` scratch namespace,
-confines HOME/TMP/XDG state beneath it, permits legitimate ephemeral Hermes
-initialization and requires identity-bound recursive cleanup before success.
-The exact bytes passed bounded TECserver root/ubuntu probe, resolver,
-Node-provider and Python-provider-route parity with sealed-runtime and
-production hashes/state unchanged. The repair was archived and independently
-reviewed at `9653d030473b3e9870ddea9158c4a2f9570c243b`; complete R3-B on that
-base is `CLEAR`. Historical S12 remediation began with
-`S12-CUTOVER-ORCHESTRATION-AND-ROLLBACK-INTERLOCK-GAP`. The first orchestration
-candidate `e6ce78aa` is `LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED / ARCHIVED`:
-VERIFY created a source candidate ref, an ACCEPTED journal bypassed SQLite, and
-the P0-P4 rollback proof mocked the composed rollback. The bounded successor is
-archived at `91172d4c` and is `LOCAL_VERIFIED / REVIEWED / FIX_REQUIRED`. Its
-canonical source-verify path is persistently read-only, SQLite is read before
-terminal journal interpretation, accepted replay is read-only, and one
-stateful composed matrix proves exact P0-P4 authority restoration; review found
-only residual Git index refresh and writable Core inspection. Candidate
-`959b8f0d` repaired those primitives and is `LOCAL_VERIFIED / REVIEWED /
-FIX_REQUIRED / ARCHIVED`; its review found a stale manually synchronized
-bootstrap digest, while the reported live-WAL SHM read-mark change is derived
-SQLite coordination rather than product mutation. Candidate
-`e120f1c246135d566e58847684e14521ea15809d` makes the exact Git candidate the
-sole framework byte authority and is `LOCAL_VERIFIED / REVIEWED / ARCHIVED`, but
-production critical proof stopped before P0 on
-`S12-P0-PREAPPLY-CANDIDATE-SUBORDINATE-AUTHORITY-GAP`: candidate-only
-subordinates still resolved from the older live checkout. The bounded successor
-derives one immutable scratch execution closure from the exact Git object, uses
-it for all S12 code/manifests and keeps live paths state-only. That successor is
-archived at `6d5d5b3a4b5b5da2eb7dbd84f37c4ec3170de41a`, independently reviewed
-`CLEAR`, and its bounded production candidate-closure proof passed. The next
-proof stopped on `S12-VISIBLE-BINDING-FEISHU-DESTINATION-HANDOFF-GAP`: Core
-discarded the bound Feishu route kind and could invoke a direct-message send
-with an empty user recipient. The bounded successor preserves the existing
-Package B `destinationKind`/`destinationRef` contract through scheduled
-delivery and maps it mechanically at the Feishu adapter. It is archived at
-`2f822d9ae3878a4f6d6e5a6f0adf1725a838f63b`; terminal audit accepted that
-contract but returned `FIX_REQUIRED` for
-`S12-VISIBLE-BINDING-APPROVAL-AND-CUSTODY-GAP`. The custody successor requires
-an explicit owner-approved digest, captures the protected input once, pins it
-inside the existing S12 transaction, extends the existing Core marker with that
-digest and reads the committed route through the existing Package B binding
-receipt after P5. That custody repair is independently clear at
-`482e70083afb067f1e804cf1a8abd20e4ebf41ab`. Its owner-approved protected
-binding remains installed byte-identically at mode `0600`, with digest
-`sha256:dde57df0d2fc34860a52e486aaccdb1aacccb83d3eedb3de40ccd5109959542f`.
-Source convergence excision is archived at `3302472676131f7046fa6e9bd4d5727e31ee28f3`.
-All 29 logical refs in the retired source-candidate namespace were deleted and
-ubuntu Git health passed with production clean at `98fd8b38`. Canonical VERIFY
-passed; APPLY completed P1, failed at P2 before Core authority or external
-effect, and restored prior source. Linux evidence proved the P2 child could
-read inherited root-opened descriptors but `/proc/self/fd` reopening failed
-with `EACCES`. The direct-FD repair was archived in successor
-`e298bab161bf0f4882bcef6e9cd701d546b63ff2`; canonical VERIFY passed and the
-production transaction reached P10/ACCEPTED. Source pointer and Core authority
-bind e298, exactly one semantic writer and the managed wake are active, normal
-ingress is restored, and Node/Python/Hermes are active. P9 is owner-accepted
-`TERMINAL_AMBIGUOUS_NO_RESEND`: attempt count 1, external effect unknown,
-resend forbidden and duplicate/resend count 0. S13 is `NOT STARTED`; it waits
-for evidence-based observation exit criteria and separate explicit owner
-deletion authorization. No S13 deletion is authorized. R2 attributable
-production mutation is none. The separately authorized XHS public-only recovery is recorded apart
-from R2 and leaves `XHS_PUBLIC_NETWORK_SMOKE_PENDING_R3`.
+remains at `e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Runtime rollback is
+closed, retired v0.13 payloads are deleted, `18002` and O2 are absent, and the
+direct loopback Ombre service on `18001` remains active. The post-S12
+capability-parity and product-effect repairs are live: AI digest, verified
+Feishu Calendar creation, replay-safe Todo registration and the managed wake
+are restored, F6a/F6b delivery guards are deployed, and the Minutes strict
+replan is production verified. The F6OBS real-08:00 observation is the ready
+frontier; S13 is `NOT STARTED` and its deletion scope is not authorized. The
+H1 Hermes playground boundary transformation is `PLANNED`
+(`docs/governance/hermes-playground-boundary.md`). S-stage exit conditions and
+S12 R-node detail are canonical in `active_sequence.md` and
+`s12-readiness-topology.md`; historical narratives live in `phase_status.md`.
+The 2026-08-17 owner-authorized cleanup removed dead code, stale docs and
+local artifacts; every deletion is recorded in `docs/governance/cleanup.md`.
 
 ## Lifecycle Stages
 
@@ -290,7 +63,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/hermes-core-scheduling-and-unified-runtime.md` | Schema v2 scheduling and unified-runtime target |
 | `docs/governance/s12-readiness-topology.md` | Canonical S12 R-node dependency topology, acceptance ledger and reviewer handoff |
 | `docs/governance/post-s12-product-effect-repair.md` | Completed post-S12 recovery record and owner-approved F6 delivery-guard frontier |
-| `docs/governance/s12-r1b-web-routing.md` | Current R1B Web capability assembly task and acceptance boundary |
+| `docs/governance/hermes-playground-boundary.md` | Hermes playground demotion boundary contract and T0-T6 stage plan |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/hermes_release_deployment.md` | Immutable-SHA deployment and rollback contract |
 | `docs/governance/phase_status.md` | Historical phase closure status |
@@ -300,7 +73,6 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/skills.md` | On-demand skill map |
 | `docs/governance/delivery-evidence.md` | Delivery evidence and adversarial acceptance |
 | `docs/governance/agent-capability-governance.md` | Skill, hook, plugin and MCP governance |
-| `docs/governance/sub_agents.md` | Sub-agent candidate policy |
 | `docs/governance/cleanup.md` | Retired/deleted component record |
 | `docs/governance/media-pipeline.md` | Media pipeline and context policy |
 | `docs/governance/sticker-catalog.md` | Sticker catalog and safe `RAN_MEDIA` contract |
@@ -315,7 +87,6 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/hermes-context-optimization.md` | Context optimization, cache and soft-reset contract |
 | `docs/governance/external-mcp-gateway.md` | External MCP admission and system queue |
 | `docs/governance/wechat-bridge-media-buffer.md` | WeChat media buffering semantics |
-| `docs/governance/mimo-power-mcp.md` | Retired MiMo Power MCP record |
 | `docs/governance/multi_frontend_identity_strategy.md` | Multi-frontend identity and timeline |
 | `docs/governance/prompt-slimming-audit.md` | Prompt slimming ownership audit |
 

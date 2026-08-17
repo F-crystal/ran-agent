@@ -74,3 +74,6 @@ docs/governance/archive/
 .agents/
 .playwright-mcp/
 vault/ombre/
+
+# Test scratch dirs
+node_bridge/.tmp-test-*/

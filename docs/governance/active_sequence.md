@@ -27,6 +27,7 @@ S0 facts/runtime selection
   -> post-S12 F6 delivery guards (PROD_APPLIED; next 08:00 observation pending; plan: docs/governance/post-s12-product-effect-repair.md)
   -> post-S12 Minutes strict replan (PROD_VERIFIED; one readback-proven document; 2026-08-17)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
+  -> H1 Hermes playground boundary transformation (PLANNED; plan: docs/governance/hermes-playground-boundary.md; starts after S13 or by explicit owner reorder)
 ```
 
 The post-S12 repair restores AI digest, Feishu Calendar, and Todo reminder

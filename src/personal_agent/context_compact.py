@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
-    from personal_agent.database import AgentDatabase
+    from personal_agent.db import Database
 
 
 CompactionStrategy = Literal["auto", "handoff", "micro", "aggressive"]
@@ -46,7 +46,7 @@ class ContextCompactor:
 
     def __init__(
         self,
-        database: AgentDatabase | None = None,
+        database: Database | None = None,
         context_window: int = DEFAULT_CONTEXT_WINDOW,
     ):
         self._database = database

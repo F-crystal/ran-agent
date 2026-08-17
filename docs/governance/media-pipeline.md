@@ -4,7 +4,7 @@ Status: CURRENT (2026-07-04)
 
 This document owns the current media pipeline contract. Detailed WeChat buffer
 semantics live in `docs/governance/wechat-bridge-media-buffer.md`; retired
-MiMo Power notes live in `docs/governance/mimo-power-mcp.md`.
+MiMo Power records live in `docs/governance/cleanup.md`.
 
 ## Mainline
 

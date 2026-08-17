@@ -261,7 +261,8 @@ review identifies a concrete gap.
 
 ### R1B — One Generic Web Acquisition Route
 
-Focused contract: `docs/governance/s12-r1b-web-routing.md`.
+Focused contract: `docs/governance/s12-r1b-web-routing.md` (retired in the
+2026-08-17 cleanup after R1B completion; recoverable from git history).
 
 - [x] Default companion surface exposes `mcp-search_hub`, not the built-in
   generic `web` toolset/provider block.

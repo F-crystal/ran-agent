@@ -1,6 +1,81 @@
 # Cleanup Scope
 
-Status: CURRENT (2026-08-06)
+Status: CURRENT (2026-08-17)
+
+## Deleted (2026-08-17, Owner-Authorized Aggressive Cleanup)
+
+Python dead code:
+
+- `src/personal_agent/ombre_brain_mcp.py` + `tests/test_ombre_brain_mcp.py`
+  (standalone reimplementation, self-test only)
+- `src/personal_agent/proactive_support.py` (zero repo references)
+- `scripts/read_claude_settings_env.py` + `tests/test_read_claude_settings_env.py`
+  (orphan pair)
+
+Node dead code:
+
+- `node_bridge/src/desktopPresence.mjs` + test (uncomposed per R1F)
+- `node_bridge/src/core/coreManagedWakeManifest.mjs` + test (live wake path
+  reads `core_managed_wake.v1.json` directly)
+- `node_bridge/src/externalMcp/experienceRanking.mjs` + test (zero importers)
+
+Orphan scripts and stale root docs:
+
+- `scripts/diagnose-social-reader.sh`, `scripts/diagnose-sticker-catalog.sh`
+  (zero refs)
+- `scripts/install_playwright_mcp.sh` (zero refs)
+- `scripts/phase5_hermes_gateway_smoke.sh` + `scripts/phase5_hermes_full_chain_smoke.mjs`
+  (Phase 5 closed)
+- `scripts/tavily-search.sh` + `scripts/claude-deep-search.sh` + root `TOOLS.md`
+  (only referenced each other; contradict the search_hub mainline)
+- root `HEARTBEAT.md` (stale orphan; superseded by `hermes/profile/AGENTS.md`
+  proactive boundary)
+
+Governance docs:
+
+- `docs/governance/s12-r1b-web-routing.md` (one-off completed; inbound refs updated)
+- `docs/governance/sub_agents.md` (content duplicated in `AGENTS.md`)
+- `docs/governance/mimo-power-mcp.md` (merged here; the 2026-07-06 retirement
+  record above is the canonical MiMo Power note)
+
+Local artifacts (untracked, irreversible):
+
+- `debug/`: p1-production-inventory, p2-ombre-recall-contract,
+  p3-runtime-comparison, post-p3-composed-gates, cron-core-v05,
+  s6-draft-snapshot-20260808 (all completed phases; the retired-O2 draft bundle
+  went with them)
+- `local_archive/` 340MB -> ~4MB: `runtime/builder-inputs` + `runtime/artifacts`
+  (rebuildable; digests pinned in governance JSONs; installed copy on server),
+  100 old archive-and-push journals (2026-08-17 frontier kept), July
+  workflow-evidence files, worktree-retirement, agent-governance-wip-park
+  evidence, s10-migration-rehearsal, `recovery/` (two completed transactions),
+  `debug/worktree-convergence-20260808`, `docs/design/*` except `openclaw/`
+  (named retention), `docs/deployment/*` except the referenced cloudflare guide
+- caches: `.pytest_cache`, `.playwright-mcp`, `node_bridge/.tmp-test-*`,
+  `__pycache__`, `.DS_Store`
+
+Kept deliberately (evidence overrode the deletion recommendation):
+
+- `scripts/provision-fastembed-model.py` — `vector_memory_index.py` uses
+  `local_files_only=True`; this script is the only offline model provisioning
+  path for fresh deploys
+- `node_bridge/src/core/ombreProjectionService.mjs` + test — dead in code
+  today, but it is the owner-authorized S8 projector that H1/T4c plans to
+  compose (`docs/governance/hermes-playground-boundary.md`)
+- `node_bridge/src/ombreRecallMcpServer.mjs` + `ombreRecallPolicy.mjs` (retired
+  18002 recall service) — deletion deferred: the release acceptance chain still
+  probes its toolset (`accept-hermes-release.sh`,
+  `apply-hermes-runtime-split.sh`); removal needs a scoped release-chain scrub
+- `node_bridge/src/quickAck.mjs` — env keys entangled with release-chain
+  script assertions; deferred
+- S12 one-off transaction set (`scripts/s12-cutover.py`, `core-cutover.mjs`,
+  `core-s12-acceptance.mjs`, `rehearse-core-schedule-migration.mjs`,
+  `core/coreCutoverCommand.mjs`, `coreS12Acceptance.mjs`,
+  `coreScheduleCutover.mjs`, `coreSystemSchedules.mjs` + paired tests) —
+  deferred to S13, its owning stage
+- `local_archive/vault-config/` (personal config snapshots),
+  `local_archive/runtime/task-state/remove-ran-agent-linux-account` (blocked
+  live task), `debug/persona_proposals/` (live runtime output)
 
 ## Deleted (2026-08-06, Unified Hermes Runtime Cleanup)
 

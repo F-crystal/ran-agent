@@ -30,7 +30,7 @@ from personal_agent.conversation_state import (
 )
 from personal_agent.db import Database
 from personal_agent.interfaces.chat import IncomingMessage
-from personal_agent.interfaces.model import ModelClient, ModelRequest
+from personal_agent.interfaces.model import ModelClient
 from personal_agent.context_compact import ContextCompactor, CompactionResult
 from personal_agent.exploration_specialist import ExplorationSpecialist
 from personal_agent.knowledge_agent import KnowledgeAgent

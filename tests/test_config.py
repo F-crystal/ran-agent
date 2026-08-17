@@ -197,13 +197,13 @@ class ConfigLoadingTest(unittest.TestCase):
         repo_root = Path(__file__).resolve().parents[1]
         soul = (repo_root / "SOUL.md").read_text(encoding="utf-8")
         identity = (repo_root / "IDENTITY.md").read_text(encoding="utf-8")
-        tools = (repo_root / "TOOLS.md").read_text(encoding="utf-8")
+        profile_rules = (repo_root / "hermes" / "profile" / "AGENTS.md").read_text(encoding="utf-8")
 
         self.assertIn("不要把用户当成任务对象", soul)
         self.assertIn("不要主动长篇报告", soul)
         self.assertIn("不要用分析外泄", identity)
         self.assertIn("不主动把普通陪伴聊天升级成任务", identity)
-        self.assertIn("工具只是后台动作", tools)
+        self.assertIn("回复里不要解释工具过程", profile_rules)
 
     def test_repo_mcp_config_registers_playwright_wrapper_without_home_shortcuts(self) -> None:
         mcp_path = Path(__file__).resolve().parents[1] / ".mcp.json"
