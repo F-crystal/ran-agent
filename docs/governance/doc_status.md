@@ -23,8 +23,8 @@ The archived post-S12 capability-parity and product-effect repair code paths
 are live in production. The dated digest backfills, verified Calendar event,
 Todo schedule registration and managed-wake activation completed on
 2026-08-17. The first catch-up digest exposed F6 malformed-envelope leakage
-and a missing Core wake date gate; their bounded repair is local-only,
-verified and reviewed pending archive and owner-signed apply. The source restores
+and a missing Core wake date gate; their bounded repair is verified, reviewed
+and archived but not deployed pending owner-signed apply. The source restores
 the existing Python AI-digest preparation semantics under
 Core due-date authority, an explicit historical-date path, verified Feishu
 Calendar creation, the semantic split between Calendar and internal Todo

@@ -83,8 +83,8 @@ F1/F2/F3 share one ready frontier with disjoint write scopes but execute
 serially per owner decision. REV/ARCH/DEPLOY run once for the single
 combined candidate. R1 depends on F2, R2 on F3, R3 on F1; R1-R3 execute
 serially in the stated order. W depends on R1+R2+R3 evidence.
-F6 follows the first real managed-wake digest and remains local-only until its
-own review, archive and owner-signed apply complete.
+F6 follows the first real managed-wake digest and remains outside production
+until its owner-signed apply completes.
 
 ## Node Checklist
 
@@ -300,8 +300,11 @@ own review, archive and owner-signed apply complete.
   normalize, non-digest schedules still deliver, dateless wake output cannot
   reach the adapter, and failed WorkRuns remain durable without replay or a
   completed-only hook.
-- [ ] **F6ARCH** — Archive and reconcile the canonical status documents via
-  `skills/archive-and-push`; not authorized by this continuation request.
+- [x] **F6ARCH** — Archive and reconcile the canonical status documents via
+  `skills/archive-and-push`.
+  Done 2026-08-17: transaction `20260817T023259Z-62443` completed after an
+  in-place validation resume pinned the current Node runtime; the default
+  Python baseline and 236 affected Node tests passed, and `main` was pushed.
 - [ ] **F6DEPLOY** — Owner-signed production apply after F6ARCH; not started.
 - [ ] **F6OBS** — Observe the first real 08:00 digest after F6DEPLOY; require a
   plain dated body, one terminal receipt and no visible private protocol.
@@ -309,9 +312,9 @@ own review, archive and owner-signed apply complete.
 ## Reconciliation Items
 
 - Production remains on the prior repaired source with managed wake active;
-  F6 is local-only pending F6ARCH and F6DEPLOY.
-- `active_sequence.md`, `current_runtime_status.md` and `doc_status.md` must
-  describe F6 as the ready frontier before the next archive.
+  F6 is archived but not applied pending F6DEPLOY.
+- `active_sequence.md`, `current_runtime_status.md` and `doc_status.md`
+  describe owner-signed F6DEPLOY as the ready frontier.
 
 ## Prohibitions
 

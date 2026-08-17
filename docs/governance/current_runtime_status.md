@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED; PRODUCT-EFFECT RECOVERY COMPLETE; F6 LOCAL_VERIFIED / REVIEWED; S13 NOT STARTED (2026-08-17)
+Status: S12 COMPLETE / PROD_ACCEPTED; PRODUCT-EFFECT RECOVERY COMPLETE; F6 LOCAL_VERIFIED / REVIEWED / ARCHIVED; S13 NOT STARTED (2026-08-17)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -10,7 +10,7 @@ historical phase records stay in their focused governance documents.
 
 ```text
 repository_state: post-S12 product-effect repair applied 2026-08-17
-source_pointer: current repaired main source; F6 remains local-only
+source_pointer: current repaired production source; archived F6 is not applied
 core_authority: core-cutover:v1 committed at e298bab161bf0f4882bcef6e9cd701d546b63ff2
 companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
@@ -46,7 +46,7 @@ product-effect repair was applied on 2026-08-17; the two dated digest
 backfills, verified Calendar creation, replay-safe Todo schedule registration
 and managed-wake activation completed. The first catch-up digest then exposed
 malformed private-envelope leakage and a missing Core wake exact-date gate.
-The bounded F6 repair is local-only pending archive and owner-signed apply. The
+The bounded F6 repair is archived but not deployed pending owner-signed apply. The
 successor makes Python the sole date-specific AIHOT/template/prompt
 owner, binds scheduled reports to the persisted occurrence due date and
 timezone, restores explicit historical-date preparation, restores verified
@@ -792,9 +792,9 @@ closed.
 The canonical execution order and stage exit conditions live in
 `docs/governance/active_sequence.md`. S0-S12 are complete and S12 is
 `PROD_ACCEPTED`; Core authority remains e298. Product-effect recovery and
-managed-wake activation are complete. F6 is the ready frontier: archive the
-locally verified/reviewed malformed-envelope and wake-date guards, obtain a
-separate owner-signed production apply, then observe one real 08:00 digest
+managed-wake activation are complete. F6 is the ready frontier: obtain a
+separate owner-signed production apply for the archived malformed-envelope and
+wake-date guards, then observe one real 08:00 digest
 with a plain dated body and no visible private protocol. S13 remains not
 started. Cleanup also requires separate explicit owner deletion authorization;
 none is current.
