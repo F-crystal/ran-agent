@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-17)
 
 This file is the public documentation index and conflict rule. Current runtime
 facts live in `docs/governance/current_runtime_status.md`; historical deployment
@@ -12,18 +12,19 @@ acceptance checklists and review handoff live in
 
 ## Current State
 
-The clean production checkout and accepted source pointer are at
-`9df626fc30a733bd76dccb42849a527fce9565b3`; `core-cutover:v1` remains at
-`e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Hermes v0.20 is
+The repaired post-S12 source is applied in production; `core-cutover:v1`
+remains at `e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Hermes v0.20 is
 `PROD_VERIFIED` for the bounded evidence in `current_runtime_status.md`.
 Runtime rollback is closed, retired v0.13 payloads are deleted, `18002` and O2
 are absent, and the direct loopback Ombre service on `18001` remains active.
 The earlier companion overlay is rollback-only evidence.
 
-The archived post-S12 capability-parity successor's code paths are live in
-production per the 2026-08-15/16 digest-backfill/calendar/todo-reminder
-operation, superseding the earlier not-yet-deployed note; the exact production
-source pointer is freshly confirmed at the next owner-signed apply. It restores
+The archived post-S12 capability-parity and product-effect repair code paths
+are live in production. The dated digest backfills, verified Calendar event,
+Todo schedule registration and managed-wake activation completed on
+2026-08-17. The first catch-up digest exposed F6 malformed-envelope leakage
+and a missing Core wake date gate; their bounded repair is local-only,
+verified and reviewed pending archive and owner-signed apply. The source restores
 the existing Python AI-digest preparation semantics under
 Core due-date authority, an explicit historical-date path, verified Feishu
 Calendar creation, the semantic split between Calendar and internal Todo
@@ -31,9 +32,8 @@ reminders, and the existing pending-Todo list owner. Python owns the digest
 template; Node owns only trusted orchestration and the single existing delivery
 path. The successor does not add another runtime, scheduler, wake, store, or
 action registry. The bounded post-S12 product-effect defect repair (plan:
-`docs/governance/post-s12-product-effect-repair.md`) is locally verified and
-independently reviewed; archive, owner-signed apply, the three recovery
-effects and wake activation remain ahead.
+`docs/governance/post-s12-product-effect-repair.md`) records the completed
+recovery and the current F6 frontier.
 
 S2 adds one production-verified typed action for an existing
 Feishu Minutes transcript: `feishu.minutes_to_doc`. It uses the authenticated
@@ -287,7 +287,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/hermes-core-foundation.md` | Package A boundary and frozen Schema v1 |
 | `docs/governance/hermes-core-scheduling-and-unified-runtime.md` | Schema v2 scheduling and unified-runtime target |
 | `docs/governance/s12-readiness-topology.md` | Canonical S12 R-node dependency topology, acceptance ledger and reviewer handoff |
-| `docs/governance/post-s12-product-effect-repair.md` | Owner-approved bounded post-S12 product-effect defect repair plan with node checklist |
+| `docs/governance/post-s12-product-effect-repair.md` | Completed post-S12 recovery record and owner-approved F6 delivery-guard frontier |
 | `docs/governance/s12-r1b-web-routing.md` | Current R1B Web capability assembly task and acceptance boundary |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/hermes_release_deployment.md` | Immutable-SHA deployment and rollback contract |

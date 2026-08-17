@@ -125,11 +125,13 @@ export function createCoreRuntimeComposition({
       let instruction = reminder
         ? `处理 owner 明确设置的到点提醒：${reminder.content}。提醒时间：${reminder.reminder_at}。仅在待办仍为 pending 时发送；否则保持静默。`
         : task.payloadRef === 'system-task:ai-daily-digest' ? '' : promptFor(task.payloadRef);
+      let expectedDigestDate = '';
       if (task.payloadRef === 'system-task:ai-daily-digest') {
         if (task.recurrence?.kind !== 'daily' || typeof task.recurrence.timeZone !== 'string') {
           throw coreError('CORE_DAILY_DIGEST_RECURRENCE_INVALID', 'daily digest requires its persisted daily timezone');
         }
         const localDate = localDateForInstant(task.scheduledFor, task.recurrence.timeZone);
+        expectedDigestDate = localDate;
         const secret = String(env.RAN_AGENT_INTERNAL_CONTROL_SECRET || '');
         if (!secret || /\s/.test(secret)) {
           throw coreError('CORE_DAILY_DIGEST_PREPARE_CONFIG', 'daily digest preparation requires private Python authority');
@@ -160,8 +162,13 @@ export function createCoreRuntimeComposition({
         ? createTrustedBridgeInformationalReportTask(base, 'scheduled_ai_daily_digest')
         : createTrustedBridgeTask(base, 'hermes_proactive_event');
       const response = await channelHub(message, { env, logger, replyBackend: env.replyBackend });
+      const replyText = String(response?.replyText || '').trim();
+      if (expectedDigestDate && !replyText.includes(expectedDigestDate)) {
+        logger.warn?.('[core-daily-digest] rejected=true reason=date_missing');
+        throw coreError('CORE_DAILY_DIGEST_DATE_MISSING', 'daily digest reply omitted its scheduled local date');
+      }
       return {
-        replyText: response?.replyText,
+        replyText,
         suppressSend: response?.suppressSend === true,
         provider: response?.provider || response?.source || 'hermes',
         model: response?.model || response?.profile || 'unspecified',

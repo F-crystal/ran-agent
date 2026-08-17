@@ -71,20 +71,22 @@ test('worker claims one queued WorkRun, records terminal evidence, and never re-
 test('handler failure becomes one durable failed result instead of an automatic retry', async (t) => {
   const { core, now } = await setup(t);
   let calls = 0;
+  let postTerminalCalls = 0;
+  const handler = async () => {
+    calls += 1;
+    throw Object.assign(new Error('unknown outcome'), { code: 'ETIMEDOUT' });
+  };
+  handler.afterTerminal = async () => { postTerminalCalls += 1; };
   const worker = createCoreWorkRunWorker({
     core, now, hashContent: () => TOKEN,
-    handlers: {
-      system_maintenance: async () => {
-        calls += 1;
-        throw Object.assign(new Error('unknown outcome'), { code: 'ETIMEDOUT' });
-      },
-    },
+    handlers: { system_maintenance: handler },
   });
   const [result] = await worker.runOnce();
   assert.equal(result.state, 'failed');
   assert.equal(core.reader.workRun(result.workRunId).failure_class, 'ETIMEDOUT');
   assert.deepEqual(await worker.runOnce(), []);
   assert.equal(calls, 1);
+  assert.equal(postTerminalCalls, 0);
   await core.close();
 });
 

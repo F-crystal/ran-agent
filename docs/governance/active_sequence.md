@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-17)
 
 This is the canonical order for active project work. Historical P-numbered plans
 do not control current execution. Keep exactly one stage `IN_PROGRESS` when the
@@ -23,23 +23,20 @@ S0 facts/runtime selection
   -> S11 synthetic fault acceptance
   -> S12 production cutover (COMPLETE / PROD_ACCEPTED at e298bab)
   -> post-S12 capability parity restoration (LOCAL_VERIFIED / REVIEWED / ARCHIVED; code paths live in production per 2026-08-15/16 evidence)
-  -> post-S12 product-effect defect repair (LOCAL_VERIFIED / REVIEWED; archive pending; plan: docs/governance/post-s12-product-effect-repair.md)
+  -> post-S12 product-effect defect repair (PROD_APPLIED / RECOVERY_COMPLETE)
+  -> post-S12 F6 delivery guards (LOCAL_VERIFIED / REVIEWED; archive pending; plan: docs/governance/post-s12-product-effect-repair.md)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
 The post-S12 repair restores AI digest, Feishu Calendar, and Todo reminder
 capability parity inside the single Companion/Core topology. Core authority
-remains `e298bab`, and managed wake is prepared/paused; S13 has not started.
-Fresh 2026-08-15/16 production evidence shows the parity successor's code
-paths live, superseding the earlier apply-pending note; the exact production
-source pointer is freshly confirmed at the next owner-signed apply. The
-follow-on product-effect defect repair (reminder binding resolution, digest
-date gate, calendar envelope replan) is LOCAL_VERIFIED and REVIEWED; its
-archive, owner-signed production apply, the three recovery effects
-(2026-08-15 digest re-backfill, screenshot calendar retry, orphan Todo Core
-registration) and owner-signed wake activation remain ahead. Archive
-completion does not authorize deployment, wake activation, historical digest
-delivery, calendar creation, or cleanup.
+remains `e298bab`; the repaired post-S12 source is applied, the three recovery
+effects are verified, and managed wake is active. Its first catch-up digest
+exposed F6: malformed private-envelope text could escape when JSON contained
+literal newlines, and the Core wake path lacked the exact-date egress gate.
+F6a/F6b are locally verified and reviewed; archive, owner-signed production
+apply and the next real 08:00 observation remain ahead. S13 has not started,
+and cleanup still lacks deletion authorization.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

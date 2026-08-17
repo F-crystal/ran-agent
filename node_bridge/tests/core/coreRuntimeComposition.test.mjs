@@ -195,7 +195,8 @@ test('daily digest and Feishu chat schedules use the same typed delivery target 
         runtime: { core, hashContent: () => TOKEN },
         channelHub: async (message) => {
           messages.push(message);
-          return { replyText: 'fixture delivery', provider: 'hermes', model: 'test' };
+          return { replyText: fixture.payloadRef === 'system-task:ai-daily-digest'
+            ? 'fixture delivery 2026-08-16' : 'fixture delivery', provider: 'hermes', model: 'test' };
         },
         fetchImpl: async (_url, init) => {
           const request = JSON.parse(init.body);
@@ -229,6 +230,40 @@ test('daily digest and Feishu chat schedules use the same typed delivery target 
       await core.close();
     });
   }
+});
+
+test('managed wake daily digest fails closed when the reply omits its scheduled local date', async (t) => {
+  const route = {
+    destinationKind: 'user', destinationRef: 'ou-owner',
+    start: '2026-08-15T23:59:00.000Z', due: '2026-08-16T00:00:00.000Z',
+    executionAt: '2026-08-16T16:30:00.000Z',
+    recurrence: { kind: 'daily', time: '08:00:00', timeZone: 'Asia/Shanghai' },
+  };
+  const { core, dbPath, now } = await setup(t, 'system-task:ai-daily-digest', null, route);
+  let sends = 0;
+  const runtime = createCoreRuntimeComposition({
+    runtime: { core, hashContent: () => TOKEN },
+    channelHub: async () => ({ replyText: '给陛下呈上今日 AI 日报', provider: 'hermes', model: 'test' }),
+    fetchImpl: async (_url, init) => {
+      const { date } = JSON.parse(init.body);
+      return { ok: true, async json() { return {
+        ok: true, authenticated: true, date, prompt: `AIHOT report for ${date}`, partial: false,
+      }; } };
+    },
+    sendFeishu: async () => { sends += 1; },
+    now,
+    env: { RAN_AGENT_CORE_WORK_POLL_MS: '250', RAN_AGENT_INTERNAL_CONTROL_SECRET: 'test-secret' },
+  });
+  runtime.start();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  await runtime.stop();
+  const inspect = openTestInspector(dbPath);
+  const work = inspect.prepare('SELECT state,failure_class FROM work_run').get();
+  assert.equal(work.state, 'failed');
+  assert.equal(work.failure_class, 'CORE_DAILY_DIGEST_DATE_MISSING');
+  inspect.close();
+  assert.equal(sends, 0);
+  await core.close();
 });
 
 test('an external notification fails closed when revision or checkpoint digest no longer matches its fact', async (t) => {

@@ -2015,6 +2015,9 @@ function extractReplyEnvelopeFromChoice(body = {}) {
     }
     return normalized;
   }
+  if (candidates.some((candidate) => looksLikeRawPrivateReplyEnvelope(candidate.text))) {
+    throw privateReplyEnvelopeError();
+  }
   return null;
 }
 
@@ -2022,6 +2025,13 @@ function looksLikePrivateReplyEnvelope(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value)
     && Object.hasOwn(value, 'schemaVersion')
     && Object.hasOwn(value, 'message'));
+}
+
+function looksLikeRawPrivateReplyEnvelope(value) {
+  const text = String(value || '').trim();
+  return text.startsWith('{')
+    && /"schemaVersion"\s*:/u.test(text)
+    && /"message"\s*:/u.test(text);
 }
 
 function privateReplyEnvelopeError(cause) {

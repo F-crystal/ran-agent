@@ -1,11 +1,13 @@
 # Post-S12 Product-Effect Defect Repair Plan
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-17)
 
 Bounded repair of three production product-effect defects found on
-2026-08-15/16 during the post-S12 capability-parity backfill operation. The
-owner approved this plan on 2026-08-16. Execution is serial in topology
-order; a node is checked off only with its stated exit evidence.
+2026-08-15/16 during the post-S12 capability-parity backfill operation, plus
+the follow-on F6 delivery guards found after managed wake activation. The owner
+approved the original plan on 2026-08-16 and F6a+F6b on 2026-08-17. Execution
+is serial in topology order; a node is checked off only with its stated exit
+evidence.
 
 ## Defects And Root Causes
 
@@ -38,6 +40,14 @@ order; a node is checked off only with its stated exit evidence.
    executed. The existing one-shot strict replan
    (`replyBackend.mjs:637-668`) is document-only and unreachable for this
    rejection class.
+4. Managed-wake digest leaked malformed private protocol. At 2026-08-17 10:07
+   Hermes produced the required dated report inside a private reply envelope
+   whose `message` contained literal newlines. `JSON.parse` rejected the
+   malformed JSON, after which `extractReplyEnvelopeFromChoice` treated the
+   whole protocol string as ordinary reply text. The Core managed-wake path
+   also lacked the exact-date egress gate already present on the legacy/manual
+   digest route, so it could dispatch either leaked protocol or a dateless
+   body.
 
 ## Topology
 
@@ -50,9 +60,22 @@ F1 Core reminder binding resolution repair
   -> ARCH archive + push + governance reconciliation (same commit)
   -> DEPLOY production apply (owner-signed; server-runtime skill; dry-run first)
   -> R1 re-backfill the 2026-08-15 digest (must carry the date)
+  -> R1b re-backfill the missed 2026-08-17 08:00 scheduled digest (owner
+     request 2026-08-17; primary hypothesis is the deliberate managed-wake
+     pause, to be confirmed read-only on the server: daily Core schedule
+     exists with correct next_due and no occurrence fired at 08:00)
   -> R2 retry the screenshot calendar request
   -> R3 register the Core schedule for the existing orphan Todo (no second Todo)
-  -> W  managed wake activation (owner-signed)
+  -> W  managed wake activation (owner-signed); exit additionally requires
+     the daily 08:00 digest Core schedule to be present with next_due at the
+     next 08:00 local occurrence
+  -> F6a malformed private-envelope fail-closed
+  -> F6b managed-wake digest exact-date egress gate
+  -> F6V affected-boundary verification
+  -> F6REV proportional adversarial review
+  -> F6ARCH archive + governance reconciliation
+  -> F6DEPLOY production apply (owner-signed)
+  -> F6OBS next real 08:00 digest observation
   -> S13 observation frontier (unchanged; deletion not authorized)
 ```
 
@@ -60,6 +83,8 @@ F1/F2/F3 share one ready frontier with disjoint write scopes but execute
 serially per owner decision. REV/ARCH/DEPLOY run once for the single
 combined candidate. R1 depends on F2, R2 on F3, R3 on F1; R1-R3 execute
 serially in the stated order. W depends on R1+R2+R3 evidence.
+F6 follows the first real managed-wake digest and remains local-only until its
+own review, archive and owner-signed apply complete.
 
 ## Node Checklist
 
@@ -137,49 +162,163 @@ serially in the stated order. W depends on R1+R2+R3 evidence.
   reviewer). No blocking finding. Reviewer re-ran the focused suites
   (Node 246/246, Python 48/48) and confirmed the full-suite failure counts
   match this document.
-- [ ] **ARCH** — Archive and push via `skills/archive-and-push`; reconcile
+- [x] **ARCH** — Archive and push via `skills/archive-and-push`; reconcile
   `active_sequence.md`, `current_runtime_status.md`, `doc_status.md` and
   this plan in the same commit; final checks wrapped in
   `workflow_guard.py verify`. Exit: archive transaction complete, push
   confirmed.
-- [ ] **DEPLOY** — Production apply via `skills/server-runtime` (dry-run
+  Done: commit `e9310bf` on `main`, pushed `d29ef57..e9310bf`, transaction
+  `20260817T004053Z-46093`, 19 files. Validation `skipped` with recorded
+  reason per the 0d7c5ce desktop precedent; workflow_guard evidence
+  `20260816T180252449462Z-de15e3a2` (Node 245/245) and
+  `20260816T180304671507Z-9ef49b32` (Python 48/48), both `passed`.
+  Governance docs reconciled in the same commit: the parity successor's
+  live-in-production state now reflects the 2026-08-15/16 fresh evidence.
+- [x] **DEPLOY** — Production apply via `skills/server-runtime` (dry-run
   first). **Owner-signed step.** Exit: dry-run clean, apply complete,
   services active, route smoke checks pass.
-- [ ] **R1** — Re-backfill the 2026-08-15 digest through the manual action.
+  Done 2026-08-17: unified-topology source path (the legacy candidate entry
+  failed closed by design); dry-run `SOURCE_DRY_RUN_OK`; owner-signed apply
+  `SOURCE_APPLIED`, snapshot
+  `/opt/ran_agent-release/source-snapshots/source-20260817T010349Z-e9310bf2a727`,
+  production HEAD `e9310bf2…`, three core services active. Blocking
+  acceptance `verify-hermes-release.sh --release` failed only at
+  `desktopProxyServer.test.mjs` (2 tests); the identical failure reproduces
+  on the server at the prior pointer `d29ef57`, proving pre-existing drift
+  (parity-successor era, desktop-only surface outside the production
+  topology), not a candidate regression. Owner explicitly accepted
+  `e9310bf` with this recorded exception; rollback cannot turn the gate
+  green at either pointer.
+- [-] **F4** — ~~Bounded drift repair~~ **CANCELLED by owner 2026-08-17**:
+  the desktop proxy frontend is declared unneeded; the two
+  `desktopProxyServer.test.mjs` expectations remain known pre-existing drift
+  on an unused surface. Consequence recorded: `verify-hermes-release.sh
+  --release` keeps failing at that file until the surface is retired or the
+  tests are repaired; retiring is out of this round's scope.
+- [x] **R1** — Re-backfill the 2026-08-15 digest through the manual action.
   Exit: exactly one new Feishu message containing `2026-08-15`, terminal
   `sent` receipt with the date gate satisfied; the old dateless message is
   left untouched (deletion not authorized).
-- [ ] **R2** — Retry the screenshot calendar request through normal
+  Done 2026-08-17: action `op_7034aea9120db16e37fadd0b317124fd` returned
+  200 `{delivery_status: sent, partial: false, date: 2026-08-15}` — both new
+  date gates passed (date verified in the body before dispatch). Feishu
+  server-side window scan (08-15 12:00 → 08-17 12:30 +08): exactly one new
+  digest message (08-17 09:40) carries `2026-08-15`; the dateless 08-16
+  23:16 message remains untouched; no duplicate dated message.
+- [x] **R1b** — Re-backfill the missed 2026-08-17 08:00 scheduled digest via
+  the same manual action (owner request). Pre-check (read-only): confirm the
+  daily digest Core schedule exists, its `next_due`, and that no occurrence
+  fired at 08:00 while wake is paused. Exit: exactly one new Feishu message
+  containing `2026-08-17`, terminal `sent` receipt with the date gate
+  satisfied.
+  Done 2026-08-17: read-only Core inspection confirmed the hypothesis —
+  `system-schedule:ai-daily-digest` is `enabled` with
+  `next_due_at=2026-08-17T00:00:00.000Z` (08:00 +08) but no occurrence fired
+  this morning (only the 08-16 occurrence exists); the miss is the
+  deliberate managed-wake pause, not a new defect. Backfill action
+  `op_4f2f36eab38217937df69e620973eb9f` returned 200
+  `{delivery_status: sent, partial: false, date: 2026-08-17}`; Feishu-side
+  scan shows exactly one new digest message (08-17 09:49) carrying
+  `2026-08-17`.
+- [x] **R2** — Retry the screenshot calendar request through normal
   ingress. Exit: exactly one new event created, adapter readback matches
   title/time/reminder, no duplicate event, no `schedule.create` execution
   trace.
-- [ ] **R3** — Inventory pending Todos, confirm exactly one orphan
+  Done 2026-08-17: the screenshot event is `剧本杀《持斧奥夫》`
+  2026-08-22 14:00-19:00 +08 with a 30-minute reminder (a different event
+  from 《七月十三日》; the 08-22 agenda held exactly one event beforehand).
+  The owner re-sent the original message through real ingress at 09:53:
+  the model first answered from session memory without acting, then at
+  09:54 re-emitted the retired contract and was rejected
+  (`HERMES_PRIVATE_REPLY_ENVELOPE_INVALID`). F3 was live (Node restarted
+  09:04 post-apply) and behaved as designed: the replan gate requires
+  calendar intent in the current user text, and the follow-up text
+  ("我没在飞书的日历里看到") carries none, so no replan fired and the
+  fail-closed text returned with zero execution. The event was then
+  created once through the verified adapter contract (create + reminder
+  PATCH + readback): event `f6cf6953-cf32-4312-9e8a-33fc4f670fac_0`,
+  readback `READBACK_OK`, 08-22 agenda afterwards exactly two events, no
+  duplicate.
+
+## Follow-Ups Discovered During Recovery
+
+- **F5 candidate (owner decision pending)** — F3's replan gate keys on the
+  current user text; contract violations on follow-up turns whose text
+  lacks intent patterns get no replan. Bounded extension idea: evaluate
+  intent over the current text plus the recent-turn context tail. Not
+  implemented in this round.
+- **Memory-honesty observation** — at 09:53 the model asserted from
+  session memory that the 08-16 23:26 attempt had booked the event, though
+  that attempt executed nothing. Failed attempts should not be recalled as
+  completed effects. Recorded as a design observation, no code change in
+  this round.
+- [x] **R3** — Inventory pending Todos, confirm exactly one orphan
   (canonical reminder `2026-08-22 08:25:00`), then issue one replay-safe
   registration for that existing todoId via the repaired route. Exit: Core
   reminder schedule count 1 -> 2, Todo row count unchanged, no second Todo;
   firing on 2026-08-22 is future work, registration and scan reconciliation
   evidence suffice here.
-- [ ] **W** — Activate managed wake. **Owner-signed step.** Exit:
-  `enabled=true` confirmed via status; S13 observation frontier becomes the
-  next ready node (deletion still not authorized).
+  Done 2026-08-17: inventory showed exactly one orphan (Todo id 15,
+  `2026-08-22 08:25:00`, never reminded; the three legacy April rows carry
+  `last_reminded_at` and are scan-ineligible). Registration through the
+  repaired route returned `{disposition: registered, scheduleSpecId:
+  todo-reminder-schedule:15, scheduledFor: 2026-08-22T00:25:00.000Z}` — the
+  F1 operation-key resolution works against the real production binding.
+  Replay returned `already_registered`. `schedule_spec` 14 -> 15 (row
+  `enabled`, correct `next_due`), `wake_occurrence`/`work_run` unchanged at
+  51/51 (occurrence materializes at fire time), Todo count unchanged at 12.
+- [x] **W** — Activate managed wake. **Owner-signed step.** Exit:
+  `enabled=true` confirmed via status; the daily 08:00 digest Core schedule
+  is present with `next_due` at the next local 08:00; S13 observation
+  frontier becomes the next ready node (deletion still not authorized).
+  Done 2026-08-17: owner chose immediate activation accepting one dated
+  catch-up duplicate. `reconcile-core-managed-wake.py --mode activate`
+  returned `{status: activated, jobId: 659f138230a7, active: true}`;
+  `--mode verify --expect-active` confirms `verified/active:true`. First
+  tick ran the designed latest-only catch-up wave (`wake_occurrence` and
+  `work_run` 51 -> 64); the digest occurrence for 2026-08-17T00:00Z fired
+  and one dated 8/17 digest arrived at 10:07 (the accepted duplicate);
+  `system-schedule:ai-daily-digest` next_due advanced to
+  2026-08-18T00:00:00.000Z (tomorrow 08:00); `todo-reminder-schedule:15`
+  remains due 2026-08-22T00:25:00.000Z. Three core services active.
+- [x] **F6a** — Treat syntactically malformed content carrying both private
+  `message` and `schemaVersion` keys as a rejected private envelope instead of
+  raw visible text. Ordinary JSON without the private shape remains visible.
+  Done 2026-08-17: the exact literal-newline incident now returns only the
+  existing safe format-error text; the provider content and protocol keys are
+  absent from the reply and warning log.
+- [x] **F6b** — Require the persisted schedule's local due date in the
+  managed-wake digest reply before Package B creates any presentation effect.
+  Done 2026-08-17: a dateless reply creates no Feishu send and terminalizes the
+  WorkRun once as `failed / CORE_DAILY_DIGEST_DATE_MISSING`. The shared worker
+  now runs completed-only post-terminal hooks only for completed WorkRuns.
+- [x] **F6V** — Affected Hermes, replyBackend/calendar-replan, legacy/manual
+  digest, Core composition and WorkRun worker tests pass 236/236. Each of the
+  three new negative checks fails on the prior source and passes on the repair.
+- [x] **F6REV** — Proportional adversarial review found no blocking issue:
+  malformed non-private JSON remains visible, valid private envelopes still
+  normalize, non-digest schedules still deliver, dateless wake output cannot
+  reach the adapter, and failed WorkRuns remain durable without replay or a
+  completed-only hook.
+- [ ] **F6ARCH** — Archive and reconcile the canonical status documents via
+  `skills/archive-and-push`; not authorized by this continuation request.
+- [ ] **F6DEPLOY** — Owner-signed production apply after F6ARCH; not started.
+- [ ] **F6OBS** — Observe the first real 08:00 digest after F6DEPLOY; require a
+  plain dated body, one terminal receipt and no visible private protocol.
 
 ## Reconciliation Items
 
-- `doc_status.md` and `active_sequence.md` still describe the post-S12
-  parity successor as "reviewed but not yet deployed", while the fresh
-  2026-08-15/16 production evidence (new digest route, lark-cli calendar
-  adapter, Core reminder route all live) shows the successor code running in
-  production. Fresh facts outrank the stale schedule; reconcile in the same
-  archive as this repair.
-- R3 uses one manual replay-safe registration through the repaired route
-  because the `system-task:reminder-check` scan does not run while managed
-  wake is paused; after W, the scan resumes as the standing recovery path.
+- Production remains on the prior repaired source with managed wake active;
+  F6 is local-only pending F6ARCH and F6DEPLOY.
+- `active_sequence.md`, `current_runtime_status.md` and `doc_status.md` must
+  describe F6 as the ready frontier before the next archive.
 
 ## Prohibitions
 
 - No second Todo row for the orphan reminder.
 - No duplicate calendar event; adapter readback must prove exactly one.
 - No deletion of the old dateless 2026-08-15 message.
-- Managed wake stays `paused / enabled=false` until node W.
+- Managed wake activation is production state; F6 does not authorize changing
+  the job or deploying new source.
 - `schedule.create` remains rejected; only a fully valid
   `feishu.calendar.create` envelope may reach the adapter.

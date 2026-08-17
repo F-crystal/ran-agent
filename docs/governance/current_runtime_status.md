@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED; POST-S12 PARITY LIVE; PRODUCT-EFFECT REPAIR REVIEWED; S13 NOT STARTED (2026-08-16)
+Status: S12 COMPLETE / PROD_ACCEPTED; PRODUCT-EFFECT RECOVERY COMPLETE; F6 LOCAL_VERIFIED / REVIEWED; S13 NOT STARTED (2026-08-17)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -9,15 +9,15 @@ historical phase records stay in their focused governance documents.
 ## Production
 
 ```text
-repository_sha: 9df626fc30a733bd76dccb42849a527fce9565b3
-source_pointer: 9df626fc30a733bd76dccb42849a527fce9565b3
+repository_state: post-S12 product-effect repair applied 2026-08-17
+source_pointer: current repaired main source; F6 remains local-only
 core_authority: core-cutover:v1 committed at e298bab161bf0f4882bcef6e9cd701d546b63ff2
 companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
 runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
 retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
 runtime_stage: S12 COMPLETE / PROD_ACCEPTED; S13 NOT STARTED
 services: Node, Python, unified Hermes and direct Ombre Brain active; normal ingress restored
-core_runtime: exactly one semantic writer; managed wake prepared and paused after accepted natural execution
+core_runtime: exactly one semantic writer; managed wake active
 acceptance_canary: TERMINAL_AMBIGUOUS_NO_RESEND; one attempt; external effect unknown; no resend or duplicate
 owner_acceptance_ref: owner-s12-e298-terminal-ambiguous-acceptance-20260813
 identity: production processes run as ubuntu:ubuntu
@@ -40,12 +40,13 @@ Hermes-native `cronjob`, `delegate_task` and `execute_code` remain disabled.
 Scheduled outbound is limited to explicit reminders, the opt-in AI digest and
 governed `external_mcp_gateway` notifications.
 
-Production source `9df626f` adds the trusted `todo.create` reminder contract and
-keeps the unified Companion source/wake release path. The post-S12 capability
-parity successor is archived, and fresh evidence from the 2026-08-15/16
-digest-backfill/calendar/todo-reminder operation shows its code paths live in
-production, superseding the earlier apply-pending note; the exact production
-source pointer is freshly confirmed at the next owner-signed apply. The
+The current production source keeps the trusted `todo.create` reminder
+contract and unified Companion source/wake release path. The post-S12
+product-effect repair was applied on 2026-08-17; the two dated digest
+backfills, verified Calendar creation, replay-safe Todo schedule registration
+and managed-wake activation completed. The first catch-up digest then exposed
+malformed private-envelope leakage and a missing Core wake exact-date gate.
+The bounded F6 repair is local-only pending archive and owner-signed apply. The
 successor makes Python the sole date-specific AIHOT/template/prompt
 owner, binds scheduled reports to the persisted occurrence due date and
 timezone, restores explicit historical-date preparation, restores verified
@@ -790,13 +791,13 @@ closed.
 
 The canonical execution order and stage exit conditions live in
 `docs/governance/active_sequence.md`. S0-S12 are complete and S12 is
-`PROD_ACCEPTED`; production source is `9df626f` and Core authority remains
-e298. The capability-parity successor's code paths are live per the
-2026-08-15/16 operation evidence; the reviewed product-effect repair must be
-deployed, its three recovery effects verified, and managed wake activated under
-owner signature, then its runtime behavior and the owner-approved managed-wake
-disposition must be observed before S13 can start. Cleanup also requires separate explicit owner
-deletion authorization; none is current.
+`PROD_ACCEPTED`; Core authority remains e298. Product-effect recovery and
+managed-wake activation are complete. F6 is the ready frontier: archive the
+locally verified/reviewed malformed-envelope and wake-date guards, obtain a
+separate owner-signed production apply, then observe one real 08:00 digest
+with a plain dated body and no visible private protocol. S13 remains not
+started. Cleanup also requires separate explicit owner deletion authorization;
+none is current.
 The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop
 patch, the three governance-hook paths belong to their dedicated task, the

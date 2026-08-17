@@ -620,23 +620,27 @@ test('fails closed for malformed private protocol but keeps ordinary requested J
     RAN_AGENT_CONTEXT_SIZE_LOG: '0',
   });
   const request = { text: '返回 JSON 示例', sender_id: 'json-sender', conversation_id: 'json-conversation', channel: 'wechat' };
-  const malformed = JSON.stringify({
-    schemaVersion: 999,
-    message: '正文',
-    actionRequests: [],
-    activityRequest: null,
-    claims: [],
-    commitments: [],
-  });
   const warnings = [];
-  const rejected = await sendChatToHermesGateway(request, {
-    config,
-    fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: malformed } }] }),
-    logger: { log() {}, warn(value) { warnings.push(String(value)); } },
-  });
-  assert.equal(rejected.reply_text, '回复格式校验失败，请稍后重试。');
-  assert.equal(rejected.reply_envelope, undefined);
-  assert.doesNotMatch(rejected.reply_text, /schemaVersion|actionRequests|commitments/);
+  for (const malformed of [
+    JSON.stringify({
+      schemaVersion: 999,
+      message: '正文',
+      actionRequests: [],
+      activityRequest: null,
+      claims: [],
+      commitments: [],
+    }),
+    '{"message":"正文第一行\n正文第二行","schemaVersion":1,"actionRequests":[],"claims":[],"commitments":[]}',
+  ]) {
+    const rejected = await sendChatToHermesGateway(request, {
+      config,
+      fetchImpl: async () => makeJsonResponse({ choices: [{ message: { content: malformed } }] }),
+      logger: { log() {}, warn(value) { warnings.push(String(value)); } },
+    });
+    assert.equal(rejected.reply_text, '回复格式校验失败，请稍后重试。');
+    assert.equal(rejected.reply_envelope, undefined);
+    assert.doesNotMatch(rejected.reply_text, /schemaVersion|actionRequests|commitments/);
+  }
   assert.match(warnings.join('\n'), /HERMES_PRIVATE_REPLY_ENVELOPE_INVALID/);
   assert.doesNotMatch(warnings.join('\n'), /schemaVersion|actionRequests|commitments/);
 

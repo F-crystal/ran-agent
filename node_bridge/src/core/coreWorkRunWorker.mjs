@@ -107,7 +107,9 @@ export function createCoreWorkRunWorker({
           resultHashToken: result.resultHashToken,
           failureClass: result.failureClass ?? null,
         });
-        await completePostTerminal(handler, work, result.deliveryOutcome ?? null);
+        if (terminal.workRun.state === 'completed') {
+          await completePostTerminal(handler, work, result.deliveryOutcome ?? null);
+        }
         results.push(Object.freeze({ workRunId: work.work_run_id, state: terminal.workRun.state }));
       }
       return Object.freeze(results);

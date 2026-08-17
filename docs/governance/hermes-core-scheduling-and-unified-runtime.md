@@ -1,10 +1,11 @@
 # Hermes Core Scheduling and Unified Runtime
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-17)
 
-Lifecycle: unified Runtime and Core cutover are `PROD_ACCEPTED`; the post-S12
-capability-parity successor is `LOCAL_VERIFIED / REVIEWED / ARCHIVED` and still
-requires a separate production apply.
+Lifecycle: unified Runtime and Core cutover are `PROD_ACCEPTED`; post-S12
+product-effect recovery is applied and managed wake is active. The F6 delivery
+guards are `LOCAL_VERIFIED / REVIEWED` and still require archive plus a
+separate owner-signed production apply.
 
 This decision record amends the implementation direction of the archived v0.4
 cutover contract. The Core cutover is complete; current deployment facts and
@@ -388,7 +389,7 @@ stopping old wake neither loses the next future run nor replays an old one.
 - Package C implements Schema v2 ScheduleSpec/WakeOccurrence
   repositories, `wake_due`, WorkRun creation and lease/fence authority, plus an
   injected managed-clock adapter. Production uses exactly one Core semantic
-  writer and one Companion managed wake, currently prepared/paused.
+  writer and one Companion managed wake, currently active.
 - Package D builds the watermark/quiesce manifest and stages legacy candidates
   paused in a zero-business-write rehearsal. The actual cutover transaction
   later imports accepted candidates with suppression/reconciliation Journal
@@ -470,6 +471,12 @@ canonicalized to numeric `1`; every other malformed private envelope fails
 closed to a safe bridge reply and a content-free error code. It must never fall
 back to raw `reply_text`. Ordinary JSON without the private envelope shape is
 still user-visible when requested.
+
+This includes syntactically invalid JSON carrying both private `message` and
+`schemaVersion` keys, such as literal newlines inside the message string. For a
+Core-managed daily digest, the persisted recurrence's local due date must also
+appear in the final reply before Package B creates an outbox or adapter effect;
+otherwise the WorkRun terminalizes failed without sending.
 
 Task recipes and input sources do not create authority. `minutes -> note`,
 `web -> study note` and `paper -> study note` are recipes that may all end in
