@@ -62,6 +62,10 @@ evidence.
    bounded 1752-character body. The bridge can safely bind that correlation
    label only for this unambiguous exact shape; all unknown/private fields and
    every other missing-ref action remain rejected.
+   The first post-deploy action then failed before any lark-cli write because
+   the model body title differed from `documentTitle`. The same exact-shape
+   canonicalization now binds only that public title metadata; the body and
+   fail-closed executor boundary remain unchanged.
 
 ## Topology
 
@@ -337,8 +341,9 @@ complete; only the next real 08:00 observation remains.
   relax the schema or call tools during replan.
 - [x] **F7b** — Bind the fixed public `feishu-minutes-doc-1` requestRef only
   when the model returns exactly one `feishu.minutes_to_doc` action with only
-  `actionType`/`scope` and the exact four scope keys. This does not normalize
-  `id`, other missing fields, other action types or invalid content.
+  the exact public fields and four scope keys, and bind the body title to
+  `documentTitle`. This does not normalize `id`, other missing fields, other
+  action types or invalid content.
 - [x] **F7V** — An actionless reply replans into one readback-verified document;
   a replan that repeats `id` reaches no lark-cli call. Full replyBackend is
   78/78 and the Calendar/Hermes sibling boundaries are 112/112.

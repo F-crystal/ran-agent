@@ -554,12 +554,12 @@ test('canonicalizes an unambiguous v1 private envelope without exposing protocol
   assert.doesNotMatch(response.reply_text, /schemaVersion|actionRequests|commitments/);
 });
 
-test('binds a missing public requestRef only for an otherwise exact Minutes action', async () => {
+test('canonicalizes only public metadata for an otherwise exact Minutes action', async () => {
   const action = {
     actionType: 'feishu.minutes_to_doc',
     scope: {
       minuteTitle: '前辈对话3', folderTitle: '中海油', documentTitle: '前辈对话3',
-      contentXml: '<title>前辈对话3</title><p>整理内容</p>',
+      contentXml: '<title>访谈整理</title><p>整理内容</p>',
     },
   };
   const content = JSON.stringify({
@@ -584,7 +584,11 @@ test('binds a missing public requestRef only for an otherwise exact Minutes acti
     },
   );
 
-  assert.deepEqual(response.action_requests, [{ requestRef: 'feishu-minutes-doc-1', ...action }]);
+  assert.deepEqual(response.action_requests, [{
+    requestRef: 'feishu-minutes-doc-1',
+    ...action,
+    scope: { ...action.scope, contentXml: '<title>前辈对话3</title><p>整理内容</p>' },
+  }]);
 });
 
 test('parses a trailing private reply envelope without exposing duplicate JSON', async () => {

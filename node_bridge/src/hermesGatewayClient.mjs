@@ -2000,7 +2000,7 @@ function extractReplyEnvelopeFromChoice(body = {}) {
     let canonical = privateShape && ['1', 'v1'].includes(String(parsed.schemaVersion).toLowerCase())
       ? { ...parsed, schemaVersion: 1 }
       : parsed;
-    canonical = bindUnambiguousMinutesRequestRef(canonical);
+    canonical = canonicalizeUnambiguousMinutesAction(canonical);
     let normalized;
     try {
       normalized = normalizeReplyEnvelope({ reply_envelope: canonical });
@@ -2028,21 +2028,25 @@ function looksLikePrivateReplyEnvelope(value) {
     && Object.hasOwn(value, 'message'));
 }
 
-function bindUnambiguousMinutesRequestRef(value) {
+function canonicalizeUnambiguousMinutesAction(value) {
   const action = Array.isArray(value?.actionRequests) && value.actionRequests.length === 1
     ? value.actionRequests[0]
     : null;
   const scope = action?.scope;
+  const actionKeys = Object.keys(action || {}).sort().join(',');
   if (!action || typeof action !== 'object' || Array.isArray(action)
     || action.actionType !== 'feishu.minutes_to_doc'
-    || Object.keys(action).sort().join(',') !== 'actionType,scope'
+    || !['actionType,scope', 'actionType,requestRef,scope'].includes(actionKeys)
     || !scope || typeof scope !== 'object' || Array.isArray(scope)
     || Object.keys(scope).sort().join(',') !== 'contentXml,documentTitle,folderTitle,minuteTitle') {
     return value;
   }
+  const escapedTitle = String(scope.documentTitle || '')
+    .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+  const contentXml = String(scope.contentXml || '').replace(/<title>[^<]*<\/title>/i, `<title>${escapedTitle}</title>`);
   return {
     ...value,
-    actionRequests: [{ requestRef: 'feishu-minutes-doc-1', ...action }],
+    actionRequests: [{ requestRef: 'feishu-minutes-doc-1', ...action, scope: { ...scope, contentXml } }],
   };
 }
 
