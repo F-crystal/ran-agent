@@ -20,15 +20,20 @@ Runtime rollback is closed, retired v0.13 payloads are deleted, `18002` and O2
 are absent, and the direct loopback Ombre service on `18001` remains active.
 The earlier companion overlay is rollback-only evidence.
 
-The archived post-S12 capability-parity successor is reviewed but not yet
-deployed. It restores the existing Python AI-digest preparation semantics under
+The archived post-S12 capability-parity successor's code paths are live in
+production per the 2026-08-15/16 digest-backfill/calendar/todo-reminder
+operation, superseding the earlier not-yet-deployed note; the exact production
+source pointer is freshly confirmed at the next owner-signed apply. It restores
+the existing Python AI-digest preparation semantics under
 Core due-date authority, an explicit historical-date path, verified Feishu
 Calendar creation, the semantic split between Calendar and internal Todo
 reminders, and the existing pending-Todo list owner. Python owns the digest
 template; Node owns only trusted orchestration and the single existing delivery
 path. The successor does not add another runtime, scheduler, wake, store, or
-action registry. Production remains on `9df626f` until a separately authorized
-source apply.
+action registry. The bounded post-S12 product-effect defect repair (plan:
+`docs/governance/post-s12-product-effect-repair.md`) is locally verified and
+independently reviewed; archive, owner-signed apply, the three recovery
+effects and wake activation remain ahead.
 
 S2 adds one production-verified typed action for an existing
 Feishu Minutes transcript: `feishu.minutes_to_doc`. It uses the authenticated
@@ -282,6 +287,7 @@ Stages describe one exact artifact and scope, not permanent quality scores.
 | `docs/governance/hermes-core-foundation.md` | Package A boundary and frozen Schema v1 |
 | `docs/governance/hermes-core-scheduling-and-unified-runtime.md` | Schema v2 scheduling and unified-runtime target |
 | `docs/governance/s12-readiness-topology.md` | Canonical S12 R-node dependency topology, acceptance ledger and reviewer handoff |
+| `docs/governance/post-s12-product-effect-repair.md` | Owner-approved bounded post-S12 product-effect defect repair plan with node checklist |
 | `docs/governance/s12-r1b-web-routing.md` | Current R1B Web capability assembly task and acceptance boundary |
 | `docs/governance/server_runtime_commands.md` | Script-first server runbook |
 | `docs/governance/hermes_release_deployment.md` | Immutable-SHA deployment and rollback contract |

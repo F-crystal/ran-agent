@@ -246,10 +246,10 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   const result = await handleScheduledAiDigestRequest({
     logger: { info() {}, warn() {}, error() {}, log() {} },
     env,
-    bodyText: JSON.stringify({ prompt: preparedPrompt }),
+    bodyText: JSON.stringify({ prompt: preparedPrompt, date: '2026-08-05' }),
     channelHub: async (message) => {
       channelMessage = message;
-      return { replyText: '给陛下呈上今日 AI 日报' };
+      return { replyText: '给陛下呈上今日 AI 日报｜2026-08-05' };
     },
     execFileImpl: async (bin, args) => {
       calls.push({ bin, args });
@@ -261,6 +261,7 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   assert.equal(result.status, 200);
   assert.equal(result.payload.ok, true);
   assert.equal(result.payload.delivery_status, 'sent');
+  assert.equal(result.payload.digest_date, '2026-08-05');
   assert.match(result.payload.outbox_id, /^outbox_[a-f0-9]{32}$/);
   assert.equal(channelMessage.platform, 'feishu');
   assert.equal(channelMessage.channel_type, 'dm');
@@ -298,12 +299,12 @@ test('manual AI digest uses its operation scope to send one digest body exactly 
   const input = {
     logger: { info() {}, warn() {}, error() {}, log() {} },
     env,
-    bodyText: JSON.stringify({ prompt: 'Python 已准备的手动历史日报提示词', mode: 'manual', operation_id: operationId }),
+    bodyText: JSON.stringify({ prompt: 'Python 已准备的手动历史日报提示词', mode: 'manual', operation_id: operationId, date: '2026-07-12' }),
     channelHub: async (message) => {
       taskGenerations += 1;
       assert.equal(message.route_hint, 'manual_ai_daily_digest');
       assert.equal(isTrustedInformationalReportTask(message), true);
-      return { replyText: '日报正文只发送一次' };
+      return { replyText: '日报正文只发送一次｜2026-07-12' };
     },
     execFileImpl: async (bin, args) => {
       sends.push({ bin, args });
@@ -324,6 +325,49 @@ test('manual AI digest uses its operation scope to send one digest body exactly 
   assert.equal(taskGenerations, 2);
 });
 
+test('scheduled AI digest fails closed when the reply omits the target date', async (t) => {
+  const env = tempEnv(t, {
+    FEISHU_LARK_CLI_BIN: 'lark-cli',
+    FEISHU_LARK_CLI_IDENTITY: 'bot',
+  }, 'digest-date-missing-');
+  setFeishuHomeDmTarget({
+    platform: 'feishu',
+    channel_type: 'dm',
+    conversation_id: 'oc-home',
+    sender_id: 'ou-home',
+  }, env);
+  let generations = 0;
+  let sends = 0;
+  const base = {
+    logger: { info() {}, warn() {}, error() {}, log() {} },
+    env,
+    channelHub: async () => {
+      generations += 1;
+      return { replyText: '给陛下呈上今日 AI 日报' };
+    },
+    execFileImpl: async (bin, args) => {
+      sends += 1;
+      return { stdout: '{"ok":true}' };
+    },
+    nowImpl: () => new Date('2026-08-16T00:00:00.000Z'),
+  };
+
+  const missingField = await handleScheduledAiDigestRequest({
+    ...base,
+    bodyText: JSON.stringify({ prompt: 'Python-owned prompt' }),
+  });
+  const datelessReply = await handleScheduledAiDigestRequest({
+    ...base,
+    bodyText: JSON.stringify({ prompt: 'Python-owned prompt', date: '2026-08-15' }),
+  });
+
+  assert.equal(missingField.status, 400);
+  assert.equal(datelessReply.status, 503);
+  assert.equal(datelessReply.payload.reason, 'digest_date_missing');
+  assert.equal(generations, 1);
+  assert.equal(sends, 0);
+});
+
 test('scheduled AI digest control route is loopback and bearer authenticated before it can create trusted provenance', async (t) => {
   const env = tempEnv(t, {
     RAN_AGENT_INTERNAL_CONTROL_SECRET: 'digest-control-secret',
@@ -341,10 +385,10 @@ test('scheduled AI digest control route is loopback and bearer authenticated bef
     url: '/scheduled/ai-daily-digest',
     headers: { authorization: 'Bearer digest-control-secret' },
     remoteAddress: '127.0.0.1',
-    bodyText: JSON.stringify({ prompt: 'Python 已准备的日报提示词' }),
+    bodyText: JSON.stringify({ prompt: 'Python 已准备的日报提示词', date: '2026-08-16' }),
     channelHub: async (message) => {
       channelMessage = message;
-      return { replyText: '日报正文' };
+      return { replyText: '日报正文｜2026-08-16' };
     },
     execFileImpl: async () => ({ stdout: '{"ok":true}' }),
     ...overrides,

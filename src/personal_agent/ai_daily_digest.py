@@ -25,19 +25,23 @@ AIHOT_FETCH_ERRORS = (OSError, urllib.error.URLError, ValueError, json.JSONDecod
 
 
 class DigestOutboundClient(Protocol):
-    def send_ai_daily_digest(self, prompt: str) -> dict[str, object]:
+    def send_ai_daily_digest(self, prompt: str, *, date: str = "") -> dict[str, object]:
         """Send one prepared digest prompt."""
         ...
 
 
-def build_digest_prompt(facts: str) -> str:
-    """Build the facts package that Hermes will turn into a digest."""
+def build_digest_prompt(facts: str, local_date: str) -> str:
+    """Build the date-bound facts package that Hermes will turn into a digest."""
 
+    _validate_local_date(local_date)
     template = _load_digest_template()
+    if "{YYYY-MM-DD}" not in template:
+        raise RuntimeError("AI daily digest template is missing the date placeholder")
+    prompt = template.replace("{YYYY-MM-DD}", local_date)
     facts_text = facts.strip()
-    if "{facts}" in template:
-        return template.replace("{facts}", facts_text).strip()
-    return "\n".join([template.strip(), "", "[AIHOT/Search Hub 事实材料]", facts_text]).strip()
+    if "{facts}" in prompt:
+        return prompt.replace("{facts}", facts_text).strip()
+    return "\n".join([prompt.strip(), "", "[AIHOT/Search Hub 事实材料]", facts_text]).strip()
 
 
 def _load_digest_template() -> str:
@@ -98,7 +102,7 @@ def prepare_ai_daily_digest(
         partial = True
     return {
         "date": local_date,
-        "prompt": build_digest_prompt(facts),
+        "prompt": build_digest_prompt(facts, local_date),
         "partial": partial,
     }
 
@@ -129,7 +133,7 @@ def run_ai_daily_digest(
     partial = bool(prepared["partial"])
     if partial:
         logger.warning("AI daily digest facts unavailable date=%s", local_date)
-    bridge_result = outbound_client.send_ai_daily_digest(str(prepared["prompt"]))
+    bridge_result = outbound_client.send_ai_daily_digest(str(prepared["prompt"]), date=local_date)
     if bridge_result.get("skipped") is True:
         logger.warning("AI daily digest skipped by Node bridge reason=%s", bridge_result.get("reason"))
         return {"sent": False, "reason": str(bridge_result.get("reason") or "bridge_skipped"), "date": local_date}
@@ -137,7 +141,8 @@ def run_ai_daily_digest(
         bridge_result.get("delivery_status") or bridge_result.get("outbox_status") or ""
     ).strip()
     outbox_id = str(bridge_result.get("outbox_id") or bridge_result.get("outboxId") or "").strip()
-    if delivery_status != "sent" or not outbox_id:
+    digest_date = str(bridge_result.get("digest_date") or "").strip()
+    if delivery_status != "sent" or not outbox_id or digest_date != local_date:
         logger.warning("AI daily digest delivery was not committed")
         return {"sent": False, "reason": "delivery_unconfirmed", "date": local_date}
 

@@ -8,7 +8,7 @@ import { createTempCore, openTestInspector } from './helpers/testCoreInspector.m
 
 const START = '2026-08-08T15:00:00.000Z';
 
-async function setup(t) {
+async function setup(t, { withBinding = true } = {}) {
   const { dbPath } = createTempCore(t, 'hermes-core-reminder-');
   let current = new Date(START);
   const core = openCoreDatabase({ dbPath, now: () => current });
@@ -25,19 +25,21 @@ async function setup(t) {
     },
     apply: (tx) => {
       tx.packageBTurn.createOrResolveConversation({
-        conversationId: 'system-owner-conversation', canonicalConversationKey: 'system-owner-conversation',
+        conversationId: 'owner-conversation:feishu:cutover', canonicalConversationKey: 'owner-conversation:feishu:cutover',
         ownerId: 'owner', actorRef: 'owner:verified', platform: 'feishu', primaryFrontend: 'feishu',
         sourceInstanceId: 'node-channel-hub:feishu',
         platformConversationBinding: 'feishu:conversation:system-owner', createdAt: START,
       });
-      tx.packageBPresentation.createOrReadBinding({
-        operationKey: 'core-cutover:system-owner-binding', bindingId: 'system-owner-binding',
-        conversationId: 'system-owner-conversation', ownerId: 'owner',
-        sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu',
-        destinationKind: 'conversation', destinationRef: 'owner-dm',
-        adapterMetadata: { protocol: 'core-system-schedule', receiptMode: 'typed', routeVersion: '1' },
-        createdAt: START,
-      });
+      if (withBinding) {
+        tx.packageBPresentation.createOrReadBinding({
+          operationKey: 'core-cutover:system-owner-binding', bindingId: 'owner-binding:feishu:cutover',
+          conversationId: 'owner-conversation:feishu:cutover', ownerId: 'owner',
+          sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu',
+          destinationKind: 'conversation', destinationRef: 'owner-dm',
+          adapterMetadata: { protocol: 'core-system-schedule', receiptMode: 'typed', routeVersion: '1' },
+          createdAt: START,
+        });
+      }
     },
   });
   return { core, dbPath, setNow: (value) => { current = new Date(value); } };
@@ -55,7 +57,20 @@ test('explicit todo reminder becomes one replay-safe Core schedule', async (t) =
   const revision = inspector.prepare('SELECT * FROM schedule_spec_revision WHERE schedule_spec_id=?').get(first.scheduleSpecId);
   assert.equal(revision.task_kind, 'scheduled_instruction');
   assert.equal(revision.payload_ref, 'legacy-todo:7');
-  assert.equal(revision.presentation_binding_id, 'system-owner-binding');
+  assert.equal(revision.presentation_binding_id, 'owner-binding:feishu:cutover');
+  inspector.close();
+  await fixture.core.close();
+});
+
+test('registration fails closed without the committed cutover owner binding', async (t) => {
+  const fixture = await setup(t, { withBinding: false });
+  const service = createCoreReminderService({ core: fixture.core, now: () => new Date('2026-08-08T15:00:30.000Z') });
+  await assert.rejects(
+    () => service.register({ todoId: 9, scheduledFor: '2026-08-08T16:00:00.000Z' }),
+    (error) => error?.code === 'CORE_REMINDER_BINDING_MISSING',
+  );
+  const inspector = openTestInspector(fixture.dbPath);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='core_reminder_registered'").get().count, 0);
   inspector.close();
   await fixture.core.close();
 });

@@ -1949,6 +1949,7 @@ function buildHermesReply(body = {}, config = {}, logger = console) {
       follow_up_messages: [],
       media: null,
       model: body.model || config.model,
+      envelope_error_code: error.code,
     };
   }
   const replyText = (contentEnvelope?.message ?? extractHermesReplyText(body)).trim();

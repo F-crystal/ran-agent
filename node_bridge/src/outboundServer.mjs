@@ -304,6 +304,14 @@ export async function handleScheduledAiDigestRequest({
     };
   }
 
+  const digestDate = typeof payload.date === 'string' ? payload.date.trim() : '';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(digestDate)) {
+    return {
+      status: 400,
+      payload: { error: "field 'date' must be YYYY-MM-DD" },
+    };
+  }
+
   const target = getFeishuHomeDmTarget(env);
   if (!target) {
     logger.warn?.('scheduled AI daily digest skipped because Feishu home DM target is missing');
@@ -337,6 +345,10 @@ export async function handleScheduledAiDigestRequest({
   const replyText = String(response?.replyText || '').trim();
   if (!replyText) {
     return { status: 503, payload: { ok: false, reason: 'digest_reply_empty' } };
+  }
+  if (!replyText.includes(digestDate)) {
+    logger.warn?.('scheduled AI daily digest reply rejected because the target date is missing');
+    return { status: 503, payload: { ok: false, reason: 'digest_date_missing' } };
   }
   const outbox = createDurableOutbox({ env, now: nowImpl });
   const outboxItem = await outbox.deliver({
@@ -377,6 +389,7 @@ export async function handleScheduledAiDigestRequest({
       delivery_status: outboxItem.delivery,
       outbox_id: outboxItem.outboxId,
       digest_kind: 'ai_daily_digest',
+      digest_date: digestDate,
     },
   };
 }

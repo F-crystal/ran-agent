@@ -39,14 +39,14 @@ class NodeBridgeOutboundClientTest(TestCase):
             ),
             patch("personal_agent.outbound_channel.urllib.request.urlopen", return_value=_Response()) as urlopen,
         ):
-            result = self.client.send_ai_daily_digest("prepared prompt", mode="manual", operation_id="op_" + "a" * 32)
+            result = self.client.send_ai_daily_digest("prepared prompt", mode="manual", operation_id="op_" + "a" * 32, date="2026-08-15")
 
         self.assertEqual(result["delivery_status"], "sent")
         request = urlopen.call_args.args[0]
         self.assertEqual(request.get_header("Authorization"), "Bearer private-control-secret")
         self.assertEqual(
             json.loads(request.data),
-            {"prompt": "prepared prompt", "mode": "manual", "operation_id": "op_" + "a" * 32},
+            {"prompt": "prepared prompt", "mode": "manual", "operation_id": "op_" + "a" * 32, "date": "2026-08-15"},
         )
         self.assertEqual(urlopen.call_args.kwargs["timeout"], 1260)
 

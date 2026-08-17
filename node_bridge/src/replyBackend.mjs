@@ -219,6 +219,27 @@ export function createReplyBackend(options = {}) {
         };
         excludeFromHistory = true;
       }
+      if (response?.envelope_error_code === 'HERMES_PRIVATE_REPLY_ENVELOPE_INVALID'
+        && hasCalendarCreateIntent(message.text)
+        && !/(?:待办|todo)/i.test(String(message.text || ''))) {
+        try {
+          const replanned = await chatImpl({
+            ...hermesInput,
+            continuity_note: [
+              hermesInput.continuity_note,
+              'NODE_ACTION_REPLAN: The previous reply envelope failed strict validation. Return exactly one feishu.calendar.create actionRequest whose scope contains only title, date (YYYY-MM-DD), startTime/endTime (HH:MM) and reminderMinutes (integer). Never use schedule.create; never add id, actor, authorization, receipt, effect, reminderTime or reminderAt fields; the bridge owns timezone, IDs and verification. Do not call tools.',
+            ].filter(Boolean).join('\n'),
+          }, hermesOptions);
+          const replannedRequest = extractCalendarReplanRequest(replanned);
+          replyEnvelope = Object.freeze({
+            ...replyEnvelope,
+            actionRequests: Object.freeze([replannedRequest]),
+          });
+        } catch (error) {
+          loggerFor(options).warn?.(`calendar action replan rejected code=${String(error?.code || 'ACTION_REPLAN_FAILED')}`);
+          replyEnvelope = Object.freeze({ ...replyEnvelope, actionRequests: Object.freeze([]) });
+        }
+      }
       const informationalReportPolicy = restrictInformationalReportEnvelope(replyEnvelope, message);
       replyEnvelope = informationalReportPolicy.envelope;
 
@@ -650,6 +671,18 @@ function extractDocumentReplanRequest(candidate) {
     || envelope.commitments.length !== 0
     || envelope.claims.length !== 0) {
     throw actionExecutionError('DOCUMENT_REPLAN_INVALID');
+  }
+  return envelope.actionRequests[0];
+}
+
+function extractCalendarReplanRequest(candidate) {
+  const envelope = normalizeReplyEnvelope(candidate);
+  if (envelope.actionRequests.length !== 1
+    || envelope.actionRequests[0]?.actionType !== 'feishu.calendar.create'
+    || envelope.activityRequest !== null
+    || envelope.commitments.length !== 0
+    || envelope.claims.length !== 0) {
+    throw actionExecutionError('CALENDAR_REPLAN_INVALID');
   }
   return envelope.actionRequests[0];
 }

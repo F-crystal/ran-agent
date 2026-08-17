@@ -26,9 +26,9 @@ class StubDigestOutboundClient:
     def __init__(self) -> None:
         self.sent_facts: list[str] = []
 
-    def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
+    def send_ai_daily_digest(self, facts: str, *, date: str = "") -> dict[str, object]:
         self.sent_facts.append(facts)
-        return {"ok": True, "delivery_status": "sent", "outbox_id": "outbox:test-digest"}
+        return {"ok": True, "delivery_status": "sent", "outbox_id": "outbox:test-digest", "digest_date": date}
 
 
 class StubHttpResponse:
@@ -71,15 +71,17 @@ class AiDailyDigestTest(unittest.TestCase):
         template_path = Path("src/personal_agent/prompts/ai_daily_digest_report.md")
         self.assertTrue(template_path.exists())
 
-        prompt = build_digest_prompt("FACTS")
+        prompt = build_digest_prompt("FACTS", "2026-08-15")
 
         self.assertIn("给陛下呈上今日 AI 日报", prompt)
+        self.assertIn("2026-08-15", prompt)
         self.assertIn("标题、来源、正文", prompt)
         self.assertIn("50-200", prompt)
         self.assertIn("报道式自然段", prompt)
         self.assertIn("不要使用“看点/意义/适合/今日信号”", prompt)
         self.assertIn("FACTS", prompt)
         self.assertNotIn("{facts}", prompt)
+        self.assertNotIn("{YYYY-MM-DD}", prompt)
         self.assertNotIn("必须逐字使用", prompt)
 
     def test_run_ai_daily_digest_sends_once_per_local_date(self) -> None:
@@ -138,8 +140,8 @@ class AiDailyDigestTest(unittest.TestCase):
 
     def test_run_ai_daily_digest_does_not_mark_sent_without_delivery_commit(self) -> None:
         class UnconfirmedOutbound:
-            def send_ai_daily_digest(self, facts: str) -> dict[str, object]:
-                del facts
+            def send_ai_daily_digest(self, facts: str, *, date: str = "") -> dict[str, object]:
+                del facts, date
                 return {"ok": True}
 
         result = run_ai_daily_digest(
@@ -193,7 +195,29 @@ class AiDailyDigestTest(unittest.TestCase):
         self.assertEqual(calls, ["https://aihot.virxact.com/api/public/daily/2026-08-14"])
         self.assertEqual(prepared["date"], "2026-08-14")
         self.assertIn("Historical fact", str(prepared["prompt"]))
+        self.assertIn("2026-08-14", str(prepared["prompt"]))
         self.assertFalse(prepared["partial"])
+
+    def test_run_ai_daily_digest_does_not_mark_sent_without_date_confirmation(self) -> None:
+        class DatelessOutbound:
+            def send_ai_daily_digest(self, facts: str, *, date: str = "") -> dict[str, object]:
+                del facts, date
+                return {"ok": True, "delivery_status": "sent", "outbox_id": "outbox:dateless"}
+
+        result = run_ai_daily_digest(
+            config=self.config,
+            database=self.database,
+            outbound_client=DatelessOutbound(),
+            logger=self.logger,
+            now_local=datetime(2026, 7, 11, 8, 0, 0),
+            facts_loader=lambda: "facts",
+        )
+
+        self.assertFalse(result["sent"])
+        self.assertEqual(result["reason"], "delivery_unconfirmed")
+        self.assertIsNone(
+            self.database.get_handoff_value(f"{AI_DAILY_DIGEST_SENT_PREFIX}2026-07-11")
+        )
 
 
 if __name__ == "__main__":

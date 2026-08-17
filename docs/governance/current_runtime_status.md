@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED; POST-S12 CAPABILITY PARITY REVIEWED; S13 NOT STARTED (2026-08-16)
+Status: S12 COMPLETE / PROD_ACCEPTED; POST-S12 PARITY LIVE; PRODUCT-EFFECT REPAIR REVIEWED; S13 NOT STARTED (2026-08-16)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -42,13 +42,22 @@ governed `external_mcp_gateway` notifications.
 
 Production source `9df626f` adds the trusted `todo.create` reminder contract and
 keeps the unified Companion source/wake release path. The post-S12 capability
-parity successor is locally reviewed and archived but requires a separate
-production apply: it makes Python the sole date-specific AIHOT/template/prompt
+parity successor is archived, and fresh evidence from the 2026-08-15/16
+digest-backfill/calendar/todo-reminder operation shows its code paths live in
+production, superseding the earlier apply-pending note; the exact production
+source pointer is freshly confirmed at the next owner-signed apply. The
+successor makes Python the sole date-specific AIHOT/template/prompt
 owner, binds scheduled reports to the persisted occurrence due date and
 timezone, restores explicit historical-date preparation, restores verified
 `feishu.calendar.create`, keeps Todo and Calendar semantics distinct, and fixes
 `/tools/todo/list` to call the existing pending-Todo owner. It adds no runtime,
-scheduler, wake, action registry, or delivery authority.
+scheduler, wake, action registry, or delivery authority. That operation exposed
+three bounded product-effect defects (reminder binding resolution, dateless
+digest acceptance, missing calendar envelope replan); their repair is locally
+verified and independently reviewed per
+`docs/governance/post-s12-product-effect-repair.md`. Managed wake remains
+paused until that repair is deployed, its three recovery effects are verified,
+and wake activation is owner-signed.
 
 ## Memory
 
@@ -782,9 +791,11 @@ closed.
 The canonical execution order and stage exit conditions live in
 `docs/governance/active_sequence.md`. S0-S12 are complete and S12 is
 `PROD_ACCEPTED`; production source is `9df626f` and Core authority remains
-e298. The reviewed capability-parity successor must be deployed separately,
-then its runtime behavior and the owner-approved managed-wake disposition must
-be observed before S13 can start. Cleanup also requires separate explicit owner
+e298. The capability-parity successor's code paths are live per the
+2026-08-15/16 operation evidence; the reviewed product-effect repair must be
+deployed, its three recovery effects verified, and managed wake activated under
+owner signature, then its runtime behavior and the owner-approved managed-wake
+disposition must be observed before S13 can start. Cleanup also requires separate explicit owner
 deletion authorization; none is current.
 The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop

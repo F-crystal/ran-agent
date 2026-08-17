@@ -327,9 +327,13 @@ class BackendHttpController:
             )
             prepared = prepare_ai_daily_digest(local_date)
             bridge_result = self._message_service.send_ai_daily_digest(
-                str(prepared["prompt"]), mode="manual", operation_id=operation_id
+                str(prepared["prompt"]), mode="manual", operation_id=operation_id, date=local_date
             )
-            if str(bridge_result.get("delivery_status") or "") != "sent" or not bridge_result.get("outbox_id"):
+            if (
+                str(bridge_result.get("delivery_status") or "") != "sent"
+                or not bridge_result.get("outbox_id")
+                or str(bridge_result.get("digest_date") or "") != local_date
+            ):
                 return HTTPStatus.BAD_GATEWAY, {"ok": False, "error": "digest delivery unconfirmed"}
         except (TypeError, ValueError, KeyError):
             return HTTPStatus.BAD_REQUEST, {"ok": False, "error": "invalid daily digest request"}

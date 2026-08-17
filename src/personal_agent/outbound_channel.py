@@ -65,7 +65,7 @@ class NodeBridgeOutboundClient:
             raise RuntimeError("node bridge proactive event response missing ok=true")
         return payload
 
-    def send_ai_daily_digest(self, prompt: str, *, mode: str = "scheduled", operation_id: str = "") -> dict[str, object]:
+    def send_ai_daily_digest(self, prompt: str, *, mode: str = "scheduled", operation_id: str = "", date: str = "") -> dict[str, object]:
         """Send one prepared AI digest prompt through the local Node bridge."""
 
         secret = os.getenv("RAN_AGENT_INTERNAL_CONTROL_SECRET", "").strip()
@@ -73,7 +73,7 @@ class NodeBridgeOutboundClient:
             raise RuntimeError("node bridge internal control secret is unavailable")
         request = urllib.request.Request(
             url=f"{self._config.node_bridge_outbound_base_url}/scheduled/ai-daily-digest",
-            data=json.dumps({"prompt": prompt, "mode": mode, "operation_id": operation_id}).encode("utf-8"),
+            data=json.dumps({"prompt": prompt, "mode": mode, "operation_id": operation_id, "date": date}).encode("utf-8"),
             headers={"Content-Type": "application/json", "Authorization": f"Bearer {secret}"},
             method="POST",
         )

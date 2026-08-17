@@ -24,21 +24,26 @@ function reminderTimes(value, now) {
 export function createCoreReminderService({
   core,
   now = () => new Date(),
-  conversationId = 'system-owner-conversation',
-  bindingId = 'system-owner-binding',
 } = {}) {
-  if (!core?.writer?.write || !core?.reader?.conversationIdentityById) {
+  if (!core?.writer?.write || !core?.reader?.conversationIdentityById
+    || !core?.reader?.packageBPresentation?.bindingsByOperation) {
     throw coreError('CORE_REMINDER_DEPENDENCY_INVALID', 'Core reminder service requires an open Core runtime');
   }
   return Object.freeze({
     async register({ todoId, scheduledFor } = {}) {
       const id = positiveTodoId(todoId);
       const times = reminderTimes(scheduledFor, now);
-      const identity = core.reader.conversationIdentityById(conversationId);
-      const binding = identity && core.reader.packageBPresentation.binding({ identity, conversationId, bindingId });
+      const routes = core.reader.packageBPresentation.bindingsByOperation('core-cutover:system-owner-binding');
+      const route = routes.length === 1 && routes[0].state === 'active' ? routes[0] : null;
+      const identity = route && core.reader.conversationIdentityById(route.conversation_id);
+      const binding = identity && core.reader.packageBPresentation.binding({
+        identity, conversationId: route.conversation_id, bindingId: route.presentation_binding_id,
+      });
       if (!identity || !binding || binding.state !== 'active') {
         throw coreError('CORE_REMINDER_BINDING_MISSING', 'Core reminder requires the active owner presentation binding');
       }
+      const conversationId = identity.conversationId;
+      const bindingId = binding.presentation_binding_id;
       const payloadRef = `legacy-todo:${id}`;
       const eventId = `core-reminder:todo:${id}:v1`;
       const sourceRef = JSON.stringify({ todoId: id, scheduledFor: times.requested });

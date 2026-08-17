@@ -22,16 +22,24 @@ S0 facts/runtime selection
   -> S10 migration rehearsal
   -> S11 synthetic fault acceptance
   -> S12 production cutover (COMPLETE / PROD_ACCEPTED at e298bab)
-  -> post-S12 capability parity restoration (LOCAL_VERIFIED / REVIEWED / ARCHIVED; production apply pending)
+  -> post-S12 capability parity restoration (LOCAL_VERIFIED / REVIEWED / ARCHIVED; code paths live in production per 2026-08-15/16 evidence)
+  -> post-S12 product-effect defect repair (LOCAL_VERIFIED / REVIEWED; archive pending; plan: docs/governance/post-s12-product-effect-repair.md)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
 The post-S12 repair restores AI digest, Feishu Calendar, and Todo reminder
-capability parity inside the single Companion/Core topology. Production source
-is still `9df626f`, Core authority remains `e298bab`, and managed wake is
-prepared/paused; S13 has not started. Archive completion does not authorize
-deployment, wake activation, historical digest delivery, calendar creation, or
-cleanup.
+capability parity inside the single Companion/Core topology. Core authority
+remains `e298bab`, and managed wake is prepared/paused; S13 has not started.
+Fresh 2026-08-15/16 production evidence shows the parity successor's code
+paths live, superseding the earlier apply-pending note; the exact production
+source pointer is freshly confirmed at the next owner-signed apply. The
+follow-on product-effect defect repair (reminder binding resolution, digest
+date gate, calendar envelope replan) is LOCAL_VERIFIED and REVIEWED; its
+archive, owner-signed production apply, the three recovery effects
+(2026-08-15 digest re-backfill, screenshot calendar retry, orphan Todo Core
+registration) and owner-signed wake activation remain ahead. Archive
+completion does not authorize deployment, wake activation, historical digest
+delivery, calendar creation, or cleanup.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

@@ -912,7 +912,7 @@ class BackendHttpControllerTest(unittest.TestCase):
             patch.object(
                 self.service,
                 "send_ai_daily_digest",
-                return_value={"delivery_status": "sent", "outbox_id": "outbox_" + "b" * 32},
+                return_value={"delivery_status": "sent", "outbox_id": "outbox_" + "b" * 32, "digest_date": "2026-08-14"},
             ) as send_digest,
         ):
             status, payload = self.controller.handle_ai_daily_digest_action(
@@ -931,7 +931,7 @@ class BackendHttpControllerTest(unittest.TestCase):
         self.assertTrue(payload["effectId"].startswith("ai-daily-digest:"))
         sent_prompt = send_digest.call_args.args[0]
         self.assertIn("一条已验证事实", sent_prompt)
-        self.assertEqual(send_digest.call_args.kwargs, {"mode": "manual", "operation_id": operation_id})
+        self.assertEqual(send_digest.call_args.kwargs, {"mode": "manual", "operation_id": operation_id, "date": "2026-08-14"})
 
     def test_ai_daily_digest_prepare_returns_prompt_without_delivery(self) -> None:
         with (
@@ -967,6 +967,30 @@ class BackendHttpControllerTest(unittest.TestCase):
                     "operationId": operation_id,
                     "actionType": "ai_daily_digest.send",
                     "scope": {"mode": "manual", "date": "2026-08-14"},
+                }
+            )
+
+        self.assertEqual(status, 502)
+        self.assertEqual(payload, {"ok": False, "error": "digest delivery unconfirmed"})
+
+    def test_ai_daily_digest_action_rejects_a_dateless_delivery_receipt(self) -> None:
+        operation_id = "op_" + "d" * 32
+        with (
+            patch(
+                "personal_agent.http_server.prepare_ai_daily_digest",
+                return_value={"date": "2026-08-15", "prompt": "一条事实", "partial": False},
+            ),
+            patch.object(
+                self.service,
+                "send_ai_daily_digest",
+                return_value={"delivery_status": "sent", "outbox_id": "outbox_" + "e" * 32},
+            ),
+        ):
+            status, payload = self.controller.handle_ai_daily_digest_action(
+                {
+                    "operationId": operation_id,
+                    "actionType": "ai_daily_digest.send",
+                    "scope": {"mode": "manual", "date": "2026-08-15"},
                 }
             )
 
