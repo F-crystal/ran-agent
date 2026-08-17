@@ -1843,6 +1843,7 @@ def patch_source_env_bytes(original: bytes) -> bytes:
         "HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1",
         "HERMES_PROFILE": SOURCE_PROFILE,
         "CO_READING_HERMES_API_BASE_URL": "http://127.0.0.1:8642/v1",
+        "AI_DAILY_DIGEST_ENABLED": "false",
     }
     kept: list[str] = []
     for line in original.decode("utf-8").splitlines():
@@ -2050,6 +2051,9 @@ def validate_source_acceptance(candidate: str, *, external_probes: bool = True) 
     if SOURCE_LEGACY_PROFILE_DIR.exists():
         raise ReleaseError("legacy Lite profile remains deployable")
     require_source_wake_script(candidate)
+    for env_file in ENV_FILES:
+        if read_env_values((env_file,)).get("AI_DAILY_DIGEST_ENABLED") != "false":
+            raise ReleaseError(f"daily digest remains enabled: {env_file}")
     for unit in SOURCE_SERVICES[:3]:
         if service_state(unit)["active"] != "active":
             raise ReleaseError(f"source service is inactive: {unit}")

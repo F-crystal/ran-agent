@@ -88,6 +88,7 @@ def test_source_env_patch_removes_split_and_retired_memory_keys() -> None:
         b"RAN_AGENT_STEWARD_TOKEN_FILE=/private/token\n"
         b"OBSIDIAN_MEMORY_MCP_ENABLED=false\n"
         b"PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=5000\n"
+        b"AI_DAILY_DIGEST_ENABLED=true\n"
     )
     patched = MODULE.patch_source_env_bytes(original)
     assert patched == (
@@ -95,6 +96,7 @@ def test_source_env_patch_removes_split_and_retired_memory_keys() -> None:
         b"HERMES_API_BASE_URL=http://127.0.0.1:8642/v1\n"
         b"HERMES_PROFILE=ran-agent-companion\n"
         b"CO_READING_HERMES_API_BASE_URL=http://127.0.0.1:8642/v1\n"
+        b"AI_DAILY_DIGEST_ENABLED=false\n"
     )
 
 
@@ -441,8 +443,12 @@ def test_source_apply_retry_uses_committed_pointer_without_mutation(
     profile_targets = (tmp_path / "config.yaml", tmp_path / "profile.yaml")
     for target in profile_targets:
         target.write_bytes(b"profile\n")
+    env_files = (tmp_path / ".env.local", tmp_path / "node.env.local")
+    for env_file in env_files:
+        env_file.write_text("AI_DAILY_DIGEST_ENABLED=false\n", encoding="utf-8")
     monkeypatch.setattr(MODULE, "current_source_pointer", lambda: pointer)
     monkeypatch.setattr(MODULE, "REPO", tmp_path)
+    monkeypatch.setattr(MODULE, "ENV_FILES", env_files)
     monkeypatch.setattr(MODULE, "LITE_UNIT", unit)
     monkeypatch.setattr(MODULE, "SOURCE_HERMES_OVERLAY_DROPIN", tmp_path / "absent-hermes")
     monkeypatch.setattr(MODULE, "SOURCE_PYTHON_OVERLAY_DROPIN", tmp_path / "absent-python")
