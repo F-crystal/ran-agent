@@ -2043,7 +2043,8 @@ function canonicalizeUnambiguousMinutesAction(value) {
   }
   const escapedTitle = String(scope.documentTitle || '')
     .replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
-  const contentXml = String(scope.contentXml || '').replace(/<title>[^<]*<\/title>/i, `<title>${escapedTitle}</title>`);
+  const bodyXml = String(scope.contentXml || '').replace(/<title>[^<]*<\/title>/i, '');
+  const contentXml = `<title>${escapedTitle}</title>${bodyXml}`;
   return {
     ...value,
     actionRequests: [{ requestRef: 'feishu-minutes-doc-1', ...action, scope: { ...scope, contentXml } }],

@@ -113,9 +113,9 @@ local repair requests one strict Hermes replan whenever the grounded Minutes
 turn has no executable action, while preserving the fail-closed schema, unique
 resource lookup and readback boundary. The final local repair also binds a
 missing public requestRef only for the exact unambiguous Minutes action shape;
-the same narrow normalization binds the body title to `documentTitle` after a
-live zero-effect rejection exposed a model title mismatch. Other invalid
-actions remain rejected. It is not yet deployed.
+the same narrow normalization binds the body title to `documentTitle` after
+live zero-effect rejections exposed missing model title metadata. Other
+invalid actions remain rejected. It is not yet deployed.
 
 S3 deployed source `cc663876881e4d1f5cfb67f20d74230730a2f68c`. A
 privacy-preserving production probe selected an existing active

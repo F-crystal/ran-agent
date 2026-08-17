@@ -62,10 +62,10 @@ evidence.
    bounded 1752-character body. The bridge can safely bind that correlation
    label only for this unambiguous exact shape; all unknown/private fields and
    every other missing-ref action remain rejected.
-   The first post-deploy action then failed before any lark-cli write because
-   the model body title differed from `documentTitle`. The same exact-shape
-   canonicalization now binds only that public title metadata; the body and
-   fail-closed executor boundary remain unchanged.
+   The first post-deploy actions then failed before any lark-cli write because
+   the model body omitted the required `<title>`. The same exact-shape
+   canonicalization now binds only that public title metadata at the front;
+   the remaining body and fail-closed executor boundary stay unchanged.
 
 ## Topology
 
