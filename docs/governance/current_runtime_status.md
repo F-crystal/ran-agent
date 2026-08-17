@@ -173,6 +173,18 @@ marker; after S1 it advances only from the accepted source pointer to an exact
 archived `main` descendant and restores that pointer on rollback. The legacy
 release mode continues to fail closed.
 
+The latest source-advance attempt stopped and restored the prior accepted
+source before acceptance because projection publication bound `source_digest`
+to the raw bytes of the whole Core SQLite file. Unrelated table writes can
+change those bytes without changing the projected activities or their
+revision. The bounded successor derives the digest from the ordered projected
+activity rows and preserves an already verified legacy digest when those rows
+are identical. A same-revision change to any projected row still fails closed.
+The repair is locally verified and has passed an idempotent rehearsal against
+the current production state; production apply is pending. `runuser` remains
+only the native root-to-ubuntu process launcher used by existing release code;
+it creates no user, service identity or permission tier.
+
 ## Active Follow-Ups
 
 The canonical execution order and stage exit conditions live in
@@ -182,7 +194,8 @@ managed-wake activation and F6 production apply are complete. F6OBS is
 superseded by the owner decision to move daily reports to Codex. H0-H5 are
 archived, deployed and production verified, including the daily-digest stop,
 external-MCP default availability, Ombre projection, bounded companionship and
-zombie-runtime removal. S13 remains not started. Cleanup also requires
+zombie-runtime removal. The source projection refresh repair is locally
+verified and awaiting immutable production apply. S13 remains not started. Cleanup also requires
 separate explicit owner deletion authorization; none is current.
 The S5-era root-worktree drafts
 were triaged in S6: the 30 runtime paths remain in the checksummed desktop

@@ -32,6 +32,7 @@ S0 facts/runtime selection
   -> H3 live Ombre continuity (PROD_VERIFIED)
   -> H4 bounded proactive companionship (PROD_VERIFIED)
   -> H5 zombie-runtime excision (PROD_VERIFIED)
+  -> post-H5 source projection refresh repair (LOCAL_VERIFIED / PROD_PENDING)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
@@ -49,7 +50,14 @@ fields, and production contains exactly one readback-proven `前辈对话3` docu
 in the unique `中海油` folder. The owner explicitly reordered H0-H5 ahead of
 S13; H0-H5 are archived, deployed and production verified. The digest is
 stopped and daily reports belong to Codex. S13 has not started, and cleanup
-still lacks deletion authorization.
+still lacks deletion authorization. A later source advance stopped and rolled
+back when projection publication hashed the entire mutable Core SQLite file,
+so an unrelated database write appeared to change an unchanged activity
+revision. The bounded successor hashes only the canonical projected activity
+rows, retains a verified legacy digest while those rows are unchanged, and
+reuses the existing root controller plus ubuntu runtime identity. Focused
+tests and a rehearsal against the current production state pass; immutable
+production apply remains pending.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

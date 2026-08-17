@@ -322,6 +322,18 @@ test('publisher preserves damaged state, rejects same-revision digest conflict, 
   assert.equal(first.activity_revision, 9);
 });
 
+test('unrelated database writes do not change the activity projection revision', () => {
+  const item = fixture('hermes-projection-unrelated-write-', 9);
+  const first = publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+  const db = new DatabaseSync(item.coreDbPath);
+  db.exec('CREATE TABLE unrelated_state (value TEXT NOT NULL)');
+  db.prepare("INSERT INTO unrelated_state (value) VALUES ('changed')").run();
+  db.close();
+
+  const repeated = publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+  assert.equal(repeated.projection_revision, first.projection_revision);
+});
+
 test('runtime access verification checks every directory and current graph file', () => {
   const item = fixture('hermes-projection-runtime-access-', 9);
   publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });

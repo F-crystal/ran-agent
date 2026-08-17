@@ -401,24 +401,24 @@ function readActivities(coreDbPath) {
   const databasePath = path.resolve(coreDbPath);
   const stat = fs.lstatSync(databasePath);
   if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('core_database_invalid');
-  const sourceDigest = sha256(fs.readFileSync(databasePath));
   const db = new DatabaseSync(databasePath, { readOnly: true });
   try {
+    const activities = db.prepare(`
+      SELECT activity_id, title, domain, state, contract_revision, updated_at
+      FROM activity
+      WHERE state IN ('active', 'paused')
+      ORDER BY activity_id
+    `).all().map((row) => ({
+      activity_id: String(row.activity_id),
+      title: String(row.title),
+      domain: String(row.domain),
+      state: String(row.state),
+      contract_revision: Number(row.contract_revision),
+      updated_at: String(row.updated_at),
+    }));
     return {
-      sourceDigest,
-      activities: db.prepare(`
-        SELECT activity_id, title, domain, state, contract_revision, updated_at
-        FROM activity
-        WHERE state IN ('active', 'paused')
-        ORDER BY activity_id
-      `).all().map((row) => ({
-        activity_id: String(row.activity_id),
-        title: String(row.title),
-        domain: String(row.domain),
-        state: String(row.state),
-        contract_revision: Number(row.contract_revision),
-        updated_at: String(row.updated_at),
-      })),
+      sourceDigest: sha256(stableJson(activities)),
+      activities,
     };
   } finally {
     db.close();
@@ -514,7 +514,11 @@ export function publishHermesIdentityProjection({
     }
     failureStateAllowed = true;
 
-    const { sourceDigest, activities } = readActivities(coreDbPath);
+    const { sourceDigest: canonicalSourceDigest, activities } = readActivities(coreDbPath);
+    const sourceDigest = currentGraph
+      && stableJson(currentGraph.snapshot.activities) === stableJson(activities)
+      ? currentGraph.snapshot.source_digest
+      : canonicalSourceDigest;
     const activityRevision = activities.reduce(
       (revision, activity) => Math.max(revision, activity.contract_revision),
       0,
