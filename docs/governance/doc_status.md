@@ -28,7 +28,7 @@ and the retired Python chat graph is absent. The Package B
 presentation-binding namespace repair is already contained in current `main`;
 no separate Package B work remains. S13 is `NOT STARTED` and its
 deletion scope is not authorized. A post-H5 source projection refresh repair
-is `LOCAL_VERIFIED / PROD_PENDING`: it removes the whole-SQLite-byte digest
+is `PROD_VERIFIED`: it removes the whole-SQLite-byte digest
 dependency while preserving same-revision projected-data conflicts and the
 existing root-controller/ubuntu-runtime identity boundary. The H0-H5 contract lives in
 `docs/governance/hermes-playground-boundary.md`. S-stage exit conditions and

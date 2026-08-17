@@ -32,7 +32,7 @@ S0 facts/runtime selection
   -> H3 live Ombre continuity (PROD_VERIFIED)
   -> H4 bounded proactive companionship (PROD_VERIFIED)
   -> H5 zombie-runtime excision (PROD_VERIFIED)
-  -> post-H5 source projection refresh repair (LOCAL_VERIFIED / PROD_PENDING)
+  -> post-H5 source projection refresh repair (PROD_VERIFIED)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
@@ -56,8 +56,8 @@ so an unrelated database write appeared to change an unchanged activity
 revision. The bounded successor hashes only the canonical projected activity
 rows, retains a verified legacy digest while those rows are unchanged, and
 reuses the existing root controller plus ubuntu runtime identity. Focused
-tests and a rehearsal against the current production state pass; immutable
-production apply remains pending.
+tests, an idempotent production-state rehearsal, immutable apply and final
+read-only production acceptance pass.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

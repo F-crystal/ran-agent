@@ -84,7 +84,7 @@ required, not optional.
   existing soft-reset seam and retries once; neither failed attempt enters
   recent or provider-visible history.
 - The source transaction refreshes the existing identity/activity projection
-  before services start. The repair is `LOCAL_VERIFIED / PROD_PENDING`: its
+  before services start. The repair is `PROD_VERIFIED`: its
   source digest covers only the ordered projected activity rows, while an
   identical verified legacy projection remains idempotent. Unrelated Core
   table writes no longer masquerade as same-revision activity changes; actual
