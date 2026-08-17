@@ -83,8 +83,8 @@ F1/F2/F3 share one ready frontier with disjoint write scopes but execute
 serially per owner decision. REV/ARCH/DEPLOY run once for the single
 combined candidate. R1 depends on F2, R2 on F3, R3 on F1; R1-R3 execute
 serially in the stated order. W depends on R1+R2+R3 evidence.
-F6 follows the first real managed-wake digest and remains outside production
-until its owner-signed apply completes.
+F6 follows the first real managed-wake digest. Its owner-signed apply is
+complete; only the next real 08:00 observation remains.
 
 ## Node Checklist
 
@@ -305,23 +305,27 @@ until its owner-signed apply completes.
   Done 2026-08-17: transaction `20260817T023259Z-62443` completed after an
   in-place validation resume pinned the current Node runtime; the default
   Python baseline and 236 affected Node tests passed, and `main` was pushed.
-- [ ] **F6DEPLOY** — Owner-signed production apply after F6ARCH; not started.
+- [x] **F6DEPLOY** — Owner-signed production apply after F6ARCH.
+  Done 2026-08-17: the unified source controller returned
+  `SOURCE_DRY_RUN_OK` then `SOURCE_APPLIED`; Node, Python and unified Hermes
+  are active, retired Full remains inactive/disabled, managed wake verifies
+  active, and the three focused F6 production regressions pass 3/3. The
+  governed read-only final check passed under label `f6-production-deploy`.
 - [ ] **F6OBS** — Observe the first real 08:00 digest after F6DEPLOY; require a
   plain dated body, one terminal receipt and no visible private protocol.
 
 ## Reconciliation Items
 
-- Production remains on the prior repaired source with managed wake active;
-  F6 is archived but not applied pending F6DEPLOY.
+- Production runs the archived F6 source with managed wake active.
 - `active_sequence.md`, `current_runtime_status.md` and `doc_status.md`
-  describe owner-signed F6DEPLOY as the ready frontier.
+  describe F6OBS as the ready frontier.
 
 ## Prohibitions
 
 - No second Todo row for the orphan reminder.
 - No duplicate calendar event; adapter readback must prove exactly one.
 - No deletion of the old dateless 2026-08-15 message.
-- Managed wake activation is production state; F6 does not authorize changing
-  the job or deploying new source.
+- Managed wake activation is production state; F6 deployment did not change
+  its job contract.
 - `schedule.create` remains rejected; only a fully valid
   `feishu.calendar.create` envelope may reach the adapter.

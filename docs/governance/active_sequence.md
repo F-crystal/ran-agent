@@ -24,7 +24,7 @@ S0 facts/runtime selection
   -> S12 production cutover (COMPLETE / PROD_ACCEPTED at e298bab)
   -> post-S12 capability parity restoration (LOCAL_VERIFIED / REVIEWED / ARCHIVED; code paths live in production per 2026-08-15/16 evidence)
   -> post-S12 product-effect defect repair (PROD_APPLIED / RECOVERY_COMPLETE)
-  -> post-S12 F6 delivery guards (LOCAL_VERIFIED / REVIEWED / ARCHIVED; owner-signed apply pending; plan: docs/governance/post-s12-product-effect-repair.md)
+  -> post-S12 F6 delivery guards (PROD_APPLIED; next 08:00 observation pending; plan: docs/governance/post-s12-product-effect-repair.md)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
@@ -34,9 +34,9 @@ remains `e298bab`; the repaired post-S12 source is applied, the three recovery
 effects are verified, and managed wake is active. Its first catch-up digest
 exposed F6: malformed private-envelope text could escape when JSON contained
 literal newlines, and the Core wake path lacked the exact-date egress gate.
-F6a/F6b are locally verified, reviewed and archived; owner-signed production
-apply and the next real 08:00 observation remain ahead. S13 has not started,
-and cleanup still lacks deletion authorization.
+F6a/F6b are deployed and their production boundary checks pass; the next real
+08:00 observation remains ahead. S13 has not started, and cleanup still lacks
+deletion authorization.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

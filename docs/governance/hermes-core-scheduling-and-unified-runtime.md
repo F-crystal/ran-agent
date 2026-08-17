@@ -4,8 +4,7 @@ Status: CURRENT (2026-08-17)
 
 Lifecycle: unified Runtime and Core cutover are `PROD_ACCEPTED`; post-S12
 product-effect recovery is applied and managed wake is active. The F6 delivery
-guards are `LOCAL_VERIFIED / REVIEWED / ARCHIVED` and still require a separate
-owner-signed production apply.
+guards are `PROD_APPLIED`; the next real 08:00 observation remains.
 
 This decision record amends the implementation direction of the archived v0.4
 cutover contract. The Core cutover is complete; current deployment facts and
