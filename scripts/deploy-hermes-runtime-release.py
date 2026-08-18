@@ -131,6 +131,19 @@ SOURCE_ADVANCE_FORBIDDEN_PREFIXES = (
     "migrations/",
     "vault/",
 )
+# Reviewed vault governance documents may ride a source advance; every other
+# vault path stays absolutely forbidden.
+SOURCE_ADVANCE_ALLOWED_VAULT_PATHS = frozenset({
+    "vault/AGENTS.md",
+})
+# Reviewed profile documents that a source profile migration contract may
+# name in allowedProfileDeltaPaths, beyond the config and inert template.
+SOURCE_PROFILE_ALLOWED_DOC_PATHS = frozenset({
+    "hermes/profile/AGENTS.md",
+    "hermes/profile/HERMES_RUNTIME.md",
+    "hermes/profile/skills/academic-writing-support/SKILL.md",
+    "hermes/profile/skills/ran-agent-runtime-debug/SKILL.md",
+})
 
 
 class ReleaseError(RuntimeError):
@@ -1594,7 +1607,7 @@ def validate_source_profile_migration(candidate: str, prior: str, profile_paths:
         migration = load_candidate_json(REPO, candidate, SOURCE_PROFILE_MIGRATION_PATH)
     except (OSError, subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         raise ReleaseError("source profile migration contract is missing or invalid") from exc
-    permitted_delta = {PROFILE_PATH, SOURCE_PROFILE_TEMPLATE_PATH}
+    permitted_delta = {PROFILE_PATH, SOURCE_PROFILE_TEMPLATE_PATH} | SOURCE_PROFILE_ALLOWED_DOC_PATHS
     active_profile = migration.get("activeProfile") if isinstance(migration.get("activeProfile"), dict) else {}
     rollback = migration.get("rollback") if isinstance(migration.get("rollback"), dict) else {}
     allowed_delta = migration.get("allowedProfileDeltaPaths")
@@ -1609,7 +1622,7 @@ def validate_source_profile_migration(candidate: str, prior: str, profile_paths:
         or migration.get("status") != SOURCE_PROFILE_MIGRATION_STATUS
         or migration.get("priorAcceptedSource") != prior
         or allowed_delta != sorted(allowed_delta_set)
-        or PROFILE_PATH not in allowed_delta_set
+        or not allowed_delta_set
         or not allowed_delta_set.issubset(permitted_delta)
         or migrated_paths != allowed_delta_set
         or migration.get("inertSources") != [SOURCE_PROFILE_TEMPLATE_PATH]
@@ -1642,7 +1655,11 @@ def validate_source_advance_paths(
         validate_source_profile_migration(candidate, prior, profile_paths)
     if any(
         path in SOURCE_ADVANCE_FORBIDDEN_PATHS
-        or any(path == prefix.rstrip("/") or path.startswith(prefix) for prefix in SOURCE_ADVANCE_FORBIDDEN_PREFIXES)
+        or any(
+            (path == prefix.rstrip("/") or path.startswith(prefix))
+            and not (prefix == "vault/" and path in SOURCE_ADVANCE_ALLOWED_VAULT_PATHS)
+            for prefix in SOURCE_ADVANCE_FORBIDDEN_PREFIXES
+        )
         for path in paths
     ):
         raise ReleaseError("source advance contains state, data, archive, vault, migration, or env changes")

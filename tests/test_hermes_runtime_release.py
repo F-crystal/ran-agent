@@ -164,9 +164,19 @@ def test_current_source_pointer_is_the_sole_acceptance_authority(
 
 def test_source_advance_rejects_private_or_migrating_paths() -> None:
     MODULE.validate_source_advance_paths([".env.example", "node_bridge/src/replyBackend.mjs", "README.md"])
+    MODULE.validate_source_advance_paths(["vault/AGENTS.md"])
     with pytest.raises(MODULE.ReleaseError, match="profile change requiring a dedicated migration"):
         MODULE.validate_source_advance_paths(["hermes/profile/config.yaml"])
-    for path in (".env.local", "data/private.db", "migrations/999.sql", "vault/raw/item"):
+    for path in (
+        ".env.local",
+        "data/private.db",
+        "migrations/999.sql",
+        "vault/raw/item",
+        "vault/inbox/note.md",
+        "vault/wiki/page.md",
+        "vault/README.md",
+        "vault",
+    ):
         with pytest.raises(MODULE.ReleaseError, match="source advance contains"):
             MODULE.validate_source_advance_paths([path])
 
@@ -189,8 +199,7 @@ def test_source_profile_migration_requires_and_accepts_only_the_exact_contract(
 ) -> None:
     prior = _source_profile_prior()
     candidate = "b" * 40
-    changed = [
-        MODULE.PROFILE_PATH,
+    changed = sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS) + [
         "hermes/profile/scripts/core-wake.sh",
     ]
     with pytest.raises(MODULE.ReleaseError, match="missing or invalid"):
@@ -221,7 +230,7 @@ def test_source_profile_migration_rejects_wrong_authority(
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     with pytest.raises(MODULE.ReleaseError, match="does not match"):
         MODULE.validate_source_advance_paths(
-            [MODULE.PROFILE_PATH],
+            sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS),
             candidate="b" * 40,
             prior=prior,
         )
@@ -234,10 +243,20 @@ def test_source_profile_migration_rejects_an_unexpected_profile_path(
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     with pytest.raises(MODULE.ReleaseError, match="does not match"):
         MODULE.validate_source_advance_paths(
-            [
-                MODULE.PROFILE_PATH,
-                "hermes/profile/unexpected.yaml",
-            ],
+            sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS) + ["hermes/profile/unexpected.yaml"],
+            candidate="b" * 40,
+            prior=_source_profile_prior(),
+        )
+
+
+def test_source_profile_migration_rejects_an_undeclared_profile_subset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blobs = _source_profile_blobs()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    with pytest.raises(MODULE.ReleaseError, match="does not match"):
+        MODULE.validate_source_advance_paths(
+            sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS)[:2],
             candidate="b" * 40,
             prior=_source_profile_prior(),
         )
@@ -304,8 +323,7 @@ def test_governed_companion_migration_passes_source_dry_run_validation(
     root = Path(__file__).parents[1]
     prior = _source_profile_prior()
     candidate = "b" * 40
-    changed = [
-        MODULE.PROFILE_PATH,
+    changed = sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS) + [
         "hermes/profile/scripts/core-wake.sh",
     ]
     blobs = {

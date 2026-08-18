@@ -25,4 +25,4 @@ git show "$CANDIDATE:scripts/bootstrap-hermes-release.sh" > "$BOOTSTRAP_ROOT/boo
   exit 1
 }
 chmod 700 "$BOOTSTRAP_ROOT/bootstrap-hermes-release.sh"
-env RAN_AGENT_RELEASE_SOURCE=origin/main bash "$BOOTSTRAP_ROOT/bootstrap-hermes-release.sh" "$MODE" "$CANDIDATE"
+env RAN_AGENT_RELEASE_SOURCE=origin/main RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP_ROOT/bootstrap-hermes-release.sh" "$MODE" "$CANDIDATE"
