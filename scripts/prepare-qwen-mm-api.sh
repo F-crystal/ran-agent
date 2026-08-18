@@ -15,10 +15,11 @@ PACKAGE_SPEC='qwen-mm-plugins @ git+https://github.com/QwenLM/Qwen-MM-Plugins.gi
 [[ -x "$UV_BIN" ]] || { echo "ERROR: uv not found: $UV_BIN" >&2; exit 1; }
 command -v flock >/dev/null || { echo "ERROR: flock is required to prepare Qwen-MM" >&2; exit 1; }
 command -v timeout >/dev/null || { echo "ERROR: timeout is required to probe Qwen-MM" >&2; exit 1; }
-mkdir -p "$STATE_DIR" "$STATE_DIR/uv-cache" "$STATE_DIR/uv-tools"
+mkdir -p "$STATE_DIR" "$STATE_DIR/uv-cache" "$STATE_DIR/uv-tools" "$STATE_DIR/uv-bin"
 
 export UV_CACHE_DIR="$STATE_DIR/uv-cache"
 export UV_TOOL_DIR="$STATE_DIR/uv-tools"
+export UV_TOOL_BIN_DIR="$STATE_DIR/uv-bin"
 export UV_LINK_MODE=copy
 export UV_PYTHON_DOWNLOADS=never
 

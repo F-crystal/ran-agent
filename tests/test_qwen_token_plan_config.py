@@ -31,6 +31,7 @@ def test_vault_runner_checks_the_configured_key_name() -> None:
 
 
 def test_qwen_mm_runner_uses_the_pinned_backend_and_token_plan_env(tmp_path: Path) -> None:
+    assert 'export UV_TOOL_BIN_DIR="$STATE_DIR/uv-bin"' in QWEN_MM_RUNNER.with_name("prepare-qwen-mm-api.sh").read_text()
     backend = tmp_path / "uv-tools/qwen-mm-plugins/bin/qwen-mm-plugins-api"
     backend.parent.mkdir(parents=True)
     backend.write_text('#!/bin/sh\nprintf "%s\\n%s\\n" "$DASHSCOPE_API_KEY" "$DASHSCOPE_BASE_URL"\n')
