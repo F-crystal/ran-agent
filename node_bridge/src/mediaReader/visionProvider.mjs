@@ -1,11 +1,15 @@
 import { MediaReaderError } from './assetResolver.mjs';
 import { analyzeImageVisionWithDashScope, isDashScopeProvider } from './dashscopeProvider.mjs';
+import { analyzeImageVisionWithQwenMm, isQwenMmProvider } from './qwenMmProvider.mjs';
 
 export async function analyzeImageVision(asset, options = {}) {
   if (options.visionProvider?.analyzeImage) {
     return await options.visionProvider.analyzeImage(asset, options);
   }
   const provider = String(options.env?.PERSONAL_AGENT_VISION_PROVIDER || '').trim();
+  if (isQwenMmProvider(provider)) {
+    return await analyzeImageVisionWithQwenMm(asset, options);
+  }
   if (isDashScopeProvider(provider, options.env)) {
     return await analyzeImageVisionWithDashScope(asset, options);
   }

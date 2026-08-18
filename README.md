@@ -77,7 +77,7 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 
 **社交媒体读取。** `social_reader` 负责 B 站、小红书、微信公众号、音乐分享等链接。社交平台“链接读取”仍优先 `social_reader`，不会被 `search_hub` 抢路。小红书固定走公开解析链路：`wanyi-watermark`、XHS-Downloader public sidecar、通用网页/OG 兜底，再把公开媒体 URL 交给 `media_reader` 做 OCR/VLM；不配置 `XHS_COOKIE`、扫码登录或账号态 MCP。公开解析失败时返回不可读/metadata-only，不会动用个人账号。
 
-**多模态理解。** 微信图片、音频、视频和文档先经过可信路径校验，再交给 `media_reader` 做 OCR、ASR、VLM 或视频分析。视频采用字幕优先策略：字幕、音频 ASR、关键帧 VLM、元数据逐级降级。
+**多模态理解。** 微信图片、音频、视频和文档先经过可信路径校验，再交给 `media_reader` 做 OCR、ASR、VLM 或视频分析。可选的 Qwen-MM 后端用 Token Plan `qwen3.6-flash` 处理 OCR/VLM；ASR 仍走独立的 DashScope 通道。视频采用字幕优先策略：字幕、音频 ASR、关键帧 VLM、元数据逐级降级。
 
 **媒体上下文追问。** 入站媒体会生成会话级 artifact。用户说“刚才那张图”“分析一下刚才那张图”时，入站消息缓冲会把文本与最近媒体显式或软绑定。默认 Context Policy v1 每轮最多注入 3 个紧凑 artifact。
 
@@ -205,7 +205,8 @@ bash scripts/diagnose-hermes-tools.sh
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | 多前端可选入口；开启 Desktop Proxy 时必须保持本机或内网受控 |
 | AI 日报 | `AI_DAILY_DIGEST_ENABLED`, `AI_DAILY_DIGEST_HOUR`, `AI_DAILY_DIGEST_MINUTE` | 可选飞书私聊日报，默认关闭 |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS` | ingest 和记忆召回；MCP deadline 由服务端固定为 15 秒 |
-| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR 和媒体生成 |
+| Qwen Token Plan | `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | 可选 Qwen-MM OCR/VLM 与 Qwen 知识维护；默认模型 `qwen3.6-flash` |
+| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | ASR、媒体生成和未启用 Token Plan 时的 OCR/VLM |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | provider-neutral vault 维护 runner；默认 Qwen-compatible，小步处理 inbox，默认超过 10 条或最老 120 分钟触发维护 |
 | 社交平台 | `SESSDATA` | B 站认证可选；小红书为 public-only，不使用 `XHS_COOKIE` |
 | 媒体上下文 | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | 默认 compact，可回退 legacy |

@@ -154,6 +154,7 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `API_SERVER_KEY`, `HERMES_API_KEY` | Hermes gateway and Node bridge API auth |
 | `PYTHON_BACKEND_BASE_URL` | Python backend, default `http://127.0.0.1:8787` |
 | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen vision, ASR, media generation |
+| `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | Optional Qwen-MM OCR/VLM on `qwen3.6-flash`; does not replace ASR |
 | `TAVILY_API_KEY` | Optional Tavily provider for Search Hub |
 | `SESSDATA` | Optional Bilibili auth; Xiaohongshu reading is public-only and does not use `XHS_COOKIE` |
 | `CO_READING_ROOT_DIR`, `CO_READING_OWNER_TOKEN` | co_reading local state directory and owner-only write auth |

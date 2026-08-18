@@ -564,7 +564,7 @@ OMBRE_BRAIN_STATUS_FILE=/opt/ran_agent/.ran_agent_state/ombre-brain/status.json
 OMBRE_BIND_HOST=127.0.0.1
 OMBRE_MCP_REQUIRE_AUTH=false
 OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
-AI_DAILY_DIGEST_ENABLED=true
+AI_DAILY_DIGEST_ENABLED=false
 AI_DAILY_DIGEST_HOUR=8
 AI_DAILY_DIGEST_MINUTE=0
 HERMES_ACTION_GATE_ENABLED=true
@@ -596,6 +596,28 @@ authentication with `true`—is a release error.
 Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform
 login state must stay in local env files only and must never be printed into
 docs, logs, tool output, or Git.
+
+## Qwen Token Plan Activation
+
+Run this only after the archived source containing the pinned Qwen-MM backend
+has been applied. Use the existing `ubuntu` service owner; do not switch Unix
+identity or change file ownership:
+
+```bash
+cd /opt/ran_agent && bash scripts/configure-qwen-token-plan.sh
+```
+
+The script prepares Qwen-MM before requesting a credential. Paste the key only
+when the terminal prints `现在请粘贴 TOKEN_PLAN_KEY（输入不会显示）`; the input is
+hidden and is never accepted in argv. It validates `qwen3.6-flash` visual chat
+and Responses API before applying an atomic config transaction, then restarts
+and checks the Python and unified Hermes services. Any post-apply failure
+restores the prior env, Qwen settings and systemd drop-in.
+
+Activation routes Qwen-MM OCR/VLM and the knowledge runner through Token Plan.
+It deliberately leaves `qwen3-asr-flash` ASR and media generation on their
+existing DashScope credentials because those models/interfaces are not covered
+by this Token Plan route.
 
 The standard deploy removes account-backed XHS keys from all managed env files.
 Do not add `XHS_COOKIE`, `XHS_MCP_*`, `PERSONAL_AGENT_XHS_MCP_*`, or
@@ -633,18 +655,11 @@ paste key-bearing curl commands into public docs.
 - Public parser metadata is not content-read evidence. `content_read` requires
   actual text or media/OCR fields.
 
-## Scheduled AI Daily Digest
+## Scheduled AI Daily Digest (Retired)
 
-- Public templates keep `AI_DAILY_DIGEST_ENABLED=false`; the managed server
-  deploy writes `AI_DAILY_DIGEST_ENABLED=true` and schedules it for 08:00
-  `Asia/Shanghai`.
-- The digest target is learned from the latest normal Feishu DM handled by
-  `node_bridge/src/feishuBridge.mjs` and stored under runtime state. To bind it,
-  send the bot any private Feishu message once after deployment.
-- Manual smoke is an owner-only internal control action. The local endpoint
-  accepts only loopback requests bearing `RAN_AGENT_INTERNAL_CONTROL_SECRET`;
-  use the authenticated deployment/verification procedure, and never place a
-  literal secret-bearing `curl` command in public documentation.
+`AI_DAILY_DIGEST_ENABLED=false` is the source and production default. The owner
+assigned daily reports to Codex; do not restore a ran-agent target binding,
+08:00 schedule, replacement seed or manual digest smoke.
 
 Do not enable `PERSONAL_AGENT_PROACTIVE_ENABLED` for this feature.
 

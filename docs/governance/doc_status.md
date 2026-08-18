@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-17)
+Status: CURRENT (2026-08-18)
 
 This file is the public documentation index and conflict rule. Current runtime
 facts live in `docs/governance/current_runtime_status.md`; historical deployment
@@ -36,6 +36,10 @@ S12 R-node detail are canonical in `active_sequence.md` and
 `s12-readiness-topology.md`; historical narratives live in `phase_status.md`.
 The 2026-08-17 owner-authorized cleanup removed dead code, stale docs and
 local artifacts; every deletion is recorded in `docs/governance/cleanup.md`.
+The post-H5 Qwen-MM Token Plan stage is `LOCAL_VERIFIED` and `IN_PROGRESS`:
+the source candidate keeps one `media_reader` facade, uses `qwen3.6-flash` for
+optional OCR/VLM and knowledge maintenance, and leaves ASR on DashScope. It is
+not yet archived, deployed or activated with the owner's key.
 
 ## Lifecycle Stages
 

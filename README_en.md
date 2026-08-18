@@ -79,7 +79,7 @@ known limitations.
 
 **Social media reading.** `social_reader` handles Bilibili, Xiaohongshu, WeChat articles, music shares, and related social links. Xiaohongshu is public-only: it tries `wanyi-watermark`, the XHS-Downloader public sidecar, and minimal HTML/OG fallback, then sends public media URLs to `media_reader` for OCR/VLM. It does not use `XHS_COOKIE`, QR login, or account-backed MCP; public parse failures return unreadable/metadata-only results instead of touching a personal account.
 
-**Multimodal understanding.** WeChat images, audio, video, and documents first pass trusted-path validation, then go through `media_reader` for OCR, ASR, VLM, or video analysis. Video analysis is subtitle-first: subtitles, audio ASR, keyframe VLM, then metadata fallback.
+**Multimodal understanding.** WeChat images, audio, video, and documents first pass trusted-path validation, then go through `media_reader` for OCR, ASR, VLM, or video analysis. The optional Qwen-MM backend uses Token Plan `qwen3.6-flash` for OCR/VLM; ASR stays on its separate DashScope route. Video analysis is subtitle-first: subtitles, audio ASR, keyframe VLM, then metadata fallback.
 
 **Media follow-up context.** Inbound media becomes conversation-scoped artifacts. When the user says “that image from earlier” or “analyze the image from before,” the inbound message buffer binds the text to recent media explicitly or as a soft candidate. Context Policy v1 injects at most 3 compact artifacts per turn by default.
 
@@ -206,7 +206,8 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | Optional multi-frontend entries; keep Desktop Proxy local or on a controlled private network when enabled |
 | AI daily digest | `AI_DAILY_DIGEST_ENABLED`, `AI_DAILY_DIGEST_HOUR`, `AI_DAILY_DIGEST_MINUTE` | Optional Feishu DM digest, disabled by default |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS` | ingest and memory recall; the MCP deadline is fixed at 15 seconds |
-| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | OCR/VLM/ASR and media generation |
+| Qwen Token Plan | `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | Optional Qwen-MM OCR/VLM and Qwen knowledge maintenance; default model `qwen3.6-flash` |
+| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | ASR, media generation, and OCR/VLM when Token Plan is not enabled |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | Provider-neutral vault maintenance runner; Qwen-compatible by default, processes inbox in small steps, and triggers maintenance above 10 pending items or oldest item age of 120 minutes by default |
 | Social platforms | `SESSDATA` | Optional Bilibili auth; Xiaohongshu is public-only and does not use `XHS_COOKIE` |
 | Media context | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | compact by default, legacy fallback available |

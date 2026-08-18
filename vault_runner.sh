@@ -34,14 +34,20 @@ fi
 
 COMMAND="$1"
 
-if [ -z "${DASHSCOPE_API_KEY:-}" ]; then
-  echo "DASHSCOPE_API_KEY is not set."
+API_KEY_ENV="${PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV:-${PERSONAL_AGENT_QWEN_API_KEY_ENV:-DASHSCOPE_API_KEY}}"
+[[ "$API_KEY_ENV" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]] || {
+  echo "Invalid knowledge-agent API key environment variable name."
+  exit 1
+}
+API_KEY_VALUE="${!API_KEY_ENV:-}"
+if [ -z "$API_KEY_VALUE" ]; then
+  echo "$API_KEY_ENV is not set."
   echo "Please set it in $ENV_FILE."
   exit 1
 fi
 
-if [ "${DASHSCOPE_API_KEY:-}" = "REPLACE_WITH_YOUR_DASHSCOPE_API_KEY" ]; then
-  echo "DASHSCOPE_API_KEY is still placeholder text in $ENV_FILE."
+if [[ "$API_KEY_VALUE" == REPLACE_WITH_* ]]; then
+  echo "$API_KEY_ENV is still placeholder text in $ENV_FILE."
   exit 1
 fi
 

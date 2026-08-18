@@ -1,6 +1,6 @@
 # Media Pipeline
 
-Status: CURRENT (2026-07-04)
+Status: CURRENT (2026-08-18)
 
 This document owns the current media pipeline contract. Detailed WeChat buffer
 semantics live in `docs/governance/wechat-bridge-media-buffer.md`; retired
@@ -97,6 +97,23 @@ metadata and image URLs must still be forwarded to analysis when available.
 Video analysis is subtitle-first when available, then audio ASR, then keyframe
 VLM, then metadata-only fallback.
 
+## Provider Boundary
+
+`media_reader` remains the only Hermes-visible media facade. Its optional
+`qwen-mm` provider delegates OCR and image/keyframe understanding to the pinned
+`QwenLM/Qwen-MM-Plugins` API process; trusted paths, downloads, cache, batching,
+partial results and public tool names remain owned by ran-agent. The backend is
+prepared ahead of activation and runtime calls never install dependencies.
+
+Token Plan activation uses `qwen3.6-flash` for Qwen-MM OCR/VLM and for the Qwen
+knowledge runner. The current Token Plan model list does not include the
+Qwen-MM Omni ASR model, so audio transcription deliberately stays on the
+existing DashScope `qwen3-asr-flash` path. This is one explicit provider split,
+not a silent fallback stack. `scripts/configure-qwen-token-plan.sh` validates
+both visual chat and Responses API before atomically switching local config;
+the key is read once from a hidden prompt and is never accepted on the command
+line.
+
 ## Context Policy
 
 `RAN_AGENT_CONTEXT_POLICY=compact` is the default. It injects at most
@@ -119,7 +136,7 @@ Rollback: set `RAN_AGENT_CONTEXT_POLICY=legacy`.
   runtime setting.
 - Runtime artifacts under `debug/`, `.ran_agent_state/`, and media task dirs
   are local state and must not be committed.
-- Production OCR uses DashScope Qwen-VL OCR. PaddleOCR is a best-effort local
-  override; the media reader startup script uses the same DashScope/120s
-  fallback defaults when env files are absent. OCR timeout or partial success
-  should remain typed.
+- The default unconfigured OCR path remains DashScope Qwen-VL OCR. After the
+  explicit Token Plan transaction, OCR/VLM use Qwen-MM with
+  `qwen3.6-flash`; PaddleOCR remains an explicit local override. OCR timeout or
+  partial success stays typed.

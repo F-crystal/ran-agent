@@ -1,6 +1,7 @@
 import { MediaReaderError } from './assetResolver.mjs';
 import { analyzeImageOcrWithDashScope, isDashScopeProvider } from './dashscopeProvider.mjs';
 import { analyzeImageOcrWithPaddle } from './paddleOcrProvider.mjs';
+import { analyzeImageOcrWithQwenMm, isQwenMmProvider } from './qwenMmProvider.mjs';
 
 export async function analyzeImageOcr(asset, options = {}) {
   if (options.ocrProvider?.analyzeImage) {
@@ -9,6 +10,9 @@ export async function analyzeImageOcr(asset, options = {}) {
   const provider = String(options.env?.PERSONAL_AGENT_OCR_PROVIDER || '').trim();
   if (!provider || provider.toLowerCase() === 'paddleocr' || provider.toLowerCase() === 'paddle') {
     return await analyzeImageOcrWithPaddle(asset, options);
+  }
+  if (isQwenMmProvider(provider)) {
+    return await analyzeImageOcrWithQwenMm(asset, options);
   }
   if (isDashScopeProvider(provider, options.env)) {
     return await analyzeImageOcrWithDashScope(asset, options);

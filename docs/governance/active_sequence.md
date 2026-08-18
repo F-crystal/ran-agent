@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-17)
+Status: CURRENT (2026-08-18)
 
 This is the canonical order for active project work. Historical P-numbered plans
 do not control current execution. Keep exactly one stage `IN_PROGRESS` when the
@@ -33,6 +33,7 @@ S0 facts/runtime selection
   -> H4 bounded proactive companionship (PROD_VERIFIED)
   -> H5 zombie-runtime excision (PROD_VERIFIED)
   -> post-H5 source projection refresh repair (PROD_VERIFIED)
+  -> post-H5 Qwen-MM Token Plan media/knowledge routing (IN_PROGRESS; LOCAL_VERIFIED, awaiting archive/deploy and owner key activation)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
@@ -58,6 +59,13 @@ rows, retains a verified legacy digest while those rows are unchanged, and
 reuses the existing root controller plus ubuntu runtime identity. Focused
 tests, an idempotent production-state rehearsal, immutable apply and final
 read-only production acceptance pass.
+
+The Qwen-MM Token Plan stage preserves `media_reader` as the single public
+facade and locally verifies a pinned internal OCR/VLM backend using
+`qwen3.6-flash`. Knowledge uses the same Token Plan key/model after activation;
+ASR remains on the existing DashScope route because the current Token Plan
+catalog does not include the Omni ASR model. Archive/deploy and the owner's
+single hidden key entry remain before production verification.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

@@ -100,7 +100,7 @@ function extractMessageContent(body) {
   return '';
 }
 
-function parseJsonContent(text) {
+export function parseJsonContent(text) {
   const raw = String(text || '').trim();
   if (!raw) {
     return {};

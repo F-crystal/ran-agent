@@ -653,6 +653,53 @@ test('transcribe_audio uses DashScope ASR adapter when an API key is configured'
   assert.match(requests[0].messages[0].content[0].input_audio.data, /^data:audio\/wav;base64,/);
 });
 
+test('analyze_image routes OCR and vision through the pinned Qwen-MM facade adapter', async () => {
+  const calls = [];
+  const result = await handleMediaReaderMcpRequest(
+    {
+      method: 'tools/call',
+      params: {
+        name: 'analyze_image',
+        arguments: { url: 'https://cdn.example.com/pic.png', ocr: true, vlm: true },
+      },
+    },
+    {
+      env: {
+        ...tempCacheEnv(),
+        PERSONAL_AGENT_OCR_PROVIDER: 'qwen-mm',
+        PERSONAL_AGENT_VISION_PROVIDER: 'qwen-mm',
+        QWEN_MM_API_VL_MODEL: 'qwen3.6-flash',
+      },
+      fetchImpl: async (url) => responseFromBytes({
+        url,
+        headers: { 'content-type': 'image/png', 'content-length': String(pngBytes().length) },
+        bytes: pngBytes(),
+      }),
+      resolveHostnameImpl: async () => ['93.184.216.34'],
+      qwenMmCallMcpTool: async (request) => {
+        calls.push(request);
+        if (request.toolName === 'ocr') {
+          return { content: [{ type: 'text', text: '图中文字' }] };
+        }
+        const content = JSON.stringify({ summary: '一张测试图片', objects: ['test'] });
+        return {
+          content: [{
+            type: 'text',
+            text: JSON.stringify({ choices: [{ message: { content } }] }),
+          }],
+        };
+      },
+    }
+  );
+
+  assert.equal(result.structuredContent.ok, true);
+  assert.equal(result.structuredContent.ocr_text, '图中文字');
+  assert.equal(result.structuredContent.scene_summary, '一张测试图片');
+  assert.deepEqual(result.structuredContent.model, { ocr: 'qwen3.6-flash', vlm: 'qwen3.6-flash' });
+  assert.deepEqual(calls.map((call) => call.toolName).sort(), ['ocr', 'vision_chat']);
+  assert.ok(calls.every((call) => !Object.hasOwn(call.arguments, 'api_key')));
+});
+
 test('analyze_video runs ffprobe ffmpeg frame extraction and DashScope analysis', async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'media-reader-ffmpeg-'));
   const calls = [];

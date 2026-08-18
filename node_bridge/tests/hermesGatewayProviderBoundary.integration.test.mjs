@@ -144,6 +144,7 @@ async function stopChild(child) {
 }
 
 test('real unified Hermes v0.20 gateway preserves system-priority Canon at provider boundary', {
+  skip: !HERMES || !HERMES_PYTHON ? 'requires the sealed Hermes v0.20 runtime' : false,
   timeout: 120_000,
 }, async (t) => {
   assertSealedHermesRuntime();

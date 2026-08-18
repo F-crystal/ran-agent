@@ -152,6 +152,7 @@ ran-agent 使用仓库内 MCP 服务：
 | `API_SERVER_KEY`, `HERMES_API_KEY` | Hermes gateway 与 Node bridge API 鉴权 |
 | `PYTHON_BACKEND_BASE_URL` | Python backend，默认 `http://127.0.0.1:8787` |
 | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen 视觉、ASR、媒体生成 |
+| `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | 可选 Qwen-MM OCR/VLM；使用 `qwen3.6-flash`，不接管 ASR |
 | `TAVILY_API_KEY` | Search Hub 的可选 Tavily provider |
 | `SESSDATA` | B 站平台认证可选；小红书读取为 public-only，不配置 `XHS_COOKIE` |
 | `CO_READING_ROOT_DIR`, `CO_READING_OWNER_TOKEN` | co_reading 本地状态目录和 owner-only 写入鉴权 |
