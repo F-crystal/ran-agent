@@ -792,10 +792,39 @@ function truncateText(text, maxChars) {
 }
 
 function extractHermesText(payload = {}) {
-  if (typeof payload.output_text === 'string' && payload.output_text.trim()) return payload.output_text.trim();
+  if (typeof payload.output_text === 'string' && payload.output_text.trim()) {
+    return unwrapHermesReplyEnvelope(payload.output_text.trim());
+  }
   const choice = Array.isArray(payload.choices) ? payload.choices[0] : null;
   const text = choice?.message?.content || choice?.text || '';
-  return String(text || '').trim() || 'Hermes returned an empty reply.';
+  return unwrapHermesReplyEnvelope(String(text || '').trim()) || 'Hermes returned an empty reply.';
+}
+
+// Some Hermes profiles wrap the assistant reply in a JSON envelope such as
+// {"reply":"..."} or {"translation":"..."} (optionally inside a ```json fence).
+// Unwrap it so the raw JSON never leaks into the co-reading thread or the
+// translation judge. Judge verdicts like {"valid":true,"reason":"..."} are
+// multi-key objects and pass through untouched.
+function unwrapHermesReplyEnvelope(text) {
+  if (!text || text[0] !== '{' && !text.startsWith('```')) return text;
+  const candidate = text.startsWith('```')
+    ? text.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim()
+    : text;
+  try {
+    const parsed = JSON.parse(candidate);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      for (const key of ['reply', 'text', 'content', 'message', 'answer', 'translation']) {
+        if (typeof parsed[key] === 'string' && parsed[key].trim()) return parsed[key].trim();
+      }
+      const entries = Object.entries(parsed);
+      if (entries.length === 1 && typeof entries[0][1] === 'string' && entries[0][1].trim()) {
+        return entries[0][1].trim();
+      }
+    }
+  } catch {
+    // Not an envelope; keep the original text.
+  }
+  return text;
 }
 
 async function staticResponse(relativePath, type) {

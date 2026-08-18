@@ -850,6 +850,95 @@ test('co_reading Web ask-Hermes route only accepts shared annotations and stores
   });
 });
 
+test('co_reading Web ask-Hermes unwraps a JSON reply envelope instead of storing raw JSON', async () => {
+  await withStore(async ({ root, store }) => {
+    const imported = await callTool(
+      'reading_import_pasted_text',
+      { owner_token: 'owner', title: 'Envelope Book', text: '信封测试正文。' },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    const bookId = imported.structuredContent.book.id;
+    const chunkId = imported.structuredContent.chunks[0].id;
+    const sharedAnn = store.addAnnotation({
+      bookId,
+      chunkId,
+      quote: '信封测试',
+      note: 'shared-note',
+      visibility: 'shared',
+    });
+
+    const app = createCoReadingWebApp({
+      store,
+      config: {
+        accessToken: 'web-token',
+        ownerToken: 'owner',
+        rootDir: root,
+        hermesBaseUrl: 'http://hermes.test/v1',
+      },
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          choices: [{ message: { content: '{"reply":"哈哈，这句戳中我了。真正的共读回应。"}' } }],
+        }),
+      }),
+    });
+
+    const asked = await app.handleRequest(req('POST', `/api/co-reading/annotations/${encodeURIComponent(sharedAnn.id)}/ask-hermes`, {
+      token: 'web-token',
+      body: {},
+    }));
+    assert.equal(asked.status, 200);
+    assert.equal(asked.body.reply.text, '哈哈，这句戳中我了。真正的共读回应。');
+    const thread = store.readThread(sharedAnn.id);
+    assert.equal(thread.replies.length, 1);
+    assert.equal(thread.replies[0].text, '哈哈，这句戳中我了。真正的共读回应。');
+  });
+});
+
+test('co_reading Web translation unwraps a JSON translation envelope before judging and saving', async () => {
+  await withStore(async ({ root, store }) => {
+    const imported = await callTool(
+      'reading_import_pasted_text',
+      { owner_token: 'owner', title: 'Envelope Translation Book', text: 'The boy who lived under the stairs.' },
+      { rootDir: root, ownerToken: 'owner' }
+    );
+    const bookId = imported.structuredContent.book.id;
+    const chunkId = imported.structuredContent.chunks[0].id;
+
+    const app = createCoReadingWebApp({
+      store,
+      config: {
+        accessToken: 'web-token',
+        ownerToken: 'owner',
+        rootDir: root,
+        hermesBaseUrl: 'http://hermes.test/v1',
+      },
+      fetchImpl: async (url, request) => {
+        const body = JSON.parse(request.body);
+        const isJudge = /translation QA judge/i.test(body.messages?.[0]?.content || '');
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            choices: [{ message: { content: isJudge ? '{"valid":true,"reason":"direct translation"}' : '{"translation":"住在楼梯下的那个男孩。"}' } }],
+          }),
+        };
+      },
+    });
+
+    const translated = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
+    assert.equal(translated.status, 200);
+    assert.equal(translated.body.cached, false);
+    assert.equal(translated.body.translation.text, '住在楼梯下的那个男孩。');
+
+    const cached = await app.handleRequest(req('GET', `/api/co-reading/books/${encodeURIComponent(bookId)}/chunks/${encodeURIComponent(chunkId)}/translation?target=zh-CN`, { token: 'web-token' }));
+    assert.equal(cached.status, 200);
+    assert.equal(cached.body.cached, true);
+    assert.equal(cached.body.translation.text, '住在楼梯下的那个男孩。');
+  });
+});
+
 test('co_reading Web config supports Tailscale host env without reusing Bilibili SOCKS proxy', () => {
   const config = getCoReadingWebConfig({
     CO_READING_WEB_ENABLED: 'true',
