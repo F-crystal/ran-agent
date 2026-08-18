@@ -2295,6 +2295,14 @@ def source_apply(candidate: str) -> dict[str, Any]:
         })
         return receipt
     except BaseException as apply_error:
+        # The rollback below must stay automatic, but the original failure
+        # reason must never be swallowed: without it a clean rollback leaves
+        # no evidence of what acceptance actually rejected.
+        print(
+            f"source apply failed: {type(apply_error).__name__}: {apply_error}",
+            file=sys.stderr,
+            flush=True,
+        )
         try:
             current = current_source_pointer()
             if current is not None and current.get("candidate") == candidate and current.get("snapshot") == str(snapshot):
