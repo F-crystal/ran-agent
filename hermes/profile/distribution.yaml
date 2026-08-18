@@ -18,11 +18,7 @@ env_requires:
     required: false
     default: "http://127.0.0.1:8787"
   - name: DASHSCOPE_API_KEY
-    description: "DashScope key used by media_reader ASR and media generation"
-    required: false
-    default: ""
-  - name: TOKEN_PLAN_API_KEY
-    description: "Optional Token Plan key used by Qwen-MM OCR/VLM and Qwen knowledge maintenance"
+    description: "DashScope key used by media_reader vision/ASR tools"
     required: false
     default: ""
   - name: QWEN_API_KEY
