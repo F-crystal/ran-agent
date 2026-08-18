@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="$ROOT_DIR/.env.local"
+NODE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"
 QWEN_SETTINGS="${QWEN_SETTINGS_PATH:-/home/ubuntu/.qwen/settings.json}"
 DROPIN="/etc/systemd/system/ran-agent-hermes.service.d/40-qwen-token-plan.conf"
 BASE_URL="${TOKEN_PLAN_BASE_URL:-https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1}"
@@ -22,27 +23,31 @@ cleanup() {
 }
 trap cleanup EXIT
 
-[[ -t 0 ]] || { echo "ERROR: please run this command in an interactive SSH terminal" >&2; exit 1; }
 [[ -f "$ENV_FILE" && -O "$ENV_FILE" ]] || { echo "ERROR: run this as the owner of $ENV_FILE" >&2; exit 1; }
+[[ -f "$NODE_ENV_FILE" && -O "$NODE_ENV_FILE" ]] || { echo "ERROR: run this as the owner of $NODE_ENV_FILE" >&2; exit 1; }
 [[ -f "$QWEN_SETTINGS" ]] || { echo "ERROR: Qwen settings not found: $QWEN_SETTINGS" >&2; exit 1; }
 
 bash "$ROOT_DIR/scripts/prepare-qwen-mm-api.sh"
 
-echo
-echo '=================================================='
-echo '现在请粘贴 TOKEN_PLAN_KEY（输入不会显示）'
-echo '粘贴后只按一次回车：'
-echo '=================================================='
-IFS= read -r -s TOKEN_PLAN_KEY
-echo
-[[ "$TOKEN_PLAN_KEY" =~ ^sk-sp-[A-Za-z0-9_-]+$ ]] || { echo "ERROR: this is not a Token Plan key (expected prefix: sk-sp-)" >&2; exit 1; }
+TOKEN_PLAN_KEY="$(sed -n 's/^TOKEN_PLAN_API_KEY=//p' "$ENV_FILE" | tail -n 1)"
+if [[ -z "$TOKEN_PLAN_KEY" ]]; then
+  [[ -t 0 ]] || { echo "ERROR: add TOKEN_PLAN_API_KEY to $ENV_FILE or run this in an interactive SSH terminal" >&2; exit 1; }
+  echo
+  echo '=================================================='
+  echo '现在请粘贴 TOKEN_PLAN_KEY（输入不会显示）'
+  echo '粘贴后只按一次回车：'
+  echo '=================================================='
+  IFS= read -r -s TOKEN_PLAN_KEY
+  echo
+fi
+[[ "$TOKEN_PLAN_KEY" =~ ^sk-sp-[^[:space:]\"\\]+$ ]] || { echo "ERROR: invalid Token Plan key format" >&2; exit 1; }
 
 token_plan_curl() {
   curl --config <(printf 'header = "Authorization: Bearer %s"\n' "$TOKEN_PLAN_KEY") "$@"
 }
 
 cat >"$WORK_DIR/vision-request.json" <<'JSON'
-{"model":"qwen3.6-flash","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="}},{"type":"text","text":"Reply with OK."}]}],"max_tokens":8}
+{"model":"qwen3.6-flash","messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAFklEQVR4nGP4TyFgGDVg1IBRA4aLAQBdePwur/3haQAAAABJRU5ErkJggg=="}},{"type":"text","text":"Reply with OK."}]}],"max_tokens":8}
 JSON
 status="$(token_plan_curl -sS -o "$WORK_DIR/vision-response.json" -w '%{http_code}' \
   -H 'Content-Type: application/json' \
@@ -58,7 +63,7 @@ jq -e '.choices[0].message.content | type == "string" and length > 0' "$WORK_DIR
 }
 
 cat >"$WORK_DIR/responses-request.json" <<'JSON'
-{"model":"qwen3.6-flash","input":"Reply with OK.","max_output_tokens":8}
+{"model":"qwen3.6-flash","input":"Reply with OK.","max_output_tokens":16}
 JSON
 status="$(token_plan_curl -sS -o "$WORK_DIR/responses-response.json" -w '%{http_code}' \
   -H 'Content-Type: application/json' \
@@ -74,6 +79,7 @@ jq -e '.output | type == "array" and length > 0' "$WORK_DIR/responses-response.j
 }
 
 cp "$ENV_FILE" "$WORK_DIR/env.old"
+cp "$NODE_ENV_FILE" "$WORK_DIR/node-env.old"
 # shellcheck disable=SC2024 # sudo reads the root-owned source; the current user owns the private destination.
 sudo cat "$QWEN_SETTINGS" >"$WORK_DIR/qwen-settings.old"
 if sudo test -f "$DROPIN"; then
@@ -95,6 +101,9 @@ awk '!/^(TOKEN_PLAN_API_KEY|TOKEN_PLAN_BASE_URL|QWEN_MM_API_VL_MODEL|PERSONAL_AG
   printf 'PERSONAL_AGENT_QWEN_TOOLS_MODEL=%s\n' "$MODEL"
 } >>"$WORK_DIR/env.new"
 
+awk '!/^(PERSONAL_AGENT_OCR_PROVIDER|PERSONAL_AGENT_VISION_PROVIDER)=/' "$NODE_ENV_FILE" >"$WORK_DIR/node-env.new"
+printf 'PERSONAL_AGENT_OCR_PROVIDER=qwen-mm\nPERSONAL_AGENT_VISION_PROVIDER=qwen-mm\n' >>"$WORK_DIR/node-env.new"
+
 jq --arg model "$MODEL" --arg base "$BASE_URL" '
   .modelProviders.openai = [{id:$model,name:$model,baseUrl:$base,envKey:"TOKEN_PLAN_API_KEY"}]
   | .model.name = $model
@@ -108,6 +117,7 @@ EOF
 
 rollback() {
   install -m 600 "$WORK_DIR/env.old" "$ENV_FILE"
+  install -m 600 "$WORK_DIR/node-env.old" "$NODE_ENV_FILE"
   sudo install -o root -g root -m 644 "$WORK_DIR/qwen-settings.old" "$QWEN_SETTINGS"
   if [[ -f "$WORK_DIR/dropin.old" ]]; then
     sudo install -o root -g root -m 644 "$WORK_DIR/dropin.old" "$DROPIN"
@@ -120,6 +130,7 @@ rollback() {
 
 APPLIED=true
 install -m 600 "$WORK_DIR/env.new" "$ENV_FILE"
+install -m 600 "$WORK_DIR/node-env.new" "$NODE_ENV_FILE"
 sudo install -o root -g root -m 644 "$WORK_DIR/qwen-settings.new" "$QWEN_SETTINGS"
 sudo install -o root -g root -m 644 "$WORK_DIR/dropin.new" "$DROPIN"
 sudo systemctl daemon-reload

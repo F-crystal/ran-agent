@@ -1,4 +1,7 @@
+import base64
 import os
+import re
+import struct
 import subprocess
 from pathlib import Path
 
@@ -15,7 +18,16 @@ def test_token_plan_key_has_one_hidden_prompt_and_transactional_apply() -> None:
     hidden_read = source.index("read -r -s TOKEN_PLAN_KEY")
     first_write = source.index('install -m 600 "$WORK_DIR/env.new"')
     assert prompt < hidden_read < first_write
+    assert 'TOKEN_PLAN_KEY="$(sed -n' in source
+    assert "A-Za-z0-9_-" not in source
     assert "curl --config <(" in source
+    encoded_image = re.search(r"data:image/png;base64,([A-Za-z0-9+/=]+)", source).group(1)
+    width, height = struct.unpack(">II", base64.b64decode(encoded_image)[16:24])
+    assert width > 10 and height > 10
+    assert '"max_output_tokens":16' in source
+    assert 'NODE_ENV_FILE="$ROOT_DIR/node_bridge/.env.local"' in source
+    assert 'install -m 600 "$WORK_DIR/node-env.old" "$NODE_ENV_FILE"' in source
+    assert 'install -m 600 "$WORK_DIR/node-env.new" "$NODE_ENV_FILE"' in source
     assert "PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV=TOKEN_PLAN_API_KEY" in source
     assert "APPLIED=true" in source
     assert 'if [[ "$APPLIED" == true && "$SUCCESS" != true ]]' in source

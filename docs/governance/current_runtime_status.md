@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED; H0-H5 PROD_VERIFIED; QWEN-MM LOCAL_VERIFIED / PROD NOT APPLIED; S13 NOT STARTED (2026-08-18)
+Status: S12 COMPLETE / PROD_ACCEPTED; H0-H5 PROD_VERIFIED; QWEN-MM PROD_VERIFIED; S13 NOT STARTED (2026-08-18)
 
 This is the compact source of truth for current production behavior. Commands
 live in `docs/governance/server_runtime_commands.md`; design contracts and
@@ -39,12 +39,12 @@ Scheduled outbound is limited to explicit reminders, bounded proactive
 companionship and governed `external_mcp_gateway` notifications. The ran-agent
 daily digest is stopped; Codex owns daily reports.
 
-The current production media providers are still the pre-change DashScope
-configuration. A locally verified candidate keeps the public `media_reader`
-surface unchanged while adding a pinned Qwen-MM OCR/VLM backend and a
-transactional Token Plan configurator for `qwen3.6-flash`; it has not yet been
-archived, deployed or activated with the owner's key. ASR is intentionally not
-part of that switch.
+Production keeps the public `media_reader` surface unchanged while routing OCR
+and image understanding through the pinned Qwen-MM backend on Token Plan
+`qwen3.6-flash`. Qwen knowledge maintenance uses the same plan endpoint and
+model. Both effective Hermes EnvironmentFile providers, Qwen settings, active
+service state, Token Plan visual/Responses calls and the actual Qwen-MM request
+path are verified. ASR and media generation intentionally remain on DashScope.
 
 The deployed H1-H3 source narrows Hermes to conversation,
 companionship and play: terminal/file/session/direct Playwright are absent,

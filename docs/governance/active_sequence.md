@@ -33,7 +33,7 @@ S0 facts/runtime selection
   -> H4 bounded proactive companionship (PROD_VERIFIED)
   -> H5 zombie-runtime excision (PROD_VERIFIED)
   -> post-H5 source projection refresh repair (PROD_VERIFIED)
-  -> post-H5 Qwen-MM Token Plan media/knowledge routing (IN_PROGRESS; LOCAL_VERIFIED, awaiting archive/deploy and owner key activation)
+  -> post-H5 Qwen-MM Token Plan media/knowledge routing (PROD_VERIFIED; qwen3.6-flash OCR/VLM and knowledge active)
   -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
@@ -61,11 +61,12 @@ tests, an idempotent production-state rehearsal, immutable apply and final
 read-only production acceptance pass.
 
 The Qwen-MM Token Plan stage preserves `media_reader` as the single public
-facade and locally verifies a pinned internal OCR/VLM backend using
-`qwen3.6-flash`. Knowledge uses the same Token Plan key/model after activation;
+facade and runs the pinned internal OCR/VLM backend on `qwen3.6-flash`.
+Production verification covered both Token Plan endpoints, active Python and
+Hermes services, Qwen settings, the actual Qwen-MM request path, and the full
+EnvironmentFile override chain. Knowledge uses the same Token Plan key/model;
 ASR remains on the existing DashScope route because the current Token Plan
-catalog does not include the Omni ASR model. Archive/deploy and the owner's
-single hidden key entry remain before production verification.
+catalog does not include the Omni ASR model.
 
 | Stage | Status | Depends | Scope | Exit condition |
 |---|---|---|---|---|

@@ -607,12 +607,13 @@ identity or change file ownership:
 cd /opt/ran_agent && bash scripts/configure-qwen-token-plan.sh
 ```
 
-The script prepares Qwen-MM before requesting a credential. Paste the key only
-when the terminal prints `现在请粘贴 TOKEN_PLAN_KEY（输入不会显示）`; the input is
-hidden and is never accepted in argv. It validates `qwen3.6-flash` visual chat
-and Responses API before applying an atomic config transaction, then restarts
-and checks the Python and unified Hermes services. Any post-apply failure
-restores the prior env, Qwen settings and systemd drop-in.
+The script prepares Qwen-MM, then reuses `TOKEN_PLAN_API_KEY` already stored in
+the owner-only root env. If it is absent, paste the key only when the terminal
+prints `现在请粘贴 TOKEN_PLAN_KEY（输入不会显示）`; input is hidden and never
+accepted in argv. It validates `qwen3.6-flash` visual chat and Responses API,
+atomically synchronizes the root and later-loaded Node env providers, then
+restarts and checks Python and unified Hermes. Any post-apply failure restores
+both env files, Qwen settings and the systemd drop-in.
 
 Activation routes Qwen-MM OCR/VLM and the knowledge runner through Token Plan.
 It deliberately leaves `qwen3-asr-flash` ASR and media generation on their

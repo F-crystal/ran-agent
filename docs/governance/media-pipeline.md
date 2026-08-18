@@ -110,9 +110,11 @@ knowledge runner. The current Token Plan model list does not include the
 Qwen-MM Omni ASR model, so audio transcription deliberately stays on the
 existing DashScope `qwen3-asr-flash` path. This is one explicit provider split,
 not a silent fallback stack. `scripts/configure-qwen-token-plan.sh` validates
-both visual chat and Responses API before atomically switching local config;
-the key is read once from a hidden prompt and is never accepted on the command
-line.
+both visual chat and Responses API before atomically switching both active env
+files. It reuses `TOKEN_PLAN_API_KEY` already stored in the owner-only root env,
+or reads it from one hidden prompt when absent; the key is never accepted on
+the command line. Both root and later-loaded Node env providers must agree,
+because the latter wins systemd EnvironmentFile precedence.
 
 ## Context Policy
 

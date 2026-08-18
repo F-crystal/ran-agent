@@ -36,10 +36,11 @@ S12 R-node detail are canonical in `active_sequence.md` and
 `s12-readiness-topology.md`; historical narratives live in `phase_status.md`.
 The 2026-08-17 owner-authorized cleanup removed dead code, stale docs and
 local artifacts; every deletion is recorded in `docs/governance/cleanup.md`.
-The post-H5 Qwen-MM Token Plan stage is `LOCAL_VERIFIED` and `IN_PROGRESS`:
-the source candidate keeps one `media_reader` facade, uses `qwen3.6-flash` for
-optional OCR/VLM and knowledge maintenance, and leaves ASR on DashScope. It is
-not yet archived, deployed or activated with the owner's key.
+The post-H5 Qwen-MM Token Plan stage is `PROD_VERIFIED`: one `media_reader`
+facade routes OCR/VLM and knowledge maintenance through `qwen3.6-flash`, while
+ASR and media generation remain on DashScope. Production acceptance covered
+both plan endpoints, effective multi-file environment precedence, active
+services, Qwen settings and the actual Qwen-MM request path.
 
 ## Lifecycle Stages
 
