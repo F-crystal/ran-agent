@@ -1,6 +1,6 @@
 # Co-Reading Runtime
 
-Status: CURRENT (2026-06-09)
+Status: CURRENT (2026-08-18)
 
 `co_reading` is the private shared reading room for Hermes and the owner. It is
 book-first: EPUB, TXT, Markdown, pasted text, local HTML, and PDF
@@ -128,7 +128,8 @@ such as `confirm: true`.
 - PDF: prefer `pdftotext` from Poppler for text-layer extraction, then fall
   back to a simple text operator scan. Scanned PDFs are stored as book records
   with `ocr_required=true`; OCR is not performed.
-- Web URL: provider interface only, reserved for later integration.
+- Web URL: normal pages reuse `search_hub`; social URLs reuse `social_reader`.
+  The browser wrapper never adds a separate crawler or exposes MCP credentials.
 
 Uploaded browser files are temporary. If a previous EPUB/PDF upload was
 imported before parser changes, re-upload the file to generate new chunks. The

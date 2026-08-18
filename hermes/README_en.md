@@ -2,11 +2,15 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-18)
 
-`DEPLOYED_RUNTIME_ACCEPTANCE` (2026-08-06): exact candidate `0b793e8` deployed one unified Hermes v0.20 gateway with DeepSeek V4 Flash on `8642`; the retired Full service is inactive/disabled. See `docs/governance/current_runtime_status.md` for the bounded evidence.
+Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash on
+`8642`; the retired Full service is inactive/disabled and never a fallback. See
+`docs/governance/current_runtime_status.md` for bounded current evidence.
 
-The O1/O2 and unified-identity commits are historical evidence only. S4 removed O2, Steward/token/model endpoint tooling, and its dedicated release gate from production source; the active read-only `personal_memory → Python → Ombre 18001` path is unchanged. Governance docs remain production authority.
+Historical migrations and retired components remain only in governance records.
+The active memory path is `personal_memory → Python/Core → Ombre 18001`:
+public recall is query-only and the stable backend owns governed projection.
 
 This directory is the repo-local Hermes profile distribution for ran-agent. It stores commit-safe profiles, persona files, MCP launcher config, and skill instructions. It must not store secrets, sessions, memories, logs, machine-local state, or platform login state.
 
@@ -135,7 +139,6 @@ ran-agent uses repo-owned MCP services:
 | `time` | `Asia/Shanghai` time queries |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares |
-| `mimo_power` | Retired: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles |
 | `personal_memory` | Unified Python memory entry combining local memory, read-only Ombre, and bounded Vault recall |
 | `external_mcp_gateway` | Governed External MCP broker exposed by default; registry, grants, budgets, and confirmation remain enforced |
 | `media_generation` | Image and speech generation in the unified profile |

@@ -1,6 +1,6 @@
 # Co-Reading Web Reader
 
-Status: CURRENT (2026-07-18)
+Status: CURRENT (2026-08-18)
 
 This document owns the private Tailscale-only Web reader for `co_reading`.
 It does not change the Bilibili yt-dlp proxy path.
@@ -22,8 +22,8 @@ or deposited into Vault; saving a shared annotation invites Hermes once.
 Original and translated text remain annotatable, and the existing
 `anchor_kind`, `anchor_lang`, and `quote_offset` contract is preserved. The
 backend, API routes, database schema, MCP surface, and security configuration
-were not changed. This accepted source revision has not been deployed;
-production is unchanged.
+were not changed by that UI redesign. The current production reader is enabled
+on its configured Tailscale address with a loopback backend; it is not public.
 
 ## Network Model
 
@@ -248,34 +248,32 @@ Current non-goals:
 - Tailscale exit node as the normal reader route.
 - Multi-user role system.
 
-## Manual Server Commands
+## Operator Checks
 
-Codex must not SSH to the server or restart services. Run commands manually on
-the server.
-
-After `git pull --ff-only`, set local env values and repair runtime drift:
+Use the immutable source-release transaction for code changes. Do not run
+`git pull`, standalone `apply-hermes-runtime-split.sh`, or hand-edit systemd as
+a reader deployment path. Server diagnostics start with:
 
 ```bash
 cd /opt/ran_agent
-
+source /opt/ran_agent/.venv/bin/activate
 tailscale ip -4
-
-# Required for PDF text-layer extraction. Scanned/image PDFs still require OCR,
-# which is not enabled for this reader stage.
-sudo apt-get install -y poppler-utils
-
-# Edit .env.local manually or append values with your real tokens.
-# Do not commit .env.local.
-
-bash scripts/apply-hermes-runtime-split.sh
-sudo systemctl restart ran-agent-node
+systemctl is-active ran-agent-node.service ran-agent-hermes.service
+ss -ltn | grep ':8787'
 ```
 
-For standalone smoke without changing the node bridge service:
+`pdftotext` from Poppler is an operating-system prerequisite for full PDF
+text-layer extraction. Missing Poppler must degrade to the bounded fallback or
+`ocr_required=true`; installing packages requires separate operator approval.
+
+For a standalone read-only UI smoke without changing systemd:
 
 ```bash
 cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+set -a
 source .env.local
+set +a
 bash scripts/start_co_reading_web.sh
 ```
 

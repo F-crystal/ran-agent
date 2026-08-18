@@ -1,16 +1,13 @@
 # Hermes External MCP Autonomy And Capability Growth Design
 
-Status: CURRENT (2026-07-13)
+Status: HISTORICAL DESIGN / PARTIALLY IMPLEMENTED (2026-08-18)
 
-Design status: PROPOSED. This document defines a target design and does not
-claim that the behavior is deployed. Production truth remains in
-`docs/governance/current_runtime_status.md` until implementation, verification,
-and rollout pass.
+This is no longer a current target or execution authority. Use
+`docs/governance/external-mcp-gateway.md` for the implemented capability plane
+and `docs/governance/current_runtime_status.md` for production truth.
 
-Some external-MCP infrastructure landed in the reliability release deployed at
-`3f6e7b705854838d9a1e8b466d959f7ead41b643`. This does not make the complete
-generic autonomy, conformance, promotion, or live-acceptance design deployed;
-those remain proposed until separately verified.
+Generic autonomy, conformance promotion, and other unimplemented ideas remain
+historical proposals unless re-authorized in `docs/governance/active_sequence.md`.
 
 ## Purpose
 

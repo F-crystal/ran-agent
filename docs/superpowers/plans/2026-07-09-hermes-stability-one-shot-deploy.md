@@ -3,14 +3,14 @@
 Status: SUPERSEDED (2026-07-10)
 
 Do not execute the remaining unchecked tasks verbatim. Landed fixes remain in
-Git history and CURRENT governance. Unexecuted or later-evolved requirements
+Git history and current governance. Unexecuted or later-evolved requirements
 are split between:
 
 - `docs/superpowers/specs/2026-07-10-hermes-core-reliability-learning-one-shot-runtime-design.md`;
 - `docs/superpowers/specs/2026-07-10-hermes-external-mcp-autonomy-capability-growth-design.md`.
 
-Those documents are current design baselines: some components are landed, but
-their complete definitions of done are not implied here. The durable-game spec
+Those documents are historical design baselines, not current runtime authority.
+The durable-game spec
 remains a historical compatibility pointer, not an execution entry point.
 
 **Goal:** Stabilize Hermes scheduled digest, bridge notices, reply windows, lite session governance, and external-MCP game autonomy so local work can iterate safely and production can deploy in one server pass.

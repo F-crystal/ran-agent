@@ -1,16 +1,13 @@
 # Hermes Core Reliability, Personal Learning, And One-Shot Runtime Design
 
-Status: CURRENT (2026-07-13)
+Status: HISTORICAL DESIGN / IMPLEMENTED IN STAGES (2026-08-18)
 
-Design status: PROPOSED. This document defines a target design and does not
-claim that the behavior is deployed. Production truth remains in
-`docs/governance/current_runtime_status.md` until implementation, verification,
-and rollout pass.
+This is no longer a current target or execution authority. Its implemented
+invariants are described by `docs/governance/current_runtime_status.md` and
+`docs/governance/hermes-core-scheduling-and-unified-runtime.md`.
 
-Some supporting components landed in the reliability release deployed at
-`3f6e7b705854838d9a1e8b466d959f7ead41b643`. That does not make this complete
-target design deployed: the definition of done, especially unified
-final-delivered history and memory/session control, remains proposed.
+Unimplemented ideas in this document remain historical proposals unless they
+are re-authorized in `docs/governance/active_sequence.md`.
 
 ## Purpose
 

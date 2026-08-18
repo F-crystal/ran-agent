@@ -1,11 +1,11 @@
 # Hermes Runtime Budget
 
-Status: CURRENT (2026-07-27)
+Status: CURRENT (2026-08-18)
 
-Hermes is the single frontline speaker. The local integration candidate uses
-`deepseek-v4-pro` for Lite and Full with final provider-body
-`thinking.type=disabled`; production remains on the owner-supplied Flash line.
-Kimi, GLM, and OpenClaw are retired as frontend primary/fallback candidates and stay out of active automatic routing config.
+Hermes is the single frontline speaker. Source and production use one unified
+companion profile with `deepseek-v4-flash` and final provider-body
+`thinking.type=disabled`. `deepseek-v4-pro` is explicit opt-in only.
+Kimi, GLM, OpenClaw, and MiMo Power stay out of active automatic routing.
 
 Budgets:
 - continuity <= 1200 chars

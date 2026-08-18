@@ -1,13 +1,16 @@
 # Post-S12 Product-Effect Defect Repair Plan
 
-Status: CURRENT (2026-08-17)
+Status: HISTORICAL COMPLETED REPAIR RECORD (2026-08-18)
 
-Bounded repair of three production product-effect defects found on
+This records the bounded repair of production product-effect defects found on
 2026-08-15/16 during the post-S12 capability-parity backfill operation, plus
 the follow-on F6 delivery guards found after managed wake activation. The owner
 approved the original plan on 2026-08-16 and F6a+F6b on 2026-08-17. Execution
 is serial in topology order; a node is checked off only with its stated exit
-evidence.
+evidence. It is not a current action-surface or execution plan: H1 later removed
+Calendar, Todo, digest, and Minutes/document actions from Hermes. Current
+behavior lives in `hermes-playground-boundary.md` and
+`current_runtime_status.md`.
 
 ## Defects And Root Causes
 
@@ -105,7 +108,7 @@ F1 Core reminder binding resolution repair
   -> F7ARCH archive + governance reconciliation
   -> F7DEPLOY production apply (owner-authorized repair)
   -> F7RUN one deterministic Minutes-to-document request + readback
-  -> F6OBS next real 08:00 digest observation
+  -> F6OBS SUPERSEDED when the owner moved daily reports to Codex
   -> S13 observation frontier (unchanged; deletion not authorized)
 ```
 
@@ -113,8 +116,9 @@ F1/F2/F3 share one ready frontier with disjoint write scopes but execute
 serially per owner decision. REV/ARCH/DEPLOY run once for the single
 combined candidate. R1 depends on F2, R2 on F3, R3 on F1; R1-R3 execute
 serially in the stated order. W depends on R1+R2+R3 evidence.
-F6 follows the first real managed-wake digest. Its owner-signed apply is
-complete; only the next real 08:00 observation remains.
+F6 followed the first real managed-wake digest. Its owner-signed apply completed;
+the later 08:00 observation was superseded when the owner moved daily reports
+to Codex and stopped the ran-agent digest.
 
 ## Node Checklist
 
@@ -362,16 +366,15 @@ complete; only the next real 08:00 observation remains.
 - [x] **F7RUN** — Hermes created exactly one `前辈对话3` document. Three prior
   action attempts were rejected before write; the sole applied operation passed
   content readback and unique `中海油` parent proof.
-- [ ] **F6OBS** — Observe the first real 08:00 digest after F6DEPLOY; require a
-  plain dated body, one terminal receipt and no visible private protocol.
+- [x] **F6OBS SUPERSEDED** — No further ran-agent digest observation is due;
+  daily reports belong to Codex and the digest is disabled.
 
 ## Reconciliation Items
 
 - Production runs the archived F6 source with managed wake active.
 - The F7 Minutes strict-replan repair is archived, deployed and production
   verified with one document and one successful operation receipt.
-- `active_sequence.md`, `current_runtime_status.md` and `doc_status.md`
-  describe F6OBS as the ready frontier.
+- Current status documents record the digest as retired and S13 as not started.
 
 ## Prohibitions
 

@@ -10,5 +10,5 @@ description: Use when diagnosing ran-agent runtime, Hermes profile, Node bridge,
 - Check services in order: Python backend, Hermes, Node bridge, MCP tools.
 - For media failures, check artifact creation, `media_reader`, and compact
   context injection.
-- For server issues, remember the server may still have a legacy frontend
-  service installed. Hermes should be the active foreground gateway.
+- Current production has one active unified Hermes gateway on `8642`; the
+  retired Full unit must remain inactive and is never a fallback runtime.

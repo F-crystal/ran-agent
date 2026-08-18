@@ -2,9 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-18)
 
-Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash. See `docs/governance/current_runtime_status.md` for the exact source SHA, evidence, and rollback boundary.
+Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash. See `docs/governance/current_runtime_status.md` for current source state, evidence, and recovery boundaries.
 
 **A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
@@ -14,7 +14,7 @@ Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash. See `do
 
 Ran Agent is a personal runtime, not a SaaS product. It routes WeChat, Feishu/Lark, and desktop-client messages into ChannelHub and replies through Hermes Gateway. The current source boundary makes Hermes the chat, emotional-companionship, and play shell; Calendar, Todo, Minutes/documents, daily reports, code, and deployment belong to Codex. The unified production profile uses DeepSeek V4 Flash and adds `thinking: {"type":"disabled"}` to the final provider HTTP body; V4 Pro is explicit opt-in only. State, logs, vault content, cookies, and secrets stay on infrastructure you control.
 
-OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Production and the current candidate both use Hermes + DeepSeek V4 Flash non-thinking; Pro requires an explicit opt-in.
+OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Production uses Hermes + DeepSeek V4 Flash non-thinking; Pro requires an explicit opt-in.
 
 ---
 
@@ -103,7 +103,6 @@ mean automatic whole-Vault search.
 | `time` | Timezone-aware time queries, default `Asia/Shanghai` | unified |
 | `media_reader` | OCR, ASR, VLM, video analysis, batch media analysis | unified |
 | `social_reader` | Bilibili, Xiaohongshu, WeChat articles, music shares | unified |
-| `mimo_power` | RETIRED: historical MiMo Token Plan deep multimodal analysis, not part of current runtime profiles | historical |
 | `sticker_catalog` | Local sticker tags, selection, sending, and owner-only inbound saves | unified |
 | `personal_memory` | Personal memory, Ombre, and bounded Vault recall; backend health check | unified |
 | `external_mcp_gateway` | Governed dynamic External MCP broker; the active companion profile exposes it by default while registry/grant/budget/confirmation controls remain enforced | unified / governed |
@@ -204,7 +203,7 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | Unified identity and cross-platform timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | Timeline retention and compaction |
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | Optional multi-frontend entries; keep Desktop Proxy local or on a controlled private network when enabled |
-| AI daily digest | `AI_DAILY_DIGEST_ENABLED`, `AI_DAILY_DIGEST_HOUR`, `AI_DAILY_DIGEST_MINUTE` | Optional Feishu DM digest, disabled by default |
+| AI daily digest | `AI_DAILY_DIGEST_ENABLED=false` | The ran-agent digest is retired and stays disabled; Codex owns daily reports |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS` | ingest and memory recall; the MCP deadline is fixed at 15 seconds |
 | Qwen Token Plan | `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | Optional Qwen-MM OCR/VLM and Qwen knowledge maintenance; default model `qwen3.6-flash` |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | ASR, media generation, and OCR/VLM when Token Plan is not enabled |
@@ -214,7 +213,7 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | UV cache | `UV_CACHE_DIR`, `UV_TOOL_DIR`, `UV_LINK_MODE`, `UV_PYTHON_DOWNLOADS` | Fixed uv/uvx cache paths to prevent disk growth |
 | XHS public parser | `XHS_GENERIC_FALLBACK_READY_PATH`, `XHS_PUBLIC_SIDECAR_URL`, `XHS_PUBLIC_SIDECAR_TIMEOUT_MS` | Xiaohongshu public parsing and XHS-Downloader sidecar; no login state |
 
-The full template is `.env.example`. The authoritative current runtime state is `docs/governance/current_runtime_status.md`.
+The baseline template is `.env.example`. The authoritative current runtime state is `docs/governance/current_runtime_status.md`.
 
 ---
 

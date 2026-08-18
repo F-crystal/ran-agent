@@ -1,6 +1,10 @@
 # Main Source Authority Convergence
 
-Status: AUTHORIZED FOR BOUNDED S1 SOURCE TRANSACTION (2026-08-08)
+Status: HISTORICAL COMPLETED IMPLEMENTATION PLAN (2026-08-18)
+
+The source-authority transaction is complete. This file no longer authorizes
+execution; use `docs/governance/current_runtime_status.md` and
+`docs/governance/hermes_release_deployment.md` for current facts and procedure.
 
 ## Objective
 

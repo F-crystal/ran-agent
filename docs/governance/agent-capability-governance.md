@@ -1,6 +1,6 @@
 # Agent Capability Governance
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-18)
 
 ## Three Layers
 

@@ -1,6 +1,6 @@
 # Sticker Catalog
 
-Status: CURRENT (2026-06-14)
+Status: CURRENT (2026-08-18)
 
 `sticker_catalog` is a platform-neutral local sticker asset catalog. WeChat and
 Feishu are delivery exits only; the model-facing protocol carries `stickerId`,
@@ -27,9 +27,9 @@ never server-side file paths.
 - `sticker_save_from_inbox` accepts at most 10 items and only trusted inbound
   temporary directories, currently including `.ran_agent_state/wechat/inbound`
   and `.ran_agent_state/feishu/inbound`.
-- Lite runtime may expose `sticker_save_from_inbox` for this explicit save
-  workflow so ordinary chat can turn a user-sent image/GIF into a reusable
-  sticker. Update/delete/list remain full/owner-only maintenance tools.
+- The unified companion profile may expose `sticker_save_from_inbox` for this
+  explicit save workflow so ordinary chat can turn a user-sent image/GIF into
+  a reusable sticker. Update/delete/list remain owner-only maintenance tools.
 - Tool results expose public sticker metadata only. They must not expose
   absolute paths, tokens, local cache paths, or raw platform resource keys.
 - Do not commit real sticker assets. For local testing, create temporary

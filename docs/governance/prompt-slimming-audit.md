@@ -1,6 +1,6 @@
 # Prompt Slimming Audit
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-08-18)
 
 This document records ownership boundaries after prompt slimming. It is not a
 runtime prompt and should stay short.

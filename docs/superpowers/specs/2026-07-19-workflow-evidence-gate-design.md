@@ -1,6 +1,8 @@
 # Workflow Evidence Gate Design
 
-Status: IMPLEMENTED (2026-07-19)
+Status: IMPLEMENTED / HISTORICAL DESIGN (2026-08-18)
+
+Use `docs/governance/delivery-evidence.md` for the current operational contract.
 
 ## Goal
 

@@ -1,11 +1,10 @@
 # Hermes External MCP Capability Plane Design
 
-Status: CURRENT (2026-07-02)
+Status: HISTORICAL DESIGN / IMPLEMENTED (2026-08-18)
 
-Design status: Target architecture with the first implementation slice landed:
-dynamic admission, Streamable HTTP execution, bounded activity grants, and
-global-user stop interruption. The current production source of truth remains
-`docs/governance/current_runtime_status.md`.
+This design is retained for rationale. Use
+`docs/governance/external-mcp-gateway.md` for the current contract and
+`docs/governance/current_runtime_status.md` for production truth.
 
 ## Goal
 

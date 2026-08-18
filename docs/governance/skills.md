@@ -1,6 +1,6 @@
 # Skills Map
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-18)
 
 ## Active Skills (On-Demand)
 
@@ -27,8 +27,8 @@ Status: CURRENT (2026-08-08)
 - Heavy/background operations should be delegated via sub-agent candidates only.
 - GitHub commit/push/archive requests must use `archive-and-push` so staging,
   commit, and push stay consistent and runtime/private files remain excluded.
-- Server deployment, runtime drift, lite/full, systemd/env, MCP exposure, and
-  one-command rollout requests must use `server-runtime`.
+- Server deployment, unified-runtime drift, systemd/env, MCP exposure, and
+  immutable source rollout requests must use `server-runtime`.
 - Staged or parallel project work must use `topology-work-planning` so ready
   nodes, write ownership, integration order, and public state stay aligned with
   the canonical dependency topology.

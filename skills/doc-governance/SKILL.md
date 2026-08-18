@@ -5,7 +5,7 @@ description: "文档治理：维护 AGENTS.md / CLAUDE.md / hermes/profile/AGENT
 
 # Doc Governance
 
-Status: CURRENT (2026-05-10)
+Status: CURRENT (2026-08-18)
 
 ## Use When
 
@@ -42,16 +42,20 @@ AGENTS.md 和 CLAUDE.md 只保留：
 - `CLAUDE.md`
 - `hermes/profile/AGENTS.md`
 - `README.md` / `README_en.md`
-- `hermes/README.md` / `hermes/README.md`
+- `hermes/README.md` / `hermes/README_en.md`
 - `docs/governance/` 下的治理文档
 
 如果一处更新，其他处必须同步。用 `grep` 检查关键词在各文件中的一致性。
 
 ### 3. 状态标注
 
-每个文档头部必须有 `Status: CURRENT (YYYY-MM-DD)` 或 `Status: SUPERSEDED`。
+每个公开说明/治理/计划文档头部必须有准确状态。运行时 prompt、persona、
+模板、license、最小 import shim 和带 YAML frontmatter 的 `SKILL.md` 可按其
+消费者协议省略独立状态行，不能为了形式破坏可执行语义。
 - `CURRENT`：文档内容准确反映当前代码状态
 - `SUPERSEDED`：文档内容已被更新文档替代
+- `HISTORICAL ...` / `IMPLEMENTED ...`：保留为设计或验收证据，但不作为
+  当前操作或状态依据
 
 更新代码后，必须同步更新相关文档的状态标注。
 
@@ -65,7 +69,7 @@ AGENTS.md 和 CLAUDE.md 只保留：
 ### 5. 中英文分离
 
 - `README.md` / `hermes/README.md`：中文
-- `README_en.md` / `hermes/README.md`：英文
+- `README_en.md` / `hermes/README_en.md`：英文
 - `docs/governance/` 内部统一使用英文（与代码和 AGENTS.md 一致）
 - 两份 README 口径一致，不混用语言
 
@@ -74,7 +78,7 @@ AGENTS.md 和 CLAUDE.md 只保留：
 治理文档是公开发布面的一部分，不是归档：
 - 历史快照（如 `*_2026-04-13.md`）只保留有参考价值的，其余删除
 - 已完成的 checklist、一次性报告、过期的诊断记录应及时清理
-- 保留的文档必须有准确的 `Status: CURRENT (YYYY-MM-DD)` 标注
+- 保留的当前文档必须标 `CURRENT`；历史材料必须明确标为历史/已实现/已取代
 - `current_runtime_status.md` 是详细运行时状态参考，控制在 ~150 行以内
 - 每个治理文档应聚焦单一主题，不要把多个不相关的内容塞进一个文件
 - `doc_status.md` 必须列出所有公开源文档，且与实际文件列表一致
@@ -88,7 +92,7 @@ AGENTS.md 和 CLAUDE.md 只保留：
 - [ ] 检查 `CLAUDE.md` 中的引用是否准确
 - [ ] 检查 `hermes/profile/AGENTS.md` 中的描述是否准确
 - [ ] 更新 `README.md` 和 `README_en.md`（如果影响用户可见功能）
-- [ ] 更新 `hermes/README.md` 和 `hermes/README.md`（如果影响 MCP 工具清单）
+- [ ] 更新 `hermes/README.md` 和 `hermes/README_en.md`（如果影响 MCP 工具清单）
 - [ ] 更新所有受影响文档的 `Status: CURRENT (YYYY-MM-DD)` 时间戳
 - [ ] 检查 `docs/governance/doc_status.md` 的文件列表是否与实际一致
 - [ ] 检查 `docs/governance/skills.md` 的 skill 列表是否与 `skills/` 目录一致
@@ -98,13 +102,13 @@ AGENTS.md 和 CLAUDE.md 只保留：
 
 ```bash
 # 检查文档一致性（关键词在各文件中的出现）
-grep -rn 'KEYWORD' \
+rg -n 'KEYWORD' \
   AGENTS.md CLAUDE.md hermes/profile/AGENTS.md \
-  README.md README_en.md hermes/README.md hermes/README.md \
+  README.md README_en.md hermes/README.md hermes/README_en.md \
   docs/governance/
 
 # 检查状态标注
-grep -rn 'Status:' AGENTS.md CLAUDE.md hermes/profile/AGENTS.md \
+rg -n 'Status:' AGENTS.md CLAUDE.md hermes/profile/AGENTS.md \
   docs/governance/*.md skills/*/SKILL.md
 
 # 统计核心文档行数（监控瘦身效果）
@@ -121,8 +125,8 @@ grep 'skills/' docs/governance/skills.md
 # 检查是否有过期的历史快照未清理
 find docs/governance/ -name '*2026-04*' -type f
 
-# 检查 docs/governance/ 总行数（目标 < 400）
-wc -l docs/governance/*.md | tail -1
+# 枚举全部 tracked Markdown（包含 hidden runner prompts）
+git -c core.quotePath=false ls-files '*.md'
 ```
 
 ## Boundaries

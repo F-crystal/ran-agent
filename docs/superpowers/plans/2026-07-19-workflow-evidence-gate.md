@@ -1,5 +1,10 @@
 # Workflow Evidence Gate Implementation Plan
 
+Status: HISTORICAL IMPLEMENTATION PLAN (2026-08-18)
+
+The gate has landed. Use `docs/governance/delivery-evidence.md` for the current
+contract; this task list is retained as implementation history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:test-driven-development and superpowers:verification-before-completion. Execute inline because the implementation owns one small file set.
 
 **Goal:** Add a deterministic repository snapshot, drift check, and redacted evidence runner without modifying Git state.

@@ -1,736 +1,188 @@
 # Server Runtime Commands
 
-Status: CURRENT (2026-08-13)
+Status: CURRENT (2026-08-18)
 
-This is the public server runbook for the real `/opt/ran_agent` runtime. It is
-an operator index, not a deployment journal. Prefer repo-managed scripts over
-manual systemd or env edits.
+This is the operator runbook for `/opt/ran_agent`. It contains stable current
+commands, not migration journals. Historical S12 and runtime-cutover evidence
+lives in `s12-readiness-topology.md`, `hermes_release_deployment.md`, and ignored
+release records.
 
-`POINT_IN_TIME_AUDIT`
-(`2026-08-05T13:30:09+08:00..13:35:11+08:00`) observed production at
-`bb66f1e6a8a400d599c7f86139107742bbedddc8` with a clean worktree, Node
-v22.22.2, and four active core services. All observed runtime processes used
-`ubuntu:ubuntu`. Lite/Full used Hermes v0.13.0 with `deepseek-v4-flash`.
-The existing direct Ombre Brain service on `18001` was active; recall-only O1
-on `18002` was inactive and O2 was absent. Storage was 39/59 GB used, 19 GB
-available, 68%. These are bounded observations, not mutation authority.
+## Current Topology
 
-O1 `1be3ee5`, V4+O1 `c52f8ba`, O2 `a978444`, and unified-identity line
-`b5b4ff4` are archived but not deployed to production. Commands that describe
-`18002`, O2, or unified-identity apply behavior are target-release contracts,
-not claims about the active host. Historical failed traces included 95% disk
-utilization; that value is not current. Use only the verified pruner below and
-never remove snapshot directories manually.
+| Service | Listener | Current role |
+|---|---|---|
+| `ran-agent-python.service` | loopback `8787` | ingest, memory, knowledge, reflection, scheduling APIs |
+| `ran-agent-node.service` | loopback control `8791` | ChannelHub, bridges, Core, delivery, MCP composition |
+| `ran-agent-hermes.service` | loopback `8642` | only active Hermes companion gateway |
+| `ran-agent-hermes-full.service` | none | retired, inactive, condition-blocked |
+| `ran-agent-ombre-brain.service` | loopback `18001` | internal read/projector MCP |
+| `ran-agent-xhs-public-sidecar.service` | loopback `18061` | public-only XHS parser sidecar |
+| co-reading Web reader | configured Tailscale address `8787` plus loopback backend | private owner reader |
 
-The exact `44b84fb11fe8854f510a78d0bea462e9b77b1bb0` Runtime apply on
-2026-08-06 failed closed while its shell wrapper was completing the same-PID
-exec into the private Python runtime, then rolled back successfully. Do not
-retry that candidate. A successor must carry the bounded MainPID-settle fix,
-preserve the exact legacy Lite/Full capability union, and pass a fresh
-exact-SHA dry-run. Authorization for the unchanged exact eight-file read-only
-bind boundary is recorded; any target or path expansion requires new
-authorization.
+Python, Node, Hermes, and Ombre run as the existing `ubuntu` service identity.
+Do not create another Unix user/group or change ownership, permissions, or
+storage layout as part of feature/deploy work.
 
-Successor `0b793e8fea85c409800ee7e0d615501816c99387` was applied on
-2026-08-06 and is `PROD_VERIFIED` for the bounded evidence in
-`current_runtime_status.md`. Production now has one
-Hermes v0.20 gateway on `8642`; `8643` is absent and the retired Full unit is
-inactive, disabled and condition-blocked. Its retained evidence set is:
+The active Hermes source is `hermes/profile/config.companion.yaml`. It exposes
+chat/companionship/play MCPs only. Legacy `config.yaml`, Lite/Full names,
+runtime-cutover controllers, and v0.13 artifacts are compatibility or evidence,
+not current deployment authority.
 
-```text
-controller: /opt/ran_agent-release/runtime-artifacts/deploy-hermes-runtime-release-0b793e8fea85c409800ee7e0d615501816c99387.py
-candidate ref: refs/ran-agent/runtime-candidates/0b793e8fea85c409800ee7e0d615501816c99387
-snapshot: /opt/ran_agent-release/runtime-snapshots/runtime-20260806T010417Z-0b793e8fea85
-```
+## Command Prerequisite
 
-Four bounded source-only transactions advanced the clean checkout to
-`2c8e97cacd1d2eaed30738abe621f3393cffb885` without replacing a service PID.
-Binding.v4 is accepted after a real source apply/rollback/reapply and records
-`runtimeRollbackAuthorized=false`; only its candidate-extracted source rollback
-remains authorized. The retired v0.13 payloads have been deleted under the
-root-owned `v013-payloads.deleted.json` record. The Runtime controller,
-candidate ref, artifact, topology, snapshot state and sealed builder remain
-evidence-only. Do not invoke Runtime rollback, relax checkout-SHA validation,
-or use the legacy split release scripts.
-
-Do not retry `44b84fb11fe8` or use the split deploy scripts against the unified
-topology.
-
-For S1 and later main-source advances, bind one reviewed main SHA and use its
-candidate-extracted existing controller. After S1, a candidate must be an exact
-archived `main` fast-forward descendant of the accepted source pointer. The
-rollback command must use the same SHA and the exact snapshot printed by apply:
+Every production diagnostic, repair, or release command starts with:
 
 ```bash
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
-git fetch --no-tags origin main
-SOURCE_CANDIDATE=<reviewed-40-char-main-sha>
-test "$(git rev-parse refs/remotes/origin/main)" = "$SOURCE_CANDIDATE"
-BOOTSTRAP="$(mktemp /tmp/ran-agent-source-bootstrap.XXXXXX)"
-git show "$SOURCE_CANDIDATE:scripts/bootstrap-hermes-release.sh" > "$BOOTSTRAP"
-chmod 700 "$BOOTSTRAP"
-RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP" --dry-run "$SOURCE_CANDIDATE"
-RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP" --apply "$SOURCE_CANDIDATE"
-RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP" --rollback "$SOURCE_CANDIDATE" <exact-source-snapshot>
-RAN_AGENT_RELEASE_UNIFIED_SOURCE=1 bash "$BOOTSTRAP" --apply "$SOURCE_CANDIDATE"
-rm -f "$BOOTSTRAP"
 ```
 
-This source transaction preserves the accepted v0.20 runtime, personal data
-and direct Ombre service. It snapshots the prior source pointer, two env files
-and Hermes unit/profile; it does not copy databases or durable delivery state.
-When `package.json` and `package-lock.json` Git blobs are unchanged it reuses
-the existing real `node_modules` directory in place without npm, staging,
-capacity gate, move or chown. Changed dependency blobs retain the existing
-staged npm/swap/rollback path. A rollback restores the exact prior source pointer.
-Post-S1 advances activate the canonical companion source
-`hermes/profile/config.companion.yaml`; legacy `config.yaml` is never an active
-companion source. An unchanged companion passes ordinary advances. Any changed
-profile still fails closed unless the candidate contains a separately reviewed
-`hermes_source_profile_migration.v1.json` binding the prior source, exact
-companion digest, allowed delta and existing live destinations. The Pro template
-is inert. The source transaction's existing profile/source snapshot owns
-rollback; the historical companion-overlay transaction is not a second writer.
+Never run `git pull`, `git switch`, `git checkout`, standalone
+`apply-hermes-runtime-split.sh`, or hand-written systemd/env mutations as a
+deployment shortcut.
 
-## Canonical S12 Transaction
+## Immutable Source Release
 
-S12 is complete and production-accepted at
-`e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Source pointer and
-`core-cutover:v1` bind that SHA; do not rerun VERIFY/APPLY or the acceptance
-canary. The command shape below is retained as transaction history, not current
-mutation authority.
-
-After R3-B is clear for the exact successor and an independent exact-SHA review
-accepts its S12 authority, `scripts/s12-cutover.py` is the only production S12
-entrypoint. Do not invoke source apply/rollback, `core-cutover.mjs`, managed-wake
-reconciliation, `core-wake.mjs`, or the acceptance subordinate as operator
-steps. VERIFY is read-only. APPLY additionally requires the owner's explicit
-identity and authorization reference; a VERIFY result does not authorize it.
-Candidate `1cb4077a0c1143b0ff7bdf312c025db110f2f0f0` and authorization
-`owner-s12-apply-20260813T1331+0800` are retired and cannot be reused. Its failed
-APPLY stopped before Core, caused no external effect, and production was
-reconciled to `98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. The later e298
-transaction superseded that failed attempt and reached P10/ACCEPTED.
-VERIFY invokes the candidate source controller directly in `source-verify`
-mode. It may use removable `/tmp` extraction and runtime scratch, but it does
-not create a source candidate ref, release lock, source pointer/snapshot, S12
-journal, Core business state, wake or effect. It
-observes the existing release lock without creating one. A repeated accepted
-APPLY reads and validates `core-cutover:v1`, worker/writer, managed wake and the
-terminal acceptance receipt without restarting services or producing an
-effect. The controller materializes one exact immutable Git candidate execution
-closure, then invokes its `deploy-hermes-runtime-release.py` directly with the
-absolute Python interpreter and child environment limited to the bounded
-system `PATH`. It uses that same closure for every S12 subordinate, manifest
-and relative Core import through P0-P10. `/opt/ran_agent` remains the production
-state root, never fallback S12 control-code authority; the closure is removed
-when the invocation ends.
-
-Configuration prerequisites are the project virtualenv, the exact archived
-candidate, its candidate-extracted S12 controller, the fresh
-production baseline observed by R3-B, one whole-second cutover instant, and an
-owner-approved root-owned mode `0600` visible-binding record. Keep the same
-values for VERIFY and any later separately authorized APPLY:
-
-The record is an owner-approved snapshot of an existing canonical route, not a
-second identity database. For the Feishu owner home DM, derive
-`destinationKind: "user"` and `destinationRef` from the learned canonical
-home-DM sender route; a Feishu chat instead uses `destinationKind:
-"conversation"` with its canonical chat recipient. Present the platform,
-semantic route and binding digest for owner review while keeping the raw
-recipient private. Do not manually transcribe or invent a recipient.
-
-Do not diagnose a protected binding or route with syscall/process tracing that
-prints arguments, environment values or file contents. Governed evidence may
-report only the semantic `destinationKind`, the approved binding digest and a
-privacy-safe route fingerprint; it must never report the raw `destinationRef`.
+Pin one reviewed archived source and use the common transaction:
 
 ```bash
 cd /opt/ran_agent
 source /opt/ran_agent/.venv/bin/activate
-S12_CANDIDATE=<independently-reviewed-40-char-main-sha>
-S12_BASELINE=<fresh-r3b-production-baseline-sha>
-S12_COMMITTED_AT=<whole-second-UTC-instant>
-S12_BINDING=<owner-approved-root-owned-0600-visible-binding.json>
-S12_BINDING_SHA256=<owner-approved-sha256:64-lowercase-hex-digest>
-S12_CONTROLLER="$(mktemp /tmp/ran-agent-s12-controller.XXXXXX)"
-git show "$S12_CANDIDATE:scripts/s12-cutover.py" > "$S12_CONTROLLER"
-chmod 700 "$S12_CONTROLLER"
-sudo "$S12_CONTROLLER" \
-  --mode verify --candidate "$S12_CANDIDATE" \
-  --production-baseline "$S12_BASELINE" \
-  --legacy-db /opt/ran_agent/data/personal_agent.db \
-  --state-dir /opt/ran_agent/.ran_agent_state \
-  --core-db /opt/ran_agent/.ran_agent_state/core/core-state.sqlite3 \
-  --visible-binding "$S12_BINDING" \
-  --visible-binding-sha256 "$S12_BINDING_SHA256" \
-  --committed-at "$S12_COMMITTED_AT"
+
+bash scripts/deploy-hermes-candidate.sh \
+  --commit <reviewed-40-char-main-sha> --dry-run
 ```
 
-The controller reads the protected binding once through a no-follow descriptor.
-VERIFY uses a temporary snapshot; APPLY publishes the same approved bytes once
-inside its existing transaction directory. After `core-cutover:v1` commits,
-Core's durable binding receipt—not the original pathname—owns acceptance routing.
-
-Only after the owner authorizes the exact VERIFY evidence, use the same command
-with `--mode apply`, `--owner-id <owner-id>` and
-`--authorization-ref <exact-authorization-ref>`. Repeating that exact APPLY
-resumes its durable transaction; changing candidate, owner, authorization,
-baseline, cutover instant, expected binding digest or Core DB fails closed. A committed
-`core-cutover:v1` marker forces forward recovery even when the root journal is
-older. Remove only the operator-extracted `/tmp` S12 controller after the
-governed transaction no longer needs it.
-
-The standalone `bootstrap-hermes-release.sh` source-release entrypoint remains
-supported by the separate source transaction runbook above; S12 does not route
-through it. Historical production source-candidate refs are retired globally
-toxic Git metadata, not S12 authority. The retired namespace was removed before
-the accepted transaction; no further ref cleanup is authorized here.
-
-A separate account audit
-(`2026-08-05T13:42:19.295+08:00..13:42:20.223+08:00`) observed the legacy
-`ran-agent` account at UID 999/GID 988 with a nologin shell. No ran-agent-owned
-runtime process was observed in the base audit window. Do not mutate or delete
-the account without separate authorization.
-
-## Source Of Truth
-
-- Unified Hermes v0.20 Runtime transactions use the candidate-extracted,
-  root-owned controller and artifact. Replace every placeholder with the exact
-  reviewed values; do not use `HEAD`, a branch, or a worktree copy:
-
-  The deployed Runtime binds exactly the eight files enumerated in
-  `hermes_runtime_artifact.v1.json` read-only inside only the Hermes systemd
-  mount namespace. General deployment authorization does not by itself approve
-  that permission-boundary mutation: record separate authorization before
-  `--mode apply`. Dry-run and isolated transient verification do not require
-  production activation of those binds.
-
-  ```bash
-  cd /opt/ran_agent
-  source /opt/ran_agent/.venv/bin/activate
-  RUNTIME_CANDIDATE=<reviewed-40-char-sha>
-  RUNTIME_CANDIDATE_REF=refs/ran-agent/runtime-candidates/$RUNTIME_CANDIDATE
-  RUNTIME_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/deploy-hermes-runtime-release-<reviewed-40-char-sha>.py
-  RUNTIME_ARTIFACT=/opt/ran_agent-release/runtime-artifacts/hermes-runtime-<candidate-short-sha>.tar.gz
-  git update-ref "$RUNTIME_CANDIDATE_REF" "$RUNTIME_CANDIDATE" 0000000000000000000000000000000000000000
-  test "$(git rev-parse --verify "$RUNTIME_CANDIDATE_REF^{commit}")" = "$RUNTIME_CANDIDATE"
-  sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode dry-run
-  sudo "$RUNTIME_CONTROLLER" --candidate "$RUNTIME_CANDIDATE" --artifact "$RUNTIME_ARTIFACT" --mode apply
-  ```
-
-  Apply prints the exact snapshot path. For the deployed 0b793e8 Runtime,
-  binding.v4 has since closed Runtime rollback. Its controller and snapshot are
-  evidence-only; do not invoke `--mode rollback`.
-
-  After the unified topology marker is published, the legacy
-  `deploy-hermes-candidate.sh` and standalone Lite/Full repair intentionally
-  refuse to operate. They are not rollback paths for the unified Runtime. The
-  candidate-named controller, candidate ref, artifact, topology, snapshot state
-  and sealed builder remain the retained evidence set.
-- Companion MCP overlay refreshes use the exact candidate-bound manifest and
-  narrow controller. The current contract mounts the exact candidate companion
-  profile read-only at the two existing Home profile paths so MCP registration
-  changes, MCP source changes and the one Python memory-facade source file
-  activate and roll back together. It does not replace the Hermes executable,
-  source checkout, database, or closed Runtime rollback authority:
-
-  ```bash
-  cd /opt/ran_agent
-  source /opt/ran_agent/.venv/bin/activate
-  set -euo pipefail
-  OVERLAY_CANDIDATE=<reviewed-40-char-sha>
-  OVERLAY_CANDIDATE_REF=refs/ran-agent/overlay-candidates/$OVERLAY_CANDIDATE
-  OVERLAY_CONTROLLER=/opt/ran_agent-release/runtime-artifacts/deploy-hermes-companion-overlay-$OVERLAY_CANDIDATE.py
-  git fetch origin main
-  test ! "$(git rev-parse --verify "$OVERLAY_CANDIDATE_REF" 2>/dev/null)" || test "$(git rev-parse --verify "$OVERLAY_CANDIDATE_REF^{commit}")" = "$OVERLAY_CANDIDATE"
-  git update-ref "$OVERLAY_CANDIDATE_REF" "$OVERLAY_CANDIDATE"
-  git show "$OVERLAY_CANDIDATE:scripts/deploy-hermes-companion-overlay.py" | sudo tee "$OVERLAY_CONTROLLER" >/dev/null
-  sudo chown root:root "$OVERLAY_CONTROLLER"
-  sudo chmod 0500 "$OVERLAY_CONTROLLER"
-  sudo "$OVERLAY_CONTROLLER" --mode preflight --candidate "$OVERLAY_CANDIDATE"
-  OVERLAY_APPLY_UNIT=ran-agent-companion-overlay-${OVERLAY_CANDIDATE:0:12}
-  sudo systemd-run --unit="$OVERLAY_APPLY_UNIT" --property=Type=exec --wait --collect \
-    "$OVERLAY_CONTROLLER" --mode apply --candidate "$OVERLAY_CANDIDATE"
-  sudo journalctl -u "$OVERLAY_APPLY_UNIT" --no-pager -n 80
-  ```
-
-  The transient systemd service keeps the transaction alive if the SSH client
-  disconnects; acceptance still comes only from the controller state and
-  journal. Apply prints the accepted transaction directory. A later explicit overlay
-  rollback may use only that candidate-extracted controller and exact directory:
-  `sudo "$OVERLAY_CONTROLLER" --mode rollback --transaction <exact-transaction-directory>`.
-  This is independent of, and does not reopen, v0.20 Runtime rollback.
-- After unified v0.20 passes immediate acceptance, the user has authorized
-  disabling the split topology and removing exact temporary validation assets
-  to reclaim space. Inventory references first. The active rollback contract
-  formerly verified the v0.13 payloads by digest. That retention window is now
-  closed and the exact payloads are absent. Preserve
-  the unified capability union, personal data, and shared runtimes. Do not
-  treat the old Full service name as permission to delete Full product state
-  or MCP capability.
-- Validate an exact reviewed release: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --dry-run`
-- Apply that same exact release after separate authorization: `bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply`
-- `deploy-hermes-main.sh --dry-run` may discover and test the then-current main head, but it is not apply authority; record and review its resolved SHA, then use the exact `--commit` path above.
-- Lite/Full drift repair is release-internal only. Do not invoke
-  `apply-hermes-runtime-split.sh` standalone; use the exact candidate
-  transaction above.
-- Run the blocking unified-runtime acceptance:
-  `bash scripts/verify-hermes-release.sh --release`
-- Diagnose proactive events:
-  `bash scripts/diagnose-proactive-events.sh`
-- Diagnose external MCP gateway:
-  `bash scripts/diagnose-external-mcp-gateway.sh`
-- Diagnose Search Hub:
-  `bash scripts/diagnose-search-hub.sh`
-- Diagnose Ombre Brain:
-  `bash scripts/diagnose-ombre-memory.sh`
-- Diagnose Hermes continuity:
-  `bash scripts/diagnose-hermes-continuity.sh`
-- Diagnose multi-frontend routing:
-  `bash scripts/diagnose-multi-frontend.sh`
-- Diagnose Hermes tool visibility:
-  `bash scripts/diagnose-hermes-tools.sh`
-- Diagnose media/XHS routing:
-  `bash scripts/diagnose-media-xhs.sh`
-- Prepare XHS public parsers:
-  `bash scripts/prepare-xhs-generic-fallback.sh` and
-  `bash scripts/prepare-xhs-public-sidecar.sh`
-- Clean UV cache safely:
-  `bash scripts/clean-uv-cache-safe.sh`
-- After this reviewed script exists in the active checkout, inspect
-  reclaimable completed-release payloads:
-  `sudo bash scripts/prune-hermes-release-artifacts.sh --dry-run`
-- After this reviewed script exists in the active checkout, reclaim only
-  payloads classified as completed `rollback_used` while keeping transaction
-  evidence:
-  `sudo bash scripts/prune-hermes-release-artifacts.sh --apply`
-- Immutable Hermes release transaction and rollback:
-  `docs/governance/hermes_release_deployment.md`
-- Explicit Pro evaluation, still through the same immutable transaction:
-  `RAN_AGENT_DEPLOY_HERMES_MODEL=deepseek-v4-pro bash scripts/deploy-hermes-candidate.sh --commit <CURRENT_REVIEWED_SHA> --apply`
-
-Do not publish one-off pasteable repair blocks in this file. If a repeated
-operation is needed, turn it into a script and reference it here.
-
-The old production checkout does not contain the pruner. Its immediate recovery
-authority is the reviewed bootstrap/apply transaction, which uses the
-candidate-staged pruner under the global release lock before it creates a new
-snapshot. It then performs a fresh mandatory capacity gate before any snapshot
-copy or service stop. Do not expect `git fetch` alone to add the script to the
-worktree.
-
-The artifact pruner fails closed for the current production transaction,
-corrupt state, symlinks, mount boundaries, path or inode drift, and a concurrent
-payload cleanup. It removes a verified rollback-used snapshot's `files/` payload
-while retaining its evidence. A final `release-transaction.*` directory with no
-`transaction-state.json` cannot be rollback authority and is removed only after
-the same identity, production-pointer, and mount checks.
-Deploy also runs this pruner while holding the cross-UID global release lock
-before the next runtime snapshot. It measures allocated blocks and inodes for
-the complete snapshot source set, adds the candidate archive/stage reserve,
-and requires the larger of 25% or 2 GiB byte headroom plus inode headroom.
-Insufficient capacity fails before a snapshot directory, service stop, or
-checkout change. Pre-prune `df` is an observation, not permission to delete
-uncertain artifacts by hand and not the final capacity authority.
-
-Agents changing or operating server runtime should first load
-`skills/server-runtime/SKILL.md`. That skill owns the virtualenv activation
-reminder and the env-preserving deploy rules.
-
-## Standard Deploy
-
-Hermes configuration prerequisites:
-
-- Run from the server checkout at `/opt/ran_agent`.
-- Activate `/opt/ran_agent/.venv` before deploy or diagnostic commands.
-- Do not invoke `scripts/apply-hermes-runtime-split.sh` standalone. It is a
-  legacy v0.13 compatibility step callable only by the immutable release
-  controller. Do not hand-edit systemd or env as the normal path.
-
-Code releases use the immutable-SHA transaction in
-`docs/governance/hermes_release_deployment.md`. Do not run `git pull`, `git
-switch`, or `git checkout` in `/opt/ran_agent` as a pre-deploy step. The
-transaction fetches a source ref only to resolve one SHA, gates an immutable
-stage, snapshots the active runtime, then changes the checkout only inside the
-apply transaction.
-
-The unified Hermes v0.20 Runtime transaction above is narrower than a code
-release: it leaves `/opt/ran_agent` on its current clean SHA, installs an
-immutable Runtime under `/opt/ran-agent-runtimes`, replaces only the managed
-Hermes/Node routing files, and records rollback state under
-`/opt/ran_agent-release/runtime-snapshots`. Use its controller for Runtime
-dry-run, apply, and rollback; use the ordinary candidate transaction only for
-later code releases that are compatible with the unified topology.
-
-The gate runs the same Git-less read-only candidate as root and as the
-validated non-root `RAN_AGENT_RUNTIME_USER/GROUP` identity (default
-`ubuntu:ubuntu`). Before and after checkout activation, tracked paths are
-projected to their Git modes and checkout owner; root-owned restrictive residue
-is repaired through no-follow file descriptors, then the Node entry and runtime
-dependencies are imported as that validated runtime identity. Do not manually
-`chown -R` or loosen repository env-file modes.
-
-After the quiesced Node and migration payloads extend the snapshot manifest,
-deploy reseals and re-verifies the in-progress snapshot before checkout. An
-interrupted explicit rollback remains eligible for the same rollback command;
-a completed rollback with only stale pointer metadata is finalized by that
-command rather than by manual Git or file deletion.
-
-For rollback interpretation only, the retired v0.13 split transaction used
-`apply-hermes-runtime-split.sh` to own:
-
-- Hermes profile install for lite and full.
-- Compact systemd units for `ran-agent-hermes.service` and
-  `ran-agent-hermes-full.service`.
-- Runtime env upsert for Hermes homes, root Node env, and
-  `/opt/ran_agent/node_bridge/.env.local`.
-- Synchronized Lite/Full `deepseek-v4-flash` selection and the shared DeepSeek
-  provider plugin that forces `thinking.type=disabled`. Pro remains available
-  only through an explicit deployment override.
-- The old pre-Gate-5 O2 compatibility wiring is retired. Current source apply
-  removes its Node environment/drop-in seams while preserving direct read-only
-  Ombre on `18001`; the previous source snapshot remains the only rollback
-  authority for any retained legacy state.
-- Service restart for `ran-agent-python.service`, `ran-agent-node.service`,
-  `ran-agent-hermes.service`, and `ran-agent-hermes-full.service` so new env
-  gates are loaded by running processes.
-- Proactive event gates:
-  `HERMES_PROACTIVE_EVENTS_ENABLED=true`,
-  `HERMES_PROACTIVE_EXTERNAL_MCP_ENABLED=true`,
-  `HERMES_PROACTIVE_REMINDERS_ENABLED=true`,
-  `HERMES_PROACTIVE_NOTIFY_MAX_CHARS=1600`, while legacy
-  `PERSONAL_AGENT_PROACTIVE_ENABLED=false` remains frozen.
-- External MCP activity runner gates:
-  `EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=true` and
-  `EXTERNAL_MCP_ACTIVITY_TICK_MS=60000`.
-- Reply-window gates:
-  `HERMES_REPLY_TIMEOUT_SECONDS=1200`,
-  `NODE_BRIDGE_QUICK_ACK_ENABLED=false`,
-  `NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS=4500`,
-  `NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理。`,
-  `FEISHU_SEND_TIMEOUT_SECONDS=30`, and
-  `FEISHU_DOWNLOAD_TIMEOUT_SECONDS=30`.
-- `/opt/ran_agent` diagnostics run strict proactive env checks: `.env.local`,
-  `node_bridge/.env.local`, and the running Python/Node service environments
-  must all show those gates after deployment.
-- UV cache/tool directories under `/opt/ran_agent/.ran_agent_state/`.
-- Trusted runtime media directories, including
-  `/opt/ran_agent/.ran_agent_state/wechat/inbound` and
-  `/opt/ran_agent/debug/wechat/inbound`.
-- XHS generic fallback marker path:
-  `/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json`.
-- XHS-Downloader public sidecar marker path:
-  `/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json`.
-- Non-blocking XHS generic fallback and public sidecar preparation before
-  service restart.
-- Active cleanup of account-backed XHS state: `XHS_COOKIE`, XHS MCP env keys,
-  `ran-agent-xhs-browse.service`, the browse marker, and legacy token cache.
-- Ombre Brain runtime preparation under
-  `/opt/ran_agent/.ran_agent_state/ombre-brain` and private buckets under
-  `/opt/ran_agent/vault/ombre`.
-- Restart and verification.
-
-For the Hermes cache-friendly context package, the same deploy command writes
-the conservative defaults and restarts the Node bridge. No manual env edits are
-required for the default rollout.
-
-### One-time owner binding
-
-The release preflight intentionally stops with `owner_binding_required` until
-an operator supplies one explicit owner identity. Do not use the legacy
-`user:ran` fallback, an ordinary chat payload, or model output as that source.
-Obtain the identity JSON only from the authenticated bridge or a verified
-platform-operator export, place it in an owner-only (`0600`) local file, then
-run the repo-managed command:
+Only after separate owner authorization, apply the same SHA:
 
 ```bash
-node scripts/bootstrap-owner-binding.mjs --identity-file /secure/path/owner-binding.json
+bash scripts/deploy-hermes-candidate.sh \
+  --commit <same-reviewed-40-char-main-sha> --apply
 ```
 
-The JSON must explicitly contain `platform` (`wechat`, `feishu`, or `desktop`),
-`senderId`, `globalUserId`, and `provenance`. The command accepts no fallback
-identity, writes only the sender hash to the runtime map, emits only a binding
-count, and refuses to replace an existing owner binding. Remove the temporary
-identity file according to the server's local secret-handling policy after the
-command succeeds.
+`scripts/deploy-hermes-main.sh --dry-run|--apply` is the convenience entrypoint
+for reviewed `origin/main`; it fetches, resolves, and pins one exact SHA before
+entering the same transaction. Do not treat the branch name itself as apply
+authority.
 
-After deploy, observe cache and context telemetry:
+The transaction owns preflight, immutable staging, release gates, snapshot,
+checkout activation, dependency reuse/swap, profile projection, service restart,
+acceptance, and rollback metadata. Use only the exact rollback command/snapshot
+printed by that transaction. Runtime-only cutover rollback is closed and must
+not be invoked.
 
-```bash
-journalctl -u ran-agent-node.service --since '30 minutes ago' --no-pager \
-  | grep -E 'hermes-provider-usage|hermes-context-components'
-```
+## Environment Ownership
 
-The default should show `cache_strategy=balanced`,
-`cache_friendly_history_enabled=false`, and DeepSeek cache telemetry fields when
-the provider returns them. To explicitly test provider-visible append history,
-deploy with:
-
-```bash
-RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY=cache_first \
-bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
-```
-
-Rollback to telemetry-only behavior:
-
-```bash
-RAN_AGENT_DEPLOY_HERMES_CONTEXT_CACHE_STRATEGY=balanced \
-RAN_AGENT_DEPLOY_HERMES_CACHE_FRIENDLY_HISTORY=false \
-RAN_AGENT_DEPLOY_HERMES_CACHE_TELEMETRY_ENABLED=true \
-bash scripts/deploy-hermes-candidate.sh --commit <reviewed-40-char-sha> --apply
-```
-
-## Runtime Services
-
-The table describes the deployed Runtime topology. The existing direct Ombre
-service on `18001` remains active; `18002` and `18061` remain inactive. The next
-personal-memory candidate keeps `18001` internal behind Python and removes the
-direct Hermes tool; it does not activate `18002`.
-
-| Service | Port | Profile | Home | Purpose |
-|---------|------|---------|------|---------|
-| `ran-agent-hermes.service` | `8642` | `ran-assistant-lite` compatibility ID | `/home/ubuntu/.hermes-ran-agent/lite` | Unified legacy Lite/Full capability surface |
-| `ran-agent-hermes-full.service` | none | retired | retained rollback state only | Inactive, disabled and condition-blocked |
-| `ran-agent-xhs-public-sidecar.service` | `18061` | n/a | `/opt/ran_agent/.ran_agent_state/xhs-public-sidecar` | XHS-Downloader public API sidecar for `social_reader` |
-| `ran-agent-ombre-brain.service` | `18001` | n/a | `/opt/ran_agent/.ran_agent_state/ombre-brain` | Current direct service; next candidate reads it only through Python personal_memory |
-| `ran-agent-ombre-recall.service` | `18002` | n/a | `/opt/ran_agent` | Inactive v0.13 rollback-era adapter; not a target service |
-
-All legacy Lite/Full bridge URLs and selectors resolve to `8642`. The unified
-profile includes terminal, file, session-search, Playwright, media and
-co-reading instead of routing heavy intents to a second gateway.
-
-## Required Env Locations
-
-The unified Runtime controller manages public routing in:
+Active EnvironmentFiles:
 
 - `/opt/ran_agent/.env.local`
 - `/opt/ran_agent/node_bridge/.env.local`
+- `/home/ubuntu/.hermes/.env` for the small Hermes service-only overlay
 
-These homes remain legacy rollback state, not unified-controller routing
-authorities:
+Owner-only files remain `ubuntu:ubuntu` mode `0600`. Inspect variable names or
+explicitly safe non-secret flags only. Never print values for API keys, tokens,
+cookies, proxy URLs, Lark identities, recipient bindings, or login state.
 
-- `/home/ubuntu/.hermes-ran-agent/.env`
-- `/home/ubuntu/.hermes-ran-agent/lite/.env`
-- `/home/ubuntu/.hermes-ran-agent/profiles/ran-assistant/.env`
-- `/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-assistant-lite/.env`
+Current safety/routing invariants:
 
-Important non-secret keys:
+- `AI_DAILY_DIGEST_ENABLED=false`; daily reports belong to Codex.
+- `EXTERNAL_MCP_GATEWAY_ENABLED=true`, system queue enabled, and activity runner
+  enabled; registry/policy/grant/evidence gates remain mandatory.
+- `RAN_AGENT_CORE_ENABLED=true` and managed wake enabled.
+- `OMBRE_BRAIN_ENABLED=true` and the MCP URL is loopback `18001`.
+- Qwen-MM OCR/VLM and knowledge use Token Plan `qwen3.6-flash`.
+- ASR and media generation remain on DashScope.
+- XHS is public-only; account-backed keys and services remain absent.
 
-```text
-HERMES_LITE_API_BASE_URL=http://127.0.0.1:8642/v1
-HERMES_FULL_API_BASE_URL=http://127.0.0.1:8642/v1
-RAN_AGENT_CAPABILITY_MODE=auto
-HERMES_CONTEXT_INJECTION_MODE=auto
-HERMES_CONTEXT_CACHE_STRATEGY=balanced
-HERMES_CACHE_FRIENDLY_HISTORY=false
-HERMES_CACHE_FRIENDLY_HISTORY_MAX_TURNS=6
-HERMES_CACHE_FRIENDLY_HISTORY_CHAR_BUDGET=12000
-HERMES_CACHE_FRIENDLY_HISTORY_PROFILE=lite
-HERMES_CACHE_TELEMETRY_ENABLED=true
-SOCIAL_READER_GENERIC_FALLBACK_ENABLED=true
-SOCIAL_READER_XHS_BACKEND_TIMEOUT_MS=90000
-SOCIAL_READER_XHS_GENERIC_FALLBACK_TIMEOUT_MS=90000
-XHS_BACKEND_MCP_TIMEOUT_MS=90000
-MEDIA_READER_MCP_TIMEOUT_MS=1200000
-PERSONAL_AGENT_MEDIA_DOWNLOAD_TIMEOUT_MS=60000
-PERSONAL_AGENT_MEDIA_MAX_CONCURRENCY=3
-PERSONAL_AGENT_MEDIA_BATCH_TIMEOUT_MS=1200000
-PERSONAL_AGENT_MEDIA_PER_ITEM_TIMEOUT_MS=120000
-PERSONAL_AGENT_OCR_PROVIDER=dashscope-qwen-vl-ocr
-PERSONAL_AGENT_OCR_MODEL=qwen-vl-ocr-2025-11-20
-PERSONAL_AGENT_OCR_TIMEOUT_MS=120000
-XHS_GENERIC_FALLBACK_READY_PATH=/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
-XHS_GENERIC_FALLBACK_MIN_VERSION=1.2.0
-XHS_PUBLIC_SIDECAR_ENABLED=true
-XHS_PUBLIC_SIDECAR_URL=http://127.0.0.1:18061/xhs/detail
-XHS_PUBLIC_SIDECAR_TIMEOUT_MS=90000
-XHS_PUBLIC_HTML_FALLBACK_ENABLED=true
-XHS_PUBLIC_SIDECAR_MARKER_PATH=/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json
-UV_CACHE_DIR=/opt/ran_agent/.ran_agent_state/uv-cache
-UV_TOOL_DIR=/opt/ran_agent/.ran_agent_state/uv-tools
-UV_LINK_MODE=copy
-UV_PYTHON_DOWNLOADS=never
-OMBRE_BRAIN_ENABLED=true
-OMBRE_BRAIN_MCP_ENABLED=true
-OMBRE_BRAIN_RUNNER=source
-OMBRE_BRAIN_REPO_URL=https://github.com/P0luz/Ombre-Brain
-OMBRE_BRAIN_HOME=/opt/ran_agent/.ran_agent_state/ombre-brain
-OMBRE_BRAIN_SOURCE_DIR=/opt/ran_agent/.ran_agent_state/ombre-brain/upstream
-OMBRE_BRAIN_VENV=/opt/ran_agent/.ran_agent_state/ombre-brain/.venv
-OMBRE_BUCKETS_DIR=/opt/ran_agent/vault/ombre
-OMBRE_BRAIN_STATUS_FILE=/opt/ran_agent/.ran_agent_state/ombre-brain/status.json
-OMBRE_BIND_HOST=127.0.0.1
-OMBRE_MCP_REQUIRE_AUTH=false
-OMBRE_BRAIN_MCP_URL=http://127.0.0.1:18001/mcp
-AI_DAILY_DIGEST_ENABLED=false
-AI_DAILY_DIGEST_HOUR=8
-AI_DAILY_DIGEST_MINUTE=0
-HERMES_ACTION_GATE_ENABLED=true
-HERMES_ACTION_GATE_MODE=repair
-HERMES_ACTION_GATE_MAX_REPAIR_ATTEMPTS=1
-HERMES_ACTION_PENDING_ENABLED=true
-HERMES_ACTION_PENDING_TTL_MINUTES=30
-HERMES_REPLY_TIMEOUT_SECONDS=1200
-NODE_BRIDGE_QUICK_ACK_ENABLED=false
-NODE_BRIDGE_QUICK_ACK_TIMEOUT_MS=4500
-NODE_BRIDGE_QUICK_ACK_TEXT=收到，正在处理。
-FEISHU_SEND_TIMEOUT_SECONDS=30
-FEISHU_DOWNLOAD_TIMEOUT_SECONDS=30
-HERMES_PROACTIVE_NOTIFY_MAX_CHARS=1600
-EXTERNAL_MCP_ACTIVITY_RUNNER_ENABLED=true
-EXTERNAL_MCP_ACTIVITY_TICK_MS=60000
-```
+`OPENCLAW_STATE_DIR` may still appear in the Node process because the vendored
+WeChat SDK uses that compatibility name for the current ran-agent state root.
+It is not OpenClaw runtime authority. Old OpenClaw gateway credentials and all
+MiMo Token Plan/runtime variables are retired and must remain absent.
 
-The recall-only `18002` service and its `OMBRE_RECALL_MCP_URL`,
-`PERSONAL_AGENT_OMBRE_BACKEND=recall_only`, and
-`PERSONAL_AGENT_OMBRE_MCP_URL` keys are retired. Do not restore them as current
-runtime configuration; personal memory uses the loopback `18001` boundary.
+## Qwen Token Plan
 
-Ombre deliberately has no network authenticator.
-`OMBRE_MCP_REQUIRE_AUTH=false` is valid only with the enforced `127.0.0.1`
-bind and loopback-only MCP/health URLs. An external bind—or claiming
-authentication with `true`—is a release error.
-
-Secrets such as API keys, cookies, proxy URLs, Lark credentials, and platform
-login state must stay in local env files only and must never be printed into
-docs, logs, tool output, or Git.
-
-## Qwen Token Plan Activation
-
-Run this only after the archived source containing the pinned Qwen-MM backend
-has been applied. Use the existing `ubuntu` service owner; do not switch Unix
-identity or change file ownership:
-
-```bash
-cd /opt/ran_agent && bash scripts/configure-qwen-token-plan.sh
-```
-
-The script prepares Qwen-MM, then reuses `TOKEN_PLAN_API_KEY` already stored in
-the owner-only root env. If it is absent, paste the key only when the terminal
-prints `现在请粘贴 TOKEN_PLAN_KEY（输入不会显示）`; input is hidden and never
-accepted in argv. It validates `qwen3.6-flash` visual chat and Responses API,
-atomically synchronizes the root and later-loaded Node env providers, then
-restarts and checks Python and unified Hermes. Any post-apply failure restores
-both env files, Qwen settings and the systemd drop-in.
-
-Activation routes Qwen-MM OCR/VLM and the knowledge runner through Token Plan.
-It deliberately leaves `qwen3-asr-flash` ASR and media generation on their
-existing DashScope credentials because those models/interfaces are not covered
-by this Token Plan route.
-
-The standard deploy removes account-backed XHS keys from all managed env files.
-Do not add `XHS_COOKIE`, `XHS_MCP_*`, `PERSONAL_AGENT_XHS_MCP_*`, or
-`XHS_BROWSE_*` keys back into Hermes or Node env.
-
-For WeChat bridge or login-state debugging, verify the exact CLI package,
-runtime SDK package, version, import path, and state directory contract before
-proposing token or state migration commands. Treat platform resolver state as
-local runtime data, not portable documentation.
-
-## Health Checks
+The owner stores `TOKEN_PLAN_API_KEY` in `/opt/ran_agent/.env.local`. Never pass
+it in argv or tool output. Configure or revalidate with:
 
 ```bash
 cd /opt/ran_agent
-bash scripts/diagnose-external-mcp-gateway.sh
-bash scripts/diagnose-search-hub.sh
-bash scripts/diagnose-hermes-continuity.sh
-bash scripts/diagnose-multi-frontend.sh
-bash scripts/diagnose-hermes-tools.sh
-bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-public-sidecar --smoke-social-tools
+source /opt/ran_agent/.venv/bin/activate
+bash scripts/configure-qwen-token-plan.sh
 ```
 
-For direct API checks, use the local Hermes API key from the server env. Do not
-paste key-bearing curl commands into public docs.
+The script reuses the stored key or prompts with hidden input only when absent.
+It validates visual chat and Responses APIs, prepares the pinned Qwen-MM
+backend, atomically synchronizes root/Node providers and Qwen settings, restarts
+the affected services, and restores the prior state on failure.
 
-## Search And Social Routing
-
-- Fresh web facts, news, academic search, AI hot topics, and normal URL reads
-  enter through `search_hub`.
-- Actual social-platform links enter `social_reader` / `media_reader` first.
-- XHS links (`xhslink.com`, `xiaohongshu.com`, `xhs.com`, or `小红书`) must not
-  be first-read through `browser_navigate` or terminal.
-- XHS is public-only. Token caches, browse tools, search/feed/profile, QR login,
-  and `check_social_login` are not part of Hermes XHS reading.
-- Public parser metadata is not content-read evidence. `content_read` requires
-  actual text or media/OCR fields.
-
-## Scheduled AI Daily Digest (Retired)
-
-`AI_DAILY_DIGEST_ENABLED=false` is the source and production default. The owner
-assigned daily reports to Codex; do not restore a ran-agent target binding,
-08:00 schedule, replacement seed or manual digest smoke.
-
-Do not enable `PERSONAL_AGENT_PROACTIVE_ENABLED` for this feature.
-
-## XHS Public Read Backends
-
-XHS reads are public-only inside `social_reader`:
-
-1. Resolve short links and note ids.
-2. Try `wanyi-watermark parse_xhs_link`.
-3. Try the XHS-Downloader sidecar `POST /xhs/detail` with
-   `download=false` and `cookie=""`.
-4. Try `wanyi-watermark parse_generic_link`.
-5. Try minimal HTML/OG metadata fallback.
-6. Forward discovered public media URLs to `media_reader.analyze_media_batch`.
-
-The deploy script prepares wrappers/markers once, then runtime uses those
-wrappers instead of cold-starting installers. Public parsers only provide
-text/media URLs; image OCR/VLM is done by `media_reader`. The default full-read
-cap is 100 media assets with 20-minute media MCP/batch budgets, so complete XHS
-image reads should fail only as explicit per-asset partial failures rather than
-silent truncation.
-
-Expected state:
-
-```text
-/opt/ran_agent/.ran_agent_state/social_reader/generic-fallback-ready.json
-/opt/ran_agent/.ran_agent_state/social_reader/xhs-public-sidecar-ready.json
-ran-agent-xhs-public-sidecar.service active on 127.0.0.1:18061 when the marker is ready and the optional sidecar is enabled
-ran-agent-xhs-browse.service absent or inactive
-no XHS_COOKIE / XHS_BROWSE_* / XHS_NOTE_TOKEN_CACHE_* in managed env files
-```
-
-If XHS content reads fail:
-
-1. Run
-   `bash scripts/diagnose-media-xhs.sh --smoke-generic --smoke-public-sidecar --smoke-social-tools`.
-2. Confirm account-backed XHS is disabled, wanyi is ready, the public sidecar is
-   ready, and `tools/list` has no `check_social_login` or `xhs_browse_*`.
-3. Check whether the specific note is simply not publicly readable. Do not
-   repair this by adding cookies, QR login, `xiaohongshu-mcp`, or token cache.
-
-Old account-backed commands now intentionally fail with
-`XHS_ACCOUNT_BACKED_DISABLED`:
+## Health And Boundary Checks
 
 ```bash
-bash scripts/prepare-xhs-browse-backend.sh
-bash scripts/start_xhs_browse_backend.sh
-bash scripts/login_xhs_browse_backend.sh
-bash scripts/run_xhs_browse_mcp.sh
+cd /opt/ran_agent
+source /opt/ran_agent/.venv/bin/activate
+
+bash scripts/diagnose-lite-full.sh
+bash scripts/diagnose-hermes-tools.sh
+bash scripts/diagnose-hermes-continuity.sh
+bash scripts/diagnose-multi-frontend.sh
+bash scripts/diagnose-external-mcp-gateway.sh
+bash scripts/diagnose-ombre-memory.sh
+bash scripts/diagnose-search-hub.sh
+bash scripts/diagnose-media-xhs.sh \
+  --smoke-generic --smoke-public-sidecar --smoke-social-tools
 ```
 
-## UV Cache Recovery
+The historical `lite/full` script name is compatibility only. A successful
+diagnosis proves one active unified gateway and an inactive Full unit.
 
-Use the safe cleaner only:
+For high-risk completion evidence, wrap the separately authorized read-only
+check:
+
+```bash
+.venv/bin/python scripts/workflow_guard.py verify \
+  --label <bounded-label> -- <read-only-command>
+```
+
+The guard records evidence; it does not authorize apply, rollback, deletion,
+identity/permission changes, or external effects.
+
+## Routing Checks
+
+- Fresh web/news/academic facts enter through `search_hub`.
+- Social links enter through `social_reader`; discovered media enters
+  `media_reader`.
+- XHS uses public parsers only. Never restore `XHS_COOKIE`, QR login,
+  account-backed MCPs, token caches, or `ran-agent-xhs-browse.service`.
+- Public parser metadata is not content-read evidence; usable text or media
+  analysis is required.
+- Co-reading normal URLs reuse Search Hub and social URLs reuse Social Reader.
+  Browser clients receive only `CO_READING_WEB_ACCESS_TOKEN`; the owner token
+  stays server-side.
+
+## Safe Maintenance
+
+UV cache cleanup uses only the scoped helper:
 
 ```bash
 bash scripts/clean-uv-cache-safe.sh
 bash scripts/clean-uv-cache-safe.sh --yes
 ```
 
-Protected paths:
+Its protected state includes social-reader markers, `vault/`, `data/`, and
+debug media evidence. Do not manually remove snapshot, runtime, model, database,
+vault, log, or cache trees of uncertain ownership.
 
-- `/opt/ran_agent/.ran_agent_state/social_reader/`
-- `/opt/ran_agent/node_bridge/.ran_agent_state/social_reader/`
-- `/opt/ran_agent/vault`
-- `/opt/ran_agent/data`
-- `/opt/ran_agent/debug/wechat/xhs_notes`
+## Retired Boundaries
 
-## Retired Paths
+Do not restore or operate:
 
-OpenClaw, Kimi, and GLM are retired frontend/runtime paths. Old
-`openclaw-*` names and `.openclaw_state` references are legacy compatibility
-artifacts only and must not be used as deployment authority.
+- OpenClaw, Kimi, GLM, or MiMo Power as frontend/runtime authorities;
+- the v0.13 split deployment or Runtime rollback path;
+- the `18002` recall adapter or O2 writer/Steward/token seam;
+- Hermes Calendar/Todo/Minutes/digest work executors;
+- account-backed XHS services or credentials;
+- Python `/chat` or a second conversation runtime.
+
+Exact deleted components are recorded in `cleanup.md`. Current product/runtime
+truth lives in `current_runtime_status.md`; completed transaction detail is not
+an operator command source.

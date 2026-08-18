@@ -1,12 +1,11 @@
 # S12 Readiness Topology And Acceptance Ledger
 
-Status: CURRENT (2026-08-13)
+Status: HISTORICAL COMPLETED ACCEPTANCE LEDGER (2026-08-18)
 
-This is the canonical execution and handoff checklist from S12 readiness through
-the S13 observation boundary. `active_sequence.md` owns the
-project-level S-stage pointer; this document owns the detailed R-node topology,
-acceptance criteria and evidence ledger. Chat summaries are not status
-authority.
+This is the completed execution and handoff ledger for S12. It must not be
+resumed as an active checklist. `active_sequence.md` owns the current frontier;
+this file preserves R-node acceptance evidence and does not authorize S13
+deletion or any production mutation.
 
 Current handoff: S12 is `COMPLETE / PROD_ACCEPTED` at
 `e298bab161bf0f4882bcef6e9cd701d546b63ff2`. Source pointer and

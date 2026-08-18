@@ -1,6 +1,15 @@
 # Cleanup Scope
 
-Status: CURRENT (2026-08-17)
+Status: CURRENT (2026-08-18)
+
+## Cleaned (2026-08-18, Production Environment Hygiene)
+
+After Qwen Token Plan activation, a read-only name audit confirmed the active
+owner-only env files contain no retired MiMo variables, old OpenClaw gateway
+credentials, or account-backed XHS variables. The stale `.env.local.swp` was
+removed after its editor session ended. `TOKEN_PLAN_API_KEY` remains only in the
+owner-managed env; no secret value was copied into source, documentation, logs,
+or Git.
 
 ## Deleted (2026-08-17, Hermes Work-Executor Excision)
 
@@ -77,9 +86,8 @@ Kept deliberately (evidence overrode the deletion recommendation):
 - `scripts/provision-fastembed-model.py` — `vector_memory_index.py` uses
   `local_files_only=True`; this script is the only offline model provisioning
   path for fresh deploys
-- `node_bridge/src/core/ombreProjectionService.mjs` + test — retained and now
-  composed in the local H3 candidate for verified personal-learning receipts;
-  production apply remains separately authorized
+- `node_bridge/src/core/ombreProjectionService.mjs` + test — retained and
+  composed in production for verified personal-learning receipts
 - `node_bridge/src/ombreRecallMcpServer.mjs` + `ombreRecallPolicy.mjs` (retired
   18002 recall service) — deletion deferred: the release acceptance chain still
   probes its toolset (`accept-hermes-release.sh`,
@@ -98,14 +106,15 @@ Kept deliberately (evidence overrode the deletion recommendation):
 ## Deleted (2026-08-06, Unified Hermes Runtime Cleanup)
 
 - Three terminal `rolled-back` Runtime snapshots from failed/superseded v0.20
-  attempts (about 638 MiB total). The accepted `0b793e8` controller, candidate
-  ref and snapshot remain the sole Runtime rollback authority set.
+  attempts (about 638 MiB total). The accepted controller/candidate/snapshot set
+  was retained for that transaction's then-open rollback window.
 - Exact server `/tmp` candidate stages, duplicate artifact copy and transfer
   bundle used by the accepted Runtime transaction.
 
-The retired Full unit is inactive, disabled and condition-blocked. Live v0.13
-executables remain until the accepted rollback window closes; personal data,
-shared runtimes and the unified Lite/Full capability surface were not deleted.
+That Runtime rollback window later closed; current recovery belongs to the
+immutable source transaction. The retired Full unit remains inactive, disabled,
+and condition-blocked, and v0.13 payloads were removed. Personal data and shared
+runtimes were not deleted.
 
 ## Deleted (2026-04-13)
 

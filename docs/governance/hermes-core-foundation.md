@@ -1,6 +1,6 @@
 # Hermes Core Foundation
 
-Status: CURRENT (2026-08-17)
+Status: IMPLEMENTED FOUNDATION REFERENCE (2026-08-18)
 
 This document records the public source-level contract of Hermes Core Packages
 A-E. All five packages completed their staged acceptance and were composed by
@@ -113,8 +113,8 @@ callback returns or throws; delayed and Promise-based writes cannot escape.
 Package A supplies typed primitives for journal/payload append, trusted ingress
 identity, tombstone/publication/effect receipts, projection reservation and
 cursor CAS, Work Run revision/fence CAS, and the database half of Living Soul
-state transitions. These are Foundation primitives, not evidence that the
-corresponding Package B/C runtime integrations exist.
+state transitions. These primitives alone are not production evidence; current
+composition and acceptance are recorded in `current_runtime_status.md`.
 
 ## Owner-Accepted Package B.1 Boundary
 
@@ -140,7 +140,7 @@ transaction. Provider Epoch identity and source snapshot bindings are
 immutable; typed state transitions and sequential attempts retain sufficient
 non-secret metadata for close/reopen rebuild readback.
 
-The foundation composed by the local Package B.2 service includes
+The foundation composed by the Package B.2 service includes
 atomic ingress plus immutable assembly intent, atomic part/reference plus
 processing transition, durable reference/deferred history, parent-scoped
 recovery and candidate readers, global pending-ingress cold-start discovery,
@@ -149,11 +149,11 @@ and a seal digest computed from persisted reference state.
 primitives remain compatibility and diagnostic surfaces whose half-states are
 explicitly exposed by typed readers rather than hidden.
 
-This accepted source remains inactive in production.
-`node_bridge/src/index.mjs` does not compose the Package B path, and ChannelHub,
-frontends, provider gateway/history, Global Timeline, `durableOutbox`, and
-Python ingest remain on their existing production paths. Package B.2 adds no
-second store, schema migration, runtime flag, or production fallback.
+Production composes the Package B path through the Node/Core mainline and keeps
+one semantic writer and one presentation effect path. ChannelHub, frontends,
+provider history, Global Timeline, and compatibility surfaces do not become
+second authorities. Package B.2 adds no fallback store or duplicate delivery
+runtime.
 
 ## Operation Identity
 

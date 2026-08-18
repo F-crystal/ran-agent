@@ -1,6 +1,6 @@
 # Runtime Constraints
 
-Status: CURRENT (2026-08-17)
+Status: CURRENT (2026-08-18)
 
 ## Split Of Responsibility
 
@@ -24,11 +24,11 @@ Status: CURRENT (2026-08-17)
   not change service identity, direct Ombre recall, rollback, or retention
   ownership.
 - Media pipeline: `raw messages -> logical turn (inbound message buffer) -> media asset -> media artifact -> conversation media context -> Hermes reply`
-- Daily reports are owned by Codex. The former Core/Python/Hermes digest path is
-  retired in local source and remains a production stop transaction, not a
+- Daily reports are owned by Codex. Production disables the former
+  Core/Python/Hermes digest; retained compatibility code is inert and is not a
   Hermes mainline.
-- External MCP candidate mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional ProactiveEvent synthetic Hermes turn`; source profiles expose the gateway by default, while admission, allow-env, proactive event and system-queue gates remain enforced.
-- Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> Qwen Code -> Obsidian vault`
+- External MCP mainline: `external_mcp_gateway -> admission/registry/executor/policy/session/evidence/activity -> optional ProactiveEvent synthetic Hermes turn`; the active profile exposes the gateway by default, while admission, allow-env, proactive event and system-queue gates remain enforced.
+- Knowledge mainline: `knowledge_agent.py -> vault_runner.sh -> configured Qwen CLI -> vault/`; production uses Token Plan `qwen3.6-flash`.
 - OpenClaw, Kimi, GLM, and MiMo Power are retired. Hermes (DeepSeek V4) is the sole frontend.
 - Life-loop and reflection remain backend/support layers. They are not an
   open-ended proactive outbound mainline. Explicit reminders may notify only as
@@ -77,7 +77,9 @@ Unless explicitly requested, do not introduce:
 ## Hermes Local Contract
 
 - For frontline lock, heartbeat cadence, and todo/reminder behavior, read `hermes/profile/AGENTS.md`.
-- Keep the local Hermes config project-scoped in `hermes/profile/config.yaml`.
+- The active project-scoped Hermes profile is
+  `hermes/profile/config.companion.yaml`. Legacy `config.yaml` is not deployment
+  authority.
 
 ## Security Scope
 

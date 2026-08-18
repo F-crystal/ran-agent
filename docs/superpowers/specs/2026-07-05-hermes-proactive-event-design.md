@@ -1,10 +1,10 @@
 # Hermes Proactive Event Design
 
-Status: CURRENT (2026-07-05)
+Status: HISTORICAL DESIGN / IMPLEMENTED (2026-08-18)
 
-Design status: target architecture and implementation contract. This document
-does not claim the runtime has already changed. `docs/governance/current_runtime_status.md`
-remains the source of truth for production behavior until implementation lands.
+The design has landed in evolved form. Use
+`docs/governance/hermes-playground-boundary.md` for the current behavior and
+`docs/governance/current_runtime_status.md` for production truth.
 
 ## Goal
 

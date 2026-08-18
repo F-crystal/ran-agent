@@ -1,6 +1,6 @@
 # WeChat Bridge Media Buffer
 
-Status: CURRENT (2026-05-22)
+Status: CURRENT (2026-08-18)
 
 The WeChat bridge buffers media and text into a logical user turn before the
 request enters `ChannelHub`.

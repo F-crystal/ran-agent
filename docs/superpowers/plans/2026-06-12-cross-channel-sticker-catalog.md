@@ -1,5 +1,10 @@
 # Cross-Channel Sticker Catalog Implementation Plan
 
+Status: HISTORICAL IMPLEMENTATION PLAN (2026-08-18)
+
+The implementation has landed. Use `docs/governance/sticker-catalog.md` for
+the current contract; this checklist is retained only as design history.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Add a platform-neutral sticker catalog so Hermes can attach saved sticker images/GIFs in WeChat and Feishu without breaking Unicode emoji, ordinary text, existing `media_generation`, or scheduled/digest paths.

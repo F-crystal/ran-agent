@@ -1,6 +1,6 @@
 # Hermes Action Contract Gate
 
-Status: CURRENT (2026-08-17)
+Status: CURRENT (2026-08-18)
 
 ## Why Not Prompt Only
 
@@ -15,26 +15,13 @@ with a short, honest fallback. In `repair` mode, only an explicitly injected,
 bounded retry for an already declared trusted action may run before the same
 safe rewrite.
 
-`feishu.minutes_to_doc` is the single document-write action currently
-registered. Hermes must first read an existing Minutes transcript, then declare
-the transcript title, destination folder title, document title and bounded
-DocxXML. Node grounds both titles in the current owner request, uniquely resolves
-the existing resources under the authenticated user, creates the document in
-that folder, and accepts success only after document readback. Ambiguous lookup
-or unknown write state fails without automatic retry. If the first private
-Minutes reply has no executable action because its envelope is invalid or its
-action list is empty, Node may request exactly one strict Hermes replan
-only when the current owner turn names both Minutes and a cloud document. The
-replan accepts only the exact public Minutes fields and still fails closed
-before lark-cli if a model-owned field such as `id` remains. It runs in the
-trusted `action_gate_repair` task session and may reread the named transcript,
-but never writes through a tool.
-For the one exact Minutes action shape containing only
-`actionType` and the four required scope fields, the bridge may bind the fixed
-public correlation label when `requestRef` alone is absent and deterministically
-bind the body `<title>` to `documentTitle`; complete outer `root`/`content`
-wrappers are removed before that title is added. It does not apply this
-normalization to any other action or unknown field.
+The current playground accepts only `memory.remember`, `memory.correct`, and
+`memory.forget` from a Hermes reply envelope. Node grounds those requests in
+explicit owner language, validates their exact scope, executes them through the
+personal-learning adapter, verifies the receipt, and then invokes the bounded
+Core/Ombre projector. Calendar, Todo, reminders, Minutes/documents, daily
+reports, code, and deployment actions are filtered before any executor; Node
+does not infer or replan those permissions from user prose.
 
 ## Delivery Boundary
 
@@ -141,7 +128,7 @@ HERMES_ACTION_GATE_ENABLED=false
 
 ## Safe Rewrite Scope
 
-B package rewrites only when the final reply claims an action that runtime
+The gate rewrites only when the final reply claims an action that runtime
 evidence does not support, or when partial/failed evidence conflicts with a
 success claim.
 
@@ -211,7 +198,7 @@ natural safe downgrade, while logs record sanitized `repair_status`,
 
 ## Pending Action Scope
 
-D package adds a separate confirmation lane for high-risk side effects. This is
+The gate also has a separate confirmation lane for high-risk side effects. This is
 not a general approval flow; ordinary chat, reading, media analysis, sticker
 send markers, and media reattach repairs do not ask for confirmation.
 
@@ -258,7 +245,7 @@ Each action stores only sanitized metadata:
   "requestId": "req_...",
   "channel": "wechat",
   "conversationIdHash": "...",
-  "profile": "ran-assistant-lite",
+  "profile": "ran-agent-companion",
   "actionType": "sticker_save",
   "summary": "保存表情包",
   "status": "pending",
@@ -383,6 +370,8 @@ No daily script is required. The gate runs in the reply backend when enabled.
 For smoke testing, send:
 
 - Plain chat: expect `intent=none`.
+- A Hermes Calendar/Todo/Minutes/document action request: expect it to be
+  blocked before every work executor.
 - A Xiaohongshu or web link: expect `intent=social_read`.
 - A media message: expect `intent=media_read`.
 - A sticker response with `RAN_MEDIA`: expect `intent=sticker_send` and marker

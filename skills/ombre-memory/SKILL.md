@@ -5,7 +5,7 @@ description: Inspect or change ran-agent personal-memory recall, Ombre Brain int
 
 # Ombre Memory
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-18)
 
 ## Product Role
 
@@ -56,19 +56,16 @@ The model has no API or token charge.
 
 ## Deployment Truth
 
-Production runs the S4 source
-`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`, with unified Hermes and
-`personal_memory`; direct loopback Ombre recall on `18001` is active, while
-`18002` and O2 are absent. The v0.13 rollback window is closed. S4 deleted O2
-and its Steward/token/model/gate implementation while leaving the direct
-`18001` read path unchanged.
+Production runs one unified Hermes gateway with `personal_memory`; direct
+loopback Ombre on `18001` is active, while the retired `18002` adapter and O2
+writer are absent. Public/model-facing recall remains query-only.
 
-S3 remains production verified: active personal learning is visible through
-`personal_memory`, the independent read-only Ombre outcome remains visible,
-and the four relevant services stayed active. S4 production verification
-confirmed those services still active, `18001` open, `18002`/`8643` closed,
-and no Node O2 environment residue. Production does not compose the S8
-projector, mutate Ombre, or enable O2.
+The stable backend now composes the accepted projector. A verified successful
+`memory.remember`, `memory.correct`, or `memory.forget` receipt creates the
+hash-bound Core source before the projector performs the corresponding
+hold/replace/erase operation. Confirmed relationship-summary events retain the
+existing `grow` mapping. Stable markers reconcile lost responses, and the Core
+source stays retryable when projection fails.
 
 ## Configuration
 

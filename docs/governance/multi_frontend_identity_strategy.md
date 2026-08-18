@@ -1,6 +1,6 @@
 # Multi-Frontend Identity Strategy
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-18)
 
 Multi-frontend is not multi-agent. WeChat, Feishu/Lark, and desktop
 OpenAI-compatible clients all enter the same ran-agent mainline:
@@ -71,11 +71,9 @@ default and sends replies with idempotency keys. Desktop proxy exposes an
 OpenAI-compatible local endpoint for desktop clients, but it still routes
 through `ChannelHub`.
 
-For scheduled AI daily digest delivery, the persisted Core occurrence and
-recurrence timezone select the report date. Python prepares the complete
-date-specific AIHOT/template prompt, and the existing Package B binding owns the
-Feishu destination and delivery. The manual historical-date action reuses the
-same Python preparation and existing delivery authority.
+The former scheduled/manual AI daily-digest routes remain dormant compatibility
+records only. Production disables the digest, Hermes has no digest work
+executor, and daily reports belong to Codex.
 
 External MCP system queue delivery follows the same identity rule:
 `/external-mcp/system-queue` uses the learned Feishu DM target and creates a

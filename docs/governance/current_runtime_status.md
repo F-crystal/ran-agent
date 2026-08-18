@@ -2,232 +2,150 @@
 
 Status: S12 COMPLETE / PROD_ACCEPTED; H0-H5 PROD_VERIFIED; QWEN-MM PROD_VERIFIED; S13 NOT STARTED (2026-08-18)
 
-This is the compact source of truth for current production behavior. Commands
-live in `docs/governance/server_runtime_commands.md`; design contracts and
-historical phase records stay in their focused governance documents.
+This is the compact authority for current source and production behavior.
+Commands live in `server_runtime_commands.md`; completed transaction detail
+lives in the historical acceptance ledgers and ignored release evidence.
 
-## Production
+## Verified Production Snapshot
+
+Read-only verification on 2026-08-18 established:
+
+| Surface | Current state |
+|---|---|
+| Production checkout | Clean archived source |
+| Python backend | Active as `ubuntu` |
+| Node bridge | Active as `ubuntu` |
+| Hermes | One active unified gateway on loopback `8642`, DeepSeek V4 Flash non-thinking |
+| Retired Hermes Full | Inactive and condition-blocked; never a fallback |
+| Ombre Brain | Active on loopback `18001` |
+| XHS public sidecar | Active; account-backed XHS service inactive |
+| Co-reading Web reader | Enabled on the configured Tailscale address with a loopback backend |
+| Core | Enabled with one semantic writer and managed wake active |
+| Daily digest | Disabled; daily reports belong to Codex |
+| External MCP | Gateway, system queue, and activity runner enabled behind policy gates |
+| Qwen Token Plan | `qwen3.6-flash` for OCR/VLM and knowledge maintenance |
+
+The owner-only env files remain `ubuntu:ubuntu` mode `0600`. Retired MiMo
+variables, old OpenClaw gateway credentials, account-backed XHS variables, and
+the stale editor swap file are absent. Secret values were not read or reported.
+
+## Conversation Mainline
 
 ```text
-repository_state: Hermes playground H0-H5 applied 2026-08-17
-source_pointer: current archived production source
-core_authority: core-cutover:v1 committed at e298bab161bf0f4882bcef6e9cd701d546b63ff2
-companion_overlay: dc5fcf13f86483073c54ac046e1b238a90c91921 retained as rollback-only evidence
-runtime: Hermes v0.20.0; deepseek-v4-flash; one gateway on 127.0.0.1:8642
-retired_runtime: 8643 absent; ran-agent-hermes-full inactive, disabled and condition-blocked
-runtime_stage: S12 COMPLETE / PROD_ACCEPTED; S13 NOT STARTED
-services: Node, Python, unified Hermes and direct Ombre Brain active; normal ingress restored
-core_runtime: exactly one semantic writer; managed wake active
-acceptance_canary: TERMINAL_AMBIGUOUS_NO_RESEND; one attempt; external effect unknown; no resend or duplicate
-owner_acceptance_ref: owner-s12-e298-terminal-ambiguous-acceptance-20260813
-identity: production processes run as ubuntu:ubuntu
-storage: 70% used; 18201784320 bytes available after S4 source activation
+WeChat / Feishu / optional Desktop Proxy
+  -> ChannelHub
+  -> replyBackend
+  -> hermesGatewayClient
+  -> unified Hermes companion
+  -> DeepSeek V4 Flash
 ```
 
-WeChat, Feishu/Lark and the optional Desktop proxy share
-`ChannelHub -> replyBackend -> hermesGatewayClient -> Hermes`. Conversation
-sessions are channel/conversation scoped; non-referential requests do not
-inherit another channel's last turn. Python `/chat` is retired and returns 410.
+IdentityMap explicitly binds authenticated frontends to one owner identity;
+conversation sessions remain channel/conversation scoped. GlobalTimeline can
+surface bounded cross-channel context without letting a non-referential turn
+inherit another channel's last answer. Python `/chat` is retired and returns
+410; the backend no longer constructs a competing chat runtime.
 
-The unified companion keeps conversation, emotional companionship, media,
-co-reading, search and admitted external MCP play on one runtime. Broad
-terminal/file/session tools, direct Playwright and work-effect actions are not
-Hermes-visible. `personal_memory` provides bounded query-only recall;
-`obsidian_memory`, Hermes-native `cronjob`, `delegate_task` and `execute_code`
-remain disabled. No replacement dependency or second runtime was installed.
-Scheduled outbound is limited to explicit reminders, bounded proactive
-companionship and governed `external_mcp_gateway` notifications. The ran-agent
-daily digest is stopped; Codex owns daily reports.
+Empty provider content and known `No reply` sentinels are infrastructure
+failures. One ordinary conversation may rotate through the existing soft-reset
+seam and retry once; failed content never enters user-visible replies or
+conversation history.
 
-Production keeps the public `media_reader` surface unchanged while routing OCR
-and image understanding through the pinned Qwen-MM backend on Token Plan
-`qwen3.6-flash`. Qwen knowledge maintenance uses the same plan endpoint and
-model. Both effective Hermes EnvironmentFile providers, Qwen settings, active
-service state, Token Plan visual/Responses calls and the actual Qwen-MM request
-path are verified. ASR and media generation intentionally remain on DashScope.
+## Responsibility Boundary
 
-The deployed H1-H3 source narrows Hermes to conversation,
-companionship and play: terminal/file/session/direct Playwright are absent,
-work `actionRequests` stop before executors, and the external MCP gateway is
-source-default available behind its existing policy gates. Empty/`No reply`
-provider output rotates once through the existing soft-reset seam and never
-enters conversation history. Verified successful personal-learning receipts
-now create hash-bound Core sources and reuse the S8 projector for Ombre
-hold/correct/forget continuity; the existing relationship-summary mapping
-remains `grow`. H4 gives the Core-managed life-loop scan one
-confirmed-memory companion candidate, then routes it through the existing
-structured ProactiveEvent, Hermes decision, Node cadence/quiet/stop/dedupe
-gates and post-send receipt. The retired direct proactive-text flag stays off.
-H5 stops the Python runtime from constructing a chat model or the retired
-frontend orchestrator/reviewer graph. The tool-model client is now constructed
-only for explicitly enabled backend memory-LLM extraction; `/chat` remains 410.
+Hermes owns conversation, emotional companionship, co-reading, search, media,
+stickers, media generation, and governed external-MCP play. Codex owns Calendar,
+Todo, reminders, Minutes/documents, daily reports, code, debugging, deployment,
+and other owner-facing work effects.
 
-The current production source keeps the trusted `todo.create` reminder
-contract and unified Companion source/wake release path. The post-S12
-product-effect repair was applied on 2026-08-17; the two dated digest
-backfills, verified Calendar creation, replay-safe Todo schedule registration
-and managed-wake activation completed. The first catch-up digest then exposed
-malformed private-envelope leakage and a missing Core wake exact-date gate.
-The bounded F6 repair was deployed through the unified source transaction on
-2026-08-17; its production boundary checks pass. The owner subsequently
-assigned daily reports to Codex; the H1 production transaction stopped the
-digest and disabled replacement seeding. The source makes Python the sole
-historical-date-specific AIHOT/template/prompt
-owner, binds scheduled reports to the persisted occurrence due date and
-timezone, restores explicit historical-date preparation, restores verified
-`feishu.calendar.create`, keeps Todo and Calendar semantics distinct, and fixes
-`/tools/todo/list` to call the existing pending-Todo owner. It adds no runtime,
-scheduler, wake, action registry, or delivery authority. That operation exposed
-three bounded product-effect defects (reminder binding resolution, dateless
-digest acceptance, missing calendar envelope replan); their repair is locally
-verified and independently reviewed per
-`docs/governance/post-s12-product-effect-repair.md`. Managed wake is active.
+The active companion profile exposes skills, memory, safe tools, and:
 
-## Memory
+- `time`
+- `social_reader`
+- `media_reader`
+- `search_hub`
+- `co_reading`
+- `sticker_catalog`
+- `media_generation`
+- `personal_memory`
+- `external_mcp_gateway`
 
-Production memory uses local SQLite with free offline FastEmbed/HNSW plus
-keyword retrieval. `personal_memory` also performs a bounded direct Ombre
-`breath_search` through the loopback-only service on `18001`; source failures
-are surfaced separately from an empty result. The recall-only adapter on
-`18002` and the O2 writer are absent. S4 removed that writer, its
-Steward/token/model endpoint code, and its dedicated release gate without
-changing the direct `18001` read path.
+Broad terminal/file/session tools, direct Playwright, native cron, code
+execution, and delegation are absent from the companion allowlist. Search Hub
+may use its internal governed Playwright fallback. Unknown external MCPs enter
+only through `external_mcp_gateway`; default availability does not bypass
+registry, grants, budgets, cancellation, evidence, or side-effect confirmation.
 
-Ombre is a derived relationship/context source, not the authority for Core
-facts or deployment truth. Core and governed runtime documents remain the
-authorities. S8 added one rebuildable projector for confirmed,
-payload-hash-bound Core/personal-learning events. H3 composes it in production
-after a verified successful personal-learning receipt and preserves its
-confirmed relationship-summary `grow` path. Hermes and public recall remain
-query-only; only the stable backend invokes the projector.
+## Actions, Delivery, And Proactive Events
 
-The converged source deploys main's strict query-only
-`personalMemoryMcpServer`, explicit `source_status`, Vault retrieval, Python
-extractor assembly, and a fixed 15000 ms child-process boundary. For explicit
-owner requests, Hermes proposes the existing typed personal-learning action and
-Node accepts it only when the identifier, content class and exact scope format
-agree; Python remains the persistence owner.
+Hermes reply envelopes may request only `memory.remember`, `memory.correct`, or
+`memory.forget`. Node validates explicit owner intent, exact scope, actor,
+idempotency, executor authority, and receipt. Work-action requests are removed
+before every executor; Node never derives permission from natural-language
+wording.
 
-## Delivery Evidence
+Text delivery uses the durable outbox/receipt path. Unknown or ambiguous adapter
+outcomes are terminal no-resend evidence, not permission to duplicate an
+effect. Media and other non-text surfaces retain their own marker/evidence
+contracts.
 
-Directed isolation probes returned only `飞书独立` on Feishu and `微信独立`
-on WeChat; neither channel inherited the sibling channel's answer. The
-2026-08-07 08:00 AI digest produced exactly one observed Feishu message
-without trailing envelope JSON, closing the named digest occurrence; it is not
-a universal exactly-once guarantee. Hermes identity was observed on WeChat and
-Feishu, a real personal-memory hit was observed, and a Full-origin search
-capability completed through the unified runtime. `8643` remained absent.
+Bounded companionship starts from confirmed personal-learning evidence, emits
+one structured ProactiveEvent candidate, and passes Node cadence, quiet-time,
+daily-limit, stop, dedupe, and post-send receipt gates. Generic timer greetings
+and direct Python proactive text remain disabled. Only governed `external_mcp_gateway` notifications
+use their evidence-bound system queue and the same attention discipline.
 
-On 2026-08-17 the owner Minutes request exposed four model-boundary failures;
-all rejected attempts stopped before the lark-cli write. The deployed repair
-keeps unknown fields fail-closed, isolates the one strict replan in the
-trusted `action_gate_repair` task session, and normalizes only the exact
-public Minutes shape. Production then created one `前辈对话3` document in the
-unique `中海油` folder; the receipt passed content and parent-folder readback,
-the exact-title directory count is one, and the governed final check
-`f7-minutes-production-success-final` passed. No ASR, PPT path or direct
-document-creation bypass was added.
+## Memory And Knowledge
 
-## Source And Recovery Authority
+`personal_memory` is the only Hermes-facing memory facade. It combines local
+SQLite/FastEmbed retrieval with bounded Ombre `breath_search`. Core and governed
+documents remain factual authorities; Ombre is a derived, erasable,
+rebuildable relationship/context projection.
 
-Binding.v4 completed the earlier runtime apply, rollback and reapply and
-records `runtimeRollbackAuthorized=false`; the retained Runtime controller,
-artifact, candidate ref, topology and snapshot state are evidence-only. S1
-then completed the source dry-run, apply, source rollback and reapply at
-`c6c0baf`. Post-S1 source advances accepted S2 at `2dc6d1a`, S3 at `cc66387`,
-and S4 at `98fd8b3`; the exact snapshot recorded by
-`source-snapshots/current-source.json` is now the source rollback authority
-and retains the prior pointer chain. Runtime rollback remains forbidden.
+A verified personal-learning receipt creates a hash-bound Core source before
+the stable backend projects remember/correct/forget to Ombre. Confirmed
+relationship summaries retain the `grow` mapping. Public recall and Hermes are
+query-only; failed projection leaves the Core source durable and retryable.
 
-The owner authorized closing the v0.13 rollback window before the 2026-08-07
-cleanup; closure relied on bounded v0.20 production acceptance plus the real
-binding.v4 source apply/rollback/reapply. Six exact retired payloads were
-removed under the root-owned `v013-payloads.deleted.json` record, reclaiming
-224079872 allocated bytes; shared runtimes, MCP capabilities, model/index
-assets, the v0.20 Runtime and personal data were preserved.
+Knowledge maintenance runs through the configured Qwen CLI wrapper. Production
+uses Token Plan `qwen3.6-flash` for the provider-neutral plan/apply/cleanup
+workflow over `vault/`; secrets stay in owner-only env. The vault contract is
+`vault/AGENTS.md`.
 
-Two earlier companion-overlay attempts are closed as `rolled_back`. Candidate
-`dc5fcf13f86483073c54ac046e1b238a90c91921` then ran under a transient systemd
-unit and was accepted at `2026-08-07T12:46:10Z`; its transaction records the
-exact profile, MCP namespace, Python source, drop-in and overlay digests. The
-historical rollback target (`2c8e97c` + accepted overlay) was superseded by S1
-source convergence.
+## Media And Co-Reading
 
-## Main Source State
+`media_reader` remains the single public media-analysis facade. The pinned
+Qwen-MM backend handles OCR and image understanding through Token Plan
+`qwen3.6-flash`; ASR and media generation remain on DashScope. XHS is
+public-only and never restores cookie, QR-login, or account-backed MCP paths.
 
-S1a was archived at `0fef0427683a8f3f77deec9e6cff937f7ab0a02e`; its bounded
-successor completed at `c6c0baf6dfbcf2cc38a68986292f55649ec93932`. The post-S1
-source controller advanced the clean production checkout and accepted source
-pointer through S4 to runtime source
-`98fd8b38eb4bca9caa6f223f990f1bec3ab6cd0d`. GitHub `main` also contains the
-local-only S5 B.2 seam and S7 Package B.3 Node wiring; production remained on
-the accepted S4 source until the separately authorized S12 cutover advanced it
-to e298; later unified-source transactions advanced the runtime source to
-`9df626f` while preserving the e298 Core authority. The source shape keeps one
-`ran-agent-companion` profile, one `8642` route, the supported Lite/Full
-capability union and a fixed 15000 ms memory boundary, and still aligns four
-production-backed contracts:
+`co_reading` supports EPUB, TXT, Markdown, pasted text, local HTML, URL and PDF
+text-layer import; scanned PDFs are marked `ocr_required`. Normal URLs reuse
+Search Hub and social URLs reuse Social Reader. The Web reader uses a browser
+access token only, keeps the owner token server-side, and exposes no public
+internet route.
 
-- canonical `memory_bge_vector_index.*` paths;
-- Ombre endpoint absence classified as transport failure;
-- unified Hermes and co-reading defaults on `8642`;
-- no model-facing Ombre mutation; the stable backend owns the production
-  projector and inactive O2 seams are absent.
+## Source And Recovery
 
-Legacy split-profile release inputs remain excluded from the companion
-distribution. The source mode is the only authorized seam through the unified
-marker; after S1 it advances only from the accepted source pointer to an exact
-archived `main` descendant and restores that pointer on rollback. The legacy
-release mode continues to fail closed.
+The unified runtime cutover and v0.13 rollback window are closed. Retained
+runtime artifacts and snapshots are evidence-only. Current code releases use
+one reviewed immutable source transaction; do not deploy with `git pull`,
+standalone split scripts, manual checkout changes, or hand-edited systemd/env.
 
-The latest source-advance attempt stopped and restored the prior accepted
-source before acceptance because projection publication bound `source_digest`
-to the raw bytes of the whole Core SQLite file. Unrelated table writes can
-change those bytes without changing the projected activities or their
-revision. The bounded successor derives the digest from the ordered projected
-activity rows and preserves an already verified legacy digest when those rows
-are identical. A same-revision change to any projected row still fails closed.
-The repair is production verified after focused tests, an idempotent rehearsal,
-immutable source apply and final read-only acceptance. `runuser` remains
-only the native root-to-ubuntu process launcher used by existing release code;
-it creates no user, service identity or permission tier.
+The source transaction refreshes identity/activity projection before service
+start. Projection identity is derived from ordered projected Activity rows, so
+unrelated SQLite writes do not create false conflicts; a same-revision change
+to projected data still fails closed.
 
-## Active Follow-Ups
+## Current Frontier
 
-The canonical execution order and stage exit conditions live in
-`docs/governance/active_sequence.md`. S0-S12 are complete and S12 is
-`PROD_ACCEPTED`; Core authority remains e298. Product-effect recovery,
-managed-wake activation and F6 production apply are complete. F6OBS is
-superseded by the owner decision to move daily reports to Codex. H0-H5 are
-archived, deployed and production verified, including the daily-digest stop,
-external-MCP default availability, Ombre projection, bounded companionship and
-zombie-runtime removal. The source projection refresh repair is production
-verified. S13 remains not started. Cleanup also requires
-separate explicit owner deletion authorization; none is current.
-The S5-era root-worktree drafts
-were triaged in S6: the 30 runtime paths remain in the checksummed desktop
-patch, the three governance-hook paths belong to their dedicated task, the
-three retained runtime semantics were re-implemented on current main, and the
-remaining O2/Steward, legacy-deployment, second proactive-delivery and
-JSON-outbox content is retired.
-
-The remote branch set is intentionally `main` only. Historical candidate
-branches are neither production nor rollback authority; recoverable local S4
-convergence artifacts remain ignored under `local_archive/`.
-
-Packages A-E are complete. S5/S7 established the B.2/B.3 delivery path, S8
-accepted the rebuildable Ombre projection seam, S9 completed Package C, S10
-completed Package D, and S11 completed Package E fault/no-resend/attention
-acceptance. S12 composed them into the production single-writer/single-wake
-topology. The later Package B presentation-binding namespace repair is already
-contained in current `main`; it does not create another writer or effect path.
-Ombre Gate 5 is retired with O2 and the historical
-name is retained only as retired evidence; the single future Core production
-gate is uniformly named the Core Cutover Gate (S12). O2 is a retired
-migration-era path; only rollback evidence may remain.
+Packages A-E, S0-S12, post-S12 product-effect recovery, H0-H5, the projection
+refresh repair, and Qwen-MM Token Plan routing are complete. S13 is not started.
+No current authorization permits deleting S13 observation/rollback evidence or
+changing service identities, permissions, ownership, or storage layout.
 
 ## Protected State
 
-Never commit or print env files, credentials, cookies, proxy URLs, runtime
-state, private vault content, databases, logs, debug output, provider-visible
-history, local archives, caches or personal media.
+Never commit or print env files, credentials, cookies, proxy URLs, recipient
+identifiers, private vault content, databases, logs, debug output, provider
+history, local archives, caches, or personal media.

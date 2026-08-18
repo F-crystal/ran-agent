@@ -2,9 +2,9 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-16)
+Status: CURRENT (2026-08-18)
 
-生产运行统一 Hermes v0.20 + DeepSeek V4 Flash；精确代码 SHA、证据与回滚边界见 `docs/governance/current_runtime_status.md`。
+生产运行统一 Hermes v0.20 + DeepSeek V4 Flash；当前代码状态、证据与恢复边界见 `docs/governance/current_runtime_status.md`。
 
 **一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
@@ -14,7 +14,7 @@ Status: CURRENT (2026-08-16)
 
 Ran Agent 是一个个人 Agent 运行时，不是 SaaS。它把微信、飞书/Lark 和桌面客户端消息统一接入 ChannelHub，再经 Hermes Gateway 生成回复。Hermes 的当前源码边界是聊天、情绪陪伴和游玩；日历、待办、妙记/文档、日报、代码与部署交给 Codex。生产统一 profile 使用 DeepSeek V4 Flash，并在最终 provider HTTP body 显式加入 `thinking: {"type":"disabled"}`；V4 Pro 只保留为显式 opt-in。状态、日志、Vault、Cookie 和密钥都留在你控制的机器上。
 
-OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产前台和当前候选都使用 Hermes + DeepSeek V4 Flash non-thinking，Pro 仅显式启用。
+OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产前台使用 Hermes + DeepSeek V4 Flash non-thinking，Pro 仅显式启用。
 
 ---
 
@@ -102,7 +102,6 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 | `time` | 时区感知时间查询，默认 `Asia/Shanghai` | unified |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 | unified |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享读取 | unified |
-| `mimo_power` | RETIRED：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles | historical |
 | `sticker_catalog` | 本地表情包标签、选择、发送和 owner-only 入站保存 | unified |
 | `personal_memory` | 个人记忆、Ombre 与受控 Vault 召回；backend 健康检查 | unified |
 | `external_mcp_gateway` | 受治理的动态 External MCP broker；活动 companion profile 默认可用，调用仍受 registry/grant/budget/confirmation 约束 | unified / governed |
@@ -203,7 +202,7 @@ bash scripts/diagnose-hermes-tools.sh
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | 统一身份、跨平台 timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | timeline 保留和压缩 |
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | 多前端可选入口；开启 Desktop Proxy 时必须保持本机或内网受控 |
-| AI 日报 | `AI_DAILY_DIGEST_ENABLED`, `AI_DAILY_DIGEST_HOUR`, `AI_DAILY_DIGEST_MINUTE` | 可选飞书私聊日报，默认关闭 |
+| AI 日报 | `AI_DAILY_DIGEST_ENABLED=false` | ran-agent 日报已退休并保持关闭；日报由 Codex 负责 |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS` | ingest 和记忆召回；MCP deadline 由服务端固定为 15 秒 |
 | Qwen Token Plan | `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | 可选 Qwen-MM OCR/VLM 与 Qwen 知识维护；默认模型 `qwen3.6-flash` |
 | DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | ASR、媒体生成和未启用 Token Plan 时的 OCR/VLM |
@@ -213,7 +212,7 @@ bash scripts/diagnose-hermes-tools.sh
 | UV cache | `UV_CACHE_DIR`, `UV_TOOL_DIR`, `UV_LINK_MODE`, `UV_PYTHON_DOWNLOADS` | 固定 uv/uvx 缓存路径，防止磁盘膨胀 |
 | XHS public parser | `XHS_GENERIC_FALLBACK_READY_PATH`, `XHS_PUBLIC_SIDECAR_URL`, `XHS_PUBLIC_SIDECAR_TIMEOUT_MS` | 小红书公开解析与 XHS-Downloader sidecar；不使用登录态 |
 
-完整变量模板见 `.env.example`。服务器当前状态和最新部署口径见 `docs/governance/current_runtime_status.md`。
+基础变量模板见 `.env.example`。服务器当前状态和最新部署口径见 `docs/governance/current_runtime_status.md`。
 
 ---
 

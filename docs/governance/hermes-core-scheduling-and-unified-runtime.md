@@ -1,14 +1,17 @@
 # Hermes Core Scheduling and Unified Runtime
 
-Status: CURRENT (2026-08-17)
+Status: IMPLEMENTED ARCHITECTURE REFERENCE / HISTORICAL ACCEPTANCE DETAIL (2026-08-18)
 
 Lifecycle: unified Runtime and Core cutover are `PROD_ACCEPTED`; post-S12
 product-effect recovery is applied and managed wake is active. The F6 delivery
-guards are `PROD_APPLIED`; the next real 08:00 observation remains.
+guards are `PROD_APPLIED`; their digest observation was superseded when the
+owner moved daily reports to Codex.
 
 This decision record amends the implementation direction of the archived v0.4
 cutover contract. The Core cutover is complete; current deployment facts and
-post-cutover source advances are recorded in `current_runtime_status.md`.
+operator commands are recorded in `current_runtime_status.md` and
+`server_runtime_commands.md`. Migration-era v0.13/O1/O2 detail below is
+historical, not current mutation authority.
 
 ## Decision
 

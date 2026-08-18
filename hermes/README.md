@@ -2,11 +2,14 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-08)
+Status: CURRENT (2026-08-18)
 
-`DEPLOYED_RUNTIME_ACCEPTANCE`（2026-08-06）：exact candidate `0b793e8` 已部署统一 Hermes v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full 服务 inactive/disabled。完整边界见 `docs/governance/current_runtime_status.md`。
+生产运行统一 Hermes v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full
+服务 inactive/disabled，不能作为 fallback。完整边界见
+`docs/governance/current_runtime_status.md`。
 
-O1/O2 与 unified-identity 提交仅保留为历史证据。S4 已从生产源码删除 O2、Steward/token/模型端点及专属发布门；现役 `personal_memory → Python → Ombre 18001` 只读链路不变，生产状态以治理文档为准。
+历史迁移和已退休组件只在治理记录中保留。现役记忆路径是
+`personal_memory → Python/Core → Ombre 18001`：公开召回只读，稳定后端负责受控投影。
 
 本目录是 ran-agent 的仓库内 Hermes profile distribution。它只保存可提交的 profile、人格文件、MCP 启动配置和技能说明；不保存 secrets、会话、记忆、日志、机器本地状态或平台登录态。
 
@@ -133,7 +136,6 @@ ran-agent 使用仓库内 MCP 服务：
 | `time` | `Asia/Shanghai` 时间查询 |
 | `media_reader` | OCR、ASR、VLM、视频分析、批量媒体分析 |
 | `social_reader` | B 站、小红书、微信公众号、音乐分享 |
-| `mimo_power` | 已退役：历史 MiMo Token Plan 深度多模态分析，不属于当前 runtime profiles |
 | `personal_memory` | Python backend 的统一个人记忆入口，内部组合本地 memory、只读 Ombre 与受控 Vault 召回 |
 | `external_mcp_gateway` | 默认可用的受治理外部 MCP broker；registry、grant、budget 与 confirmation 仍强制执行 |
 | `media_generation` | 图片和语音生成，统一 profile 可用 |

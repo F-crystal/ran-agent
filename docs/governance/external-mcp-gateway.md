@@ -1,6 +1,6 @@
 # External MCP Gateway
 
-Status: CURRENT (2026-08-17)
+Status: CURRENT (2026-08-18)
 
 This document owns the current external MCP gateway and system-queue contract.
 The design history lives under `docs/superpowers/`; this file records the
@@ -104,53 +104,25 @@ Requirements:
 `silent`, `remember`, `draft`, malformed JSON, generic text, missing `why_now`,
 or missing evidence must not send visible messages.
 
-This is the current production compatibility path. The S9 local Core source
-adds the future `external_poll` ScheduleSpec class but does not compose it into
-the gateway. During S10 migration, forum, RSS, and other external MCP
-watchers must be split into:
+Production composes external polling with Core authority. Forum, RSS, and
+other external MCP watchers follow:
 
 ```text
 poll/scan -> sanitized Core fact -> WakeOccurrence/WorkRun -> Hermes decision
   -> Node attention valve -> Core presentation outbox/receipt
 ```
 
-R1E now gates the existing runtime scan before provider execution on the exact
-durable `external_poll` WorkRun revision, fence, lease owner/id/expiry, active
-Core Activity contract and aggregate payload. The existing fact repository
-rechecks that authority; candidate Activity/revision/checkpoint identity is
-exact, server identity comes from trusted runtime scope, and duplicate or
-reopened terminal work does not repeat provider execution or fact creation.
-Independent review blocked the first R1E candidate `c8e5a882` on
-`R1E-FACT-PROJECTION-GAP` and `R1E-REVISION-EVIDENCE-SKEW`. The bounded repair
-uses the existing Core projection outbox: the fact and deterministic pending
-projection are one transaction; recovery replays only attention/schedule
-projection, never the provider. A notification is released only while the
-current external Activity exactly matches the projection's revision and
-checkpoint digest, and its evidence names the same Core fact. Fresh focused
-repair checks pass `18/18` and shared affected checks pass `52/52`. The repaired
-archive `493c77aa90fe53bba8a10fd94dd03136ba51d4eb` passed independent
-exact-SHA rereview; it remains local and is not production.
+The scan must hold the exact `external_poll` WorkRun revision, fence, lease,
+active Activity, and bound aggregate payload before provider execution. The
+fact and deterministic pending projection commit together. Recovery may replay
+attention/schedule projection, never the provider call or fact creation.
 
-The watcher never sends directly. Hermes continues to propose structured
-content and evidence plus an attention identifier; Node validates identifier,
-content class and format. In the S12 candidate, ordinary timely content is
-eligible under the attention valve's no-provider default and ambient content is
-silent. Synthetic focused/gaming/busy/dnd/unknown policies still prove durable
-delay and coalescing, but desktop presence and explicit owner DND are
-`POST_CUTOVER_OK`, not runtime dependencies. Hermes activity in a game MCP does
-not establish owner gaming. The existing Core-managed attention-flush schedule
-is the single flush clock, and only an owner-allowlisted critical class or
-explicit reminder bypasses a synthetic quiet policy.
-The S10 migration manifest preserves existing watch scopes as paused until
-their watermark is accepted, so historical forum or external MCP results are
-not replayed as new notifications. The local target seam now records only an
-opaque payload reference, keyed content hash and stable source fingerprint as
-a Core fact after a claimed `external_poll` WorkRun whose schedule payload is
-bound to the same server identifier; it exposes no send method.
-A production-copy rehearsal at `2026-08-08T08:28:45.000Z` found no current
-watch candidate and 13 legacy external activities; the latter are staged
-paused and must be quiesced/reconciled before cutover. This changes no
-production gateway flag or route.
+The watcher never sends directly. Hermes proposes structured content, evidence,
+and an attention identifier; Node validates all three. Ordinary timely content
+may notify, ambient content stays silent, and delayed content is durably
+coalesced. The Core-managed attention-flush schedule is the only flush clock.
+Legacy watch scopes remain paused until their watermark is explicitly accepted,
+so historical results cannot replay as new notifications.
 
 ## Background Activity
 

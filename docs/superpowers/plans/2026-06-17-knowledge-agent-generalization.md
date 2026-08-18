@@ -1,5 +1,11 @@
 # Knowledge Agent Generalization Implementation Plan
 
+Status: HISTORICAL IMPLEMENTATION PLAN (2026-08-18)
+
+The provider-neutral knowledge path has landed. Current runtime facts live in
+`docs/governance/current_runtime_status.md`; current vault policy lives in
+`vault/AGENTS.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Make the knowledge-management agent provider-neutral, give Hermes a lightweight relevant-context surfacing path, and make knowledge maintenance less conservative without turning chat history into noisy real-time wiki churn.

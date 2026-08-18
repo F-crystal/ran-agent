@@ -1,5 +1,11 @@
 # Hermes External MCP Capability Plane Implementation Plan
 
+Status: HISTORICAL IMPLEMENTATION PLAN (2026-08-18)
+
+This checklist is not an execution entry point. Its disabled-by-default launch
+assumption is superseded: the reviewed gateway is enabled by default. Use
+`docs/governance/external-mcp-gateway.md` for the current contract.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Implement a disabled-by-default external MCP capability plane for Hermes, with registry validation, policy, sessions, evidence, pending side effects, system-queue silent suppression, watchlists, diagnostics, docs, and tests.
