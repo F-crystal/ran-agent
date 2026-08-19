@@ -12,6 +12,11 @@ model:
 agent:
   reasoning_effort: none
 
+hooks:
+  post_api_request:
+    - command: /usr/bin/python3 /opt/ran_agent/scripts/hermes-provider-response-observer.py
+      timeout: 5
+
 terminal:
   backend: local
   cwd: /opt/ran_agent

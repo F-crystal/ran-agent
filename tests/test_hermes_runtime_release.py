@@ -194,12 +194,26 @@ def _source_profile_prior() -> str:
     return json.loads(_source_profile_blobs()[MODULE.SOURCE_PROFILE_MIGRATION_PATH])["priorAcceptedSource"]
 
 
+def _source_profile_contract_paths(blobs: dict[str, bytes] | None = None) -> list[str]:
+    source = blobs or _source_profile_blobs()
+    contract = json.loads(source[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
+    return contract["allowedProfileDeltaPaths"]
+
+
+def _identity_rotation_blobs() -> dict[str, bytes]:
+    blobs = _source_profile_blobs()
+    contract = json.loads(blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
+    contract["allowedProfileDeltaPaths"] = sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS)
+    blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH] = json.dumps(contract).encode()
+    return blobs
+
+
 def test_source_profile_migration_requires_and_accepts_only_the_exact_contract(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     prior = _source_profile_prior()
     candidate = "b" * 40
-    changed = sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS) + [
+    changed = _source_profile_contract_paths() + [
         "hermes/profile/scripts/core-wake.sh",
     ]
     with pytest.raises(MODULE.ReleaseError, match="missing or invalid"):
@@ -230,7 +244,7 @@ def test_source_profile_migration_rejects_wrong_authority(
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     with pytest.raises(MODULE.ReleaseError, match="does not match"):
         MODULE.validate_source_advance_paths(
-            sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS),
+            _source_profile_contract_paths(blobs),
             candidate="b" * 40,
             prior=prior,
         )
@@ -243,7 +257,7 @@ def test_source_profile_migration_rejects_an_unexpected_profile_path(
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     with pytest.raises(MODULE.ReleaseError, match="does not match"):
         MODULE.validate_source_advance_paths(
-            sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS) + ["hermes/profile/unexpected.yaml"],
+            _source_profile_contract_paths(blobs) + ["hermes/profile/unexpected.yaml"],
             candidate="b" * 40,
             prior=_source_profile_prior(),
         )
@@ -253,10 +267,16 @@ def test_source_profile_migration_rejects_an_undeclared_profile_subset(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     blobs = _source_profile_blobs()
+    contract = json.loads(blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
+    contract["allowedProfileDeltaPaths"] = sorted([
+        MODULE.PROFILE_PATH,
+        "hermes/profile/HERMES_RUNTIME.md",
+    ])
+    blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH] = json.dumps(contract).encode()
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     with pytest.raises(MODULE.ReleaseError, match="does not match"):
         MODULE.validate_source_advance_paths(
-            sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS)[:2],
+            [MODULE.PROFILE_PATH],
             candidate="b" * 40,
             prior=_source_profile_prior(),
         )
@@ -268,7 +288,7 @@ def test_source_profile_migration_authorizes_a_contracted_identity_rotation(
     # hermes/profile/AGENTS.md is an identity file; the accepted contract names
     # it in allowedProfileDeltaPaths, so the identity rotation is authorized.
     assert "hermes/profile/AGENTS.md" in MODULE.SOURCE_PROFILE_IDENTITY_PATHS
-    blobs = _source_profile_blobs()
+    blobs = _identity_rotation_blobs()
     monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
     MODULE.validate_source_advance_paths(
         sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS),
@@ -282,7 +302,7 @@ def test_source_profile_migration_rejects_an_unauthorized_identity_rotation(
 ) -> None:
     # The contract delta drops the identity file while the source delta still
     # touches it: fail closed before any runtime mutation.
-    blobs = _source_profile_blobs()
+    blobs = _identity_rotation_blobs()
     contract = json.loads(blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
     contract["allowedProfileDeltaPaths"] = sorted(
         path for path in contract["allowedProfileDeltaPaths"]
@@ -304,7 +324,7 @@ def test_source_profile_migration_fails_closed_on_uncontractable_identity_files(
 ) -> None:
     # IDENTITY.md and SOUL.md sit outside the contract-able doc set: even a
     # contract naming them cannot authorize the rotation.
-    blobs = _source_profile_blobs()
+    blobs = _identity_rotation_blobs()
     contract = json.loads(blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
     contract["allowedProfileDeltaPaths"] = sorted(
         [*contract["allowedProfileDeltaPaths"], identity_path]
@@ -433,7 +453,7 @@ def test_governed_companion_migration_passes_source_dry_run_validation(
     root = Path(__file__).parents[1]
     prior = _source_profile_prior()
     candidate = "b" * 40
-    changed = sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS) + [
+    changed = _source_profile_contract_paths() + [
         "hermes/profile/scripts/core-wake.sh",
     ]
     blobs = {

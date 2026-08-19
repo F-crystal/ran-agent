@@ -45,6 +45,13 @@ def test_companion_profile_is_the_capability_union_behind_one_memory_facade() ->
     assert config["security"]["allow_lazy_installs"] is False
     assert config["security"]["tirith_enabled"] is False
     assert config["agent"]["reasoning_effort"] == "none"
+    assert config["hooks"] == {
+        "post_api_request": [{
+            "command": "/usr/bin/python3 /opt/ran_agent/scripts/hermes-provider-response-observer.py",
+            "timeout": 5,
+        }]
+    }
+    assert "hooks_auto_accept" not in config
     assert "ombre_memory" not in config["mcp_servers"]
 
 

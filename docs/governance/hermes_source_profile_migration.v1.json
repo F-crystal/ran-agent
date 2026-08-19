@@ -1,21 +1,18 @@
 {
   "schemaVersion": 1,
   "status": "RELEASE_CANDIDATE_READY_FOR_SOURCE_PROFILE_MIGRATION",
-  "priorAcceptedSource": "e627b4c5751c42620ae934f3c0c273a8940d0944",
+  "priorAcceptedSource": "fb13e7bd1a51101aa839505e0e2465162192199f",
   "activeProfile": {
     "name": "ran-agent-companion",
     "canonicalSource": "hermes/profile/config.companion.yaml",
-    "sourceSha256": "437a95d99e33b81b09f76073d70c77159d6e69130a837762a0e7199a37ffa1a6",
+    "sourceSha256": "20e44c763e8dbb519d146fca8b6d62726bb26a24d3754490be8968c3bf4465fe",
     "destinations": [
       "/home/ubuntu/.hermes-ran-agent/lite/config.yaml",
       "/home/ubuntu/.hermes-ran-agent/lite/profiles/ran-agent-companion/config.yaml"
     ]
   },
   "allowedProfileDeltaPaths": [
-    "hermes/profile/AGENTS.md",
-    "hermes/profile/HERMES_RUNTIME.md",
-    "hermes/profile/skills/academic-writing-support/SKILL.md",
-    "hermes/profile/skills/ran-agent-runtime-debug/SKILL.md"
+    "hermes/profile/config.companion.yaml"
   ],
   "inertSources": [
     "hermes/profile/config.pro.template.yaml"
