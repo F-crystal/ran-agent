@@ -457,3 +457,219 @@ test('publication lock rejects concurrent producer and does not consume the lock
   assert.throws(() => publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item }), /projection_publication_concurrent/);
   assert.equal(fs.readFileSync(`${item.outputPath}.publication.lock`, 'utf8'), 'held');
 });
+
+function rotatedProjectRoot(directory) {
+  const root = path.join(directory, 'rotated-project');
+  const profile = path.join(root, 'hermes', 'profile');
+  fs.mkdirSync(profile, { recursive: true });
+  for (const name of ['IDENTITY.md', 'SOUL.md', 'AGENTS.md']) {
+    fs.copyFileSync(path.join(PROJECT_ROOT, 'hermes', 'profile', name), path.join(profile, name));
+  }
+  fs.appendFileSync(path.join(profile, 'AGENTS.md'), '\nrotated identity marker\n');
+  return root;
+}
+
+function graphArtifacts(outputPath) {
+  const pointerBytes = fs.readFileSync(outputPath);
+  const pointer = JSON.parse(pointerBytes.toString('utf8'));
+  const manifestPath = path.join(`${outputPath}.manifests`, pointer.manifest_file);
+  const manifestBytes = fs.readFileSync(manifestPath);
+  const manifest = JSON.parse(manifestBytes.toString('utf8'));
+  const revisionPath = path.join(`${outputPath}.revisions`, manifest.revision_file);
+  return {
+    pointerBytes,
+    manifestBytes,
+    revisionBytes: fs.readFileSync(revisionPath),
+    stateBytes: fs.readFileSync(`${outputPath}.publication-state.json`),
+    revisionPath,
+    manifestPath,
+  };
+}
+
+test('identity rotation republishes the same graph under the new identity at revision 0 and above', () => {
+  const oldIdentity = computeHermesIdentityVersion(PROJECT_ROOT).version;
+  for (const revision of [null, 7]) {
+    const item = fixture(`hermes-projection-rotate-rev${revision ?? 0}-`, revision);
+    const rotatedRoot = rotatedProjectRoot(item.directory);
+    const newIdentity = computeHermesIdentityVersion(rotatedRoot).version;
+    assert.notEqual(newIdentity, oldIdentity);
+    const expectedRevision = revision ?? 0;
+
+    const before = publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+    assert.equal(before.activity_revision, expectedRevision);
+    const artifacts = graphArtifacts(item.outputPath);
+
+    const rotated = publishHermesIdentityProjection({ projectRoot: rotatedRoot, ...item });
+    assert.equal(rotated.activity_revision, expectedRevision);
+    assert.notEqual(rotated.projection_revision, before.projection_revision);
+    assert.equal(rotated.identity_digest, newIdentity);
+    assert.deepEqual(rotated.activities, before.activities);
+
+    const state = JSON.parse(fs.readFileSync(`${item.outputPath}.publication-state.json`, 'utf8'));
+    assert.equal(state.state, 'published');
+    assert.equal(state.high_water_activity_revision, expectedRevision);
+    assert.equal(state.high_water_projection_revision, rotated.projection_revision);
+
+    // The old graph remains on disk as immutable content-addressed artifacts.
+    assert.deepEqual(fs.readFileSync(artifacts.manifestPath), artifacts.manifestBytes);
+    assert.deepEqual(fs.readFileSync(artifacts.revisionPath), artifacts.revisionBytes);
+
+    assert.deepEqual(loadPublishedProjection(item.outputPath, newIdentity), rotated);
+    assert.throws(() => loadPublishedProjection(item.outputPath, oldIdentity));
+    assert.equal(
+      publishHermesIdentityProjection({ projectRoot: rotatedRoot, ...item }).projection_revision,
+      rotated.projection_revision,
+    );
+  }
+});
+
+test('identity rotation preserves the activity high-water across earlier and later advances', () => {
+  const item = fixture('hermes-projection-rotate-high-water-', 9);
+  const rotatedRoot = rotatedProjectRoot(item.directory);
+  const newIdentity = computeHermesIdentityVersion(rotatedRoot).version;
+  publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+  let db = new DatabaseSync(item.coreDbPath);
+  db.prepare('UPDATE activity SET contract_revision = 10').run();
+  db.close();
+  const revision10 = publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+
+  const rotated = publishHermesIdentityProjection({ projectRoot: rotatedRoot, ...item });
+  assert.equal(rotated.activity_revision, 10);
+  let state = JSON.parse(fs.readFileSync(`${item.outputPath}.publication-state.json`, 'utf8'));
+  assert.equal(state.high_water_activity_revision, 10);
+  assert.equal(state.high_water_projection_revision, rotated.projection_revision);
+  assert.notEqual(rotated.projection_revision, revision10.projection_revision);
+
+  db = new DatabaseSync(item.coreDbPath);
+  db.prepare('UPDATE activity SET contract_revision = 11').run();
+  db.close();
+  const advanced = publishHermesIdentityProjection({ projectRoot: rotatedRoot, ...item });
+  assert.equal(advanced.activity_revision, 11);
+  state = JSON.parse(fs.readFileSync(`${item.outputPath}.publication-state.json`, 'utf8'));
+  assert.equal(state.high_water_activity_revision, 11);
+  assert.deepEqual(loadPublishedProjection(item.outputPath, newIdentity), advanced);
+});
+
+test('identity rotation fails closed when the old graph does not verify under the old identity', () => {
+  const item = fixture('hermes-projection-rotate-tampered-');
+  const oldIdentity = computeHermesIdentityVersion(PROJECT_ROOT).version;
+  publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+  const artifacts = graphArtifacts(item.outputPath);
+  fs.writeFileSync(artifacts.revisionPath, '{"tampered":true}\n');
+
+  const rotatedRoot = rotatedProjectRoot(item.directory);
+  assert.throws(
+    () => publishHermesIdentityProjection({ projectRoot: rotatedRoot, ...item }),
+    (error) => error.code === 'PROJECTION_RECONCILIATION_REQUIRED',
+  );
+  // Fail-closed: the rotation attempt rewrote nothing about the old graph.
+  assert.deepEqual(fs.readFileSync(item.outputPath), artifacts.pointerBytes);
+  assert.deepEqual(fs.readFileSync(artifacts.manifestPath), artifacts.manifestBytes);
+  assert.deepEqual(
+    fs.readFileSync(`${item.outputPath}.publication-state.json`),
+    artifacts.stateBytes,
+  );
+  fs.writeFileSync(artifacts.revisionPath, artifacts.revisionBytes);
+  assert.doesNotThrow(() => loadPublishedProjection(item.outputPath, oldIdentity));
+});
+
+test('identity rotation riding an activity change fails closed', () => {
+  for (const mutation of ['title', 'revision']) {
+    const item = fixture(`hermes-projection-rotate-${mutation}-`, 7);
+    publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+    const db = new DatabaseSync(item.coreDbPath);
+    if (mutation === 'title') {
+      db.prepare("UPDATE activity SET title = 'Changed during rotation'").run();
+    } else {
+      db.prepare('UPDATE activity SET contract_revision = 8').run();
+    }
+    db.close();
+    const artifacts = graphArtifacts(item.outputPath);
+    assert.throws(
+      () => publishHermesIdentityProjection({ projectRoot: rotatedProjectRoot(item.directory), ...item }),
+      (error) => error.code === 'PROJECTION_RECONCILIATION_REQUIRED'
+        && /identity_rotation_requires_unchanged_activity_projection/.test(error.message),
+    );
+    assert.deepEqual(fs.readFileSync(item.outputPath), artifacts.pointerBytes);
+    assert.deepEqual(
+      fs.readFileSync(`${item.outputPath}.publication-state.json`),
+      artifacts.stateBytes,
+    );
+  }
+});
+
+test('failed identity rotation never destroys the old graph and its bytes stay recoverable', () => {
+  const preSwapStages = [
+    'state-building-write',
+    'revision-write',
+    'manifest-rename',
+    'pointer-rename',
+  ];
+  const postSwapStages = [
+    'pointer-swapped',
+    'pointer-swap-process-interrupt',
+    'state-published-write',
+  ];
+  const oldIdentity = computeHermesIdentityVersion(PROJECT_ROOT).version;
+  for (const stage of [...preSwapStages, ...postSwapStages]) {
+    const item = fixture(`hermes-projection-rotate-fault-${stage}-`, 7);
+    const rotatedRoot = rotatedProjectRoot(item.directory);
+    const before = publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+    const artifacts = graphArtifacts(item.outputPath);
+
+    assert.throws(() => publishHermesIdentityProjection({
+      projectRoot: rotatedRoot,
+      ...item,
+      faultInjector(current) {
+        if (current === stage) throw new Error(`injected:${stage}`);
+      },
+    }));
+
+    // The immutable old revision and manifest survive the failed rotation
+    // byte-for-byte, and consumers stay blocked instead of reading a mix.
+    assert.deepEqual(fs.readFileSync(artifacts.manifestPath), artifacts.manifestBytes);
+    assert.deepEqual(fs.readFileSync(artifacts.revisionPath), artifacts.revisionBytes);
+    assert.throws(() => loadPublishedProjection(item.outputPath, oldIdentity));
+    const failedState = JSON.parse(
+      fs.readFileSync(`${item.outputPath}.publication-state.json`, 'utf8'),
+    );
+    assert.notEqual(failedState.state, 'published');
+    assert.equal(failedState.high_water_activity_revision, 7);
+    if (preSwapStages.includes(stage)) {
+      assert.deepEqual(fs.readFileSync(item.outputPath), artifacts.pointerBytes);
+    }
+
+    // Restoring the snapshotted pointer and publication state (the deploy
+    // transaction's snapshot/restore) recovers the old graph byte-for-byte.
+    fs.writeFileSync(item.outputPath, artifacts.pointerBytes);
+    fs.writeFileSync(`${item.outputPath}.publication-state.json`, artifacts.stateBytes);
+    assert.deepEqual(loadPublishedProjection(item.outputPath, oldIdentity), before);
+  }
+});
+
+test('reconciliation after a crashed rotation establishes the actual current graph', () => {
+  const item = fixture('hermes-projection-rotate-reconcile-', 7);
+  const rotatedRoot = rotatedProjectRoot(item.directory);
+  const newIdentity = computeHermesIdentityVersion(rotatedRoot).version;
+  publishHermesIdentityProjection({ projectRoot: PROJECT_ROOT, ...item });
+  assert.throws(() => publishHermesIdentityProjection({
+    projectRoot: rotatedRoot,
+    ...item,
+    faultInjector(stage) {
+      if (stage === 'pointer-swap-process-interrupt') throw new Error('crash');
+    },
+  }), (error) => error.code === 'PROJECTION_PUBLICATION_AMBIGUOUS');
+
+  // The pointer already references the rotated graph; reconciliation under
+  // the new identity confirms it without lowering the activity high-water.
+  const reconciled = reconcilePublishedProjection({
+    outputPath: item.outputPath,
+    identityVersion: newIdentity,
+  });
+  assert.equal(reconciled.identity_digest, newIdentity);
+  assert.equal(reconciled.activity_revision, 7);
+  const state = JSON.parse(fs.readFileSync(`${item.outputPath}.publication-state.json`, 'utf8'));
+  assert.equal(state.state, 'published');
+  assert.equal(state.high_water_activity_revision, 7);
+  assert.deepEqual(loadPublishedProjection(item.outputPath, newIdentity), reconciled);
+});

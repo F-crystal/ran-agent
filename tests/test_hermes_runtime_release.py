@@ -262,6 +262,116 @@ def test_source_profile_migration_rejects_an_undeclared_profile_subset(
         )
 
 
+def test_source_profile_migration_authorizes_a_contracted_identity_rotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # hermes/profile/AGENTS.md is an identity file; the accepted contract names
+    # it in allowedProfileDeltaPaths, so the identity rotation is authorized.
+    assert "hermes/profile/AGENTS.md" in MODULE.SOURCE_PROFILE_IDENTITY_PATHS
+    blobs = _source_profile_blobs()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    MODULE.validate_source_advance_paths(
+        sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS),
+        candidate="b" * 40,
+        prior=_source_profile_prior(),
+    )
+
+
+def test_source_profile_migration_rejects_an_unauthorized_identity_rotation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The contract delta drops the identity file while the source delta still
+    # touches it: fail closed before any runtime mutation.
+    blobs = _source_profile_blobs()
+    contract = json.loads(blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
+    contract["allowedProfileDeltaPaths"] = sorted(
+        path for path in contract["allowedProfileDeltaPaths"]
+        if path != "hermes/profile/AGENTS.md"
+    )
+    blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH] = json.dumps(contract).encode()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    with pytest.raises(MODULE.ReleaseError, match="does not authorize the identity rotation"):
+        MODULE.validate_source_advance_paths(
+            sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS),
+            candidate="b" * 40,
+            prior=_source_profile_prior(),
+        )
+
+
+@pytest.mark.parametrize("identity_path", sorted(MODULE.SOURCE_PROFILE_IDENTITY_PATHS - {"hermes/profile/AGENTS.md"}))
+def test_source_profile_migration_fails_closed_on_uncontractable_identity_files(
+    monkeypatch: pytest.MonkeyPatch, identity_path: str
+) -> None:
+    # IDENTITY.md and SOUL.md sit outside the contract-able doc set: even a
+    # contract naming them cannot authorize the rotation.
+    blobs = _source_profile_blobs()
+    contract = json.loads(blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH])
+    contract["allowedProfileDeltaPaths"] = sorted(
+        [*contract["allowedProfileDeltaPaths"], identity_path]
+    )
+    blobs[MODULE.SOURCE_PROFILE_MIGRATION_PATH] = json.dumps(contract).encode()
+    monkeypatch.setattr(MODULE, "candidate_blob", lambda _repo, _candidate, path: blobs[path])
+    with pytest.raises(MODULE.ReleaseError, match="does not match"):
+        MODULE.validate_source_advance_paths(
+            sorted(MODULE.SOURCE_PROFILE_ALLOWED_DOC_PATHS) + [identity_path],
+            candidate="b" * 40,
+            prior=_source_profile_prior(),
+        )
+
+
+def test_source_snapshot_covers_the_published_projection_graph(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    projection = tmp_path / "state" / "published-memory-context.json"
+    monkeypatch.setattr(MODULE, "SOURCE_PROJECTION", projection)
+    paths = MODULE.source_snapshot_paths()
+    assert projection in paths
+    assert projection.with_name(f"{projection.name}.revisions") in paths
+    assert projection.with_name(f"{projection.name}.manifests") in paths
+    assert projection.with_name(f"{projection.name}.publication-state.json") in paths
+
+
+def test_source_snapshot_roundtrip_restores_projection_graph_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    projection = tmp_path / "state" / "published-memory-context.json"
+    revisions = projection.with_name(f"{projection.name}.revisions")
+    manifests = projection.with_name(f"{projection.name}.manifests")
+    state_file = projection.with_name(f"{projection.name}.publication-state.json")
+    revisions.mkdir(parents=True)
+    manifests.mkdir()
+    projection.write_bytes(b'{"schema_version":1,"manifest_file":"old.json"}\n')
+    (revisions / "old-revision.json").write_bytes(b'{"old":true}\n')
+    (manifests / "old.json").write_bytes(b'{"identity_digest":"sha256:old"}\n')
+    state_file.write_bytes(b'{"state":"published"}\n')
+    snapshot = tmp_path / "snapshot"
+    (snapshot / "files").mkdir(parents=True)
+    graph_paths = (
+        projection,
+        revisions,
+        manifests,
+        state_file,
+    )
+    records = [MODULE.backup_path(snapshot, path, index) for index, path in enumerate(graph_paths)]
+    monkeypatch.setattr(MODULE, "restore_metadata", lambda *_args: None)
+
+    # Simulate a mid-rotation deploy: new artifacts plus a swapped pointer.
+    projection.write_bytes(b'{"schema_version":1,"manifest_file":"new.json"}\n')
+    (revisions / "new-revision.json").write_bytes(b'{"new":true}\n')
+    (manifests / "new.json").write_bytes(b'{"identity_digest":"sha256:new"}\n')
+    state_file.write_bytes(b'{"state":"ambiguous"}\n')
+
+    for record in reversed(records):
+        MODULE.restore_path(snapshot, record)
+
+    assert projection.read_bytes() == b'{"schema_version":1,"manifest_file":"old.json"}\n'
+    assert state_file.read_bytes() == b'{"state":"published"}\n'
+    assert (manifests / "old.json").read_bytes() == b'{"identity_digest":"sha256:old"}\n'
+    assert (revisions / "old-revision.json").read_bytes() == b'{"old":true}\n'
+    assert not (manifests / "new.json").exists()
+    assert not (revisions / "new-revision.json").exists()
+
+
 def test_source_advance_wake_script_only_passes_without_profile_migration(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

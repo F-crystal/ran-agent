@@ -144,6 +144,18 @@ SOURCE_PROFILE_ALLOWED_DOC_PATHS = frozenset({
     "hermes/profile/skills/academic-writing-support/SKILL.md",
     "hermes/profile/skills/ran-agent-runtime-debug/SKILL.md",
 })
+# Core identity files pin the published Hermes identity projection version
+# (sha256 over these bodies in node_bridge/src/hermesIdentityProjection.mjs).
+# A delta touching any of them rotates the published identity and is only
+# lawful when the migration contract names the path in
+# allowedProfileDeltaPaths; note hermes/profile/AGENTS.md is both an identity
+# file and an allowed contract path, while the other two identity files stay
+# outside the contract-able doc set and therefore always fail closed.
+SOURCE_PROFILE_IDENTITY_PATHS = frozenset({
+    "hermes/profile/AGENTS.md",
+    "hermes/profile/IDENTITY.md",
+    "hermes/profile/SOUL.md",
+})
 
 
 class ReleaseError(RuntimeError):
@@ -1612,6 +1624,11 @@ def validate_source_profile_migration(candidate: str, prior: str, profile_paths:
     rollback = migration.get("rollback") if isinstance(migration.get("rollback"), dict) else {}
     allowed_delta = migration.get("allowedProfileDeltaPaths")
     allowed_delta_set = set(allowed_delta) if isinstance(allowed_delta, list) else set()
+    identity_delta = migrated_paths & SOURCE_PROFILE_IDENTITY_PATHS
+    if identity_delta and not identity_delta.issubset(allowed_delta_set):
+        raise ReleaseError(
+            "source profile migration contract does not authorize the identity rotation"
+        )
     profile = candidate_blob(REPO, candidate, PROFILE_PATH)
     if (
         set(migration) != {
@@ -1759,6 +1776,14 @@ def source_snapshot_paths() -> tuple[Path, ...]:
         SOURCE_PROFILE_DIR,
         SOURCE_LEGACY_PROFILE_DIR,
         *ENV_FILES,
+        # The published identity projection graph (pointer, immutable
+        # revision/manifest stores, and publication state) so a source
+        # rollback restores the old graph's original bytes byte-for-byte
+        # alongside the prior checkout's identity files.
+        SOURCE_PROJECTION,
+        SOURCE_PROJECTION.with_name(f"{SOURCE_PROJECTION.name}.revisions"),
+        SOURCE_PROJECTION.with_name(f"{SOURCE_PROJECTION.name}.manifests"),
+        SOURCE_PROJECTION.with_name(f"{SOURCE_PROJECTION.name}.publication-state.json"),
     )
 
 

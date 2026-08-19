@@ -296,6 +296,42 @@ function readProjectionGraph(outputPath, identityVersion, minimumHighWater = 0) 
   return { pointer, manifest, snapshot };
 }
 
+const IDENTITY_MISMATCH_ERRORS = new Set([
+  'manifest_identity_mismatch',
+  'identity_version_mismatch',
+  'identity_digest_mismatch',
+]);
+
+function recoverPublishedIdentityVersion(outputPath, identityVersion, error) {
+  if (!IDENTITY_MISMATCH_ERRORS.has(error?.message)) return null;
+  try {
+    const locations = pointerPaths(outputPath);
+    const pointer = verifyPointer(readJsonRegular(locations.target, 'pointer'));
+    const manifestPath = path.join(locations.manifests, pointer.manifest_file);
+    const manifestBytes = readRegularBytes(manifestPath, 'manifest');
+    if (sha256(manifestBytes) !== pointer.manifest_digest) return null;
+    const previous = JSON.parse(manifestBytes.toString('utf8'))?.identity_digest;
+    // identity_digest pins the identity the graph was published under, so it
+    // is the only trustworthy source for the pre-rotation identity version.
+    if (!SHA256_PATTERN.test(previous || '') || previous === identityVersion) return null;
+    return previous;
+  } catch {
+    return null;
+  }
+}
+
+function readProjectionGraphAllowingRotation(outputPath, identityVersion, minimumHighWater = 0) {
+  try {
+    return { graph: readProjectionGraph(outputPath, identityVersion, minimumHighWater), rotatedFrom: null };
+  } catch (error) {
+    const rotatedFrom = recoverPublishedIdentityVersion(outputPath, identityVersion, error);
+    if (!rotatedFrom) throw error;
+    // Identity rotation is only safe once the old graph verifies end to end
+    // under its own identity; any tampering fails closed here.
+    return { graph: readProjectionGraph(outputPath, rotatedFrom, minimumHighWater), rotatedFrom };
+  }
+}
+
 export function loadPublishedProjection(outputPath, identityVersion) {
   const locations = pointerPaths(outputPath);
   const state = verifyPublicationState(readJsonRegular(locations.state, 'publication_state'));
@@ -362,7 +398,7 @@ export function reconcilePublishedProjection({ outputPath, identityVersion, faul
       publicationStateRecord('reconciling', previousHighWater, previousProjectionHighWater),
       { faultInjector, prefix: 'state-reconciling' },
     );
-    const graph = readProjectionGraph(outputPath, identityVersion, previousHighWater);
+    const graph = readProjectionGraphAllowingRotation(outputPath, identityVersion, previousHighWater).graph;
     if (graph.snapshot.activity_revision === previousHighWater
         && previousProjectionHighWater
         && graph.snapshot.projection_revision !== previousProjectionHighWater) {
@@ -464,9 +500,12 @@ export function publishHermesIdentityProjection({
     }
 
     let currentGraph = null;
+    let rotatedFromIdentity = null;
     if (fs.existsSync(locations.target)) {
       try {
-        currentGraph = readProjectionGraph(outputPath, canonical.version);
+        const current = readProjectionGraphAllowingRotation(outputPath, canonical.version);
+        currentGraph = current.graph;
+        rotatedFromIdentity = current.rotatedFrom;
       } catch (error) {
         throw projectionError(
           'PROJECTION_RECONCILIATION_REQUIRED',
@@ -538,6 +577,17 @@ export function publishHermesIdentityProjection({
       published_memory_context: publishedMemoryContext,
     };
     snapshot.projection_revision = sha256(stableJson(projectionPayload(snapshot)));
+    if (rotatedFromIdentity
+        && (activityRevision !== currentGraph.snapshot.activity_revision
+          || stableJson(currentGraph.snapshot.activities) !== stableJson(activities))) {
+      // Rotation republishes the same activity projection under a new
+      // identity; an activity change riding the identity change fails closed.
+      failureStateAllowed = false;
+      throw projectionError(
+        'PROJECTION_RECONCILIATION_REQUIRED',
+        'identity_rotation_requires_unchanged_activity_projection',
+      );
+    }
     if (activityRevision < durableFloor) {
       failureStateAllowed = false;
       throw projectionError(
@@ -547,7 +597,8 @@ export function publishHermesIdentityProjection({
     }
     if (activityRevision === durableFloor
         && durableProjectionFloor
-        && snapshot.projection_revision !== durableProjectionFloor) {
+        && snapshot.projection_revision !== durableProjectionFloor
+        && !rotatedFromIdentity) {
       failureStateAllowed = false;
       throw projectionError(
         'PROJECTION_REVISION_CONFLICT',
