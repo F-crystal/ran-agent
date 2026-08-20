@@ -11,7 +11,7 @@ WorkingDirectory=/opt/ran_agent
 EnvironmentFile=-/opt/ran_agent/.env.local
 EnvironmentFile=-/opt/ran_agent/node_bridge/.env.local
 EnvironmentFile=-/home/ubuntu/.hermes/.env
-UnsetEnvironment=BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH
+UnsetEnvironment=BASH_ENV ENV BASHOPTS SHELLOPTS BASH_XTRACEFD PYTHONHOME PYTHONPATH PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH TELEGRAM_BOT_TOKEN
 Environment=RAN_AGENT_REPO_ROOT=/opt/ran_agent
 Environment=HERMES_HOME=/home/ubuntu/.hermes-ran-agent/lite
 Environment=HERMES_PROFILE=ran-agent-companion

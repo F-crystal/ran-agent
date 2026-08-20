@@ -1343,6 +1343,10 @@ def test_unified_unit_uses_exact_runtime_and_one_port() -> None:
     assert "8643" not in unit
     assert "HERMES_DISABLE_LAZY_INSTALLS=1" in unit
     assert "TIRITH_ENABLED=false" in unit
+    assert any(
+        line.startswith("UnsetEnvironment=") and "TELEGRAM_BOT_TOKEN" in line
+        for line in unit.splitlines()
+    )
     assert "BindReadOnlyPaths=" not in unit
     assert "PERSONAL_MEMORY_BACKEND_TIMEOUT_MS=" not in unit
     memory = (Path(__file__).parents[1] / "node_bridge/src/personalMemoryMcpServer.mjs").read_text()
