@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { ProxyAgent } from 'undici';
+import { fetch as undiciFetch, ProxyAgent } from 'undici';
 
 import { readJsonState, writeJsonAtomic } from './atomicState.mjs';
 import { handleIncomingMessage } from './channelHub.mjs';
@@ -105,7 +105,7 @@ export function createTelegramOffsetStore({ offsetPath, fsState = {} } = {}) {
   });
 }
 
-export function createTelegramSendAdapter({ env = process.env, fetchImpl = globalThis.fetch, dispatcher: providedDispatcher, lifecycleSignal } = {}) {
+export function createTelegramSendAdapter({ env = process.env, fetchImpl = undiciFetch, dispatcher: providedDispatcher, lifecycleSignal } = {}) {
   const config = getTelegramConfig(env);
   if (config.proxyUrl && !providedDispatcher) {
     throw telegramError('TELEGRAM_PROXY_DISPATCHER_REQUIRED', 'Telegram proxy dispatcher is unavailable');
@@ -129,7 +129,7 @@ export function createTelegramSendAdapter({ env = process.env, fetchImpl = globa
 export async function startTelegramBridge({
   env = process.env,
   logger = console,
-  fetchImpl = globalThis.fetch,
+  fetchImpl = undiciFetch,
   channelHub = handleIncomingMessage,
   outbox,
   identityResolver = getIdentityBinding,
@@ -145,21 +145,12 @@ export async function startTelegramBridge({
   const abortController = new AbortController();
   const dispatcher = createTelegramDispatcher(config.proxyUrl);
   const api = createTelegramApi({ config, fetchImpl, dispatcher });
-  try {
-    const webhook = await api.call('getWebhookInfo', {}, requestSignal(abortController.signal, DEFAULT_API_DEADLINE_MS));
-    if (String(webhook?.url || '').trim()) {
-      throw telegramError('TELEGRAM_WEBHOOK_CONFIGURED', 'Telegram webhook is configured; long polling is disabled');
-    }
-  } catch (error) {
-    abortController.abort();
-    await dispatcher?.close?.();
-    throw error;
-  }
   const offset = createTelegramOffsetStore({ offsetPath: offsetPath || config.offsetPath });
   const adapter = createTelegramSendAdapter({ env, fetchImpl, dispatcher, lifecycleSignal: abortController.signal });
   let stopped = false;
   let loopPromise;
   let backoffMs = 1000;
+  let webhookReady = false;
 
   const processUpdate = async (update) => {
     const normalized = normalizeTelegramUpdate(update, { config, identityResolver, env });
@@ -179,6 +170,15 @@ export async function startTelegramBridge({
   const run = async () => {
     while (!stopped) {
       try {
+        if (!webhookReady) {
+          const webhook = await api.call('getWebhookInfo', {}, requestSignal(abortController.signal, DEFAULT_API_DEADLINE_MS));
+          if (stopped) break;
+          if (String(webhook?.url || '').trim()) {
+            logger.warn?.('[telegram-bridge] stopped reason=TELEGRAM_WEBHOOK_CONFIGURED');
+            break;
+          }
+          webhookReady = true;
+        }
         const updates = await api.call('getUpdates', {
           offset: offset.get(),
           timeout: config.pollTimeoutSeconds,

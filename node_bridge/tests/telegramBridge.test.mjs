@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import test from 'node:test';
-import { ProxyAgent } from 'undici';
+import { MockAgent, ProxyAgent } from 'undici';
 
 import {
   createTelegramOffsetStore,
@@ -77,6 +77,31 @@ test('Telegram transport exceptions are stable and redact raw token and URL', as
   );
 });
 
+test('Telegram default API fetch shares the Undici dispatcher ABI', async () => {
+  const dispatcher = new MockAgent();
+  dispatcher.disableNetConnect();
+  dispatcher.get('https://api.telegram.org')
+    .intercept({ path: '/bot123456:unit-test-token/sendMessage', method: 'POST' })
+    .reply(200, { ok: true, result: { message_id: 21 } });
+  try {
+    const adapter = createTelegramSendAdapter({
+      env: { ...baseEnv, TELEGRAM_PROXY_URL: 'http://proxy.invalid:18888' },
+      dispatcher,
+      lifecycleSignal: AbortSignal.timeout(500),
+    });
+    const result = await Promise.race([
+      adapter.sendReply({ target: { conversation_id: '100' }, text: 'same Undici source' }),
+      new Promise((resolve) => setTimeout(() => resolve({ textStatus: 'timed_out' }), 250)),
+    ]);
+    assert.equal(result.textStatus, 'sent');
+  } finally {
+    await Promise.race([
+      dispatcher.close(),
+      new Promise((resolve) => setTimeout(resolve, 100)),
+    ]);
+  }
+});
+
 test('Telegram slow but healthy send remains sent within the normal API deadline', async () => {
   const adapter = createTelegramSendAdapter({
     env: baseEnv,
@@ -131,6 +156,66 @@ test('Telegram webhook preflight carries a bounded lifecycle signal', async (t) 
     assert.equal(preflightSignal.aborted, false);
   } finally {
     await bridge.stop();
+  }
+});
+
+test('Telegram webhook transport failure stays in poll backoff and does not reject startup', async (t) => {
+  const isolated = createIsolatedTestEnv(t, {}, 'telegram-webhook-backoff-');
+  const env = {
+    ...isolated,
+    ...baseEnv,
+    TELEGRAM_BRIDGE_ENABLED: 'true',
+    RAN_AGENT_IDENTITY_MAP_PATH: path.join(isolated.RAN_AGENT_STATE_DIR, 'identity-map.json'),
+  };
+  bootstrapOwnerBinding({
+    trustedIdentity: { platform: 'telegram', senderId: '100', globalUserId: 'user:ran', provenance: 'telegram_owner_challenge' },
+    env,
+    now: '2026-08-20T00:00:00.000Z',
+  });
+  const methods = [];
+  const delays = [];
+  const originalSetTimeout = globalThis.setTimeout;
+  globalThis.setTimeout = (callback, milliseconds, ...args) => {
+    if (milliseconds >= 1000) {
+      delays.push(milliseconds);
+      return originalSetTimeout(callback, 0, ...args);
+    }
+    return originalSetTimeout(callback, milliseconds, ...args);
+  };
+  let webhookAttempts = 0;
+  let updatesCalls = 0;
+  let bridge;
+  try {
+    bridge = await startTelegramBridge({
+      env,
+      fetchImpl: async (url, options = {}) => {
+        const method = String(url).split('/').pop();
+        methods.push(method);
+        if (method === 'getWebhookInfo') {
+          webhookAttempts += 1;
+          if (webhookAttempts === 1) throw new Error('temporary network failure');
+          return telegramResponse({ url: '' });
+        }
+        if (method === 'getUpdates') {
+          updatesCalls += 1;
+          return new Promise((resolve, reject) => {
+            options.signal?.addEventListener('abort', () => {
+              const error = new Error('aborted');
+              error.name = 'AbortError';
+              reject(error);
+            }, { once: true });
+          });
+        }
+        throw new Error('unexpected Telegram method');
+      },
+      logger: { info() {}, warn() {}, error() {} },
+    });
+    await waitFor(() => updatesCalls === 1);
+    assert.deepEqual(methods.slice(0, 3), ['getWebhookInfo', 'getWebhookInfo', 'getUpdates']);
+    assert.equal(delays[0], 1000);
+  } finally {
+    await bridge?.stop();
+    globalThis.setTimeout = originalSetTimeout;
   }
 });
 
@@ -420,18 +505,17 @@ test('Telegram transport exception becomes ambiguous outbox terminal and replay 
   assert.equal(sends, 1);
 });
 
-test('configured Telegram webhook fails closed before getUpdates', async () => {
+test('configured Telegram webhook stops the loop before getUpdates', async () => {
   let updates = 0;
-  await assert.rejects(
-    startTelegramBridge({
-      env: { ...baseEnv, TELEGRAM_BRIDGE_ENABLED: 'true' },
-      identityResolver: () => ({ bindingVersion: 2, platform: 'telegram', owner: true, globalUserId: 'user:ran' }),
-      fetchImpl: async (url) => String(url).endsWith('/getWebhookInfo')
-        ? telegramResponse({ url: 'https://webhook.invalid' })
-        : (updates += 1, telegramResponse([])),
-    }),
-    (error) => error?.code === 'TELEGRAM_WEBHOOK_CONFIGURED',
-  );
+  const bridge = await startTelegramBridge({
+    env: { ...baseEnv, TELEGRAM_BRIDGE_ENABLED: 'true' },
+    identityResolver: () => ({ bindingVersion: 2, platform: 'telegram', owner: true, globalUserId: 'user:ran' }),
+    fetchImpl: async (url) => String(url).endsWith('/getWebhookInfo')
+      ? telegramResponse({ url: 'https://webhook.invalid' })
+      : (updates += 1, telegramResponse([])),
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  await bridge.stop();
   assert.equal(updates, 0);
 });
 
