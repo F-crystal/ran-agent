@@ -29,7 +29,7 @@ function readTrustedIdentity(identityFile) {
       throw new Error('not an object');
     }
     const platform = String(value.platform || '').trim().toLowerCase();
-    if (!['wechat', 'feishu', 'desktop'].includes(platform)) {
+    if (!['wechat', 'feishu', 'desktop', 'telegram'].includes(platform)) {
       throw new Error('invalid platform');
     }
     return {

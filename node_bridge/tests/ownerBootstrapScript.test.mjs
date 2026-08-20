@@ -19,6 +19,35 @@ function run(args, env) {
   });
 }
 
+test('owner bootstrap command accepts a protected Telegram owner identity', (t) => {
+  const isolated = createIsolatedTestEnv(t, {}, 'ran-agent-owner-bootstrap-telegram-');
+  const identityMapPath = join(isolated.RAN_AGENT_STATE_DIR, 'identity-map.json');
+  const trustedIdentityPath = join(isolated.RAN_AGENT_STATE_DIR, 'telegram-owner.json');
+  const trustedIdentity = {
+    platform: 'telegram',
+    senderId: 'telegram-private-owner-id',
+    globalUserId: 'user:ran',
+    provenance: 'confirmed_botfather_owner',
+  };
+  writeFileSync(trustedIdentityPath, JSON.stringify(trustedIdentity));
+  chmodSync(trustedIdentityPath, 0o600);
+
+  const output = run(['--identity-file', trustedIdentityPath], {
+    ...isolated,
+    RAN_AGENT_IDENTITY_MAP_PATH: identityMapPath,
+  });
+
+  assert.match(output, /owner-bootstrap: ok bindings=1/);
+  assert.equal(output.includes(trustedIdentity.senderId), false);
+  assert.equal(output.includes(trustedIdentity.globalUserId), false);
+  assert.equal(
+    getIdentityBinding({ platform: 'telegram', sender_id: trustedIdentity.senderId }, {
+      env: { ...isolated, RAN_AGENT_IDENTITY_MAP_PATH: identityMapPath },
+    }).owner,
+    true,
+  );
+});
+
 test('owner bootstrap command accepts only an explicit protected identity file and emits no raw identity', (t) => {
   const isolated = createIsolatedTestEnv(t, {}, 'ran-agent-owner-bootstrap-command-');
   const identityMapPath = join(isolated.RAN_AGENT_STATE_DIR, 'identity-map.json');
