@@ -11,7 +11,9 @@ const START = '2026-08-08T15:00:00.000Z';
 const DUE = '2026-08-08T15:01:00.000Z';
 const TOKEN = `hmac-sha256:v1:test:${'a'.repeat(64)}`;
 
-async function setup(t, payloadRef = 'system-task:daily-digest') {
+async function setup(t, payloadRef = 'system-task:daily-digest', {
+  bindingId = 'binding', bindingOperationKey = 'core-cutover:system-owner-binding',
+} = {}) {
   const { dbPath } = createTempCore(t, 'hermes-core-scheduled-worker-');
   let current = new Date(START);
   const core = openCoreDatabase({ dbPath, now: () => current });
@@ -19,16 +21,16 @@ async function setup(t, payloadRef = 'system-task:daily-digest') {
   const scheduling = createCoreSchedulingService({ core });
   const identityInput = {
     conversationId: 'conversation', canonicalConversationKey: 'conversation', ownerId: 'owner',
-    actorRef: 'owner:verified', platform: 'feishu', primaryFrontend: 'feishu',
-    sourceInstanceId: 'node-channel-hub:feishu', platformConversationBinding: 'feishu:conversation',
+    actorRef: 'owner:verified', platform: 'wechat', primaryFrontend: 'wechat',
+    sourceInstanceId: 'node-channel-hub:wechat', platformConversationBinding: 'wechat:conversation',
     createdAt: START,
   };
   await core.writer.write((tx) => {
     tx.packageBTurn.createOrResolveConversation(identityInput);
     tx.packageBPresentation.createOrReadBinding({
-      operationKey: 'binding:create', bindingId: 'binding', conversationId: 'conversation', ownerId: 'owner',
-      sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu', destinationKind: 'user',
-      destinationRef: 'ou-owner', adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
+      operationKey: bindingOperationKey, bindingId, conversationId: 'conversation', ownerId: 'owner',
+      sourceInstanceId: 'node-channel-hub:wechat', platform: 'wechat', destinationKind: 'user',
+      destinationRef: 'wechat-owner', adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
     });
     tx.journal.append({
       eventId: 'cause', eventType: 'schedule_requested', ownerId: 'owner', conversationId: 'conversation',
@@ -44,7 +46,7 @@ async function setup(t, payloadRef = 'system-task:daily-digest') {
     scheduleSpecId: 'schedule', scheduleSpecRevisionId: 'schedule-r1', activityId: 'activity',
     operationKey: 'schedule:create', recurrence: { kind: 'one_shot', at: DUE },
     taskKind: 'scheduled_instruction', payloadRef, catchUpPolicy: 'latest',
-    activityContractRevision: 0, conversationId: 'conversation', presentationBindingId: 'binding',
+    activityContractRevision: 0, conversationId: 'conversation', presentationBindingId: bindingId,
     expectedBindingRevision: 0, causationId: 'cause',
   });
   current = new Date(DUE);
@@ -63,7 +65,7 @@ test('scheduled WorkRun consumer proves the typed system instruction to terminal
     send: async (view) => {
       effects += 1;
       routes.push({ platform: view.platform, destinationKind: view.destinationKind, target: view.target });
-      return { resultState: 'sent', evidenceRef: 'feishu:test:sent', evidenceHashToken: TOKEN };
+      return { resultState: 'sent', evidenceRef: 'wechat:test:sent', evidenceHashToken: TOKEN };
     },
     afterTerminal: async (context, delivery) => {
       const inspector = openTestInspector(dbPath);
@@ -78,7 +80,7 @@ test('scheduled WorkRun consumer proves the typed system instruction to terminal
   const [result] = await worker.runOnce();
   assert.equal(result.state, 'completed');
   assert.equal(effects, 1);
-  assert.deepEqual(routes, [{ platform: 'feishu', destinationKind: 'user', target: 'ou-owner' }]);
+  assert.deepEqual(routes, [{ platform: 'wechat', destinationKind: 'user', target: 'wechat-owner' }]);
   assert.equal(terminals.length, 1);
   assert.equal(terminals[0].context.payload_ref, 'system-task:daily-digest');
   assert.equal(terminals[0].delivery.state, 'sent');
@@ -107,7 +109,7 @@ test('reopen after terminal commit retries only the missing acknowledgement', as
     },
     send: async () => {
       effects += 1;
-      return { resultState: 'sent', evidenceRef: 'feishu:test:sent', evidenceHashToken: TOKEN };
+      return { resultState: 'sent', evidenceRef: 'wechat:test:sent', evidenceHashToken: TOKEN };
     },
     afterTerminal: async () => {
       acknowledgements += 1;
@@ -175,5 +177,31 @@ test('ambiguous adapter outcome remains terminal and is not resent', async (t) =
   assert.equal(effects, 1);
   assert.equal(acknowledgements, 1);
   assert.equal(core.reader.workRun(workRunId).state, 'completed');
+  await core.close();
+});
+
+test('scheduled delivery rejects a secondary binding instead of replacing the global owner binding', async (t) => {
+  const { core, now, workRunId } = await setup(t, 'system-task:secondary', {
+    bindingId: 'secondary-binding', bindingOperationKey: 'secondary-binding:create',
+  });
+  await core.writer.write((tx) => tx.packageBPresentation.createOrReadBinding({
+    operationKey: 'core-cutover:system-owner-binding', bindingId: 'global-binding',
+    conversationId: 'conversation', ownerId: 'owner', sourceInstanceId: 'node-channel-hub:wechat-global',
+    platform: 'wechat', destinationKind: 'user', destinationRef: 'wechat-owner-global',
+    adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
+  }));
+  let effects = 0;
+  const scheduled = createPackageBScheduledDeliveryHandler({
+    core, now, hashContent: () => TOKEN,
+    decide: async () => ({ replyText: 'must not decide', provider: 'hermes', model: 'test' }),
+    send: async () => { effects += 1; return { resultState: 'sent', evidenceRef: 'wechat:secondary' }; },
+  });
+  const worker = createCoreWorkRunWorker({
+    core, now, hashContent: () => TOKEN, handlers: { scheduled_instruction: scheduled },
+  });
+  const [result] = await worker.runOnce();
+  assert.equal(result.state, 'failed');
+  assert.equal(core.reader.workRun(workRunId).state, 'failed');
+  assert.equal(effects, 0);
   await core.close();
 });

@@ -78,13 +78,13 @@ async function setup(t) {
     apply: (tx) => {
       tx.packageBTurn.createOrResolveConversation({
         conversationId: CONVERSATION, canonicalConversationKey: CONVERSATION,
-        ownerId: OWNER, actorRef: 'actor:owner', platform: 'feishu', primaryFrontend: 'feishu',
-        sourceInstanceId: 'feishu:owner', platformConversationBinding: 'feishu:owner', createdAt: AT,
+        ownerId: OWNER, actorRef: 'actor:owner', platform: 'wechat', primaryFrontend: 'wechat',
+        sourceInstanceId: 'wechat:owner', platformConversationBinding: 'wechat:owner', createdAt: AT,
       });
       tx.packageBPresentation.createOrReadBinding({
         operationKey: 'core-cutover:system-owner-binding', bindingId: BINDING,
-        conversationId: CONVERSATION, ownerId: OWNER, sourceInstanceId: 'feishu:owner',
-        platform: 'feishu', destinationKind: 'user', destinationRef: 'ou_owner',
+        conversationId: CONVERSATION, ownerId: OWNER, sourceInstanceId: 'wechat:owner',
+        platform: 'wechat', destinationKind: 'user', destinationRef: 'wechat_owner',
         adapterMetadata: { protocol: 'core-system-schedule', receiptMode: 'typed', routeVersion: '1' },
         createdAt: AT,
       });
@@ -101,7 +101,7 @@ function input(overrides = {}) {
   };
 }
 
-test('S12 acceptance registers one Core schedule and reaches one durable Feishu receipt', async (t) => {
+test('S12 acceptance registers one Core schedule and reaches one durable WeChat receipt', async (t) => {
   const { core, dbPath, root, setNow } = await setup(t);
   const registered = await registerS12Acceptance({ core, input: input() });
   assert.equal(registered.disposition, 'registered');
@@ -119,7 +119,7 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
     send: async (view) => {
       effects += 1;
       routes.push({ destinationKind: view.destinationKind, target: view.target });
-      return { resultState: 'sent', evidenceRef: 'feishu:s12:accepted', evidenceHashToken: TOKEN };
+      return { resultState: 'sent', evidenceRef: 'wechat:s12:accepted', evidenceHashToken: TOKEN };
     },
   });
   const worker = createCoreWorkRunWorker({
@@ -130,7 +130,7 @@ test('S12 acceptance registers one Core schedule and reaches one durable Feishu 
   assert.equal(terminal.status, 'TERMINAL_RECEIPT');
   assert.equal(terminal.outboxId.startsWith('outbox:scheduled:'), true);
   assert.ok(terminal.receiptId);
-  assert.deepEqual(routes, [{ destinationKind: 'user', target: 'ou_owner' }]);
+  assert.deepEqual(routes, [{ destinationKind: 'user', target: 'wechat_owner' }]);
   await worker.runOnce();
   assert.equal(effects, 1);
   assert.equal(inspectS12Acceptance({ core, ...input() }).receiptId, terminal.receiptId);

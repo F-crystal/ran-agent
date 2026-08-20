@@ -13,7 +13,7 @@ import {
   deliverNodeTextThroughCore,
 } from '../../src/core/packageB/packageBNodeDeliveryService.mjs';
 import { readTimelineRecords } from '../../src/globalTimeline.mjs';
-import { getAccountBindingKey } from '../../src/identityMap.mjs';
+import { getAccountBindingKey, getHermesSessionId, shortHash } from '../../src/identityMap.mjs';
 import { createIsolatedTestEnv } from '../helpers/isolatedState.mjs';
 import { createTempCore, openTestInspector, rowCount } from './helpers/testCoreInspector.mjs';
 
@@ -44,15 +44,15 @@ function quietLogger() {
 
 test('ChannelHub binding namespace coexists with the cutover system-owner binding and replays once', async (t) => {
   const message = {
-    id: 'feishu-post-s12-binding', platform: 'feishu', conversation_id: 'feishu-owner-dm',
-    stable_conversation_key: 'feishu:dm:owner', text: '验证绑定命名空间',
+    id: 'wechat-post-s12-binding', platform: 'wechat', conversation_id: 'wechat-owner-dm',
+    stable_conversation_key: 'wechat:dm:owner', text: '验证绑定命名空间',
     created_at: Date.parse('2026-08-13T11:07:11.000Z'),
   };
   const ownerId = 'user:ran';
-  const actorRef = 'feishu:owner:verified';
+  const actorRef = 'wechat:owner:verified';
   const routeKey = createHash('sha256').update(`${message.platform}\u0000${message.conversation_id}`).digest('hex').slice(0, 32);
   const conversationKey = createHash('sha256').update(`${ownerId}\u0000${message.stable_conversation_key}`).digest('hex').slice(0, 32);
-  const conversationId = `conversation:feishu:${conversationKey}`;
+  const conversationId = `conversation:wechat:${conversationKey}`;
   const oldGenericBindingId = `binding:${routeKey}`;
   const { dbPath } = createTempCore(t, 'hermes-core-node-post-s12-binding-');
   const core = openCoreDatabase({ dbPath });
@@ -79,8 +79,8 @@ test('ChannelHub binding namespace coexists with the cutover system-owner bindin
       ownerId, watermark: '2026-08-13T11:00:00.000Z', createdAt: '2026-08-13T11:01:00.000Z',
       visibleBinding: {
         conversationId, canonicalConversationKey: conversationId, actorRef,
-        platform: 'feishu', sourceInstanceId: 'node-channel-hub:feishu',
-        platformConversationBinding: `feishu:conversation:${routeKey}`,
+        platform: 'wechat', sourceInstanceId: 'node-channel-hub:wechat',
+        platformConversationBinding: `wechat:conversation:${routeKey}`,
         bindingId: oldGenericBindingId, destinationKind: 'user', destinationRef: 'system-owner-destination',
       },
     }),
@@ -99,7 +99,7 @@ test('ChannelHub binding namespace coexists with the cutover system-owner bindin
     ...input,
     send: async () => {
       effects += 1;
-      return { textStatus: 'sent', adapterReceiptRef: 'feishu:test:sent' };
+      return { textStatus: 'sent', adapterReceiptRef: 'wechat:test:sent' };
     },
   });
   assert.equal(first.exchange.bindingId, `binding:channel-hub:v1:${routeKey}`);
@@ -265,6 +265,67 @@ test('verified WeChat normal ingress commits one provider attempt, final, outbox
   assert.equal(inspector.prepare(`SELECT count(*) AS count FROM journal_event
     WHERE event_type='package_b_provider_attempt_recorded'`).get().count, 1);
   inspector.close();
+});
+
+test('Telegram owner ingress crosses the real Core repositories once', async (t) => {
+  const message = {
+    id: 'telegram-owner-core-red-1', platform: 'telegram', channel_type: 'dm',
+    conversation_id: 'telegram-owner-conversation', sender_id: 'telegram-owner',
+    stable_conversation_key: 'telegram:dm:telegram-owner',
+    text: 'Core red test', created_at: Date.parse('2026-08-20T00:00:00.000Z'),
+  };
+  const env = identityEnv(t, message);
+  const { dbPath } = createTempCore(t, 'hermes-core-node-telegram-red-');
+  let core = openCoreDatabase({ dbPath });
+  core.migrate();
+  let adapterEffects = 0;
+  const result = await handleIncomingMessage(message, {
+    env,
+    core,
+    coreContentHasher: createCoreContentHasher({ keyId: 'telegram-red-key', key: 'telegram-red-secret' }),
+    logger: quietLogger(),
+    replyBackend: { async getReply() { return { replyText: 'Core red response', media: null, provider: 'synthetic', model: 'test' }; } },
+    adapter: { async sendReply() { adapterEffects += 1; return { textStatus: 'sent', adapterReceiptRef: `telegram:message:${shortHash(987654321)}` }; } },
+  });
+  assert.equal(result.coreDelivery.state, 'sent');
+  assert.equal(adapterEffects, 1);
+  await core.close();
+
+  core = openCoreDatabase({ dbPath });
+  core.migrate();
+  const replay = await handleIncomingMessage(message, {
+    env,
+    core,
+    coreContentHasher: createCoreContentHasher({ keyId: 'telegram-red-key', key: 'telegram-red-secret' }),
+    logger: quietLogger(),
+    replyBackend: { async getReply() { return { replyText: 'Core red response', media: null, provider: 'synthetic', model: 'test' }; } },
+    adapter: { async sendReply() { throw new Error('replay must not resend'); } },
+  });
+  assert.equal(replay.coreDelivery.state, 'sent');
+  assert.equal(replay.coreDelivery.effectAttempted, false);
+  assert.equal(adapterEffects, 1);
+  await core.close();
+
+  const inspector = openTestInspector(dbPath);
+  assert.equal(rowCount(inspector, 'conversation'), 1);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='package_b_conversation_identity_bound'").get().count, 1);
+  assert.equal(rowCount(inspector, 'ingress_event'), 1);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='package_b_ingress_committed'").get().count, 1);
+  assert.equal(rowCount(inspector, 'exchange'), 1);
+  assert.equal(rowCount(inspector, 'provider_epoch'), 1);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM semantic_turn WHERE role='assistant'").get().count, 1);
+  assert.equal(rowCount(inspector, 'presentation_outbox'), 1);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='package_b_provider_attempt_recorded'").get().count, 1);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='package_b_final_semantic_committed'").get().count, 1);
+  assert.equal(inspector.prepare("SELECT count(*) AS count FROM journal_event WHERE event_type='package_b_presentation_result_recorded'").get().count, 1);
+  assert.equal(inspector.prepare('SELECT owner_id FROM conversation').get().owner_id, 'user:ran');
+  const receiptPayload = inspector.prepare(`SELECT payload.payload_ref FROM journal_payload payload
+    JOIN journal_event event ON event.journal_event_id=payload.journal_event_id
+    WHERE event.event_type='package_b_presentation_result_recorded'`).get().payload_ref;
+  assert.match(receiptPayload, /^telegram:message:[a-f0-9]{16}$/);
+  assert.notEqual(receiptPayload, 'telegram:message:987654321');
+  assert.notEqual(getHermesSessionId(message), getHermesSessionId({ ...message, platform: 'wechat' }));
+  assert.match(getHermesSessionId(message), /^ran-agent-telegram-/);
 });
 
 test('local Core wiring rejects a non-owner before any Core fact or adapter effect', async (t) => {

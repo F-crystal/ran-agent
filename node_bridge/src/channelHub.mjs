@@ -168,7 +168,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
     }
     return { ...deliveredResponse, coreDelivery: coreResult.delivery };
   } else if (shouldUseDurableTextDelivery({ response: deliveredResponse, options })) {
-    await options.outbox.deliver({
+    const durableDelivery = await options.outbox.deliver({
       operationKey: durableOperationKey,
       platform: message.platform,
       conversation_id: message.conversation_id,
@@ -195,6 +195,7 @@ export async function handleIncomingMessage(normalizedMessage = {}, options = {}
         ? async ({ outboxId, text }) => deliveredResponse.backendProjection({ outboxId, replyText: text })
         : undefined,
     });
+    return { ...deliveredResponse, durableDelivery };
   } else {
     if (!taskScoped && !options.outbox && deliveredResponse.excludeFromHistory !== true) safeAppendTurn(assistantTurn, logger);
     if (options.adapter?.sendReply && deliveredResponse.suppressSend !== true) {

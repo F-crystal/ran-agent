@@ -63,7 +63,7 @@ test('reply backend rejects missing or unsupported platform before Hermes', asyn
   const backend = createReplyBackend({
     hermesImpl: async () => { providerAttempts += 1; throw new Error('Hermes reached'); },
   });
-  for (const message of [{ text: 'missing' }, { text: 'unsupported', platform: 'telegram' }]) {
+  for (const message of [{ text: 'missing' }, { text: 'unsupported', platform: 'signal' }]) {
     await assert.rejects(
       backend.getReply(message),
       (error) => error?.code === 'PLATFORM_UNSUPPORTED',

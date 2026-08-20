@@ -509,7 +509,7 @@ function clipText(value, maxChars) {
 
 function normalizePlatform(platform) {
   const value = String(platform || '').trim().toLowerCase();
-  return ['wechat', 'feishu', 'desktop'].includes(value) ? value : 'wechat';
+  return ['wechat', 'feishu', 'desktop', 'telegram'].includes(value) ? value : 'wechat';
 }
 
 function canonicalStringify(value) {

@@ -15,6 +15,7 @@ import {
 import { startDesktopProxyServer } from './desktopProxyServer.mjs';
 import { startCoReadingWebServer } from './coReading/webServer.mjs';
 import { sendFeishuReply, startFeishuBridge } from './feishuBridge.mjs';
+import { startTelegramBridge } from './telegramBridge.mjs';
 import { handleIncomingMessage } from './channelHub.mjs';
 import { runDueExternalMcpActivities } from './externalMcp/activityRunner.mjs';
 import { callExternalMcpTool } from './externalMcp/executor.mjs';
@@ -387,50 +388,6 @@ export function createExternalMcpRuntimeTransport({ env = process.env, executor 
   });
 }
 
-// Checkpoints are already receipt-backed by the supervisor; this is only the
-// shared reply-release and durable-delivery boundary. It never re-invokes an
-// MCP tool or treats an adapter handoff as a confirmed send without a receipt.
-export async function submitExternalMcpCheckpoint({
-  candidate,
-  context,
-  replyBackend,
-  outbox,
-  sendWechat,
-  sendFeishu = sendFeishuReply,
-  env = process.env,
-} = {}) {
-  if (!replyBackend || typeof replyBackend.releaseExternalCheckpoint !== 'function'
-    || !outbox || typeof outbox.deliver !== 'function' || !context?.notifyTarget) return { skipped: true };
-  const released = await replyBackend.releaseExternalCheckpoint({ candidate, context });
-  const target = context.notifyTarget;
-  const text = String(released?.replyText || '').trim();
-  if (!text || released?.suppressSend === true) return { skipped: true };
-  const operationKey = `external-checkpoint:${context.activityId}:${context.checkpointDigest}`;
-  return await outbox.deliver({
-    operationKey,
-    jobResultKey: `external-job:${context.activityId}:${context.checkpointDigest}`,
-    route: { adapterKey: target.platform, destinationRef: `conversation:${shortDigest(target.conversationId)}` },
-    text,
-    attachments: [],
-    idempotent: false,
-    maxAttempts: 1,
-  }, {
-    send: async () => {
-      if (target.platform === 'feishu') {
-        const receipt = await sendFeishu({
-          target: { conversation_id: target.conversationId, sender_id: target.senderId }, text, env,
-        });
-        return { textStatus: 'sent', attachments: [], adapterReceiptRef: receipt?.adapterReceiptRef || 'feishu:checkpoint' };
-      }
-      if (target.platform === 'wechat' && typeof sendWechat === 'function') {
-        await sendWechat(text);
-        return { textStatus: 'ambiguous', attachments: [], adapterReceiptRef: `wechat:checkpoint-${shortDigest(operationKey)}` };
-      }
-      return { textStatus: 'failed', attachments: [], adapterReceiptRef: `checkpoint:unsupported-${shortDigest(operationKey)}`, knownFailure: true };
-    },
-  });
-}
-
 export function startExternalMcpActivityRunnerLoop({
   env = process.env,
   logger = console,
@@ -634,40 +591,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export function redactProxyUrlForLog(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return '';
-  try {
-    const parsed = new URL(raw);
-    parsed.username = '';
-    parsed.password = '';
-    parsed.hash = '';
-    if (parsed.search) {
-      parsed.search = '?redacted';
-    }
-    return parsed.toString();
-  } catch {
-    return '[configured]';
-  }
-}
-
-async function configureProxyIfPresent() {
-  const proxyUrl = String(
-    process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.ALL_PROXY || ''
-  ).trim();
-  if (!proxyUrl) {
-    return;
-  }
-  try {
-    const { ProxyAgent, setGlobalDispatcher } = await import('undici');
-    setGlobalDispatcher(new ProxyAgent(proxyUrl));
-    console.log(`[node-bridge] using outbound proxy ${redactProxyUrlForLog(proxyUrl)}`);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.warn(`[node-bridge] failed to enable proxy dispatcher: ${message}`);
-  }
-}
-
 function isLoginAbortError(error) {
   if (!(error instanceof Error)) {
     return false;
@@ -816,7 +739,6 @@ async function startWithRetry(agent, weixinAccountConfig) {
 }
 
 async function main() {
-  await configureProxyIfPresent();
   const s12IngressQuiesced = process.env.RAN_AGENT_S12_INGRESS_QUIESCED === 'true';
   const weixinAccountConfig = s12IngressQuiesced ? null : await ensureWeixinAccountReady();
   if (weixinAccountConfig) {
@@ -852,14 +774,7 @@ async function main() {
     transport: createExternalMcpRuntimeTransport({ env: runtimeEnv }),
     submitCandidate: (candidate, context) => coreRuntime
       ? coreExternalMcp.submitCandidate(candidate, context)
-      : submitExternalMcpCheckpoint({
-        candidate,
-        context,
-        replyBackend: runtimeEnv.replyBackend,
-        outbox: durableOutbox,
-        sendWechat: (text) => proactiveBot.sendMessage(text),
-        env: runtimeEnv,
-      }),
+      : Promise.resolve({ skipped: true, reason: 'core_runtime_unavailable' }),
   });
   if (coreRuntime) {
     const attentionValve = createAttentionValve({
@@ -885,10 +800,26 @@ async function main() {
     activityFacade: externalMcpRuntime.facade,
     personalLearningProjector: ombreProjection?.projectPersonalLearningReceipt,
   });
+  const sendWechatText = async ({ text } = {}) => {
+    try {
+      await proactiveBot.sendMessage(text);
+      return { textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:bridge:accepted' };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const knownFailure = /context_token|context token|必须包含|消息必须/i.test(message);
+      return {
+        textStatus: knownFailure ? 'failed' : 'ambiguous',
+        attachments: [],
+        knownFailure,
+        adapterReceiptRef: `wechat:${knownFailure ? 'failed' : 'ambiguous'}:bridge`,
+      };
+    }
+  };
   const coreWorkRuntime = createCoreRuntimeComposition({
     runtime: coreRuntime, channelHub, externalPollHandler: coreExternalMcp?.handler,
     attentionFlushHandler: coreExternalMcp?.attentionFlushHandler, externalMcpRuntime,
     env: runtimeEnv, logger: console,
+    sendWechat: sendWechatText,
   });
   if (s12IngressQuiesced) {
     if (!coreWorkRuntime) throw new Error('S12 quiescence requires committed Core worker authority');
@@ -910,6 +841,7 @@ async function main() {
   const outboundConfig = getOutboundServerConfig(process.env);
   const outboundServer = createOutboundServer({
     bot: proactiveBot, logger: console, env: runtimeEnv, channelHub, coreRuntime,
+    outbox: durableOutbox, sendWechat: sendWechatText,
   });
   const feishuBridge = startFeishuBridge({ env: runtimeEnv, logger: console, outbox: durableOutbox, channelHub });
   const desktopProxyServer = startDesktopProxyServer({ env: runtimeEnv, logger: console, outbox: durableOutbox, channelHub });
@@ -925,9 +857,12 @@ async function main() {
     `[node-bridge] outbound server started host=${outboundConfig.host} port=${outboundConfig.port}`
   );
 
+  let telegramBridge = { async stop() {} };
   try {
+    telegramBridge = await startTelegramBridge({ env: runtimeEnv, logger: console, outbox: durableOutbox, channelHub });
     await startWithRetry(agent, weixinAccountConfig);
   } finally {
+    await telegramBridge.stop();
     externalMcpRuntime.stop();
     await coreWorkRuntime?.stop();
     feishuBridge?.stop?.();

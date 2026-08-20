@@ -13,12 +13,14 @@ const GENERATED_AUDIO_SAMPLE_RATE = 24000;
 
 export function getDashScopeMediaConfig(env = process.env) {
   const directApiBaseUrl = (env.DASHSCOPE_BASE_URL || 'https://dashscope.aliyuncs.com').replace(/\/$/, '');
+  const compatibleApiBaseUrl = (env.DASHSCOPE_COMPAT_BASE_URL || `${directApiBaseUrl}/compatible-mode/v1`).replace(/\/$/, '');
   const directApiToken = String(env.DASHSCOPE_API_KEY || env.QWEN_API_KEY || '').trim();
   const imageModel = String(env.RAN_AGENT_IMAGE_MODEL || env.DASHSCOPE_IMAGE_MODEL || 'qwen-image').trim();
   const speechModel = String(env.RAN_AGENT_SPEECH_MODEL || env.DASHSCOPE_SPEECH_MODEL || 'qwen3-omni-flash').trim();
 
   return {
     directApiBaseUrl,
+    compatibleApiBaseUrl,
     directApiToken,
     imageModel,
     speechModel,
@@ -142,7 +144,7 @@ export async function generateSpeechWithQwenOmni(prompt, options = {}) {
   if (!config.directApiToken) {
     throw new Error('speech generation requires DASHSCOPE_API_KEY');
   }
-  const response = await fetchImpl('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions', {
+  const response = await fetchImpl(`${config.compatibleApiBaseUrl}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.directApiToken}`,

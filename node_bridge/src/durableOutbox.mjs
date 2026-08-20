@@ -268,11 +268,11 @@ function normalizeReservation(input) {
   const idempotent = input.idempotent === true;
   const maxAttempts = normalizeMaxAttempts(input.maxAttempts, idempotent);
   const platform = boundedIdentifier(
-    input.platform || (['wechat', 'feishu', 'desktop'].includes(route.adapterKey) ? route.adapterKey : 'desktop'),
+    input.platform || (['wechat', 'feishu', 'desktop', 'telegram'].includes(route.adapterKey) ? route.adapterKey : 'desktop'),
     'platform',
     80,
   );
-  if (!['wechat', 'feishu', 'desktop'].includes(platform)) {
+  if (!['wechat', 'feishu', 'desktop', 'telegram'].includes(platform)) {
     throw outboxError('OUTBOX_CONTENT_INVALID', 'platform is invalid');
   }
   const conversation_id = boundedIdentifier(input.conversation_id || route.destinationRef, 'conversation_id', 512);
@@ -452,7 +452,7 @@ function upgradeLegacyState(state) {
   let changed = false;
   for (const item of state.items || []) {
     if (!item.platform) {
-      item.platform = ['wechat', 'feishu', 'desktop'].includes(item.route?.adapterKey)
+      item.platform = ['wechat', 'feishu', 'desktop', 'telegram'].includes(item.route?.adapterKey)
         ? item.route.adapterKey : 'desktop';
       changed = true;
     }

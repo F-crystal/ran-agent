@@ -44,9 +44,9 @@ function setup(t) {
   }));
   fs.writeFileSync(visibleBindingPath, JSON.stringify({
     conversationId: 'system-owner-conversation', canonicalConversationKey: 'system-owner-conversation',
-    actorRef: 'owner:verified', platform: 'feishu', sourceInstanceId: 'node-channel-hub:feishu',
-    platformConversationBinding: 'feishu:conversation:system-owner',
-    bindingId: 'system-owner-binding', destinationKind: 'user', destinationRef: 'ou-owner-fixture',
+    actorRef: 'owner:verified', platform: 'wechat', sourceInstanceId: 'node-channel-hub:wechat',
+    platformConversationBinding: 'wechat:conversation:system-owner',
+    bindingId: 'system-owner-binding', destinationKind: 'user', destinationRef: 'wechat-owner-fixture',
   }));
   return { root, dbPath, snapshotPath, visibleBindingPath };
 }

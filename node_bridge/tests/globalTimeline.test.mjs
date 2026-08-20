@@ -74,6 +74,15 @@ test('global timeline appends user and assistant turns with hashed ids', () => {
   assert.equal(records[0].text, '我们聊内莉·布莱');
 });
 
+test('global timeline preserves Telegram and keeps unknown platforms fail closed to legacy WeChat', () => {
+  const timelinePath = tempTimelinePath();
+  appendTurn({ timelinePath, id: 'telegram-turn', global_user_id: 'user:ran', platform: 'telegram', channel_type: 'dm', conversation_id: 'tg-chat', sender_id: 'tg-user', role: 'user', text: 'telegram text', created_at: 1 });
+  appendTurn({ timelinePath, id: 'unknown-turn', global_user_id: 'user:ran', platform: 'signal', channel_type: 'dm', conversation_id: 'unknown-chat', sender_id: 'unknown-user', role: 'user', text: 'legacy text', created_at: 2 });
+
+  const records = readTimelineRecords({ timelinePath });
+  assert.deepEqual(records.map((record) => record.platform), ['telegram', 'wechat']);
+});
+
 test('global timeline returns local and global recent history', () => {
   const timelinePath = tempTimelinePath();
   appendTurn({ timelinePath, global_user_id: 'user:ran', platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-a', sender_id: 'u', role: 'user', text: '微信话题', created_at: 1 });

@@ -27,6 +27,10 @@ import { createDurableOutbox } from './durableOutbox.mjs';
 import { createCoreReminderService } from './core/coreReminderService.mjs';
 import { legacyReminderInstant } from './core/coreScheduleMigration.mjs';
 import {
+  presentationTarget,
+  resolveActiveOwnerPresentationBinding,
+} from './core/ownerPresentationBinding.mjs';
+import {
   commitProactiveEventDelivery,
   releaseProactiveEventDelivery,
   reserveProactiveEventDelivery,
@@ -400,8 +404,10 @@ export async function handleProactiveEventRequest({
   env = process.env,
   bodyText = '',
   channelHub = handleIncomingMessage,
-  execFileImpl,
+  outbox,
   nowImpl,
+  coreRuntime,
+  sendWechat,
 } = {}) {
   let payload;
   try {
@@ -413,18 +419,24 @@ export async function handleProactiveEventRequest({
     };
   }
 
-  const target = getFeishuHomeDmTarget(env);
+  const target = resolveVisibleProactiveTarget({ coreRuntime, expectedRevision: payload.binding_revision });
   if (!target) {
-    logger.warn?.('proactive event skipped because Feishu home DM target is missing');
+    logger.warn?.('proactive event skipped because active owner presentation binding is missing or stale');
     return {
       status: 200,
-      payload: { ok: true, skipped: true, reason: 'feishu_home_dm_target_missing' },
+      payload: { ok: true, skipped: true, reason: 'owner_presentation_binding_missing' },
+    };
+  }
+  if (!outbox || typeof outbox.deliver !== 'function') {
+    return {
+      status: 200,
+      payload: { ok: true, skipped: true, reason: 'durable_outbox_unavailable' },
     };
   }
 
   const normalized = normalizeProactiveEvent(payload, {
     globalUserId: target.sender_id,
-    channel: 'feishu',
+    channel: target.platform,
   });
   if (!normalized.ok) {
     return {
@@ -466,6 +478,8 @@ export async function handleProactiveEventRequest({
   let adapterSent = false;
   let egressReason = '';
   const message = buildProactiveSyntheticTurn(event, {
+    platform: target.platform,
+    channel_type: target.channel_type,
     conversation_id: target.conversation_id,
     sender_id: target.sender_id,
   });
@@ -475,24 +489,23 @@ export async function handleProactiveEventRequest({
     response = await channelHub(message, {
       env,
       logger,
+      outbox,
       adapter: {
-        async sendReply({ target: replyTarget, text, message: sourceMessage }) {
+        async sendReply({ text, message: sourceMessage }) {
           const egress = evaluateProactiveEgress({ event, replyText: text, env });
           egressReason = egress.reason;
           if (!egress.send) {
-            return;
+            return { textStatus: 'not_requested', attachments: [] };
           }
-          await sendFeishuReply({
+          if (typeof sendWechat !== 'function') throw new Error('WeChat presentation adapter is unavailable');
+          return sendWechat({
             target: {
-              ...replyTarget,
+              ...target,
               source_message_id: sourceMessage?.id || sourceMessage?.message_id || event.event_id,
             },
             text: egress.message,
             env,
-            execFileImpl,
           });
-          commitProactiveEventDelivery(reservation.record.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
-          adapterSent = true;
         },
       },
     });
@@ -504,6 +517,11 @@ export async function handleProactiveEventRequest({
       status: 200,
       payload: { ok: true, dropped: true, reason: 'send_failed' },
     };
+  }
+  const terminal = response?.durableDelivery || response?.coreDelivery;
+  adapterSent = terminal?.delivery === 'sent' || terminal?.state === 'sent';
+  if (adapterSent) {
+    commitProactiveEventDelivery(reservation.record.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
   }
   if (!adapterSent) {
     releaseProactiveEventDelivery(reservation.record.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
@@ -542,8 +560,10 @@ export async function handleExternalMcpSystemQueueRequest({
   env = process.env,
   bodyText = '',
   channelHub = handleIncomingMessage,
-  execFileImpl,
+  outbox,
   nowImpl,
+  coreRuntime,
+  sendWechat,
 } = {}) {
   const queueGate = getExternalMcpSystemQueueGate(env);
   if (!queueGate.enabled) {
@@ -563,12 +583,18 @@ export async function handleExternalMcpSystemQueueRequest({
     };
   }
 
-  const target = getFeishuHomeDmTarget(env);
+  const target = resolveVisibleProactiveTarget({ coreRuntime, expectedRevision: payload.binding_revision });
   if (!target) {
-    logger.warn?.('external MCP system queue skipped because Feishu home DM target is missing');
+    logger.warn?.('external MCP system queue skipped because active owner presentation binding is missing or stale');
     return {
       status: 200,
-      payload: { ok: true, skipped: true, reason: 'feishu_home_dm_target_missing' },
+      payload: { ok: true, skipped: true, reason: 'owner_presentation_binding_missing' },
+    };
+  }
+  if (!outbox || typeof outbox.deliver !== 'function') {
+    return {
+      status: 200,
+      payload: { ok: true, skipped: true, reason: 'durable_outbox_unavailable' },
     };
   }
 
@@ -631,7 +657,7 @@ export async function handleExternalMcpSystemQueueRequest({
     eventId: idempotencyKey,
     kind: externalMcpWatchKindToEventKind(watch.kind),
     globalUserId,
-    channel: 'feishu',
+    channel: target.platform,
     watchScope,
     reason: payload.reason,
     evidenceRefs: trustedEvidenceRefs,
@@ -674,7 +700,7 @@ export async function handleExternalMcpSystemQueueRequest({
   const message = buildExternalMcpSyntheticTurn({
     id: idempotencyKey,
     proactiveEvent: event,
-    platform: 'feishu',
+    platform: target.platform,
     conversationId: target.conversation_id,
     senderId: target.sender_id,
   });
@@ -684,24 +710,23 @@ export async function handleExternalMcpSystemQueueRequest({
     response = await channelHub(message, {
       env,
       logger,
+      outbox,
       adapter: {
-        async sendReply({ target: replyTarget, text, message: sourceMessage }) {
+        async sendReply({ text, message: sourceMessage }) {
           const egress = evaluateExternalMcpSystemQueueEgress({ event, replyText: text, env });
           egressReason = egress.reason;
           if (!notifyAllowed || !egress.send) {
-            return;
+            return { textStatus: 'not_requested', attachments: [] };
           }
-          await sendFeishuReply({
+          if (typeof sendWechat !== 'function') throw new Error('WeChat presentation adapter is unavailable');
+          return sendWechat({
             target: {
-              ...replyTarget,
+              ...target,
               source_message_id: sourceMessage?.id || sourceMessage?.message_id || idempotencyKey,
             },
             text: egress.message,
             env,
-            execFileImpl,
           });
-          commitExternalMcpNotificationReservation(reservation.event.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
-          adapterSent = true;
         },
       },
     });
@@ -715,6 +740,11 @@ export async function handleExternalMcpSystemQueueRequest({
       status: 200,
       payload: { ok: true, dropped: true, reason: 'send_failed' },
     };
+  }
+  const terminal = response?.durableDelivery || response?.coreDelivery;
+  adapterSent = terminal?.delivery === 'sent' || terminal?.state === 'sent';
+  if (adapterSent && reservation?.event?.reservationId) {
+    commitExternalMcpNotificationReservation(reservation.event.reservationId, { env, now: typeof nowImpl === 'function' ? nowImpl() : new Date() });
   }
   if (!adapterSent && reservation?.event?.reservationId) {
     releaseExternalMcpNotificationReservation(reservation.event.reservationId, { env });
@@ -790,7 +820,10 @@ function normalizeOutboundMediaPayload(media) {
   return fileName ? { type, url, fileName } : { type, url };
 }
 
-export function createOutboundServer({ bot, logger = console, env = process.env, coreRuntime = null } = {}) {
+export function createOutboundServer({
+  bot, logger = console, env = process.env, coreRuntime = null, channelHub = handleIncomingMessage,
+  outbox, sendWechat,
+} = {}) {
   return http.createServer(async (request, response) => {
     let rawBody = '';
     request.on('data', (chunk) => {
@@ -817,6 +850,7 @@ export function createOutboundServer({ bot, logger = console, env = process.env,
           headers: request.headers,
           remoteAddress: request.socket.remoteAddress,
           bodyText: rawBody,
+          channelHub,
         });
       } else if (request.method === 'POST' && request.url === CORE_REMINDER_REGISTER_ROUTE) {
         result = await handleCoreReminderRegisterRequest({
@@ -827,9 +861,12 @@ export function createOutboundServer({ bot, logger = console, env = process.env,
         result = await handleProactiveEventControlRequest({
           logger, env, method: request.method, url: request.url,
           headers: request.headers, remoteAddress: request.socket.remoteAddress, bodyText: rawBody,
+          channelHub, outbox, coreRuntime, sendWechat,
         });
       } else if (request.method === 'POST' && request.url === '/external-mcp/system-queue') {
-        result = await handleExternalMcpSystemQueueRequest({ logger, env, bodyText: rawBody });
+        result = await handleExternalMcpSystemQueueRequest({
+          logger, env, bodyText: rawBody, channelHub, outbox, coreRuntime, sendWechat,
+        });
       } else if (String(request.url || '').startsWith('/environment/sensorlogger/')) {
         result = await handleEnvironmentSensorRequest({
           env,
@@ -955,4 +992,13 @@ function sanitizeExternalMcpScope(value) {
     .replace(/[\r\n\t]/g, ' ')
     .replace(/[^a-zA-Z0-9_.:/-]/g, '')
     .slice(0, 180);
+}
+
+function resolveVisibleProactiveTarget({ coreRuntime, expectedRevision } = {}) {
+  if (!coreRuntime?.core) return null;
+  try {
+    return presentationTarget(resolveActiveOwnerPresentationBinding(coreRuntime.core, { expectedRevision }));
+  } catch {
+    return null;
+  }
 }

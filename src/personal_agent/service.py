@@ -497,7 +497,6 @@ class PersonalAgentService:
             proactive_results.append(self.send_proactive_event({
                 "event_id": f"companion-{aware_local:%Y%m%d}-{learning_id}",
                 "kind": "companion",
-                "channel": "feishu",
                 "watch_scope": evidence_ref,
                 "reason": statement,
                 "evidence_refs": [evidence_ref],
@@ -1120,7 +1119,7 @@ class PersonalAgentService:
                     },
                     ensure_ascii=False,
                 ),
-                tags=_build_proactive_tags(str(event.get("channel") or "feishu"), str(event.get("dedupe_key") or event_id)),
+                tags=_build_proactive_tags(str(event.get("channel") or "proactive"), str(event.get("dedupe_key") or event_id)),
                 importance=1,
             )
         return {

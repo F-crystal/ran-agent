@@ -24,7 +24,7 @@ export function normalizeProactiveEvent(input = {}, defaults = {}) {
   const globalUserId = sanitizeId(
     input.global_user_id || input.globalUserId || defaults.globalUserId || ''
   );
-  const channel = normalizeChannel(input.channel || defaults.channel || 'feishu');
+  const channel = normalizeChannel(input.channel || defaults.channel || '');
   const watchScope = sanitizeScope(input.watch_scope || input.watchScope || defaults.watchScope || '');
   const reason = sanitizeText(input.reason || defaults.reason || '');
   const evidenceRefs = normalizeRefs(
@@ -97,8 +97,8 @@ export function buildProactiveSyntheticTurn(event, target = {}) {
   return createTrustedBridgeTask({
     id,
     message_id: id,
-    platform: event.channel || 'feishu',
-    channel_type: 'dm',
+    platform: target.platform || event.channel || '',
+    channel_type: target.channel_type || target.channelType || 'dm',
     conversation_id: sanitizeId(target.conversation_id || target.conversationId || ''),
     sender_id: sanitizeId(target.sender_id || target.senderId || event.global_user_id || ''),
     global_user_id: event.global_user_id || '',
@@ -216,7 +216,7 @@ function normalizeKind(value) {
 
 function normalizeChannel(value) {
   const text = String(value || '').trim().toLowerCase();
-  return VALID_CHANNELS.has(text) ? text : 'feishu';
+  return VALID_CHANNELS.has(text) ? text : '';
 }
 
 function normalizeDeliverability(value) {

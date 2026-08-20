@@ -5,6 +5,7 @@
 !.env.example
 
 # Runtime state and local data
+.local/
 .openclaw_state/
 .ran_agent_state/
 node_bridge/.ran_agent_state/

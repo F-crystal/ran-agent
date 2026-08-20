@@ -1,6 +1,6 @@
 # Documentation Status
 
-Status: CURRENT (2026-08-18)
+Status: CURRENT (2026-08-20)
 
 This is the documentation index and conflict rule. It classifies every tracked
 Markdown document without turning a second document into runtime authority.
@@ -22,13 +22,15 @@ becomes current merely because some of its code landed.
 
 ## Tracked Markdown Inventory
 
-The 2026-08-18 audit covered all 103 tracked Markdown files:
+The 2026-08-20 audit covers the 103 existing tracked Markdown files plus the
+five active Owner Channels OpenSpec artifacts in this candidate:
 
 | Scope | Count | Classification |
 |---|---:|---|
 | repository root | 8 | policy, shims, persona, license, and bilingual overview |
 | `docs/` | 42 | 26 governance documents plus 16 historical plans/specs |
 | `hermes/` | 19 | bilingual overview, active profile prompts/shims, and 9 profile skills |
+| `openspec/` | 5 | active Owner Channels proposal, design, tasks, and focused contracts |
 | `skills/` | 22 | executable project skills, their security policy, and imported references/templates |
 | `src/` | 1 | dormant daily-digest prompt retained with disabled compatibility code |
 | `vault/` | 11 | vault policy/shims, 3 Qwen task prompts, and 5 note templates |

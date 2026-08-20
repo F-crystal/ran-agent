@@ -13,6 +13,7 @@ import {
   getStableConversationKey,
   bootstrapOwnerBinding,
   validateOwnerBindingPreflight,
+  shortHash,
 } from '../src/identityMap.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
 
@@ -25,6 +26,36 @@ test('identity map defaults all frontends to the same global user', (t) => {
   assert.equal(getGlobalUserId({ platform: 'wechat', sender_id: 'wx-raw-openid' }, { env }), 'user:ran');
   assert.equal(getGlobalUserId({ platform: 'feishu', sender_id: 'ou-raw-openid' }, { env }), 'user:ran');
   assert.equal(getGlobalUserId({ platform: 'desktop', sender_id: 'desktop-local' }, { env }), 'user:ran');
+});
+
+test('protected Telegram owner binding shares global owner but isolates conversation and session', (t) => {
+  const isolated = createIsolatedTestEnv(t, {}, 'ran-agent-telegram-identity-');
+  const identityMapPath = path.join(isolated.RAN_AGENT_STATE_DIR, 'identity-map.json');
+  const telegramKey = `telegram:${shortHash('tg-owner')}`;
+  const wechatKey = `wechat:${shortHash('wx-owner')}`;
+  writeFileSync(identityMapPath, JSON.stringify({
+    schemaVersion: 2,
+    bindings: {
+      [telegramKey]: {
+        platform: 'telegram', senderHash: shortHash('tg-owner'), globalUserId: 'user:ran', owner: true,
+        provenance: 'telegram_owner_challenge', createdAt: '2026-08-20T00:00:00.000Z',
+      },
+      [wechatKey]: {
+        platform: 'wechat', senderHash: shortHash('wx-owner'), globalUserId: 'user:ran', owner: true,
+        provenance: 'wechat_account_bootstrap', createdAt: '2026-08-20T00:00:00.000Z',
+      },
+    },
+  }));
+  const env = { ...isolated, RAN_AGENT_IDENTITY_MAP_PATH: identityMapPath };
+  const telegram = { platform: 'telegram', channel_type: 'dm', conversation_id: 'tg-chat', sender_id: 'tg-owner' };
+  const wechat = { platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-chat', sender_id: 'wx-owner' };
+
+  assert.equal(getGlobalUserId(telegram, { env }), 'user:ran');
+  assert.equal(getIdentityBinding(telegram, { env }).owner, true);
+  assert.notEqual(getStableConversationKey(telegram), getStableConversationKey(wechat));
+  assert.match(getHermesSessionId(telegram), /^ran-agent-telegram-/);
+  assert.match(getHermesSessionId(wechat), /^ran-agent-wechat-/);
+  assert.notEqual(getHermesSessionId(telegram), getHermesSessionId(wechat));
 });
 
 test('identity map builds hashed account binding keys without raw ids', () => {
@@ -176,7 +207,7 @@ test('owner bootstrap rejects adding a different global owner', (t) => {
 });
 
 test('missing and unsupported platforms fail closed instead of acquiring WeChat identity or session semantics', () => {
-  for (const message of [{ sender_id: 'missing' }, { platform: 'telegram', sender_id: 'unsupported' }]) {
+  for (const message of [{ sender_id: 'missing' }, { platform: 'signal', sender_id: 'unsupported' }]) {
     assert.throws(() => getAccountBindingKey(message), (error) => error?.code === 'PLATFORM_UNSUPPORTED');
     assert.throws(() => getHermesSessionId(message), (error) => error?.code === 'PLATFORM_UNSUPPORTED');
   }

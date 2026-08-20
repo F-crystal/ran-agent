@@ -2,11 +2,11 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-18)
+Status: CURRENT (2026-08-20)
 
 Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash. See `docs/governance/current_runtime_status.md` for current source state, evidence, and recovery boundaries.
 
-**A local-first personal AI agent runtime: WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
+**A local-first personal AI agent runtime: WeChat, Feishu/Lark, the desktop OpenAI-compatible proxy, and a disabled-by-default owner-only Telegram text entry all enter ChannelHub; Hermes handles conversation, Node bridge handles multi-frontend transport, the Python backend owns memory, knowledge, and scheduling, and MCP tools handle media and social-platform understanding.**
 
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
@@ -21,7 +21,7 @@ OpenClaw, Kimi, GLM, and MiMo Power are retired as current runtime paths. Produc
 ## Current Mainline
 
 ```text
-WeChat / Feishu / Desktop Proxy
+WeChat / Feishu / Desktop Proxy / optional Telegram text
   -> ChannelHub
   -> replyBackend
   -> unified Hermes gateway
@@ -65,11 +65,13 @@ known limitations.
 
 ## What It Does
 
-**Unified multi-frontend entry.** WeChat, Feishu/Lark, and the desktop OpenAI-compatible proxy all enter `node_bridge/src/channelHub.mjs`, then use the same `replyBackend -> hermesGatewayClient -> Hermes` mainline. `IdentityMap` uses explicit owner binding to associate authenticated frontend identities with one global user identity, while platform conversation/session scopes remain isolated. `GlobalTimeline` records cross-platform turns.
+**Unified multi-frontend entry.** WeChat, Feishu/Lark, the desktop OpenAI-compatible proxy, and optional Telegram private text all enter `node_bridge/src/channelHub.mjs`, then use the same `replyBackend -> hermesGatewayClient -> Hermes` mainline. `IdentityMap` uses explicit owner binding to associate authenticated frontend identities with one global user identity, while platform conversation/session scopes remain isolated. `GlobalTimeline` records cross-platform turns.
 
 **WeChat conversation entry.** Messages enter `node_bridge/src/wechatBridge.mjs`, pass through inbound aggregation, ChannelHub, media context handling, Hermes Gateway, and DeepSeek V4 Flash, then return to WeChat. The Python backend receives `/ingest` asynchronously for recent memory and downstream tasks.
 
 **Feishu and desktop entries.** Feishu bridge consumes messages with `lark-cli event consume im.message.receive_v1 --as bot` and replies through `im +messages-send`; desktop clients connect to ran-agent's OpenAI-compatible proxy so they do not bypass ChannelHub, unified identity/Timeline, or action/evidence gates.
+
+**Telegram text entry.** Source includes a disabled-by-default owner-only private-chat long-poll bridge. It accepts only explicitly bound owner text, rejects groups, bots, media, and cross-channel fallback, and reads only `TELEGRAM_PROXY_URL` rather than enabling a global Node proxy. Production enablement and proactive-destination selection require separate acceptance.
 
 **Work-effect boundary.** Calendar, Todo, reminders, Minutes/cloud documents, daily reports, code, and deployment are no longer Hermes-visible actions. Those requests use Codex's governed native tools. Node validates only the remaining personal-memory action contracts and never infers or replans work authority from user prose.
 
@@ -203,10 +205,11 @@ All secrets live in local `.env.local`, `node_bridge/.env.local`, or machine-loc
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | Unified identity and cross-platform timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | Timeline retention and compaction |
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | Optional multi-frontend entries; keep Desktop Proxy local or on a controlled private network when enabled |
+| Telegram | `TELEGRAM_BRIDGE_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_USER_ID`, `TELEGRAM_OWNER_CHAT_ID`, `TELEGRAM_PROXY_URL` | Disabled-by-default owner-only text entry; proxy scope is Telegram-only |
 | AI daily digest | `AI_DAILY_DIGEST_ENABLED=false` | The ran-agent digest is retired and stays disabled; Codex owns daily reports |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS` | ingest and memory recall; the MCP deadline is fixed at 15 seconds |
 | Qwen Token Plan | `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | Optional Qwen-MM OCR/VLM and Qwen knowledge maintenance; default model `qwen3.6-flash` |
-| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | ASR, media generation, and OCR/VLM when Token Plan is not enabled |
+| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY`, `DASHSCOPE_COMPAT_BASE_URL` | ASR, media generation, and OCR/VLM when Token Plan is not enabled; the compatible endpoint may use an explicit base URL |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | Provider-neutral vault maintenance runner; Qwen-compatible by default, processes inbox in small steps, and triggers maintenance above 10 pending items or oldest item age of 120 minutes by default |
 | Social platforms | `SESSDATA` | Optional Bilibili auth; Xiaohongshu is public-only and does not use `XHS_COOKIE` |
 | Media context | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | compact by default, legacy fallback available |
@@ -231,6 +234,7 @@ ran_agent/
 │       ├── globalTimeline.mjs
 │       ├── desktopProxyServer.mjs
 │       ├── feishuBridge.mjs
+│       ├── telegramBridge.mjs
 │       ├── inboundMessageBuffer.mjs
 │       ├── hermesGatewayClient.mjs
 │       ├── mediaContextStore.mjs

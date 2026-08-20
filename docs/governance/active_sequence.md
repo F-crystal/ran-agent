@@ -1,6 +1,6 @@
 # Active Work Sequence
 
-Status: CURRENT (2026-08-18)
+Status: CURRENT (2026-08-20)
 
 This is the canonical dependency order for unfinished product/runtime work.
 Historical P-numbered plans and completed acceptance ledgers do not control the
@@ -15,12 +15,20 @@ S0-S11 local foundations and rehearsal (COMPLETE)
       -> Hermes playground H0-H5 (PROD_VERIFIED)
       -> source projection refresh repair (PROD_VERIFIED)
       -> Qwen-MM Token Plan media/knowledge routing (PROD_VERIFIED)
+      -> adopt-wechat-telegram-owner-channels (SOURCE IN_PROGRESS; production cutover pending)
       -> S13 observation and cleanup (NOT STARTED; deletion not authorized)
 ```
 
 ## Ready Frontier
 
-There is no authorized S-stage implementation in progress.
+`adopt-wechat-telegram-owner-channels` is the next incomplete implementation
+node. Source now resolves proactive effects from the single Core owner binding
+and contains a disabled-by-default, owner-private, text-only Telegram frontend.
+The approved Mac Clash path passed the Telegram network gate, and the full
+owner/media/session/fallback matrix passed in an isolated tecserver process.
+Production still has the Feishu binding: deriving and committing the WeChat
+binding, persisting the Telegram-only proxy path, source apply, real-message
+acceptance, and any Feishu startup retirement remain separately authorized.
 
 S13 depends on a fresh observation window over the then-current source and a
 separate owner-approved exact deletion scope. It must confirm one Core writer,

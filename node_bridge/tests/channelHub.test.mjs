@@ -91,11 +91,33 @@ test('channel hub routes normalized WeChat message through replyBackend and time
   assert.deepEqual(records.map((item) => item.role), ['user', 'assistant']);
 });
 
+test('Telegram owner ingress uses an isolated Hermes session and one durable outbox effect', async (t) => {
+  const env = tempEnv(t, { seedOwners: false });
+  writeOwnerBinding(env, { platform: 'telegram', sender_id: 'tg-owner' });
+  const outbox = createDurableOutbox({ env });
+  let backendMessage = null;
+  let sends = 0;
+  const response = await handleIncomingMessage({
+    id: 'tg-msg-1', platform: 'telegram', channel_type: 'dm', conversation_id: 'tg-chat', sender_id: 'tg-owner', text: 'hello', created_at: 1000,
+  }, {
+    env, outbox, logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: { async getReply(message) { backendMessage = message; return { replyText: 'telegram reply', followUpMessages: [], media: null }; } },
+    adapter: { async sendReply() { sends += 1; return { textStatus: 'sent', attachments: [], adapterReceiptRef: 'telegram:message:hash' }; } },
+  });
+
+  assert.equal(response.durableDelivery.delivery, 'sent');
+  assert.equal(backendMessage.global_user_id, 'user:ran');
+  assert.match(backendMessage.hermes_session_id, /^ran-agent-telegram-/);
+  assert.equal(outbox.list().length, 1);
+  assert.equal(outbox.list()[0].platform, 'telegram');
+  assert.equal(sends, 1);
+});
+
 test('unbound or invalid normal ingress is suppressed before every effect boundary', async (t) => {
   const cases = [
     ['unbound', 'wechat', 'owner_unverified'],
     ['missing', undefined, 'platform_unsupported'],
-    ['unsupported', 'telegram', 'platform_unsupported'],
+    ['unsupported', 'signal', 'platform_unsupported'],
     ...listHermesTaskScopedRoutes().map((routeHint) => [
       `forged-${routeHint}`, 'wechat', 'owner_unverified', routeHint,
     ]),
@@ -311,6 +333,122 @@ test('channel hub leaves no assistant timeline turn after a known durable adapte
     ['user'],
   );
   assert.equal(outbox.list()[0].delivery, 'failed');
+});
+
+function durableDeliveryMessage(id) {
+  return {
+    id, platform: 'wechat', channel_type: 'dm', conversation_id: 'wx-conv',
+    sender_id: 'wx-user', text: 'hello', created_at: 1000,
+  };
+}
+
+async function runDurableDeliveryCase(t, { id, adapterResult }) {
+  const env = tempEnv(t);
+  const outbox = createDurableOutbox({ env, now: () => new Date('2026-07-12T00:00:00.000Z') });
+  let sends = 0;
+  const response = await handleIncomingMessage(durableDeliveryMessage(id), {
+    env,
+    outbox,
+    logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: { async getReply() { return { replyText: 'reply', followUpMessages: [], media: null }; } },
+    adapter: {
+      async sendReply() {
+        sends += 1;
+        return adapterResult;
+      },
+    },
+  });
+  return { env, outbox, response, sends };
+}
+
+test('channel hub returns the durable sent terminal to its caller', async (t) => {
+  const { outbox, response, sends } = await runDurableDeliveryCase(t, {
+    id: 'wx-terminal-sent',
+    adapterResult: { textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:terminal-sent' },
+  });
+  assert.equal(response.durableDelivery.delivery, 'sent');
+  assert.deepEqual(outbox.list().map((item) => item.delivery), ['sent']);
+  assert.equal(sends, 1);
+});
+
+test('channel hub returns a known failed terminal without projecting assistant text', async (t) => {
+  const { env, outbox, response, sends } = await runDurableDeliveryCase(t, {
+    id: 'wx-terminal-failed',
+    adapterResult: { textStatus: 'failed', knownFailure: true, attachments: [], adapterReceiptRef: 'wechat:terminal-failed' },
+  });
+  assert.equal(response.durableDelivery.delivery, 'failed');
+  assert.deepEqual(outbox.list().map((item) => item.delivery), ['failed']);
+  assert.equal(sends, 1);
+  assert.deepEqual(readTimelineRecords({ timelinePath: env.RAN_AGENT_GLOBAL_TIMELINE_PATH }).map((item) => item.role), ['user']);
+});
+
+test('channel hub returns an ambiguous terminal as non-replayable', async (t) => {
+  const { outbox, response, sends } = await runDurableDeliveryCase(t, {
+    id: 'wx-terminal-ambiguous',
+    adapterResult: { textStatus: 'ambiguous', attachments: [], adapterReceiptRef: 'wechat:terminal-ambiguous' },
+  });
+  assert.equal(response.durableDelivery.delivery, 'ambiguous');
+  assert.deepEqual(outbox.list().map((item) => item.delivery), ['ambiguous']);
+  assert.equal(sends, 1);
+});
+
+test('channel hub replay of a sent terminal does not invoke the adapter again', async (t) => {
+  const env = tempEnv(t);
+  const outbox = createDurableOutbox({ env, now: () => new Date('2026-07-12T00:00:00.000Z') });
+  let sends = 0;
+  const options = {
+    env, outbox, logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: { async getReply() { return { replyText: 'reply', followUpMessages: [], media: null }; } },
+    adapter: { async sendReply() { sends += 1; return { textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:replay' }; } },
+  };
+  const first = await handleIncomingMessage(durableDeliveryMessage('wx-terminal-replay'), options);
+  const second = await handleIncomingMessage(durableDeliveryMessage('wx-terminal-replay'), options);
+  assert.equal(first.durableDelivery.delivery, 'sent');
+  assert.equal(second.durableDelivery.delivery, 'sent');
+  assert.equal(sends, 1);
+  assert.deepEqual(outbox.list().map((item) => item.delivery), ['sent']);
+});
+
+test('channel hub replay of an ambiguous terminal fails without a second adapter call', async (t) => {
+  const env = tempEnv(t);
+  const outbox = createDurableOutbox({ env, now: () => new Date('2026-07-12T00:00:00.000Z') });
+  let sends = 0;
+  const options = {
+    env, outbox, logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: { async getReply() { return { replyText: 'reply', followUpMessages: [], media: null }; } },
+    adapter: { async sendReply() { sends += 1; return { textStatus: 'ambiguous', attachments: [], adapterReceiptRef: 'wechat:replay-ambiguous' }; } },
+  };
+  await handleIncomingMessage(durableDeliveryMessage('wx-terminal-replay-ambiguous'), options);
+  await assert.rejects(
+    handleIncomingMessage(durableDeliveryMessage('wx-terminal-replay-ambiguous'), options),
+    /safe to resend|ambiguous/i,
+  );
+  assert.equal(sends, 1);
+  assert.deepEqual(outbox.list().map((item) => item.delivery), ['ambiguous']);
+});
+
+test('Telegram ambiguous delivery is terminal and never falls back to WeChat or Feishu', async (t) => {
+  const env = tempEnv(t, { seedOwners: false });
+  writeOwnerBinding(env, { platform: 'telegram', sender_id: 'tg-owner' });
+  const outbox = createDurableOutbox({ env });
+  let sends = 0;
+  const options = {
+    env, outbox, logger: { log() {}, warn() {}, error() {}, info() {} },
+    replyBackend: { async getReply() { return { replyText: 'reply', followUpMessages: [], media: null }; } },
+    adapter: {
+      async sendReply({ target }) {
+        sends += 1;
+        assert.equal(target.platform, 'telegram');
+        return { textStatus: 'ambiguous', attachments: [], adapterReceiptRef: 'telegram:ambiguous:hash' };
+      },
+    },
+  };
+  const message = { id: 'tg-ambiguous', platform: 'telegram', channel_type: 'dm', conversation_id: 'tg-chat', sender_id: 'tg-owner', text: 'hello', created_at: 1000 };
+  await handleIncomingMessage(message, options);
+  await assert.rejects(handleIncomingMessage(message, options), /safe to resend|ambiguous/i);
+  assert.equal(sends, 1);
+  assert.deepEqual(outbox.list().map((item) => item.platform), ['telegram']);
+  assert.deepEqual(outbox.list().map((item) => item.delivery), ['ambiguous']);
 });
 
 test('channel hub does not project text or ingest when an outbox is supplied but the delivery boundary is unknown', async (t) => {

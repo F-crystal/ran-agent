@@ -262,7 +262,7 @@ def reminder_check_job(
         reminder_message = todo_manager.format_reminder_message(todo)
         reminder_seed = _reminder_event_key(todo.id, todo.reminder_at)
 
-        if database.has_recent_proactive_seed(channel="feishu", seed=reminder_seed, window_minutes=30):
+        if database.has_recent_proactive_seed(channel="proactive", seed=reminder_seed, window_minutes=30):
             logger.info("reminder skipped by recent dedupe todo_id=%s seed=%s", todo.id, reminder_seed)
             continue
 
@@ -330,7 +330,6 @@ def _build_reminder_proactive_event(
         "event_id": key,
         "kind": "reminder",
         "global_user_id": "owner",
-        "channel": "feishu",
         "watch_scope": f"todo:{todo_id}",
         "reason": f"Explicit reminder is due: {formatted_message or content}",
         "evidence_refs": [f"todo:{todo_id}"],

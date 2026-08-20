@@ -22,7 +22,7 @@ const IDENTITY_KIND = 'conversation_identity_bound';
 const USER_COMMIT_KIND = 'semantic_user_turn_committed';
 const USER_REVISION_KIND = 'semantic_user_revision_committed';
 const FOREGROUND_KIND = 'foreground_exchange_bound';
-const VALIDATED_PLATFORMS = new Set(['wechat', 'feishu', 'desktop']);
+const VALIDATED_PLATFORMS = new Set(['wechat', 'feishu', 'desktop', 'telegram']);
 
 function identityScope() { return 'conversation_identity'; }
 function userScope(conversationId, exchangeId) { return `user_turn:${conversationId}:${exchangeId}`; }

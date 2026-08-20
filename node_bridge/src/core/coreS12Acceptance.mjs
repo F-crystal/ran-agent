@@ -31,7 +31,7 @@ function authority(core, input) {
 function systemOwnerBinding(core, ownerId) {
   const matches = core.reader.packageBPresentation.bindingsByOperation('core-cutover:system-owner-binding');
   if (matches.length !== 1 || matches[0].receipt_owner_id !== ownerId || matches[0].state !== 'active'
-    || matches[0].platform !== 'feishu' || !['user', 'conversation'].includes(matches[0].destination_kind)
+    || matches[0].platform !== 'wechat' || !['user', 'conversation'].includes(matches[0].destination_kind)
     || typeof matches[0].destination_ref !== 'string' || !matches[0].destination_ref) {
     throw coreError('S12_ACCEPTANCE_BINDING_INVALID', 'S12 acceptance requires the committed cutover owner binding');
   }

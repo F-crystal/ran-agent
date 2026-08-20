@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-18)
+Status: CURRENT (2026-08-20)
 
 Production runs one unified Hermes v0.20 gateway with DeepSeek V4 Flash on
 `8642`; the retired Full service is inactive/disabled and never a fallback. See
@@ -22,7 +22,7 @@ This directory is the repo-local Hermes profile distribution for ran-agent. It s
 - The unified production profile uses `deepseek-v4-flash`; the provider policy adds `thinking.type=disabled` to
   the final HTTP body. Pro is explicit opt-in only.
 - DeepSeek V4 is treated as a text model in this project. Raw images, audio, video, and social-platform content must be processed by MCP tools first.
-- The current source candidate uses one `8642` gateway and one companion profile; WeChat, Feishu/Lark, and the desktop proxy all enter ChannelHub before the unified mainline calls Hermes.
+- The current source candidate uses one `8642` gateway and one companion profile; WeChat, Feishu/Lark, the desktop proxy, and a disabled-by-default owner-only Telegram text entry all enter ChannelHub before the unified mainline calls Hermes. Telegram adds no Hermes profile capability or media surface.
 - OpenClaw, Kimi, and GLM are retired as frontend paths and must not be used as runtime, deployment, or debugging authorities.
 
 ---
@@ -156,7 +156,7 @@ Fresh web facts, news, academic lookup, and normal URL reads should use `search_
 | `DEEPSEEK_API_KEY` | Hermes DeepSeek provider key |
 | `API_SERVER_KEY`, `HERMES_API_KEY` | Hermes gateway and Node bridge API auth |
 | `PYTHON_BACKEND_BASE_URL` | Python backend, default `http://127.0.0.1:8787` |
-| `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen vision, ASR, media generation |
+| `DASHSCOPE_API_KEY`, `QWEN_API_KEY`, `DASHSCOPE_COMPAT_BASE_URL` | DashScope/Qwen vision, ASR, media generation, and compatible endpoint base URL |
 | `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | Optional Qwen-MM OCR/VLM on `qwen3.6-flash`; does not replace ASR |
 | `TAVILY_API_KEY` | Optional Tavily provider for Search Hub |
 | `SESSDATA` | Optional Bilibili auth; Xiaohongshu reading is public-only and does not use `XHS_COOKIE` |

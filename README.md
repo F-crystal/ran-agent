@@ -2,11 +2,11 @@
 
 # Ran Agent
 
-Status: CURRENT (2026-08-18)
+Status: CURRENT (2026-08-20)
 
 生产运行统一 Hermes v0.20 + DeepSeek V4 Flash；当前代码状态、证据与恢复边界见 `docs/governance/current_runtime_status.md`。
 
-**一个本地优先的个人 AI 助手运行时：微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
+**一个本地优先的个人 AI 助手运行时：微信、飞书/Lark、桌面 OpenAI-compatible Proxy 和默认关闭的 owner-only Telegram 文本入口统一进入 ChannelHub，Hermes 负责对话，Node bridge 负责多前端接入，Python 后端负责记忆、知识和调度，媒体与社交平台理解通过 MCP 工具完成。**
 
 [![License](https://img.shields.io/badge/license-PolyForm%20Noncommercial-blue)](LICENSE.md)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-brightgreen)](package.json)
@@ -21,7 +21,7 @@ OpenClaw、Kimi、GLM 和 MiMo Power 当前 runtime 路线已经退休；生产�
 ## 当前主线
 
 ```text
-WeChat / Feishu / Desktop Proxy
+WeChat / Feishu / Desktop Proxy / optional Telegram text
   -> ChannelHub
   -> replyBackend
   -> unified Hermes gateway
@@ -63,11 +63,13 @@ activity/revision/lease 以及 immutable-SHA release transaction。它们提供�
 
 ## 能做什么
 
-**多前端统一入口。** 微信、飞书/Lark 和桌面 OpenAI-compatible Proxy 都进入 `node_bridge/src/channelHub.mjs`，再走同一个 `replyBackend -> hermesGatewayClient -> Hermes` 主链路。`IdentityMap` 通过显式 owner binding，将已认证的多前端身份归并到同一全局用户身份；平台 conversation/session 仍保持隔离。`GlobalTimeline` 记录跨平台 turn。
+**多前端统一入口。** 微信、飞书/Lark、桌面 OpenAI-compatible Proxy 和可选 Telegram 私聊文本都进入 `node_bridge/src/channelHub.mjs`，再走同一个 `replyBackend -> hermesGatewayClient -> Hermes` 主链路。`IdentityMap` 通过显式 owner binding，将已认证的多前端身份归并到同一全局用户身份；平台 conversation/session 仍保持隔离。`GlobalTimeline` 记录跨平台 turn。
 
 **微信对话入口。** 微信消息进入 `node_bridge/src/wechatBridge.mjs`，经入站聚合、ChannelHub、媒体上下文处理、Hermes Gateway、DeepSeek V4 Flash 后回到微信。Python 后端会异步接收 `/ingest`，维护近期记忆和后续任务。
 
 **飞书和桌面入口。** 飞书桥接通过 `lark-cli event consume im.message.receive_v1 --as bot` 消费消息，并通过 `im +messages-send` 回复；桌面客户端通过 ran-agent 的 OpenAI-compatible Proxy 接入，避免绕过 ChannelHub、统一身份/Timeline，以及 action/evidence gates。
+
+**Telegram 文本入口。** 源码包含默认关闭的 owner-only 私聊长轮询桥；只接受显式绑定 owner 的文本消息，拒绝群聊、机器人、媒体和跨通道 fallback。它只读取 `TELEGRAM_PROXY_URL`，不会启用 Node 全局代理；生产启用和主动目的地切换仍需单独验收。
 
 **工作效果边界。** 日历、待办、提醒、妙记/云文档、日报、代码和部署不再是 Hermes 模型可见动作；这些请求交给 Codex 的受治理原生工具。Node 只校验 Hermes 仍允许提出的个人记忆动作，不从用户自然语言推断或重规划工作权限。
 
@@ -202,10 +204,11 @@ bash scripts/diagnose-hermes-tools.sh
 | Multi-frontend | `RAN_AGENT_DEFAULT_GLOBAL_USER_ID`, `RAN_AGENT_IDENTITY_MAP_PATH`, `RAN_AGENT_GLOBAL_TIMELINE_PATH` | 统一身份、跨平台 timeline |
 | Timeline retention | `RAN_AGENT_TIMELINE_MAX_BYTES`, `RAN_AGENT_TIMELINE_MAX_TURNS`, `RAN_AGENT_TIMELINE_RETENTION_DAYS`, `RAN_AGENT_TIMELINE_COMPACT_ENABLED` | timeline 保留和压缩 |
 | Feishu / Desktop | `FEISHU_BRIDGE_ENABLED`, `FEISHU_LARK_CLI_IDENTITY`, `DESKTOP_PROXY_ENABLED`, `DESKTOP_PROXY_PORT`, `DESKTOP_PROXY_API_KEY` | 多前端可选入口；开启 Desktop Proxy 时必须保持本机或内网受控 |
+| Telegram | `TELEGRAM_BRIDGE_ENABLED`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_OWNER_USER_ID`, `TELEGRAM_OWNER_CHAT_ID`, `TELEGRAM_PROXY_URL` | 默认关闭的 owner-only 文本入口；代理仅限 Telegram bridge |
 | AI 日报 | `AI_DAILY_DIGEST_ENABLED=false` | ran-agent 日报已退休并保持关闭；日报由 Codex 负责 |
 | Python backend | `PYTHON_BACKEND_BASE_URL`, `PYTHON_BACKEND_INGEST_TIMEOUT_MS` | ingest 和记忆召回；MCP deadline 由服务端固定为 15 秒 |
 | Qwen Token Plan | `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | 可选 Qwen-MM OCR/VLM 与 Qwen 知识维护；默认模型 `qwen3.6-flash` |
-| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | ASR、媒体生成和未启用 Token Plan 时的 OCR/VLM |
+| DashScope/Qwen | `DASHSCOPE_API_KEY`, `QWEN_API_KEY`, `DASHSCOPE_COMPAT_BASE_URL` | ASR、媒体生成和未启用 Token Plan 时的 OCR/VLM；兼容接口可显式指定 base URL |
 | Knowledge agent runner | `PERSONAL_AGENT_KNOWLEDGE_AGENT_RUNNER`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_COMMAND`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_API_KEY_ENV`, `PERSONAL_AGENT_KNOWLEDGE_AGENT_TIMEOUT_SECONDS`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_COUNT`, `PERSONAL_AGENT_KNOWLEDGE_BACKLOG_TRIGGER_AGE_MINUTES` | provider-neutral vault 维护 runner；默认 Qwen-compatible，小步处理 inbox，默认超过 10 条或最老 120 分钟触发维护 |
 | 社交平台 | `SESSDATA` | B 站认证可选；小红书为 public-only，不使用 `XHS_COOKIE` |
 | 媒体上下文 | `RAN_AGENT_CONTEXT_POLICY`, `RAN_AGENT_MAX_MEDIA_ARTIFACTS` | 默认 compact，可回退 legacy |
@@ -230,6 +233,7 @@ ran_agent/
 │       ├── globalTimeline.mjs
 │       ├── desktopProxyServer.mjs
 │       ├── feishuBridge.mjs
+│       ├── telegramBridge.mjs
 │       ├── inboundMessageBuffer.mjs
 │       ├── hermesGatewayClient.mjs
 │       ├── mediaContextStore.mjs

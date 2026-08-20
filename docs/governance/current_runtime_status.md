@@ -1,6 +1,6 @@
 # Current Runtime Status
 
-Status: S12 COMPLETE / PROD_ACCEPTED; H0-H5 PROD_VERIFIED; QWEN-MM PROD_VERIFIED; S13 NOT STARTED (2026-08-18)
+Status: S12 COMPLETE / PROD_ACCEPTED; OWNER CHANNELS SOURCE IN PROGRESS; S13 NOT STARTED (2026-08-20)
 
 This is the compact authority for current source and production behavior.
 Commands live in `server_runtime_commands.md`; completed transaction detail
@@ -29,10 +29,23 @@ The owner-only env files remain `ubuntu:ubuntu` mode `0600`. Retired MiMo
 variables, old OpenClaw gateway credentials, account-backed XHS variables, and
 the stale editor swap file are absent. Secret values were not read or reported.
 
+## Source Versus Production
+
+Current source contains one disabled-by-default, owner-private, text-only
+Telegram long-poll bridge. It reuses IdentityMap, ChannelHub, the durable
+outbox, platform-isolated Hermes sessions, and a Telegram-only proxy dispatcher;
+unsupported media and cross-channel fallback are rejected. An isolated
+tecserver Node process passed the owner, restart, session, delivery, ambiguity,
+shutdown, and proxy matrix. This is source evidence, not production acceptance.
+
+Production still uses the committed Feishu owner presentation binding. No
+source apply, service restart, persistent Telegram proxy, polling activation,
+real Telegram send, WeChat binding cutover, or Feishu disablement is claimed.
+
 ## Conversation Mainline
 
 ```text
-WeChat / Feishu / optional Desktop Proxy
+WeChat / Feishu / optional Desktop Proxy / source-only Telegram text
   -> ChannelHub
   -> replyBackend
   -> hermesGatewayClient

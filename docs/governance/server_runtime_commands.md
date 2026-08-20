@@ -93,6 +93,11 @@ Current safety/routing invariants:
 - Qwen-MM OCR/VLM and knowledge use Token Plan `qwen3.6-flash`.
 - ASR and media generation remain on DashScope.
 - XHS is public-only; account-backed keys and services remain absent.
+- Telegram source support is disabled by default. Production enablement requires
+  `TELEGRAM_BRIDGE_ENABLED`, the protected bot/owner bindings, and the dedicated
+  `TELEGRAM_PROXY_URL`; never route Telegram through a global Node proxy.
+- The active proactive owner presentation binding remains Feishu until a
+  separately authorized expected-revision cutover commits WeChat or Telegram.
 
 `OPENCLAW_STATE_DIR` may still appear in the Node process because the vendored
 WeChat SDK uses that compatibility name for the current ran-agent state root.

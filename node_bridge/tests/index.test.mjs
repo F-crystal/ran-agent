@@ -12,8 +12,6 @@ import {
   parseCheckinCommand,
   buildAgent,
   isExternalMcpActivityRunnerEnabled,
-  redactProxyUrlForLog,
-  submitExternalMcpCheckpoint,
   shouldRetryWeixinStartAttempt,
   startExternalMcpActivityRunnerLoop,
 } from '../src/index.mjs';
@@ -45,6 +43,15 @@ test('main creates and recovers one shared durable outbox before wiring live cha
   assert.doesNotMatch(INDEX_SOURCE, /ombreCompatRuntime/);
 });
 
+test('main composes exactly one Telegram bridge start and one finally stop without a global dispatcher', () => {
+  assert.match(INDEX_SOURCE, /startTelegramBridge\(\{ env: runtimeEnv, logger: console, outbox: durableOutbox, channelHub \}\)/);
+  assert.match(INDEX_SOURCE, /await telegramBridge\.stop\(\)/);
+  assert.equal((INDEX_SOURCE.match(/startTelegramBridge\(/g) || []).length, 1);
+  assert.equal((INDEX_SOURCE.match(/telegramBridge\.stop\(/g) || []).length, 1);
+  assert.doesNotMatch(INDEX_SOURCE, /setGlobalDispatcher/);
+  assert.doesNotMatch(INDEX_SOURCE, /process\.env\.(HTTPS_PROXY|HTTP_PROXY|ALL_PROXY)/);
+});
+
 test('S12 quiescence starts only the committed Core worker before reopening ingress', () => {
   assert.match(INDEX_SOURCE, /RAN_AGENT_S12_INGRESS_QUIESCED === 'true'/);
   assert.match(INDEX_SOURCE, /if \(s12IngressQuiesced\) \{[\s\S]*?coreWorkRuntime\.start\(\)[\s\S]*?await coreWorkRuntime\.stop\(\)[\s\S]*?return;/);
@@ -58,7 +65,7 @@ test('main starts the v2 external MCP runtime instead of the legacy activity run
   assert.match(INDEX_SOURCE, /createExternalMcpAutonomyRuntime\(\{\s*env: runtimeEnv,/);
   assert.match(INDEX_SOURCE, /transport: createExternalMcpRuntimeTransport\(\{ env: runtimeEnv \}\)/);
   assert.match(INDEX_SOURCE, /if \(!coreRuntime\) await externalMcpRuntime\.start\(\)/);
-  assert.match(INDEX_SOURCE, /submitCandidate: \(candidate, context\) => coreRuntime\s*\? coreExternalMcp\.submitCandidate\(candidate, context\)\s*: submitExternalMcpCheckpoint\(\{/);
+  assert.match(INDEX_SOURCE, /submitCandidate: \(candidate, context\) => coreRuntime\s*\? coreExternalMcp\.submitCandidate\(candidate, context\)\s*: Promise\.resolve\(\{ skipped: true, reason: 'core_runtime_unavailable' \}\)/);
   assert.match(INDEX_SOURCE, /coreExternalMcp = createCoreExternalMcpHandler\(\{/);
   assert.match(INDEX_SOURCE, /externalPollHandler: coreExternalMcp\?\.handler/);
   assert.match(INDEX_SOURCE, /externalMcpRuntime\.stop\(\)/);
@@ -68,7 +75,7 @@ test('main starts the v2 external MCP runtime instead of the legacy activity run
 test('Core owner attention defaults available without desktop telemetry or a second channel policy', () => {
   assert.match(INDEX_SOURCE, /const attentionValve = createAttentionValve\(\{\s*statePath: path\.join\(resolveStateDir\(runtimeEnv\), 'attention', 'delayed\.json'\),\s*\}\)/);
   assert.doesNotMatch(INDEX_SOURCE, /createDesktopPresenceProvider|presence\.json|\/v1\/presence/i);
-  assert.doesNotMatch(INDEX_SOURCE, /telegram/i);
+  assert.doesNotMatch(INDEX_SOURCE, /createDesktopPresenceProvider|presence\.json|\/v1\/presence/i);
 });
 
 test('runtime provider transport forwards only the selected manifest tool call after the bridge has authorized it', async () => {
@@ -114,37 +121,6 @@ test('runtime provider transport forwards the activity abort signal to the real 
   assert.equal(received.signal, controller.signal);
 });
 
-test('external checkpoint uses the reply release gate before one durable outbox delivery', async () => {
-  const deliveries = [];
-  const result = await submitExternalMcpCheckpoint({
-    candidate: { status: 'ready' },
-    context: {
-      activityId: 'autonomy_checkpoint_1', checkpointDigest: 'a'.repeat(64), revision: 2,
-      notifyTarget: { platform: 'feishu', channelType: 'dm', conversationId: 'conversation-1', senderId: 'sender-1' },
-    },
-    replyBackend: {
-      async releaseExternalCheckpoint(input) {
-        assert.equal(input.context.activityId, 'autonomy_checkpoint_1');
-        return { replyText: 'A verified checkpoint.', suppressSend: false };
-      },
-    },
-    outbox: {
-      async deliver(input, options) {
-        deliveries.push(input);
-        assert.deepEqual(await options.send(), {
-          textStatus: 'sent', attachments: [], adapterReceiptRef: 'feishu:checkpoint',
-        });
-        return { delivery: 'sent' };
-      },
-    },
-    sendFeishu: async () => ({ adapterReceiptRef: 'feishu:checkpoint' }),
-  });
-
-  assert.equal(result.delivery, 'sent');
-  assert.equal(deliveries.length, 1);
-  assert.equal(deliveries[0].operationKey, `external-checkpoint:autonomy_checkpoint_1:${'a'.repeat(64)}`);
-});
-
 test('shouldRetryWeixinStartAttempt treats non-positive max retries as infinite', () => {
   assert.equal(shouldRetryWeixinStartAttempt(1, 0), true);
   assert.equal(shouldRetryWeixinStartAttempt(50, 0), true);
@@ -162,18 +138,6 @@ test('isTransientWeixinStartError matches common TLS/network fetch failure signa
   assert.equal(isTransientWeixinStartError(new Error('ECONNRESET by peer')), true);
   assert.equal(isTransientWeixinStartError(new Error('SSL handshake failed')), true);
   assert.equal(isTransientWeixinStartError(new Error('invalid token')), false);
-});
-
-test('redactProxyUrlForLog removes credentials and query parameters', () => {
-  assert.equal(
-    redactProxyUrlForLog('http://user:pass@example.com:8080/proxy?token=secret'),
-    'http://example.com:8080/proxy?redacted'
-  );
-  assert.equal(
-    redactProxyUrlForLog('socks5://user:pass@127.0.0.1:1080'),
-    'socks5://127.0.0.1:1080'
-  );
-  assert.equal(redactProxyUrlForLog('not a url with secret'), '[configured]');
 });
 
 test('parseCheckinCommand validates command shape', () => {

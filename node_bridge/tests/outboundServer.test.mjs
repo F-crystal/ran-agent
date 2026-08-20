@@ -19,6 +19,8 @@ import {
   handleScheduledAiDigestRequest,
   resolveStateDir,
 } from '../src/outboundServer.mjs';
+import { handleIncomingMessage } from '../src/channelHub.mjs';
+import { bootstrapOwnerBinding } from '../src/identityMap.mjs';
 
 test('proactive event control route requires loopback and the internal secret', async () => {
   const base = {
@@ -52,6 +54,8 @@ import {
   setProactiveDispatchState,
 } from '../src/runtimeState.mjs';
 import { createIsolatedTestEnv } from './helpers/isolatedState.mjs';
+import { buildExternalMcpSyntheticTurn } from '../src/externalMcp/systemQueue.mjs';
+import { createDurableOutbox } from '../src/durableOutbox.mjs';
 
 const PROJECT_ROOT = path.resolve(new URL('../..', import.meta.url).pathname);
 
@@ -286,6 +290,7 @@ test('handleScheduledAiDigestRequest routes digest through existing Feishu DM fl
   assert.equal(channelMessage.route_hint, 'scheduled_ai_daily_digest');
   assert.equal(isTrustedInformationalReportTask(channelMessage), true);
   assert.equal(channelMessage.text, preparedPrompt);
+  assert.equal(calls.length, 1);
   assert.equal(calls[0].bin, 'lark-cli');
   assert.equal(calls[0].args.includes('--user-id'), true);
   assert.equal(calls[0].args.includes('ou-home'), true);
@@ -487,6 +492,7 @@ test('handleExternalMcpSystemQueueRequest drops unregistered watch scopes', asyn
   let channelCalled = false;
   const result = await handleExternalMcpSystemQueueRequest({
     env,
+    ...wechatDeliveryTestOptions(),
     bodyText: JSON.stringify({
       globalUserId: 'ou-home',
       serverId: 'forum.example',
@@ -542,10 +548,16 @@ test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic
   }, { env, now: '2026-07-01T11:59:00Z' });
 
   let channelMessage = null;
-  const calls = [];
+  const fixedNow = new Date('2026-07-01T12:00:00Z');
+  const outbox = createDurableOutbox({ env, now: () => fixedNow });
   const result = await handleExternalMcpSystemQueueRequest({
     logger: { info() {}, warn() {}, error() {}, log() {} },
     env,
+    coreRuntime: ownerBindingRuntime({ binding: activeOwnerBinding() }),
+    outbox,
+    sendWechat: async () => ({
+      textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:external-test',
+    }),
     bodyText: JSON.stringify({
       id: 'watch-event-1',
       globalUserId: 'ou-home',
@@ -561,48 +573,33 @@ test('handleExternalMcpSystemQueueRequest routes registered watches as synthetic
     nowImpl: () => new Date('2026-07-01T12:00:00Z'),
     channelHub: async (message, options) => {
       channelMessage = message;
-      await options.adapter.sendReply({
-        target: {
-          channel_type: 'dm',
-          conversation_id: message.conversation_id,
-          sender_id: message.sender_id,
-        },
-        text: JSON.stringify({
-          action: 'notify',
-          message: '你关注的帖子有一条直接回复。',
-          evidence_refs: [evidence.evidence_ref],
-          why_now: 'watched thread received a direct reply',
+      return handleIncomingMessage(message, {
+        ...options,
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          async json() {
+            return { choices: [{ message: { content: JSON.stringify({
+              action: 'notify',
+              message: '你关注的帖子有一条直接回复。',
+              evidence_refs: [evidence.evidence_ref],
+              why_now: 'watched thread received a direct reply',
+            }) } }] };
+          },
         }),
-        message,
       });
-      return {
-        replyText: JSON.stringify({
-          action: 'notify',
-          message: '你关注的帖子有一条直接回复。',
-          evidence_refs: [evidence.evidence_ref],
-          why_now: 'watched thread received a direct reply',
-        }),
-        suppressSend: false,
-      };
-    },
-    execFileImpl: async (bin, args) => {
-      calls.push({ bin, args });
-      return { stdout: '{"ok":true}' };
     },
   });
 
   assert.equal(result.status, 200);
   assert.equal(result.payload.ok, true);
   assert.equal(result.payload.notified, true);
-  assert.equal(channelMessage.platform, 'feishu');
+  assert.equal(channelMessage.platform, 'wechat');
   assert.equal(channelMessage.route_hint, 'external_mcp_system_queue');
   assert.equal(isTrustedHermesTaskScopedMessage(channelMessage), true);
   assert.match(channelMessage.text, /watched forum thread changed/);
   assert.match(channelMessage.text, new RegExp(`evidence_refs: ${evidence.evidence_ref}`));
   assert.match(channelMessage.text, /allowed_capability_tiers: T1,T2/);
-  assert.equal(calls[0].bin, 'lark-cli');
-  assert.equal(calls[0].args.includes('--user-id'), true);
-  assert.equal(calls[0].args.includes('ou-home'), true);
 });
 
 test('handleExternalMcpSystemQueueRequest rejects caller-supplied untrusted evidence refs', async (t) => {
@@ -628,6 +625,7 @@ test('handleExternalMcpSystemQueueRequest rejects caller-supplied untrusted evid
   let channelCalled = false;
   const result = await handleExternalMcpSystemQueueRequest({
     env,
+    ...wechatDeliveryTestOptions(),
     nowImpl: () => new Date('2026-07-01T12:00:00Z'),
     bodyText: JSON.stringify({
       id: 'watch-event-spoofed',
@@ -692,6 +690,7 @@ test('handleExternalMcpSystemQueueRequest rate limits notify events before Herme
   let channelCalled = false;
   const result = await handleExternalMcpSystemQueueRequest({
     env,
+    ...wechatDeliveryTestOptions(),
     bodyText: JSON.stringify({
       globalUserId: 'ou-home',
       serverId: 'forum.example',
@@ -756,6 +755,7 @@ test('handleExternalMcpSystemQueueRequest ignores caller-supplied time and topic
   let channelCalled = false;
   const result = await handleExternalMcpSystemQueueRequest({
     env,
+    ...wechatDeliveryTestOptions(),
     bodyText: JSON.stringify({
       globalUserId: 'ou-home',
       serverId: 'forum.example',
@@ -953,6 +953,264 @@ test('handleOutboundRequest rejects low-value proactive text through the retired
   assert.equal(sendCalled, false);
 });
 
+function ownerBindingRuntime({ binding, bindings, ownerId = 'wechat-owner' } = {}) {
+  const routes = bindings || (binding ? [binding] : []);
+  return {
+    core: {
+      reader: {
+        conversationIdentityById(conversationId) {
+          const route = routes.find((item) => item.conversation_id === conversationId);
+          return route ? { conversationId, ownerId } : null;
+        },
+        packageBPresentation: {
+          bindingsByOperation: () => routes,
+        },
+      },
+    },
+  };
+}
+
+function activeOwnerBinding(overrides = {}) {
+  return {
+    state: 'active',
+    presentation_binding_id: 'owner-binding',
+    conversation_id: 'owner-conversation',
+    source_instance_id: 'node-test',
+    platform: 'wechat',
+    destination_kind: 'user',
+    destination_ref: 'wechat-owner',
+    receipt_owner_id: 'wechat-owner',
+    revision: 3,
+    ...overrides,
+  };
+}
+
+function wechatDeliveryTestOptions() {
+  return {
+    coreRuntime: ownerBindingRuntime({ binding: activeOwnerBinding() }),
+    outbox: {
+      async deliver(_input, options) {
+        const result = await options.send();
+        return { delivery: result?.textStatus === 'sent' ? 'sent' : 'ambiguous', adapterResult: result };
+      },
+    },
+    sendWechat: async () => ({
+      textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:test',
+    }),
+  };
+}
+
+function stubHermesNotify(t) {
+  t.mock.method(globalThis, 'fetch', async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        choices: [{ message: { content: JSON.stringify({
+          action: 'notify', message: '提醒：test', evidence_refs: ['todo:binding-test'], why_now: 'due',
+        }) } }],
+      };
+    },
+  }));
+}
+
+function reminderEvent(overrides = {}) {
+  return {
+    event_id: 'binding-test-event',
+    kind: 'reminder',
+    global_user_id: 'wechat-owner',
+    channel: 'feishu',
+    watch_scope: 'todo:binding-test',
+    reason: 'Explicit reminder is due: test',
+    evidence_refs: ['todo:binding-test'],
+    dedupe_key: 'todo:binding-test:20260818T210000',
+    created_at: '2026-08-18T13:00:00.000Z',
+    expires_at: '2026-08-18T14:00:00.000Z',
+    deliverability: 'notify_allowed',
+    allowed_capability_tiers: ['T0'],
+    quiet_policy: 'ignore_for_explicit_reminder',
+    budget_class: 'reminder',
+    ...overrides,
+  };
+}
+
+test('owner binding red test: missing Core binding never falls back to legacy Feishu target', async (t) => {
+  const env = tempEnv(t, { HERMES_PROACTIVE_REMINDERS_ENABLED: 'true' }, 'owner-binding-missing-');
+  setFeishuHomeDmTarget({
+    platform: 'feishu', channel_type: 'dm', conversation_id: 'legacy-feishu', sender_id: 'legacy-owner',
+  }, env);
+  let channelCalls = 0;
+  const result = await handleProactiveEventRequest({
+    env,
+    bodyText: JSON.stringify(reminderEvent()),
+    channelHub: async () => { channelCalls += 1; return { replyText: '' }; },
+  });
+  assert.equal(result.payload.skipped, true);
+  assert.equal(channelCalls, 0);
+});
+
+test('owner binding red test: an unknown producer platform does not default to WeChat', () => {
+  assert.throws(() => buildExternalMcpSyntheticTurn({
+    id: 'unknown-platform', platform: 'mars', conversationId: 'conversation', senderId: 'owner',
+    kind: 'forum', reason: 'fact', watchScope: 'thread:1', globalUserId: 'owner',
+  }), /platform/i);
+});
+
+test('owner channel red test: actual ChannelHub exposes two outboxes and a split terminal', async (t) => {
+  const env = tempEnv(t, { HERMES_PROACTIVE_REMINDERS_ENABLED: 'true' }, 'owner-channel-double-outbox-');
+  const fixedNow = new Date('2026-08-18T13:30:00.000Z');
+  bootstrapOwnerBinding({
+    trustedIdentity: {
+      platform: 'wechat', senderId: 'wechat-owner', globalUserId: 'wechat-owner',
+      provenance: 'test_owner_bootstrap',
+    },
+    env,
+    now: fixedNow.toISOString(),
+  });
+  const outbox = createDurableOutbox({ env, now: () => fixedNow });
+  stubHermesNotify(t);
+  let physicalSends = 0;
+  let sentTarget;
+  const request = {
+    env,
+    coreRuntime: ownerBindingRuntime({ binding: activeOwnerBinding() }),
+    outbox,
+    nowImpl: () => fixedNow,
+    channelHub: handleIncomingMessage,
+    sendWechat: async ({ target }) => {
+      sentTarget = target;
+      physicalSends += 1;
+      return { textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:red-test' };
+    },
+    bodyText: JSON.stringify(reminderEvent({ event_id: 'double-outbox-event' })),
+  };
+  const result = await handleProactiveEventRequest(request);
+  const ledgerPath = path.join(env.RAN_AGENT_STATE_DIR, 'node-bridge-runtime', 'proactive-events.json');
+  const firstLedger = fs.existsSync(ledgerPath) ? JSON.parse(fs.readFileSync(ledgerPath, 'utf8')) : [];
+  const outboxEntries = outbox.list();
+
+  assert.deepEqual({
+    handler: result.payload.reason,
+    physicalSends,
+    outboxCount: outboxEntries.length,
+    outboxStates: outboxEntries.map((item) => item.delivery).sort(),
+    ledger: firstLedger.map((item) => item.status),
+    target: sentTarget.conversation_id,
+  }, {
+    handler: 'sent',
+    physicalSends: 1,
+    outboxCount: 1,
+    outboxStates: ['sent'],
+    ledger: ['sent'],
+    target: 'wechat-owner',
+  });
+
+  const replay = await handleProactiveEventRequest(request);
+  const replayLedger = JSON.parse(fs.readFileSync(ledgerPath, 'utf8'));
+  assert.equal(replay.payload.reason, 'event_already_sent');
+  assert.equal(physicalSends, 1);
+  assert.equal(outbox.list().length, 1);
+  assert.deepEqual(replayLedger.map((item) => item.status), ['sent']);
+
+  const ambiguousEnv = tempEnv(t, { HERMES_PROACTIVE_REMINDERS_ENABLED: 'true' }, 'owner-channel-ambiguous-');
+  const ambiguousOutbox = createDurableOutbox({
+    env: ambiguousEnv,
+    now: () => fixedNow,
+  });
+  let ambiguousSends = 0;
+  const ambiguousRequest = {
+    env: ambiguousEnv,
+    coreRuntime: ownerBindingRuntime({ binding: activeOwnerBinding() }),
+    outbox: ambiguousOutbox,
+    nowImpl: () => fixedNow,
+    channelHub: handleIncomingMessage,
+    sendWechat: async () => {
+      ambiguousSends += 1;
+      return { textStatus: 'ambiguous', attachments: [], adapterReceiptRef: 'wechat:ambiguous' };
+    },
+    bodyText: JSON.stringify(reminderEvent({
+      event_id: 'ambiguous-event', dedupe_key: 'todo:ambiguous',
+    })),
+  };
+  const ambiguousResult = await handleProactiveEventRequest(ambiguousRequest);
+  const ambiguousReplay = await handleProactiveEventRequest(ambiguousRequest);
+  const ambiguousLedgerPath = path.join(ambiguousEnv.RAN_AGENT_STATE_DIR, 'node-bridge-runtime', 'proactive-events.json');
+  const ambiguousLedger = fs.existsSync(ambiguousLedgerPath)
+    ? JSON.parse(fs.readFileSync(ambiguousLedgerPath, 'utf8')) : [];
+  assert.equal(ambiguousResult.payload.status, 'suppressed');
+  assert.equal(ambiguousReplay.payload.reason, 'send_failed');
+  assert.equal(ambiguousSends, 1);
+  assert.deepEqual(ambiguousOutbox.list().map((item) => item.delivery), ['ambiguous']);
+  assert.deepEqual(ambiguousLedger.map((item) => item.status), []);
+});
+
+test('owner binding red test: unknown destination kind fails closed', async (t) => {
+  const env = tempEnv(t, { HERMES_PROACTIVE_REMINDERS_ENABLED: 'true' }, 'owner-binding-destination-');
+  let channelCalls = 0;
+  const result = await handleProactiveEventRequest({
+    env, coreRuntime: ownerBindingRuntime({ binding: activeOwnerBinding({ destination_kind: 'unknown' }) }),
+    bodyText: JSON.stringify(reminderEvent({ event_id: 'unknown-destination' })),
+    channelHub: async () => { channelCalls += 1; return { replyText: '' }; },
+  });
+  assert.equal(result.payload.skipped, true);
+  assert.equal(channelCalls, 0);
+});
+
+test('owner binding red test: foreign receipt owner fails closed', async (t) => {
+  const env = tempEnv(t, { HERMES_PROACTIVE_REMINDERS_ENABLED: 'true' }, 'owner-binding-foreign-');
+  let channelCalls = 0;
+  const result = await handleProactiveEventRequest({
+    env, coreRuntime: ownerBindingRuntime({
+      binding: activeOwnerBinding({ receipt_owner_id: 'foreign-owner' }), ownerId: 'wechat-owner',
+    }),
+    bodyText: JSON.stringify(reminderEvent({ event_id: 'foreign-owner' })),
+    channelHub: async () => { channelCalls += 1; return { replyText: '' }; },
+  });
+  assert.equal(result.payload.skipped, true);
+  assert.equal(channelCalls, 0);
+});
+
+test('owner binding red test: secondary binding cannot replace the global owner binding', async (t) => {
+  const env = tempEnv(t, { HERMES_PROACTIVE_REMINDERS_ENABLED: 'true' }, 'owner-binding-secondary-');
+  let channelCalls = 0;
+  const result = await handleProactiveEventRequest({
+    env,
+    coreRuntime: ownerBindingRuntime({ bindings: [
+      activeOwnerBinding(), activeOwnerBinding({ presentation_binding_id: 'secondary-binding' }),
+    ] }),
+    bodyText: JSON.stringify(reminderEvent({ event_id: 'secondary-binding' })),
+    channelHub: async () => { channelCalls += 1; return { replyText: '' }; },
+  });
+  assert.equal(result.payload.skipped, true);
+  assert.equal(channelCalls, 0);
+});
+
+test('owner binding red test: stale binding revision cannot reach sent evidence', async (t) => {
+  const env = tempEnv(t, { HERMES_PROACTIVE_REMINDERS_ENABLED: 'true' }, 'owner-binding-stale-');
+  let adapterCalls = 0;
+  const result = await handleProactiveEventRequest({
+    env,
+    coreRuntime: ownerBindingRuntime({ binding: activeOwnerBinding({ revision: 3 }) }),
+    bodyText: JSON.stringify(reminderEvent({ binding_revision: 2 })),
+    channelHub: async (message, options) => {
+      await options.adapter.sendReply({
+        target: { channel_type: 'dm', conversation_id: message.conversation_id, sender_id: message.sender_id },
+        text: JSON.stringify({ action: 'notify', message: '提醒：test', evidence_refs: ['todo:binding-test'], why_now: 'due' }),
+        message,
+      });
+      return { replyText: '' };
+    },
+    sendWechat: async () => { adapterCalls += 1; return { resultState: 'sent' }; },
+  });
+  assert.equal(result.payload.skipped, true);
+  assert.equal(adapterCalls, 0);
+});
+
+/*
+ * Keep the legacy control-route coverage below separate from the owner-binding
+ * invariant tests above.
+ */
+
 test('handleProactiveEventRequest sends reminder events through Hermes egress', async (t) => {
   const env = tempEnv(t, {
     HERMES_PROACTIVE_EVENTS_ENABLED: 'true',
@@ -968,9 +1226,35 @@ test('handleProactiveEventRequest sends reminder events through Hermes egress', 
   }, env);
 
   let channelMessage = null;
-  const calls = [];
+  const fixedNow = new Date('2026-07-01T09:10:00+08:00');
+  const outbox = createDurableOutbox({ env, now: () => fixedNow });
+  const coreRuntime = ownerBindingRuntime({ binding: activeOwnerBinding() });
+  const sendWechat = async () => ({
+    textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:reminder-test',
+  });
+  const channelHub = async (message, options) => {
+    channelMessage = message;
+    return handleIncomingMessage(message, {
+      ...options,
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        async json() {
+          return { choices: [{ message: { content: JSON.stringify({
+            action: 'notify',
+            message: '提醒一下：去单位',
+            evidence_refs: ['todo:1'],
+            why_now: 'explicit todo reminder is due now',
+          }) } }] };
+        },
+      }),
+    });
+  };
   const result = await handleProactiveEventRequest({
     env,
+    coreRuntime,
+    outbox,
+    sendWechat,
     logger: { info() {}, warn() {}, error() {}, log() {} },
     nowImpl: () => new Date('2026-07-01T09:10:00+08:00'),
     bodyText: JSON.stringify({
@@ -989,35 +1273,7 @@ test('handleProactiveEventRequest sends reminder events through Hermes egress', 
       quiet_policy: 'ignore_for_explicit_reminder',
       budget_class: 'reminder',
     }),
-    channelHub: async (message, options) => {
-      channelMessage = message;
-      await options.adapter.sendReply({
-        target: {
-          channel_type: 'dm',
-          conversation_id: message.conversation_id,
-          sender_id: message.sender_id,
-        },
-        text: JSON.stringify({
-          action: 'notify',
-          message: '提醒一下：去单位',
-          evidence_refs: ['todo:1'],
-          why_now: 'explicit todo reminder is due now',
-        }),
-        message,
-      });
-      return {
-        replyText: JSON.stringify({
-          action: 'notify',
-          message: '提醒一下：去单位',
-          evidence_refs: ['todo:1'],
-          why_now: 'explicit todo reminder is due now',
-        }),
-      };
-    },
-    execFileImpl: async (bin, args) => {
-      calls.push({ bin, args });
-      return { stdout: '{"ok":true}' };
-    },
+    channelHub,
   });
 
   assert.equal(result.status, 200);
@@ -1027,12 +1283,13 @@ test('handleProactiveEventRequest sends reminder events through Hermes egress', 
   assert.equal(result.payload.notified, true);
   assert.equal(channelMessage.route_hint, 'hermes_proactive_event');
   assert.match(channelMessage.text, /Explicit reminder is due/);
-  assert.equal(calls[0].bin, 'lark-cli');
-  assert.equal(calls[0].args.includes('提醒一下：去单位'), true);
 
   let secondChannelCalled = false;
   const duplicate = await handleProactiveEventRequest({
     env,
+    coreRuntime,
+    outbox,
+    sendWechat,
     logger: { info() {}, warn() {}, error() {}, log() {} },
     nowImpl: () => new Date('2026-07-01T09:11:00+08:00'),
     bodyText: JSON.stringify({
@@ -1090,25 +1347,38 @@ test('memory-grounded companion events obey stop, quiet hours, cadence, daily li
     quiet_policy: 'respect',
     budget_class: 'curiosity',
   });
-  const request = (body, now, reply = '那件没聊完的心事，今天想继续说一点吗？') => handleProactiveEventRequest({
-    env,
-    logger: { info() {}, warn() {}, error() {}, log() {} },
-    nowImpl: () => new Date(now),
-    bodyText: JSON.stringify(body),
-    channelHub: async (message, options) => {
-      const text = JSON.stringify({
-        action: 'notify', message: reply,
-        evidence_refs: [message.proactive_event.evidence_refs[0]],
-        why_now: 'confirmed relationship context remains unresolved',
-      });
-      await options.adapter.sendReply({
-        target: { channel_type: 'dm', conversation_id: 'oc-home', sender_id: 'ou-home' },
-        text, message,
-      });
-      return { replyText: text };
-    },
-    execFileImpl: async () => ({ stdout: '{"ok":true}' }),
+  let durableNow = new Date('2026-07-01T10:00:00+08:00');
+  const outbox = createDurableOutbox({ env, now: () => durableNow });
+  const coreRuntime = ownerBindingRuntime({ binding: activeOwnerBinding() });
+  const sendWechat = async () => ({
+    textStatus: 'sent', attachments: [], adapterReceiptRef: 'wechat:companion-test',
   });
+  const request = (body, now, reply = '那件没聊完的心事，今天想继续说一点吗？') => {
+    durableNow = new Date(now);
+    return handleProactiveEventRequest({
+      env,
+      coreRuntime,
+      outbox,
+      sendWechat,
+      logger: { info() {}, warn() {}, error() {}, log() {} },
+      nowImpl: () => new Date(now),
+      bodyText: JSON.stringify(body),
+      channelHub: async (message, options) => handleIncomingMessage(message, {
+        ...options,
+        fetchImpl: async () => ({
+          ok: true,
+          status: 200,
+          async json() {
+            return { choices: [{ message: { content: JSON.stringify({
+              action: 'notify', message: reply,
+              evidence_refs: message.proactive_event.evidence_refs,
+              why_now: 'confirmed relationship context remains unresolved',
+            }) } }] };
+          },
+        }),
+      }),
+    });
+  };
 
   setCheckinRange({ minMinutes: 20, maxMinutes: 20, enabled: false }, env);
   assert.equal((await request(event('learn-a'), '2026-07-01T10:00:00+08:00')).payload.reason, 'companion_stopped');
@@ -1135,6 +1405,7 @@ test('companion egress suppresses generic greetings even with valid memory evide
   let sends = 0;
   const result = await handleProactiveEventRequest({
     env,
+    ...wechatDeliveryTestOptions(),
     nowImpl: () => new Date('2026-07-01T10:00:00+08:00'),
     bodyText: JSON.stringify({
       event_id: 'companion-generic', kind: 'companion', channel: 'feishu',
@@ -1152,7 +1423,6 @@ test('companion egress suppresses generic greetings even with valid memory evide
       await options.adapter.sendReply({ target: {}, text, message });
       return { replyText: text };
     },
-    execFileImpl: async () => { sends += 1; return { stdout: '{"ok":true}' }; },
   });
   assert.equal(result.payload.status, 'suppressed');
   assert.equal(result.payload.reason, 'generic_proactive_message');
@@ -1174,6 +1444,7 @@ test('handleProactiveEventRequest drops reminder events when reminder delivery i
   let channelCalled = false;
   const result = await handleProactiveEventRequest({
     env,
+    ...wechatDeliveryTestOptions(),
     bodyText: JSON.stringify({
       event_id: 'reminder-1',
       kind: 'reminder',
@@ -1217,6 +1488,7 @@ test('handleProactiveEventRequest rejects external events without the dedicated 
   let channelCalled = false;
   const result = await handleProactiveEventRequest({
     env,
+    ...wechatDeliveryTestOptions(),
     bodyText: JSON.stringify({
       event_id: 'fake-external-1',
       kind: 'forum_watch',

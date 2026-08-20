@@ -83,13 +83,13 @@ async function seedOwnerBinding(core) {
   await core.writer.write((tx) => {
     tx.packageBTurn.createOrResolveConversation({
       conversationId: 'system-owner-conversation', canonicalConversationKey: 'system-owner-conversation',
-      ownerId: 'owner', actorRef: 'owner:verified', platform: 'feishu', primaryFrontend: 'feishu',
-      sourceInstanceId: 'node-channel-hub:feishu', platformConversationBinding: 'feishu:owner', createdAt: START,
+      ownerId: 'owner', actorRef: 'owner:verified', platform: 'wechat', primaryFrontend: 'wechat',
+      sourceInstanceId: 'node-channel-hub:wechat', platformConversationBinding: 'wechat:owner', createdAt: START,
     });
     tx.packageBPresentation.createOrReadBinding({
-      operationKey: 'external:test:binding', bindingId: 'system-owner-binding',
+      operationKey: 'core-cutover:system-owner-binding', bindingId: 'system-owner-binding',
       conversationId: 'system-owner-conversation', ownerId: 'owner',
-      sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu',
+      sourceInstanceId: 'node-channel-hub:wechat', platform: 'wechat',
       destinationKind: 'conversation', destinationRef: 'owner-dm',
       adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
     });
@@ -150,7 +150,7 @@ test('Core external MCP Work Run records candidates as facts without a send surf
       get(activityId) {
         return activityId === 'activity-1' ? {
           activityId, status: 'active', revision: 3,
-          scope: { serverId: 'forum-mcp' }, notifyTarget: { platform: 'feishu' },
+          scope: { serverId: 'forum-mcp' }, notifyTarget: { platform: 'wechat' },
           checkpoint: { stateDigest: 'checkpoint-1' },
         } : null;
       },
@@ -164,7 +164,7 @@ test('Core external MCP Work Run records candidates as facts without a send surf
       };
       const context = {
         activityId: 'activity-1', checkpointDigest: 'checkpoint-1',
-        notifyTarget: { platform: 'feishu' }, revision: 3,
+        notifyTarget: { platform: 'wechat' }, revision: 3,
       };
       await bridge.submitCandidate(candidate, context);
       await bridge.submitCandidate({
@@ -229,7 +229,7 @@ test('ordinary proactive delivery reaches the typed Core receipt seam without de
   const activity = {
     activityId: 'activity-1', status: 'active', revision: 3, domain: 'forum',
     scope: { serverId: 'forum-mcp', resourceId: 'topic-1' },
-    notifyTarget: { platform: 'feishu' },
+    notifyTarget: { platform: 'wechat' },
     checkpoint: { stateDigest: 'checkpoint-3', summary: 'The watched topic has a worthy update.' },
   };
   let bridge;
@@ -278,7 +278,7 @@ test('ordinary proactive delivery reaches the typed Core receipt seam without de
         provider: 'hermes', model: 'synthetic',
       };
     },
-    sendFeishu: async (input) => { sends.push(input); },
+    sendWechat: async (input) => { sends.push(input); return { resultState: 'sent', evidenceRef: 'wechat:test' }; },
     now: fixture.now, env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
   });
   runtime.start();
@@ -300,7 +300,7 @@ test('fact projection recovery crosses crash boundaries without replaying the pr
       await seedOwnerBinding(fixture.core);
       const activity = {
         activityId: 'activity-1', status: 'active', revision: 3,
-        scope: { serverId: 'forum-mcp' }, notifyTarget: { platform: 'feishu' },
+        scope: { serverId: 'forum-mcp' }, notifyTarget: { platform: 'wechat' },
         checkpoint: { stateDigest: 'checkpoint-3', summary: 'A durable external checkpoint is ready.' },
       };
       let providerCalls = 0;

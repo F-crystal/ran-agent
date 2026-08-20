@@ -4,7 +4,6 @@ import {
   createTrustedBridgeInformationalReportTask,
   createTrustedBridgeTask,
 } from '../hermesTaskScope.mjs';
-import { sendFeishuReply } from '../feishuBridge.mjs';
 import {
   buildExternalMcpSyntheticTurn,
   evaluateExternalMcpSystemQueueEgress,
@@ -37,14 +36,26 @@ function todoId(payloadRef) {
   return match ? Number(match[1]) : null;
 }
 
-function feishuTarget(view) {
-  const recipient = String(view?.target || '').trim();
-  if (view?.platform !== 'feishu' || !recipient) {
-    throw coreError('CORE_FEISHU_ROUTE_INVALID', 'Feishu delivery requires one typed recipient');
+function normalizeCoreAdapterResult(result, { platform, outboxId, hashContent }) {
+  const value = result && typeof result === 'object' ? result : {};
+  if (['sent', 'failed', 'ambiguous'].includes(value.resultState)) {
+    const evidenceRef = String(value.evidenceRef || `${platform}:core:${digest(outboxId)}`).trim();
+    return {
+      resultState: value.resultState,
+      evidenceRef,
+      evidenceHashToken: value.evidenceHashToken || hashContent('adapter-receipt', evidenceRef),
+      errorClass: value.errorClass || null,
+    };
   }
-  if (view.destinationKind === 'user') return { channel_type: 'dm', sender_id: recipient };
-  if (view.destinationKind === 'conversation') return { channel_type: 'group', conversation_id: recipient };
-  throw coreError('CORE_FEISHU_ROUTE_INVALID', 'Feishu delivery route kind is unsupported');
+  const status = String(value.textStatus || '').trim().toLowerCase();
+  const resultState = status === 'sent' ? 'sent' : status === 'failed' ? 'failed' : 'ambiguous';
+  const evidenceRef = String(value.adapterReceiptRef || `${platform}:core:${digest(outboxId)}`).trim();
+  return {
+    resultState,
+    evidenceRef,
+    evidenceHashToken: hashContent('adapter-receipt', evidenceRef),
+    errorClass: resultState === 'sent' ? null : String(value.errorClass || `adapter_${resultState}`),
+  };
 }
 
 async function pythonJson(fetchImpl, baseUrl, route, body, secret = '') {
@@ -67,7 +78,7 @@ export function createCoreRuntimeComposition({
   env = process.env,
   logger = console,
   fetchImpl = globalThis.fetch,
-  sendFeishu = sendFeishuReply,
+  sendWechat,
   now = () => new Date(),
 } = {}) {
   if (!runtime) return null;
@@ -179,12 +190,13 @@ export function createCoreRuntimeComposition({
       };
     },
     send: async (view) => {
-      await sendFeishu({ target: feishuTarget(view), text: view.text, env });
-      const evidenceRef = `feishu:core-scheduled:${digest(view.outboxId)}`;
-      return {
-        resultState: 'sent', evidenceRef,
-        evidenceHashToken: runtime.hashContent('adapter-receipt', evidenceRef),
-      };
+      if (view.platform === 'wechat') {
+        if (typeof sendWechat !== 'function') throw coreError('CORE_WECHAT_ADAPTER_UNAVAILABLE', 'WeChat presentation adapter is unavailable');
+        return normalizeCoreAdapterResult(await sendWechat(view), {
+          platform: 'wechat', outboxId: view.outboxId, hashContent: runtime.hashContent,
+        });
+      }
+      throw coreError('CORE_PRESENTATION_BINDING_UNSUPPORTED', 'scheduled presentation platform is unsupported');
     },
     afterTerminal: async (context) => {
       const reminderId = todoId(context.payload_ref);

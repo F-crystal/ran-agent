@@ -57,7 +57,7 @@ function requireBinding(input) {
   if (!input || fields.some((field) => typeof input[field] !== 'string' || !input[field].trim())) {
     throw coreError('CORE_SYSTEM_SCHEDULE_BINDING_REQUIRED', 'visible system schedules require one owner binding');
   }
-  if (input.platform !== 'feishu' || !['user', 'conversation'].includes(input.destinationKind)) {
+  if (input.platform !== 'wechat' || !['user', 'conversation'].includes(input.destinationKind)) {
     throw coreError('CORE_SYSTEM_SCHEDULE_ROUTE_INVALID', 'visible system schedule route is unsupported');
   }
   return input;
@@ -73,6 +73,7 @@ export function seedCoreSystemSchedules(tx, {
   const at = wholeSecond(createdAt, 'system schedule creation time');
   const boundary = wholeSecond(watermark, 'system schedule watermark');
   const visible = validateCoreSystemScheduleBinding(manifest, visibleBinding);
+  let visibleBindingRevision = null;
   if (visible) {
     tx.packageBTurn.createOrResolveConversation({
       conversationId: visible.conversationId,
@@ -85,7 +86,7 @@ export function seedCoreSystemSchedules(tx, {
       platformConversationBinding: visible.platformConversationBinding,
       createdAt: at,
     });
-    tx.packageBPresentation.createOrReadBinding({
+    const bindingResult = tx.packageBPresentation.createOrReadBinding({
       operationKey: 'core-cutover:system-owner-binding',
       bindingId: visible.bindingId,
       conversationId: visible.conversationId,
@@ -97,6 +98,7 @@ export function seedCoreSystemSchedules(tx, {
       adapterMetadata: { protocol: 'core-system-schedule', receiptMode: 'typed', routeVersion: '1' },
       createdAt: at,
     });
+    visibleBindingRevision = Number(bindingResult.binding.revision);
   }
   for (const item of manifest.schedules) {
     const activityId = `system-activity:${item.id}`;
@@ -119,7 +121,7 @@ export function seedCoreSystemSchedules(tx, {
       causationId: CORE_CUTOVER_EVENT_ID,
       conversationId: item.visible ? visible.conversationId : null,
       presentationBindingId: item.visible ? visible.bindingId : null,
-      expectedBindingRevision: item.visible ? 0 : null,
+      expectedBindingRevision: item.visible ? visibleBindingRevision : null,
     });
   }
   return Object.freeze({ schedules: manifest.schedules.length });

@@ -36,6 +36,7 @@ const MAX_PENDING_LIMIT = 500;
 const PART_KINDS = new Set(['text', 'image', 'audio', 'quote', 'edit', 'withdrawal', 'other']);
 const REFERENCE_KINDS = new Set(['none', 'explicit', 'deferred', 'quote', 'anchor', 'mutation_target']);
 const MUTATION_KINDS = new Set(['create', 'edit', 'withdrawal', 'retry']);
+const VERIFIED_CONVERSATION_PLATFORMS = new Set(['wechat', 'feishu', 'desktop', 'telegram']);
 const METADATA_KEYS = new Set(['mediaKind', 'mimeType', 'sizeBytes', 'width', 'height', 'durationMs']);
 const INTENT_FIELDS = [
   'ingressEventId', 'ingressResultId', 'ingressDisposition', 'processingOperationKey',
@@ -569,7 +570,7 @@ export function createPackageBIngressReader({ read, all }) {
         identity.canonicalConversationKey, 'conversation_identity');
       const conversation = read('SELECT * FROM conversation WHERE conversation_id=?', conversationId);
       if (receipt.journal_event_id !== expectedEventId || receipt.revision !== 1
-        || !['wechat', 'feishu', 'desktop'].includes(identity.platform)
+        || !VERIFIED_CONVERSATION_PLATFORMS.has(identity.platform)
         || !conversation || conversation.owner_id !== identity.ownerId
         || conversation.primary_frontend !== identity.platform) {
         throw pendingIntegrity('Conversation identity receipt does not match its parent');

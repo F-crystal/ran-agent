@@ -21,14 +21,14 @@ async function setup(t, payloadRef, externalFact = null, route = {}) {
   await core.writer.write((tx) => {
     tx.packageBTurn.createOrResolveConversation({
       conversationId: 'conversation', canonicalConversationKey: 'conversation', ownerId: 'owner',
-      actorRef: 'owner:verified', platform: 'feishu', primaryFrontend: 'feishu',
-      sourceInstanceId: 'node-channel-hub:feishu', platformConversationBinding: 'feishu:conversation',
+      actorRef: 'owner:verified', platform: 'wechat', primaryFrontend: 'wechat',
+      sourceInstanceId: 'node-channel-hub:wechat', platformConversationBinding: 'wechat:conversation',
       createdAt: START,
     });
     tx.packageBPresentation.createOrReadBinding({
-      operationKey: 'binding:create', bindingId: 'binding', conversationId: 'conversation', ownerId: 'owner',
-      sourceInstanceId: 'node-channel-hub:feishu', platform: 'feishu',
-      destinationKind: route.destinationKind || 'user', destinationRef: route.destinationRef || 'ou-owner',
+      operationKey: 'core-cutover:system-owner-binding', bindingId: 'binding', conversationId: 'conversation', ownerId: 'owner',
+      sourceInstanceId: 'node-channel-hub:wechat', platform: 'wechat',
+      destinationKind: route.destinationKind || 'user', destinationRef: route.destinationRef || 'wechat-owner',
       adapterMetadata: { protocol: 'test', receiptMode: 'typed' }, createdAt: START,
     });
     tx.journal.append({
@@ -113,7 +113,7 @@ test('an admitted external checkpoint is decided by Hermes and sent through the 
         provider: 'hermes', model: 'test',
       };
     },
-    sendFeishu: async (input) => { sends.push(input); },
+    sendWechat: async (input) => { sends.push(input); return { resultState: 'sent', evidenceRef: 'wechat:test' }; },
     now,
     env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
   });
@@ -151,7 +151,7 @@ test('the S12 acceptance schedule uses the existing Core worker and exact accept
       messages.push(message);
       return { replyText: 'S12 Core cutover accepted.', provider: 'hermes', model: 'test' };
     },
-    sendFeishu: async (input) => { sends.push(input); },
+    sendWechat: async (input) => { sends.push(input); return { resultState: 'sent', evidenceRef: 'wechat:test' }; },
     now,
     env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
   });
@@ -161,7 +161,7 @@ test('the S12 acceptance schedule uses the existing Core worker and exact accept
   assert.equal(messages.length, 1);
   assert.equal(messages[0].text, 'S12 Core cutover acceptance. Reply exactly: S12 Core cutover accepted.');
   assert.equal(sends.length, 1);
-  assert.deepEqual(sends[0].target, { channel_type: 'dm', sender_id: 'ou-owner' });
+  assert.equal(sends[0].target, 'wechat-owner');
   runtime.start();
   await new Promise((resolve) => setTimeout(resolve, 20));
   await runtime.stop();
@@ -171,7 +171,7 @@ test('the S12 acceptance schedule uses the existing Core worker and exact accept
 
 test('a retired daily digest is suppressed before Python, Hermes, or Feishu', async (t) => {
   const route = {
-    destinationKind: 'user', destinationRef: 'ou-owner',
+    destinationKind: 'user', destinationRef: 'wechat-owner',
     start: '2026-08-15T23:59:00.000Z', due: '2026-08-16T00:00:00.000Z',
     recurrence: { kind: 'daily', time: '08:00:00', timeZone: 'Asia/Shanghai' },
   };
@@ -181,7 +181,7 @@ test('a retired daily digest is suppressed before Python, Hermes, or Feishu', as
     runtime: { core, hashContent: () => TOKEN },
     channelHub: async () => { effects += 1; throw new Error('Hermes must not run'); },
     fetchImpl: async () => { effects += 1; throw new Error('Python must not run'); },
-    sendFeishu: async () => { effects += 1; throw new Error('Feishu must not run'); },
+    sendWechat: async () => { effects += 1; throw new Error('WeChat must not run'); },
     now,
     env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
   });
@@ -195,12 +195,12 @@ test('a retired daily digest is suppressed before Python, Hermes, or Feishu', as
 test('daily digest and Feishu chat schedules use the same typed delivery target contract', async (t) => {
   for (const fixture of [
     { name: 'owner DM digest', payloadRef: 'system-task:ai-daily-digest', destinationKind: 'user',
-      destinationRef: 'ou-owner', target: { channel_type: 'dm', sender_id: 'ou-owner' },
+      destinationRef: 'wechat-owner', target: 'wechat-owner',
       start: '2026-08-15T23:59:00.000Z', due: '2026-08-16T00:00:00.000Z',
       executionAt: '2026-08-16T16:30:00.000Z',
       recurrence: { kind: 'daily', time: '08:00:00', timeZone: 'Asia/Shanghai' } },
     { name: 'group conversation', payloadRef: 'system-task:group-notice', destinationKind: 'conversation',
-      destinationRef: 'oc-group', target: { channel_type: 'group', conversation_id: 'oc-group' } },
+      destinationRef: 'wechat-group', target: 'wechat-group' },
   ]) {
     await t.test(fixture.name, async (st) => {
       const { core, now } = await setup(st, fixture.payloadRef, null, fixture);
@@ -229,7 +229,7 @@ test('daily digest and Feishu chat schedules use the same typed delivery target 
             prompt: `AIHOT date-specific report prompt for ${request.date}`, partial: false,
           }; } };
         },
-        sendFeishu: async (input) => { sends.push(input); },
+        sendWechat: async (input) => { sends.push(input); return { resultState: 'sent', evidenceRef: 'wechat:test' }; },
         now,
         env: {
           RAN_AGENT_CORE_WORK_POLL_MS: '250',
@@ -261,7 +261,7 @@ test('daily digest and Feishu chat schedules use the same typed delivery target 
 
 test('managed wake daily digest fails closed when the reply omits its scheduled local date', async (t) => {
   const route = {
-    destinationKind: 'user', destinationRef: 'ou-owner',
+    destinationKind: 'user', destinationRef: 'wechat-owner',
     start: '2026-08-15T23:59:00.000Z', due: '2026-08-16T00:00:00.000Z',
     executionAt: '2026-08-16T16:30:00.000Z',
     recurrence: { kind: 'daily', time: '08:00:00', timeZone: 'Asia/Shanghai' },
@@ -277,7 +277,7 @@ test('managed wake daily digest fails closed when the reply omits its scheduled 
         ok: true, authenticated: true, date, prompt: `AIHOT report for ${date}`, partial: false,
       }; } };
     },
-    sendFeishu: async () => { sends += 1; },
+    sendWechat: async () => { sends += 1; return { resultState: 'sent', evidenceRef: 'wechat:test' }; },
     now,
     env: {
       RAN_AGENT_CORE_WORK_POLL_MS: '250',
@@ -321,7 +321,7 @@ test('an external notification fails closed when revision or checkpoint digest n
         runtime: { core, hashContent: () => TOKEN },
         externalMcpRuntime: { store: { get: () => activity } },
         channelHub: async () => { hermesCalls += 1; return {}; },
-        sendFeishu: async () => { sends += 1; },
+        sendWechat: async () => { sends += 1; return { resultState: 'sent', evidenceRef: 'wechat:test' }; },
         now, env: { RAN_AGENT_CORE_WORK_POLL_MS: '250' },
       });
       runtime.start();
@@ -344,7 +344,7 @@ test('Python reminder acknowledgement observes a durably terminal suppressed Wor
   const runtime = createCoreRuntimeComposition({
     runtime: { core, hashContent: () => TOKEN },
     channelHub: async () => { throw new Error('completed reminder must suppress before Hermes'); },
-    sendFeishu: async () => { sends += 1; },
+    sendWechat: async () => { sends += 1; return { resultState: 'sent', evidenceRef: 'wechat:test' }; },
     fetchImpl: async (url) => {
       if (url.endsWith('/tools/todo/get')) {
         return { ok: true, json: async () => ({ todo: { id: 7, status: 'done' } }) };

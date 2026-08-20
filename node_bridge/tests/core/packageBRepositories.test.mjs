@@ -64,14 +64,15 @@ async function openFixture(t, prefix = 'hermes-core-b11-') {
   return { core, dbPath };
 }
 
-async function seedAssembly(core) {
-  const conversation = await core.writer.write((tx) => tx.packageBTurn.createOrResolveConversation(identity()));
+async function seedAssembly(core, { identityOverrides = {}, bindingOverrides = {} } = {}) {
+  const conversation = await core.writer.write((tx) => tx.packageBTurn.createOrResolveConversation(identity(identityOverrides)));
   const accepted = await core.writer.write((tx) => tx.packageBIngress.commit(ingress()));
   const binding = await core.writer.write((tx) => tx.packageBPresentation.createOrReadBinding({
     operationKey: 'binding:create:1',
     bindingId: 'binding-1', conversationId: CONVERSATION, ownerId: OWNER, sourceInstanceId: 'desktop:local',
     platform: 'desktop', destinationKind: 'conversation', destinationRef: 'desktop:conversation',
     adapterMetadata: { protocol: 'fixture', receiptMode: 'fixture' }, createdAt: AT,
+    ...bindingOverrides,
   }));
   const assembly = await core.writer.write((tx) => tx.packageBAssembly.create({
     operationKey: 'assembly:create:1', assemblyId: 'assembly-1', conversationId: CONVERSATION,
@@ -98,8 +99,8 @@ async function seal(core, conversationIdentity) {
   }));
 }
 
-async function seedUserReady(core) {
-  const base = await seedAssembly(core);
+async function seedUserReady(core, options = {}) {
+  const base = await seedAssembly(core, options);
   const sealed = await seal(core, base.conversation.identity);
   const user = await core.writer.write((tx) => tx.packageBTurn.commitUserTurn({
     operationKey: 'user:commit:1', conversationId: CONVERSATION, exchangeId: 'exchange-1', assemblyId: 'assembly-1',
@@ -109,8 +110,8 @@ async function seedUserReady(core) {
   return { ...base, sealed, user };
 }
 
-async function seedFinalReady(core) {
-  const base = await seedUserReady(core);
+async function seedFinalReady(core, options = {}) {
+  const base = await seedUserReady(core, options);
   const epoch = await core.writer.write((tx) => tx.packageBProvider.createEpoch(epochInput()));
   const attempt = await core.writer.write((tx) => tx.packageBProvider.appendAttempt(attemptInput()));
   return { ...base, epoch, attempt };

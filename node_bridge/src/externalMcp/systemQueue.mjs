@@ -27,11 +27,13 @@ export function buildExternalMcpSyntheticTurn(input = {}) {
     conversation_id: input.conversationId || input.conversation_id,
     sender_id: input.senderId || input.sender_id,
   });
+  const platform = sanitizePlatform(input.platform || turn.platform || '');
+  if (!platform) throw new Error('external MCP presentation platform is unsupported');
   return createTrustedBridgeTask({
     ...turn,
     id: sanitizeId(input.id || event?.event_id || `external-mcp-${Date.now()}`),
     message_id: sanitizeId(input.id || event?.event_id || `external-mcp-${Date.now()}`),
-    platform: sanitizePlatform(input.platform || turn.platform || 'feishu'),
+    platform,
     channel_type: 'dm',
     conversation_id: sanitizeId(input.conversationId || input.conversation_id || turn.conversation_id || ''),
     sender_id: sanitizeId(input.senderId || input.sender_id || turn.sender_id || ''),
@@ -98,7 +100,7 @@ function parseJson(text) {
 
 function sanitizePlatform(value) {
   const text = String(value || '').trim().toLowerCase();
-  return ['wechat', 'feishu', 'desktop'].includes(text) ? text : 'feishu';
+  return ['wechat', 'feishu', 'desktop'].includes(text) ? text : '';
 }
 
 function sanitizeId(value) {

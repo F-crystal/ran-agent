@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 
 import { coreError } from '../coreErrors.mjs';
 import { createCoreSchedulingService } from '../coreScheduling.mjs';
+import { resolveConversationPresentationBinding } from '../ownerPresentationBinding.mjs';
 import { runPackageBLocalDelivery } from './packageBDeliveryService.mjs';
 
 function key(value) {
@@ -32,6 +33,12 @@ export function createPackageBScheduledDeliveryHandler({
     if (!context) throw coreError('CORE_SCHEDULED_DELIVERY_CONTEXT_MISSING', 'scheduled delivery context is missing');
     const identity = core.reader.conversationIdentityById(context.conversation_id);
     if (!identity) throw coreError('CORE_SCHEDULED_DELIVERY_IDENTITY_MISSING', 'scheduled delivery identity is missing');
+    const binding = resolveConversationPresentationBinding(core, {
+      identity,
+      conversationId: context.conversation_id,
+      bindingId: context.presentation_binding_id,
+      expectedRevision: context.binding_revision,
+    });
     const stable = key(work.work_run_id);
     const at = wholeSecond(now());
     const instructionTurnId = `turn:scheduled:${stable}`;
@@ -49,9 +56,9 @@ export function createPackageBScheduledDeliveryHandler({
       scheduledFor: context.scheduled_for,
       recurrence: JSON.parse(context.recurrence_json),
       payloadRef: context.payload_ref,
-      platform: context.platform,
-      destinationKind: context.destination_kind,
-      destinationRef: context.destination_ref,
+      platform: binding.platform,
+      destinationKind: binding.destination_kind,
+      destinationRef: binding.destination_ref,
       ownerId: identity.ownerId,
     }));
     if (decision?.suppressSend === true) {
@@ -112,13 +119,13 @@ export function createPackageBScheduledDeliveryHandler({
         expectedExchangeRevision: 1, expectedProviderEpochRevision: 0,
         workRunAuthority: authority, committedAt: at,
         presentations: [{
-          outboxId, operationScope: `presentation:${context.platform}`,
+          outboxId, operationScope: `presentation:${binding.platform}`,
           operationKey: `scheduled:outbox:${stable}`, bindingId: context.presentation_binding_id,
-          target: context.destination_ref, destinationKind: context.destination_kind, kind: 'text',
+          target: binding.destination_ref, destinationKind: binding.destination_kind, kind: 'text',
           payloadRef: `presentation:text:scheduled:${stable}:1`,
           payloadHashToken: hashContent('presentation-text', replyText),
-          routeRevision: Number(context.binding_revision), routeSourceInstanceId: context.source_instance_id,
-          platform: context.platform,
+          routeRevision: Number(binding.revision), routeSourceInstanceId: binding.source_instance_id,
+          platform: binding.platform,
         }],
       },
       send: (view) => send(Object.freeze({ ...view, text: replyText })),

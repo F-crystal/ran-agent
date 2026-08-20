@@ -280,7 +280,7 @@ test('trusted frontend context is system-priority, transport-neutral, and platfo
 
 test('Hermes gateway rejects missing or unsupported platform before provider or WeChat session fallback', async () => {
   let fetches = 0;
-  for (const payload of [{ text: 'missing platform' }, { text: 'unsupported', platform: 'telegram' }]) {
+  for (const payload of [{ text: 'missing platform' }, { text: 'unsupported', platform: 'signal' }]) {
     await assert.rejects(
       sendChatToHermesGateway(payload, {
         fetchImpl: async () => { fetches += 1; throw new Error('provider reached'); },

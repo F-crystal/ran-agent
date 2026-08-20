@@ -75,6 +75,26 @@ test('reserves one stable outbox item with text and typed attachments stored sep
   assert.deepEqual(persisted.items[0].attachments, item.attachments);
 });
 
+test('accepts Telegram as an explicit outbox platform without persisting raw Telegram identifiers in receipt', async (t) => {
+  const outbox = durableOutbox.createDurableOutbox({ env: createIsolatedTestEnv(t) });
+  const input = request('operation:telegram:reply', {
+    platform: 'telegram',
+    conversation_id: 'conversation:hash',
+    exchange_id: 'telegram:update-hash',
+    route: { adapterKey: 'telegram', destinationRef: 'conversation:hash' },
+    attachments: [],
+  });
+  const result = await outbox.deliver(input, {
+    send: async () => sentResult({ attachments: [], adapterReceiptRef: 'telegram:message:receipt-hash' }),
+  });
+
+  assert.equal(result.delivery, 'sent');
+  assert.equal(outbox.list().length, 1);
+  assert.equal(outbox.list()[0].platform, 'telegram');
+  assert.equal(JSON.stringify(result.deliveryTerminalReceipts).includes('tg-chat'), false);
+  assert.equal(JSON.stringify(result.deliveryTerminalReceipts).includes('raw-telegram-id'), false);
+});
+
 test('rejects raw media markers, runtime paths, remote attachment URLs, and untyped attachments', (t) => {
   const outbox = durableOutbox.createDurableOutbox({ env: createIsolatedTestEnv(t) });
   for (const invalid of [

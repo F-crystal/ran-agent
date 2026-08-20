@@ -2,7 +2,7 @@
 
 # Hermes Profile Distribution
 
-Status: CURRENT (2026-08-18)
+Status: CURRENT (2026-08-20)
 
 生产运行统一 Hermes v0.20 + DeepSeek V4 Flash；只有 `8642` gateway，旧 Full
 服务 inactive/disabled，不能作为 fallback。完整边界见
@@ -21,7 +21,7 @@ Status: CURRENT (2026-08-18)
 - 当前统一生产 profile 使用 `deepseek-v4-flash`，provider policy
   在最终 HTTP body 显式加入 `thinking.type=disabled`；Pro 仅显式 opt-in。
 - DeepSeek V4 在本项目中按文本模型使用，原始图片、音频、视频和社交平台内容必须先由 MCP 工具处理。
-- 当前 source candidate 只使用一个 `8642` gateway 和一个 companion profile；微信、飞书/Lark 和桌面 Proxy 都先进入 ChannelHub，再由统一主链路调用 Hermes。
+- 当前 source candidate 只使用一个 `8642` gateway 和一个 companion profile；微信、飞书/Lark、桌面 Proxy 与默认关闭的 owner-only Telegram 文本入口都先进入 ChannelHub，再由统一主链路调用 Hermes。Telegram 不增加 Hermes profile 能力或媒体面。
 - OpenClaw、Kimi、GLM 前台路线已经退休，不再作为运行时、部署目标或调试权威。
 
 ---
@@ -153,7 +153,7 @@ ran-agent 使用仓库内 MCP 服务：
 | `DEEPSEEK_API_KEY` | Hermes DeepSeek provider key |
 | `API_SERVER_KEY`, `HERMES_API_KEY` | Hermes gateway 与 Node bridge API 鉴权 |
 | `PYTHON_BACKEND_BASE_URL` | Python backend，默认 `http://127.0.0.1:8787` |
-| `DASHSCOPE_API_KEY`, `QWEN_API_KEY` | DashScope/Qwen 视觉、ASR、媒体生成 |
+| `DASHSCOPE_API_KEY`, `QWEN_API_KEY`, `DASHSCOPE_COMPAT_BASE_URL` | DashScope/Qwen 视觉、ASR、媒体生成及兼容接口地址 |
 | `TOKEN_PLAN_API_KEY`, `TOKEN_PLAN_BASE_URL`, `QWEN_MM_API_VL_MODEL` | 可选 Qwen-MM OCR/VLM；使用 `qwen3.6-flash`，不接管 ASR |
 | `TAVILY_API_KEY` | Search Hub 的可选 Tavily provider |
 | `SESSDATA` | B 站平台认证可选；小红书读取为 public-only，不配置 `XHS_COOKIE` |

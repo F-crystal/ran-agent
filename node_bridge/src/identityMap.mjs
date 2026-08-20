@@ -84,6 +84,7 @@ export function getHermesSessionId(normalizedMessage = {}) {
     return `ran-agent-desktop-${shortHash(clientId)}`;
   }
   const conversationId = firstNonEmptyString(normalizedMessage.conversation_id, normalizedMessage.sender_id) || 'unknown';
+  if (platform === 'telegram') return `ran-agent-telegram-${shortHash(conversationId)}`;
   return `ran-agent-wechat-${shortHash(conversationId)}`;
 }
 
@@ -208,7 +209,7 @@ function readIdentityMap(filePath) {
 
 export function normalizePlatform(platform) {
   const value = String(platform || '').trim().toLowerCase();
-  if (['wechat', 'feishu', 'desktop'].includes(value)) return value;
+  if (['wechat', 'feishu', 'desktop', 'telegram'].includes(value)) return value;
   const error = new Error('recognized platform is required');
   error.code = 'PLATFORM_UNSUPPORTED';
   throw error;
@@ -278,7 +279,7 @@ function parseBindingKey(value) {
   const parts = String(value || '').split(':');
   if (parts.length !== 2) return null;
   const [platform, senderHash] = parts;
-  if (!['wechat', 'feishu', 'desktop'].includes(platform) || !/^[a-f0-9]{16}$/.test(senderHash)) return null;
+  if (!['wechat', 'feishu', 'desktop', 'telegram'].includes(platform) || !/^[a-f0-9]{16}$/.test(senderHash)) return null;
   return { platform, senderHash };
 }
 
